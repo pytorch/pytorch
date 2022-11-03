@@ -287,6 +287,24 @@ void fill__Tensor_batch_rule(
   std::get<0>(self_and_other).copy_(std::get<1>(self_and_other));
 }
 
+std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
+  Tensor& grad, optional<int64_t> grad_bdim,
+  Tensor& self, optional<int64_t> self_bdim,
+  Tensor& buffer, optional<int64_t> buffer_bdim) {
+  // NB: This emulates handle_pointwise_ops except we ignore the last argument, buffer
+  // when any of the inputs are on cuda.
+  // We do this because on cuda, buffer is a dummy tensor always of logical rank 1 and
+  // it becomes an issue when the rest of the inputs are scalar
+  int64_t out_logical_rank = std::max(rankWithoutBatchDim(grad, grad_bdim), rankWithoutBatchDim(self, self_bdim));
+  if (!grad.is_cuda() && !self.is_cuda() && !buffer.is_cuda()) {
+    out_logical_rank = std::max(out_logical_rank, rankWithoutBatchDim(buffer, buffer_bdim));
+  }
+  Tensor out_grad = maybePadToLogicalRank(moveBatchDimToFront(grad, grad_bdim), grad_bdim, out_logical_rank);
+  Tensor out_self = maybePadToLogicalRank(moveBatchDimToFront(self, self_bdim), self_bdim, out_logical_rank);
+  Tensor out_buffer = maybePadToLogicalRank(moveBatchDimToFront(buffer, buffer_bdim), buffer_bdim, out_logical_rank);
+  return std::make_tuple(at::log_sigmoid_backward(out_grad, out_self, out_buffer), 0);
+}
+
 Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
   return at::binomial(count, prob.contiguous(), gen); // Bug in PyTorch, prob shouldn't need to be contiguous
 }
@@ -414,7 +432,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   // BINARY_POINTWISE(infinitely_differentiable_gelu_backward);
   BINARY_POINTWISE(leaky_relu_backward);
   BINARY_POINTWISE(logit_backward);
-  POINTWISE_BOXED(log_sigmoid_backward);
+  VMAP_SUPPORT(log_sigmoid_backward, log_sigmoid_backward_batch_rule);
   VMAP_SUPPORT(gelu_backward, gelu_backward_batch_rule);
   BINARY_POINTWISE(sigmoid_backward);
   POINTWISE_BOXED(softplus_backward);

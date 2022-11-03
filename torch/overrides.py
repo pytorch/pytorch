@@ -26,7 +26,7 @@ import collections
 import functools
 import types
 import warnings
-from typing import Dict, Set, List, Any, Callable, Iterable, Type, Iterator, Tuple
+from typing import Dict, Set, List, Any, Callable, Iterable, Type, Tuple
 import contextlib
 
 import torch
@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr,
     _push_on_torch_function_stack, _pop_torch_function_stack, _get_function_stack_at, _len_torch_function_stack,
-    _set_torch_function_mode, _is_torch_function_mode_enabled)
+    _is_torch_function_mode_enabled)
 
 __all__ = [
     "get_ignored_functions",
@@ -283,7 +283,6 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._neg_view,
         Tensor._is_zerotensor,
         Tensor._addmm_activation,
-        Tensor._nested_tensor_layer_norm,
         Tensor.to_padded_tensor,
     }
 
@@ -417,7 +416,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.concatenate: lambda tensors, dim=0, out=None: -1,  # alias for torch.concatenate
         torch.cdist: lambda x1, x2, p=2.0, compute_mode='use_mm_for_euclid_dist_if_necessary': -1,
         torch.ceil: lambda input, out=None: -1,
-        torch.celu: lambda input, alhpa=1., inplace=False: -1,
+        torch.celu: lambda input, alpha=1., inplace=False: -1,
         torch.chain_matmul: lambda *matrices, out=None: -1,
         torch.channel_shuffle: lambda input, groups : -1,
         torch.cholesky: lambda input, upper=False, out=None: -1,
@@ -573,7 +572,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.grid_sampler_2d: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
         torch.grid_sampler_3d: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
         torch.group_norm: lambda input, num_groups, weight=None, bias=None, eps=1e-05, cudnn_enabled=True: -1,
-        torch.gru: lambda input, hx, params, has_biases, num_layers, gropout, train, bidirectional, batch_first: -1,
+        torch.gru: lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1,
         torch.gru_cell: lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1,
         torch.gt: lambda input, other, out=None: -1,
         torch.greater: lambda input, other, out=None: -1,
@@ -1513,8 +1512,8 @@ def handle_torch_function(
     if _is_torch_function_mode_enabled():
         # if we're here, the mode must be set to a TorchFunctionStackMode
         # this unsets it and calls directly into TorchFunctionStackMode's torch function
-        with _no_torch_function_mode():
-            result = _TorchFunctionStackMode().__torch_function__(public_api, types, args, kwargs)
+        with _pop_mode_temporarily() as mode:
+            result = mode.__torch_function__(public_api, types, args, kwargs)
         if result is not NotImplemented:
             return result
 
@@ -1555,7 +1554,7 @@ has_torch_function = _add_docstr(
     Arguments
     ---------
     relevant_args : iterable
-        Iterable or aguments to check for __torch_function__ methods.
+        Iterable or arguments to check for __torch_function__ methods.
     Returns
     -------
     bool
@@ -1695,7 +1694,7 @@ def resolve_name(f):
         Name of the function; if eval'ed it should give back the input
         function.
     """
-    if isinstance(f, torch._ops.OpOverload):
+    if isinstance(f, torch._ops.OpOverload) or isinstance(f, torch._ops.OpOverloadPacket):
         return str(f)
     return _get_overridable_functions()[1].get(f)
 
@@ -1829,15 +1828,11 @@ def _get_current_function_mode_stack():
     return [_get_function_stack_at(i) for i in range(stack_len)]
 
 def _push_mode(mode):
-    if _len_torch_function_stack() == 0:
-        _set_torch_function_mode(_TorchFunctionStackMode())
     _push_on_torch_function_stack(mode)
 
 
 def _pop_mode():
     old = _pop_torch_function_stack()
-    if _len_torch_function_stack() == 0:
-        _set_torch_function_mode(None)
     return old
 
 
@@ -1849,37 +1844,11 @@ def _pop_mode_temporarily():
     finally:
         _push_mode(old)
 
-# a helper "mode" used by the torch_function push helper method. This is the only mode that will ever
-# be active at the C++ level and it will run the current mode
-class _TorchFunctionStackMode:
-    def __torch_function__(self, func, types, args=(), kwargs=None):
-        with _pop_mode_temporarily() as old:
-            if _len_torch_function_stack() > 0:
-                _set_torch_function_mode(self)
-            # we can't check the type of __torch_function__ here but this is sufficient for checking it's a classmethod
-            if old.__torch_function__.__self__ is type(old):
-                raise RuntimeError("TorchFunctionMode's torch_function function " +
-                                   "should be a normal method not a class method")
-            return old.__torch_function__(func, types, args, kwargs)
-
 class BaseTorchFunctionMode(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
-
-
-# This is private API as I'm not sure it's possible for users to use this
-# compositionally (easy to discard too many modes).  It is useful for
-# library code though, e.g., in handle_torch_function
-@contextlib.contextmanager
-def _no_torch_function_mode() -> Iterator[None]:
-    _set_torch_function_mode(None)
-    try:
-        yield
-    finally:
-        if _len_torch_function_stack() > 0:
-            _set_torch_function_mode(_TorchFunctionStackMode())
 
 
 class enable_reentrant_dispatch():

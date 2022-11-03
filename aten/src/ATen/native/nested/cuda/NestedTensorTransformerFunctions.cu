@@ -15,6 +15,17 @@
 #include <c10/cuda/CUDAStream.h>
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
+
+#ifndef USE_ROCM
+#ifndef _WIN32
+#include <cutlass/gemm/device/default_gemm_configuration.h>
+#include <cutlass/gemm/device/gemm_grouped.h>
+#include <cutlass/gemm/kernel/default_gemm_grouped.h>
+#endif
+#endif
+
+#include <ATen/NestedTensorImpl.h>
 
 #define BLOCK_DIM 256
 #define GRID_DIM_Y 16
@@ -338,7 +349,8 @@ __global__ void add_padding_3(
     const int i0 = i / (output_sizes_2 * output_sizes_3);
     const int i1 = (i % (output_sizes_2 * output_sizes_3)) / output_sizes_3;
     const int i2 = i % output_sizes_3;
-    if (batch_id < batch_size && i0 < sizes_i[0] && i1 < sizes_i[1] && i2 < sizes_i[2]) {
+    if (batch_id < batch_size && i0 < sizes_i[0] && i1 < sizes_i[1] &&
+        i2 < sizes_i[2]) {
       const int offset = offsets[batch_id];
       const int input_offset =
           offset + i0 * (sizes_i[1] * sizes_i[2]) + i1 * sizes_i[2] + i2;
@@ -352,7 +364,8 @@ __global__ void add_padding_3(
     const int i0 = i / (output_sizes_2 * output_sizes_3);
     const int i1 = (i % (output_sizes_2 * output_sizes_3)) / output_sizes_3;
     const int i2 = i % output_sizes_3;
-    if (batch_id < batch_size && i0 < sizes_i[0] && i1 < sizes_i[1] && i2 < sizes_i[2]) {
+    if (batch_id < batch_size && i0 < sizes_i[0] && i1 < sizes_i[1] &&
+        i2 < sizes_i[2]) {
       const int offset = offsets[batch_id];
       const int input_offset =
           offset + i0 * (sizes_i[1] * sizes_i[2]) + i1 * sizes_i[2] + i2;

@@ -291,9 +291,14 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
 
 
 static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
-  checkIndexTensorTypes(orig);
+  checkIndexTensorTypes(orig, /*allow_int*/true);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
+  for (auto & i : indices) {
+    if (i.defined() && i.dtype() == at::kInt) {
+      i = i.to(at::kLong);
+    }
+  }
   // next broadcast all index tensors together
   indices = expand_outplace(indices);
   // add missing null Tensors so that it matches self.dim()

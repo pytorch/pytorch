@@ -141,10 +141,10 @@ is selected instead.
 
 When loading a model, ops are selected for each `torch::jit::Node` in the graph as follows:
 
-1) If an out variant is registered, pass the node to the function that prodcues the `SROperator`. If
-the result is not `nulltpr`, use that op.
-2) If a native function is registered, pass the node to the function that prodcues the `SROperator`. If
-the result is not `nulltpr`, use that op.
+1) If an out variant is registered, pass the node to the function that produces the `SROperator`. If
+the result is not `nullptr`, use that op.
+2) If a native function is registered, pass the node to the function that produces the `SROperator`. If
+the result is not `nullptr`, use that op.
 3) Use the JIT implementation. Static runtime will throw an exception if it does not exist.
 
 ## Implementation Details

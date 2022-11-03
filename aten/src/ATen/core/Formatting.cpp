@@ -89,14 +89,9 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
       break;
     }
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double expMin;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double expMax;
-  if(offset == size) {
-    expMin = 1;
-    expMax = 1;
-  } else {
+  double expMin = 1;
+  double expMax = 1;
+  if(offset != size) {
     expMin = fabs(self_p[offset]);
     expMax = fabs(self_p[offset]);
     for (const auto i : c10::irange(offset, size)) {
@@ -122,8 +117,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
     }
   }
   double scale = 1;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t sz;
+  int64_t sz = 11;
   if(intMode) {
     if(expMax > 9) {
       sz = 11;
@@ -159,8 +153,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
 
 static void __printIndent(std::ostream &stream, int64_t indent)
 {
-  for (const auto i : c10::irange(indent)) {
-    (void)i; //Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(indent)) {
     stream << " ";
   }
 }
@@ -171,10 +164,8 @@ static void printScale(std::ostream & stream, double scale) {
 }
 static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent)
 {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double scale;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t sz;
+  double scale = 0.0;
+  int64_t sz = 0;
   std::tie(scale, sz) = __printFormat(stream, self);
 
   __printIndent(stream, indent);
@@ -283,6 +274,9 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     } else if (tensor_.is_mkldnn()) {
       stream << "MKLDNN Tensor: ";
       tensor = tensor_.to_dense().to(kCPU, kDouble).contiguous();
+    } else if (tensor_.is_mps()) {
+      // MPS does not support double tensors, so first copy then convert
+      tensor = tensor_.to(kCPU).to(kDouble).contiguous();
     } else {
       tensor = tensor_.to(kCPU, kDouble).contiguous();
     }
@@ -291,10 +285,8 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       stream << "[ " << tensor_.toString() << "{}";
     } else if(tensor.ndimension() == 1) {
       if (tensor.numel() > 0) {
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        double scale;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        int64_t sz;
+        double scale = 0.0;
+        int64_t sz = 0;
         std::tie(scale, sz) =  __printFormat(stream, tensor);
         if(scale != 1) {
           printScale(stream, scale);

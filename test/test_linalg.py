@@ -18,13 +18,12 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64, parametrize, IS_SANDCASTLE)
+     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
-     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, dtypesIfMPS,
-     tol as xtol, toleranceOverride)
+     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, dtypesIfMPS)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
@@ -33,6 +32,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9, _get_magma_version, \
     _get_torch_cuda_version
 from torch.distributions.binomial import Binomial
+import torch.backends.opt_einsum as opt_einsum
 
 # Protects against includes accidentally setting the default dtype
 # NOTE: jit_metaprogramming_utils sets the default dtype to double!
@@ -3668,9 +3668,23 @@ class TestLinalg(TestCase):
     def _check_einsum(self, *args, np_args=None):
         if np_args is None:
             np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
-        res = torch.einsum(*args)
         ref = np.einsum(*np_args)
-        self.assertEqual(torch.from_numpy(np.array(ref)), res)
+        res = torch.einsum(*args)
+        self.assertEqual(ref, res)
+
+        # Check that the other variations for opt_einsum work too
+        if TEST_OPT_EINSUM:
+            with opt_einsum.flags(enabled=False):
+                res = torch.einsum(*args)
+                self.assertEqual(ref, res)
+
+            with opt_einsum.flags(enabled=True, strategy='greedy'):
+                res = torch.einsum(*args)
+                self.assertEqual(ref, res)
+
+            with opt_einsum.flags(enabled=True, strategy='optimal'):
+                res = torch.einsum(*args)
+                self.assertEqual(ref, res)
 
     @dtypes(torch.double, torch.cdouble)
     def test_einsum(self, device, dtype):
@@ -3734,6 +3748,9 @@ class TestLinalg(TestCase):
 
         # with strided tensors
         self._check_einsum("bn,Anm,bm->bA", l[:, ::2], w[:, ::2, ::2], r[:, ::2])
+
+        # test multiple inputs
+        self._check_einsum("...,be,b...,beg,gi,bc...->bi...", A, B, C, D, E, F)
 
     @dtypes(torch.double, torch.cdouble)
     def test_einsum_sublist_format(self, device, dtype):
@@ -4949,6 +4966,64 @@ class TestLinalg(TestCase):
                         self.assertEqual(B_left, A_adj @ X)
                     else:
                         self.assertEqual(B_left, X @ A_adj)
+
+
+    @onlyCPU
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_lu_cpu_errors(self, device, dtype):
+        # Square tests
+        sample = torch.randn(3, 2, 2, device=device, dtype=dtype)
+        B = torch.randn(3, 2, 2, device=device, dtype=dtype)
+        LU, pivots = torch.linalg.lu_factor(sample)
+
+        # This should run without issues
+        torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
+        torch.lu_unpack(LU, pivots)
+
+        pivots[0] = 0
+        with self.assertRaisesRegex(RuntimeError, r"greater or equal to 1"):
+            torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
+            torch.lu_unpack(LU, pivots)
+
+        pivots[0] = 3
+        with self.assertRaisesRegex(RuntimeError, r"smaller or equal to LU.size\(-2\)"):
+            torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
+            torch.lu_unpack(LU, pivots)
+
+        # Rectangular tests
+        sample = torch.randn(3, 4, 2, device=device, dtype=dtype)
+        B = torch.randn(3, 4, 2, device=device, dtype=dtype)
+        LU, pivots = torch.linalg.lu_factor(sample)
+
+        # This should run without issues
+        torch.lu_unpack(LU, pivots)
+
+        pivots[0] = 0
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
+            torch.lu_unpack(LU, pivots)
+
+        pivots[0] = 5
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
+            torch.lu_unpack(LU, pivots)
+
+
+        # Rectangular tests
+        sample = torch.randn(2, 3, 5, device=device, dtype=dtype)
+        B = torch.randn(2, 3, 5, device=device, dtype=dtype)
+        LU, pivots = torch.linalg.lu_factor(sample)
+
+        # This should run without issues
+        torch.lu_unpack(LU, pivots)
+
+        pivots[0] = 0
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
+            torch.lu_unpack(LU, pivots)
+
+        pivots[0] = 4
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
+            torch.lu_unpack(LU, pivots)
 
 
     @skipCPUIfNoLapack
@@ -7315,66 +7390,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(out_ref, out1.cpu())
         self.assertEqual(out1, out2)
 
-    @onlyCUDA
-    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
-    # imported 'tol' as 'xtol' to avoid aliasing in code above
-    @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
-                        torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
-                        torch.float32: xtol(atol=1e-1, rtol=1e-1)})
-    @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    @parametrize("size", [100, 1000, 10000])
-    def test_cublas_addmm(self, size: int, dtype: torch.dtype):
-        #
-        # Check for catastrophic cuBLAS inaccuracy by measuring the deviation between
-        # results from the CUDA invocation of torch.addmm and the CPU invocation
-        # (which does not use CUDA backend).
-        #
-        # Get dims
-        n, m, p = (size + 1, size, size + 2)
-        # Make random tensors on CPU (seed set on common_utils.py import)
-        # (Not using numpy because it does not support bfloat16)
-        make_arg = partial(make_tensor, dtype=dtype, device="cpu")
-        m_beta = make_arg(1)
-        m_input = make_arg((n, p))
-        m_1 = make_arg((n, m))
-        m_2 = make_arg((m, p))
-        # *(B)FLOAT16 Special Handling*
-        # Backend does not tensorize float16 on CPU,
-        # and bloat16 may present accuracy issues,
-        # so convert to float32 for these cases
-        # (but keep same for other types, e.g. float32 and int*)
-        if dtype == torch.float16 or dtype == torch.bfloat16:
-            m_beta = m_beta.to(dtype=torch.float32)
-            m_input = m_input.to(dtype=torch.float32)
-            m_1 = m_1.to(dtype=torch.float32)
-            m_2 = m_2.to(dtype=torch.float32)
-        # Get CPU result
-        res_cpu = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
-        # *(B)FLOAT16 Special Handling*``
-        # Convert back to (b)float16
-        if dtype == torch.float16 or dtype == torch.bfloat16:
-            m_beta = m_beta.to(dtype=dtype)
-            m_input = m_input.to(dtype=dtype)
-            m_1 = m_1.to(dtype=dtype)
-            m_2 = m_2.to(dtype=dtype)
-            res_cpu = res_cpu.to(dtype=dtype)
-        # Move arg tensors to CUDA
-        m_beta = m_beta.to("cuda")
-        m_input = m_input.to("cuda")
-        m_1 = m_1.to("cuda")
-        m_2 = m_2.to("cuda")
-        # Get CUDA result
-        res_cuda = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
-        # Move to CPU for comparison
-        res_cuda = res_cuda.to("cpu")
-        # Compare
-        self.assertEqual(res_cpu, res_cuda)
-
     def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])
         b = torch.ones([3, 2, 5, 24, 24])
         c = a.permute(0, 1, 3, 2).matmul(b)
         self.assertEqual([c.min(), c.max(), c.sum()], [24, 24, 414720])
+
 
 instantiate_device_type_tests(TestLinalg, globals())
 

@@ -177,6 +177,35 @@ void FusionExecutor::compileFusion(
     TORCH_INTERNAL_ASSERT(
         out->getValType() == ValType::TensorView,
         "Output types from fusions that are not tensors are not supported at this point.");
+
+    const auto maybe_rfactor_domain =
+        out->as<TensorView>()->getMaybeRFactorDomain();
+    // walking through outputs to see if output shapes are dependent on
+    // non-tensor inputs. For which case, we should have disabled output
+    // allocation, since the caching id only looks at tensor shapes.
+    // See issue https://github.com/csarofeen/pytorch/issues/2002
+    std::vector<Val*> output_extents;
+    for (const auto id : maybe_rfactor_domain) {
+      Val* extent = nullptr;
+      if (id->isReduction() || id->isStride()) {
+        continue;
+      } else if (id->isBroadcast() && id->hasExpandedExtent()) {
+        extent = id->expandedExtent();
+      } else {
+        extent = id->extent();
+      }
+      output_extents.emplace_back(extent);
+    }
+    auto dependencies = InputsOf::outputs(fusion, output_extents);
+    if (std::any_of(dependencies.begin(), dependencies.end(), [](Val* val) {
+          return val->isFusionInput();
+        })) {
+      // TODO: parameter cache is too big a hammer here. We should consider
+      // separate the caching logic of output sizes & launch params. Since
+      // output size dependency should only invalidate the output sizes
+      disable_parameter_cache_ = true;
+      break;
+    }
   }
 
   if (isDebugDumpEnabled(DebugDumpOption::FusionIr)) {
@@ -1146,9 +1175,9 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (measure_kernel_time_ ||
       isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth) ||
       isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
-    cudaEventCreate(&start_event);
-    cudaEventCreate(&finish_event);
-    cudaEventRecord(start_event);
+    C10_CUDA_CHECK(cudaEventCreate(&start_event));
+    C10_CUDA_CHECK(cudaEventCreate(&finish_event));
+    C10_CUDA_CHECK(cudaEventRecord(start_event));
   }
 
   if (execute_kernel_) {
@@ -1204,12 +1233,13 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (measure_kernel_time_ ||
       isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth) ||
       isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
-    cudaEventRecord(finish_event);
-    cudaEventSynchronize(start_event);
-    cudaEventSynchronize(finish_event);
-    cudaEventElapsedTime(&kernel_time_ms_, start_event, finish_event);
-    cudaEventDestroy(start_event);
-    cudaEventDestroy(finish_event);
+    C10_CUDA_CHECK(cudaEventRecord(finish_event));
+    C10_CUDA_CHECK(cudaEventSynchronize(start_event));
+    C10_CUDA_CHECK(cudaEventSynchronize(finish_event));
+    C10_CUDA_CHECK(
+        cudaEventElapsedTime(&kernel_time_ms_, start_event, finish_event));
+    C10_CUDA_CHECK(cudaEventDestroy(start_event));
+    C10_CUDA_CHECK(cudaEventDestroy(finish_event));
 
     bytes_processed_ = 0;
     // Figure how many bytes are inputs, outputs, and temporary buffers

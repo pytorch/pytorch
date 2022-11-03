@@ -12,6 +12,8 @@
 #include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <torch/csrc/onnx/diagnostics/diagnostics.h>
+
 #include <onnx/shape_inference/implementation.h>
 #include <algorithm>
 #include <cmath>
@@ -89,6 +91,7 @@ void MergeInferredTypeAndSetMap(
 namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
+namespace diagnostics = ::torch::onnx::diagnostics;
 
 c10::ShapeSymbol ONNXDimToShapeSymbol(
     const onnx::TensorShapeProto_Dimension& dim,
@@ -697,18 +700,25 @@ std::vector<::c10::ShapeSymbol> Broadcast(
     const c10::ShapeSymbol& ss_shape_1 = input_shape_value_1[rank_1 - 1 - idx];
     bool is_static_0 = ss_shape_0.is_static();
     bool is_static_1 = ss_shape_1.is_static();
+    size_t shape_idx = rank_max - 1 - idx;
     if (is_static_0 && is_static_1) {
       int64_t static_0_sz = ss_shape_0.static_size();
       int64_t static_1_sz = ss_shape_1.static_size();
-      final_shape[rank_max - 1 - idx] = ::c10::ShapeSymbol::fromStaticSize(
-          std::max(static_0_sz, static_1_sz));
+      // condition for corner case of 0d tensor
+      // 0d tensor with 1d tensor would give us 0d tensor
+      if (std::min(static_0_sz, static_1_sz) == 0) {
+        final_shape[shape_idx] = ::c10::ShapeSymbol::fromStaticSize(
+            std::min(static_0_sz, static_1_sz));
+      } else {
+        final_shape[shape_idx] = ::c10::ShapeSymbol::fromStaticSize(
+            std::max(static_0_sz, static_1_sz));
+      }
     } else if (!is_static_0 && !is_static_1) {
       if (ss_shape_0.value() == ss_shape_1.value()) {
-        final_shape[rank_max - 1 - idx] = ss_shape_0;
+        final_shape[shape_idx] = ss_shape_0;
       }
     }
   }
-
   if (rank_0 < rank_1) {
     for (size_t idx = rank_min; idx < rank_max; idx++) {
       size_t shape_idx = rank_max - 1 - idx;
@@ -882,17 +892,18 @@ void ProcessReduceNode(Node* n) {
     auto input_shape_value_0 = input_shape_0.value().sizes();
     size_t rank_0 = input_shape_value_0.value().size();
     std::vector<::c10::ShapeSymbol> final_shape;
+    std::vector<int64_t> axes_vector(rank_0);
     if (!n->hasAttributeS("axes")) {
-      UpdateShape(n->output(0), c10::SymbolicShape(final_shape));
-      return;
+      std::iota(axes_vector.begin(), axes_vector.end(), 0);
+    } else {
+      axes_vector = n->is(attr::axes);
     }
-    final_shape.reserve(rank_0);
-    std::vector<int64_t> axes_vector = n->is(attr::axes);
     for (auto idx : c10::irange(axes_vector.size())) {
       if (axes_vector[idx] < 0) {
         axes_vector[idx] += rank_0;
       }
     }
+    final_shape.reserve(rank_0);
     // ONNX keepdims defaults to 1 when not set.
     int64_t keepdims = 1;
     if (n->hasAttributeS("keepdims")) {
@@ -1882,6 +1893,11 @@ void UpdateReliable(
         output->node()->kind().toDisplayString(),
         " type is missing, so it may result in wrong shape inference for the exported graph. ",
         "Please consider adding it in symbolic function.");
+    // Experimental, nothing sent to stdout nor stderr.
+    diagnostics::Diagnose(
+        diagnostics::Rule::kNodeMissingOnnxShapeInference,
+        diagnostics::Level::kWarning,
+        {output->node()->kind().toDisplayString()});
   }
   auto reliable = false;
   if (inferred) {

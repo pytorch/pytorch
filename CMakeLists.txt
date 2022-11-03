@@ -184,20 +184,13 @@ cmake_dependent_option(
     "BUILD_TEST" OFF)
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
-option(USE_ASAN "Use Address Sanitizer" OFF)
+option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
-# BUILD_SPLIT_CUDA must also be exported as an environment variable before building, with
-# `export BUILD_SPLIT_CUDA=1` because cpp_extension.py can only work properly if this variable
-# also exists in the environment.
-# This option is incompatible with CUDA_SEPARABLE_COMPILATION.
-cmake_dependent_option(
-    BUILD_SPLIT_CUDA "Split torch_cuda library into torch_cuda_cu and torch_cuda_cpp" OFF
-    "USE_CUDA AND NOT CUDA_SEPARABLE_COMPILATION" OFF)
 cmake_dependent_option(
      BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
-option(USE_ROCM "Use ROCm" ON)
+cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
@@ -345,9 +338,6 @@ cmake_dependent_option(
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
-cmake_dependent_option(
-    USE_DEPLOY "Build embedded torch::deploy interpreter.  See torch/csrc/deploy/README.md for more info." OFF
-    "BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
 option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
@@ -555,6 +545,9 @@ if(MSVC)
 
   # Try harder
   string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /w -w")
+
+  string(APPEND CMAKE_CXX_FLAGS " /FS")
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /FS")
 endif(MSVC)
 
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
@@ -828,10 +821,13 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wextra")
   append_cxx_flag_if_supported("-Werror=return-type" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=braced-scalar-init" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=range-loop-construct" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-type-limits" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-array-bounds" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unknown-pragmas" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wunused-local-typedefs" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-parameter" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-function" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
@@ -895,6 +891,7 @@ if(NOT MSVC)
     append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wunused-lambda-capture" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wunused-local-typedef" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
     if(${USE_COLORIZE_OUTPUT})
     endif()
@@ -928,14 +925,16 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
-  check_cxx_compiler_flag("-Werror=sign-compare" HAS_WERROR_SIGN_COMPARE)
-  # This doesn't work globally so we use the test on specific
-  # target_compile_options
 endif()
 
 if(USE_ASAN)
-    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=address")
-    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address")
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=address -fsanitize=undefined")
+    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address -fsanitize=undefined")
+endif()
+
+if(USE_TSAN)
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=thread")
+    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=thread")
 endif()
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
@@ -1174,11 +1173,6 @@ endif()
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
-
-# ---[ Torch Deploy
-if(USE_DEPLOY)
-  add_subdirectory(torch/csrc/deploy)
-endif()
 
 if(BUILD_FUNCTORCH)
   add_subdirectory(functorch)

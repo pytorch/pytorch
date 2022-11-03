@@ -1,5 +1,6 @@
 # Owner(s): ["module: tests"]
 
+import contextlib
 import torch
 import numpy as np
 
@@ -1129,6 +1130,10 @@ class TestReductions(TestCase):
             torch.bincount(torch.tensor([1, 3], device=device),
                            torch.tensor([.2, .2], device=device),
                            minlength=-1)
+        # n-d weights, with n > 1 throws
+        with self.assertRaisesRegex(RuntimeError, '1-d'):
+            torch.bincount(torch.tensor([1, 0], device=device),
+                           torch.tensor([[1., 0.3], [1., 0.3]], device=device))
         # input and weights dim mismatch
         with self.assertRaisesRegex(RuntimeError, 'same length'):
             torch.bincount(torch.tensor([1, 0], device=device),
@@ -2795,9 +2800,14 @@ class TestReductions(TestCase):
             torch.histc(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device),
                         bins=4, max=3),
             torch.tensor([0, 1, 1, 0], dtype=torch.float, device=device))
-        # tensor with nan -- should throw a RuntimeError
+        # tensor with nan; min, max not provided -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, r'range of \[nan, nan\] is not finite'):
             torch.histc(torch.tensor([float("nan")], dtype=torch.float, device=device))
+        # tensor with nan; min, max provided -- nan is ignored
+        self.assertEqual(
+            torch.histc(torch.tensor([1., 2., float("nan")], dtype=torch.float, device=device),
+                        bins=4, max=3),
+            torch.tensor([0, 1, 1, 0], dtype=torch.float, device=device))
         # tensors with min > max -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, "max must be larger than min"):
             torch.histc(torch.tensor([1., 2., 3.], dtype=torch.float, device=device),
@@ -3373,6 +3383,21 @@ as the input tensor excluding its innermost dimension'):
 
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 
+    @onlyCUDA
+    @largeTensorTest("8GB")
+    @dtypes(torch.half, torch.chalf, torch.bfloat16)
+    def test_reductions_large_half_tensors(self, device, dtype):
+        t = torch.ones(2**31, device=device, dtype=dtype)
+        t[2**30:] = -1
+        expected = torch.tensor(0, device=device, dtype=dtype)
+        self.assertEqual(torch.sum(t), expected)
+
+        # mean_cuda is not implemented for ComplexHalf
+        err_msg = "not implemented for 'ComplexHalf'"
+        ctx = self.assertRaisesRegex(
+            RuntimeError, err_msg) if dtype is torch.chalf else contextlib.nullcontext()
+        with ctx:
+            self.assertEqual(torch.mean(t), expected)
 
 instantiate_device_type_tests(TestReductions, globals())
 

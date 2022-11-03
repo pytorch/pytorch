@@ -81,6 +81,13 @@ class CommandBuffer final {
   void insert_barrier(const PipelineBarrier& pipeline_barrier);
   void dispatch(const utils::uvec3&);
 
+  void copy_buffer_to_buffer(
+      const api::VulkanBuffer&,
+      const api::VulkanBuffer&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&);
+
   void copy_texture_to_texture(
       const api::VulkanImage&,
       const api::VulkanImage&,

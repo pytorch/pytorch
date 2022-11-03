@@ -5,11 +5,11 @@
 #include <utility>
 #include <vector>
 
+#include <ATen/Utils.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/Export.h>
-#include <torch/csrc/utils/disallow_copy.h>
 
 namespace torch {
 namespace jit {
@@ -118,7 +118,7 @@ void setTypeTags(bool state);
 bool getTypeTags();
 
 class TORCH_API Pickler {
-  TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
+  AT_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
  public:
   Pickler(std::function<void(const char*, size_t)> writer)
@@ -130,12 +130,14 @@ class TORCH_API Pickler {
       std::vector<at::Tensor>* tensor_table,
       std::function<c10::QualifiedName(const c10::ClassTypePtr&)> type_renamer,
       std::vector<c10::ClassTypePtr>* memoized_class_types,
-      std::function<std::string(const at::Tensor&)> get_tensor_id = nullptr)
+      std::function<std::string(const at::Tensor&)> get_tensor_id = nullptr,
+      bool tag_aggregates = true)
       : writer_(std::move(writer)),
         tensor_table_(tensor_table),
         type_renamer_(std::move(type_renamer)),
         memoized_class_types_(memoized_class_types),
-        get_tensor_id_(std::move(get_tensor_id)) {}
+        get_tensor_id_(std::move(get_tensor_id)),
+        tag_aggregates_(tag_aggregates) {}
   // NOLINTNEXTLINE(bugprone-exception-escape)
   ~Pickler();
 
@@ -274,6 +276,11 @@ class TORCH_API Pickler {
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
   std::unordered_map<std::string, uint32_t> memoized_devices_map_;
+  // when true, List and Dict objects will be wrapped in a
+  // torch.jit._pickle.restore_type_tag call to correctly set the dynamic
+  // TorchScript type for the object. When true the thing unpickling must have
+  // torch installed.
+  bool tag_aggregates_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
