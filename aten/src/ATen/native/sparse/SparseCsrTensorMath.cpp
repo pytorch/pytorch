@@ -48,6 +48,8 @@
 #include <ATen/ops/conj_physical.h>
 #include <ATen/ops/conj_physical_native.h>
 #include <ATen/ops/copy_native.h>
+#include <ATen/ops/deg2rad.h>
+#include <ATen/ops/deg2rad_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/erf.h>
 #include <ATen/ops/erf_native.h>
@@ -357,6 +359,7 @@ CREATE_UNARY_UFUNC(asinh);
 CREATE_UNARY_UFUNC(atan);
 CREATE_UNARY_UFUNC(atanh);
 CREATE_UNARY_UFUNC(ceil);
+CREATE_UNARY_UFUNC(deg2rad);
 CREATE_UNARY_UFUNC(erf);
 CREATE_UNARY_UFUNC(erfinv);
 CREATE_UNARY_UFUNC(expm1);

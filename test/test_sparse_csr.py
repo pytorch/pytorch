@@ -61,6 +61,7 @@ binary_ops_with_dense_output = list(filter(lambda op: op.name in binary_function
 UNARY_EWISE_CSR_ALLOW_AUTOGRAD = [
     'abs',
     'conj_physical',
+    'deg2rad',
     'neg',
     'positive',
     'frac',

@@ -4034,15 +4034,21 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: deg2rad
+    SparseCPU, SparseCUDA: deg2rad_sparse
+    SparseCsrCPU, SparseCsrCUDA: deg2rad_sparse_csr
 
 - func: deg2rad_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: deg2rad_
+    SparseCPU, SparseCUDA: deg2rad_sparse_
+    SparseCsrCPU, SparseCsrCUDA: deg2rad_sparse_csr_
 
 - func: deg2rad.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: deg2rad_out
+    SparseCPU, SparseCUDA: deg2rad_sparse_out
+    SparseCsrCPU, SparseCsrCUDA: deg2rad_sparse_csr_out
 
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
