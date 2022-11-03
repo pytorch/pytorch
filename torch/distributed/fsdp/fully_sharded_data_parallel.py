@@ -331,21 +331,11 @@ class FullyShardedDataParallel(nn.Module):
         backward_prefetch (Optional[BackwardPrefetch]):
             This configures explicit backward prefetching of all-gathers. See
             :class:`BackwardPrefetch` for details. (Default: ``BACKWARD_PRE``)
-        mixed_precision (Optional[MixedPrecision]): A ``MixedPrecision`` instance
-            describing the mixed precision training config to be used. ``MixedPrecision``
-            supports configuring parameter, buffer, and gradient communication dtype. Note
-            that only floating point data is cast to the reduced precision. This allows
-            users potential memory saving and training speedup while trading off
-            accuracy during model training. If ``None``, no mixed precision is applied.
-            Note that if ``mixed_precision`` is enabled for FSDP model that
-            contains ``BatchNorm`` with ``auto_wrap_policy``, FSDP will take
-            care to disable mixed precision for ``BatchNorm`` units by wrapping
-            them separately in their own FSDP unit with ``mixed_precision=None``.
-            This is done because several ``BatchNorm`` kernels do not implement
-            reduced type support at the moment. If individually wrapping the model,
-            users must take care to set ``mixed_precision=None`` for
-            ``BatchNorm`` units.
-            (Default: ``None``)
+        mixed_precision (Optional[MixedPrecision]):
+            This configures native mixed precision for FSDP. If this is set to
+            ``None``, then no mixed precision is used. Otherwise, parameter,
+            buffer, and gradient reduction dtypes can be set. See
+            :class:`MixedPrecision` for details. (Default: ``None``)
         ignored_modules (Optional[Iterable[torch.nn.Module]]): Modules whose
             own parameters and child modules' parameters and buffers are
             ignored by this instance. None of the modules directly in
