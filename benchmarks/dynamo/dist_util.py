@@ -13,7 +13,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     CheckpointImpl,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 
 try:
     from .torchbench import setup_torchbench_cwd
@@ -135,10 +135,7 @@ def apply_fsdp(model, use_checkpointing=False, use_wrap_policy=True):
 
     wrap_policy = None
     if use_wrap_policy:
-        # transformer policy is really a generic policy that wraps modules of specified classes
-        wrap_policy = functools.partial(
-            transformer_auto_wrap_policy, transformer_layer_cls=blocks
-        )
+        wrap_policy = ModuleWrapPolicy(blocks)
 
     model = FSDP(model, auto_wrap_policy=wrap_policy)
     if use_checkpointing:
