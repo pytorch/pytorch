@@ -1697,16 +1697,45 @@ def _add_onnxscript_fn(
     # function_proto into model_proto
     # TODO(titaiwang): Currently, onnxscript doesn't support ONNXFunction
     # calling other ONNXFunction scenario, neither does it here
-    onnx_function_list = list()
-    included_node_func = set()
-    for node in model_proto.graph.node:
+    onnx_function_list = list()  # type: ignore[var-annotated]
+    included_node_func = set()  # type: Set[str]
+    _find_onnxscript_op_recursively(
+        model_proto.graph, included_node_func, custom_opsets, onnx_function_list
+    )
+
+    if onnx_function_list:
+        model_proto.functions.extend(onnx_function_list)
+        model_bytes = model_proto.SerializeToString()
+    return model_bytes
+
+
+@_beartype.beartype
+def _find_onnxscript_op_recursively(
+    graph_proto,
+    included_node_func: Set[str],
+    custom_opsets: Mapping[str, int],
+    onnx_function_list: List,
+):
+    """Recursively iterate ModelProto to find ONNXFunction op"""
+    for node in graph_proto.node:
         node_kind = node.domain + "::" + node.op_type
+        # For control flow node: IF/Loop which has inner graph_proto
+        for attr in node.attribute:
+            if attr.g is not None:
+                (
+                    onnx_function_list,
+                    included_node_func,
+                ) = _find_onnxscript_op_recursively(
+                    attr.g, included_node_func, custom_opsets, onnx_function_list
+                )
         if (
-            jit_utils.is_custom_domain(node.domain)
+            node.domain
+            and jit_utils.is_custom_domain(node.domain)
             and node_kind not in included_node_func
         ):
             specified_version = custom_opsets.get(node.domain, 1)
             onnx_function_group = registration.registry.get_function_group(node_kind)
+            # Only the custom Op with ONNX function should be found in registry
             if onnx_function_group is not None:
                 onnx_fn = onnx_function_group.get(specified_version)
                 if onnx_fn is not None:
@@ -1715,18 +1744,14 @@ def _add_onnxscript_fn(
                     onnx_function_list.append(onnx_fn.to_function_proto())  # type: ignore[attr-defined]
                     included_node_func.add(node_kind)
                     continue
-
-            raise errors.UnsupportedOperatorError(
-                node_kind,
-                specified_version,
-                onnx_function_group.get_min_supported()
-                if onnx_function_group
-                else None,
-            )
-    if onnx_function_list:
-        model_proto.functions.extend(onnx_function_list)
-        model_bytes = model_proto.SerializeToString()
-    return model_bytes
+                raise errors.UnsupportedOperatorError(
+                    node_kind,
+                    specified_version,
+                    onnx_function_group.get_min_supported()
+                    if onnx_function_group
+                    else None,
+                )
+    return onnx_function_list, included_node_func
 
 
 @_beartype.beartype
@@ -1808,17 +1833,22 @@ def _add_output_to_block(block: _C.Block, value: _C.Value) -> int:
 
 @_beartype.beartype
 def _should_aten_fallback(
-    name: str,
-    opset_version: int,
-    operator_export_type: _C_onnx.OperatorExportTypes,
+    name: str, opset_version: int, operator_export_type: _C_onnx.OperatorExportTypes
 ):
+    # For BUILD_CAFFE2=0 builds, if domain=="aten" and operator_export_type==ONNX_ATEN,
+    #   an aten::ATen operator is created regardless of symbolics existence
+    # For BUILD_CAFFE2=1, the same applies only if there is no symbolic available
+
     is_exportable_aten_op = registration.registry.is_registered_op(name, opset_version)
     is_onnx_aten_export = operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN
     is_aten_fallback_export = (
         operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
     )
-    return is_onnx_aten_export or (
-        not is_exportable_aten_op and is_aten_fallback_export
+    is_caffe2_build = _C_onnx._CAFFE2_ATEN_FALLBACK
+
+    return name.startswith("aten::") and (
+        ((is_onnx_aten_export or is_aten_fallback_export) and not is_caffe2_build)
+        or (not is_exportable_aten_op and is_aten_fallback_export)
     )
 
 
@@ -1913,6 +1943,21 @@ def _run_symbolic_function(
         env=env,
     )
 
+    # Direct ATen export requested
+    if _should_aten_fallback(ns_op_name, opset_version, operator_export_type):
+        attrs = {
+            k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
+            for k in node.attributeNames()
+        }
+        outputs = node.outputsSize()
+        attrs["outputs"] = outputs
+        return graph_context.at(
+            op_name,
+            *inputs,
+            overload_name=_get_aten_op_overload_name(node),
+            **attrs,
+        )
+
     try:
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
         if symbolic_helper.is_caffe2_aten_fallback() and opset_version == 9:
@@ -1930,6 +1975,7 @@ def _run_symbolic_function(
         if symbolic_function_group is not None:
             symbolic_fn = symbolic_function_group.get(opset_version)
             if symbolic_fn is not None:
+                # TODO Wrap almost identical attrs assignment or comment the difference.
                 attrs = {
                     k: symbolic_helper._node_get(node, k) for k in node.attributeNames()
                 }
@@ -1942,18 +1988,6 @@ def _run_symbolic_function(
         if namespace == "onnx":
             # Clone node to trigger ONNX shape inference
             return graph_context.op(op_name, *inputs, **attrs, outputs=node.outputsSize())  # type: ignore[attr-defined]
-
-        if _should_aten_fallback(ns_op_name, opset_version, operator_export_type):
-            # Direct ATen export requested
-            outputs = node.outputsSize()
-            attrs["outputs"] = outputs
-            # `overload_name` is set for non-Caffe2 builds only
-            return graph_context.at(
-                op_name,
-                *inputs,
-                overload_name=_get_aten_op_overload_name(node),
-                **attrs,
-            )
 
         raise errors.UnsupportedOperatorError(
             symbolic_function_name,
