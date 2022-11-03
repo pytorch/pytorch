@@ -1,5 +1,6 @@
 import functools
-from typing import Any, Callable, List, no_type_check, Optional, Tuple
+import warnings
+from typing import Any, Callable, Iterable, List, no_type_check, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -23,6 +24,97 @@ from torch.distributed.fsdp.flat_param import (
     HandleTrainingState,
 )
 from torch.distributed.utils import _to_kwargs
+
+
+@no_type_check
+def _lazy_init(
+    state: _State,
+    root_module: nn.Module,
+) -> _State:
+    """
+    Performs initialization lazily, typically right before the first forward
+    pass. The laziness is needed to ensure that the parameter device/dtype and
+    the FSDP hierarchy have finalized. This method's actual logic only runs on
+    the root FSDP instance, which performs initialization for all non-root FSDP
+    instances to avoid partial initialization.
+
+    For the non-composable code path, ``state`` and ``root_module`` should be
+    the same, namely the FSDP instance itself.
+    """
+    if state._is_root is not None:
+        return  # no-op: already lazily initialized
+    if not torch.cuda.is_available():
+        # Allow the FSDP constructor to run even without CUDA but check this
+        # once we start real execution
+        raise RuntimeError("FSDP does not support CPU only execution")
+    # The following logic is only run on the root FSDP instance since it will
+    # set `_is_root=False` for the non-root instances
+    state._is_root = True
+    _assert_in_training_states(state, [TrainingState.IDLE])
+    _init_streams(state)
+    buffers, buffer_dtypes = _get_buffers_and_dtypes_for_computation(state, root_module)
+    _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, state.compute_device)
+    for handle in state._handles:
+        handle.init_flat_param_attributes()
+    state._exec_order_data.init(state, root_module, state.process_group)
+    if _is_composable(state):
+        # Return early since there is no need to share data structures
+        return state
+    # Initialize non-root FSDP instances and share attributes from the root to
+    # non-root instances
+    assert state is root_module
+    inconsistent_limit_all_gathers = False
+    for fsdp_module in state.fsdp_modules(root_module):
+        if fsdp_module is root_module:
+            continue
+        # Relax the assert for non-root FSDP instances in case the nested
+        # initialized module is wrapped again in FSDP later (e.g. after
+        # training to run inference)
+        p_assert(
+            fsdp_module._is_root is None or not fsdp_module._is_root,
+            "Non-root FSDP instance's `_is_root` should not have been "
+            "set yet or should have been set to `False`",
+        )
+        fsdp_module._is_root = False
+        fsdp_module._streams = state._streams
+        fsdp_module._exec_order_data = state._exec_order_data
+        if fsdp_module.limit_all_gathers != state.limit_all_gathers:
+            # Prefer the root's value
+            inconsistent_limit_all_gathers = True
+            fsdp_module.limit_all_gathers = state.limit_all_gathers
+        fsdp_module._free_event_queue = state._free_event_queue
+        fsdp_module._handles_prefetched = state._handles_prefetched
+        fsdp_module._needs_pre_backward_unshard = state._needs_pre_backward_unshard
+        for handle in fsdp_module._handles:
+            handle.init_flat_param_attributes()
+    if inconsistent_limit_all_gathers:
+        warnings.warn(
+            "Found inconsistent `limit_all_gathers` values across FSDP "
+            f"instances on rank {state.rank}. Using the root FSDP's value of "
+            f"{state.limit_all_gathers} for all instances."
+        )
+    return state
+
+
+@no_type_check
+def _init_streams(
+    state: _State,
+) -> _State:
+    """
+    Initializes CUDA streams for overlapping communication, computation, and
+    data transfers. The streams should be shared across FSDP instances.
+    """
+    assert state._is_root
+    assert torch.cuda.is_available()
+    # Stream for unshard logic, including allocating the all-gather destination
+    # tensors and the all-gathers themselves.
+    state._streams["unshard"] = torch.cuda.Stream()
+    # Stream for overlapping gradient reduction with the backward pass gradient
+    # computation.
+    state._streams["post_backward"] = torch.cuda.Stream()
+    # Stream for pre-unshard logic, namely allocations and writes for CPU
+    # offloading (H2D copy) and mixed precision (low precision cast).
+    state._streams["pre_unshard"] = torch.cuda.Stream()
 
 
 @no_type_check
@@ -127,7 +219,8 @@ def _pre_forward(
             the current forward.
         unshard_fn (Optional[Callable]): A callable to unshard any currently
             sharded parameters or ``None`` to not do any unsharding.
-        module (nn.Module): Module whose forward this method runs right before.
+        module (nn.Module): Module whose forward this method runs right before;
+            expected by the hook signature.
         input (Any): Unused; expected by the hook signature.
     """
     state.training_state = TrainingState.FORWARD_BACKWARD
@@ -198,16 +291,43 @@ def _post_forward(
 
 
 @no_type_check
-def _fsdp_root_pre_forward(
+def _post_forward_reshard(
     state: _State,
+    handles: List[FlatParamHandle],
+) -> None:
+    """Reshards parameters in the post-forward."""
+    if not handles:
+        return
+    # Do not free the root's parameters in the post-forward for `FULL_SHARD`
+    # with the intention that they are immediately used for backward
+    # computation (though this may not be true)
+    free_unsharded_flat_params = [
+        not state._is_root
+        and handle._config.sharding_strategy == HandleShardingStrategy.FULL_SHARD
+        for handle in handles
+    ]
+    _reshard(state, handles, free_unsharded_flat_params)
+
+
+@no_type_check
+def _root_pre_forward(
+    state: _State,
+    module: nn.Module,
     *args,
     **kwargs,
 ):
     """
     Runs pre-forward logic specific to the root FSDP instance, which should run
-    before any individual module's pre-forward. If this is called on a non-root
-    FSDP instance, then the forward inputs are returned directly.
+    before any individual module's pre-forward. This starts with an attempt at
+    lazy initialization (which only runs non-vacuously once). Otherwise, if
+    this is called on a non-root FSDP instance, then the forward inputs are
+    returned directly.
+
+    Args:
+        module (nn.Module): Module for which this logic tries to run. It may or
+            may not be the root. If not, then this method does not do anything.
     """
+    _lazy_init(state, module)
     p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
     if not state._is_root:
         return args, kwargs
@@ -304,7 +424,10 @@ def _pre_backward_hook(
             _register_post_backward_final_callback(state)
             _clear_grads_if_needed(_all_handles(state))
         elif _handles_key:
-            _assert_in_training_states(state, [TrainingState.IDLE])
+            allowed_states = [TrainingState.IDLE]
+            if _is_composable(state):
+                allowed_states.append(TrainingState.FORWARD_BACKWARD)
+            _assert_in_training_states(state, allowed_states)
         state.training_state = TrainingState.FORWARD_BACKWARD
         # Queueing the post-backward callback is the only logic that is not
         # per-handle in the pre-backward hook, so we can return early here if
@@ -355,7 +478,6 @@ def _post_backward_hook(
         "FullyShardedDataParallel._post_backward_hook"
     ):
         _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
-        state.training_state = TrainingState.FORWARD_BACKWARD
         p_assert(
             handle._training_state == HandleTrainingState.BACKWARD_PRE,
             f"Expects `BACKWARD_PRE` state but got {handle._training_state}",
@@ -732,6 +854,87 @@ def _get_training_state(
         f"Expects uniform training state but got {training_states}",
     )
     return next(iter(training_states))
+
+
+@no_type_check
+def _register_pre_forward_hooks(
+    state: _State,
+    modules: Iterable[nn.Module],
+) -> None:
+    """
+    Registers pre-forward hooks on all modules in ``modules``. The pre-forward
+    hooks are partially applied based on the current ``FlatParamHandle``
+    construction, meaning that they must be re-registered if the construction
+    changes.
+    """
+    for forward_handle in state._pre_forward_handles:
+        forward_handle.remove()
+    state._pre_forward_handles.clear()
+    for module in modules:
+        module_param_handles = state._module_to_handles[module]
+        if module_param_handles:
+            unshard_fn = functools.partial(
+                _pre_forward_unshard,
+                state,
+                module_param_handles,
+            )
+            hook = functools.partial(
+                _pre_forward, state, module_param_handles, unshard_fn
+            )
+            state._pre_forward_handles.append(module.register_forward_pre_hook(hook))
+
+
+@no_type_check
+def _register_post_forward_hooks(
+    state: _State,
+    modules: Iterable[nn.Module],
+) -> None:
+    """
+    Registers post-forward hooks on all modules in ``modules``. The
+    post-forward hooks are partially applied based on the current
+    ``FlatParamHandle`` construction, meaning that they must be re-registered
+    if the construction changes.
+    """
+    for forward_handle in state._post_forward_handles:
+        forward_handle.remove()
+    state._post_forward_handles.clear()
+    for module in modules:
+        module_param_handles = state._module_to_handles[module]
+        if module_param_handles:
+            reshard_fn = functools.partial(
+                _post_forward_reshard,
+                state,
+                module_param_handles,
+            )
+            hook = functools.partial(
+                _post_forward,
+                state,
+                module_param_handles,
+                reshard_fn,
+            )
+            state._post_forward_handles.append(module.register_forward_hook(hook))
+
+
+@no_type_check
+def _register_root_pre_forward_hooks(
+    state: _State,
+    modules: Iterable[nn.Module],
+):
+    """
+    # TODO (awgu): This requires kwarg support for hooks registered by
+    ``register_forward_pre_hook()``. ``_root_pre_forward()`` does not have the
+    supported hook signature right now.
+    """
+    for forward_handle in state._root_pre_forward_handles:
+        forward_handle.remove()
+    state._root_pre_forward_handles.clear()
+    for module in modules:
+        module_param_handles = state._module_to_handles[module]
+        if module_param_handles:
+            hook = functools.partial(_root_pre_forward, state, module)
+            state._root_pre_forward_handles.append(
+                module.register_forward_pre_hook(hook)
+            )
 
 
 @no_type_check
