@@ -482,9 +482,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     disable_amp = torch._C._is_any_autocast_enabled()
 
     if config.use_functionalize:
-        fx_g = make_fx(
-            detach_and_functionalize_pure(joint_forward_backward), aot_config.decompositions
-        )(*joint_inputs)
+        with enable_python_dispatcher():
+            fx_g = make_fx(
+                detach_and_functionalize_pure(joint_forward_backward), aot_config.decompositions
+            )(*joint_inputs)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
