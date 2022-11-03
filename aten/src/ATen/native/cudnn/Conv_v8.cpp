@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 
 #if AT_CUDNN_ENABLED()
@@ -10,7 +11,7 @@
 #include <cudnn_frontend.h>
 #include <cudnn_frontend_find_plan.h>
 #include <cudnn_frontend_get_plan.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/ConvUtils.h>
@@ -25,6 +26,12 @@
 
 #include <mutex>
 #include <unordered_map>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 namespace at { namespace native {
 
@@ -152,7 +159,8 @@ BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFused> benchmark_cache_fus
 // would not be a POD anymore.
 void setCacheKey(CacheKey& key, const cudnnBackendDescriptorType_t operation, const Tensor& y, const Tensor& x, const Tensor& w, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
   memset(&key, 0, sizeof(key));
-  setConvolutionParams(&key.params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32, x.suggest_memory_format());
+  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(x, w);
+  setConvolutionParams(&key.params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
   key.operation = operation;
   key.x_alignment = getAlignment(x);
   key.y_alignment = getAlignment(y);
@@ -161,7 +169,8 @@ void setCacheKey(CacheKey& key, const cudnnBackendDescriptorType_t operation, co
 
 void setCacheKeyFused(CacheKeyFused& key, const Tensor& y, const Tensor& x, const Tensor& w, const Tensor& z, const Tensor& b, const float alpha, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
   memset(&key, 0, sizeof(key));
-  setConvolutionParams(&key.params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32, x.suggest_memory_format());
+  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(x, w);
+  setConvolutionParams(&key.params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
   key.x_alignment = getAlignment(x);
   key.y_alignment = getAlignment(y);
   key.w_alignment = getAlignment(w);
@@ -300,8 +309,7 @@ size_t get_available_workspace() {
   int device;
   C10_CUDA_CHECK(cudaGetDevice(&device));
   size_t max_block_size = 0;
-  size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
-  c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
+  c10::cuda::CUDACachingAllocator::cacheInfo(device, &max_block_size);
   return max_block_size;
 }
 
@@ -654,7 +662,7 @@ void raw_cudnn_convolution_add_relu_out(
     bool allow_tf32) {
   if (output.numel() == 0) { return; }
   if (at::native::cudnnv8_enabled_check_debug()) {
-    auto bias_ = bias.view({1, bias.numel(), 1, 1});
+    auto bias_ = input.ndimension() == 4 ? bias.view({1, bias.numel(), 1, 1}) : bias.view({1, bias.numel(), 1, 1, 1});
     run_fused_conv(input, output, weight, z, bias_,
       alpha, stride, padding, dilation,
       groups, benchmark, deterministic, allow_tf32);

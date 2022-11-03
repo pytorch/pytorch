@@ -88,7 +88,7 @@ void run_fmha_loop_(Launch_params<FMHA_fprop_params> &launch_params,
     });
 }
 
-void run_fmha_fprop(Launch_params<FMHA_fprop_params> &launch_params,
+TORCH_API void run_fmha_fprop(Launch_params<FMHA_fprop_params> &launch_params,
                     const bool configure) {
     BOOL_SWITCH(launch_params.params.is_bf16, IsBf16Const, [&] {
         using elem_type = std::conditional<IsBf16Const, cutlass::bfloat16_t, cutlass::half_t>::type;

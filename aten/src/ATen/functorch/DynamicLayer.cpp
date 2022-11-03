@@ -151,7 +151,6 @@ bool getInplaceRequiresGradAllowed() {
   return functorch_tls->allow_inplace_requires_grad_;
 }
 
-
 static std::vector<DynamicLayer>& dynamicLayerStackAccessor() {
   return getRawFunctorchTLS()->dynamicLayerStack;
 }
@@ -294,10 +293,19 @@ Tensor unwrapIfDead(const Tensor& tensor) {
 
 void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
     std::function<Tensor(const Tensor&)> func) {
+   auto func_with_bool = [&](const Tensor& tensor, bool unused) { return func(tensor); };
+   foreachTensorInplaceWithFlag(args, begin, end, std::bitset<64>(), func_with_bool);
+}
+
+void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int64_t end,
+    const std::bitset<64> use_flag_relative, std::function<Tensor(const Tensor&, bool)> func){
   TORCH_INTERNAL_ASSERT(begin >= 0);
   TORCH_INTERNAL_ASSERT(end >= 0);
   TORCH_INTERNAL_ASSERT(begin <= end);
-  for (int64_t idx = begin; idx < end; idx++) {
+  for (int64_t relative_idx = 0; relative_idx < end - begin; relative_idx++) {
+    const bool flag = use_flag_relative[relative_idx] == 1;
+
+    const auto idx = relative_idx + begin;
     auto ivalue = args[idx];
     // Tensor?[] translates to a c10::List<IValue> so we need to peek inside List
     if (ivalue.isList()) {
@@ -307,7 +315,7 @@ void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
       for (const auto list_idx : c10::irange(0, list.size())) {
         const auto& elt = list.get(list_idx);
         if (elt.isTensor()) {
-          list.set(list_idx, func(elt.toTensor()));
+          list.set(list_idx, func(elt.toTensor(), flag));
           modified = true;
         }
       }
@@ -319,7 +327,7 @@ void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
     if (ivalue.isTensorList()) {
       auto list = ivalue.toTensorList();
       for (const auto list_idx : c10::irange(0, list.size())) {
-        list[list_idx] = func(list[list_idx]);
+        list[list_idx] = func(list[list_idx], flag);
       }
       args[idx] = list;
     }
@@ -328,7 +336,7 @@ void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
       continue;
     }
     Tensor value = ivalue.toTensor();
-    Tensor replacement = func(value);
+    Tensor replacement = func(value, flag);
     args[idx] = std::move(replacement);
     // sanity checks
     if (ivalue.toTensor().defined()) {
@@ -371,6 +379,14 @@ bool isInplaceOp(const FunctionSchema& schema) {
   return return_alias_info && return_alias_info->isWrite();
 }
 
+c10::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input_idx) {
+  for (size_t res_idx = 0; res_idx != schema.returns().size(); ++res_idx) {
+    if (schema.may_contain_alias(SchemaArgument(SchemaArgType::input, immutable_input_idx), SchemaArgument(SchemaArgType::output, res_idx))) {
+      return res_idx; // for everything currently in native_functions, each input aliases at most one output (tensor list counts as one output)
+    }
+  }
+  return nullopt;
+}
 
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
 static void dump_local_tls() {
@@ -446,12 +462,23 @@ restoreLocalDispatchKeySetRAII(const c10::impl::LocalDispatchKeySet& key_set) {
   return c10::impl::ForceDispatchKeyGuard(key_set);
 }
 
-void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+// right now grad_special_case as a bool is sufficient because this is the only special case for grad. If we need to add
+// more special cases, it's more scalable to add an enum to know which op we're looking at without looking at the schema
+void dynamicLayerBack(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case) {
   auto& layer = dynamicLayerStackAccessor().back();
   auto restore_guard = restoreLocalDispatchKeySetRAII(layer.interpreter().getSavedLocalDispatchKeySet());
   WithoutTop guard;
 
-  layer.interpreter().sendToNextInterpreter(op, stack);
+  layer.interpreter().sendToNextInterpreter(op, stack, grad_special_case);
+}
+
+// used for functions that have aliasing operations but should be treated like they're out of place (i.e. lift_fresh)
+void dynamicLayerBackGradSpecialCase(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  return dynamicLayerBack(op, stack, true);
+}
+
+void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  return dynamicLayerBack(op, stack, false);
 }
 
 TORCH_LIBRARY_IMPL(_, FuncTorchDynamicLayerFrontMode, m) {
@@ -460,6 +487,18 @@ TORCH_LIBRARY_IMPL(_, FuncTorchDynamicLayerFrontMode, m) {
 
 TORCH_LIBRARY_IMPL(_, FuncTorchDynamicLayerBackMode, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dynamicLayerBackFallback>());
+}
+
+
+#define SPECIAL_GRAD_CASE(op) \
+  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerBackGradSpecialCase>());
+
+TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerBackMode, m) {
+  // lift_fresh: it's must be freshly allocated and should be wrapped. User shouldn't have access to input version
+  // alias: this is needed for the CompositeImplicit instance norm (running_mean/var get set to be a wrapped value)
+  //        It's not a user facing function, but is more prone to possible errors
+  SPECIAL_GRAD_CASE(lift_fresh);
+  SPECIAL_GRAD_CASE(alias);
 }
 
 }

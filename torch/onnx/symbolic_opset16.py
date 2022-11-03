@@ -32,7 +32,7 @@ from torch.nn.functional import (
     GRID_SAMPLE_PADDING_MODES,
 )
 from torch.onnx import _type_utils, symbolic_helper
-from torch.onnx._internal import _beartype, registration
+from torch.onnx._internal import _beartype, jit_utils, registration
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=16)
 
@@ -42,7 +42,14 @@ _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=16)
 @_onnx_symbolic("aten::grid_sampler")
 @symbolic_helper.parse_args("v", "v", "i", "i", "b")
 @_beartype.beartype
-def grid_sampler(g, input, grid, mode_enum, padding_mode_enum, align_corners):
+def grid_sampler(
+    g: jit_utils.GraphContext,
+    input,
+    grid,
+    mode_enum,
+    padding_mode_enum,
+    align_corners,
+):
     mode_s = {v: k for k, v in GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg]
     padding_mode_s = {v: k for k, v in GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]  # type: ignore[call-arg]
     return g.op(
@@ -58,11 +65,13 @@ def grid_sampler(g, input, grid, mode_enum, padding_mode_enum, align_corners):
 @_onnx_symbolic("aten::scatter_add")
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
-def scatter_add(g, self, dim, index, src):
+def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("scatter", self, dim, index, src, overload_name="src")
 
-    src_type = src.type().scalarType()
+    src_type = _type_utils.JitScalarType.from_value(
+        src, _type_utils.JitScalarType.UNDEFINED
+    )
     src_sizes = symbolic_helper._get_tensor_sizes(src)
     index_sizes = symbolic_helper._get_tensor_sizes(index)
 
@@ -78,13 +87,11 @@ def scatter_add(g, self, dim, index, src):
     else:
         # Check if scalar "src" has same type as self (PyTorch allows different
         # type for scalar src (but not when src is tensor)). If not, insert Cast node.
-        if self.type().scalarType() != src_type:
+        if _type_utils.JitScalarType.from_value(self) != src_type:
             src = g.op(
                 "Cast",
                 src,
-                to_i=_type_utils.JitScalarType.from_name(
-                    self.type().scalarType()
-                ).onnx_type(),
+                to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
             )
 
         return g.op(

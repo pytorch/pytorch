@@ -65,7 +65,7 @@ in real time.
 
 See :class:`~torch.utils.data.IterableDataset` for more details.
 
-.. note:: When using an :class:`~torch.utils.data.IterableDataset` with
+.. note:: When using a :class:`~torch.utils.data.IterableDataset` with
           `multi-process data loading <Multi-process data loading_>`_. The same
           dataset object is replicated on each worker process, and thus the
           replicas must be configured differently to avoid duplicated data. See
@@ -427,6 +427,7 @@ Example::
 .. autoclass:: ConcatDataset
 .. autoclass:: ChainDataset
 .. autoclass:: Subset
+.. autofunction:: torch.utils.data._utils.collate.collate
 .. autofunction:: torch.utils.data.default_collate
 .. autofunction:: torch.utils.data.default_convert
 .. autofunction:: torch.utils.data.get_worker_info

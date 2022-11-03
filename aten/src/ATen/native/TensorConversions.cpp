@@ -1,13 +1,56 @@
+// #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/Optional.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorOperators.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_autocast_to_full_precision_native.h>
+#include <ATen/ops/_autocast_to_reduced_precision_native.h>
+#include <ATen/ops/_convert_indices_from_coo_to_csr.h>
+#include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
+#include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_to_copy.h>
+#include <ATen/ops/_to_copy_native.h>
+#include <ATen/ops/_to_cpu_native.h>
+#include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_quantized.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/empty_strided_native.h>
+#include <ATen/ops/to_dense_backward_native.h>
+#include <ATen/ops/to_dense_native.h>
+#include <ATen/ops/to_mkldnn_backward_native.h>
+#include <ATen/ops/to_native.h>
+#include <ATen/ops/to_sparse_bsc_native.h>
+#include <ATen/ops/to_sparse_bsr_native.h>
+#include <ATen/ops/to_sparse_csc_native.h>
+#include <ATen/ops/to_sparse_csr_native.h>
+#include <ATen/ops/to_sparse_native.h>
+#include <ATen/ops/view_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <numeric>
 
@@ -455,6 +498,15 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   if (input_.layout() == c10::kSparse) {
     auto input = input_.coalesce();
     return grad.sparse_mask(input);
+  }
+  if (at::sparse_csr::is_sparse_compressed(input_)) {
+    // TODO: implement sparse_compressed_mask
+    switch(input_.layout()) {
+    case kSparseCsr: return grad.sparse_mask(input_.to_sparse()).to_sparse_csr();
+    case kSparseCsc: return grad.sparse_mask(input_.to_sparse()).to_sparse_csc();
+      // BSR and BSC should be handled via implement sparse_compressed_mask
+    default: ; // fall back to unsupported input layout error
+    }
   }
   if (input_.layout() == c10::kMkldnn) {
     return grad.to_mkldnn(input_.scalar_type());
@@ -1697,11 +1749,11 @@ c10::optional<Tensor> to_meta(const c10::optional<Tensor>& tensor) {
   return c10::nullopt;
 }
 
-std::vector<Tensor> to_meta(const at::TensorList& t_list) {
+std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
   std::vector<Tensor> outs;
   outs.reserve(t_list.size());
-  for (const auto& i : c10::irange(t_list.size())) {
-    outs.push_back(to_meta(t_list[i]));
+  for (const auto& tensor : t_list) {
+    outs.push_back(to_meta(tensor));
   }
   return outs;
 }

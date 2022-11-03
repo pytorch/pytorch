@@ -719,7 +719,9 @@ def argument(a: Argument) -> PythonArgument:
         name=a.name,
         type=a.type,
         # TODO: directly translate a.default to python default
-        default=str(pythonify_default(cpp.default_expr(a.default, a.type)))
+        default=str(
+            pythonify_default(cpp.default_expr(a.default, a.type, symint=False))
+        )
         if a.default is not None
         else None,
         default_init=None,
@@ -804,7 +806,7 @@ def signature_from_schema(
             a = getattr(topt_args, name)
             if a.default is None or a.default == "None":
                 return None
-            return cpp.default_expr(a.default, a.type)
+            return cpp.default_expr(a.default, a.type, symint=False)
 
         tensor_options_args.append(
             PythonArgument(
@@ -956,11 +958,13 @@ def argument_type_str_pyi(t: Type) -> str:
             elem = argument_type_str_pyi(t.elem)
             ret = f"Sequence[{elem}]"
 
+    else:
+        raise RuntimeError(f"unrecognized type {repr(t)}")
+
     if add_optional:
         ret = "Optional[" + ret + "]"
-    return ret
 
-    raise RuntimeError(f"unrecognized type {repr(t)}")
+    return ret
 
 
 def return_type_str_pyi(t: Type) -> str:

@@ -23,6 +23,19 @@ in_dims_t = Union[int, Tuple]
 out_dims_t = Union[int, Tuple[int, ...]]
 
 
+def doesnt_support_saved_tensors_hooks(f):
+    message = (
+        "functorch transforms don't yet support saved tensor hooks. "
+        "Please open an issue with your use case."
+    )
+
+    @functools.wraps(f)
+    def fn(*args, **kwargs):
+        with torch.autograd.graph.disable_saved_tensors_hooks(message):
+            return f(*args, **kwargs)
+    return fn
+
+
 # Checks that all args-to-be-batched have the same batch dim size
 def _validate_and_get_batch_size(
         flat_in_dims: List[Optional[int]],
@@ -468,6 +481,7 @@ def _check_randomness_arg(randomness):
         raise RuntimeError(f"Only allowed values for randomness are 'error', 'different', or 'same'. Got {randomness}")
 
 
+@doesnt_support_saved_tensors_hooks
 def _flat_vmap(func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs):
     vmap_level = _vmap_increment_nesting(batch_size, randomness)
     try:

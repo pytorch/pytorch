@@ -1,10 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/MaxPooling.h>
 #include <ATen/native/Pool.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/max_pool1d_native.h>
+#include <ATen/ops/max_pool1d_with_indices.h>
+#include <ATen/ops/quantized_max_pool1d.h>
+#endif
 
 namespace at {
 namespace native {
@@ -98,6 +109,14 @@ Tensor max_pool1d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+
+  auto ndim = self.ndimension();
+   TORCH_CHECK(
+       (ndim == 2 && self.size(0) != 0 && self.size(1) != 0) ||
+           (ndim == 3 && self.size(1) != 0 && self.size(2) != 0),
+       "max_pool1d: Expected 2D or 3D (batch mode) tensor with optional 0 dim batch size for input, but got:",
+       self.sizes());
+
   if (self.is_quantized()) {
     return at::quantized_max_pool1d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
