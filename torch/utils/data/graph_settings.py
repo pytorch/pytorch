@@ -32,7 +32,10 @@ def _get_all_graph_pipes_helper(graph: DataPipeGraph, id_cache: Set[int]) -> Lis
     return results
 
 
-def apply_sharding(datapipe: DataPipe, num_of_instances: int, instance_id: int, sharding_group=SHARDING_PRIORITIES.DEFAULT) -> DataPipe:
+def apply_sharding(datapipe: DataPipe,
+                   num_of_instances: int,
+                   instance_id: int,
+                   sharding_group=SHARDING_PRIORITIES.DEFAULT) -> DataPipe:
     graph = traverse_dps(datapipe)
     all_pipes = get_all_graph_pipes(graph)
     already_applied_to = None
