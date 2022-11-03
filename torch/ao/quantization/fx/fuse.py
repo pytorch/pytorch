@@ -24,7 +24,7 @@ from ..backend_config.utils import (
     get_fusion_pattern_to_root_node_getter,
     get_fusion_pattern_to_extra_inputs_getter,
 )
-from .backend_config_utils import get_fusion_pattern_to_fuse_handler_cls
+from .backend_config_utils import _get_fusion_pattern_to_fuse_handler_cls
 
 from .custom_config import FuseCustomConfig
 
@@ -69,7 +69,7 @@ def fuse(
     if backend_config is None:
         backend_config = get_native_backend_config()
 
-    fusion_pattern_to_fuse_handler_cls = sorted_patterns_dict(get_fusion_pattern_to_fuse_handler_cls(backend_config))
+    fusion_pattern_to_fuse_handler_cls = sorted_patterns_dict(_get_fusion_pattern_to_fuse_handler_cls(backend_config))
     fuser_method_mapping = get_fuser_method_mapping(backend_config)
     fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config)
     fusion_pattern_to_extra_inputs_getter = get_fusion_pattern_to_extra_inputs_getter(backend_config)

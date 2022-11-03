@@ -18,7 +18,9 @@ from .fusion_patterns import DefaultFuseHandler
 
 from typing import Dict, Any, Callable, Optional
 
-def get_quantize_handler_cls(
+__all__ = []
+
+def _get_quantize_handler_cls(
         observation_type,
         dtype_configs,
         num_tensor_args_to_observation_type,
@@ -77,7 +79,7 @@ def get_quantize_handler_cls(
 
     return ConfigurableQuantizeHandler
 
-def get_pattern_to_quantize_handlers(backend_config: BackendConfig) -> Dict[Pattern, QuantizerCls]:
+def _get_pattern_to_quantize_handlers(backend_config: BackendConfig) -> Dict[Pattern, QuantizerCls]:
     """
     Note: Quantize handler is just a holder for some check methods like
     (should_insert_observer_for_output), maybe this can be a enum as well,
@@ -95,7 +97,7 @@ def get_pattern_to_quantize_handlers(backend_config: BackendConfig) -> Dict[Patt
         if input_output_observed is None:
             input_output_observed = True
         pattern_to_quantize_handlers[pattern] = \
-            get_quantize_handler_cls(
+            _get_quantize_handler_cls(
                 observation_type,
                 dtype_configs,
                 num_tensor_args_to_observation_type,
@@ -106,7 +108,7 @@ def get_pattern_to_quantize_handlers(backend_config: BackendConfig) -> Dict[Patt
     return pattern_to_quantize_handlers
 
 # TODO: move this to torch/ao/quantization/backend_config/utils.py
-def get_fusion_pattern_to_fuse_handler_cls(
+def _get_fusion_pattern_to_fuse_handler_cls(
         backend_config: BackendConfig) -> Dict[Pattern, Callable]:
     fusion_pattern_to_fuse_handlers: Dict[Pattern, Callable] = {}
     for pattern, config in backend_config.configs.items():
@@ -117,7 +119,7 @@ def get_fusion_pattern_to_fuse_handler_cls(
     return fusion_pattern_to_fuse_handlers
 
 # TODO: remove when all uses are changed to backend_config
-def get_native_quant_patterns(additional_quant_patterns: Dict[Pattern, QuantizerCls] = None) -> Dict[Pattern, QuantizerCls]:
+def _get_native_quant_patterns(additional_quant_patterns: Dict[Pattern, QuantizerCls] = None) -> Dict[Pattern, QuantizerCls]:
     """
     Return a map from pattern to quantize handlers based on the default patterns and the native backend_config.
     The returned map is sorted such that longer patterns will be encountered first when iterating through it.
@@ -128,17 +130,6 @@ def get_native_quant_patterns(additional_quant_patterns: Dict[Pattern, Quantizer
     # TODO: currently we just extend the quantize handlers generated from
     # `get_native_backend_config`
     # in the future we can just assign backend_config when everything is defined
-    for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config()).items():
+    for pattern, quantize_handler in _get_pattern_to_quantize_handlers(get_native_backend_config()).items():
         patterns[pattern] = quantize_handler
     return sorted_patterns_dict(patterns)
-
-get_fusion_pattern_to_fuse_handler_cls.__module__ = "torch.ao.quantization.fx.backend_config_utils"
-get_native_quant_patterns.__module__ = "torch.ao.quantization.fx.backend_config_utils"
-get_pattern_to_quantize_handlers.__module__ = "torch.ao.quantization.fx.backend_config_utils"
-
-__all__ = [
-    "get_quantize_handler_cls",
-    "get_fusion_pattern_to_fuse_handler_cls",
-    "get_native_quant_patterns",
-    "get_pattern_to_quantize_handlers",
-]

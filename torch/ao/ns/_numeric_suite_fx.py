@@ -121,7 +121,7 @@ from .fx.ns_types import (
 )
 from torch.ao.quantization.backend_config.utils import get_fusion_pattern_to_root_node_getter
 from torch.ao.quantization.backend_config import BackendConfig
-from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
+from torch.ao.quantization.fx.backend_config_utils import _get_pattern_to_quantize_handlers
 from torch.ao.quantization.fx.match_utils import find_matches
 from torch.ao.quantization.fx.qconfig_mapping_utils import generate_node_name_to_qconfig
 from torch.ao.quantization.qconfig import QConfigAny
@@ -803,7 +803,7 @@ def prepare_n_shadows_model(
     # Find the set of subgraphs in the original graph which we need to
     # consider.
     modules = dict(mt.named_modules(remove_duplicate=False))
-    patterns = get_pattern_to_quantize_handlers(backend_config)
+    patterns = _get_pattern_to_quantize_handlers(backend_config)
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config)
     standalone_module_names: List[str] = []

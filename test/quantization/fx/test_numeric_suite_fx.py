@@ -85,7 +85,7 @@ from torch.ao.ns._numeric_suite_fx import (
 )
 from torch.ao.ns.fx.qconfig_multi_mapping import QConfigMultiMapping
 from torch.ao.quantization.backend_config import get_native_backend_config
-from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
+from torch.ao.quantization.fx.backend_config_utils import _get_pattern_to_quantize_handlers
 
 
 # Note: these models are not for use outside of this file. While it's good
@@ -299,7 +299,7 @@ def get_all_quant_patterns():
     all_quant_patterns = get_default_quant_patterns()
     # some of the patterns are moved to (native) backend_config_dict so we need to
     # add them back here
-    for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config()).items():
+    for pattern, quantize_handler in _get_pattern_to_quantize_handlers(get_native_backend_config()).items():
         all_quant_patterns[pattern] = quantize_handler
     return all_quant_patterns
 
