@@ -15,7 +15,6 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
-    skipIfSlowGradcheckEnv,
     dtype_abbrs
 )
 from torch.testing._internal.common_device_type import (
@@ -53,7 +52,6 @@ b8 = torch.bool
 u8 = torch.uint8
 
 
-@skipIfSlowGradcheckEnv
 class TestMetaConverter(TestCase):
     def assertSameVersionCounter(self, m1, m2):
         # Cannot easily test m1 and m2 have same storage due to
@@ -325,6 +323,8 @@ CHECK_STRIDES_SKIPS = {
     aten.igammac.default,
     aten.lcm.default,
     aten.le.Tensor,
+    aten.lerp.Scalar,
+    aten.lerp.Tensor,
     aten.logical_and.default,
     aten.logical_or.default,
     aten.logical_xor.default,
@@ -348,7 +348,6 @@ CHECK_STRIDES_SKIPS = {
 
     # channel_last and channel_last_3d related failures
     aten.convolution.default,
-    aten.upsample_bilinear2d.vec,
 
     # following ops fails if include_storage_offset = True, but these are a bit edge casey
     # we should still fix them, leaving them here for tracking.
@@ -1117,7 +1116,6 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 # inconsistencies between CUDA and CPU, and running on CUDA makes it easier
 # to ignore the CPU case when inconsistencies arise.  Ideally we deal
 # with the inconsistencies but this takes time.
-@skipIfSlowGradcheckEnv
 class TestMeta(TestCase):
     # Copies inputs to inplace operations to avoid inplace modifications
     #   to leaves requiring gradient

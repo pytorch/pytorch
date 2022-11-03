@@ -14,6 +14,10 @@ from torch.distributed.fsdp._init_utils import (
     _init_runtime_state,
     _init_state_dict_state,
 )
+from torch.distributed.fsdp._runtime_utils import (
+    _register_post_forward_hooks,
+    _register_pre_forward_hooks,
+)
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
@@ -66,4 +70,7 @@ def fully_sharded_data_parallel(
         sync_module_states,
     )
     state = _init_state_dict_state(state)
+    modules = list(module.modules())
+    _register_pre_forward_hooks(state, modules)
+    _register_post_forward_hooks(state, modules)
     return cast(FSDPState, state)
