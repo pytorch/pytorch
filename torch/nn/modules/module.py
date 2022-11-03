@@ -737,7 +737,7 @@ class Module:
         if you need to store extra state. This function is called when building the
         module's `state_dict()`.
 
-        Note that extra state should be pickleable to ensure working serialization
+        Note that extra state should be picklable to ensure working serialization
         of the state_dict. We only provide provide backwards compatibility guarantees
         for serializing Tensors; other objects may break backwards compatibility if
         their serialized pickled form changes.
@@ -1737,7 +1737,7 @@ class Module:
         ``strict=True`` are affected by modifications the hook makes to
         ``missing_keys`` or ``unexpected_keys``, as expected. Additions to either
         set of keys will result in an error being thrown when ``strict=True``, and
-        clearning out both missing and unexpected keys will avoid an error.
+        clearing out both missing and unexpected keys will avoid an error.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
