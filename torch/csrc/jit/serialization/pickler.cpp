@@ -480,8 +480,10 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   // Construct the collections.OrderedDict for the backward_hooks
   push<PickleOpCode>(PickleOpCode::REDUCE);
 
-  auto math_bits = torch::jit::getTensorMathBits(tensor);
-  pushDict(math_bits);
+  if (!quantized) {
+    auto math_bits = torch::jit::getTensorMathBits(tensor);
+    pushDict(math_bits);
+  }
 
   push<PickleOpCode>(PickleOpCode::TUPLE);
 
