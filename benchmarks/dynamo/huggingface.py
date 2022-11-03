@@ -68,9 +68,6 @@ finally:
         exec(f"from transformers import {cls}")
 
 
-USE_HALF_BATCH_SIZE = True
-
-
 # These models contain the models present in huggingface_models_list. It is a
 # combination of models supported by HF Fx parser and some manually supplied
 # models. For these models, we already know the largest batch size that can fit
@@ -107,31 +104,27 @@ SKIP = {
 }
 
 # TODO - Fails even after fake tensors
-USE_SMALL_BATCH_SIZE = {
+BATCH_SIZE_DIVISORS = {
     "AlbertForMaskedLM": 2,
-    "AlbertForPreTraining": 4,
     "AlbertForQuestionAnswering": 2,
-    "BartForCausalLM": 2,
-    "BartForConditionalGeneration": 1,
-    "BlenderbotSmallForConditionalGeneration": 32,
-    "DebertaForMaskedLM": 4,
+    "AllenaiLongformerBase": 2,
+    "BartForConditionalGeneration": 2,
+    "BertForMaskedLM": 2,
+    "BlenderbotSmallForCausalLM": 2,
+    "BlenderbotSmallForConditionalGeneration": 2,
+    "ElectraForCausalLM": 2,
+    "ElectraForQuestionAnswering": 2,
+    "GPT2ForSequenceClassification": 2,
+    "LayoutLMForMaskedLM": 2,
+    "LayoutLMForSequenceClassification": 2,
+    "RobertaForCausalLM": 2,
+    "T5ForConditionalGeneration": 2,
+    # Large footprint
+    "BartForCausalLM": 4,
     "DebertaForQuestionAnswering": 4,
-    "DebertaV2ForMaskedLM": 1,
-    "DebertaV2ForQuestionAnswering": 1,
-    "DistilBertForMaskedLM": 16,
-    "ElectraForCausalLM": 1,
-    "GPTNeoForCausalLM": 1,
-    "GPTNeoForSequenceClassification": 1,
-    "M2M100ForConditionalGeneration": 2,
-    "MT5ForConditionalGeneration": 2,
-    "MegatronBertForCausalLM": 2,
-    "OPTForCausalLM": 4,
-    "PegasusForCausalLM": 8,
-    "PegasusForConditionalGeneration": 4,
-    "RobertaForCausalLM": 4,
-    "TrOCRForCausalLM": 8,
-    "XGLMForCausalLM": 1,
     "XLNetLMHeadModel": 4,
+    # Very large footprint
+    "DebertaForMaskedLM": 8,
 }
 
 
@@ -369,13 +362,8 @@ class HuggingfaceRunner(BenchmarkRunner):
 
         if batch_size is None:
             batch_size = batch_size_default
-            if model_name in USE_SMALL_BATCH_SIZE:
-                batch_size = USE_SMALL_BATCH_SIZE[model_name]
-                log.warning(
-                    f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
-                )
-            elif USE_HALF_BATCH_SIZE and batch_size >= 2:
-                batch_size = int(batch_size / 2)
+            if model_name in BATCH_SIZE_DIVISORS:
+                batch_size = max(int(batch_size / BATCH_SIZE_DIVISORS[model_name]), 1)
                 log.warning(
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
                 )

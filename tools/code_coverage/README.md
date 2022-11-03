@@ -51,7 +51,7 @@ Great, you are ready to run the code coverage tool for the first time! Start fro
 ```
 python oss_coverage.py --run-only=atest
 ```
-This command will run `atest` binary in `build/bin/` folder and generate reoports over the entire *Pytorch* folder. You can find the reports in `profile/summary`. But you may only be interested in the `aten` folder, in this case, try:
+This command will run `atest` binary in `build/bin/` folder and generate reports over the entire *Pytorch* folder. You can find the reports in `profile/summary`. But you may only be interested in the `aten` folder, in this case, try:
 ```
 python oss_coverage.py --run-only=atest --interest-only=aten
 ```
@@ -91,9 +91,9 @@ python oss_coverage.py --run-only=atest --interest-only=c10 --summary
 
 
 **2. Run tests yourself**
-When you are developing a new feature, you may first run the tests yourself to make sure the implementation is all right and then want to learn its coverage. But sometimes the test take very long time and you don't want to wait to run it again when doing code coverage. In this case, you can use these arguments to accerate your development (make sure you build pytorch with the coverage option!):
+When you are developing a new feature, you may first run the tests yourself to make sure the implementation is all right and then want to learn its coverage. But sometimes the test take very long time and you don't want to wait to run it again when doing code coverage. In this case, you can use these arguments to accelerate your development (make sure you build pytorch with the coverage option!):
 ```
-# run tests when you are devloping a new feature, assume the the test is `test_nn.py`
+# run tests when you are developing a new feature, assume the test is `test_nn.py`
 python oss_coverage.py --run-only=test_nn.py
 # or you can run it yourself
 cd test/ && python test_nn.py
