@@ -26,7 +26,6 @@ from torch.distributed.fsdp._runtime_utils import (
     _cast_buffers_to_dtype_and_device,
     _clear_grads_if_needed,
     _get_buffer_dtypes,
-    _get_buffers_and_dtypes_for_computation,
     _lazy_init,
 )
 from torch.distributed.utils import _replace_by_prefix

@@ -50,7 +50,6 @@ from torch.distributed.fsdp._init_utils import (
     _init_state_dict_state,
 )
 from torch.distributed.fsdp._runtime_utils import (
-    _cast_buffers_to_dtype_and_device,
     _clear_grads_if_needed,
     _lazy_init,
     _post_forward,
