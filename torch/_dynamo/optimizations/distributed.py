@@ -41,13 +41,20 @@ def pretty_print_buckets(buckets: List[Bucket]):
         print("Please `pip install tabulate` in order to pretty-print ddp bucket sizes")
 
 
+def fx_name(fqn):
+    parts = fqn.split(".")
+    module = "self_" + "_".join(parts[:-1])
+    attr = parts[-1]
+    return module, attr
+
+
 class DDPOptimizer:
     def __init__(
         self,
         bucket_bytes_cap: int,
         parameters_to_ignore: List[str],
         backend_compile_fn,
-        debug=False,
+        debug=True,
         first_bucket_cap: Optional[int] = None,
     ):
         if first_bucket_cap is not None:
@@ -62,14 +69,18 @@ class DDPOptimizer:
         assert (
             self.first_bucket_cap <= self.bucket_bytes_cap
         ), "First bucket should be smaller/equal to other buckets to get comms warmed up ASAP"
-        self.parameters_to_ignore = parameters_to_ignore
+
+        self.parameters_to_ignore = set([fx_name(fqn) for fqn in parameters_to_ignore])
+
         self.backend_compile_fn = backend_compile_fn
         self.debug = debug
 
     def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
         """
-        TODO:
-        - handle params_and_buffers_to_ignore
+        Implements graph splitting, first determining a set of of buckets by counting
+        parameter sizes in reverse graph order, then invoking the user/backend compiler
+        to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
+        and returns its callable.
         """
 
         # 1: compute the partition map according to DDP bucket logic
@@ -88,10 +99,16 @@ class DDPOptimizer:
             if node.op == "call_module":
                 target = gm.get_submodule(node.target)
                 for name, p in target.named_parameters():
+                    if (str(node), name) in self.parameters_to_ignore:
+                        if self.debug:
+                            print(f"DDPOptimizer ignoring {node}.{name}")
+                        continue
                     if p.requires_grad:
                         buckets[0].size += p.storage().nbytes()
-                        # TODO correct FQ name?
-                        buckets[0].params.append(f"{node}_{name}")
+                        # Note, we can't reconstruct real fqn's due to how they get flattened,
+                        # but this is at least user-recognizable
+                        # (e.g. original net.some_parameter becomes self_net_some_parameter)
+                        buckets[0].params.append((str(node), name))
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
                 if maybe_param.requires_grad:

@@ -6,6 +6,7 @@ from unittest.mock import patch
 import numpy as np
 import torch
 import torch._dynamo
+from torch._dynamo.optimizations.distributed import DDPOptimizer, fx_name
 import torch._dynamo.test_case
 import torch.distributed as dist
 from contextlib import contextmanager
@@ -381,6 +382,37 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         except Exception:
             pass
         self.assertEqual(res, 1)
+
+    @patch.object(config, "optimize_ddp", False)
+    def test_ignored_parameters_2(self):
+        """
+        Verifies ddp graph-split logic ignores parameters marked to ignore on DDP module.
+        Hooks up graph-split optimizer manually so it can peek at internal state.
+        """
+        m, inputs, correct_outputs = self.get_model()
+        parameters_to_ignore = ["net.2.weight", "net.2.bias"]
+        DDP._set_params_and_buffers_to_ignore_for_model(m, parameters_to_ignore)
+        ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
+
+        check_splits_compiler = CheckSplitsCompiler()
+
+        ddp_optimizer = DDPOptimizer(
+            bucket_bytes_cap=ddp_m.bucket_bytes_cap,
+            parameters_to_ignore=ddp_m.parameters_to_ignore,
+            backend_compile_fn=check_splits_compiler.compile_fn
+        )
+
+        @torch._dynamo.optimize(ddp_optimizer.compile_fn)
+        def opt_fn(inputs):
+            return ddp_m(inputs)
+
+        opt_outputs = opt_fn(inputs)
+        self.assertTrue(same(correct_outputs, opt_outputs))
+        self.assertEqual(check_splits_compiler.compiler_called, 2)
+        fx_parameters_to_ignore = [fx_name(p) for p in parameters_to_ignore]
+        for b in ddp_optimizer.buckets:
+            for p in b.params:
+                self.assertFalse(p in fx_parameters_to_ignore)
 
 
 if __name__ == "__main__":
