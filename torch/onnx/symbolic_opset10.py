@@ -603,7 +603,7 @@ def nan_to_num(g: jit_utils.GraphContext, input, nan, posinf, neginf):
     # return the original tensor
     if not symbolic_helper._is_fp(input):
         return input
-    input_dtype = _type_utils.JitScalarType.from_name(input.type().scalarType()).dtype()
+    input_dtype = _type_utils.JitScalarType.from_value(input).dtype()
     if nan is None:
         nan = 0.0
     nan_cond = opset9.isnan(g, input)
