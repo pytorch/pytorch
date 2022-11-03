@@ -65,7 +65,8 @@ UNARY_EWISE_CSR_ALLOW_AUTOGRAD = [
     'neg',
     'positive',
     'frac',
-    'nn.functional.relu'
+    'nn.functional.relu',
+    'log1p'
 ]
 
 # This should be just an import from test_linalg instead of code duplication
