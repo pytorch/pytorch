@@ -8,10 +8,19 @@ import re
 import sys
 import subprocess
 from torchgen.code_template import CodeTemplate
+from dataclasses import dataclass
+from typing import List
 
 H_NAME = "spv.h"
 CPP_NAME = "spv.cpp"
 DEFAULT_ENV = {"precision": "highp", "format": "rgba32f"}
+
+
+@dataclass
+class ShaderInfo:
+    tile_size: List[int]
+    layouts: List[str]
+    weight_storage_type: str = ""
 
 def getName(filePath):
     return os.path.basename(filePath).replace("/", "_").replace(".", "_")
@@ -20,6 +29,24 @@ def isDescriptorLine(lineStr):
     descriptorLineId = r"^layout\(set"
     return re.search(descriptorLineId, lineStr)
 
+def isTileSizeLine(lineStr):
+    tile_size_id = r"^ \* TILE_SIZE = \("
+    return re.search(tile_size_id, lineStr)
+
+def findTileSizes(lineStr):
+    tile_size_id = r"^ \* TILE_SIZE = \(([0-9]+), ([0-9]+), ([0-9]+)\)"
+    matches = re.search(tile_size_id, lineStr)
+    return [int(matches.group(1)), int(matches.group(2)), int(matches.group(3))]
+
+def isWeightStorageTypeLine(lineStr):
+    weight_storage_id = r"^ \* WEIGHT_STORAGE = "
+    return re.search(weight_storage_id, lineStr)
+
+def getWeightStorageType(lineStr):
+    weight_storage_id = r"^ \* WEIGHT_STORAGE = ([a-zA-Z]+_\dD)"
+    matches = re.search(weight_storage_id, lineStr)
+    return matches.group(1)
+
 typeIdMapping = {
     r"image[123]D\b": "VK_DESCRIPTOR_TYPE_STORAGE_IMAGE",
     r"sampler[123]D\b": "VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER",
@@ -27,21 +54,29 @@ typeIdMapping = {
     r"\buniform\b.*\bBlock\b": "VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER",
 }
 
+storageTypeToEnum = {
+    "TEXTURE_2D" : "api::StorageType::TEXTURE_2D",
+    "TEXTURE_3D" : "api::StorageType::TEXTURE_3D",
+    "BUFFER" : "api::StorageType::BUFFER",
+}
+
 def determineDescriptorType(lineStr):
     for identifier, typeNum in typeIdMapping.items():
         if re.search(identifier, lineStr):
             return typeNum
 
-    raise Exception("Could not identify descriptor type of line: {}".format(lineStr))
-
-def getLayout(srcFilePath):
-    layout = []
+def getShaderInfo(srcFilePath):
+    shader_info = ShaderInfo([], [], "")
     with open(srcFilePath, 'r') as srcFile:
         for line in srcFile:
             if isDescriptorLine(line):
-                layout.append(determineDescriptorType(line))
+                shader_info.layouts.append(determineDescriptorType(line))
+            if isTileSizeLine(line):
+                shader_info.tile_size = findTileSizes(line)
+            if isWeightStorageTypeLine(line):
+                shader_info.weight_storage_type = getWeightStorageType(line)
 
-    return layout
+    return shader_info
 
 def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
     print("hFilePath:{} cppFilePath:{} srcDirPath:{} glslcPath:{} tmpDirPath:{}".format(
@@ -85,6 +120,8 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
     h = "#pragma once\n"
     h += "#include <stdint.h>\n"
     h += "#include <vector>\n"
+    h += "#include <string>\n"
+    h += "#include <ATen/native/vulkan/api/Types.h>\n"
     h += "#include <ATen/native/vulkan/api/vk_api.h>"
 
     nsbegin = "\nnamespace at {\nnamespace native {\nnamespace vulkan {\n"
@@ -101,7 +138,7 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
         h += "extern const uint32_t {}[];\n".format(name)
         h += "extern const uint32_t {};\n".format(name_len)
 
-        layout = getLayout(srcPath)
+        shader_info = getShaderInfo(srcPath)
         name_layout = name + "_layout"
         h += "extern const std::vector<VkDescriptorType> {};\n".format(name_layout)
 
@@ -117,9 +154,25 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
 
         # Add layout
         cpp += "const std::vector<VkDescriptorType> {} = {{\n".format(name_layout)
-        for descriptor in layout:
+        for descriptor in shader_info.layouts:
             cpp += "  {},\n".format(descriptor)
         cpp += "};\n"
+
+        # Add tile size
+        if (len(shader_info.tile_size) > 0):
+            name_tile_size = name + "_tile_size"
+            h += "extern const std::vector<uint32_t> {};\n".format(name_tile_size)
+            cpp += "const std::vector<uint32_t> {} = {{\n".format(name_tile_size)
+            for s in shader_info.tile_size:
+                cpp += "  {},\n".format(s)
+            cpp += "};\n"
+
+        # Add weight type
+        if (shader_info.weight_storage_type != ""):
+            name_weight_storage_type = name + "_weight_storage_type"
+            h += "extern const api::StorageType {};\n".format(name_weight_storage_type)
+            cpp += "const api::StorageType {} = \n".format(name_weight_storage_type)
+            cpp += "  {};\n".format(storageTypeToEnum[shader_info.weight_storage_type])
 
     cpp += nsend
     h += nsend
