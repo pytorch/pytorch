@@ -1,4 +1,9 @@
+#include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Runtime.h>
+#include <c10/util/Logging.h>
+#include <c10/util/irange.h>
+
+#include <sstream>
 
 namespace at {
 namespace native {
@@ -236,11 +241,11 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
 #endif /* USE_VULKAN_VOLK, USE_VULKAN_WRAPPER */
 
   const bool enableValidationMessages =
-#if defined(DEBUG)
+#if defined(VULKAN_DEBUG)
       true;
 #else
       false;
-#endif /* DEBUG */
+#endif /* VULKAN_DEBUG */
   const bool initDefaultDevice = true;
   const uint32_t numRequestedQueues = 1; // TODO: raise this value
 

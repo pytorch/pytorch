@@ -118,7 +118,7 @@ static Tensor moveDimToFrontAndExpand(Tensor tensor, optional<int64_t> dim, int6
 // 4. Expand each physical tensor so that they have output batch size equal
 //    to `batch_sizes`
 VmapPhysicalViewVec
-MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
+MultiBatchVmapTransform::logicalToPhysical(ITensorListRef logical_tensors) {
   auto cur_level = maybeCurrentDynamicLayer().value().layerId();
   auto bdim_size = -1;
 

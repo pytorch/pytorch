@@ -8,5 +8,3 @@ Experimental Function Transforms
 .. autosummary::
     :toctree: generated
     :nosignatures:
-
-    functionalize

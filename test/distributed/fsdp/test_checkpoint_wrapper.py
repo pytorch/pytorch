@@ -1,25 +1,25 @@
 # Owner(s): ["oncall: distributed"]
 
+import unittest
 from copy import deepcopy
 from functools import partial
 
 import torch
 import torch.nn as nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    apply_activation_checkpointing,
     checkpoint_wrapper,
-    apply_activation_checkpointing_wrapper,
+    CheckpointImpl,
     CheckpointWrapper,
-    CheckpointImpl
+    offload_wrapper,
+    OffloadWrapper,
 )
-
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils.checkpoint import checkpoint
 
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TestCase,
-)
+_SAVED_PREFIX = "_saved_"
+GRAD_FN_NEXT_FUNCTIONS = "next_functions"
 
-import unittest
 
 class CheckpointWrapperTest(TestCase):
     def setUp(self):
@@ -61,22 +61,19 @@ class CheckpointWrapperTest(TestCase):
                 self.lin = nn.Linear(10, 10)
 
             def forward(self, a, b, c=None, d=None, **kwargs):
-                return (
-                    self.lin(a),
-                    self.lin(b),
-                    self.lin(c),
-                    self.lin(d)
-                )
-
+                return (self.lin(a), self.lin(b), self.lin(c), self.lin(d))
 
         for wrapper in [
             partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.REENTRANT),
             partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT),
-            partial(checkpoint_wrapper, offload_to_cpu=True),
+            offload_wrapper,
         ]:
             with self.subTest(wrapper=wrapper):
                 model = wrapper(MyModel())
-                self.assertTrue(isinstance(model, CheckpointWrapper))
+                if wrapper == offload_wrapper:
+                    self.assertTrue(isinstance(model, OffloadWrapper))
+                else:
+                    self.assertTrue(isinstance(model, CheckpointWrapper))
                 # Verify kwargs can be passed in
                 inp = torch.ones(4, 10, requires_grad=True)
                 out = model(inp, inp, c=inp, d=inp, e=inp, f=inp)
@@ -105,7 +102,6 @@ class CheckpointWrapperTest(TestCase):
         out = model(a=inp, b=inp)
         self.assertEqual(2, len(out))
 
-
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
     def test_checkpoint_wrapper_parity(self):
         """
@@ -114,13 +110,14 @@ class CheckpointWrapperTest(TestCase):
         results in the same maximum memory usage, i.e. they are
         equivalent memory usage wise.
         """
+
         class Model(nn.Module):
             def __init__(
                 self,
                 n: int,
                 use_cp: bool,
                 use_wrapper: bool = False,
-                use_reentrant: bool = True
+                use_reentrant: bool = True,
             ):
                 super().__init__()
                 self.layers = nn.ModuleList()
@@ -130,10 +127,14 @@ class CheckpointWrapperTest(TestCase):
                 self.use_reentrant = use_reentrant
                 wrp = partial(
                     checkpoint_wrapper,
-                    checkpoint_impl=CheckpointImpl.REENTRANT if use_reentrant else CheckpointImpl.NO_REENTRANT
+                    checkpoint_impl=CheckpointImpl.REENTRANT
+                    if use_reentrant
+                    else CheckpointImpl.NO_REENTRANT,
                 )
                 for i in range(self.n):
-                    l = nn.Sequential(nn.Linear(256, 256), nn.Linear(256, 256), nn.Linear(256, 256))
+                    l = nn.Sequential(
+                        nn.Linear(256, 256), nn.Linear(256, 256), nn.Linear(256, 256)
+                    )
                     use_checkpoint_wrapper = self.use_wrapper
                     if use_checkpoint_wrapper:
                         l = wrp(l)
@@ -141,29 +142,41 @@ class CheckpointWrapperTest(TestCase):
 
             def forward(self, x):
                 for i in range(self.n):
-                    if (
-                        self.use_wrapper or
-                        not self.use_cp
-                    ):
+                    if self.use_wrapper or not self.use_cp:
                         x = self.layers[i](x)
                     else:
-                        x = checkpoint(self.layers[i], x, use_reentrant=self.use_reentrant)
+                        x = checkpoint(
+                            self.layers[i], x, use_reentrant=self.use_reentrant
+                        )
                 return x
 
         def test(use_checkpointing, use_wrapper, use_reentrant):
-            a = Model(8, use_checkpointing, use_wrapper=use_wrapper, use_reentrant=use_reentrant).cuda()
+            a = Model(
+                8,
+                use_checkpointing,
+                use_wrapper=use_wrapper,
+                use_reentrant=use_reentrant,
+            ).cuda()
             x = torch.randn(10000, 256, requires_grad=True).cuda()
             torch.cuda.reset_peak_memory_stats()
             loss = a(x).sum()
             loss.backward()
             return torch.cuda.max_memory_allocated()
 
-        functional_no_reentrant = test(use_checkpointing=True, use_wrapper=False, use_reentrant=False)
-        wrapper_no_reentrant = test(use_checkpointing=False, use_wrapper=True, use_reentrant=False)
+        functional_no_reentrant = test(
+            use_checkpointing=True, use_wrapper=False, use_reentrant=False
+        )
+        wrapper_no_reentrant = test(
+            use_checkpointing=False, use_wrapper=True, use_reentrant=False
+        )
         self.assertEqual(functional_no_reentrant, wrapper_no_reentrant)
 
-        functional_reentrant = test(use_checkpointing=True, use_wrapper=False, use_reentrant=True)
-        wrapper_reentrant = test(use_checkpointing=False, use_wrapper=True, use_reentrant=True)
+        functional_reentrant = test(
+            use_checkpointing=True, use_wrapper=False, use_reentrant=True
+        )
+        wrapper_reentrant = test(
+            use_checkpointing=False, use_wrapper=True, use_reentrant=True
+        )
         self.assertEqual(functional_reentrant, wrapper_reentrant)
 
     def test_forward_missing_attributes(self):
@@ -173,15 +186,16 @@ class CheckpointWrapperTest(TestCase):
         # Test indexing is forwarded
         self.assertEqual(wrapped[0], lin)
         # Test missing attributes are forwarded.
-        m._foo = 'bar'
-        self.assertEqual(wrapped._foo, 'bar')
+        m._foo = "bar"
+        self.assertEqual(wrapped._foo, "bar")
 
-    def test_apply_activation_checkpointing_wrapper(self):
+    def test_apply_activation_checkpointing(self):
         """
-        Ensures that `apply_activation_checkpointing_wrapper` can be used
+        Ensures that `apply_activation_checkpointing` can be used
         to swap modules for their checkpoint-wrapped counterparts given
         a model.
         """
+
         class LinearWithBatchNorm(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -202,7 +216,6 @@ class CheckpointWrapperTest(TestCase):
             def forward(self, x):
                 return self.seq(x)
 
-
         def check_fn(l):
             return isinstance(l, nn.Linear)
 
@@ -211,6 +224,7 @@ class CheckpointWrapperTest(TestCase):
         for wrapper in [
             partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.REENTRANT),
             partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT),
+            offload_wrapper,
         ]:
             model = MyModel()
             if n_linear is None:
@@ -219,16 +233,30 @@ class CheckpointWrapperTest(TestCase):
                 )
 
             with self.subTest(wrapper=wrapper):
-                apply_activation_checkpointing_wrapper(
+                apply_activation_checkpointing(
                     model, checkpoint_wrapper_fn=wrapper, check_fn=check_fn
                 )
-                n_linear_wrapped = sum(1 if isinstance(x, nn.Linear) else 0 for x in model.modules())
-                n_checkpointed = sum(1 if isinstance(x, CheckpointWrapper) else 0 for x in model.modules())
+                n_linear_wrapped = sum(
+                    1 if isinstance(x, nn.Linear) else 0 for x in model.modules()
+                )
+                n_checkpointed = sum(
+                    1 if isinstance(x, (CheckpointWrapper, OffloadWrapper)) else 0
+                    for x in model.modules()
+                )
                 self.assertEqual(n_checkpointed, n_linear_wrapped)
                 self.assertEqual(n_linear, n_linear_wrapped)
                 for j in range(3):
-                    self.assertTrue(isinstance(model.seq[j].lin, CheckpointWrapper))
-                    self.assertTrue(isinstance(model.seq[j].nested_linear[0], CheckpointWrapper))
+                    self.assertTrue(
+                        isinstance(
+                            model.seq[j].lin, (CheckpointWrapper, OffloadWrapper)
+                        )
+                    )
+                    self.assertTrue(
+                        isinstance(
+                            model.seq[j].nested_linear[0],
+                            (CheckpointWrapper, OffloadWrapper),
+                        )
+                    )
 
                 inp = torch.randn(4, 10, requires_grad=True)
                 for i in range(6):
@@ -240,9 +268,22 @@ class CheckpointWrapperTest(TestCase):
                     for j in range(3):
                         weight_lin = model.seq[j].lin._checkpoint_wrapped_module.weight
                         bias_lin = model.seq[j].lin._checkpoint_wrapped_module.bias
-                        weight_nested_lin = model.seq[j].nested_linear[0]._checkpoint_wrapped_module.weight
-                        bias_nested_lin = model.seq[j].nested_linear[0]._checkpoint_wrapped_module.bias
-                        for param in [weight_lin, bias_lin, weight_nested_lin, bias_nested_lin]:
+                        weight_nested_lin = (
+                            model.seq[j]
+                            .nested_linear[0]
+                            ._checkpoint_wrapped_module.weight
+                        )
+                        bias_nested_lin = (
+                            model.seq[j]
+                            .nested_linear[0]
+                            ._checkpoint_wrapped_module.bias
+                        )
+                        for param in [
+                            weight_lin,
+                            bias_lin,
+                            weight_nested_lin,
+                            bias_nested_lin,
+                        ]:
                             self.assertTrue(param.requires_grad)
                             self.assertFalse(param.grad is None)
 
@@ -276,9 +317,9 @@ class CheckpointWrapperTest(TestCase):
         orig_init = torch.autograd.graph.saved_tensors_hooks.__init__
         torch.autograd.graph.saved_tensors_hooks.__init__ = patched_init
 
-        model = checkpoint_wrapper(model, offload_to_cpu=True)
+        model = offload_wrapper(model)
 
-        inp = torch.randn(3, 10, device='cuda')
+        inp = torch.randn(3, 10, device="cuda")
         loss = model(inp).sum()
 
         # All autograd saved tensors should be offloaded to CPU.
@@ -286,7 +327,7 @@ class CheckpointWrapperTest(TestCase):
 
         def dfs(grad_fn):
             for e in dir(grad_fn):
-                if not e.startswith('_saved_'):
+                if not e.startswith(_SAVED_PREFIX):
                     continue
 
                 saved = getattr(grad_fn, e)
@@ -295,7 +336,7 @@ class CheckpointWrapperTest(TestCase):
                     nonlocal offload_verified
                     offload_verified = True
 
-            if hasattr(grad_fn, 'next_functions'):
+            if hasattr(grad_fn, GRAD_FN_NEXT_FUNCTIONS):
                 for next_grad_fn, _ in grad_fn.next_functions:
                     dfs(next_grad_fn)
 
@@ -304,6 +345,7 @@ class CheckpointWrapperTest(TestCase):
         self.assertTrue(offload_verified)
 
         torch.autograd.graph.saved_tensors_hooks.__init__ = orig_init
+
 
 if __name__ == "__main__":
     run_tests()

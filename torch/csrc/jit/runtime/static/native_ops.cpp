@@ -7,6 +7,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/intrusive_ptr.h>
@@ -975,7 +976,11 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
             auto& runner = block_runners[!condition];
 
             auto output = runner({});
-            if (!output.isTuple()) {
+            // If we are returning a tuple, we are either returning
+            // multiple unpacked values or all of the values wrapped
+            // in a single tuple. The second condition handles the
+            // the latter case.
+            if (!output.isTuple() || p_node->num_outputs() == 1) {
               p_node->Output(0) = std::move(output);
               return;
             }

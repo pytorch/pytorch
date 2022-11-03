@@ -58,8 +58,10 @@ AUTOGRAD_KEYS = ["AutogradNestedTensor"] + [
     "Autograd" + component for component in BACKEND_COMPONENTS
 ]
 
+FRAGMENT_NAMESPACES = {"quantized", "quantized_decomposed"}
+
 # This doesn't have to be in sync with the header, it only needs to contain
-# entries that we actually use in the codegen
+# entries that we actually use in the codegen or want pyi entries for
 class DispatchKey(Enum):
     Undefined = 0
     CatchAll = Undefined
@@ -92,6 +94,7 @@ class DispatchKey(Enum):
     TESTING_ONLY_GenericWrapper = auto()
     TESTING_ONLY_GenericMode = auto()
 
+    ADInplaceOrView = auto()
     Autograd = auto()
     CompositeImplicitAutograd = auto()
     CompositeImplicitAutogradNestedTensor = auto()
@@ -965,6 +968,10 @@ class NativeFunction:
     def root_name(self) -> str:
         return self.func.name.name.base
 
+    @property
+    def part_of_structured_group(self) -> bool:
+        return self.structured or self.structured_delegate is not None
+
 
 SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable", "scratch"))
 
@@ -993,6 +1000,12 @@ class NativeFunctionsGroup:
                 raise AssertionError(
                     "NativeFunctionsGroup constructed from two NativeFunctions "
                     f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
+                )
+
+            if self.structured != f.part_of_structured_group:
+                raise AssertionError(
+                    "NativeFunctionsGroup constructed from structured and unstructured "
+                    f"functions: {self.out.func.name} and {f.func.name}"
                 )
         assert self.functional.func.kind() == SchemaKind.functional
         assert self.out.func.kind() == SchemaKind.out

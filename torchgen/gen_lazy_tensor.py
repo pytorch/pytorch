@@ -23,7 +23,7 @@ import torchgen.dest as dest
 
 from torchgen.api.lazy import setValueT
 from torchgen.api.types import BaseCppType
-from torchgen.dest.lazy_ir import GenLazyIR, GenTSLazyIR
+from torchgen.dest.lazy_ir import GenLazyIR, GenLazyNativeFuncDefinition, GenTSLazyIR
 from torchgen.gen import get_grouped_native_functions, parse_native_yaml
 
 from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
@@ -182,11 +182,11 @@ c10::optional<at::Tensor> to_meta(const c10::optional<at::Tensor>& tensor) {
   return c10::nullopt;
 }
 
-std::vector<at::Tensor> to_meta(const at::TensorList& t_list) {
+std::vector<at::Tensor> to_meta(at::ITensorListRef t_list) {
   std::vector<at::Tensor> outs;
   outs.reserve(t_list.size());
-  for (const auto& i : c10::irange(t_list.size())) {
-    outs.push_back(to_meta(t_list[i]));
+  for (const auto& tensor : t_list) {
+    outs.push_back(to_meta(tensor));
   }
   return outs;
 }
@@ -200,6 +200,9 @@ class default_args:
     tensor_class: str = "torch::lazy::LazyTensor"
     tensor_class_hdr: str = "torch/csrc/lazy/core/tensor.h"
     lazy_ir_generator: Type[GenLazyIR] = GenLazyIR
+    native_func_definition_generator: Type[
+        GenLazyNativeFuncDefinition
+    ] = GenLazyNativeFuncDefinition
     backend_name: str = "TorchScript"
 
 
@@ -267,6 +270,9 @@ def main() -> None:
     lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator
     if options.gen_ts_lowerings:
         lazy_ir_generator = GenTSLazyIR
+    native_func_definition_generator: Type[
+        GenLazyNativeFuncDefinition
+    ] = default_args.native_func_definition_generator
 
     run_gen_lazy_tensor(
         aten_path,
@@ -280,6 +286,7 @@ def main() -> None:
         options.tensor_class_hdr,
         options.shape_inference_hdr,
         lazy_ir_generator,
+        native_func_definition_generator,
         options.backend_name,
     )
 
@@ -296,6 +303,9 @@ def run_gen_lazy_tensor(
     tensor_class_hdr: str = default_args.tensor_class_hdr,
     shape_inference_hdr: str = default_args.shape_inference_hdr,
     lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator,
+    native_func_definition_generator: Type[
+        GenLazyNativeFuncDefinition
+    ] = default_args.native_func_definition_generator,
     # build_in_tree is true for TS backend and affects include paths
     build_in_tree: bool = False,
     # per_operator_headers changes whether ATen/Functions.h or individual operator headers are used
@@ -499,7 +509,7 @@ def run_gen_lazy_tensor(
             "namespace_epilogue": ns_helper.epilogue,
             "native_function_definitions": list(
                 concat_map_codegen(
-                    dest.GenLazyNativeFuncDefinition(
+                    native_func_definition_generator(
                         f"{backend_key}NativeFunctions",
                         backend_indices[backend_key],
                         tensor_class,

@@ -12,11 +12,11 @@ import select
 import signal
 import threading
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
 
-__all__ = ['FileTimerClient', 'FileTimerRequest', 'FileTimerServer']
+__all__ = ["FileTimerClient", "FileTimerRequest", "FileTimerServer"]
 
 class FileTimerRequest(TimerRequest):
     """
@@ -75,7 +75,7 @@ class FileTimerClient(TimerClient):
         file_path: str, the path of a FIFO special file. ``FileTimerServer``
                         must have created it by calling os.mkfifo().
 
-        signal: singal, the signal to use to kill the process. Using a
+        signal: signal, the signal to use to kill the process. Using a
                         negative or zero signal will not kill the process.
     """
     def __init__(self, file_path: str, signal=signal.SIGKILL) -> None:
@@ -145,9 +145,17 @@ class FileTimerServer:
 
         daemon: bool, running the watchdog thread in daemon mode or not.
                       A daemon thread will not block a process to stop.
+        log_event: Callable[[Dict[str, str]], None], an optional callback for
+                logging the events in JSON format.
     """
 
-    def __init__(self, file_path: str, max_interval: float = 10, daemon: bool = True) -> None:
+    def __init__(
+        self,
+        file_path: str,
+        max_interval: float = 10,
+        daemon: bool = True,
+        log_event: Callable[[str, Optional[FileTimerRequest]], None] = None
+    ) -> None:
         self._file_path = file_path
         self._max_interval = max_interval
         self._daemon = daemon
@@ -161,6 +169,7 @@ class FileTimerServer:
         self._request_count = 0
         # For test only. Process all requests and stop the server.
         self._run_once = False
+        self._log_event = log_event if log_event is not None else lambda name, request: None
 
 
     def start(self) -> None:
@@ -172,6 +181,7 @@ class FileTimerServer:
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=self._daemon)
         logging.info("Starting watchdog thread...")
         self._watchdog_thread.start()
+        self._log_event("watchdog started", None)
 
     def stop(self) -> None:
         logging.info(f"Stopping {type(self).__name__}")
@@ -184,6 +194,7 @@ class FileTimerServer:
             logging.info("No watchdog thread running, doing nothing")
         if os.path.exists(self._file_path):
             os.remove(self._file_path)
+        self._log_event("watchdog stopped", None)
 
     def run_once(self) -> None:
         self._run_once = True
@@ -219,20 +230,24 @@ class FileTimerServer:
         reaped_worker_pids = set()
         for worker_pid, expired_timers in self.get_expired_timers(now).items():
             logging.info(f"Reaping worker_pid=[{worker_pid}]." f" Expired timers: {self._get_scopes(expired_timers)}")
+            reaped_worker_pids.add(worker_pid)
             # In case we have multiple expired timers, we find the first timer
             # with a valid signal (>0) in the expiration time order.
             expired_timers.sort(key=lambda timer: timer.expiration_time)
             signal = 0
+            expired_timer = None
             for timer in expired_timers:
+                self._log_event("timer expired", timer)
                 if timer.signal > 0:
                     signal = timer.signal
+                    expired_timer = timer
                     break
             if signal <= 0:
                 logging.info(f"No signal specified with worker=[{worker_pid}]. Do not reap it.")
                 continue
             if self._reap_worker(worker_pid, signal):
                 logging.info(f"Successfully reaped worker=[{worker_pid}] with signal={signal}")
-                reaped_worker_pids.add(worker_pid)
+                self._log_event("kill worker process", expired_timer)
             else:
                 logging.error(f"Error reaping worker=[{worker_pid}]. Will retry on next watchdog.")
         self.clear_timers(reaped_worker_pids)

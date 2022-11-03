@@ -21,20 +21,18 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: '3.8'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/.github/requirements-gha-cache.txt
 
-      - name: Install lintrunner
-        uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          command: pip install lintrunner==0.9.2
+      - name: Install requirements
+        run: |
+          pip install -r .github/requirements-gha-cache.txt --user
 
       - name: Initialize lint dependencies
         run: lintrunner init
@@ -83,10 +81,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.x
+          python-version: '3.x'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
@@ -134,33 +133,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          set -x
-
-          ancestor=$(git merge-base "${BASE}" "${HEAD}")
-          details=$(git diff --shortstat "$ancestor" "${HEAD}")
-          add=$(echo "$details" | grep -o '[0-9]* insertion' | grep -o '[0-9]*' || true)
-          remove=$(echo "$details" | grep -o '[0-9]* deletion' | grep -o '[0-9]*' || true)
-
-          pr_size=0
-          if [ "$add" ]; then
-              pr_size=$(("$pr_size" + "$add"))
-          fi
-          if [ "$remove" ]; then
-              pr_size=$(("$pr_size" + "$remove"))
-          fi
-
-          if ((pr_size > 2000)); then
-            echo
-            echo 'Your PR is '"$pr_size"' LOC which is more than the 2000 maximum'
-            echo 'allowed within PyTorch infra. PLease make sure to split up'
-            echo 'your PR into smaller pieces that can be reviewed.'
-            echo 'If you think that this rule should not apply to your PR,'
-            echo 'please contact @albanD or @seemethere.'
-            echo
-            false
-          fi
-
-
+          bash .github/scripts/pr-sanity-check.sh
 
   workflow-checks:
     name: workflow-checks
@@ -173,10 +146,11 @@ jobs:
           submodules: false
           fetch-depth: 1
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.x
+          python-version: '3.x'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
@@ -225,7 +199,7 @@ jobs:
           fetch-depth: 1
       # This is not a node project so there is no package-lock.json to cache
       - name: Setup Node
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v3
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -264,10 +238,11 @@ jobs:
         with:
           submodules: false
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: '3.8'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
@@ -309,25 +284,28 @@ jobs:
           fetch-depth: 1
       - name: Setup Python 3.5
         if: matrix.test_type == 'older_python_version'
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.5
+          python-version: '3.5'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
-            **/.github/requirements-gha-cache.txt
+            **/requirements.txt
       - name: Setup Python 3.8
         if: matrix.test_type != 'older_python_version'
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: '3.8'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
-            **/.github/requirements-gha-cache.txt
+            **/requirements.txt
       - name: Install torch
         if: matrix.test_type == 'with_torch'
         run: |
+          pip install -r requirements.txt
           # Doesn't really matter what torch version, we just need ANY torch installed
           pip install 'torch==1.*'
       - name: Run collect_env.py

@@ -150,11 +150,11 @@ class Transformer(Module):
         return output
 
     @staticmethod
-    def generate_square_subsequent_mask(sz: int) -> Tensor:
+    def generate_square_subsequent_mask(sz: int, device='cpu') -> Tensor:
         r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
             Unmasked positions are filled with float(0.0).
         """
-        return torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
+        return torch.triu(torch.full((sz, sz), float('-inf'), device=device), diagonal=1)
 
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
@@ -203,6 +203,11 @@ class TransformerEncoder(Module):
         Shape:
             see the docs in Transformer class.
         """
+        if src_key_padding_mask is not None:
+            _skpm_dtype = src_key_padding_mask.dtype
+            if _skpm_dtype != torch.bool and not torch.is_floating_point(src_key_padding_mask):
+                raise AssertionError(
+                    "only bool and floating types of key_padding_mask are supported")
         output = src
         convert_to_nested = False
         first_layer = self.layers[0]
@@ -442,6 +447,11 @@ class TransformerEncoderLayer(Module):
             see the docs in Transformer class.
         """
 
+        if src_key_padding_mask is not None:
+            _skpm_dtype = src_key_padding_mask.dtype
+            if _skpm_dtype != torch.bool and not torch.is_floating_point(src_key_padding_mask):
+                raise AssertionError(
+                    "only bool and floating types of key_padding_mask are supported")
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         why_not_sparsity_fast_path = ''
         if not src.dim() == 3:
@@ -456,15 +466,14 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "activation_relu_or_gelu was not True"
         elif not (self.norm1.eps == self.norm2.eps):
             why_not_sparsity_fast_path = "norm1.eps is not equal to norm2.eps"
-        elif src_mask is not None:
-            why_not_sparsity_fast_path = "src_mask is not supported for fastpath"
-        elif src.is_nested and src_key_padding_mask is not None:
-            why_not_sparsity_fast_path = "src_key_padding_mask is not supported with NestedTensor input for fastpath"
+        elif src.is_nested and (src_key_padding_mask is not None or src_mask is not None):
+            why_not_sparsity_fast_path = "src_key_padding_mask and src_mask are not supported with NestedTensor input"
+        elif (not src.is_nested) and (src_key_padding_mask is not None and src_mask is not None):
+            why_not_sparsity_fast_path = "src_key_padding_mask and src_mask were both supplied"
         elif self.self_attn.num_heads % 2 == 1:
             why_not_sparsity_fast_path = "num_head is odd"
         elif torch.is_autocast_enabled():
             why_not_sparsity_fast_path = "autocast is enabled"
-
         if not why_not_sparsity_fast_path:
             tensor_args = (
                 src,

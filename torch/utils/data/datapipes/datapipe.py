@@ -153,9 +153,10 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
         `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
         """
+        state = self.__dict__
         if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-        return self.__dict__
+            return IterDataPipe.getstate_hook(state)
+        return state
 
     def __reduce_ex__(self, *args, **kwargs):
         if IterDataPipe.reduce_ex_hook is not None:
@@ -188,6 +189,10 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
             return self.str_hook(self)
         # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
+
+    def __dir__(self):
+        # for auto-completion in a REPL (e.g. Jupyter notebook)
+        return list(super().__dir__()) + list(self.functions.keys())
 
     def reset(self) -> None:
         r"""
@@ -275,9 +280,10 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
         `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
         """
+        state = self.__dict__
         if MapDataPipe.getstate_hook is not None:
-            return MapDataPipe.getstate_hook(self)
-        return self.__dict__
+            return MapDataPipe.getstate_hook(state)
+        return state
 
     def __reduce_ex__(self, *args, **kwargs):
         if MapDataPipe.reduce_ex_hook is not None:
@@ -310,6 +316,11 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
             return self.str_hook(self)
         # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
+
+    def __dir__(self):
+        # for auto-completion in a REPL (e.g. Jupyter notebook)
+        return list(super().__dir__()) + list(self.functions.keys())
+
 
 
 class _DataPipeSerializationWrapper:
@@ -345,8 +356,17 @@ class _DataPipeSerializationWrapper:
 
 
 class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
-    def __iter__(self):
-        yield from self._datapipe
+    def __init__(self, datapipe: IterDataPipe[T_co]):
+        super().__init__(datapipe)
+        self._datapipe_iter: Optional[Iterator[T_co]] = None
+
+    def __iter__(self) -> "_IterDataPipeSerializationWrapper":
+        self._datapipe_iter = iter(self._datapipe)
+        return self
+
+    def __next__(self) -> T_co:
+        assert self._datapipe_iter is not None
+        return next(self._datapipe_iter)
 
 
 class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPipe):

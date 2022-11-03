@@ -13,6 +13,10 @@ void transfer_cpu_to_vulkan(const Tensor&, vTensor&);
 
 void transfer_vulkan_to_cpu(vTensor&, Tensor&);
 
+void pack_cpu_to_vulkan(const Tensor& src, vTensor& dst);
+
+void pack_vulkan_to_cpu(vTensor& src, Tensor& dst);
+
 Tensor& copy_(Tensor& dst, const Tensor& src);
 
 //

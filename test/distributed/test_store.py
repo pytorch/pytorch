@@ -130,6 +130,35 @@ class FileStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+    def test_init_pg_and_rpc_with_same_file(self):
+        file = tempfile.NamedTemporaryFile(delete=False)
+        # Init RPC using file
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
+        rpc_backend_options.init_method = f"file://{file.name}"
+        rpc.init_rpc("worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options)
+
+        # Init PG using file
+        dist.init_process_group("gloo", rank=0, world_size=1, init_method=f"file://{file.name}")
+        dist.destroy_process_group()
+        assert os.path.exists(file.name)
+
+        rpc.shutdown()
+        os.remove(file.name)
+
+    def test_refcount(self):
+        file = tempfile.NamedTemporaryFile(delete=False)
+        store = dist.FileStore(file.name, 1)
+        store2 = dist.FileStore(file.name, 1)
+
+        del store
+        assert os.path.exists(file.name)
+        del store2
+        assert not os.path.exists(file.name)
+
+    @property
+    def num_keys_total(self):
+        return 6
+
 
 @skip_if_win32()
 class HashStoreTest(TestCase, StoreTestBase):
@@ -165,6 +194,10 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
 
     def _create_store(self):
         return dist.PrefixStore(self.prefix, self.filestore)
+
+    @property
+    def num_keys_total(self):
+        return 6
 
 
 class TCPStoreTest(TestCase, StoreTestBase):

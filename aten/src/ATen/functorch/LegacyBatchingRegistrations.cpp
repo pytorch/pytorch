@@ -7,6 +7,7 @@
 #include <torch/library.h>
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/ATen.h>
+#include <ATen/native/TensorShape.h>
 
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/TensorWrapper.h>
@@ -68,11 +69,15 @@ static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
 }
 
-// This check should probably go into the dispatcher...
-static bool participatesInCurrentLevel(const Tensor& self) {
+static int64_t get_current_level() {
   auto maybe_level = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_level.has_value());
-  auto current_level = maybe_level->layerId();
+  return maybe_level->layerId();
+}
+
+// This check should probably go into the dispatcher...
+static bool participatesInCurrentLevel(const Tensor& self) {
+  auto current_level = get_current_level();
   auto* maybe_batched_impl = maybeGetBatchedImpl(self);
   if (!maybe_batched_impl) {
     return false;
@@ -82,7 +87,7 @@ static bool participatesInCurrentLevel(const Tensor& self) {
   return self_level == current_level;
 }
 
-static bool participatesInCurrentLevel(TensorList self) {
+static bool participatesInCurrentLevel(ITensorListRef self) {
   for (const Tensor& tensor : self) {
     if (participatesInCurrentLevel(tensor)) {
       return true;
@@ -413,7 +418,7 @@ static void checkBasicAsStridedValidForSlice(
   }
   if (!max_slice_loc.has_value()) {
     TORCH_CHECK(false,
-        "result = tensor.as_strided(", sizes, ",",  strides, ",", storage_offset, ")",
+        "result = tensor.as_strided(", sizes, ", ",  strides, ", ", storage_offset, ") ",
         "can access memory outside of `tensor`. `tensor` has no storage but the ",
         "passed-in (size, stride, storage_offset) imply a result with some storage. ",
         "This is not supported inside of vmap, please try to rewrite the ",
@@ -422,11 +427,11 @@ static void checkBasicAsStridedValidForSlice(
 
   TORCH_CHECK(
       *max_as_strided_loc <= *max_slice_loc && base_offset <= storage_offset,
-      "result = tensor.as_strided(", sizes, ",",  strides, ",", storage_offset, ")",
-      "can access memory outside of `tensor`. `result` can access some",
+      "result = tensor.as_strided(", sizes, ", ",  strides, ", ", storage_offset, ") ",
+      "can access memory outside of `tensor`. `result` can access some ",
       "memory in range [", storage_offset, ", ", *max_as_strided_loc, "], but ",
       "`tensor` can only access some memory in range [", base_offset, ", ",
-      *max_slice_loc, "]. This is not supported inside of vmap, please try to",
+      *max_slice_loc, "]. This is not supported inside of vmap, please try to ",
       "rewrite the `as_strided` call as a sequence of PyTorch view operations");
 }
 
@@ -606,18 +611,71 @@ Tensor unwrap_and_call_method(const Tensor& input, ExtraArgs... extra_args) {
   return makeBatched(output_physical, input_batched->bdim(), input_batched->level());
 }
 
-Tensor cat_batching_rule(TensorList tensors, int64_t dim) {
+Tensor cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   if (!participatesInCurrentLevel(tensors)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::cat(tensors, dim);
   }
-  auto physical_views = MultiBatchVmapTransform::logicalToPhysical(tensors);
-  auto physical_tensors = fmap(
-      physical_views, [](const VmapPhysicalView& view) -> Tensor { return view.tensor(); });
-  TORCH_INTERNAL_ASSERT(
-      tensors.size() > 0, "The dispatcher should not have dispatched here otherwise.");
-  auto result = at::cat(physical_tensors, physical_views[0].getPhysicalDim(dim));
-  return physical_views[0].getPhysicalToLogicalMap().apply(result);
+
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+
+  // NB: Probably bad for perf that we're allocating std::vectors for each level, but
+  // what can you do.
+  auto materialized = tensors.materialize();
+  dim = at::legacy_cat_wrap_dim(dim, materialized);
+
+  // Strategy:
+  // we're going to unwrap tensors, move their batch dims to the front,
+  // and put them into `tensors_to_cat`. Tensors that don't have a batch dim
+  // will get one forced onto them.
+  //
+  // Then, we'll do at::cat(tensors_to_cat, ...).
+  //
+  // There's a special case where at::cat ignores tensors that have logical shape
+  // [0]. If we see a Tensor that has logical shape [0] (but physical shape [B, 0]),
+  // we'll just slice the tensor to get a Tensor of shape [0] to pass to at::cat.
+  std::vector<Tensor> tensors_to_cat;
+  tensors_to_cat.reserve(tensors.size());
+  c10::optional<int64_t> bdim_size = c10::nullopt;
+
+  // find the bdim size. Might not exist if all BatchedTensors should be skipped
+  // by cat's special case.
+  for (const auto& tensor : tensors) {
+    if (!participatesInCurrentLevel(tensor)) {
+      continue;
+    }
+    if (at::native::cat_should_skip_tensor(tensor)) {
+      continue;
+    }
+    const auto* batched = unsafeGetBatchedImpl(tensor);
+    bdim_size = batched->value().size(batched->bdim());
+    break;
+  }
+
+  // unwrap batchedtensors; expand out bdims
+  for (const auto& tensor : tensors) {
+    if (!participatesInCurrentLevel(tensor)) {
+      if (at::native::cat_should_skip_tensor(tensor) || !bdim_size.has_value()) {
+        tensors_to_cat.emplace_back(tensor);
+        continue;
+      }
+      tensors_to_cat.emplace_back(ensure_has_bdim(tensor, /*has_bdim*/false, *bdim_size));
+      continue;
+    }
+    const auto* batched = unsafeGetBatchedImpl(tensor);
+    if (at::native::cat_should_skip_tensor(tensor)) {
+      // Special case: slice the tensor to get something of shape [0] to pass to cat
+      // We slice instead of allocate a new tensor to propagate requires_gradness...
+      tensors_to_cat.emplace_back(batched->value().select(/*dim=*/batched->bdim(), /*index=*/0));
+      continue;
+    }
+    tensors_to_cat.emplace_back(moveBatchDimToFront(batched->value(), batched->bdim()));
+  }
+
+  auto new_dim = bdim_size.has_value() ? dim + 1 : dim;
+  c10::optional<int64_t> new_bdim = bdim_size.has_value() ? c10::make_optional((int64_t)0) : nullopt;
+  auto result = at::cat(tensors_to_cat, new_dim);
+  return makeBatched(result, new_bdim, get_current_level());
 }
 
 Tensor block_diag_batching_rule(TensorList tensors) {
