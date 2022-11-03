@@ -359,7 +359,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "segment_reduce.lengths": {f16, f32, f64},
     "segment_reduce.offsets": {f16, f32, f64},
     "sgn": {f16, f32, f64},
-    "std_mean.unbiased": {f16},
     "stft": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},

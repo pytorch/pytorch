@@ -1744,9 +1744,6 @@ static Tensor& std_var_out(
   const auto correction = correction_opt.value_or(1);
   ScalarType dtype = get_dtype_from_result(result, {});
   auto iter = make_reduction(fname, result, self, dim, keepdim, dtype);
-  TORCH_CHECK(at::canCast(self.scalar_type(), result.scalar_type()),
-              "result type ", self.scalar_type(), " can't be cast to the "
-              "desired output type ", result.scalar_type());
 
   if (iter.numel() == 0) {
     // Trivial reduction
