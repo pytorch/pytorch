@@ -66,11 +66,11 @@ namespace {
 }
 
 static inline bool cudnnv8_enabled_check_debug() {
-  static bool cudnnv8_flag = c10::utils::check_env("TORCH_CUDNN_V8_API_ENABLED") == true;
+  static bool cudnnv8_flag = c10::utils::check_env("TORCH_CUDNN_V8_API_DISABLED") != true;
   static bool cudnnv8_debug = c10::utils::check_env("TORCH_CUDNN_V8_API_DEBUG") == true;
   static uint8_t cudnnv8_debugcount = 0;
   if (cudnnv8_debug == 1 && cudnnv8_debugcount < 10) {
-    TORCH_WARN("TORCH_CUDNN_V8_DEBUG ON, V8_FLAG: ", cudnnv8_flag, " TORCH_CUDNN_USE_HEURISTIC_MODE B: ", cudnnv8_heuristic_mode_b);
+    TORCH_WARN("TORCH_CUDNN_V8_DEBUG ON, V8 ON: ", cudnnv8_flag, " TORCH_CUDNN_USE_HEURISTIC_MODE B: ", cudnnv8_heuristic_mode_b);
     cudnnv8_debugcount++;
   }
   return cudnnv8_flag == 1;
@@ -114,6 +114,7 @@ struct ConvParams {
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
+// Keep in sync with py::enum_ in Module.cpp
 enum class ConvBackend {
   CudaDepthwise2d,
   CudaDepthwise3d,
@@ -165,7 +166,11 @@ TORCH_API ConvBackend select_conv_backend(
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
-    bool transposed, IntArrayRef output_padding, int64_t groups);
+    bool transposed, IntArrayRef output_padding, int64_t groups, const at::OptionalIntArrayRef bias_sizes_opt);
+
+TORCH_API at::MemoryFormat _determine_backend_memory_format(const Tensor& input,
+    const Tensor& weight,
+    const ConvBackend backend);
 
 // ---------------------------------------------------------------------
 //

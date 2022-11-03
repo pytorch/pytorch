@@ -58,6 +58,20 @@ jobs:
           python3 -m tools.stats.upload_test_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --head-branch "${HEAD_BRANCH}"
           python3 -m tools.stats.upload_sccache_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
 
+      - name: Upload test artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_ARTIFACTS_URL: ${{ github.event.workflow_run.artifacts_url }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
+        run: |
+          echo "${WORKFLOW_ARTIFACTS_URL}"
+
+          # Note that in the case of Linux and Windows, their artifacts have already been uploaded to S3, so there simply won't be
+          # anything on GitHub to upload. The command should return right away
+          python3 -m tools.stats.upload_artifacts --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
+
   check-api-rate:
     if: ${{ always() }}
     runs-on: [self-hosted, linux.2xlarge]

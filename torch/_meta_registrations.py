@@ -120,6 +120,16 @@ def meta_max(self):
     return self.new_empty(())
 
 
+@register_meta(aten.max.dim)
+def meta_max_dim(self, dim, keepdim=False):
+    dim = utils.reduction_dims(self.shape, (dim,))
+    output_shape = _compute_reduction_shape(self, dim, keepdim)
+    return (
+        self.new_empty(output_shape),
+        self.new_empty(output_shape, dtype=torch.long),
+    )
+
+
 @register_meta([aten.min.default])
 def meta_min(self):
     return self.new_empty(())
@@ -133,7 +143,7 @@ def meta_angle(self):
         _, result_dtype = elementwise_dtypes(
             self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
         )
-    return self.new_empty(self.size(), dtype=result_dtype)
+    return torch.empty_like(self, dtype=result_dtype)
 
 
 @register_meta(aten.angle.out)
@@ -252,15 +262,15 @@ def meta__fused_moving_avg_obs_fq_helper(
     quant_min,
     quant_max,
     ch_axis,
-    per_row_fake_quant,
-    symmetric_quant,
+    per_row_fake_quant=False,
+    symmetric_quant=False,
 ):
     check(
         ch_axis < self.dim(),
         lambda: "Error in fused_moving_avg_obs_fake_quant_cpu: ch_axis must be < self.dim()",
     )
-    mask = self.empty_like(dtype=torch.bool)
-    return (self.empty_like(), mask)
+    mask = torch.empty_like(self, dtype=torch.bool)
+    return (torch.empty_like(self), mask)
 
 
 def dot_check(self, other):
@@ -655,7 +665,13 @@ def meta_adaptive_avg_pool2d(self, output_size):
         self.ndim == 3 or self.ndim == 4,
         lambda: f"Expected 3D or 4D tensor, but got {self.shape}",
     )
-    return self.new_empty(self.shape[:-2] + tuple(output_size))
+    output_shape = self.shape[:-2] + tuple(output_size)
+    memory_format = utils.suggest_memory_format(self)
+    # need to set memory_format to preserve the memory format of the input
+    # channel last input should have channel last output
+    return torch.empty(
+        output_shape, dtype=self.dtype, device=self.device, memory_format=memory_format
+    )
 
 
 @register_meta(aten._adaptive_avg_pool3d.default)
@@ -1088,6 +1104,11 @@ def meta_zero_(self):
     return self
 
 
+@register_meta(aten.zero.default)
+def meta_zero(self):
+    return self.new_empty(self.shape)
+
+
 @register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
 def meta_fill_(self, val):
     return self
@@ -1095,7 +1116,7 @@ def meta_fill_(self, val):
 
 @register_meta([aten.fill.Tensor, aten.fill.Scalar])
 def meta_fill(self, val):
-    return self.new_empty(self.shape)
+    return torch.empty_like(self)
 
 
 @register_meta(aten.relu_.default)
@@ -1634,9 +1655,6 @@ def activate_meta():
     for op_overload, fn in all_meta_table.items():
         assert isinstance(op_overload, OpOverload)
 
-        # register python meta kernel to python dispatcher
-        op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
-
         if torch._C._dispatch_has_kernel_for_dispatch_key(
             op_overload.name(), "CompositeImplicitAutograd"
         ):
@@ -1668,7 +1686,7 @@ def activate_meta():
             _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
             # register python meta kernel to python dispatcher
-            # op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
+            op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
 
 activate_meta()
