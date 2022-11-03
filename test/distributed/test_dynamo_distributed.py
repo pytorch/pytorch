@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from torch import nn
 from torch._dynamo import config
 from torch._dynamo.utils import same
+from torch._dynamo.testing import collect_results
 from torch._inductor.utils import has_triton
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
@@ -152,8 +153,11 @@ class TestDistributedMultiProc(MultiProcessTestCase):
             opt_outputs = opt_model(**inputs)
             opt_loss = opt_outputs.loss
             opt_loss.backward()
-            self.assertTrue(same(correct_outputs, opt_outputs))
-            # TODO(whc) add the optimizer, and verify grads match
+
+            inputs_flat = [inputs[k] for k in inputs]
+            correct_results = collect_results(model, correct_outputs.logits, correct_loss, inputs_flat)
+            opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
+            self.assertTrue(same(correct_results, opt_results))
 
 @requires_nccl()
 class TestDistributed(torch._dynamo.test_case.TestCase):
