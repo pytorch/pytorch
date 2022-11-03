@@ -680,10 +680,7 @@
     "QuantType",
     "QuantWrapper",
     "RecordingObserver",
-    "_add_module_to_qconfig_obs_ctr",
-    "_add_observer_",
     "add_quant_dequant",
-    "_assert_valid_qconfig",
     "convert",
     "convert_dynamic_jit",
     "convert_jit",
@@ -725,12 +722,9 @@
     "get_default_static_quant_module_mappings",
     "get_dynamic_quant_module_class",
     "get_fuser_method",
-    "_get_observer_dict",
     "get_observer_state_dict",
     "get_quantized_operator",
     "get_static_quant_module_class",
-    "_get_unique_devices_",
-    "_is_activation_post_process",
     "load_observer_state_dict",
     "no_observer_set",
     "prepare",
@@ -739,13 +733,11 @@
     "prepare_qat",
     "propagate_qconfig_",
     "qconfig_equals",
-    "_get_quant_type_to_str",
     "quantize",
     "quantize_dynamic",
     "quantize_dynamic_jit",
     "quantize_jit",
     "quantize_qat",
-    "_register_activation_post_process_hook",
     "script_qconfig",
     "script_qconfig_dict",
     "swap_module"
@@ -810,15 +802,12 @@
     "QConfig",
     "QConfigAny",
     "QConfigDynamic",
-    "_add_module_to_qconfig_obs_ctr",
-    "_assert_valid_qconfig",
     "get_default_qat_qconfig",
     "get_default_qconfig",
     "qconfig_equals"
   ],
   "torch.quantization.quant_type": [
     "QuantType",
-    "_get_quant_type_to_str"
   ],
   "torch.quantization.quantization_mappings": [
     "get_default_compare_output_module_list",
@@ -833,19 +822,14 @@
     "no_observer_set"
   ],
   "torch.quantization.quantize": [
-    "_add_observer_",
     "add_quant_dequant",
     "convert",
-    "_get_observer_dict",
-    "_get_unique_devices_",
-    "_is_activation_post_process",
     "prepare",
     "prepare_qat",
     "propagate_qconfig_",
     "quantize",
     "quantize_dynamic",
     "quantize_qat",
-    "_register_activation_post_process_hook",
     "swap_module"
   ],
   "torch.quantization.quantize_jit": [
