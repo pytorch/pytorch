@@ -20,7 +20,6 @@ from torch.nn.utils import stateless
 
 from functorch import make_fx
 from functorch.experimental import functionalize
-from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
