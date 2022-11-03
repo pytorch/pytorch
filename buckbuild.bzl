@@ -1286,6 +1286,7 @@ def define_buck_targets(
         ] + ([] if IS_OSS else ["//xplat/folly:molly"]),
         exported_deps = [
             ":aten_cpu",
+            ":aten_vulkan",
             ":torch_common",
         ] + ([] if IS_OSS else [
             "//xplat/caffe2/fb/custom_ops/batch_box_cox:batch_box_cox",
