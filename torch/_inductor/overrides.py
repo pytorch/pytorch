@@ -16,6 +16,7 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.modules.utils import _pair
+from torch.nn.utils.fusion import fuse_conv_bn_eval
 from torch.overrides import TorchFunctionMode
 
 log = logging.getLogger(__name__)
@@ -310,12 +311,45 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     )
     if not is_cpu:
         return gm
+    gm = fuse_conv_bn(gm)
     # For binary fusion, we need to check inputs info to make sure
     # the binary inputs have same tensor info(device, dtype, and layout).
     ShapeProp(gm).propagate(*example_inputs)
     gm = fuse_unary(gm)
     gm = fuse_binary(gm)
 
+    return gm
+
+
+def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
+    """
+    Fuses Convolution/BN layers for inference purposes.
+    """
+    patterns = [
+        (torch.nn.Conv1d, torch.nn.BatchNorm1d),
+        (torch.nn.Conv2d, torch.nn.BatchNorm2d),
+        (torch.nn.Conv3d, torch.nn.BatchNorm3d),
+    ]
+    modules = dict(gm.named_modules())
+
+    for pattern in patterns:
+        for node in gm.graph.nodes:
+            if matches_module_pattern(pattern, node, modules):
+                if len(node.args[0].users) > 1:  # Output of conv is used by other nodes
+                    continue
+                conv = modules[node.args[0].target]
+                bn = modules[node.target]
+                eval_mode = all(not n.training for n in [conv, bn])
+                if not eval_mode:
+                    continue
+                if not bn.track_running_stats:
+                    continue
+                fused_conv = fuse_conv_bn_eval(conv, bn)
+                replace_node_module(node.args[0], modules, fused_conv)
+                node.replace_all_uses_with(node.args[0])
+                gm.graph.erase_node(node)
+                gm.graph.lint()
+    gm.recompile()
     return gm
 
 

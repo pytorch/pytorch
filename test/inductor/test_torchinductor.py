@@ -1335,6 +1335,62 @@ class CommonTemplate:
         )
 
     # For gpu path, there has a accurcy issue,
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv  bn test")
+    def test_conv_bn_fuse(self):
+        input_shapes = {1: (112,), 2: (112, 112), 3: (55, 55, 55)}
+        conv_modules = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
+        bn_modules = {
+            1: torch.nn.BatchNorm1d,
+            2: torch.nn.BatchNorm2d,
+            3: torch.nn.BatchNorm3d,
+        }
+        options = itertools.product(
+            [1, 2, 3],
+            [True, False],
+            [1, 3],
+            [1, 2],
+            [1, 4],
+        )
+
+        for (
+            dim,
+            bias,
+            kernel_size,
+            dilation,
+            groups,
+        ) in options:
+            oC = 32 * groups
+            iC = 3 * groups
+            x_shape = (1, iC) + input_shapes[dim]
+            mod = torch.nn.Sequential(
+                conv_modules[dim](
+                    iC,
+                    oC,
+                    kernel_size=kernel_size,
+                    dilation=dilation,
+                    groups=groups,
+                    bias=bias,
+                ),
+                bn_modules[dim](oC),
+            ).eval()
+            test_memory_format = [torch.contiguous_format]
+            # TODO: GPU path doesn't support channels_last now.
+            if not HAS_CUDA and dim > 1:
+                channels_last = (
+                    torch.channels_last if dim == 2 else torch.channels_last_3d
+                )
+                test_memory_format.append(channels_last)
+            for memory_format in test_memory_format:
+                v = torch.randn(x_shape, dtype=torch.float32).to(
+                    memory_format=memory_format
+                )
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
+
+    # For gpu path, there has a accurcy issue,
     # see https://github.com/pytorch/pytorch/issues/87745.
     @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
     def test_conv2d_unary(self):
