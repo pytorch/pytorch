@@ -4075,21 +4075,13 @@ def arange(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
-    check(
-        start.dtype == end.dtype,
-        lambda: f"expected dtype {start.dtype} for `end` but got dtype {end.dtype}",
-    )
     if isinstance(weight, Number):
         weight = start.new_full((), weight)  # type: ignore[arg-type]
-    else:
-        check(
-            start.dtype == weight.dtype,
-            lambda: f"expected dtype {start.dtype} for `weight` but got dtype {weight.dtype}",  # type: ignore[union-attr]
-        )
     assert isinstance(weight, Tensor)  # mypy
     # We implement it this way for numerical stability. We assume (in the stability optimisation)
-    # that 0 <= weight <= 1. We take the abs to deal with comples numbers
-    # We want to do operations near zero, which is where floating points are most precise
+    # that 0 <= weight <= 1. We take the abs to deal with complex numbers
+    # We want to perform operations near zero, which is where floating points are most precise
+    # thus, we perform the following optimisation:
     # If weight.abs() >= 0.5:
     #    return (1 - weight) * (start - end) + end
     mask = weight.abs() >= 0.5
