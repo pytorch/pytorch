@@ -2321,20 +2321,11 @@ void ConcretePyInterpreterVTable::python_dispatcher(
     torch::jit::Stack* stack) const {
   py::gil_scoped_acquire g;
   py::handle torch_api_function_overload = getTorchApiFunction(op);
-  // TODO: if necessary, can optimize to cache the cache lookup
-  // TODO: if necessary, can optimize OpOverload to have slots
-  auto cache = py::dict(torch_api_function_overload.attr("_dispatch_cache"));
-  if (cache.ptr() == nullptr) {
-    throw python_error();
-  }
 
   c10::DispatchKey k = ks.highestPriorityTypeId();
-  // TODO: allow this to be non-owning
-  auto handler = py::reinterpret_borrow<py::object>(
-      PyDict_GetItem(cache.ptr(), py::cast(k).ptr()));
+  auto handler = torch_api_function_overload.attr(toString(k));
   if (handler.ptr() == nullptr) {
-    // Slow path
-    handler = torch_api_function_overload.attr("_get_dispatch")(k);
+    throw python_error();
   }
   if (py::isinstance<c10::DispatchKey>(handler)) {
     // NB: not redispatch, as that will permanently remove the python
