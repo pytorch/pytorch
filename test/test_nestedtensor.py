@@ -831,6 +831,21 @@ class TestNestedTensorDeviceType(TestCase):
         out = nt1 + nt2
         self.assertEqual(ref, out)
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.float16)
+    @torch.inference_mode()
+    @parametrize("embedding_dim", [8, 128, 256, 384])
+    def test_nested_tensor_dense_elementwise(self, device, dtype, embedding_dim):
+        batch_size = 32
+        seq_lens = torch.randint(low=0, high=10, size=(batch_size,))
+        ts = [torch.randn((seq_len, embedding_dim)) for seq_len in seq_lens]
+        nt = torch.nested.nested_tensor(ts, device=device, dtype=dtype)
+        t = torch.randn((batch_size, 1, embedding_dim), device=device, dtype=dtype)
+        ref_add = torch.nested.nested_tensor([t1 + t2 for (t1, t2) in zip(nt.unbind(), t.unbind())])
+        ref_mul = torch.nested.nested_tensor([t1 * t2 for (t1, t2) in zip(nt.unbind(), t.unbind())])
+        self.assertEqual(nt.add(t), ref_add)
+        self.assertEqual(nt.mul(t), ref_mul)
+
     @dtypes(torch.float, torch.float16)
     @skipMeta
     @torch.inference_mode()
