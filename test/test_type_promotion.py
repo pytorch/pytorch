@@ -7,7 +7,8 @@ import unittest
 import torch
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
-                                                  TEST_NUMPY, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict)
+                                                  TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
+                                                  numpy_to_torch_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
                                                         dtypes, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
@@ -30,14 +31,10 @@ load_tests = load_tests
 def float_double_default_dtype(fn):
     @wraps(fn)
     def wrapped_fn(*args, **kwargs):
-        cur_dtype = torch.get_default_dtype()
-        try:
-            torch.set_default_dtype(torch.float)
+        with set_default_dtype(torch.float):
             fn(*args, **kwargs)
-            torch.set_default_dtype(torch.double)
+        with set_default_dtype(torch.double):
             fn(*args, **kwargs)
-        finally:
-            torch.set_default_dtype(cur_dtype)
 
     return wrapped_fn
 
