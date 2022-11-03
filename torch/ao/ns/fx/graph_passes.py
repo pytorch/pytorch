@@ -1,7 +1,7 @@
 import torch
 from torch.fx import GraphModule, map_arg
 from torch.fx.graph import Graph, Node
-from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
+from torch.ao.quantization.fx.utils import _get_new_attr_name_with_prefix
 
 from .utils import (
     get_node_first_input_and_output_type,
@@ -69,7 +69,7 @@ def _insert_logger_after_node(
     """
     # create new name
     logger_node_name = \
-        get_new_attr_name_with_prefix(node.name + logger_node_name_suffix)(gm)
+        _get_new_attr_name_with_prefix(node.name + logger_node_name_suffix)(gm)
     target_type = get_target_type_str(node, gm)
     # create the logger object
     logger_obj = logger_cls(
@@ -174,14 +174,14 @@ def _insert_quantize_per_tensor_node(
 ) -> Node:
     # copy scale
     scale_node_name = \
-        get_new_attr_name_with_prefix(
+        _get_new_attr_name_with_prefix(
             node_a.name + '_input_scale_')(gm_b)
     setattr(gm_b, scale_node_name, scale)
     scale_node = graph_c.create_node(
         'get_attr', scale_node_name, (), {}, scale_node_name)
     # copy zero_point
     zero_point_node_name = \
-        get_new_attr_name_with_prefix(
+        _get_new_attr_name_with_prefix(
             node_a.name + '_input_zero_point_')(gm_b)
     setattr(gm_b, zero_point_node_name, zero_point)
     zero_point_node = graph_c.create_node(
@@ -273,7 +273,7 @@ def _insert_dtype_cast_after_node(
 
     if isinstance(prev_node_c, Node):
         new_dtype_cast_name = \
-            get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
+            _get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
         if dtype_cast_op:
             if dtype_cast_scale is not None and dtype_cast_zero_point is not None:
                 return _insert_quantize_per_tensor_node(
@@ -298,7 +298,7 @@ def _insert_dtype_cast_after_node(
         results = []
         for prev_node_c_inner in prev_node_c:
             new_dtype_cast_name = \
-                get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
+                _get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
             if dtype_cast_op:
                 # TODO(future PR): add handling for quantize_per_tensor
                 new_dtype_cast_node = graph_c.create_node(
@@ -329,7 +329,7 @@ def _copy_node_from_a_to_c(
     """
     if node_a.op == 'get_attr':
         node_a_copy_name = \
-            get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)
+            _get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)
         node_a_obj = _getattr_from_fqn(gm_a, node_a.target)  # type: ignore[arg-type]
         if torch.is_tensor(node_a_obj):
             node_a_obj = node_a_obj.detach()
@@ -345,7 +345,7 @@ def _copy_node_from_a_to_c(
                 get_normalized_nth_input(node_a, gm_a, 0),
                 gm_a, gm_b, graph_c)  # type: ignore[arg-type]
             node_a_copy_name = \
-                get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)
+                _get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)
             node_a_copy = graph_c.create_node(
                 node_a.op, node_a.target, (arg_copy,), {}, node_a_copy_name)
             return node_a_copy
@@ -353,7 +353,7 @@ def _copy_node_from_a_to_c(
             arg_copy = _copy_node_from_a_to_c(
                 get_normalized_nth_input(node_a, gm_a, 0), gm_a, gm_b, graph_c)  # type: ignore[arg-type]
             node_a_copy_name = \
-                get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)
+                _get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)
             node_a_copy = graph_c.create_node(
                 node_a.op, node_a.target,
                 (arg_copy, get_normalized_nth_input(node_a, gm_a, 1)),
@@ -596,12 +596,12 @@ def _insert_copy_of_node_a_after_input_node_c(
     new_args = tuple(new_args)  # type: ignore[assignment]
 
     node_a_shadows_c_name = \
-        get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
+        _get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
 
     if node_a.op == 'call_module':
         # if target is a module, we point to the module from gm_b
         new_mod_copy_name = \
-            get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
+            _get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
         # fetch the corresponding module from gm_a
         assert isinstance(node_a.target, str)
         mod_a = _getattr_from_fqn(gm_a, node_a.target)

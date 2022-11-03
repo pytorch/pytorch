@@ -79,7 +79,7 @@ class ModelReport:
         >>> # xdoctest: +SKIP
         >>> # get the necessary qconfig
         >>> config = PrepareCustomConfig()
-        >>> skipped_module_names, skipped_module_classes = get_skipped_module_name_and_classes(config, False)
+        >>> skipped_module_names, skipped_module_classes = _get_skipped_module_name_and_classes(config, False)
 
         >>> # initialize our model and get GraphModule
         >>> model = SomeModel()

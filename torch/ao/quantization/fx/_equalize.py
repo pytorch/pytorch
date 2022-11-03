@@ -16,9 +16,9 @@ from ..observer import _with_args, ObserverBase, PerChannelMinMaxObserver
 from ..utils import _parent_name, _check_min_max_valid
 
 from .utils import (
-    get_new_attr_name_with_prefix,
-    maybe_get_next_module,
-    node_arg_is_weight,
+    _get_new_attr_name_with_prefix,
+    _maybe_get_next_module,
+    _node_arg_is_weight,
 )
 
 CUSTOM_MODULE_SUPP_LIST: List[Any] = []
@@ -320,7 +320,7 @@ def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -
     # TODO: Pass in backend_config into this function and parent functions.
     backend_config = get_native_backend_config()
     for node_arg in op_node.args:
-        if node_arg_is_weight(op_node, node_arg, backend_config):
+        if _node_arg_is_weight(op_node, node_arg, backend_config):
             assert(isinstance(node_arg, Node) and node_arg.op == 'call_module' and
                    isinstance(modules[str(node_arg.target)], _WeightEqualizationObserver))
             return node_arg
@@ -347,21 +347,21 @@ def maybe_get_next_input_eq_obs(node: Node, modules: Dict[str, nn.Module]) -> Op
     assert(node_supports_equalization(node, modules))
 
     # Locate the following nn.ReLU or F.relu node if it exists
-    maybe_relu_node = maybe_get_next_module(node, modules, nn.ReLU)
+    maybe_relu_node = _maybe_get_next_module(node, modules, nn.ReLU)
     if maybe_relu_node is None:
-        maybe_relu_node = maybe_get_next_module(node, modules, target_functional_type=F.relu)
+        maybe_relu_node = _maybe_get_next_module(node, modules, target_functional_type=F.relu)
 
     # Locate the following output observer if it exists.
     # We will skip the relu node if it exists.
     maybe_obs_node = (
-        maybe_get_next_module(node, modules, ObserverBase)
+        _maybe_get_next_module(node, modules, ObserverBase)
         if maybe_relu_node is None
-        else maybe_get_next_module(maybe_relu_node, modules, ObserverBase)
+        else _maybe_get_next_module(maybe_relu_node, modules, ObserverBase)
     )
     if maybe_obs_node is None:
         return None
 
-    maybe_eq_obs_node = maybe_get_next_module(maybe_obs_node, modules, _InputEqualizationObserver)
+    maybe_eq_obs_node = _maybe_get_next_module(maybe_obs_node, modules, _InputEqualizationObserver)
     if maybe_eq_obs_node is None:
         return None
 
@@ -681,7 +681,7 @@ def convert_eq_obs(
 
             # Create a node containing the equalization scale
             with model.graph.inserting_before(inp_quant_obs_node):
-                get_new_eq_scale_name = get_new_attr_name_with_prefix(prev_node.name + '_equalization_scale')
+                get_new_eq_scale_name = _get_new_attr_name_with_prefix(prev_node.name + '_equalization_scale')
                 name = get_new_eq_scale_name(modules)
                 setattr(model, name, modules[node.target].equalization_scale)
                 eq_scale_node = model.graph.create_node('get_attr', name)

@@ -12,16 +12,16 @@ import torch.ao.nn.quantized.reference as nnqr
 from torch.ao.nn.quantized.modules.utils import WeightedQuantizedModule
 from .graph_module import QuantizedGraphModule
 from .utils import (
-    collect_producer_nodes,
-    get_linear_prepack_op_for_dtype,
-    get_new_attr_name_with_prefix,
-    get_qconv_prepack_op,
-    graph_module_from_producer_nodes,
+    _collect_producer_nodes,
+    _get_linear_prepack_op_for_dtype,
+    _get_new_attr_name_with_prefix,
+    _get_qconv_prepack_op,
+    _graph_module_from_producer_nodes,
 )
 from ..utils import _parent_name
 from ..qconfig import QConfigAny
 from ..quantization_mappings import get_quantized_operator
-from .utils import create_node_from_old_node_preserve_meta
+from .utils import _create_node_from_old_node_preserve_meta
 from typing import Dict, Tuple, Type, List, Callable, Any, Union, Set, Optional
 import operator
 
@@ -337,12 +337,12 @@ def fold_weight(
     # get packed weights
     for node in quantized.graph.nodes:
         if node.op == 'call_function' and node.target in WEIGHT_PREPACK_OPS:
-            nodes_to_fold = collect_producer_nodes(node)
+            nodes_to_fold = _collect_producer_nodes(node)
             if nodes_to_fold is not None:
                 for node_to_fold in nodes_to_fold:
                     folded_nodes[node_to_fold.name] = node
 
-                prepacking_module = graph_module_from_producer_nodes(
+                prepacking_module = _graph_module_from_producer_nodes(
                     quantized, nodes_to_fold)
                 packed_weight = prepacking_module()
                 packed_weights[node.name] = packed_weight
@@ -364,7 +364,7 @@ def fold_weight(
             op_node = list(prepack_node.users)[0]
             module_path, _ = node_name_to_scope[op_node.name]
             get_new_packed_weight_name = \
-                get_new_attr_name_with_prefix(module_path + '_packed_weight_')
+                _get_new_attr_name_with_prefix(module_path + '_packed_weight_')
             packed_weight_name = get_new_packed_weight_name(quantized_root)
             setattr(quantized_root, packed_weight_name, packed_weight)
             # replace prepack node with a getattr node
@@ -614,9 +614,9 @@ def _lower_static_weighted_ref_functional(
         prepack_args = [quantized_weight] + remaining_func_args
         if func_node.target == F.linear:
             weight_dtype = quantized_weight.args[-1]
-            prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
+            prepack_op = _get_linear_prepack_op_for_dtype(weight_dtype)
         elif func_node.target in CONV_FUNCTIONAL_OPS:
-            prepack_op = get_qconv_prepack_op(func_node.target)  # type: ignore[arg-type]
+            prepack_op = _get_qconv_prepack_op(func_node.target)  # type: ignore[arg-type]
             # For conv1d, the stride, padding, and dilation args may be ints,
             # in which case we need to convert them to tuples
             if func_node.target == F.conv1d:
@@ -716,9 +716,9 @@ def _lower_dynamic_weighted_ref_functional(
         # Conv prepack args: (quantized weights[, bias, stride, padding, dilation, groups])
         prepack_args = [quantized_weight] + remaining_func_args
         if func_node.target == F.linear:
-            prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
+            prepack_op = _get_linear_prepack_op_for_dtype(weight_dtype)
         elif func_node.target in CONV_FUNCTIONAL_OPS:
-            prepack_op = get_qconv_prepack_op(func_node.target)
+            prepack_op = _get_qconv_prepack_op(func_node.target)
             # For conv1d, the stride, padding, and dilation args may be ints,
             # in which case we need to convert them to tuples
             if func_node.target == F.conv1d:
@@ -783,7 +783,7 @@ def _lower_quantized_binary_op(
             qop_node_args.extend([scale_node, zero_point_node])
         # insert a call to quantized binary op and remove the original binary op
         with model.graph.inserting_after(q_node):
-            qop_node = create_node_from_old_node_preserve_meta(
+            qop_node = _create_node_from_old_node_preserve_meta(
                 model.graph,
                 ("call_function", qbin_op, tuple(qop_node_args), {}),
                 bop_node)
@@ -888,7 +888,7 @@ def special_pattern_replacement(model: QuantizedGraphModule):
             kwargs["output_scale"] = qnode_qparams[0]
             kwargs["output_zero_point"] = qnode_qparams[1]
             with model.graph.inserting_after(qnode_qparams[1]):
-                qop_node = create_node_from_old_node_preserve_meta(
+                qop_node = _create_node_from_old_node_preserve_meta(
                     model.graph,
                     ("call_function", qop, tuple(args), kwargs),
                     ref_node)

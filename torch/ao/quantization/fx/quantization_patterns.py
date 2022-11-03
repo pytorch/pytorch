@@ -4,7 +4,7 @@ from torch.fx.graph import (
 )
 
 from .utils import (
-    all_node_args_have_no_tensors,
+    _all_node_args_have_no_tensors,
 )
 from torch.ao.quantization.utils import (
     Pattern,
@@ -68,7 +68,7 @@ class QuantizeHandler(ABC):
             for arg_idx in range(len(self.root_node.args)):
                 arg = self.root_node.args[arg_idx]
                 if isinstance(arg, Node) and (
-                        not all_node_args_have_no_tensors(
+                        not _all_node_args_have_no_tensors(
                             arg, self.modules, cache_for_no_tensor_check)):
                     self.num_tensor_args += 1
 

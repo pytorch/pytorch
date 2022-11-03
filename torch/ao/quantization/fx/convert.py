@@ -52,12 +52,12 @@ from torch.nn.utils.parametrize import type_before_parametrizations
 from .utils import (
     _get_module,
     _is_custom_module_lstm,
-    get_custom_module_class_keys,
-    get_quantize_node_info,
-    create_getattr_from_value,
-    collect_producer_nodes,
-    graph_module_from_producer_nodes,
-    node_arg_is_weight,
+    _get_custom_module_class_keys,
+    _get_quantize_node_info,
+    _create_getattr_from_value,
+    _collect_producer_nodes,
+    _graph_module_from_producer_nodes,
+    _node_arg_is_weight,
 )
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
@@ -109,12 +109,12 @@ def _restore_st_run_weight_observers(observed: GraphModule, backend_config: Back
             continue
         for node_arg in node.args:
             # node_arg is weight
-            if node_arg and node_arg_is_weight(node, node_arg, backend_config):
-                weight_observer_nodes = collect_producer_nodes(node_arg)
+            if node_arg and _node_arg_is_weight(node, node_arg, backend_config):
+                weight_observer_nodes = _collect_producer_nodes(node_arg)
                 if weight_observer_nodes is None:
                     continue
                 weight_observer_module = \
-                    graph_module_from_producer_nodes(
+                    _graph_module_from_producer_nodes(
                         observed, weight_observer_nodes)
                 # run the weight observer
                 weight_observer_module()
@@ -571,7 +571,7 @@ def convert(
                     "but {} was updated to {}".format(k, v, convert_node_name_to_qconfig[k])
         node_name_to_qconfig = convert_node_name_to_qconfig
 
-    custom_module_classes = get_custom_module_class_keys(convert_custom_config.observed_to_quantized_mapping)
+    custom_module_classes = _get_custom_module_class_keys(convert_custom_config.observed_to_quantized_mapping)
     custom_module_class_mapping = convert_custom_config.observed_to_quantized_mapping
 
     if model._equalization_node_name_to_qconfig is not None:
@@ -611,7 +611,7 @@ def convert(
         assert isinstance(node.target, str)
         module_path, prefix = _get_module_path_and_prefix(node, node_name_to_scope, node_name_to_qconfig)
         observer_module = modules[node.target]
-        maybe_quantize_node_info = get_quantize_node_info(observer_module, is_decomposed)
+        maybe_quantize_node_info = _get_quantize_node_info(observer_module, is_decomposed)
         # Skip replacing observers to quant/dequant nodes if the qconfigs of all
         # consumers and producers of this observer are None
         skip_replacement = all([
@@ -636,7 +636,7 @@ def convert(
                     if key in ['_scale_', '_zero_point_']:
                         # For scale and zero_point values we register them as buffers in the root module.
                         # TODO: maybe need more complex attr name here
-                        qparam_node = create_getattr_from_value(model, graph, module_path + prefix + key, value)
+                        qparam_node = _create_getattr_from_value(model, graph, module_path + prefix + key, value)
                         quantize_op_inputs.append(qparam_node)
                     else:
                         # for qparams that are not scale/zero_point (like axis, dtype) we store them as literals in the graph.

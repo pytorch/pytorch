@@ -18,8 +18,8 @@ from .fx.custom_config import (
     PrepareCustomConfig,
 )
 from .fx.utils import graph_pretty_str  # noqa: F401
-from .fx.utils import get_custom_module_class_keys  # noqa: F401
-from .fx.utils import get_skipped_module_name_and_classes
+from .fx.utils import _get_custom_module_class_keys  # noqa: F401
+from .fx.utils import _get_skipped_module_name_and_classes
 from .qconfig_mapping import QConfigMapping
 
 def _check_is_graph_module(model: torch.nn.Module) -> None:
@@ -155,7 +155,7 @@ forward graph of the parent module,
     _swap_ff_with_fxff(model)
 
     skipped_module_names, skipped_module_classes = \
-        get_skipped_module_name_and_classes(prepare_custom_config, is_standalone_module)
+        _get_skipped_module_name_and_classes(prepare_custom_config, is_standalone_module)
     preserved_attributes = prepare_custom_config.preserved_attributes
     # symbolically trace the model
     tracer = QuantizationTracer(skipped_module_names, skipped_module_classes)  # type: ignore[arg-type]
