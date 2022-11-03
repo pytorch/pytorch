@@ -4,6 +4,7 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
@@ -68,8 +69,15 @@ void record_stream_any_impl(Variable& var, c10::Stream& stream) {
 }
 
 bool can_accumulate_inplace(const Variable& v) {
-  return v.is_non_overlapping_and_dense() && v.use_count() == 1 &&
-      v.storage().use_count() == 1 && !v._is_zerotensor();
+  return (
+      // `v` is a "vanilla" Tensor
+      !(at::isTensorSubclassLike(v) || v._is_zerotensor() || v.is_nested()) &&
+
+      // with a favorable memory layout
+      v.is_non_overlapping_and_dense() &&
+
+      // and we hold the last reference
+      v.use_count() == 1 && v.storage().use_count() == 1);
 }
 } // anonymous namespace
 
@@ -84,29 +92,26 @@ static void accumulate(
   // becomes the candidate output Tensor.) We only do this if:
   //  1) GradMode is disabled since Autograd has special handling for inplace
   //     mutation which we don't want to trigger.
-  //  2) Both `.use_count` and `.storage().use_count()` are one for the
-  //     candidate Tensor. (And thus, we hold the last reference.)
-  //  3) `old_var` and `var` are not both sparse, since we cannot rely on an
-  //     efficient inplace sparse-sparse addition implementation.
-  //  4) The candidate Tensor is contiguous, non-overlapping, and dense.
-  //     (Otherwise we might introduce exotic memory patterns.)
-  //  5) The candidate is mutable. Currently only ZeroTensors are immutable.
+  //
+  //  2) We hold the last reference.
+  //     (Both `.use_count` and `.storage().use_count()` are one)
+  //
+  //  3) The candidate tensor is a contiguous, non-overlapping, dense, and
+  //     otherwise stock standard Tensor.
+  //
+  //  4) The candidate is mutable. Currently only ZeroTensors are immutable.
 
   if (at::GradMode::is_enabled()) {
     buffer[pos] = old_var + var;
   } else if (
       // ATen doesn't route sparse additions correctly...
       old_var.is_sparse() || old_var.is_sparse_csr()) {
-    if (!(var.is_sparse() || var.is_sparse_csr()) &&
-        can_accumulate_inplace(var)) {
+    if (can_accumulate_inplace(var)) {
       buffer[pos] = var.add_(old_var);
     } else {
       buffer[pos] = var + old_var;
     }
-  } else if (
-      // We rely on the prior block to catch sparse `out_var`. Otherwise we
-      // would need `&& !(var.is_sparse() || var.is_sparse_csr())`.
-      can_accumulate_inplace(old_var)) {
+  } else if (can_accumulate_inplace(old_var)) {
     buffer[pos] = old_var.add_(var);
   } else {
     buffer[pos] = old_var + var;
