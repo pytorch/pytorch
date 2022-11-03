@@ -3447,6 +3447,71 @@ class ConvolutionBinary(ExternKernelAlloc):
         self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
 
+class ConvolutionBinaryInplace(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._convolution_pointwise_.binary"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._convolution_pointwise_.binary",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        other: "TensorBox",
+        weight: "TensorBox",
+        bias: "TensorBox",
+        padding_: List[int],
+        stride_: List[int],
+        dilation_: List[int],
+        groups: int,
+        binary_attr: str,
+        binary_alpha: Optional[float],
+        unary_attr: Optional[str],
+        unary_scalars: Optional[List],
+        unary_algorithm: Optional[str],
+    ):
+        kernel = "torch.ops.mkldnn._convolution_pointwise_.binary"
+        (inputs, constant_args, kernel_layout,) = _prepare_convolution_fusion_create(
+            cls, x, weight, bias, padding_, stride_, dilation_, groups
+        )
+        other = cls.realize_input(other)
+        inputs.insert(1, other)
+        constant_args = constant_args + [
+            binary_attr,
+            binary_alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ]
+        return ConvolutionBinary(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+    def apply_constraint(self):
+        x = self.inputs[0]
+        # FixedLayout of input
+        x = self.require_stride_order(x, self.layout.preferred_stride_order)
+        self.inputs[0] = x
+        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
+
+
 class LinearUnary(ExternKernelAlloc):
     kernel = "torch.ops.mkldnn._linear_pointwise"
 
