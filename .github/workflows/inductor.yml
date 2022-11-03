@@ -2,8 +2,6 @@ name: inductor
 
 on:
   push:
-    branches:
-      - master
     tags:
       - ciflow/inductor/*
   workflow_dispatch:
