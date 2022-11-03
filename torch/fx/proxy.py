@@ -275,6 +275,7 @@ class GraphAppendingTracer(TracerBase):
         super().__init__()
         self.graph = graph
         self.scope = Scope("", None)
+        self.node_name_to_scope = {}
 
 @compatibility(is_backward_compatible=False)
 def assert_fn(x):
