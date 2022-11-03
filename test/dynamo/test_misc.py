@@ -1385,6 +1385,21 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_autograd_profiler_enabled(self):
+        def fn(x):
+            if torch.autograd._profiler_enabled():
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.randn((2, 2), requires_grad=True)
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_python_slice(self):
         def f1(input):
             y = 0

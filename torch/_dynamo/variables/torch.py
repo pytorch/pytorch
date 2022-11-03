@@ -288,6 +288,9 @@ class TorchVariable(VariableTracker):
         ):
             log.warning("Profiler will be ignored")
             return ProfilerContextWrapperVariable(**options)
+        elif self.value is torch.autograd._profiler_enabled:
+            assert not (args or kwargs)
+            return ConstantVariable(torch.autograd._profiler_enabled(), **options)
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
