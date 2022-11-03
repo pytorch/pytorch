@@ -3055,7 +3055,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
 
 
 @register_lowering([aten.var, prims.var])
-def var_(x, axis, correction=1, keepdim=False):
+def var_(x, axis=None, correction=1, keepdim=False):
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)
     diffs = square(sub(x, mean(x, axis, keepdim=True)))
@@ -3070,7 +3070,7 @@ def var_(x, axis, correction=1, keepdim=False):
 
 
 @register_lowering(aten.var_mean)
-def var_mean(x, dim, unbiased=True, keepdim=False, correction=None):
+def var_mean(x, dim=None, unbiased=True, keepdim=False, correction=None):
     if correction is None:
         correction = int(unbiased)
     return [
@@ -3080,7 +3080,7 @@ def var_mean(x, dim, unbiased=True, keepdim=False, correction=None):
 
 
 @register_lowering(aten.std)
-def std(x, axis, correction=1, keepdim=False):
+def std(x, axis=None, correction=1, keepdim=False):
     return sqrt(var_(x, axis, correction, keepdim=keepdim))
 
 
