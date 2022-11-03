@@ -329,6 +329,7 @@ c10::intrusive_ptr<Work> alltoall_cuda_(
 }
 
 c10::intrusive_ptr<Work> barrier_cpu(
+    at::Tensor /* unused */,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<int64_t>& device_ids,
     int64_t timeout) {
@@ -337,6 +338,7 @@ c10::intrusive_ptr<Work> barrier_cpu(
 }
 
 c10::intrusive_ptr<Work> barrier_cuda(
+    at::Tensor /* unused */,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<int64_t>& device_ids,
     int64_t timeout) {

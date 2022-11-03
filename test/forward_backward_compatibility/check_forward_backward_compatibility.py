@@ -285,8 +285,7 @@ ALLOW_LIST = [
     ("aten::_flash_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
     ("aten::_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
     # Distributed c10d ops are all going to be updated
-    ("c10d::.*", datetime.date(2022, 10, 31)),
-    ("c10d::allgather_", datetime.date(2022, 10, 1)),
+    ("c10d::.*", datetime.date(2022, 12, 31)),
     ("aten::to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_tensor", datetime.date(2022, 10, 15)),

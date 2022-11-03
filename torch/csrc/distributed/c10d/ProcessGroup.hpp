@@ -77,9 +77,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return size_;
   }
 
-  // Subclasses must override this method to return the backend name
   virtual const std::string getBackendName() const {
-    TORCH_INTERNAL_ASSERT(false, "getBackendName is not implemented.");
+    return options_->backend;
   };
 
   virtual void startCoalescing() {
@@ -337,8 +336,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   const int rank_;
   const int size_;
+  const c10::intrusive_ptr<Options> options_;
   // Optional sequence number structure for matching collectives.
   c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
+
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;

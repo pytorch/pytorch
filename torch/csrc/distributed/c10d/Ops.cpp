@@ -132,6 +132,7 @@ c10::intrusive_ptr<Work> alltoall_(
 }
 
 c10::intrusive_ptr<Work> barrier(
+    at::Tensor /* unused */,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<int64_t>& device_ids,
     int64_t timeout) {
@@ -376,10 +377,21 @@ c10::intrusive_ptr<Work> barrier(
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::barrier", "")
                        .typed<c10::intrusive_ptr<::c10d::Work>(
+                           at::Tensor,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            const std::vector<int64_t>&,
                            int64_t)>();
-  return op.call(process_group, opts.device_ids, opts.timeout.count());
+
+  // Default to using cpu implementation
+  at::Tensor tensor = at::empty({0}, at::TensorOptions().device(at::kCPU));
+  // if opts.device_ids or backend is nccl are specified then use cuda
+  // implementation
+  if (opts.device_ids.size() > 0 || process_group->getBackendName() == "nccl") {
+    // set cuda tensor
+    tensor = at::empty(
+        {0}, at::TensorOptions().device(at::kCUDA, opts.device_ids[0]));
+  }
+  return op.call(tensor, process_group, opts.device_ids, opts.timeout.count());
 }
 
 c10::intrusive_ptr<Work> send(
