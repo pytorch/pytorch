@@ -4002,36 +4002,40 @@ class CommonTemplate:
         ]
         self.common(forward, args)
 
-    @requires_cuda()
     def test_any_all_reductions(self):
         dtypes = [torch.bool, torch.int32, torch.float32]
-        for dt in dtypes:
-            inps0 = (torch.zeros(2, 0, device="cuda", dtype=dt), 1)
-            pass_ops = [lambda *x: aten.any(*x), lambda *x: aten.all(*x)]
-            for po in pass_ops:
-                compiled = torch._dynamo.optimize("inductor")(po)
-                expected = po(*inps0)
-                actual = compiled(*inps0)
-                self.assertEqual(expected, actual)
+        devices = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+        for device in devices:
+            for kd in [True, False]:
+                for dt in dtypes:
+                    inps0 = (torch.zeros(2, 0, device="cuda", dtype=dt), 1)
+                    pass_ops = [lambda *x: aten.any(*x), lambda *x: aten.all(*x)]
+                    for po in pass_ops:
+                        compiled = torch._dynamo.optimize("inductor")(po)
+                        expected = po(*inps0)
+                        actual = compiled(*inps0)
+                        self.assertEqual(expected, actual)
 
-    @requires_cuda()
     def test_zero_dim_reductions(self):
+        devices = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+        for device in devices:
+            for kd in [True, False]:
+                inps0 = (torch.zeros(2, 0, device=device, dtype=torch.float16), 1, kd)
+                failed_ops = [aten.argmin, aten.argmax, aten.max, aten.min]
+                for fo in failed_ops:
+                    with self.assertRaisesRegex(
+                        IndexError, "Expected reduction dim 1 to have non-zero size"
+                    ):
+                        mod = make_fx(fo)(*inps0)
+                        _ = compile_fx_inner(mod, inps0)
 
-        inps0 = (torch.zeros(2, 0, device="cuda", dtype=torch.float16), 1)
-        failed_ops = [aten.argmin, aten.argmax, aten.max, aten.min]
-        for fo in failed_ops:
-            with self.assertRaisesRegex(
-                IndexError, "Expected reduction dim 1 to have non-zero size"
-            ):
-                mod = make_fx(fo)(*inps0)
-                _ = compile_fx_inner(mod, inps0)
+                pass_ops = [lambda *x: aten.sum(*x), lambda *x: aten.prod(*x)]
+                for po in pass_ops:
+                    compiled = torch._dynamo.optimize("inductor")(po)
+                    expected = po(*inps0)
+                    actual = compiled(*inps0)
 
-        pass_ops = [lambda *x: aten.sum(*x), lambda *x: aten.prod(*x)]
-        for po in pass_ops:
-            compiled = torch._dynamo.optimize("inductor")(po)
-            expected = po(*inps0)
-            actual = compiled(*inps0)
-            self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
+                self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
 
     @requires_cuda()
     def test_unspec_inputs(self):
