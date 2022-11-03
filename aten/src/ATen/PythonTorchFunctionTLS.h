@@ -25,7 +25,8 @@ struct TORCH_API PythonTorchFunctionTLS {
   //   - disabled_state, which says which part of torch function are disabled
   //   - stack_, which is a vector of modes representing the stack of user
   //   defined modes
-  TorchFunctionDisabledState disabled_state_ = TorchFunctionDisabledState::ENABLED;
+  TorchFunctionDisabledState disabled_state_ =
+      TorchFunctionDisabledState::ENABLED;
   std::vector<std::shared_ptr<c10::SafePyObject>> stack_;
 };
 

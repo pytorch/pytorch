@@ -11,7 +11,8 @@ PyObject* disabled_torch_function = nullptr;
 PyObject* disabled_torch_dispatch = nullptr;
 
 bool torch_function_enabled() {
-  return at::impl::PythonTorchFunctionTLS::get_disabled_state() == at::impl::TorchFunctionDisabledState::ENABLED;
+  return at::impl::PythonTorchFunctionTLS::get_disabled_state() ==
+      at::impl::TorchFunctionDisabledState::ENABLED;
 }
 
 PyObject* disabled_torch_function_impl() {
@@ -43,7 +44,8 @@ PyObject* DisableTorchFunctionSubclass__enter(
   const auto old_state = at::impl::PythonTorchFunctionTLS::get_disabled_state();
   ((DisableTorchFunctionSubclass*)self)->old_state = old_state;
   if (old_state == at::impl::TorchFunctionDisabledState::ENABLED) {
-    at::impl::PythonTorchFunctionTLS::set_disabled_state(at::impl::TorchFunctionDisabledState::SUBCLASSES_DISABLED);
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::SUBCLASSES_DISABLED);
   }
   Py_RETURN_NONE;
 }
@@ -126,7 +128,8 @@ typedef struct {
 PyObject* DisableTorchFunction__enter(PyObject* self, PyObject* unused) {
   ((DisableTorchFunctionSubclass*)self)->old_state =
       at::impl::PythonTorchFunctionTLS::get_disabled_state();
-  at::impl::PythonTorchFunctionTLS::set_disabled_state(at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+  at::impl::PythonTorchFunctionTLS::set_disabled_state(
+      at::impl::TorchFunctionDisabledState::ALL_DISABLED);
   Py_RETURN_NONE;
 }
 
@@ -215,7 +218,8 @@ PyObject* THPModule_disable_torch_function(PyObject* self, PyObject* a) {
   // the old value.
   auto old_value = at::impl::PythonTorchFunctionTLS::get_disabled_state();
   if (old_value == at::impl::TorchFunctionDisabledState::ENABLED) {
-    at::impl::PythonTorchFunctionTLS::set_disabled_state(at::impl::TorchFunctionDisabledState::SUBCLASSES_DISABLED);
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::SUBCLASSES_DISABLED);
   }
   // kwargs can safely be nullptr here.
   PyObject* result = PyObject_Call(func, py_args.ptr(), kwargs);

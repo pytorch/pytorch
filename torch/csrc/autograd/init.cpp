@@ -61,7 +61,8 @@ struct DisableAutocast {
 struct EnableTorchFunction {
   EnableTorchFunction()
       : old_(at::impl::PythonTorchFunctionTLS::get_disabled_state()) {
-    at::impl::PythonTorchFunctionTLS::set_disabled_state(at::impl::TorchFunctionDisabledState::ENABLED);
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ENABLED);
   }
   ~EnableTorchFunction() {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(old_);
