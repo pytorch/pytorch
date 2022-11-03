@@ -325,6 +325,8 @@ CHECK_STRIDES_SKIPS = {
     aten.igammac.default,
     aten.lcm.default,
     aten.le.Tensor,
+    aten.lerp.Scalar,
+    aten.lerp.Tensor,
     aten.logical_and.default,
     aten.logical_or.default,
     aten.logical_xor.default,
@@ -348,7 +350,6 @@ CHECK_STRIDES_SKIPS = {
 
     # channel_last and channel_last_3d related failures
     aten.convolution.default,
-    aten.upsample_bilinear2d.vec,
 
     # following ops fails if include_storage_offset = True, but these are a bit edge casey
     # we should still fix them, leaving them here for tracking.
