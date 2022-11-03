@@ -1,6 +1,6 @@
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import MapDataPipe, DataChunk
-from typing import List, Optional, Sized, TypeVar
+from typing import List, Sized, TypeVar
 
 __all__ = ["BatcherMapDataPipe", ]
 
