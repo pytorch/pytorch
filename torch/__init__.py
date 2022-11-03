@@ -1021,10 +1021,9 @@ def _register_device_module(device_type, module):
 
 # expose return_types
 from . import return_types
-if sys.executable != 'torch_deploy' and os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "0":
-    from . import library
-    if not TYPE_CHECKING:
-        from . import _meta_registrations
+from . import library
+if not TYPE_CHECKING:
+    from . import _meta_registrations
 
 # Enable CUDA Sanitizer
 if 'TORCH_CUDA_SANITIZER' in os.environ:

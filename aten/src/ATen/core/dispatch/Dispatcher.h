@@ -11,6 +11,7 @@
 #include <c10/util/LeftRight.h>
 #include <list>
 #include <mutex>
+#include <condition_variable>
 #include <type_traits>
 
 #include <ATen/core/grad_mode.h>
@@ -182,6 +183,9 @@ public:
     return backendFallbackKernels_[dispatch_ix].kernel.isValid();
   }
 
+  // Used by torchdeploy/multipy for multiple interpreters racing.
+  void waitForDef(const FunctionSchema& schema);
+  void waitForImpl(const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key);
 
   // ------------------------------------------------------------------------
   //
@@ -307,7 +311,23 @@ private:
   std::array<impl::AnnotatedKernel, num_runtime_entries> backendFallbackKernels_;
 
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
+
+  // This mutex protects concurrent access to the dispatcher
   std::mutex mutex_;
+
+  // This condition variable gets notified whenever we add a new def/impl to the
+  // dispatch table.  This is primarily used by multipy/torchdeploy, when
+  // we have multiple interpreters trying to register to the dispatch table.
+  // In this situation, whenever the non-primary interpreter would have tried
+  // to register to the dispatch table, instead it will check to see if the
+  // expected registration has already been made, and if it hasn't, wait on
+  // this condition variable to see if it was just racing with the primary
+  // interpreter.
+  //
+  // We expect it to be rare for there to be any waiters on this condition
+  // variable.  This is mostly just to help give better diagnostics if
+  // something goes horribly wrong
+  std::condition_variable cond_var_;
 };
 
 /**
@@ -316,6 +336,8 @@ private:
  * to lookup a kernel for a certain set of arguments.
  */
 class TORCH_API OperatorHandle {
+  template <typename T> friend class std::hash;
+
 public:
   OperatorHandle(OperatorHandle&&) noexcept = default;
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
@@ -409,6 +431,14 @@ public:
   template <typename F>
   PyObject* getPythonOp(c10::impl::PyInterpreter* self_interpreter, F slow_accessor) const {
     return operatorDef_->op.getPythonOp(self_interpreter, slow_accessor);
+  }
+
+  bool operator==(const OperatorHandle& other) const {
+    return operatorDef_ == other.operatorDef_;
+  }
+
+  bool operator!=(const OperatorHandle& other) const {
+    return operatorDef_ != other.operatorDef_;
   }
 
 private:
@@ -695,3 +725,14 @@ inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet
 }
 
 } // namespace c10
+
+namespace std {
+
+template <>
+struct hash<c10::OperatorHandle> {
+  size_t operator()(c10::OperatorHandle op) const noexcept {
+    return std::hash<void*>{}(static_cast<void*>(op.operatorDef_));
+  }
+};
+
+} // hamespace std
