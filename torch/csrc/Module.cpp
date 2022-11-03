@@ -1549,7 +1549,7 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_set_tensor_mathbits",
       static_cast<void (*)(
-          const at::Tensor&, std::unordered_map<std::string, bool>)>(
+          const at::Tensor&, std::unordered_map<int8_t, bool>)>(
           torch::jit::setTensorMathBits));
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());

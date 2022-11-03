@@ -481,8 +481,15 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::REDUCE);
 
   if (!quantized) {
+    // Only push it for regular tensor.
     auto math_bits = torch::jit::getTensorMathBits(tensor);
-    pushDict(math_bits);
+    // c10::Dict support only `int64_t` keys.
+    c10::Dict<int64_t, bool> math_bits_dict;
+    for (auto& pair : math_bits) {
+      math_bits_dict.insert_or_assign(
+          static_cast<int64_t>(pair.first), pair.second);
+    }
+    pushDict(math_bits_dict);
   }
 
   push<PickleOpCode>(PickleOpCode::TUPLE);
