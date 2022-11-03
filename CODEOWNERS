@@ -1,7 +1,7 @@
 # IMPORTANT:
-# This file is ONLY used to subscribe for the notifications for a
-# PRs related to a specific files. People in this file are
-# notrequire the approval for your changes.
+# This file is ONLY used to subscribe for notifications for PRs
+# related to a specific file path. Approvals from people in this
+# file are not required for merges.
 
 # This is a comment.
 # Each line is a file pattern followed by one or more owners.
@@ -14,7 +14,7 @@
 /torch/csrc/autograd/ @albanD @soulitzer
 /torch/autograd/ @albanD @soulitzer
 /tools/autograd/ @albanD @soulitzer
-/torch/nn/ @albanD @jbschlosser @saketh-are
+/torch/nn/ @albanD @jbschlosser
 /torch/optim/ @albanD
 /test/test_public_bindings.py @albanD
 /test/allowlist_for_publicAPI.json @albanD @anjali411
@@ -23,22 +23,20 @@
 
 # Architecture Optimization (quantization, sparsity, etc.)
 /aten/src/ATen/native/ao_sparse @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized @vkuzo @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cpu @vkuzo @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cuda @vkuzo @jerryzh168 @dzdang
-/aten/src/ATen/native/quantized/cudnn @vkuzo @jerryzh168 @dzdang
+/aten/src/ATen/native/quantized @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cpu @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cuda @jerryzh168 @dzdang
+/aten/src/ATen/native/quantized/cudnn @jerryzh168 @dzdang
 /test/test_quantization.py @jerryzh168
 /test/ao/ @jerryzh168 @z-a-f @hdcharles
 /test/quantization/ @jerryzh168 @z-a-f
-/torch/quantization/ @jerryzh168 @vkuzo
-ao/ @vkuzo
-ao/ns/ @vkuzo
+/torch/quantization/ @jerryzh168
 ao/sparisty/ @z-a-f @hdcharles
 ao/quantization/ @jerryzh168
-nn/intrinsic/ @jerryzh168 @vkuzo
-nn/quantized/ @jerryzh168 @vkuzo
+nn/intrinsic/ @jerryzh168
+nn/quantized/ @jerryzh168
 nn/quantizable/ @jerryzh168 @z-a-f
-nn/qat/ @jerryzh168 @vkuzo
+nn/qat/ @jerryzh168
 
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
@@ -47,22 +45,23 @@ nn/qat/ @jerryzh168 @vkuzo
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
-/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
-/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
+/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @H-Huang @awgu @kwen2501
+/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @H-Huang @awgu @kwen2501
+/torch/distributed/_composable @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @H-Huang @awgu @kwen2501 @yhcharles
+/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @H-Huang @awgu @kwen2501
 
 # Distributed tests
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu
-/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu
+/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501
+/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501
 
 # ONNX Export
-/torch/csrc/jit/passes/onnx.h @bowenbao @shubhambhokare1
-/torch/csrc/jit/passes/onnx.cpp @bowenbao @shubhambhokare1
-/torch/csrc/jit/passes/onnx/ @bowenbao @shubhambhokare1
-/torch/onnx/ @bowenbao @shubhambhokare1
-/test/onnx/ @bowenbao @shubhambhokare1
+/torch/csrc/jit/passes/onnx.h @bowenbao @abock
+/torch/csrc/jit/passes/onnx.cpp @bowenbao @abock
+/torch/csrc/jit/passes/onnx/ @bowenbao @abock
+/torch/onnx/ @bowenbao @abock
+/test/onnx/ @bowenbao @abock
 
 # Docker
 /.circleci/docker/ @jeffdaily
@@ -92,11 +91,18 @@ nn/qat/ @jerryzh168 @vkuzo
 /torch/testing/_internal/common_methods_invocations.py @mruberry @ngimel
 /torch/testing/_internal/common_device_type.py @mruberry @ngimel
 test/test_ops.py @mruberry @ngimel
-test/test_ops_gradients.py @mruberry @ngimel
+test/test_ops_gradients.py @mruberry @ngimel @soulitzer
+test/test_ops_fwd_gradients.py @mruberry @ngimel @soulitzer
 test/test_unary_ufuncs.py @mruberry @ngimel
 test/test_binary_ufuncs.py @mruberry @ngimel
 test/test_reductions.py @mruberry @ngimel
 test/test_type_promotion.py @mruberry @ngimel
+
+# functorch-related things
+# This list is for people wanting to be notified every time there's a change
+# Useful for e.g. auditing xfails that other folks add to tests
+test/functorch/test_ops.py @zou3519
+test/functorch/test_vmap.py @zou3519
 
 # torch MPS
 test/test_mps.py @kulinseth
@@ -108,3 +114,6 @@ torch/csrc/autograd/profiler* @robieta
 torch/autograd/profiler* @robieta
 torch/csrc/profiler/ @robieta
 torch/profiler/ @robieta
+
+# AOTDispatch tests
+test/functorch/test_aotdispatch.py @ezyang @Chillee

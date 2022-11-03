@@ -191,7 +191,7 @@ def _all_gather(obj, worker_names=None, timeout=UNSET_RPC_TIMEOUT):
             _ALL_WORKER_NAMES is not None
         ), "`_ALL_WORKER_NAMES` is not initialized for `def _all_gather`."
         worker_names = _ALL_WORKER_NAMES
-    leader_name = sorted(worker_names)[0]
+    leader_name = min(worker_names)
 
     self_name = _get_current_rpc_agent().get_worker_info().name
 

@@ -20,15 +20,18 @@ from torchgen.api.types import (
     boolT,
     doubleT,
     intArrayRefT,
+    iTensorListRefT,
     ListCType,
     longT,
     MutRefCType,
     OptionalCType,
     optionalIntArrayRefT,
+    optionalSymIntArrayRefT,
     scalarT,
     stringT,
     symIntArrayRefT,
     SymIntT,
+    TENSOR_LIST_LIKE_CTYPES,
     tensorListT,
     tensorT,
 )
@@ -288,7 +291,7 @@ PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
 for (auto i : c10::irange(prop.size())) {
     auto si = prop[i];
     if (si.is_symbolic()) {
-      auto py_symint = py::cast(si.toSymIntNodeImpl()).release().ptr();
+      auto py_symint = py::cast(si).release().ptr();
       PyTuple_SetItem(tup, (Py_ssize_t) i, py_symint);
     } else {
        PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong(si.as_int_unchecked()));
@@ -310,7 +313,7 @@ return PyLong_FromUnsignedLong((int64_t) prop);
 """
 
 GETTER_BODY_SYMINT = """\
-return prop.is_symbolic() ? py::cast(prop.toSymIntNodeImpl()).release().ptr() : PyLong_FromUnsignedLong(prop.as_int_unchecked());
+return prop.is_symbolic() ? py::cast(prop).release().ptr() : PyLong_FromUnsignedLong(prop.as_int_unchecked());
 """
 
 GETTER_BODY_DOUBLE = """\
@@ -446,7 +449,8 @@ def gen_autograd_functions_python(
         infos,
         key_fn=lambda info: info.name,
         base_env={
-            "generated_comment": f"@generated from {fm.template_dir_for_comments()}/python_functions.cpp",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/python_functions.cpp",
         },
         env_callable=lambda info: {
             "py_function_initializers": [
@@ -472,10 +476,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     py_getsetdef_structs: List[str] = []
 
     for arg in info.args_with_derivatives:
-        if (
-            arg.type == "at::TensorList"
-            or arg.type == "const c10::List<c10::optional<at::Tensor>> &"
-        ):
+        if arg.type in TENSOR_LIST_LIKE_CTYPES:
             size = f"{arg.name}_size_"
             saved_list_sizes.append(f"size_t {arg.name}_size_;")
         else:
@@ -509,7 +510,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
             should_append_raw_getsetdef = True
-        elif type == BaseCType(tensorListT):
+        elif type == BaseCType(tensorListT) or type == BaseCType(iTensorListRefT):
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
             # Just clear() is sufficient, we don't need to loop and clear each variable.
@@ -570,11 +571,25 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                     op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG
                 )
             )
+        elif type == BaseCType(optionalSymIntArrayRefT):
+            saved_variables.append(f"c10::OptionalArray<c10::SymInt> {name};")
+            getter_definitions.append(
+                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_SYMINT
+                )
+            )
         elif type == OptionalCType(BaseCType(intArrayRefT)):
             saved_variables.append(f"c10::OptionalArray<int64_t> {name};")
             getter_definitions.append(
                 GETTER_DEFINITION_OPT_ARRAYREF.substitute(
                     op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG
+                )
+            )
+        elif type == OptionalCType(BaseCType(symIntArrayRefT)):
+            saved_variables.append(f"c10::OptionalArray<c10::SymInt> {name};")
+            getter_definitions.append(
+                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_SYMINT
                 )
             )
         elif type == OptionalCType(ArrayRefCType(BaseCType(doubleT))):
@@ -613,6 +628,16 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
         else:
+            # Check for indicators that you're putting a non-owning reference
+            # into the saved variable field.  If this is spuriously firing,
+            # edit this field.  Otherwise, you probably need to add a case
+            # above.
+            assert (
+                "ref" not in type.cpp_type().lower()
+                and "view" not in type.cpp_type().lower()
+                and "*" not in type.cpp_type()
+                and "&" not in type.cpp_type()
+            ), f"{type.cpp_type()} looks like it contains a non-owning reference"
             saved_variables.append(f"{type.cpp_type()} {name};")
 
             if type in MISC_GETTER_DEFS:

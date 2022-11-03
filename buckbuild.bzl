@@ -22,6 +22,7 @@ load(
     "jit_core_headers",
     "jit_core_sources",
     "libtorch_profiler_sources",
+    "torch_cpp_srcs",
     "torch_mobile_tracer_sources",
 )
 load(
@@ -336,6 +337,7 @@ def get_aten_generated_files(enabled_backends):
         "CompositeExplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradNonFunctionalFunctions.h",
         "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
+        "VmapGeneratedPlumbing.h",
         "core/ATenOpList.cpp",
         "core/TensorBody.h",
         "core/TensorMethods.cpp",
@@ -1368,6 +1370,19 @@ def define_buck_targets(
     )
 
     pt_xplat_cxx_library(
+        name = "torch_cpp_cpu",
+        srcs = torch_cpp_srcs,
+        headers = native.glob(["torch/csrc/api/include/**/*.h"]) + ["torch/script.h"],
+        compiler_flags = get_pt_compiler_flags(),
+        exported_preprocessor_flags = get_pt_preprocessor_flags(),
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":torch",
+            ":torch_mobile_deserialize_common",  # for torch/csrc/api/src/serialize/input-archive.cpp
+        ],
+    )
+
+    pt_xplat_cxx_library(
         name = "torch_core",
         srcs = core_sources_full_mobile_no_backend_interface + [
             "torch/csrc/api/src/jit.cpp",
@@ -1696,7 +1711,7 @@ def define_buck_targets(
             "torch/csrc/jit/serialization/mobile_bytecode.fbs",
         ],
         outs = {
-            "mobile_bytecode_generated.h": ["mobile_bytecode_generated.h"],
+            "mobile_bytecode_generated_fbsource.h": ["mobile_bytecode_generated.h"],
         },
         cmd = "$(exe {})".format(third_party("flatc")) +
               " --cpp --gen-mutable --scoped-enums -o ${OUT} ${SRCS}",
@@ -1712,13 +1727,18 @@ def define_buck_targets(
         name = "mobile_bytecode",
         header_namespace = "",
         exported_headers = {
-            "torch/csrc/jit/serialization/mobile_bytecode_generated.h": ":mobile_bytecode_header[mobile_bytecode_generated.h]",
+            ("torch/csrc/jit/serialization/mobile_bytecode_generated.h" if IS_OSS
+            else "torch/csrc/jit/serialization/mobile_bytecode_generated_fbsource.h")
+            : ":mobile_bytecode_header[mobile_bytecode_generated_fbsource.h]",
         },
         # Avoid leaking implementation details by only exposing this header to
         # the internals of the loader/serializer layer.
         visibility = [
             "{}:flatbuffer_loader".format(ROOT),
             "{}:flatbuffer_serializer_mobile".format(ROOT),
+        ],
+        exported_deps = [
+            third_party("flatbuffers-api"),
         ],
     )
 
@@ -1740,7 +1760,6 @@ def define_buck_targets(
             ":mobile_bytecode",
             ":torch_mobile_module",
             C10,
-            third_party("flatbuffers-api"),
         ],
         exported_deps = [
             ":torch_mobile_train",
@@ -1778,7 +1797,6 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":mobile_bytecode",
-            third_party("flatbuffers-api"),
         ],
         exported_deps = [
             ":torch_mobile_deserialize",

@@ -3,7 +3,7 @@
 #ifdef USE_XNNPACK
 #include <cstdint>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/xnnpack/Common.h>
 
 using xnnpack_operator = at::native::xnnpack::Operator;

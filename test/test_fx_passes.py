@@ -160,10 +160,38 @@ class TestPartitionFunctions:
         out = torch.stack([add_1, add_2, add_3])
         return out
 
+    @staticmethod
+    def forward12(a, b, c):
+        b0 = a + 1.0
+        c0 = a + 1.5
+        x0 = b0.relu()
+        x1 = c0.relu()
+        b1 = b0 + x1
+        c1 = c0 + 1.2
+        # c2 has dependency on x0 & b0, when we merge {c0, c1, c2}
+        # this dependency should be updated to the fusion group and reflected
+        # on the decision to not fuse b0 & b1, which forms a cyclic dependency in
+        # the new graph
+        c2 = x0 + c0
+        return b1, c2
+
+    @staticmethod
+    def forward13(a, b, c):
+        a0, a1, a2, a3 = a.split(1, 0)
+        b1 = a0 + b
+        c1 = a1 + c
+        return b1 + c1
+
+    @staticmethod
+    def forward14(a, b, c):
+        a0, a1 = torch.ops.aten.std_mean(a)
+        out = a0 + 1.0
+        return out
+
 # A mock OperatorSupport class, where only operator.add is supported
 class MockOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {operator.add}
+        return node.op == "call_function" and node.target in {operator.add, operator.getitem, torch.ops.aten.std_mean}
 
 
 @instantiate_parametrized_tests
@@ -172,6 +200,10 @@ class TestFXGraphPasses(JitTestCase):
     @parametrize("fn, expected_partition", [
         (TestPartitionFunctions.forward1, [["add_7", "add_6"], ["add_5", "add_4", "add_3"], ["add_2", "add_1", "add"]]),
         (TestPartitionFunctions.forward2, [["add_3", "add_2"], ["add_1", "add"]]),
+
+        # 1 horizontal fusion with common producer
+        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),
+        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),
 
         # 2 branches cases
         (TestPartitionFunctions.forward5, [["add_1", "add"]]),
@@ -183,6 +215,13 @@ class TestFXGraphPasses(JitTestCase):
         (TestPartitionFunctions.forward9, [['add_3', 'add_2', 'add_1', 'add']]),
         (TestPartitionFunctions.forward10, [['add_3', 'add_2', 'add', 'add_1']]),
         (TestPartitionFunctions.forward11, [['add_1'], ['add']]),
+
+        # 4 not necessarily the only partition, just to verify that there's no cyclic dependency after partition
+        (TestPartitionFunctions.forward12, [["add_2"], ["add_3", "add_4", "add_1"], ["add"]]),
+
+        # 5 getitem special case
+        (TestPartitionFunctions.forward13, [["add_2", "add_1", "add"]]),
+        (TestPartitionFunctions.forward14, [["add", "std_mean", "getitem", "getitem_1"]]),
     ])
     def test_partitioner(self, fn, expected_partition):
         traced = symbolic_trace(fn)
@@ -203,24 +242,6 @@ class TestFXGraphPasses(JitTestCase):
         expected = fn(a, b, c)
         result = fused_graph(a, b, c)
         torch.testing.assert_close(expected, result)
-
-
-    @parametrize("fn, expected_partition", [
-        # horizontal fusion without a common downstream node, not supported yet
-        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),
-        # horizontal fusion with a common downstream node, not supported yet
-        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),
-    ])
-    def test_partitioner_xfail(self, fn, expected_partition):
-        traced = symbolic_trace(fn)
-
-        supported_ops = MockOperatorSupport()
-        partitioner = CapabilityBasedPartitioner(traced, supported_ops, allows_single_node_partition=True)
-        partitions = partitioner.propose_partitions()
-
-        partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
-        with self.assertRaises(Exception):
-            assert len(partitions_name) == len(expected_partition)
 
     @parametrize("partition", [
         [['add', 'add_1'], ['add_5', 'add_6']],
@@ -621,6 +642,70 @@ class MultiOutputWithWithInvalidMatches:
         TestCase(False, True, 0),
     ]
 
+class QuantizationFp8Pattern:
+    @classmethod
+    def setup(cls):
+        cls.quantization = torch.library.Library("fp8_quantization", "DEF")
+        cls.quantization.define("quantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
+        cls.quantization.define("dequantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
+
+    @classmethod
+    def tearDown(cls):
+        del cls.quantization
+
+    @staticmethod
+    def forward(self, arg0_1, arg1_1):
+        qt = torch.ops.fp8_quantization
+        _scale_0 = self._scale_0
+        quantize_per_tensor_affine_fp8 = qt.quantize_per_tensor_affine_fp8(arg0_1, 0, _scale_0)
+        dequantize_per_tensor_affine_fp8 = qt.dequantize_per_tensor_affine_fp8(quantize_per_tensor_affine_fp8, 0, _scale_0)
+        _scale_1 = self._scale_0
+        quantize_per_tensor_affine_fp8_1 = qt.quantize_per_tensor_affine_fp8(arg1_1, 0, _scale_1)
+        dequantize_per_tensor_affine_fp8_1 = qt.dequantize_per_tensor_affine_fp8(quantize_per_tensor_affine_fp8_1, 0, _scale_1)
+        add = torch.ops.aten.add.Tensor(dequantize_per_tensor_affine_fp8, dequantize_per_tensor_affine_fp8_1)
+        _scale_2 = self._scale_0
+        quantize_per_tensor_affine_fp8_2 = qt.quantize_per_tensor_affine_fp8(add, 0, _scale_2)
+        dequantize_per_tensor_affine_fp8_2 = qt.dequantize_per_tensor_affine_fp8(quantize_per_tensor_affine_fp8_2, 0, _scale_2)
+        return dequantize_per_tensor_affine_fp8_2
+
+    @staticmethod
+    def pattern(a, a_dtype, a_scale, b, b_dtype, b_scale, out_scale):
+        qt = torch.ops.fp8_quantization
+        a = qt.dequantize_per_tensor_affine_fp8(a, a_dtype, a_scale)
+        b = qt.dequantize_per_tensor_affine_fp8(b, b_dtype, b_scale)
+        output = torch.ops.aten.add.Tensor(a, b)
+
+        qt.dequantize_per_tensor_affine_fp8
+
+        output = qt.quantize_per_tensor_affine_fp8(output, a_dtype, out_scale)
+        return output
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 1),
+    ]
+
+class NoAnchorFound:
+    # This test case is for pattern where no matching anchor is found in the target graph
+    # `anchor` is the starting point of the pattern matching, it's usually the boundary returning nodes
+    @staticmethod
+    def forward(x):
+        x = x + 1
+        return x
+
+    @staticmethod
+    def pattern(a):
+        b1 = a.relu()
+        return b1
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 0),
+        TestCase(True, False, 0),
+        TestCase(False, True, 0),
+        TestCase(True, True, 0)
+    ]
+
 @instantiate_parametrized_tests
 class TestFXMatcherUtils(JitTestCase):
 
@@ -639,8 +724,15 @@ class TestFXMatcherUtils(JitTestCase):
         MultipleOutputsIdenticalAnchor,
         MultipleOutputsHorizontalPattern,
         MultiOutputWithWithInvalidMatches,
+        QuantizationFp8Pattern,
+        NoAnchorFound,
     ])
     def test_subgraph_matcher(self, test_model):
+
+        setup = getattr(test_model, "setup", None)
+        if callable(setup):
+            setup()
+
         traced = symbolic_trace(test_model.forward)
         pattern_traced = symbolic_trace(test_model.pattern)
 
@@ -661,6 +753,10 @@ class TestFXMatcherUtils(JitTestCase):
                     if not test_case.match_output and node.op == "output":
                         continue
                     assert node in match.nodes_map
+
+        tearDown = getattr(test_model, "tearDown", None)
+        if callable(setup):
+            tearDown()
 
 
 if __name__ == "__main__":

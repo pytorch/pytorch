@@ -16,34 +16,36 @@ inline int64_t normalize_dim(int64_t d, int64_t n) {
 }
 } // namespace
 
-Tensor cat_batch(const TensorList tensors, vTensor& v_output) {
+Tensor cat_batch(const MaterializedITensorListRef& tensors, vTensor& v_output) {
   TORCH_CHECK(false, "Vulkan cat not implemented for batch dimension!");
 }
 
-Tensor cat_feature(const TensorList tensors, vTensor& v_output) {
+Tensor cat_feature(
+    const MaterializedITensorListRef& tensors,
+    vTensor& v_output) {
   api::Context* const context = api::context();
 
   int64_t ch_size_allprior = 0;
   int64_t ch_interval = 0;
-  for (const auto& tensor : tensors) {
+  for (const at::Tensor& tensor : tensors) {
     ch_interval += tensor.sizes()[1];
   }
 
-  for (const auto& tensor : tensors) {
+  for (const at::Tensor& tensor : tensors) {
     const Tensor self = tensor.is_vulkan() ? tensor : tensor.vulkan();
     const vTensor& v_self = convert(self);
 
     const struct Block final {
       uvec3 size; // output texture size
-      uint32_t fill_0; // dummy
+      uint32_t fill0; // dummy
       uvec3 isize; // input texture size
-      uint32_t fill_1; // dummy
-      uint32_t batch_size; // input tensor's batch size
-      uint32_t ch_size; // input tensor's channel size
+      uint32_t fill1; // dummy
+      uint32_t batchSize; // input tensor's batch size
+      uint32_t chSize; // input tensor's channel size
       uint32_t
-          ch_interval; // channel interval (total # of channels for all tensors)
+          chInterval; // channel interval (total # of channels for all tensors)
       uint32_t
-          ch_size_allprior; // # of channels for tensor 0 to i-1 at ith tensor
+          chSizeAllprior; // # of channels for tensor 0 to i-1 at ith tensor
     } block{
         v_output.extents(),
         0u,
@@ -84,12 +86,14 @@ Tensor cat_feature(const TensorList tensors, vTensor& v_output) {
   return convert(v_output);
 }
 
-Tensor cat_feature_mult4ch(const TensorList tensors, vTensor& v_output) {
+Tensor cat_feature_mult4ch(
+    const MaterializedITensorListRef& tensors,
+    vTensor& v_output) {
   api::Context* const context = api::context();
 
   int64_t depth_size_allprior = 0;
   int64_t ch_interval = 0;
-  for (const auto& tensor : tensors) {
+  for (const at::Tensor& tensor : tensors) {
     ch_interval += tensor.sizes()[1];
   }
   const int64_t depth_interval = ch_interval / 4;
@@ -97,7 +101,7 @@ Tensor cat_feature_mult4ch(const TensorList tensors, vTensor& v_output) {
   uvec3 src_offset{};
   uvec3 dst_offset{};
 
-  for (const auto& tensor_arg : tensors) {
+  for (const at::Tensor& tensor_arg : tensors) {
     const Tensor tensor =
         tensor_arg.is_vulkan() ? tensor_arg : tensor_arg.vulkan();
     const vTensor& v_self = convert(tensor);
@@ -137,17 +141,19 @@ Tensor cat_feature_mult4ch(const TensorList tensors, vTensor& v_output) {
   return convert(v_output);
 }
 
-Tensor cat_width(const TensorList tensors, vTensor& v_output) {
+Tensor cat_width(const MaterializedITensorListRef& tensors, vTensor& v_output) {
   TORCH_CHECK(false, "Vulkan cat not implemented for width dimension!");
 }
 
-Tensor cat_height(const TensorList tensors, vTensor& v_output) {
+Tensor cat_height(
+    const MaterializedITensorListRef& tensors,
+    vTensor& v_output) {
   api::Context* const context = api::context();
 
   uvec3 src_offset{};
   uvec3 dst_offset{};
 
-  for (const auto& tensor : tensors) {
+  for (const at::Tensor& tensor : tensors) {
     const vTensor& v_self = convert(tensor);
 
     api::PipelineBarrier pipeline_barrier{};
@@ -175,14 +181,17 @@ Tensor cat_height(const TensorList tensors, vTensor& v_output) {
   return convert(v_output);
 }
 
-Tensor cat(const at::TensorList tensors, const int64_t dim) {
+Tensor cat(const at::ITensorListRef& tensors, const int64_t in_dim) {
   TORCH_CHECK(tensors.size() > 0, "Vulkan cat expects at least one tensor");
 
-  at::Tensor tensor = tensors[0];
+  const int64_t dim = normalize_dim(in_dim, 4);
+  auto materialized = tensors.materialize();
+  TORCH_INTERNAL_ASSERT(materialized.size() > 0, "Accessing empty array");
+  const at::Tensor& tensor = materialized[0];
   int64_t cat_dim_size = 0;
   bool is_mult4ch = true;
 
-  for (const auto& t : tensors) {
+  for (const at::Tensor& t : materialized) {
     TORCH_INTERNAL_ASSERT(
         t.dim() == 4, "Vulkan cat expects 4 dimensional inputs");
 
@@ -202,22 +211,23 @@ Tensor cat(const at::TensorList tensors, const int64_t dim) {
   }
 
   auto result_size = tensor.sizes().vec();
+  TORCH_INTERNAL_ASSERT(result_size.size() > 0, "Accessing empty array");
   result_size[dim] = cat_dim_size;
 
   vTensor v_output{api::context(), result_size, tensor.options()};
 
   if (dim == 3) {
-    return cat_width(tensors, v_output);
+    return cat_width(materialized, v_output);
   }
   if (dim == 2) {
-    return cat_height(tensors, v_output);
+    return cat_height(materialized, v_output);
   } else if (dim == 1) {
     if (is_mult4ch) {
-      return cat_feature_mult4ch(tensors, v_output);
+      return cat_feature_mult4ch(materialized, v_output);
     }
-    return cat_feature(tensors, v_output);
+    return cat_feature(materialized, v_output);
   }
-  return cat_batch(tensors, v_output);
+  return cat_batch(materialized, v_output);
 }
 
 #ifdef USE_VULKAN_API

@@ -16,6 +16,7 @@
     - [Running `mypy`](#running-mypy)
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
+- [Merging your Change](#merging-your-change)
 - [Writing documentation](#writing-documentation)
   - [Docstring type formatting](#docstring-type-formatting)
   - [Building documentation](#building-documentation)
@@ -117,21 +118,9 @@ git submodule sync --recursive
 git submodule update --init --recursive --jobs 0
 ```
 
-If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
+If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
 
-3. Follow  the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source), except when it's time to install PyTorch instead of invoking `setup.py install` you'll want to call `setup.py develop` instead:
-
-Specifically, the change you have to make is to replace
-
-```bash
-python setup.py install
-```
-
-with
-
-```bash
-python setup.py develop
-```
+3. Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source), but instead of installing PyTorch via `python setup.py install`, use `python setup.py develop`.
 
 This mode will symlink the Python files from the current local source
 tree into the Python install.  This way when you modify a Python file, you
@@ -434,6 +423,17 @@ ghstack submit
 **NB**: It is not recommended to use this workflow unless you are also using
 [`ghstack`](https://github.com/ezyang/ghstack). It creates a large commit that is
 of very low signal to reviewers.
+
+## Merging your Change
+If you know the right people or team that should approve your PR (and you have the required permisssions to do so), add them to the Reviewers list.
+
+If not, leave the Reviewers section empty. Our triage squad will review your PR, add a module label, and assign it to the appropriate reviewer in a couple business days.  The reviewer will then look at your PR and respond.
+
+Occasionally, things might fall through the cracks (sorry!). In case your PR either doesn't get assigned to a reviewer or doesn't get any response from the reviewer for 4 business days, please leave comment on the PR (mentioning the reviewer if one has been assigned). That'll get it nudged back onto people's radar.
+
+If that still doesn't help, come see us during [our office hours](https://github.com/pytorch/pytorch/wiki/Contact-Pytorch-Dev-Infra-Office)
+
+Once your PR is approved, you can merge it in by entering a comment with the content `@pytorchmergebot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
 
 ## Writing documentation
 

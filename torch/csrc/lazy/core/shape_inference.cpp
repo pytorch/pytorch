@@ -451,11 +451,11 @@ std::vector<Shape> compute_shape_expand(
   std::vector<int64_t> target_size(_sizes.size());
   for (const auto idx : c10::irange(_sizes.size())) {
     if (_sizes[idx].is_symbolic()) {
-      c10::SymIntNode symbolicIntNode = _sizes[idx].toSymIntNodeImpl();
-      auto* lazySymIntNode =
-          dynamic_cast<torch::lazy::SymIntNodeImpl*>(symbolicIntNode.get());
-      TORCH_INTERNAL_ASSERT(lazySymIntNode);
-      auto size_node = lazySymIntNode->node_;
+      c10::SymNode symbolicIntNode = _sizes[idx].toSymNodeImpl();
+      auto* lazySymNode =
+          dynamic_cast<torch::lazy::SymNodeImpl*>(symbolicIntNode.get());
+      TORCH_INTERNAL_ASSERT(lazySymNode);
+      auto size_node = lazySymNode->node_;
       auto static_value =
           std::dynamic_pointer_cast<torch::lazy::DimensionNode>(size_node)
               ->getStaticValue();
@@ -1334,13 +1334,13 @@ std::vector<Shape> compute_shape_diagonal_scatter(
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_slice_scatter(
+std::vector<Shape> compute_shape_slice_scatter_symint(
     const at::Tensor& self,
     const at::Tensor& src,
     int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
-    int64_t step) {
+    c10::optional<c10::SymInt> start,
+    c10::optional<c10::SymInt> end,
+    c10::SymInt step) {
   auto self_meta = at::native::empty_strided_meta_symint(
       self.sym_sizes(),
       self.sym_strides(),
@@ -1355,7 +1355,7 @@ std::vector<Shape> compute_shape_slice_scatter(
       /*layout=*/c10::make_optional(src.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto out_meta = at::compositeexplicitautograd::slice_scatter(
+  auto out_meta = at::compositeexplicitautograd::slice_scatter_symint(
       self_meta, src_meta, dim, start, end, step);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }

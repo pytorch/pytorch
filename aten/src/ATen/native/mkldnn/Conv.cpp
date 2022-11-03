@@ -1,7 +1,20 @@
-#include <ATen/ATen.h>
-#include <ATen/native/ConvUtils.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
+#include <torch/library.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/native/ConvUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/conv2d.h>
+#include <ATen/ops/conv3d.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/mkldnn_convolution_native.h>
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -39,7 +52,6 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
-#include <ATen/native/ConvUtils.h>
 
 namespace at { namespace native {
 
@@ -163,14 +175,24 @@ static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bo
    return memory_format;
 }
 
-Tensor mkldnn_convolution(
+Tensor _mkldnn_convolution(
     const Tensor& input_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    c10::string_view attr = "none",
+    torch::List<c10::optional<at::Scalar>> scalars =
+        torch::List<c10::optional<at::Scalar>>(),
+    c10::optional<c10::string_view> algorithm = c10::nullopt) {
+  ideep::attr_t op_attr = ideep::attr_t();
+  if (attr != "none") {
+    auto it = fx_fusion_attr_map().find(attr);
+    TORCH_CHECK(it != fx_fusion_attr_map().end(), "Fusion behavior undefined.");
+    op_attr = it->second(scalars, algorithm);
+  }
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
@@ -211,7 +233,8 @@ Tensor mkldnn_convolution(
         {padding.begin(), padding.end()},
         {padding.begin(), padding.end()},
         groups,
-        is_channels_last);
+        is_channels_last,
+        op_attr);
   } else {
     ideep::convolution_forward::compute_v3(
         x,
@@ -223,7 +246,8 @@ Tensor mkldnn_convolution(
         {padding.begin(), padding.end()},
         {padding.begin(), padding.end()},
         groups,
-        is_channels_last);
+        is_channels_last,
+        op_attr);
   }
 
   if (input.is_mkldnn()) {
@@ -232,6 +256,159 @@ Tensor mkldnn_convolution(
     return mkldnn_to_dense(MKLDNNTensor(y, input.options()));
   } else {
     TORCH_INTERNAL_ASSERT(y.get_desc().is_nhwc());
+    return output;
+  }
+}
+
+Tensor mkldnn_convolution(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
+  return _mkldnn_convolution(
+      input_t, weight_t, bias_opt, padding, stride, dilation, groups);
+}
+
+Tensor mkldnn_convolution_pointwise(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::string_view attr,
+    torch::List<c10::optional<at::Scalar>> scalars,
+    c10::optional<c10::string_view> algorithm) {
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  return _mkldnn_convolution(
+      input_t,
+      weight_t,
+      bias_opt,
+      padding,
+      stride,
+      dilation,
+      groups,
+      attr,
+      scalars,
+      algorithm);
+}
+
+Tensor mkldnn_convolution_pointwise_binary(
+    const Tensor& input_t,
+    const Tensor& other_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    c10::string_view attr) {
+  TORCH_CHECK(
+      input_t.ndimension() == 4 || input_t.ndimension() == 5,
+      "mkldnn_convolution_pointwise_binary: currently only support 2d and 3d")
+
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  // Make sure inputs have same type(device, layout, dtype), device is cpu and
+  // dtype is float or bfloat16.
+  check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
+
+  check_shape_forward(
+      input_t, weight_t, bias, padding, stride, dilation, groups);
+
+  auto output_sizes = conv_output_size(
+      input_t.sizes(), weight_t.sizes(), padding, stride, dilation);
+  // TODO: support broadcast binary fusion.
+  TORCH_CHECK(
+      output_sizes == other_t.sizes(),
+      "Binary Fusion's inputs should have same shape");
+  // Only calling fusion path for channels_last path.
+  // TODO: OneDNN doesn't optimize well for groups > 1 case, it will be enabled
+  // at next OneDNN release.
+  bool can_be_fused =
+      groups == 1 && mkldnn_conv_use_channels_last(input_t, weight_t);
+
+  auto it_binary = fusion_binary_alg_map().find(attr);
+  TORCH_CHECK(
+      it_binary != fusion_binary_alg_map().end(), "Fusion behavior undefined.");
+  if (can_be_fused) {
+    c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+    auto memory_format =
+        mkldnn_convolution_memory_format(input_t.ndimension(), true);
+    auto input = input_t.contiguous(memory_format);
+    auto weight = weight_t.contiguous(memory_format);
+    auto other = other_t.contiguous(memory_format);
+    auto output = at::empty_like(other);
+    const ideep::tensor x = itensor_from_tensor(input);
+    const ideep::tensor w = itensor_from_tensor(weight);
+    const ideep::tensor z = itensor_from_tensor(other);
+    ideep::tensor y = itensor_from_tensor(output);
+    auto output_size = other.sizes().vec();
+    ideep::tag format_tag = ideep::tag::nhwc;
+    if (input_t.ndimension() == 5) {
+      format_tag = ideep::tag::ndhwc;
+    }
+    auto other_desc = ideep::tensor::desc(
+        output_size, get_mkldnn_dtype(weight.scalar_type()), format_tag);
+    auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
+    if (bias.defined()) {
+      const ideep::tensor b = itensor_from_tensor(bias);
+      ideep::convolution_forward::compute_binary(
+          x,
+          z,
+          w,
+          b,
+          output_size,
+          y,
+          {stride.begin(), stride.end()},
+          {dilation.begin(), dilation.end()},
+          {padding.begin(), padding.end()},
+          {padding.begin(), padding.end()},
+          groups,
+          /* is_channels_last */ true,
+          op_attr);
+    } else {
+      ideep::convolution_forward::compute_binary(
+          x,
+          z,
+          w,
+          output_size,
+          y,
+          {stride.begin(), stride.end()},
+          {dilation.begin(), dilation.end()},
+          {padding.begin(), padding.end()},
+          {padding.begin(), padding.end()},
+          groups,
+          /* is_channels_last */ true,
+          op_attr);
+    }
+    return output;
+  } else {
+    // Fallback case, if inputs are not channels last or have different dtype,
+    // OneDNN fusion may have performance regression.
+    Tensor output;
+    if (input_t.ndimension() == 4) {
+      output = at::conv2d(
+          input_t, weight_t, bias_opt, stride, padding, dilation, groups);
+    } else {
+      output = at::conv3d(
+          input_t, weight_t, bias_opt, stride, padding, dilation, groups);
+    }
+    if (attr == "add") {
+      output.add_(other_t);
+    } else if (attr == "sub") {
+      output.sub_(other_t);
+    } else if (attr == "mul") {
+      output.mul_(other_t);
+    } else {
+      output.div_(other_t);
+    }
     return output;
   }
 }
@@ -355,6 +532,15 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
 }
 
 REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_backward_stub, &mkldnn_convolution_backward);
+
+TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
+      TORCH_FN(mkldnn_convolution_pointwise));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise.binary"),
+      TORCH_FN(mkldnn_convolution_pointwise_binary));
+}
 
 }}  // namespace at::native
 

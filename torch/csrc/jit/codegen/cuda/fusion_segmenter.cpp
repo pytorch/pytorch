@@ -1722,7 +1722,7 @@ class TranslateApplicableWelford {
   //!  returns true if any welford has been translated
   static bool run(
       SegmentedFusion* segmented_fusion,
-      const at::ArrayRef<IValue>& runtime_inputs) {
+      const KernelArgumentHolder& runtime_inputs) {
     TranslateApplicableWelford translate_welford(
         segmented_fusion, runtime_inputs);
     return translate_welford.translated_any_welford_;
@@ -1730,7 +1730,7 @@ class TranslateApplicableWelford {
 
   //! Try translation on complete fusion,
   //!  returns true if any welford has been translated
-  static bool run(Fusion* fusion, const at::ArrayRef<IValue>& runtime_inputs) {
+  static bool run(Fusion* fusion, const KernelArgumentHolder& runtime_inputs) {
     TranslateApplicableWelford translate_welford(fusion, runtime_inputs);
     return translate_welford.translated_any_welford_;
   }
@@ -1738,11 +1738,11 @@ class TranslateApplicableWelford {
  private:
   explicit TranslateApplicableWelford(
       SegmentedFusion* segmented_fusion,
-      const at::ArrayRef<IValue>& runtime_inputs);
+      const KernelArgumentHolder& runtime_inputs);
 
   explicit TranslateApplicableWelford(
       Fusion* fusion,
-      const at::ArrayRef<IValue>& runtime_inputs);
+      const KernelArgumentHolder& runtime_inputs);
 
   //! Given vector of welford ops from the same fusion,
   //!  checks if translating all of them result in a
@@ -1774,7 +1774,7 @@ class TranslateApplicableWelford {
   bool translated_any_welford_ = false;
 
   //! a reference to global fusion runtime inputs
-  const at::ArrayRef<IValue>& runtime_inputs_;
+  const KernelArgumentHolder& runtime_inputs_;
 
   //! For translation within group only,
   //!  group boundary at test copy
@@ -1785,7 +1785,7 @@ class TranslateApplicableWelford {
 
 TranslateApplicableWelford::TranslateApplicableWelford(
     Fusion* fusion,
-    const at::ArrayRef<IValue>& runtime_inputs)
+    const KernelArgumentHolder& runtime_inputs)
     : runtime_inputs_(runtime_inputs) {
   auto exprs = fusion->exprs();
   std::vector<WelfordOp*> orignal_welfords(
@@ -1802,7 +1802,7 @@ TranslateApplicableWelford::TranslateApplicableWelford(
 
 TranslateApplicableWelford::TranslateApplicableWelford(
     SegmentedFusion* segmented_fusion,
-    const at::ArrayRef<IValue>& runtime_inputs)
+    const KernelArgumentHolder& runtime_inputs)
     : runtime_inputs_(runtime_inputs) {
   std::vector<SegmentedGroup*> translated_groups;
   std::vector<WelfordOp*> welford_to_translate;
@@ -2046,7 +2046,7 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
 
 bool SegmentCandidateFinder::TranslateWelfordInFusion(
     Fusion* fusion,
-    const at::ArrayRef<IValue>& runtime_inputs) {
+    const KernelArgumentHolder& runtime_inputs) {
   return TranslateApplicableWelford::run(fusion, runtime_inputs);
 }
 
@@ -2598,9 +2598,39 @@ bool CombineReductions::shouldRun(
   return false;
 }
 
-bool SegmentCandidateFinder::codeGenSupportedMerge(SegmentedEdge* edge) {
+namespace {
+
+//! Returns true if group1 and group2 are an immediate producer-consumer pair.
+bool areDirectlyConnected(SegmentedGroup* group1, SegmentedGroup* group2) {
+  // Check if group1 is a immediate consumer of group2
+  if (std::any_of(
+          group1->producer_edges.begin(),
+          group1->producer_edges.end(),
+          [group2](SegmentedEdge* edge) { return edge->from == group2; })) {
+    return true;
+  }
+
+  // Check if group1 is a immediate producer of group2
+  if (std::any_of(
+          group1->consumer_edges.begin(),
+          group1->consumer_edges.end(),
+          [group2](SegmentedEdge* edge) { return edge->to == group2; })) {
+    return true;
+  }
+
+  return false;
+}
+
+} // namespace
+
+bool SegmentCandidateFinder::codeGenSupportedMerge(
+    SegmentedGroup* group1,
+    SegmentedGroup* group2) {
+  TORCH_INTERNAL_ASSERT(
+      areDirectlyConnected(group1, group2),
+      "only support testing immediate producer-consumer groups");
   Fusion* fusion = segmented_fusion_->completeFusion();
-  auto h = tryMerge(fusion, runtime_info_, edge->from, edge->to);
+  auto h = tryMerge(fusion, runtime_info_, group1, group2);
   return h.has_value();
 }
 
@@ -2616,7 +2646,7 @@ ScheduleHeuristic SegmentCandidateFinder::deriveHeuristic(
 
 SegmentCandidateFinder::SegmentCandidateFinder(
     std::unique_ptr<Fusion> fusion,
-    const at::ArrayRef<IValue>& inputs,
+    const KernelArgumentHolder& inputs,
     SegmentCandidateFinderOptions options)
     : options_(options),
       runtime_info_(fusion.get(), inputs, true),
@@ -2827,7 +2857,7 @@ void SegmentCandidateFinder::findSegments() {
 
         auto candidate_it = candidates.begin();
         while (candidate_it != candidates.end() &&
-               !codeGenSupportedMerge(candidate_it->edge)) {
+               !codeGenSupportedMerge(group, candidate_it->group)) {
           candidate_it++;
         }
         if (candidate_it == candidates.end()) {
@@ -2896,7 +2926,7 @@ void SegmentCandidateFinder::finalMerge() {
       for (auto consumer : all_consumers_of_producer_group) {
         if (!producer_check->isConsumerOfAny(
                 consumer, all_consumers_of_producer_group) &&
-            codeGenSupportedMerge(consumer_edge_map.at(consumer))) {
+            codeGenSupportedMerge(producer_group, consumer)) {
           to_merge_.emplace_back(producer_group);
           to_merge_.emplace_back(consumer);
           producer_group->merged_ = true;
@@ -3100,7 +3130,7 @@ FusionKernelRuntime::SchedulerEntryPtr SegmentedFusion::
 }
 
 std::unique_ptr<FusionHeuristics> SegmentedFusion::makeInitialHeuristics(
-    const at::ArrayRef<IValue>& inputs) {
+    const KernelArgumentHolder& inputs) {
   auto ret = std::make_unique<FusionHeuristics>();
   SchedulerRuntimeInfo runtime_info(completeFusion(), inputs, true);
   for (auto g : groups()) {

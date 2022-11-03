@@ -2,21 +2,24 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/ATen.h>
+#include <c10/util/Exception.h>
+#include <utility>
 
 #include <ATen/native/vulkan/api/vk_api.h>
 
+#define CONCAT_LITERALS(a, b) #a #b
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 #include <ATen/native/vulkan/glsl.h>
-#define VK_KERNEL(name)                     \
-  ::at::native::vulkan::api::ShaderSource { \
-#name, name##_glsl,                     \
+#define VK_KERNEL(name)                          \
+  ::at::native::vulkan::api::ShaderSource {      \
+    CONCAT_LITERALS(vulkan., name), name##_glsl, \
   }
 #else
 #include <ATen/native/vulkan/spv.h>
-#define VK_KERNEL(name)                                  \
-  ::at::native::vulkan::api::ShaderSource {              \
-#name, name##_spv, name##_spv_len, name##_spv_layout \
+#define VK_KERNEL(name)                                         \
+  ::at::native::vulkan::api::ShaderSource {                     \
+    CONCAT_LITERALS(vulkan., name), name##_spv, name##_spv_len, \
+        name##_spv_layout                                       \
   }
 #endif /* USE_VULKAN_SHADERC_RUNTIME */
 

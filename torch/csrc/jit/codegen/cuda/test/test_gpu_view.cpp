@@ -1,4 +1,5 @@
 #if defined(USE_CUDA)
+#include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -344,12 +345,14 @@ std::vector<view_example> all_view_examples = {
     {{37, 9, 7, 3 * 2, 5 * 2}, {37 * 9, 2, 2, 3, 7 * 5}},
 
     {{1, 1, 3333, 1}, {1, 1, -1, 1}},
-    {{1, 1111 * 3}, {1, 1, 1, -1, 1, 3}},
+    // Disabled for now due to non-deterministic nan issue (#1920)
+    // {{1, 1111 * 3}, {1, 1, 1, -1, 1, 3}},
     {{1, 3333, 1}, {-1}},
     {{1, 1, 3333, 1}, {1, 1, 3333, 1}},
     {{1, 303 * 11, 1}, {1, 303, -1, 1}},
     {{1, 3333, 1}, {1, 303, 11, 1}},
-    {{1, 3333}, {1, 1, 1, 1111, 1, 3}},
+    // Disabled for now due to non-deterministic nan issue (#1920)
+    // {{1, 3333}, {1, 1, 1, 1111, 1, 3}},
     {{1, 3333, 1}, {3333}},
 
     {{1, 3922 * 7, 1, 2}, {1, 3922 * 2, 1, -1}},
@@ -975,7 +978,7 @@ TEST_F(NVFuserTest, FusionExpandView1_CUDA) {
   FusionExecutorCache executor_cache(std::move(fusion));
   auto cg_outputs = executor_cache.runFusionWithInputs({t0, t1});
 
-  auto ref = at::native::reshape(t0.expand({4, 3, 8}), {12, 8}) + t1;
+  auto ref = at::reshape(t0.expand({4, 3, 8}), {12, 8}) + t1;
 
   testValidate(
       executor_cache.fusion(), cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
@@ -1006,7 +1009,7 @@ TEST_F(NVFuserTest, FusionExpandView2_CUDA) {
   FusionExecutorCache executor_cache(std::move(fusion));
   auto cg_outputs = executor_cache.runFusionWithInputs({t0, t1});
 
-  auto ref = at::native::reshape(t0.expand({12, 8}), {3, 4, 8}) + t1;
+  auto ref = at::reshape(t0.expand({12, 8}), {3, 4, 8}) + t1;
 
   testValidate(
       executor_cache.fusion(), cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
@@ -1157,6 +1160,185 @@ TEST_F(NVFuserTest, FusionViewTransformCache_CUDA) {
       {{1, 3922 * 2, 1, 7}, {1, -1, 2}}, {{1, 3922, 1, 7}, {1, -1, 2}});
   assert_does_not_match(
       {{19, 3 * 4, 7, 99}, {19, -1, 3}}, {{19, 3 * 5, 7, 99}, {19, -1, 3}});
+}
+
+TEST_F(NVFuserTest, FusionViewIdGraph_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  int w = 2, x = 3, y = 4, z = 5;
+
+  auto tv0 = makeConcreteTensor({w, x, y, z});
+  fusion.addInput(tv0);
+
+  auto tv1 = sin(tv0);
+
+  auto tv2 = view(tv1, {w, x, y, z}, {w, y, x * z});
+  fusion.addOutput(tv2);
+
+  auto tv3 = makeConcreteTensor({w, x, y, z});
+  fusion.addInput(tv3);
+
+  auto tv4 = view(tv3, {w, x, y, z}, {w, y, x * z});
+  fusion.addOutput(tv4);
+
+  // Link 0 and 3 together for view analysis done based on before the views
+  // actually happened.
+  auto tv5 = add(tv0, tv3);
+  fusion.addOutput(tv5);
+
+  auto tv6 = makeConcreteTensor({w, x, x, y, z});
+
+  auto tv7 = sum(tv6, {2});
+  auto tv8 = broadcast(tv7, {false, true, false, true, false, false});
+
+  auto tv9 = makeConcreteTensor({w, 6, x, 7, y, z});
+  fusion.addInput(tv9);
+  auto tv10 = add(tv8, tv9);
+  fusion.addOutput(tv10);
+
+  auto tv12 = view(tv8, {w, 1, x, 1, y, z}, {w, y, x * z});
+  fusion.addOutput(tv12);
+
+  // Link the views after the views happen
+  auto t13 = add(tv12, tv4);
+  fusion.addOutput(t13);
+
+  // Grab the trivial reduced tensor from t12's view.
+  auto tv11 = ir_utils::producerTvsOf(tv12)[0];
+
+  // Start from the exact iter domain graph of the fusion
+  IterDomainGraph id_graph(&fusion);
+  auto disjoint_view_ids = id_graph.exactNodes();
+
+  TORCH_CHECK(
+      id_graph.exactNodes().strictAreMapped(tv2->axis(1), tv4->axis(1)));
+  TORCH_CHECK(
+      id_graph.exactNodes().strictAreMapped(tv2->axis(2), tv4->axis(2)));
+
+  TORCH_CHECK(id_graph.exactNodes().strictAreMapped(
+      tv2->getRootDomain()[1], tv12->getRootDomain()[1]));
+  TORCH_CHECK(id_graph.exactNodes().strictAreMapped(
+      tv2->getRootDomain()[2], tv12->getRootDomain()[2]));
+  TORCH_CHECK(id_graph.exactNodes().strictAreMapped(
+      tv2->getRootDomain()[3], tv12->getRootDomain()[3]));
+}
+
+TEST_F(NVFuserTest, FusionViewVectorize_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(3);
+  fusion.addInput(tv0);
+  auto tv1 = flatten(tv0, 1, 2);
+  auto tv2 = flatten(tv0, 1, 2);
+  auto tv3 = sin(tv1);
+  auto tv4 = sin(tv2);
+  fusion.addOutput(tv3);
+  fusion.addOutput(tv4);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({256, 1024, 1024}, options);
+
+  auto lparams = schedulePointwise(&fusion, {input});
+
+  auto hasVectorization = [](TensorView* tv) -> bool {
+    for (auto i : tv->domain()->domain()) {
+      if (i->getParallelType() == ParallelType::Vectorize) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  for (auto o : fusion.outputs()) {
+    TORCH_CHECK(hasVectorization(o->as<TensorView>()));
+  }
+  for (auto i : fusion.inputs()) {
+    for (auto c : ir_utils::consumerTvsOf(i->as<TensorView>())) {
+      TORCH_CHECK(hasVectorization(c));
+    }
+  }
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {input}, lparams);
+  auto outputs = fe.runFusion({input}, lparams);
+
+  auto tv_ref = input.flatten(1, 2).sin();
+
+  testValidate(&fusion, outputs, {input}, {tv_ref, tv_ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionExpandFlatten_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeConcreteTensor({-1, -1, 1});
+  fusion->addInput(tv0);
+  auto tv1 = expand(
+      tv0,
+      {tv0->axis(0)->extent(),
+       tv0->axis(1)->extent(),
+       IrBuilder::create<Int>(8)});
+  auto tv2 = flatten(tv1, 1, 2);
+  auto tv3 = sum(tv2, {1});
+  fusion->addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({256, 1024, 1}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs({input});
+
+  auto aten_out = input.expand({256, 1024, 8}).flatten(1, 2).sum(1);
+
+  testValidate(
+      executor_cache.fusion(),
+      cg_outputs,
+      {input},
+      {aten_out},
+      __LINE__,
+      __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionIllegalReductionFlatten_CUDA) {
+  EXPECT_THAT(
+      []() {
+        auto fusion = std::make_unique<Fusion>();
+        FusionGuard fg(fusion.get());
+
+        auto tv0 = makeConcreteTensor({2, 3});
+        fusion->addInput(tv0);
+
+        auto tv1 = sum(tv0, {1});
+        auto tv2 = flatten(tv1, 0, 1);
+        fusion->addOutput(tv2);
+      },
+      testing::ThrowsMessage<c10::Error>(
+          testing::HasSubstr("Invalid end_dim")));
+}
+
+TEST_F(NVFuserTest, FusionReductionFlatten1_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeConcreteTensor({2, 3, 5});
+  fusion->addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = flatten(tv1, 0, 1);
+  fusion->addOutput(tv2);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({2, 3, 5}, options);
+  auto ref = t0.sum({1}).flatten(0, 1);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
 } // namespace jit

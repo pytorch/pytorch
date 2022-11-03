@@ -1,16 +1,22 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/DimVector.h>
+#include <ATen/core/functional.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/DimVector.h>
 #include <ATen/core/IListRef.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorShape.h>
@@ -24,6 +30,179 @@
 #include <c10/util/SmallVector.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_conj_copy_native.h>
+#include <ATen/ops/_convert_indices_from_coo_to_csr.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo.h>
+#include <ATen/ops/_fw_primal_copy_native.h>
+#include <ATen/ops/_indices_copy_native.h>
+#include <ATen/ops/_make_dual.h>
+#include <ATen/ops/_make_dual_copy_native.h>
+#include <ATen/ops/_mkldnn_reshape.h>
+#include <ATen/ops/_mkldnn_transpose.h>
+#include <ATen/ops/_neg_view_copy_native.h>
+#include <ATen/ops/_reshape_alias_copy_native.h>
+#include <ATen/ops/_reshape_alias_native.h>
+#include <ATen/ops/_reshape_from_tensor_native.h>
+#include <ATen/ops/_shape_as_tensor_native.h>
+#include <ATen/ops/_sparse_broadcast_to.h>
+#include <ATen/ops/_sparse_broadcast_to_copy_native.h>
+#include <ATen/ops/_sparse_broadcast_to_native.h>
+#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_csr_tensor_unsafe.h>
+#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_stack_native.h>
+#include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/_unsafe_view_native.h>
+#include <ATen/ops/_values_copy_native.h>
+#include <ATen/ops/adjoint_native.h>
+#include <ATen/ops/alias.h>
+#include <ATen/ops/alias_copy_native.h>
+#include <ATen/ops/alias_native.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/as_strided_copy_native.h>
+#include <ATen/ops/as_strided_native.h>
+#include <ATen/ops/as_strided_scatter_native.h>
+#include <ATen/ops/atleast_1d.h>
+#include <ATen/ops/atleast_2d.h>
+#include <ATen/ops/atleast_3d.h>
+#include <ATen/ops/block_diag_native.h>
+#include <ATen/ops/broadcast_tensors_native.h>
+#include <ATen/ops/broadcast_to_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/cat_meta.h>
+#include <ATen/ops/cat_native.h>
+#include <ATen/ops/chunk_native.h>
+#include <ATen/ops/col_indices_copy_native.h>
+#include <ATen/ops/column_stack_native.h>
+#include <ATen/ops/concat_native.h>
+#include <ATen/ops/concatenate_native.h>
+#include <ATen/ops/crow_indices_copy_native.h>
+#include <ATen/ops/dense_dim_native.h>
+#include <ATen/ops/detach_copy_native.h>
+#include <ATen/ops/detach_native.h>
+#include <ATen/ops/diag.h>
+#include <ATen/ops/diag_embed.h>
+#include <ATen/ops/diag_embed_native.h>
+#include <ATen/ops/diag_native.h>
+#include <ATen/ops/diagflat_native.h>
+#include <ATen/ops/diagonal.h>
+#include <ATen/ops/diagonal_backward.h>
+#include <ATen/ops/diagonal_backward_native.h>
+#include <ATen/ops/diagonal_copy.h>
+#include <ATen/ops/diagonal_copy_native.h>
+#include <ATen/ops/diagonal_native.h>
+#include <ATen/ops/diagonal_scatter_native.h>
+#include <ATen/ops/dsplit_native.h>
+#include <ATen/ops/dstack_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_quantized.h>
+#include <ATen/ops/expand_as_native.h>
+#include <ATen/ops/expand_copy_native.h>
+#include <ATen/ops/expand_native.h>
+#include <ATen/ops/flatten_dense_tensors_native.h>
+#include <ATen/ops/flatten_native.h>
+#include <ATen/ops/from_blob.h>
+#include <ATen/ops/hsplit_native.h>
+#include <ATen/ops/hstack.h>
+#include <ATen/ops/hstack_native.h>
+#include <ATen/ops/index_select_native.h>
+#include <ATen/ops/indices_copy_native.h>
+#include <ATen/ops/lift_fresh_native.h>
+#include <ATen/ops/lift_native.h>
+#include <ATen/ops/mH_native.h>
+#include <ATen/ops/mT_native.h>
+#include <ATen/ops/matrix_H_native.h>
+#include <ATen/ops/meshgrid_native.h>
+#include <ATen/ops/moveaxis_native.h>
+#include <ATen/ops/movedim.h>
+#include <ATen/ops/movedim_native.h>
+#include <ATen/ops/narrow.h>
+#include <ATen/ops/narrow_copy.h>
+#include <ATen/ops/narrow_copy_native.h>
+#include <ATen/ops/narrow_native.h>
+#include <ATen/ops/new_empty_native.h>
+#include <ATen/ops/new_ones_native.h>
+#include <ATen/ops/numpy_T_native.h>
+#include <ATen/ops/permute_copy_native.h>
+#include <ATen/ops/permute_native.h>
+#include <ATen/ops/ravel_native.h>
+#include <ATen/ops/repeat_native.h>
+#include <ATen/ops/reshape_as_native.h>
+#include <ATen/ops/reshape_native.h>
+#include <ATen/ops/resize_native.h>
+#include <ATen/ops/row_stack_native.h>
+#include <ATen/ops/select.h>
+#include <ATen/ops/select_backward_native.h>
+#include <ATen/ops/select_copy_native.h>
+#include <ATen/ops/select_native.h>
+#include <ATen/ops/select_scatter_native.h>
+#include <ATen/ops/set_native.h>
+#include <ATen/ops/slice.h>
+#include <ATen/ops/slice_backward_native.h>
+#include <ATen/ops/slice_copy_native.h>
+#include <ATen/ops/slice_native.h>
+#include <ATen/ops/slice_scatter_native.h>
+#include <ATen/ops/sparse_coo_tensor.h>
+#include <ATen/ops/sparse_coo_tensor_native.h>
+#include <ATen/ops/sparse_dim_native.h>
+#include <ATen/ops/split_copy_native.h>
+#include <ATen/ops/split_native.h>
+#include <ATen/ops/split_with_sizes.h>
+#include <ATen/ops/split_with_sizes_copy_native.h>
+#include <ATen/ops/split_with_sizes_native.h>
+#include <ATen/ops/squeeze_copy_native.h>
+#include <ATen/ops/squeeze_native.h>
+#include <ATen/ops/stack_native.h>
+#include <ATen/ops/sub.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/sum_to_size_native.h>
+#include <ATen/ops/swapaxes_native.h>
+#include <ATen/ops/swapdims_native.h>
+#include <ATen/ops/t_copy_native.h>
+#include <ATen/ops/t_native.h>
+#include <ATen/ops/tensor.h>
+#include <ATen/ops/tensor_split.h>
+#include <ATen/ops/tensor_split_native.h>
+#include <ATen/ops/tile_native.h>
+#include <ATen/ops/transpose.h>
+#include <ATen/ops/transpose_copy_native.h>
+#include <ATen/ops/transpose_native.h>
+#include <ATen/ops/unbind.h>
+#include <ATen/ops/unbind_copy_native.h>
+#include <ATen/ops/unbind_native.h>
+#include <ATen/ops/unflatten_dense_tensors_native.h>
+#include <ATen/ops/unflatten_native.h>
+#include <ATen/ops/unfold_copy_native.h>
+#include <ATen/ops/unfold_native.h>
+#include <ATen/ops/unsafe_chunk_native.h>
+#include <ATen/ops/unsafe_split_native.h>
+#include <ATen/ops/unsafe_split_with_sizes_native.h>
+#include <ATen/ops/unsqueeze_copy_native.h>
+#include <ATen/ops/unsqueeze_native.h>
+#include <ATen/ops/values_copy_native.h>
+#include <ATen/ops/view_as_complex.h>
+#include <ATen/ops/view_as_complex_copy_native.h>
+#include <ATen/ops/view_as_native.h>
+#include <ATen/ops/view_as_real.h>
+#include <ATen/ops/view_as_real_copy_native.h>
+#include <ATen/ops/view_copy_native.h>
+#include <ATen/ops/view_native.h>
+#include <ATen/ops/vsplit_native.h>
+#include <ATen/ops/vstack.h>
+#include <ATen/ops/vstack_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/zeros_native.h>
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -57,7 +236,7 @@ inline c10::MemoryFormat cat_compute_output_memory_format(const MaterializedITen
   return format.value();
 }
 
-TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
+TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
@@ -65,10 +244,10 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
   auto materialized = tensors.materialize();
 
   cat_check_no_zero_dim(materialized);
-  dim = at::legacy_cat_wrap_dim(dim, tensors);
+  dim = at::legacy_cat_wrap_dim(dim, materialized);
 
   // Checking names before the actual dimensions.
-  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
+  auto maybe_outnames = namedinference::compute_cat_outnames(materialized);
 
   TORCH_CHECK(
       materialized.size() > 0, "torch.cat(): expected a non-empty list of Tensors");
@@ -367,7 +546,7 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
 }
 
 TORCH_IMPL_FUNC(cat_out_cpu)
-(ITensorListRef tensors,
+(const ITensorListRef& tensors,
  int64_t dim,
  int64_t valid,
  bool all_contiguous,
@@ -515,16 +694,16 @@ static void check_cat_sparse_dims(Tensor const &t,
             ", but tensor at position ", pos, " has ", t.sparse_dim(), ", ", t.dense_dim(), ".");
 }
 
-static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
+static Tensor cat_sparse_impl(const MaterializedITensorListRef& tensors, int64_t dim) {
   std::vector<Tensor> indices;
   std::vector<Tensor> values;
-  int64_t wrapped = maybe_wrap_dim(dim, tensors[0].dim());
-  int64_t sparse_dim = tensors[0].sparse_dim();
-  int64_t dense_dim = tensors[0].dense_dim();
-  IntArrayRef sizes = tensors[0].sizes();
+  int64_t wrapped = maybe_wrap_dim(dim, tensors[0].get().dim());
+  int64_t sparse_dim = tensors[0].get().sparse_dim();
+  int64_t dense_dim = tensors[0].get().dense_dim();
+  IntArrayRef sizes = tensors[0].get().sizes();
   if (wrapped < sparse_dim) {
     for (const auto i : c10::irange(tensors.size())) {
-      auto const &t = tensors[i];
+      const Tensor& t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
       indices.push_back(t._indices());
       values.push_back(t._values());
@@ -543,7 +722,7 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
     int64_t col = 0;
     int64_t cumulative_offset = 0;
     for (const auto i : c10::irange(tensors.size())) {
-      auto const &t = tensors[i];
+      const Tensor& t = tensors[i];
       int64_t this_piece_size = t._nnz();
       // cumulative_offset is zero for the first piece, so
       // don't waste time doing this operation unless i > 0.
@@ -559,10 +738,10 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
         idxs,
         vals,
         sizes_copy,
-        optTypeMetaToScalarType(tensors[0].options().dtype_opt()),
-        tensors[0].options().layout_opt(),
-        tensors[0].options().device_opt(),
-        tensors[0].options().pinned_memory_opt());
+        optTypeMetaToScalarType(tensors[0].get().options().dtype_opt()),
+        tensors[0].get().options().layout_opt(),
+        tensors[0].get().options().device_opt(),
+        tensors[0].get().options().pinned_memory_opt());
   }
   else {
     // Catting along a dense dimension requires us to create new values.
@@ -584,15 +763,19 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
     // The dimension in each tensor's values object that corresponds to the overall dimension along which we're catting.
     int64_t values_dim = wrapped - sparse_dim + 1;
     // The final size along the catted dimension.
-    const int64_t total_size = std::accumulate(tensors.begin(), tensors.end(), static_cast<int64_t>(0), [values_dim](int64_t l, Tensor const &r) {
-      return l + r._values().size(values_dim);
-    });
-    auto zeros_sizes = tensors[0]._values().sizes().vec();
+    const int64_t total_size = std::accumulate(
+        tensors.begin(),
+        tensors.end(),
+        static_cast<int64_t>(0),
+        [values_dim](int64_t l, const Tensor& r) {
+          return l + r._values().size(values_dim);
+        });
+    auto zeros_sizes = tensors[0].get()._values().sizes().vec();
     int64_t cumulative_size = 0;
     std::vector<Tensor> vals_pieces;
     std::vector<Tensor> idxs_pieces;
     for (const auto i : c10::irange(tensors.size())) {
-      auto const &t = tensors[i];
+      const Tensor& t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
       // dimension 0 of values corresponds to the number of values,
       // rather than to any logical dimension of the sparse tensor.
@@ -622,16 +805,17 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
         at::cat(idxs_pieces, 1),
         at::cat(vals_pieces),
         sizes_copy,
-        optTypeMetaToScalarType(tensors[0].options().dtype_opt()),
-        tensors[0].options().layout_opt(),
-        tensors[0].options().device_opt(),
-        tensors[0].options().pinned_memory_opt());
+        optTypeMetaToScalarType(tensors[0].get().options().dtype_opt()),
+        tensors[0].get().options().layout_opt(),
+        tensors[0].get().options().device_opt(),
+        tensors[0].get().options().pinned_memory_opt());
   }
 }
 
-Tensor cat_sparse(TensorList tensors, int64_t dim) {
-  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
-  auto result = cat_sparse_impl(tensors, at::legacy_cat_wrap_dim(dim, tensors));
+Tensor cat_sparse(const ITensorListRef& tensors, int64_t dim) {
+  auto materialized = tensors.materialize();
+  auto maybe_outnames = namedinference::compute_cat_outnames(materialized);
+  auto result = cat_sparse_impl(materialized, at::legacy_cat_wrap_dim(dim, materialized));
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
@@ -717,52 +901,64 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   TORCH_CHECK(chunks > 0,
            "chunk expects `chunks` to be greater than 0, got: ", chunks);
 
-  const auto dim_size = self.size(dim);
-  int64_t split_size = (dim_size + chunks - 1) / chunks;
+  const auto dim_size = self.sym_size(dim);
+  auto split_size = (dim_size + chunks - 1) / chunks;
 
   // We need to call split_with_sizes in the case where split_size and dimension size are 0, because
   // a call to split would discard the number of chunks (because we can have an arbitrary number of
   // 0-sized chunks adding up to 0).  So, call split_with_sizes with the correct number of chunks,
   // eventually we will do this for all cases.
   if (split_size == 0 && dim_size == 0) {
-    std::vector<int64_t> split_sizes(chunks, split_size);
+    std::vector<c10::SymInt> split_sizes(chunks, split_size);
     split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size);
-    return self.split_with_sizes(split_sizes, dim);
+    return self.split_with_sizes_symint(split_sizes, dim);
   } else {
-    return self.split(split_size, dim);
+    return self.split_symint(split_size, dim);
   }
 }
 
-std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t dim) {
+std::vector<Tensor> tensor_split_sections_symint(const Tensor& self, c10::SymInt sym_sections, int64_t dim) {
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
+  // NB: intentional, sections specifies number of output tensors, which
+  // cannot be polymorphic
+  int64_t sections = sym_sections.guard_int(__FILE__, __LINE__);
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
-  const auto dim_size = self.size(dim_);
+  const auto dim_size = self.sym_size(dim_);
   std::vector<Tensor> splits(sections);
-  int64_t min_split_size = dim_size / sections;
-  int64_t num_splits_one_extra = dim_size % sections;
-  int64_t start_idx = 0;
+  auto min_split_size = dim_size / sections;
+  auto num_splits_one_extra = dim_size % sections;
+  c10::SymInt start_idx = 0;
   for (const auto split_idx : c10::irange(sections)) {
-    int64_t split_size = (split_idx < num_splits_one_extra) ? (min_split_size + 1) : min_split_size;
-    splits[split_idx] = at::slice(self, dim_, start_idx, start_idx + split_size);
+    auto split_size = (num_splits_one_extra > split_idx) ? (min_split_size + 1) : min_split_size;
+    splits[split_idx] = at::slice_symint(self, dim_, start_idx, start_idx + split_size);
     start_idx += split_size;
   }
   return splits;
 }
 
-std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim) {
+template <typename T>
+std::vector<Tensor> _tensor_split_indices(const Tensor& self, ArrayRef<T> indices, int64_t dim) {
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   int64_t num_indices = indices.size();
   std::vector<Tensor> splits(num_indices + 1);
-  int64_t start_idx = 0;
+  T start_idx(0);
   for (const auto split_idx : c10::irange(num_indices)) {
-    int64_t end_idx = indices[split_idx];
-    splits[split_idx] = at::slice(self, dim_, start_idx, end_idx);
+    auto end_idx = indices[split_idx];
+    splits[split_idx] = at::symint::slice<T>(self, dim_, start_idx, end_idx);
     start_idx = end_idx;
   }
-  splits[num_indices] = at::slice(self, dim_, start_idx, self.size(dim_));
+  splits[num_indices] = at::symint::slice<T>(self, dim_, start_idx, at::symint::size<T>(self, dim_));
   return splits;
+}
+
+std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim) {
+  return _tensor_split_indices(self, indices, dim);
+}
+
+std::vector<Tensor> tensor_split_indices_symint(const Tensor& self, SymIntArrayRef indices, int64_t dim) {
+  return _tensor_split_indices(self, indices, dim);
 }
 
 std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indices_or_sections, int64_t dim) {
@@ -916,7 +1112,7 @@ Tensor expand(const Tensor& self, c10::IntArrayRef size, bool /*unused*/) {
 }
 
 Tensor expand_as(const Tensor& self, const Tensor& other) {
-  return self.expand(other.sizes());
+  return self.expand_symint(other.sym_sizes());
 }
 
 Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
@@ -990,8 +1186,8 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
   return result;
 }
 
-const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
-  auto storage_offset = storage_offset_.value_or(self.storage_offset());
+const Tensor &as_strided__symint(const Tensor& self, SymIntArrayRef size, SymIntArrayRef stride, optional<c10::SymInt> storage_offset_) {
+  auto storage_offset = storage_offset_.value_or(self.sym_storage_offset());
   setStrided(self, size, stride, storage_offset);
   return self;
 }
@@ -1131,11 +1327,24 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   return at::slice(self, dim, start, start + length, 1);
 }
 
-Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t length) {
+Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
+  TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  auto cur_size = self.sym_size(dim);
+  if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
+    start = maybe_wrap_dim(start, cur_size);
+  }
+  TORCH_CHECK(length >= 0 && start <= cur_size - length,
+           "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
+  return at::slice_symint(self, dim, start, start + length, 1);
+}
+
+// This overload exists purely for XLA, because they wanted to pass in "symbolic"
+// start via Tensor.
+Tensor narrow_tensor_symint(const Tensor& self, int64_t dim, const Tensor& start, SymInt length) {
   TORCH_CHECK(start.dim() == 0 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
               "start must be an 0-dim integral Tensor.");
   int64_t st = start.item<int64_t>();
-  return at::narrow(self, dim, st, length);
+  return at::narrow_symint(self, dim, c10::SymInt(st), length);
 }
 
 std::tuple<DimVector, DimVector, std::vector<int64_t>>
@@ -1326,6 +1535,47 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
+Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
+  if (self.is_sparse()) {
+    AT_ERROR("reshape is not implemented for sparse tensors");
+  }
+  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+
+  if (self.is_mkldnn()) {
+    return at::_mkldnn_reshape(self, c10::asIntArrayRefSlow(shape));
+  }
+
+  // `computeStride` returns the proper strides to use if this
+  // `reshape` can be just a view.
+  auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape);
+
+  // NB: Even though we have viewable geometry and the target strides here,
+  //     we do not just call `as_strided` on `self` because the backward
+  //     for `as_strided` is not as efficient as that of `view` (since the
+  //     former is meant to handle general cases).
+  //
+  //     Similarly we don't call `view` because it duplicates some of the work
+  //     we've already done, and instead call our internal/private operator
+  //     `_reshape_alias` that essentially does the same thing as `view` and
+  //     `as_strided` without any of the extra overhead.
+  if (stride.has_value()) {
+    // Temporary check to revert to the old behavior/view in cases where the
+    // device is not supported (e.g. for XLA the operation is not supported
+    // so we use `view` instead).
+    //
+    // We need to do the checks here instead of in `native_functions.yaml`
+    // to preserve backwards compatibility.
+    if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
+      return self._reshape_alias_symint(shape, stride.value());
+    } else {
+      return self.view_symint(shape);
+    }
+  }
+  return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
+}
+
+// Duplicate of above code for non-symbolic ints. Kept for BC purposes and to
+// minimize breakages.
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
@@ -1452,39 +1702,49 @@ QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int6
   return quantizer;
 }
 
-Tensor select(const Tensor& self, int64_t dim, int64_t index) {
+Tensor select(const Tensor& self, int64_t dim, int64_t index_) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "select() cannot be applied to a 0-dim tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
-  auto size = self.size(dim);
-  if (index < -size || index >= size) {
+  auto size = self.sym_sizes()[dim];
+  if (size < -index_ || size <= index_) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
-      TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
+      TORCH_CHECK_INDEX(false, "select(): index ", index_, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()[dim]);
     }
-    TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
+    TORCH_CHECK_INDEX(false, "select(): index ", index_, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
+  SymInt index = index_;
   if (index < 0) {
     index += size;
   }
   if (self.is_sparse()) {
-    return select_sparse(self, dim, index);
+    return select_sparse(self, dim, index.guard_int(__FILE__, __LINE__));
   }
-  DimVector sizes(self.sizes().begin(), self.sizes().end());
-  DimVector strides(self.strides().begin(), self.strides().end());
-  auto storage_offset = self.storage_offset() + index * strides[dim];
-  sizes.erase(sizes.begin() + dim);
-  strides.erase(strides.begin() + dim);
 
   Tensor result;
   if (self.is_quantized()) {
-    auto quantizer = create_subtensor_quantizer(self, true, index, index + 1, dim, 1);
+    auto local_index = index.guard_int(__FILE__, __LINE__);
+
+    DimVector sizes(self.sizes().begin(), self.sizes().end());
+    DimVector strides(self.strides().begin(), self.strides().end());
+    auto storage_offset = self.storage_offset() + local_index * strides[dim];
+    sizes.erase(sizes.begin() + dim);
+    strides.erase(strides.begin() + dim);
+
+    auto quantizer = create_subtensor_quantizer(self, true, local_index, local_index + 1, dim, 1);
     result = as_strided_qtensorimpl(self, sizes, strides, storage_offset, quantizer);
   } else {
-    result = self.as_strided(sizes, strides, storage_offset);
+    std::vector<c10::SymInt> sizes(self.sym_sizes().begin(), self.sym_sizes().end());
+    std::vector<c10::SymInt> strides(self.sym_strides().begin(), self.sym_strides().end());
+    auto storage_offset = self.sym_storage_offset() + index * strides[dim];
+    sizes.erase(sizes.begin() + dim);
+    strides.erase(strides.begin() + dim);
+
+    result = self.as_strided_symint(sizes, strides, storage_offset);
   }
   namedinference::propagate_names_except(result, self, {dim});
   return result;
@@ -2203,8 +2463,8 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
-std::vector<Tensor> split(const Tensor& self, IntArrayRef sizes, int64_t dim) {
-  return at::split_with_sizes(self, sizes, dim);
+std::vector<Tensor> split_symint(const Tensor& self, c10::SymIntArrayRef sizes, int64_t dim) {
+  return at::split_with_sizes_symint(self, sizes, dim);
 }
 
 std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t dim) {
@@ -2727,11 +2987,11 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
     return self.alias();
   }
 
-  DimVector sizes(self.sizes().begin(), self.sizes().end());
+  SymDimVector sizes(self.sym_sizes().begin(), self.sym_sizes().end());
   std::swap(sizes[dim0], sizes[dim1]);
-  DimVector strides(self.strides().begin(), self.strides().end());
+  SymDimVector strides(self.sym_strides().begin(), self.sym_strides().end());
   std::swap(strides[dim0], strides[dim1]);
-  auto result = self.as_strided(sizes, strides);
+  auto result = self.as_strided_symint(sizes, strides);
   propagate_transposed_names(result, self, dim0, dim1);
   return result;
 }
@@ -2759,30 +3019,30 @@ Tensor & t_(Tensor & self) {
   return self.transpose_(0, self.dim() < 2 ? 0 : 1);
 }
 
-std::tuple<DimVector, DimVector>
+std::tuple<SymDimVector, SymDimVector>
 inferSqueezeGeometry(const Tensor &tensor) {
-  DimVector sizes;
-  DimVector strides;
+  SymDimVector sizes;
+  SymDimVector strides;
 
   for(const auto d : c10::irange(tensor.dim())) {
-    if(tensor.sizes()[d] != 1) {
-      sizes.push_back(tensor.sizes()[d]);
-      strides.push_back(tensor.strides()[d]);
+    if(tensor.sym_sizes()[d] != 1) {
+      sizes.push_back(tensor.sym_sizes()[d]);
+      strides.push_back(tensor.sym_strides()[d]);
     }
   }
 
   return std::make_tuple(std::move(sizes), std::move(strides));
 }
 
-std::tuple<DimVector, DimVector>
+std::tuple<SymDimVector, SymDimVector>
 inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
-  DimVector sizes;
-  DimVector strides;
+  SymDimVector sizes;
+  SymDimVector strides;
 
   for(const auto d : c10::irange(tensor.dim())) {
-    if(d != dim || tensor.sizes()[dim] != 1) {
-      sizes.push_back(tensor.sizes()[d]);
-      strides.push_back(tensor.strides()[d]);
+    if(d != dim || tensor.sym_sizes()[dim] != 1) {
+      sizes.push_back(tensor.sym_sizes()[d]);
+      strides.push_back(tensor.sym_strides()[d]);
     }
   }
   return std::make_tuple(std::move(sizes), std::move(strides));
@@ -2812,14 +3072,14 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 // dim is present if squeezing a single dimension and absent if squeezing all dimensions
 Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  DimVector sizes;
-  DimVector strides;
+  SymDimVector sizes;
+  SymDimVector strides;
   std::tie(sizes, strides) = dim.has_value() ? inferSqueezeGeometry(self, dim.value()) : inferSqueezeGeometry(self);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     int64_t shift = 0;
-    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(self.dim());
+    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(0, self.dim());
     for (const auto d : dims) {
       if (self.sizes()[d] == 1) {
         TORCH_CHECK(axis != d, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
@@ -2834,7 +3094,9 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
                                                   axis,
                                                   quantizer->scalar_type());
   }
-  auto result = make_qtensor(self, sizes, strides, quantizer);
+  // TODO: quantized Tensor support for SymInt needs to be added but basic building blocs
+  // are missing for now.
+  auto result = make_qtensor(self, c10::asIntArrayRefSlow(sizes), c10::asIntArrayRefSlow(strides), quantizer);
   if (dim.has_value()) {
     namedinference::propagate_names_except(result, self, {dim.value()});
   } else {
@@ -2847,7 +3109,7 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
 
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  at::Tensor result = self.as_strided(std::get<0>(g), std::get<1>(g));
+  at::Tensor result = self.as_strided_symint(std::get<0>(g), std::get<1>(g));
   auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
@@ -2863,11 +3125,11 @@ Tensor squeeze_quantized(const Tensor& self) {
 Tensor squeeze(const Tensor& self, int64_t dim) {
   int64_t dims = self.dim();
   dim = maybe_wrap_dim(dim, dims);
-  if (dims == 0 || self.sizes()[dim] != 1) {
-    return self.as_strided(self.sizes(), self.strides());
+  if (dims == 0 || self.sym_sizes()[dim] != 1) {
+    return self.as_strided_symint(self.sym_sizes(), self.sym_strides());
   }
   auto g = inferSqueezeGeometry(self, dim);
-  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided_symint(std::get<0>(g), std::get<1>(g));
   namedinference::propagate_names_except(result, self, {dim});
   return result;
 }
@@ -2880,7 +3142,7 @@ Tensor squeeze_quantized(const Tensor& self, int64_t dim) {
 
 Tensor & squeeze_(Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  self.as_strided_(std::get<0>(g), std::get<1>(g));
+  self.as_strided__symint(std::get<0>(g), std::get<1>(g));
   return self;
 }
 
@@ -2888,12 +3150,12 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
   int64_t dims = self.dim();
   dim = maybe_wrap_dim(dim, self.dim());
 
-  if (dims == 0 || self.sizes()[dim] != 1) {
-    self.as_strided_(self.sizes(), self.strides());
+  if (dims == 0 || self.sym_sizes()[dim] != 1) {
+    self.as_strided__symint(self.sym_sizes(), self.sym_strides());
     return self;
   }
   auto g = inferSqueezeGeometry(self, dim);
-  self.as_strided_(std::get<0>(g), std::get<1>(g));
+  self.as_strided__symint(std::get<0>(g), std::get<1>(g));
   return self;
 }
 
@@ -2999,18 +3261,18 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   // of freedom we don't want; for example, consider shape [0, 1, 3, 0], with start_dim=1, end_dim=2.
   // It's clear we want result shape [0, 3, 0] but passing [0, -1, 0] to infer_size means the -1
   // can take on any value and satisfy the constraints.
-  auto slice_numel = c10::multiply_integers(self.sizes().slice(start_dim, end_dim - start_dim + 1));
-  std::vector<int64_t> shape;
+  auto slice_numel = c10::multiply_integers(self.sym_sizes().slice(start_dim, end_dim - start_dim + 1));
+  std::vector<c10::SymInt> shape;
   shape.reserve(self.dim() - end_dim + start_dim);
   for (const auto i : c10::irange(start_dim)) {
-    shape.push_back(self.sizes()[i]);
+    shape.push_back(self.sym_sizes()[i]);
   }
   shape.push_back(slice_numel);
   for (const auto i : c10::irange(end_dim + 1, self.dim())) {
-    shape.push_back(self.sizes()[i]);
+    shape.push_back(self.sym_sizes()[i]);
   }
 
-  return native::reshape(self, shape);
+  return native::reshape_symint(self, shape);
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
@@ -3297,107 +3559,54 @@ Tensor detach(const Tensor& self) {
     /*allow_tensor_metadata_change=*/false));
 }
 
-Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {
-  // some special handling to deal with allow dimension == 0 when self.dim() == 0
-  dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
+Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
+  // some special handling to deal with allow d == 0 when self.dim() == 0
+  auto ndim = self.dim();
+  d = at::maybe_wrap_dim(d, ndim, /*wrap_scalar=*/true);
 
-  const auto sizes = self.sizes();
-  const auto strides = self.strides();
-  int64_t max_size = self.dim() == 0 ? 1 : sizes[dimension];
-  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", dimension,
+  auto sizes = self.sizes().vec();
+  auto strides = self.strides().vec();
+  int64_t max_size = self.dim() == 0 ? 1 : sizes[d];
+  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", d,
                                 " is ", max_size, " but size is ", size);
   TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
-
-  DimVector new_size(self.dim() + 1);
-  DimVector new_stride(self.dim() + 1);
-
-  new_size[self.dim()] = size;
-  new_stride[self.dim()] = self.dim() == 0 ? 1 : strides[dimension];
-  for(const auto d : c10::irange(self.dim())) {
-    const auto self_size = sizes[d];
-    const auto self_stride = strides[d];
-    if(d == dimension) {
-      new_size[d] = (self_size - size) / step + 1;
-      new_stride[d] = step*self_stride;
-    } else {
-      new_size[d] = self_size;
-      new_stride[d] = self_stride;
-    }
+  sizes.push_back(size);
+  strides.push_back(self.dim() == 0 ? 1 : strides[d]);
+  // The if handles the self.dim() == 0 case
+  if (d < ndim) {
+    sizes[d] = (sizes[d] - size) / step + 1;
+    strides[d] *= step;
   }
-
-  return self.as_strided(new_size, new_stride);
+  return self.as_strided(sizes, strides);
 }
 
-template <typename scalar_t>
-void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
-  TORCH_CHECK(self.dim() == 1 || self.dim() == 2, "matrix or a vector expected");
-
-  auto self_data = self.data_ptr<scalar_t>();
-  if (self.dim() == 1) {
-    auto self_size = self.size(0);
-    auto self_stride = self.stride(0);
-    int64_t sz = self_size + std::abs(dimension);
-
-    at::native::resize_output(result, {sz, sz});
-    result.zero_();
-    auto r_data = result.data_ptr<scalar_t>();
-    auto r_stride_0 = result.stride(0);
-    auto r_stride_1 = result.stride(1);
-    r_data += (dimension >= 0 ? dimension*r_stride_1 : -dimension*r_stride_0);
-
-    for (const auto i : c10::irange(self_size)) {
-      r_data[i * (r_stride_0 + r_stride_1)] = self_data[i * self_stride];
-    }
+Tensor diag(const Tensor& self, int64_t offset) {
+  auto ndim = self.dim();
+  TORCH_CHECK(ndim == 1 || ndim == 2, "diag(): Supports 1D or 2D tensors. Got ", self.dim(), "D");
+  if (ndim == 1) {
+    return at::diag_embed(self, offset);
   } else {
-    auto self_stride_0 = self.stride(0);
-    auto self_stride_1 = self.stride(1);
-
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t sz;
-    if (dimension >= 0) {
-      sz = std::min(self.size(0), self.size(1) - dimension);
-    } else {
-      sz = std::min(self.size(0) + dimension, self.size(1));
-    }
-
-    at::native::resize_output(result, {sz});
-    result.zero_();
-    auto r_data = result.data_ptr<scalar_t>();
-    auto r_stride_0 = result.stride(0);
-    self_data += (dimension >= 0 ? dimension * self_stride_1 : -dimension * self_stride_0);
-    for (const auto i : c10::irange(sz)) {
-      r_data[i * r_stride_0] = self_data[i * (self_stride_0 + self_stride_1)];
-    }
+    // We return a copy of the diagonal
+    return at::diagonal_copy(self, offset);
   }
 }
 
-Tensor diag(const Tensor& self, int64_t dimension) {
-  Tensor result = at::empty({0}, self.options());
-  at::diag_out(result, self, dimension);
-  return result;
-}
-
-Tensor& diag_cpu_out(const Tensor& self, int64_t dimension, Tensor &result) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kBool, self.scalar_type(), "diag", [&] {
-    apply_diag<scalar_t>(result, self, dimension);
-  });
-  return result;
-}
-
-Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagonal) {
-  auto ndimension = input_sizes.size();
-  AT_ASSERT(ndimension == 1 || ndimension == 2);
-
-  if (ndimension == 1 || input_sizes[0] == input_sizes[1]) {
-    return grad.diag(diagonal);
+Tensor& diag_out(const Tensor& self, int64_t offset, Tensor& out) {
+  auto ndim = self.dim();
+  TORCH_CHECK(ndim == 1 || ndim == 2, "Supports 1D or 2D tensors. Got ", self.dim(), "D");
+  if (ndim == 1) {
+    TORCH_CHECK(
+        canCast(self.scalar_type(), out.scalar_type()),
+        "diag: result type ", self.scalar_type(), " can't be cast to the desired out= type ",
+        out.scalar_type());
+    return at::diag_embed_out(out, self, offset);
+  } else {
+    return at::diagonal_copy_out(out, self, offset);
   }
-
-  // Input was a matrix but was not square
-  return at::diagonal_backward(grad, input_sizes, diagonal, 0, 1);
 }
 
-Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
+Tensor diagonal_backward_symint(const Tensor & grad, SymIntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto grad_input = at::zeros_symint(input_sizes, grad.options());
   auto diag = grad_input.diagonal(offset, dim1, dim2);
   diag.copy_(grad);
   return grad_input;
@@ -3647,8 +3856,16 @@ at::Tensor& _sparse_broadcast_to_copy_out(const at::Tensor & self, at::IntArrayR
 
 
 at::Tensor& diagonal_copy_out(const at::Tensor & self, int64_t offset, int64_t dim1, int64_t dim2, at::Tensor & out) {
-  auto tmp = self.diagonal(offset, dim1, dim2);
-  out.copy_(tmp);
+  TORCH_CHECK(
+    out.device() == self.device(),
+    "diagonal_copy: Expected out and self tensors to be on the same device, but got ",
+    "out on ", out.device(), " and self on ", self.device());
+  auto result = self.diagonal(offset, dim1, dim2);
+  at::native::resize_output(out, result.sizes());
+  TORCH_CHECK(
+      canCast(result.scalar_type(), out.scalar_type()),
+      "diagonal_copy: result type ", result.scalar_type(), " can't be cast to the desired out= type ", out.scalar_type());
+  out.copy_(result);
   return out;
 }
 
@@ -3841,6 +4058,14 @@ at::Tensor& alias_copy_out(const at::Tensor & self, at::Tensor & out) {
   auto tmp = self.alias();
   out.copy_(tmp);
   return out;
+}
+
+int64_t sparse_dim_strided(const at::Tensor& self) {
+  return 0;
+}
+
+int64_t dense_dim_strided(const at::Tensor& self) {
+  return self.dim();
 }
 
 } // namespace native
