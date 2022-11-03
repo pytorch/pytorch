@@ -40,6 +40,24 @@ void initNvFuserPythonBindings(PyObject* module) {
       .value("ComplexDouble", Nvf::DataType::ComplexDouble)
       .value("Null", Nvf::DataType::Null);
 
+  nvfuser.def(
+      "compute_contiguity",
+      [](const std::vector<int64_t>& sizes,
+         const std::vector<int64_t>& strides) {
+        py::tuple contiguity(sizes.size());
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "compute_contiguity: Sizes and strides must have the same number of dimensions");
+        if (sizes.size() == 0) {
+          return contiguity;
+        }
+        contiguity[sizes.size() - 1] = strides.back() == 1;
+        for (int64_t i = static_cast<int64_t>(sizes.size()) - 2; i >= 0; --i) {
+          contiguity[i] = strides[i] == strides[i + 1] * sizes[i + 1];
+        }
+        return contiguity;
+      });
+
   //! Binding the FusionCache that holds a cache of Fusions
   //! This is only bound to provide an interface to get the number of fusions
   //! that are cached.
@@ -1346,7 +1364,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             output_shape.size() >= broadcast_dims.size(),
             "broadcast_dims vector size is too big for output shape!");
         nvfuser::Tensor output = fd->defineTensor();
-        fd->defineRecord(new nvfuser::BroadcastOpRecord(
+        fd->defineRecord(new nvfuser::BroadcastInDimOpRecord(
             {fd->recordingState(arg())},
             {fd->recordingState(output())},
             "ops.broadcast_in_dim",
@@ -1357,6 +1375,24 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("arg"),
       py::arg("output_shape"),
       py::arg("broadcast_dims"),
+      py::return_value_policy::reference);
+  nvf_ops.def(
+      "broadcast",
+      [](nvfuser::FusionDefinition::Operators& self,
+         nvfuser::Tensor arg,
+         std::vector<bool>& is_broadcast_dim) -> nvfuser::Tensor {
+        FUSER_PERF_SCOPE("Operators.broadcast");
+        nvfuser::FusionDefinition* fd = self.fusion_definition;
+        nvfuser::Tensor output = fd->defineTensor();
+        fd->defineRecord(new nvfuser::BroadcastOpRecord(
+            {fd->recordingState(arg())},
+            {fd->recordingState(output())},
+            "ops.broadcast",
+            is_broadcast_dim));
+        return output;
+      },
+      py::arg("arg"),
+      py::arg("is_broadcast_dim"),
       py::return_value_policy::reference);
 }
 
