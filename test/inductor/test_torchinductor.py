@@ -4083,6 +4083,20 @@ class CommonTemplate:
                 else:
                     self.assertEqual(len(inps), 0)
 
+    @unittest.skipIf(HAS_CUDA, "histogramdd only supports cpu")
+    def test_kwargs(self):
+        def fn(x, y):
+            return torch.histogramdd(
+                x,
+                bins=[3, 3],
+                weight=y,
+            )
+
+        self.common(
+            fn,
+            [torch.randn((4, 2)), torch.randn((4))],
+        )
+
 
 if HAS_CPU:
 
