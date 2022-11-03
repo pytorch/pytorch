@@ -1344,10 +1344,11 @@ class CommonTemplate:
             v = torch.randn(x_shape, dtype=torch.float32).to(
                 memory_format=memory_format
             )
-            self.common(
-                mod,
-                (v,),
-            )
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     # For gpu path, there has a accurcy issue,
     # see https://github.com/pytorch/pytorch/issues/87745.
@@ -1431,10 +1432,11 @@ class CommonTemplate:
             v = torch.randn(x_shape, dtype=torch.float32).to(
                 memory_format=memory_format
             )
-            self.common(
-                mod,
-                (v,),
-            )
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     def test_gather1(self):
         def fn(a, b):
