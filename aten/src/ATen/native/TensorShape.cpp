@@ -1200,10 +1200,10 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
   int64_t allDim = self.dim();
   int64_t end = start+length;
   TORCH_CHECK(allDim > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  TORCH_CHECK(length >= 0, "narrow() doesn't support negative length.");
+  TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
   TORCH_CHECK(dim >= 0 && dim < allDim,
     "Dimension ", dim, " out of range. Expecting 0 <= dim < ", allDim, ".");
-  TORCH_CHECK(start >= 0 && length >= 0 && end <= self.size(dim),
+  TORCH_CHECK(start >= 0 && end <= self.size(dim),
     "Invalid range to narrow. range(start, start+length) must be a subset of range(0, ", self.size(dim), ").")
   Tensor indices = self._indices();
   int64_t sparse_dim = self.sparse_dim();
@@ -1233,24 +1233,24 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  TORCH_CHECK(length >= 0, "narrow() doesn't support negative length.");
+  TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
   auto cur_size = self.size(dim);
   if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
     start = maybe_wrap_dim(start, cur_size);
   }
-  TORCH_CHECK(length >= 0 && start <= cur_size - length,
+  TORCH_CHECK(start <= cur_size - length,
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   return at::slice(self, dim, start, start + length, 1);
 }
 
 Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  TORCH_CHECK(length >= 0, "narrow() doesn't support negative length.");
+  TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
   auto cur_size = self.sym_size(dim);
   if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
     start = maybe_wrap_dim(start, cur_size);
   }
-  TORCH_CHECK(length >= 0 && start <= cur_size - length,
+  TORCH_CHECK(start <= cur_size - length,
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   return at::slice_symint(self, dim, start, start + length, 1);
 }
@@ -2996,7 +2996,7 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     int64_t shift = 0;
-    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(self.dim());
+    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(0, self.dim());
     for (const auto d : dims) {
       if (self.sizes()[d] == 1) {
         TORCH_CHECK(axis != d, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
