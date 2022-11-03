@@ -395,41 +395,6 @@ class SingleOpModel(torch.nn.Module):
         return self.operator(*args, **self.kwargs)
 
 
-def parameterize_opsets(test_class, opsets: Sequence[int]):
-    """Parameterizes the TestConsistency class with the given opsets."""
-    for opset in opsets:
-        # Generate a test method for each opset
-        test_name = f"test_output_match_opset_{opset}"
-        base_method = test_class.get_test_base(opset)
-        # Important to rename the test method so that DecorateInfo can find it
-        base_method.__name__ = test_name
-
-        # Update the ops to skip in the OpInfo database
-        decorated = skip_ops(
-            OPS_DB,
-            test_class.__name__,
-            test_name,
-            opset=opset,
-            skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
-        )(base_method)
-
-        # Create parameterized tests for each op
-        if opset < 13:
-            # bfloat16 is not supported before opset 13
-            allowed_dtypes = tuple(
-                [dtype for dtype in SUPPORTED_DTYPES if dtype != torch.bfloat16]
-            )
-        else:
-            allowed_dtypes = SUPPORTED_DTYPES
-        filtered_ops = [op for op in OPS_DB if op.name in ALLOWLIST_OP]
-        decorated = common_device_type.ops(
-            filtered_ops,
-            allowed_dtypes=allowed_dtypes,
-        )(decorated)
-
-        setattr(test_class, test_name, decorated)
-
-
 class TestConsistency(common_utils.TestCase):
     """Test consistency of exported ONNX models.
 
@@ -437,7 +402,7 @@ class TestConsistency(common_utils.TestCase):
     """
 
     @classmethod
-    def get_test_base(cls, opset: int):
+    def create_test_base(cls, opset: int):
         """Returns the base test method for the given opset."""
 
         def _output_match_base(self, device: str, dtype: torch.dtype, op):
@@ -491,8 +456,43 @@ class TestConsistency(common_utils.TestCase):
 
         return _output_match_base
 
+    @classmethod
+    def parameterize_opsets(cls, opsets: Sequence[int]):
+        """Parameterizes the TestConsistency class with the given opsets."""
+        for opset in opsets:
+            # Generate a test method for each opset
+            test_name = f"test_output_match_opset_{opset}"
+            base_method = cls.create_test_base(opset)
+            # Important to rename the test method so that DecorateInfo can find it
+            base_method.__name__ = test_name
 
-parameterize_opsets(TestConsistency, TESTED_OPSETS)
+            # Update the ops to skip in the OpInfo database
+            decorated = skip_ops(
+                OPS_DB,
+                cls.__name__,
+                test_name,
+                opset=opset,
+                skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
+            )(base_method)
+
+            # Create parameterized tests for each op
+            if opset < 13:
+                # bfloat16 is not supported before opset 13
+                allowed_dtypes = tuple(
+                    [dtype for dtype in SUPPORTED_DTYPES if dtype != torch.bfloat16]
+                )
+            else:
+                allowed_dtypes = SUPPORTED_DTYPES
+            filtered_ops = [op for op in OPS_DB if op.name in ALLOWLIST_OP]
+            decorated = common_device_type.ops(
+                filtered_ops,
+                allowed_dtypes=allowed_dtypes,
+            )(decorated)
+
+            setattr(cls, test_name, decorated)
+
+
+TestConsistency.parameterize_opsets(TESTED_OPSETS)
 common_device_type.instantiate_device_type_tests(
     TestConsistency, globals(), only_for="cpu"
 )
