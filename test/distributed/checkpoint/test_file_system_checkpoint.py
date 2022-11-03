@@ -113,8 +113,9 @@ class MyShardedModel3(torch.nn.Module):
 
 
 class TestDistributedStateDictSaveLoad(TestCase):
-    @parametrize("thread_count", _THREAD_COUNTS)
-    def test_read_write_only_tensor(self, thread_count) -> None:
+    # @parametrize("thread_count", _THREAD_COUNTS)
+    # def test_read_write_only_tensor(self, thread_count) -> None:
+    def test_read_write_only_tensor(self) -> None:
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
 
@@ -184,8 +185,9 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     @with_comms(init_rpc=False)
-    @parametrize("thread_count", _THREAD_COUNTS)
-    def test_read_write_shard_tensor(self, thread_count) -> None:
+    # @parametrize("thread_count", _THREAD_COUNTS)
+    # def test_read_write_shard_tensor(self, thread_count) -> None:
+    def test_read_write_shard_tensor(self) -> None:
         paths = [tempfile.mkdtemp()]
         dist.broadcast_object_list(paths)
 
@@ -257,8 +259,9 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
-    @parametrize("thread_count", _THREAD_COUNTS)
-    def test_load_with_different_shard_plan(self, thread_count) -> None:
+    # @parametrize("thread_count", _THREAD_COUNTS)
+    # def test_load_with_different_shard_plan(self, thread_count) -> None:
+    def test_load_with_different_shard_plan(self) -> None:
         path = self.get_file_path()
 
         # We hardcode the assumption of how many shards are around
@@ -431,8 +434,9 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
-    @parametrize("thread_count", _THREAD_COUNTS)
-    def test_save_load_bytes(self, thread_count) -> None:
+    # @parametrize("thread_count", _THREAD_COUNTS)
+    # def test_save_load_bytes(self, thread_count) -> None:
+    def test_save_load_bytes(self) -> None:
         path = self.get_file_path()
 
         state_dict_to_save = {"bytes0": [1], "bytes1": "string"}
@@ -451,9 +455,12 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
-    @parametrize("thread_count", _THREAD_COUNTS)
+    # @parametrize("thread_count", _THREAD_COUNTS)
+    # def test_switch_between_sharded_tensor_to_tensor(
+    #     self, thread_count
+    # ) -> None:
     def test_switch_between_sharded_tensor_to_tensor(
-        self, thread_count
+        self
     ) -> None:
         path = self.get_file_path()
         tensor_size = 32
@@ -542,9 +549,9 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     )
 
 
-instantiate_parametrized_tests(TestDistributedStateDictSaveLoad)
-instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
-instantiate_parametrized_tests(TestDistributedReshardOnLoad)
+# instantiate_parametrized_tests(TestDistributedStateDictSaveLoad)
+# instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
+# instantiate_parametrized_tests(TestDistributedReshardOnLoad)
 
 
 if __name__ == "__main__":
