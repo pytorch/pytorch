@@ -33,6 +33,10 @@ on:
         default: "3.8"
         description: |
           The python version to be used. Will be 3.8 by default
+      environment-file:
+        required: false
+        type: string
+        description: Set the conda environment file used to setup macOS build.
       test-matrix:
         required: false
         type: string
@@ -83,9 +87,20 @@ jobs:
           fi
 
       - name: Setup miniconda
+        if: inputs.environment-file == ''
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: ${{ inputs.python_version }}
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+
+      # This option is used when cross-compiling arm64 from x86-64. Specifically, we need arm64 conda
+      # environment even though the arch is x86-64
+      - name: Setup miniconda using the provided environment file
+        if: inputs.environment-file != ''
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: ${{ inputs.python_version }}
+          environment-file: ${{ inputs.environment-file }}
 
       - name: Install macOS homebrew dependencies
         run: |

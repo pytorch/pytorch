@@ -451,11 +451,11 @@ std::vector<Shape> compute_shape_expand(
   std::vector<int64_t> target_size(_sizes.size());
   for (const auto idx : c10::irange(_sizes.size())) {
     if (_sizes[idx].is_symbolic()) {
-      c10::SymIntNode symbolicIntNode = _sizes[idx].toSymIntNodeImpl();
-      auto* lazySymIntNode =
-          dynamic_cast<torch::lazy::SymIntNodeImpl*>(symbolicIntNode.get());
-      TORCH_INTERNAL_ASSERT(lazySymIntNode);
-      auto size_node = lazySymIntNode->node_;
+      c10::SymNode symbolicIntNode = _sizes[idx].toSymNodeImpl();
+      auto* lazySymNode =
+          dynamic_cast<torch::lazy::SymNodeImpl*>(symbolicIntNode.get());
+      TORCH_INTERNAL_ASSERT(lazySymNode);
+      auto size_node = lazySymNode->node_;
       auto static_value =
           std::dynamic_pointer_cast<torch::lazy::DimensionNode>(size_node)
               ->getStaticValue();

@@ -64,6 +64,7 @@ if is_available():
         _reduce_scatter_base,
         _create_process_group_wrapper,
         _rank_not_in_group,
+        _c10d_error_logger,
     )
 
     from .rendezvous import (
@@ -81,5 +82,8 @@ else:
     #   python test/test_public_bindings.py -k test_correct_module_names
     # working even when USE_DISTRIBUTED=0.  Feel free to add more
     # stubs as necessary.
-    class ProcessGroup:  # type: ignore[no-redef]
+    # We cannot define stubs directly because they confuse pyre
+
+    class _ProcessGroupStub:
         pass
+    sys.modules["torch.distributed"].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]

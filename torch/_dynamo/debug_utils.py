@@ -128,7 +128,7 @@ def _cuda_system_info_comment():
         )
         model_str += f"{cuda_version_out}\n"
     except FileNotFoundError:
-        model_str += "nvcc not found\n"
+        model_str += "# nvcc not found\n"
 
     gpu_names = subprocess.run(
         ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
@@ -179,11 +179,6 @@ from {config.inductor_import}.compile_fx import compile_fx_inner
 from {config.dynamo_import}.debug_utils import same_two_models
 """
 
-NVFUSER_IMPORT = """
-from torch.fx.passes.backends.nvfuser import NvFuserBackend
-nvfuser = NvFuserBackend()
-"""
-
 COMPILER_REPRO_OPTIONS = {
     "inductor": (INDUCTOR_IMPORT, "compile_fx_inner", "inductor_fails"),
     "inductor_accuracy": (
@@ -191,7 +186,6 @@ COMPILER_REPRO_OPTIONS = {
         "compile_fx_inner",
         "inductor_accuracy_fails",
     ),
-    "nvfuser": (NVFUSER_IMPORT, "nvfuser", "nvfuser_fails"),
 }
 
 
@@ -301,22 +295,6 @@ def inductor_fails(fx_g, args, check_str=None):
     try:
         compile_mod = compile_fx_inner(fx_g, args)
         compile_mod(args)
-    except Exception as e:
-        if check_str is not None and check_str not in repr(e):
-            return False
-        print(repr(e))
-        return True
-    return False
-
-
-def nvfuser_fails(fx_g, args, check_str=None):
-    from torch.fx.passes.backends.nvfuser import NvFuserBackend
-
-    nvfuser = NvFuserBackend()
-
-    try:
-        compile_mod = nvfuser(fx_g, args)
-        compile_mod = compile_mod(*args)
     except Exception as e:
         if check_str is not None and check_str not in repr(e):
             return False
@@ -796,9 +774,8 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
-                        "Compiled Fx GraphModule failed with following error. Setting up minifier."
+                        "Compiled Fx GraphModule failed. Creating script to minify the error."
                     )
-                    log.exception(exc)
                     if config.repro_level == 1:
                         dump_state_fn = functools.partial(
                             dump_backend_state, compiler_name=compiler_name
@@ -812,9 +789,10 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                             example_inputs,
                             compiler_name,
                         )
-                    raise ValueError(
-                        f"Issue detected. Repro at {get_minifier_repro_path()}."
+                    exc.minifier_path = os.path.join(
+                        minifier_dir(), "minifier_launcher.py"
                     )
+                    raise
         else:
             compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
 
@@ -840,9 +818,8 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     except Exception as exc:
         orig_failure = str(exc)
         log.warning(
-            "Compiled Fx GraphModule failed with following error. Starting minifier."
+            "Compiled Fx GraphModule failed. Creating script to minify the error."
         )
-        log.exception(exc)
         dump_state_fn = functools.partial(
             dump_backend_state, compiler_name=compiler_name
         )
