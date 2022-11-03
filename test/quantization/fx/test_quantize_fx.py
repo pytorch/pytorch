@@ -130,7 +130,7 @@ from torch.ao.quantization.fx.custom_config import (
 )
 
 from torch.ao.quantization.fx.qconfig_mapping_utils import (
-    maybe_adjust_qconfig_for_module_name_object_type_order,
+    _maybe_adjust_qconfig_for_module_name_object_type_order,
 )
 
 from torch.ao.quantization.fx.utils import (
@@ -1944,9 +1944,9 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[1], key2)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key1], qconfig1)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key2], qconfig2)
-        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+        self.assertEqual(_maybe_adjust_qconfig_for_module_name_object_type_order(
                          qconfig_mapping, "mod1", torch.nn.Linear, 0, None), qconfig1)
-        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+        self.assertEqual(_maybe_adjust_qconfig_for_module_name_object_type_order(
                          qconfig_mapping, "mod2", torch.nn.ReLU, 1, None), qconfig2)
         # Override existing key
         qconfig_mapping.set_module_name_object_type_order("mod1", torch.nn.Linear, 0, qconfig3)
@@ -1955,16 +1955,16 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(list(qconfig_mapping.module_name_object_type_order_qconfigs)[1], key2)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key1], qconfig3)
         self.assertEqual(qconfig_mapping.module_name_object_type_order_qconfigs[key2], qconfig2)
-        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+        self.assertEqual(_maybe_adjust_qconfig_for_module_name_object_type_order(
                          qconfig_mapping, "mod1", torch.nn.Linear, 0, None), qconfig3)
-        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+        self.assertEqual(_maybe_adjust_qconfig_for_module_name_object_type_order(
                          qconfig_mapping, "mod2", torch.nn.ReLU, 1, None), qconfig2)
         # No match
-        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+        self.assertEqual(_maybe_adjust_qconfig_for_module_name_object_type_order(
                          qconfig_mapping, "mod123", torch.nn.Linear, 0, None), None)
-        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+        self.assertEqual(_maybe_adjust_qconfig_for_module_name_object_type_order(
                          qconfig_mapping, "mod1", torch.nn.Linear, 35, None), None)
-        self.assertEqual(maybe_adjust_qconfig_for_module_name_object_type_order(
+        self.assertEqual(_maybe_adjust_qconfig_for_module_name_object_type_order(
                          qconfig_mapping, "mod2", torch.nn.Conv2d, 1, None), None)
 
     def _get_qconfig_dict_for_qconfig_mapping_test(self, global_qconfig, qconfig1, qconfig2):

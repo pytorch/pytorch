@@ -27,10 +27,10 @@ from ..qconfig_mapping_utils import (
     _update_qconfig_for_qat,
 )
 from .qconfig_mapping_utils import (
-    generate_node_name_to_qconfig,
-    compare_prepare_convert_qconfig_mappings,
-    update_qconfig_for_fusion,
-    is_qconfig_supported_by_dtype_configs,
+    _generate_node_name_to_qconfig,
+    _compare_prepare_convert_qconfig_mappings,
+    _update_qconfig_for_fusion,
+    _is_qconfig_supported_by_dtype_configs,
 )
 from torch.ao.quantization.backend_config.utils import (
     get_root_module_to_quantized_reference_module,
@@ -318,7 +318,7 @@ def convert_weighted_module(
     # skip converting to reference quantized module if the qconfig is not supported
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config)
     dtype_configs = pattern_to_dtype_configs.get(type(original_module), [])
-    if not is_qconfig_supported_by_dtype_configs(qconfig, dtype_configs):
+    if not _is_qconfig_supported_by_dtype_configs(qconfig, dtype_configs):
         return
 
     # TODO: rename _weight_is_statically_quantized to weight_is_int8_quantized
@@ -555,10 +555,10 @@ def convert(
 
         if model._is_qat:
             _update_qconfig_for_qat(qconfig_mapping, {})
-        update_qconfig_for_fusion(model, qconfig_mapping)
+        _update_qconfig_for_fusion(model, qconfig_mapping)
 
-        compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]
-        convert_node_name_to_qconfig = generate_node_name_to_qconfig(
+        _compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]
+        convert_node_name_to_qconfig = _generate_node_name_to_qconfig(
             model, modules_copy, model.graph, qconfig_mapping, node_name_to_scope)
         # check the convert_node_name_to_qconfig generated and ensure that
         # all the values either match what was set in prepare node_name_to_qconfig

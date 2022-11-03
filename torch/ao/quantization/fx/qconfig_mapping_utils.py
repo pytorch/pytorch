@@ -34,19 +34,11 @@ from ..qconfig_mapping_utils import (
 )
 
 
-# TODO: revisit this list. Many helper methods shouldn't be public
-__all__ = [
-    "check_is_valid_config_dict",
-    "compare_prepare_convert_qconfig_mappings",
-    "generate_node_name_to_qconfig",
-    "is_qconfig_supported_by_dtype_configs",
-    "maybe_adjust_qconfig_for_module_name_object_type_order",
-    "update_qconfig_for_fusion",
-]
+__all__ = []
 
 
 
-def maybe_adjust_qconfig_for_module_name_object_type_order(
+def _maybe_adjust_qconfig_for_module_name_object_type_order(
     qconfig_mapping: QConfigMapping,
     cur_module_path: str,
     cur_object_type: Callable,
@@ -63,7 +55,7 @@ def maybe_adjust_qconfig_for_module_name_object_type_order(
     return fallback_qconfig
 
 
-def update_qconfig_for_fusion(model: GraphModule, qconfig_mapping: QConfigMapping):
+def _update_qconfig_for_fusion(model: GraphModule, qconfig_mapping: QConfigMapping):
     """
     Update the QConfigMapping to account for fused modules such as LinearReLU.
     This assumes the QConfigMapping's attributes have already been converted to OrderedDicts.
@@ -100,7 +92,7 @@ def update_qconfig_for_fusion(model: GraphModule, qconfig_mapping: QConfigMappin
             if fused_qconfig is not None:
                 object_type_dict[type(maybe_fused_module)] = fused_qconfig
 
-def generate_node_name_to_qconfig(
+def _generate_node_name_to_qconfig(
         root: torch.nn.Module,
         modules: Dict[str, torch.nn.Module],
         input_graph: Graph,
@@ -137,7 +129,7 @@ def generate_node_name_to_qconfig(
             cur_object_type_idx = \
                 submodule_to_object_type_to_cur_idx[module_path][node.target]
             submodule_to_object_type_to_cur_idx[module_path][node.target] += 1
-            qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
+            qconfig = _maybe_adjust_qconfig_for_module_name_object_type_order(
                 qconfig_mapping, module_path, node.target, cur_object_type_idx, qconfig)
             qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
 
@@ -171,7 +163,7 @@ def generate_node_name_to_qconfig(
             cur_object_type_idx = \
                 submodule_to_object_type_to_cur_idx[parent_name][module_type]
             submodule_to_object_type_to_cur_idx[parent_name][module_type] += 1
-            qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
+            qconfig = _maybe_adjust_qconfig_for_module_name_object_type_order(
                 qconfig_mapping, parent_name, module_type, cur_object_type_idx,
                 qconfig)
             qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
@@ -187,7 +179,7 @@ def generate_node_name_to_qconfig(
     return node_name_to_qconfig
 
 
-def check_is_valid_config_dict(config_dict: Any, allowed_keys: Set[str], dict_name: str) -> None:
+def _check_is_valid_config_dict(config_dict: Any, allowed_keys: Set[str], dict_name: str) -> None:
     r""" Checks if the given config_dict has the correct keys
 
     Args:
@@ -202,7 +194,7 @@ def check_is_valid_config_dict(config_dict: Any, allowed_keys: Set[str], dict_na
                 '\' instead.')
 
 
-def compare_prepare_convert_qconfig_mappings(
+def _compare_prepare_convert_qconfig_mappings(
         prepare_qconfig_mapping: QConfigMapping,
         convert_qconfig_mapping: QConfigMapping):
     r""" Compare the qconfig_mapping passed in convert to the one from prepare and check the values
@@ -233,7 +225,7 @@ def compare_prepare_convert_qconfig_mappings(
                 "Expected convert QConfigMapping to have the same qconfig as prepare for key {} {}; \
                 prepare: {}; convert: {}".format(dict_names[i], name, prepare_dicts[i][name], convert_dicts[i][name])
 
-def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[DTypeConfig]):
+def _is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[DTypeConfig]):
     for dtype_config in dtype_configs:
         is_dynamic = dtype_config.is_dynamic
         if is_dynamic is None:
