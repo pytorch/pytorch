@@ -12,7 +12,7 @@ from torch.ao.quantization.quantize import _observer_forward_hook
 from torch.ao.quantization.quantize import _propagate_qconfig_helper
 from torch.ao.quantization.quantize import _remove_activation_post_process
 from torch.ao.quantization.quantize import _remove_qconfig
-from torch.ao.quantization.quantize import add_observer_
+from torch.ao.quantization.quantize import _add_observer_
 from torch.ao.quantization.quantize import add_quant_dequant
 from torch.ao.quantization.quantize import convert
 from torch.ao.quantization.quantize import _get_observer_dict

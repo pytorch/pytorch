@@ -24,6 +24,7 @@ def are_aliased(x, y):
 def _functionalize(f, *, reapply_views: bool):
     def wrapped(a):
         input_functional = torch._to_functional_tensor(a)
+        input_functional.requires_grad = a.requires_grad
         torch._enable_functionalization(reapply_views=reapply_views)
         try:
             out = f(input_functional)
@@ -100,6 +101,68 @@ class TestFunctionalization(TestCase):
             z2 = z + 1
             return z2
         self.assert_functionalization(f, torch.ones(4))
+
+    def test_freeze(self):
+        def f(x):
+            y = x.clone()
+            z = y[0]
+            torch._freeze_functional_tensor(y)
+            x.add_(1)
+            self.assertRaises(RuntimeError, lambda: y.add_(1))
+            self.assertRaises(RuntimeError, lambda: z.add_(1))
+            return z
+
+        _functionalize(f, reapply_views=True)(torch.ones(3, 3))
+
+    def test_view_clone_view_inplace(self):
+        def f(input):
+            shape = [1, 1024, 128, 128]
+            input_reshaped = input.view(shape)
+            out = input_reshaped.clone()
+            r = out.view(input.shape)
+            r.relu_()
+            return r
+
+        def g(x):
+            loss = f(x).sum()
+            from functorch._src.aot_autograd import setup_stacktrace_preservation_hooks
+            import torch.fx.traceback as fx_traceback
+            setup_stacktrace_preservation_hooks([loss.grad_fn])
+            with fx_traceback.override_stack_trace():
+                loss.backward()
+            return x.grad
+
+        with torch.autograd.detect_anomaly(check_nan=False):
+            logs = self.get_logs(g, torch.ones(16, 64, 128, 128, requires_grad=True))
+        self.assertExpectedInline(logs, """\
+
+
+
+def forward(self, a_1):
+    view_copy = torch.ops.aten.view_copy.default(a_1, [1, 1024, 128, 128]);  a_1 = None
+    clone = torch.ops.aten.clone.default(view_copy);  view_copy = None
+    view_copy_1 = torch.ops.aten.view_copy.default(clone, [16, 64, 128, 128]);  clone = None
+    relu = torch.ops.aten.relu.default(view_copy_1);  view_copy_1 = None
+    sum_1 = torch.ops.aten.sum.default(relu)
+    ones_like = torch.ops.aten.ones_like.default(sum_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand_copy = torch.ops.aten.expand_copy.default(ones_like, [16, 64, 128, 128]);  ones_like = None
+    new_zeros = torch.ops.aten.new_zeros.default(expand_copy, [16777216])
+    as_strided_copy = torch.ops.aten.as_strided_copy.default(new_zeros, [16, 64, 128, 128], [1048576, 16384, 128, 1], 0)
+    as_strided_copy_1 = torch.ops.aten.as_strided_copy.default(new_zeros, [1, 1024, 128, 128], [16777216, 16384, 128, 1], 0)
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(new_zeros, expand_copy, [16, 64, 128, 128], [1048576, 16384, 128, 1], 0);  new_zeros = expand_copy = None
+    as_strided_copy_2 = torch.ops.aten.as_strided_copy.default(as_strided_scatter, [1, 1024, 128, 128], [16777216, 16384, 128, 1], 0);  as_strided_scatter = None
+    new_empty_strided = torch.ops.aten.new_empty_strided.default(as_strided_copy_2, [1, 1024, 128, 128], [16777216, 16384, 128, 1])
+    as_strided_copy_3 = torch.ops.aten.as_strided_copy.default(as_strided_copy_2, [16, 64, 128, 128], [1048576, 16384, 128, 1], 0)
+    as_strided_copy_4 = torch.ops.aten.as_strided_copy.default(as_strided_copy_2, [16, 64, 128, 128], [1048576, 16384, 128, 1], 0)
+    clone_1 = torch.ops.aten.clone.default(as_strided_copy_4, memory_format = torch.contiguous_format);  as_strided_copy_4 = None
+    threshold_backward = torch.ops.aten.threshold_backward.default(clone_1, relu, 0);  clone_1 = relu = None
+    _reshape_alias_copy = torch.ops.aten._reshape_alias_copy.default(as_strided_copy_2, [16, 64, 128, 128], [1048576, 16384, 128, 1])
+    detach_copy = torch.ops.aten.detach_copy.default(_reshape_alias_copy);  _reshape_alias_copy = None
+    as_strided_scatter_1 = torch.ops.aten.as_strided_scatter.default(as_strided_copy_2, threshold_backward, [16, 64, 128, 128], [1048576, 16384, 128, 1], 0);  as_strided_copy_2 = threshold_backward = None
+    _reshape_alias_copy_1 = torch.ops.aten._reshape_alias_copy.default(as_strided_scatter_1, [16, 64, 128, 128], [1048576, 16384, 128, 1]);  as_strided_scatter_1 = None
+    detach_copy_1 = torch.ops.aten.detach_copy.default(_reshape_alias_copy_1);  _reshape_alias_copy_1 = None
+    return detach_copy_1
+    """)  # noqa: B950
 
     def test_simple(self):
         def f(x):

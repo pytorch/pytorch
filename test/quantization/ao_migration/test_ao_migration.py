@@ -14,7 +14,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             '_propagate_qconfig_helper',
             '_remove_activation_post_process',
             '_remove_qconfig',
-            'add_observer_',
+            '_add_observer_',
             'add_quant_dequant',
             'convert',
             '_get_observer_dict',
@@ -271,7 +271,7 @@ class TestAOMigrationNNQuantized(AOMigrationTestCase):
             '_ntuple_from_first',
             '_pair_from_first',
             '_quantize_weight',
-            'hide_packed_params_repr',
+            '_hide_packed_params_repr',
             'WeightedQuantizedModule',
         ]
         self._test_function_import('utils', function_list,

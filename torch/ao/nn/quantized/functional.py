@@ -447,7 +447,7 @@ def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = Fals
     :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)`
 
     Args:
-        input: Quaintized input
+        input: Quantized input
         negative_slope: The slope of the negative input
         inplace: Inplace modification of the input tensor
         scale, zero_point: Scale and zero point of the output tensor.

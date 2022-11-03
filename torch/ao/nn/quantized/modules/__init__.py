@@ -22,6 +22,40 @@ from .rnn import LSTM
 
 from .functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
 
+__all__ = [
+    'BatchNorm2d',
+    'BatchNorm3d',
+    'Conv1d',
+    'Conv2d',
+    'Conv3d',
+    'ConvTranspose1d',
+    'ConvTranspose2d',
+    'ConvTranspose3d',
+    'DeQuantize',
+    'ELU',
+    'Embedding',
+    'EmbeddingBag',
+    'GroupNorm',
+    'Hardswish',
+    'InstanceNorm1d',
+    'InstanceNorm2d',
+    'InstanceNorm3d',
+    'LayerNorm',
+    'LeakyReLU',
+    'Linear',
+    'LSTM',
+    'MultiheadAttention',
+    'Quantize',
+    'ReLU6',
+    'Sigmoid',
+    'Softmax',
+    'Dropout',
+    'PReLU',
+    # Wrapper modules
+    'FloatFunctional',
+    'FXFloatFunctional',
+    'QFunctional',
+]
 
 class Quantize(torch.nn.Module):
     r"""Quantizes an incoming tensor
@@ -98,38 +132,3 @@ class DeQuantize(torch.nn.Module):
     @staticmethod
     def from_float(mod):
         return DeQuantize()
-
-__all__ = [
-    'BatchNorm2d',
-    'BatchNorm3d',
-    'Conv1d',
-    'Conv2d',
-    'Conv3d',
-    'ConvTranspose1d',
-    'ConvTranspose2d',
-    'ConvTranspose3d',
-    'DeQuantize',
-    'ELU',
-    'Embedding',
-    'EmbeddingBag',
-    'GroupNorm',
-    'Hardswish',
-    'InstanceNorm1d',
-    'InstanceNorm2d',
-    'InstanceNorm3d',
-    'LayerNorm',
-    'LeakyReLU',
-    'Linear',
-    'LSTM',
-    'MultiheadAttention',
-    'Quantize',
-    'ReLU6',
-    'Sigmoid',
-    'Softmax',
-    'Dropout',
-    'PReLU',
-    # Wrapper modules
-    'FloatFunctional',
-    'FXFloatFunctional',
-    'QFunctional',
-]
