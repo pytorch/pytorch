@@ -1278,7 +1278,7 @@ our [CI wiki](https://github.com/pytorch/pytorch/wiki/Debugging-using-with-ssh-f
 ### Which commit is used in CI?
 
 For CI run on `master`, this repository is checked out for a given `master`
-commit, and CI is run on that commit (there isn't really any other choice). 
+commit, and CI is run on that commit (there isn't really any other choice).
 
 For PRs, however, it's a bit more complicated. Consider this commit graph, where
 `master` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
@@ -1299,13 +1299,13 @@ There are two possible choices for which commit to use:
 2. Checkout commit `C`, the hypothetical result of what would happen if the PR
    were merged into it's destination (usually `master`).
 
-For all practical purposes, most people can think of the commit being used as 
+For all practical purposes, most people can think of the commit being used as
 commit `B` (choice **1**).
 
 However, if you're modifying the workflow files (which govern CI behavior) there's
 a nuance to know about:
 The workflow files themselves get taken from checkpoint `C`, the merger of your
-PR and the `master` branch. But only the workflow files get taken from that merged 
+PR and the `master` branch. But only the workflow files get taken from that merged
 checkpoint. Everything else (tests, code, etc) all get taken directly from your
 PR's commit (commit `B`)
 
