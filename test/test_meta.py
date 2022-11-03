@@ -15,7 +15,6 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
-    skipIfSlowGradcheckEnv,
     dtype_abbrs
 )
 from torch.testing._internal.common_device_type import (
@@ -53,7 +52,6 @@ b8 = torch.bool
 u8 = torch.uint8
 
 
-@skipIfSlowGradcheckEnv
 class TestMetaConverter(TestCase):
     def assertSameVersionCounter(self, m1, m2):
         # Cannot easily test m1 and m2 have same storage due to
@@ -298,7 +296,6 @@ CHECK_STRIDES_SKIPS = {
     aten._linalg_svd.default,
     aten._scaled_dot_product_attention_forward.default,
     aten.add.Tensor,
-    aten.addmm.default,
     aten.atan2.default,
     aten.binary_cross_entropy.default,
     aten.bitwise_and.Tensor,
@@ -326,6 +323,8 @@ CHECK_STRIDES_SKIPS = {
     aten.igammac.default,
     aten.lcm.default,
     aten.le.Tensor,
+    aten.lerp.Scalar,
+    aten.lerp.Tensor,
     aten.logical_and.default,
     aten.logical_or.default,
     aten.logical_xor.default,
@@ -348,15 +347,7 @@ CHECK_STRIDES_SKIPS = {
     aten.xlogy.Tensor,
 
     # channel_last and channel_last_3d related failures
-    aten.constant_pad_nd.default,
-    aten._adaptive_avg_pool2d.default,
-    aten.constant_pad_nd.default,
     aten.convolution.default,
-    aten.convolution.default,
-    aten._adaptive_avg_pool2d.default,
-    aten.upsample_bilinear2d.vec,
-    aten.constant_pad_nd.default,
-    aten.upsample_bilinear2d.vec,
 
     # following ops fails if include_storage_offset = True, but these are a bit edge casey
     # we should still fix them, leaving them here for tracking.
@@ -1125,7 +1116,6 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 # inconsistencies between CUDA and CPU, and running on CUDA makes it easier
 # to ignore the CPU case when inconsistencies arise.  Ideally we deal
 # with the inconsistencies but this takes time.
-@skipIfSlowGradcheckEnv
 class TestMeta(TestCase):
     # Copies inputs to inplace operations to avoid inplace modifications
     #   to leaves requiring gradient
@@ -1269,7 +1259,7 @@ class TestMeta(TestCase):
         self.assertEqual(r.device.type, 'meta')
         self.assertEqual(r.shape, inps[0].shape)
 
-    def test_fill_alias_relationship(self):
+    def test_fill__alias_relationship(self):
         inps = torch.rand(2**52, device='meta')
         r = torch.ops.aten.fill_(inps, 1.0)
         # aten.fill_ returns an aliase
@@ -1278,6 +1268,70 @@ class TestMeta(TestCase):
         # aten.fill returns a new tensor
         r2 = torch.ops.aten.fill(inps, 1.0)
         self.assertNotEqual(id(inps), id(r2))
+
+    def test_meta__fused_moving_avg_obs_fq_helper(self, device):
+        from torch.ao.quantization import FusedMovingAvgObsFakeQuantize
+        to_meta = MetaConverter()
+
+        x = torch.randn(5, 5, device=device)
+        running_min_op = torch.tensor(float("inf"), device=device)
+        running_max_op = torch.tensor(float("-inf"), device=device)
+        avg_const = 0.01
+        scale = torch.tensor([1.0], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+
+        mod = FusedMovingAvgObsFakeQuantize()
+        torch.ao.quantization.enable_fake_quant(mod)
+        torch.ao.quantization.enable_observer(mod)
+        mod.to(device)
+
+        meta_x = to_meta(x)
+
+        args = [
+            x,
+            mod.observer_enabled,
+            mod.fake_quant_enabled,
+            running_min_op,
+            running_max_op,
+            scale,
+            zero_point,
+            avg_const,
+            0,
+            255,
+            0,
+        ]
+
+        meta_args = args.copy()
+        meta_args[0] = meta_x
+
+        kwargss = [
+            {},
+            {"per_row_fake_quant": False, "symmetric_quant": False},
+            {"per_row_fake_quant": False, "symmetric_quant": True},
+        ]
+
+        for kwargs in kwargss:
+            ref_out = aten._fused_moving_avg_obs_fq_helper.default(*args, **kwargs)
+            meta_out = aten._fused_moving_avg_obs_fq_helper.default(*meta_args, **kwargs)
+
+            self.assertEqual(ref_out[0].size(), meta_out[0].size())
+            self.assertEqual(ref_out[0].stride(), meta_out[0].stride())
+            self.assertEqual(ref_out[1].size(), meta_out[1].size())
+            self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
+
+    # opinfo test is using aten.fill_, it's not testing aten.fill
+    @onlyCUDA
+    def test_fill_stride(self):
+        to_meta = MetaConverter()
+        sample_args = [torch.rand(2, 2, 2, 2), 1.0]
+
+        for args in get_strided_args(sample_args):
+            meta_args = to_meta(args)
+            ref_out = torch.ops.aten.fill(*args)
+            meta_out = torch.ops.aten.fill(*meta_args)
+            self.assertEqual(ref_out.size(), meta_out.size())
+            self.assertEqual(ref_out.stride(), meta_out.stride())
+
 
     def test_map_location_deserialize(self):
         import io
