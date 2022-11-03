@@ -41,9 +41,9 @@ template<typename T>
 static inline T pooling_output_shape_pad_lr(
         T inputSize, T kernelSize, T pad_l, T pad_r, T stride, T dilation,
         bool ceil_mode) {
-    T outputSize = div_rtn<T>(
-        inputSize + pad_l + pad_r - dilation * (kernelSize - 1) - 1 +
-        (ceil_mode ? stride - 1 : 0), stride) + 1;
+    T outputSize = ceil_mode ? div_ceil<T>(inputSize + pad_l + pad_r, stride) :
+                               div_rtn<T>(
+        inputSize + pad_l + pad_r - dilation * (kernelSize - 1) - 1, stride) + 1;
     if (ceil_mode) {
         // ensure that the last pooling starts inside the image
         // needed to avoid problems in ceil mode
