@@ -1384,10 +1384,11 @@ class CommonTemplate:
                 v = torch.randn(x_shape, dtype=torch.float32).to(
                     memory_format=memory_format
                 )
-                self.common(
-                    mod,
-                    (v,),
-                )
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
 
     # For gpu path, there has a accurcy issue,
     # see https://github.com/pytorch/pytorch/issues/87745.
@@ -1430,10 +1431,11 @@ class CommonTemplate:
             v = torch.randn(x_shape, dtype=torch.float32).to(
                 memory_format=memory_format
             )
-            self.common(
-                mod,
-                (v,),
-            )
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     # For gpu path, there has a accurcy issue,
     # see https://github.com/pytorch/pytorch/issues/87745.
@@ -1505,10 +1507,11 @@ class CommonTemplate:
             v = torch.randn(x_shape, dtype=torch.float32).to(
                 memory_format=memory_format
             )
-            self.common(
-                mod,
-                (v,),
-            )
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     def test_linear_unary(self):
         options = itertools.product(unary_list, [[2, 3, 10], [2, 10]], [True, False])
@@ -1522,11 +1525,11 @@ class CommonTemplate:
                 # only fuse for linear when the dtype is bf16
                 mod = mod.to(dtype)
                 v = torch.randn(input_shape).to(dtype)
-
-                self.common(
-                    mod,
-                    (v,),
-                )
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
 
     def test_linear_binary(self):
         class M(torch.nn.Module):
@@ -1553,8 +1556,8 @@ class CommonTemplate:
                 mod = mod.to(dtype)
                 v = torch.randn(input_shape).to(dtype)
                 other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
-
-                self.common(mod, (v, other), atol=2e-3, rtol=0.016)
+                with torch.no_grad():
+                    self.common(mod, (v, other), atol=2e-3, rtol=0.016)
 
     def test_gather1(self):
         def fn(a, b):

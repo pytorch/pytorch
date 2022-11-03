@@ -250,6 +250,8 @@ test_dynamo_shard() {
 }
 
 test_inductor_distributed() {
+  # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
+  # with if required # gpus aren't available
   PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed
   assert_git_not_dirty
 }
@@ -728,6 +730,10 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
 elif [[ "$TEST_CONFIG" == deploy ]]; then
   checkout_install_torchdeploy
   test_torch_deploy
+elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
+  install_filelock
+  install_triton
+  test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
