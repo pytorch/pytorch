@@ -629,7 +629,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
@@ -643,7 +643,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
@@ -657,7 +657,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
@@ -671,7 +671,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
@@ -685,7 +685,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({12}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
@@ -699,7 +699,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({12}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
@@ -713,7 +713,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({8}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       at::rand({12}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      true,
+      false,
       0.1,
       1e-05,
       false);
