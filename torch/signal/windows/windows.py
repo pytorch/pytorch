@@ -135,14 +135,14 @@ def exponential(
 
     _window_function_checks('exponential', M, dtype, layout)
 
-    if M == 0:
-        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
-
     if tau <= 0:
         raise ValueError(f'Tau must be positive, got: {tau} instead.')
 
     if sym and center is not None:
         raise ValueError('Center must be None for symmetric windows')
+
+    if M == 0:
+        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
     if center is None:
         center = (M if not sym and M > 1 else M - 1) / 2.0
@@ -291,11 +291,11 @@ def gaussian(
 
     _window_function_checks('gaussian', M, dtype, layout)
 
-    if M == 0:
-        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
-
     if std <= 0:
         raise ValueError(f'Standard deviation must be positive, got: {std} instead.')
+
+    if M == 0:
+        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
     start = -(M if not sym and M > 1 else M - 1) / 2.0
 
