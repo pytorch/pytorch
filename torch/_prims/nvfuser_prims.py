@@ -5,7 +5,7 @@
 # can be added in the future for the corresponding higher-level torch/aten
 # functions.
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 
@@ -14,11 +14,14 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     getnvFuserDtype,
     make_contiguous_strides_for,
+    reduction_dtypes,
+    REDUCTION_OUTPUT_TYPE_KIND,
     ShapeType,
     TensorLikeType,
 )
 
 from torch._prims_common.wrappers import (
+    _maybe_convert_to_dtype,
     backwards_not_supported,
     elementwise_type_promotion_wrapper,
 )
@@ -373,12 +376,54 @@ def register_native_batch_norm():
         )
 
     nvprim_impl.impl(name, _prim_impl)
-    nvprim_autograd_impl.impl(
-        name, backwards_not_supported(torch.ops.nvprims.native_batch_norm.default)
-    )
-
     prim_packet = torch.ops.nvprims.native_batch_norm
     prim = prim_packet.default
+
+    def _native_batch_norm_ref(
+        input: torch.Tensor,
+        weight: Optional[torch.Tensor],
+        bias: Optional[torch.Tensor],
+        running_mean: Optional[torch.Tensor],
+        running_var: Optional[torch.Tensor],
+        training: bool,
+        momentum: float,
+        eps: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
+        if torch._prims_common.is_complex_dtype(input.dtype):
+            raise NotImplementedError("Complex tensors are not supported")
+
+        computation_dtype, result_dtype = reduction_dtypes(
+            input, REDUCTION_OUTPUT_TYPE_KIND.SAME
+        )
+        input_ = _maybe_convert_to_dtype(input, computation_dtype)
+        output, mean, rstd = prim(
+            input_, weight, bias, running_mean, running_var, training, momentum, eps
+        )
+        output_ = _maybe_convert_to_dtype(output, result_dtype)  # type: ignore[arg-type]
+        return (output_, mean, rstd)  # type: ignore[return-value]
+
+    def _native_batch_norm_autograd(
+        input: torch.Tensor,
+        weight: Optional[torch.Tensor],
+        bias: Optional[torch.Tensor],
+        running_mean: Optional[torch.Tensor],
+        running_var: Optional[torch.Tensor],
+        training: bool,
+        momentum: float,
+        eps: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # This wrapper is needed to convert prims calls inside
+        # _native_batch_norm_ref to nvprims calls
+        from torch._prims.context import NvfuserPrimsMode
+
+        with NvfuserPrimsMode():
+            return backwards_not_supported(_native_batch_norm_ref)(
+                input, weight, bias, running_mean, running_var, training, momentum, eps
+            )
+
+    nvprim_autograd_impl.impl(name, _native_batch_norm_autograd)
+
     for p in (prim_packet, prim):
         p.__doc__ = "Computes batch normalization."
         p.impl_nvfuser = _nvfuser_impls["native_batch_norm"]
