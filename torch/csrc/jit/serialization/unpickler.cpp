@@ -874,7 +874,7 @@ void Unpickler::rebuildTensor(bool quantized) {
     // for a regular tensor (final else case).
     // NOTE: `math_bits` is the 7th arg.
     bool has_math_bits = elements.size() >= 7;  // >= assuming more args were added later.
-    if (has_math_bits) {
+    if (has_math_bits && !quantized) {
       auto math_bits = elements.at(idx + 2).toGenericDict();
       torch::jit::setTensorMathBits(result, math_bits);
     }
