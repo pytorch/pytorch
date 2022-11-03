@@ -9,26 +9,24 @@ import weakref
 from typing import Callable
 
 import torch
-from torch.fx.graph_module import (
-    _forward_from_src as original_forward_from_src,
-)
+from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
 from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import is_generator, transform_code_object
 from .eval_frame import (
-    TorchPatcher,
-    WrapperBackend,
     always_optimize_code_objects,
     skip_code,
+    TorchPatcher,
+    WrapperBackend,
 )
 from .exc import (
     BackendCompilerFailed,
     InternalTorchDynamoError,
     TorchRuntimeError,
-    Unsupported,
     unimplemented,
+    Unsupported,
 )
 from .guards import CheckFunctionManager, GuardedCode
 from .replay_record import ExecutionRecord
