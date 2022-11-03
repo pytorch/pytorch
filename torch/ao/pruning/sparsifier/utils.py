@@ -7,6 +7,8 @@ __all__ = [
     "fqn_to_module",
     "get_arg_info_from_tensor_fqn",
     "FakeSparsity",
+    "FakeStructuredSparsity",
+    "BiasHook",
 ]
 
 
@@ -78,3 +80,41 @@ class FakeSparsity(nn.Module):
         # That way we make sure that the linear module doesn't store the masks
         # alongside their parametrizations.
         return {}
+
+# Structured Pruning Parameterizations
+class FakeStructuredSparsity(nn.Module):
+    r"""Zero out pruned channels for structured sparsity"""
+
+    def __init__(self, mask):
+        super().__init__()
+        self.register_buffer("mask", mask)
+
+    def forward(self, x):
+        assert self.mask.shape[0] == x.shape[0]
+        x.data[self.mask] = 0
+        return x
+
+    def state_dict(self, *args, **kwargs):
+        # avoid double saving masks
+        return {}
+
+class BiasHook:
+    def __init__(self, parametrization, prune_bias):
+        self.param = parametrization
+        self.prune_bias = prune_bias
+
+    def __call__(self, module, input, output):
+        mask = self.param.mask
+
+        if getattr(module, '_bias', None) is not None:
+            bias = module._bias.data
+            if self.prune_bias:
+                bias[mask] = 0
+
+            # reshape bias to broadcast over output dimensions
+            idx = [1] * len(output.shape)
+            idx[1] = -1
+            bias = bias.reshape(idx)
+
+            output += bias
+        return output
