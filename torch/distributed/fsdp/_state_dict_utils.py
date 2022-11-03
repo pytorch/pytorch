@@ -22,7 +22,13 @@ from torch.distributed.fsdp._common_utils import (
     FSDP_PREFIX,
     TrainingState,
 )
-from torch.distributed.fsdp._runtime_utils import _clear_grads_if_needed
+from torch.distributed.fsdp._runtime_utils import (
+    _cast_buffers_to_dtype_and_device,
+    _clear_grads_if_needed,
+    _get_buffer_dtypes,
+    _get_buffers_and_dtypes_for_computation,
+    _lazy_init,
+)
 from torch.distributed.utils import _replace_by_prefix
 
 from ._fsdp_extensions import (
@@ -80,7 +86,7 @@ def _common_pre_state_dict_hook(
     """Performs the pre-state_dict tasks shared by all state_dict types."""
     if torch.cuda.is_available():
         torch.cuda.synchronize()
-    module._lazy_init()
+    _lazy_init(module, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     # if module.is_root:
     #    _clear_grads_if_needed(module._fsdp_handles(module))
@@ -104,14 +110,6 @@ def _common_summon_pre_state_dict_hook(
         offload_to_cpu=offload_to_cpu,
         rank0_only=rank0_only,
     )
-    # Since buffers are not sharded and stay casted, restore them to their
-    # original user module specified types for checkpoint. We take care to
-    # recast in post_state_dict_hook for consistency with the fact that
-    # buffers stay casted after forward/backward. We must have the
-    # call here instead of above because _summon_full_params calls _lazy_init()
-    # which would cast the buffers.
-    if module._mixed_precision_enabled_for_buffers():
-        module._cast_buffers(dtype=module._buffer_name_to_orig_dtype, recurse=False)
 
 
 # TODO: change to the decorator style. See ``_full_pre_state_dict_hook``.
@@ -119,7 +117,7 @@ def _common_summon_post_state_dict_hook(
     module,
     state_dict: Dict[str, Any],
     prefix: str,
-    inner_hook: Callable,
+    param_hook: Callable,
 ) -> Dict[str, Any]:
     """
     The post-state_dict flow that shared by all state_dict types that require
@@ -177,15 +175,12 @@ def _common_summon_post_state_dict_hook(
             f"param_name={param_name} rank={module.rank}."
         )
 
-        inner_hook(module, state_dict, prefix, fqn)
+        param_hook(module, state_dict, prefix, fqn)
     _exit_full_param_ctx(module)
 
-    # Offload the buffer to CPU if needed -- we do not do this in
-    # `_summon_full_params()` since without care, that would free
-    # the original buffer's GPU memory and require reallocating
-    # that memory later; this only affects the state dict's buffer
-    # variable and leaves the original buffer's GPU memory intact
     cpu_device = torch.device("cpu")
+    buffer_fqns = []
+    buffers = []
     for clean_key in module._buffer_names:
         # This is a hack to support activation checkpoint.
         clean_key = clean_key.replace(f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", "")
@@ -196,12 +191,16 @@ def _common_summon_post_state_dict_hook(
         if no_fsdp_return:
             state_dict.pop(fqn)
         else:
-            # TODO: remove the buffer retrieval. See ``_full_pre_state_dict_hook``.
-            buf = functools.reduce(getattr, clean_key.split("."), module.module)
-            if module._state_dict_config.offload_to_cpu and buf != cpu_device:
-                buf = buf.to(cpu_device)
-            state_dict[fqn] = buf
-    assert module.training_state != TrainingState.SUMMON_FULL_PARAMS
+            buffer = state_dict[fqn]
+            if module._state_dict_config.offload_to_cpu and buffer.device != cpu_device:
+                state_dict[fqn] = buffer.to(cpu_device)
+            buffer_fqns.append(fqn)
+            buffers.append(state_dict[fqn])
+    if buffers and module._mixed_precision_enabled_for_buffers():
+        buffer_dtypes = _get_buffer_dtypes(module, buffer_fqns)
+        _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, module.compute_device)
+        for buffers, fqn in zip(buffers, buffer_fqns):
+            state_dict[fqn] = buffer.clone()
     return state_dict
 
 
@@ -244,7 +243,7 @@ def _full_post_state_dict_hook(
     # TODO: remove the hack. See ``_full_pre_state_dict_hook``.
     _full_pre_state_dict_hook(module, state_dict, prefix)
 
-    def inner_hook(
+    def param_hook(
         module,
         state_dict: Dict[str, Any],
         prefix: str,
@@ -275,7 +274,7 @@ def _full_post_state_dict_hook(
                     f"implementation of {fqn}. Error: {str(e)}"
                 )
 
-    return _common_summon_post_state_dict_hook(module, state_dict, prefix, inner_hook)
+    return _common_summon_post_state_dict_hook(module, state_dict, prefix, param_hook)
 
 
 def _full_pre_load_state_dict_hook(
@@ -432,7 +431,7 @@ def _sharded_post_state_dict_hook(
     # TODO: remove the hack. See ``_full_pre_state_dict_hook``.
     _sharded_pre_state_dict_hook(module, state_dict, prefix)
 
-    def inner_hook(module, state_dict: Dict[str, Any], prefix: str, fqn: str):
+    def param_hook(module, state_dict: Dict[str, Any], prefix: str, fqn: str):
         param = state_dict[fqn]
         sharded_tensor = _ext_chunk_tensor(
             tensor=param,
@@ -445,7 +444,7 @@ def _sharded_post_state_dict_hook(
             sharded_tensor = sharded_tensor.cpu()
         state_dict[fqn] = sharded_tensor
 
-    return _common_summon_post_state_dict_hook(module, state_dict, prefix, inner_hook)
+    return _common_summon_post_state_dict_hook(module, state_dict, prefix, param_hook)
 
 
 def _sharded_post_load_state_dict_hook(module, *args, **kwargs) -> None:
@@ -560,12 +559,6 @@ def _post_state_dict_hook(
     processed_state_dict = _post_state_dict_hook_fn[fsdp_module._state_dict_type](
         fsdp_module, state_dict, prefix
     )
-    # Restore buffers, which currently are in their full precision type,
-    # back to their mixed precision type. This is because buffers are cast
-    # during lazy_init() and stay at their mixed precision type before/after
-    # forward/backward. As a result state_dict() should maintain this.
-    if fsdp_module._is_root and fsdp_module._mixed_precision_enabled_for_buffers():
-        fsdp_module._cast_buffers(recurse=True)
     return processed_state_dict
 
 
