@@ -59,7 +59,7 @@ from .graph_module import (
 )
 
 from .pattern_utils import (
-    sorted_patterns_dict,
+    _sorted_patterns_dict,
 )
 
 from .match_utils import (
@@ -1580,7 +1580,7 @@ def prepare(
     if backend_config is None:
         backend_config = get_native_backend_config()
     pattern_to_quantize_handler = _get_pattern_to_quantize_handlers(backend_config)
-    pattern_to_quantize_handler = sorted_patterns_dict(pattern_to_quantize_handler)
+    pattern_to_quantize_handler = _sorted_patterns_dict(pattern_to_quantize_handler)
 
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config)

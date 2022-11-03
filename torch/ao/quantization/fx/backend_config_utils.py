@@ -1,5 +1,5 @@
 import torch
-from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns, sorted_patterns_dict
+from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns, _sorted_patterns_dict
 from torch.ao.quantization.backend_config import (
     get_native_backend_config,
     ObservationType,
@@ -132,4 +132,4 @@ def _get_native_quant_patterns(additional_quant_patterns: Dict[Pattern, Quantize
     # in the future we can just assign backend_config when everything is defined
     for pattern, quantize_handler in _get_pattern_to_quantize_handlers(get_native_backend_config()).items():
         patterns[pattern] = quantize_handler
-    return sorted_patterns_dict(patterns)
+    return _sorted_patterns_dict(patterns)

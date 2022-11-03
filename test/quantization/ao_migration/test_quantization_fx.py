@@ -56,9 +56,9 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
     def test_function_import_fx_pattern_utils(self):
         function_list = [
             'QuantizeHandler',
-            'register_fusion_pattern',
+            '_register_fusion_pattern',
             'get_default_fusion_patterns',
-            'register_quant_pattern',
+            '_register_quant_pattern',
             'get_default_quant_patterns',
             'get_default_output_activation_post_process_map'
         ]
