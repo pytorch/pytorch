@@ -3497,7 +3497,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             unary_scalars,
             unary_algorithm,
         ]
-        return ConvolutionBinary(
+        return ConvolutionBinaryInplace(
             layout=kernel_layout,
             inputs=inputs,
             constant_args=constant_args,
