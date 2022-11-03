@@ -118,12 +118,12 @@ jobs:
       build-environment: linux-bionic-cuda11.7-py3.10-gcc7-no-ops
       docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
 
-  pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build:
-    name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
+  pytorch-linux-focal-py3-clang7-android-ndk-r19c-build:
+    name: pytorch-linux-focal-py3-clang7-android-ndk-r19c-build
     uses: ./.github/workflows/_android-full-build-test.yml
     with:
-      build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
-      docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+      build-environment: pytorch-linux-focal-py3-clang7-android-ndk-r19c-build
+      docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
 
   linux-bionic-py3_7-clang9-slow-build:
     name: linux-bionic-py3.7-clang9-slow
@@ -226,6 +226,10 @@ jobs:
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
       python_version: 3.9.12
+      # We need to set the environment file here instead of trying to detect it automatically because
+      # MacOS arm64 is cross-compiled from x86-64. Specifically, it means that arm64 conda environment
+      # is needed when building PyTorch MacOS arm64 from x86-64
+      environment-file: .github/requirements/conda-env-macOS-ARM64
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "macos-m1-12" },
