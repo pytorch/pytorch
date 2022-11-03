@@ -8,6 +8,7 @@ import torch.fx.traceback as fx_traceback
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
 from contextlib import contextmanager
+from tqdm import tqdm
 
 __all__ = ['Interpreter', 'Transformer']
 
@@ -118,7 +119,7 @@ class Interpreter:
             args = self.module.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
 
-        for node in self.module.graph.nodes:
+        for node in tqdm(self.module.graph.nodes, desc="Compiled Nodes"):
             if node in self.env:
                 # Short circuit if we have this value. This could
                 # be used, for example, for partial evaluation
