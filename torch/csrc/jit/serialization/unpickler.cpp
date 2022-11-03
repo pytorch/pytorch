@@ -863,11 +863,13 @@ void Unpickler::rebuildTensor(bool quantized) {
     }
     bool requires_grad = elements.at(idx).toBool();
     // elements[idx++] is empty backwards hooks
+    auto math_bits = elements.at(idx + 2).toGenericDict();
     at::TensorImpl* impl = result.unsafeGetTensorImpl();
     impl->set_storage_keep_dtype(storage_tensor.storage());
     impl->set_storage_offset(storage_offset);
     impl->set_sizes_and_strides(size, stride);
     result = autograd::make_variable(result, requires_grad);
+    torch::jit::setTensorMathBits(result, math_bits);
     stack_.emplace_back(std::move(result));
   });
 }

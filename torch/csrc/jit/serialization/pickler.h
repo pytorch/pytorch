@@ -310,5 +310,17 @@ inline void setTensorMathBits(
   t._set_neg(math_bits["neg"]);
 }
 
+// set MathBits on Tensor from map
+inline void setTensorMathBits(
+    const at::Tensor& t,
+    c10::Dict<c10::IValue, c10::IValue> math_bits_idict) {
+  std::unordered_map<std::string, bool> math_bits;
+  for (auto& pair : math_bits_idict) {
+    std::string key = *pair.key().toString();
+    math_bits[key] = pair.value().toBool();
+  }
+  setTensorMathBits(t, math_bits);
+}
+
 } // namespace jit
 } // namespace torch
