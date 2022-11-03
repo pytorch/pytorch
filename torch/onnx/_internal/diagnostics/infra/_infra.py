@@ -60,12 +60,10 @@ class Rule:
     @classmethod
     def from_sarif(cls, **kwargs):
         """Returns a rule from the SARIF reporting descriptor."""
-        short_description = kwargs.get("short_description", {}).get("text", None)
-        full_description = kwargs.get("full_description", {}).get("text", None)
-        full_description_markdown = kwargs.get("full_description", {}).get(
-            "markdown", None
-        )
-        help_uri = kwargs.get("help_uri", None)
+        short_description = kwargs.get("short_description", {}).get("text")
+        full_description = kwargs.get("full_description", {}).get("text")
+        full_description_markdown = kwargs.get("full_description", {}).get("markdown")
+        help_uri = kwargs.get("help_uri")
 
         rule = cls(
             id=kwargs["id"],
@@ -203,9 +201,7 @@ class Diagnostic:
 
     def sarif(self) -> sarif.Result:
         """Returns the SARIF Result representation of this diagnostic."""
-        message = self.message
-        if message is None:
-            message = self.rule.message_default_template
+        message = self.message or self.rule.message_default_template
         if self.additional_message is not None:
             message = f"{message}\n{self.additional_message}"
         sarif_result = sarif.Result(
