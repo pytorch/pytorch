@@ -57,7 +57,7 @@ def _is_composable(state: _State):
 
 
 @no_type_check
-def _all_handles(state: _State):
+def _all_handles(state: _State) -> List:
     return (
         state._handles
         if _is_composable(state)
@@ -91,48 +91,44 @@ def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
     return getattr(tensor, FSDP_FLATTENED, False)
 
 
-def _get_param_to_unflat_param_names(
+def _get_param_to_fqns(
     model: torch.nn.Module,
     dedup_shared_params: bool = True,
-) -> Dict[torch.nn.Parameter, List[str]]:
+) -> Dict[nn.Parameter, List[str]]:
     """
-    Constructs a mapping from flattened parameter (including non-FSDP-module
-    parameters) to its unflattened parameter names. For non-FSDP-module
-    parameters, these mapped-to lists always contain a single element. The
-    unflattened parameter names should match the keys of the model state dict.
-
-    For shared parameters, only the first parameter name is included (following
-    the ``torch.nn.Module.parameters()`` order).
+    Constructs a mapping from parameter to a list of its FQNs. Each normal
+    parameter maps to a singleton list containing its FQN, while each
+    ``FlatParameter`` maps to a list of its original parameter FQNs, which may
+    have length greater than one. All FQNs are prefixed starting from
+    ``model``.
 
     Args:
         model (torch.nn.Module): Root module (which may or may not be a
             :class:`FullyShardedDataParallel` instance).
-        dedup_shared_params (bool): If ``True``, only includes the first
-            list of unflattened parameter names corresponding to a parameter
-            in the module walk order; if ``False``, then includes all of the
-            unflattened parameter names.
+        dedup_shared_params (bool): For shared parameters, if ``True``, only
+            includes the FQNs corresponding to the first encounter of the
+            shared parameter in the module traversal; if ``False``, then
+            includes the FQNs across all encounters. (Default: ``True``)
     """
 
-    def module_fn(module, prefix, param_to_unflat_param_names):
+    def module_fn(module, prefix, param_to_fqns):
         for param_name, param in module.named_parameters(recurse=False):
-            module_prefixed_param_names = (
+            local_fqns = (
                 param._fqns
                 if type(param) is flat_param_file.FlatParameter
                 else [param_name]
             )  # prefixed from `module`
-            fully_prefixed_param_names = [
-                clean_tensor_name(prefix + name) for name in module_prefixed_param_names
-            ]  # fully prefixed from the top level including `prefix`
-            # If this parameter has already been visited, then it is a
-            # shared parameter; then, only take the first parameter name
-            is_shared_param = param in param_to_unflat_param_names
+            global_fqns = [
+                clean_tensor_name(prefix + name) for name in local_fqns
+            ]  # prefixed from the top level `model` (i.e. including `prefix`)
+            is_shared_param = param in param_to_fqns
             if not is_shared_param:
-                param_to_unflat_param_names[param] = fully_prefixed_param_names
+                param_to_fqns[param] = global_fqns
             elif not dedup_shared_params:
-                param_to_unflat_param_names[param].extend(fully_prefixed_param_names)
+                param_to_fqns[param].extend(global_fqns)
 
-    def return_fn(param_to_unflat_param_names):
-        return param_to_unflat_param_names
+    def return_fn(param_to_fqns):
+        return param_to_fqns
 
     param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
     return _apply_to_modules(
