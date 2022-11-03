@@ -150,13 +150,13 @@ def _rebuild_tensor(storage, storage_offset, size, stride):
 
 def get_math_bits(tensor):
     assert isinstance(tensor, torch.Tensor)
-    return torch._C._get_tensor_mathbits(tensor)
+    return torch._C._get_tensor_mathbits(tensor)  # type: ignore[attr-defined]
 
 
 def set_math_bits(tensor, math_bits):
     assert isinstance(math_bits, dict)
     assert isinstance(tensor, torch.Tensor)
-    torch._C._set_tensor_mathbits(tensor, math_bits)
+    torch._C._set_tensor_mathbits(tensor, math_bits)  # type: ignore[attr-defined]
 
 
 def _rebuild_tensor_v2(
