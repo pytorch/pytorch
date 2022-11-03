@@ -214,7 +214,10 @@ class TestPartitionFunctions:
 class MockOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
         return (node.op == "call_function" and
-                node.target in {operator.add, operator.getitem, torch.ops.aten.view, torch.ops.aten.permute, torch.ops.aten.std_mean})
+                node.target in {operator.add, operator.getitem,
+                                torch.ops.aten.view,
+                                torch.ops.aten.permute,
+                                torch.ops.aten.std_mean})
 
 @instantiate_parametrized_tests
 class TestFXGraphPasses(JitTestCase):
