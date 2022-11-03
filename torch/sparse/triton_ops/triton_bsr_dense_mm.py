@@ -26,7 +26,7 @@ def compressed_indices_to_plain_indices(cidx, pidx):
 
 
 @triton.jit
-def _bsr_strided_mm_kernel(
+def _bsr_strided_sparse_rowspace_kernel(
     batch_idx_ptr,
     row_idx_ptr,
     nnz_per_row_ptr,
@@ -34,6 +34,7 @@ def _bsr_strided_mm_kernel(
     BLOCKSIZE_ROW: tl.constexpr,
     BLOCKSIZE_COL: tl.constexpr,
     col_indices_ptr,
+    col_indices_stride,
     # values prologue
     values_ptr,
     values_nnz_stride,
@@ -83,6 +84,7 @@ def _bsr_strided_mm_kernel(
         + values_row_block_stride * row_block_arange[:, None]
         + values_col_block_stride * col_block_arange[None, :]
     )
+
     # NOTE: dense is advanced into all dimensions but the tiled row one.
     # That will be advanced in the loop according to values in col_indices.
     dense_block_ptrs = (
@@ -92,6 +94,7 @@ def _bsr_strided_mm_kernel(
         + dense_row_block_stride * col_block_arange[:, None]
         + dense_col_block_stride * row_block_arange[None, :]
     )
+
     # Pointers are set to exact write-to locations
     output_ptrs = (
         output_ptr
@@ -103,13 +106,13 @@ def _bsr_strided_mm_kernel(
     )
 
     output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_ROW), tl.float32)
+    col_index_nnz_ptr = col_indices_ptr + row_idx_nnz_offset * col_indices_stride
     for nnz_idx in range(row_idx_nnz):
         values_block = tl.load(values_block_ptrs)
 
         # find which row of dense needs to get loaded
         # for multiplication with values_block.
-        # TODO: vectorize the load.
-        dense_row_idx = tl.load(col_indices_ptr + row_idx_nnz_offset + nnz_idx)
+        dense_row_idx = tl.load(col_index_nnz_ptr)
         dense_block = tl.load(dense_block_ptrs + dense_tiled_row_stride * dense_row_idx)
 
         # do block mm
@@ -117,6 +120,7 @@ def _bsr_strided_mm_kernel(
 
         # move val ptrs to the next block in the row
         values_block_ptrs += values_nnz_stride
+        col_index_nnz_ptr += col_indices_stride
 
     # write back the result
     tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))
@@ -124,8 +128,8 @@ def _bsr_strided_mm_kernel(
 
 def bsr_dense_mm(bsr, dense):
     # TODO: insert checks
-    m, k = bsr.shape[-2:]
-    k1, n = dense.shape[-2:]
+    m, kl = bsr.shape[-2:]
+    kr, n = dense.shape[-2:]
 
     # TODO: probably make sure that inputs are properly contiguous
 
@@ -175,11 +179,19 @@ def bsr_dense_mm(bsr, dense):
     crow_indices = batch_broadcast_and_squash(
         crow_indices, batch_dims_broadcasted, (-1,)
     )
-    col_indices = batch_broadcast_and_squash(col_indices, batch_dims_broadcasted, (-1,))
-    values = batch_broadcast_and_squash(
-        values, batch_dims_broadcasted, values.shape[-3:]
+
+    # NOTE: now batch and nnz dimensions are merged to satisfy
+    # requirements imposed by _bsr_strided_sparse_rowspace_kernel.
+    # Turn it off once _bsr_strided_dense_rowspace_kernel is implemented.
+    col_indices = batch_broadcast_and_squash(
+        col_indices, batch_dims_broadcasted + (-1,), ()
     )
+    values = batch_broadcast_and_squash(
+        values, batch_dims_broadcasted + (values.shape[-3],), values.shape[-2:]
+    )
+
     dense = batch_broadcast_and_squash(dense, batch_dims_broadcasted, dense.shape[-2:])
+
     # NOTE: output is contiguous, so batch_broadcast_and_squash will create a view
     output = batch_broadcast_and_squash(
         output, batch_dims_broadcasted, output.shape[-2:]
@@ -224,25 +236,18 @@ def bsr_dense_mm(bsr, dense):
     # are used to compute offsets into nnz values.
     nnz_per_row_cumsum = nnz_per_row.cumsum(-1)
 
-    # The meta-data for search into values assumes
-    # the batch and the nnz dimensions squashed together.
-    # TODO: batch dims for values and col_indices are
-    # already flattened. Fuse batch flattening with
-    # batch-info flattening together.
-    values = values.flatten(0, 1)
-    col_indices = col_indices.flatten(0, 1)
-
     # Launch kernel
     n_nnz_block_rows = row_idx.size(-1)
     n_block_cols = dense.size(-3)
     grid = (n_nnz_block_rows, n_block_cols)
-    _bsr_strided_mm_kernel[grid](
+    _bsr_strided_sparse_rowspace_kernel[grid](
         batch_idx,
         row_idx,
         nnz_per_row,
         nnz_per_row_cumsum,
         *blocksize,
         col_indices,
+        *col_indices.stride(),
         values,
         *values.stride(),
         dense,
@@ -275,7 +280,7 @@ if __name__ == "__main__":
         # mask = torch.rand(*mask_size, device='cuda') < p
         mask = torch.zeros(*mask_size).to(torch.bool)
         mask[0, 0] = True
-        mask[1, 0] = True
+        # mask[1, 0] = True
         mask = mask.cuda()
         x = torch.rand(*mask_size, *block_size, dtype=dtype, device="cuda") / 10
         x = (
@@ -284,7 +289,6 @@ if __name__ == "__main__":
             .reshape(*size)
             .to_sparse_bsr(*block_size)
         )
-        print(x)
         y = torch.rand(5, *size, dtype=dtype, device="cuda") / 10
         res_dense = x.to_dense() @ y
         res = bsr_dense_mm(x, y)
