@@ -9,7 +9,6 @@ from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
     _is_namedtuple,
 )
 from torch.nn.utils.rnn import PackedSequence
-from torch.utils._mode_utils import no_dispatch
 
 
 def _contains_batchnorm(module):
@@ -108,16 +107,16 @@ def _same_storage(x: torch.Tensor, y: torch.Tensor) -> bool:
     return x.storage().data_ptr() == y.storage().data_ptr()
 
 
-def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.cuda.Stream) -> None:
-    with no_dispatch():
-        tensor.record_stream(cast(torch._C.Stream, stream))
-
-
-def p_assert(cond: Any, s: Any, raise_assertion_error: bool = True) -> None:
+def p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
     """This is used as an alternate to ``assert`` when in the backward context
     to print the error message ``s`` since otherwise, it is swallowed."""
     if not cond:
         print(s)
         traceback.print_stack()
         if raise_assertion_error:
-            raise AssertionError
+            raise AssertionError(s)
+
+
+def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.cuda.Stream) -> None:
+    with no_dispatch():
+        tensor.record_stream(cast(torch._C.Stream, stream))
