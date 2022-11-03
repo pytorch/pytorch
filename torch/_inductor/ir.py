@@ -3569,7 +3569,7 @@ class LoopBodyBlock:
                 self.garbage_collect_values = False
                 self.env = {}
                 self.fetch_attr = submodules.__getitem__
-                self.name = "Shim"
+                self.name = V.get_ops_handler().name
         return InterpreterShim().run(V.get_ops_handler())
 
     def debug_str(self, name="block"):

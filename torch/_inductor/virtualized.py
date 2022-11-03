@@ -57,6 +57,8 @@ def _arg_str(a):
 
 class MockHandler:
     def __getattr__(self, name):
+        if name == "name":
+            return "MockHandler"
         def inner(*args, **kwargs):
             fargs = [_arg_str(a) for a in args]
             fargs.extend(f"{k}={v}" for k, v in kwargs.items())
