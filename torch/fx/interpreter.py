@@ -120,8 +120,8 @@ class Interpreter:
         if enable_io_processing:
             args = self.module.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
-        print(list(self.module.graph.nodes))
-        for node in tqdm(self.module.graph.nodes, desc=f"Compiling subgraph", position=0, leave=True):
+        for node in tqdm(self.module.graph.nodes, desc=f"Compiling subgraph {str(list(self.module.graph.nodes))}", initial=1, position=0, leave=True):
+            time.sleep(1)
             if node in self.env:
                 # Short circuit if we have this value. This could
                 # be used, for example, for partial evaluation
