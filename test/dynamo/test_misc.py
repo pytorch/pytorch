@@ -1409,6 +1409,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
 
+    def test_tensor_is_contiguous(self):
+        def fn(x):
+            input = torch.randn((1, 16, 1, 1), device="cuda")
+            weight = torch.randn((8, 16, 3, 3), device="cuda")
+            weight = weight.to(memory_format=x)
+            output = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
+            return output.is_contiguous(memory_format=x)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        for x in [torch.contiguous_format, torch.channels_last]:
+            self.assertEqual(fn(x), opt_fn(x))
+
     def test_python_slice(self):
         def f1(input):
             y = 0

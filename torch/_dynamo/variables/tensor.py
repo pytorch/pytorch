@@ -409,7 +409,13 @@ class TensorVariable(VariableTracker):
         if not config.dynamic_shapes:
             props["size"] = tuple(value.size())
             props["stride"] = tuple(value.stride())
-            props["is_contiguous"] = value.is_contiguous()
+            props["is_contiguous"] = tuple(
+                [
+                    x
+                    for x in torch._prims_common._memory_formats
+                    if value.is_contiguous(memory_format=x)
+                ]
+            )
         return props
 
     def var_getattr(self, tx, name):
@@ -489,13 +495,13 @@ class TensorVariable(VariableTracker):
         elif name == "is_floating_point" and self.dtype is not None:
             constant_result = ConstantVariable(self.dtype.is_floating_point, **options)
         elif name == "is_contiguous" and self.is_contiguous is not None:
-            if (
-                "memory_format" in kwargs
-                and kwargs["memory_format"].as_python_constant()
-                == torch.contiguous_format
-            ):
-                kwargs.pop("memory_format")
-            constant_result = ConstantVariable(self.is_contiguous, **options)
+            if "memory_format" in kwargs:
+                memory_format = kwargs.pop("memory_format").as_python_constant()
+            else:
+                memory_format = torch.contiguous_format
+            constant_result = ConstantVariable(
+                memory_format in self.is_contiguous, **options
+            )
         else:
             constant_result = None
 
