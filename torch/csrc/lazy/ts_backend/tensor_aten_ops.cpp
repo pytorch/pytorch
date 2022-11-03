@@ -54,17 +54,6 @@ std::vector<int64_t> GetExpandDimensions(
 //////////////////////////////////////////////////////////////////////////////
 // ATEN operators follows here, listed in alphabetical order.
 //////////////////////////////////////////////////////////////////////////////
-torch::lazy::LazyTensorPtr expand(
-    const torch::lazy::LazyTensorPtr& input,
-    std::vector<int64_t> size) {
-  auto input_shape = input->shape();
-  return torch::lazy::LazyTensor::Create(
-      torch::lazy::MakeExpand(
-          input->GetIrValue(),
-          GetExpandDimensions(input_shape.Get(), std::move(size)),
-          /*is_scalar_expand=*/false),
-      input->GetDevice());
-}
 
 void fill_(torch::lazy::LazyTensorPtr& input, const at::Scalar& value) {
   torch::lazy::Value constant =
