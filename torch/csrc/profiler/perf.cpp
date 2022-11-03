@@ -151,7 +151,6 @@ void PerfProfiler::Configure(std::vector<std::string>& event_names) {
     events_.emplace_back(name);
     events_.back().Init();
   }
-  start_values_.resize(events_.size(), 0);
 
   // TODO
   // Reset pthreadpool here to make sure we can attach to new children
@@ -159,24 +158,40 @@ void PerfProfiler::Configure(std::vector<std::string>& event_names) {
 }
 
 void PerfProfiler::Enable() {
-  TORCH_CHECK(!is_enabled_, "Nested perf event counting is not supported yet");
-  for (int i = 0; i < events_.size(); ++i) {
-    start_values_[i] = events_[i].ReadCounter();
-    events_[i].Enable();
+  if (start_values_.size()) {
+    StopCounting();
   }
-  is_enabled_ = true;
+
+  start_values_.emplace(events_.size(), 0);
+
+  auto& sv = start_values_.top();
+  for (int i = 0; i < events_.size(); ++i) {
+    sv[i] = events_[i].ReadCounter();
+  }
+  StartCounting();
 }
 
 void PerfProfiler::Disable(perf_counters_t& vals) {
+  StopCounting();
   TORCH_CHECK(
       vals.size() == events_.size(),
       "Can not fit all perf counters in the supplied container");
-  TORCH_CHECK(is_enabled_, "Perf Profiler is not enabled");
+  TORCH_CHECK(
+      start_values_.size() > 0,
+      "PerfProfiler must be enabled before disabling");
+
+  /* Always connecting this disable event to the last enable event i.e. using
+   * whatever is on the top of the start counter value stack. */
+  perf_counters_t& sv = start_values_.top();
   for (int i = 0; i < events_.size(); ++i) {
-    events_[i].Disable();
-    vals[i] = CalcDelta(start_values_[i], events_[i].ReadCounter());
+    vals[i] = CalcDelta(sv[i], events_[i].ReadCounter());
   }
-  is_enabled_ = false;
+  start_values_.pop();
+
+  // Restore it for a parent
+  if (start_values_.size()) {
+    StartCounting();
+  }
 }
 } // namespace linux_perf
 } // namespace impl

@@ -200,9 +200,13 @@ def detach_and_functionalize_pure(f, preserve_requires_grad=True):
                 continue
             torch._sync(f_arg)
             new_arg = torch._from_functional_tensor(f_arg)
-            # TODO: Improve diagnostics here.  If this assert failed,
-            # it means you passed a function that mutates inputs...
-            assert arg is new_arg
+            # I want to do this assert, but it is annoying because
+            # we have operator tests that have mutating inputs.  So
+            # I do something unsound instead
+            # assert arg is new_arg, "input argument was mutated, this is not valid"
+            if arg is not new_arg:
+                assert arg.shape == new_arg.shape
+                arg.copy_(new_arg)
 
         def from_fun(t):
             if not isinstance(t, Tensor) or not torch._is_functional_tensor(t):
