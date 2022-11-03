@@ -42,18 +42,18 @@ ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
-# TODO: Type[torch.SymIntNode], Type[torch.SymFloatNode]
+# TODO: Type[torch.SymInt], Type[torch.SymFloat]
 NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
 # TODO: This needs a lot more type annotations
-# NumberType = Union[bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode]
+# NumberType = Union[bool, int, float, complex, torch.SymInt, torch.SymFloat]
 NumberType = Union[bool, int, float, complex]
 
-Number = (bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode)
+Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat)
 # I don't call it Integral because numbers.Integral includes bool, but IntLike
 # does not
 Dim = int
-IntLike = (int, torch.SymIntNode)
-FloatLike = (float, torch.SymFloatNode)
+IntLike = (int, torch.SymInt)
+FloatLike = (float, torch.SymFloat)
 IntWithoutSymInt = int
 FloatWithoutSymFloat = float
 DeviceLikeType = Union[str, torch.device]
@@ -1113,10 +1113,10 @@ class RETURN_TYPE(Enum):
 
 
 # TODO: when NumberType contains the sym types, can simplify this
-def number_type(x: Union[NumberType, torch.SymIntNode, torch.SymFloatNode]) -> Type:
-    if isinstance(x, torch.SymIntNode):
+def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
+    if isinstance(x, torch.SymInt):
         return int
-    elif isinstance(x, torch.SymFloatNode):
+    elif isinstance(x, torch.SymFloat):
         return float
     else:
         return type(x)

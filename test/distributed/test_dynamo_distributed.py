@@ -2,16 +2,23 @@
 import os
 import unittest
 from unittest.mock import patch
-
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch.distributed as dist
+from contextlib import contextmanager
 from torch import nn
 from torch._dynamo import config
 from torch._dynamo.utils import same
+from torch._inductor.utils import has_triton
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing._internal.common_distributed import MultiProcessTestCase, skip_if_lt_x_gpu, requires_nccl
+import torch._dynamo.logging
 
+def init_weights(m):
+    if isinstance(m, nn.Linear):
+        nn.init.xavier_uniform_(m.weight)
+        m.bias.data.fill_(0.01)
 
 class ToyModel(nn.Module):
     def __init__(self, in_feat=10, hidden_feat=5000, num_hidden=2, out_feat=5):
@@ -19,11 +26,18 @@ class ToyModel(nn.Module):
         self.net = nn.Sequential(
             *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
             + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()] * num_hidden
-            + [nn.Linear(hidden_feat, 5), nn.ReLU()]
+            + [nn.Linear(hidden_feat, out_feat), nn.ReLU()]
         )
 
     def forward(self, inputs):
         return self.net(inputs)
+
+def get_model(device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
+    m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat).to(device)
+    m.apply(init_weights)
+    inputs = torch.rand(bsz, in_feat).to(device)
+    outputs = m(inputs)
+    return m, inputs, outputs
 
 
 class CheckSplitsCompiler:
@@ -34,7 +48,65 @@ class CheckSplitsCompiler:
         self.compiler_called += 1
         return gm
 
+@contextmanager
+def _per_rank_init(rank, world_size):
+    # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
+    # Just manually implement the most important part of the dynamo behavior to reset/clear.
+    torch.cuda.set_device(rank)
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '6789'
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch._dynamo.reset()
+    torch._dynamo.utils.counters.clear()
+    yield
+    torch._dynamo.reset()
+    torch._dynamo.utils.counters.clear()
+    dist.destroy_process_group()
 
+
+@requires_nccl()
+class TestDistributedMultiProc(MultiProcessTestCase):
+    def setUp(self):
+        super(TestDistributedMultiProc, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(TestDistributedMultiProc, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def world_size(self) -> int:
+        return torch.cuda.device_count()
+
+    @classmethod
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+        # Don't enable DDP + ReplicatedTensor, as that breaks Dynamo+DDP
+        # TODO(whc) why is ReplicatedTensor defaulted=True in MultiProcessTestCase, and should we support it?
+        # from torch.nn.parallel._replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
+        # _set_ddp_with_replicated_tensor(True)
+
+        # The rest is copypasta from MultiProcessTestCase._run
+        self = cls(test_name)
+        self.rank = rank
+        self.file_name = file_name
+        self.run_test(test_name, parent_pipe)
+
+    @skip_if_lt_x_gpu(2)
+    @patch.object(config, "optimize_ddp", False)
+    def test_ddp_baseline_aot_eager_multiprocess(self):
+        with _per_rank_init(self.rank, self.world_size):
+            self.assertFalse(config.optimize_ddp)
+            m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
+            m = DDP(m, device_ids=[self.rank])
+            m = torch._dynamo.optimize("aot_eager")(m)
+            outputs = m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
+
+
+@requires_nccl()
 class TestDistributed(torch._dynamo.test_case.TestCase):
     """
     Test harness initializes dist process group
@@ -54,18 +126,19 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
             )
         )
         cls.rank = 0
-        cls.device = f"cpu:{cls.rank}"
-        cls.device_ids = None if "cpu" in cls.device else [cls.rank]
-        dist.init_process_group("gloo", rank=cls.rank, world_size=1)
+        cls.device = f"cuda:{cls.rank}"
+        cls.device_ids = None if "cuda" in cls.device else [cls.rank]
+        dist.init_process_group("nccl", rank=cls.rank, world_size=1)
 
     @classmethod
     def tearDownClass(cls):
         dist.destroy_process_group()
         super().tearDownClass()
 
-    def get_model(self):
-        m = ToyModel().to(self.device)
-        inputs = torch.randn(20, 10).to(self.device)
+    def get_model(self, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
+        m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat).to(self.device)
+        m.apply(init_weights)
+        inputs = torch.rand(bsz, in_feat).to(self.device)
         outputs = m(inputs)
         return m, inputs, outputs
 
@@ -79,6 +152,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_inductor(self):
         from torch.nn.parallel import DistributedDataParallel as DDP
@@ -104,6 +178,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(correct_outputs, outputs))
 
     @unittest.skip("hangs/crashes with inductor currently")
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", False)
     def test_fsdp_baseline_inductor(self):
         from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -136,9 +211,8 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
-    # hangs/crashes with inductor currently
-    @unittest.skip("hangs/crashes with inductor currently")
     @patch.object(config, "optimize_ddp", True)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
         """
         Same as above, but using inductor backend.
@@ -161,11 +235,8 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         introducing graph splits. (Based on model parmeters fitting in the bucket)
         """
         # DDP will always do a 'first bucket' with a really small size;  so only a tiny model will escape this
-        m = ToyModel(hidden_feat=5).to(self.device)
-        inputs = torch.randn(20, 10).to(self.device)
-        correct_outputs = m(inputs)
+        m, inputs, correct_outputs = self.get_model(hidden_feat=5)
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=250)
-
         check_splits_compiler = CheckSplitsCompiler()
 
         @torch._dynamo.optimize(check_splits_compiler.compile_fn)
@@ -233,7 +304,8 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
                 return self.seq(x)
 
         m = MyModule().to(self.device)
-        inputs = torch.randn((512, 512)).to(self.device)
+        m.apply(init_weights)
+        inputs = torch.rand((512, 512)).to(self.device)
         correct_outputs = m(inputs)
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=1)
 
@@ -247,7 +319,8 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
-    def test_empty_graph(self):
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_empty_graph_inductor(self):
         def fn():
             get_world_size = torch.distributed.distributed_c10d.get_world_size()
             return (get_world_size,)
