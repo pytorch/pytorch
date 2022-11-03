@@ -14,7 +14,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             '_propagate_qconfig_helper',
             '_remove_activation_post_process',
             '_remove_qconfig',
-            'add_observer_',
+            '_add_observer_',
             'add_quant_dequant',
             'convert',
             '_get_observer_dict',

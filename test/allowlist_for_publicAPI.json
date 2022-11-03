@@ -736,7 +736,7 @@
     "QuantWrapper",
     "RecordingObserver",
     "_add_module_to_qconfig_obs_ctr",
-    "add_observer_",
+    "_add_observer_",
     "add_quant_dequant",
     "_assert_valid_qconfig",
     "convert",
@@ -888,7 +888,7 @@
     "no_observer_set"
   ],
   "torch.quantization.quantize": [
-    "add_observer_",
+    "_add_observer_",
     "add_quant_dequant",
     "convert",
     "_get_observer_dict",

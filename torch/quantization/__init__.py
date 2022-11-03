@@ -40,9 +40,8 @@ _all__ = [
     'get_quantized_operator',
     'get_fuser_method',
     # Sub functions for `prepare` and `swap_module`
-    'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
+    'propagate_qconfig_', 'add_quant_dequant', 'swap_module',
     'default_eval_fn',
-    '_register_activation_post_process_hook',
     # Observers
     'ObserverBase', 'WeightObserver', 'HistogramObserver',
     'observer', 'default_observer',

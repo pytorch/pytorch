@@ -294,7 +294,7 @@ class PackageImporter(Importer):
 
         Args:
             include (Union[List[str], str]): An optional string e.g. ``"my_package.my_subpackage"``, or optional list of strings
-                for the names of the files to be inluded in the zipfile representation. This can also be
+                for the names of the files to be included in the zipfile representation. This can also be
                 a glob-style pattern, as described in :meth:`PackageExporter.mock`
 
             exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
