@@ -1060,7 +1060,7 @@ def hessian(func, argnums=0):
         >>>   return x.sin().sum()
         >>>
         >>> x = torch.randn(5)
-        >>> hess = jacfwd(jacrev(f))(x)
+        >>> hess = hessian(f)(x)  # equivalent to jacfwd(jacrev(f))(x)
         >>> assert torch.allclose(hess, torch.diag(-x.sin()))
 
     """
