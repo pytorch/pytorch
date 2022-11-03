@@ -287,6 +287,14 @@ float_magic_methods = {
     "floordiv",
 }
 
+magic_methods_on_builtins = {"min", "max"}
+magic_methods_on_math = {"ceil", "floor"}
+magic_methods_on_submodule = {"sym_float", "sym_int", "sym_sqrt"}
+
+always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
+always_int_magic_methods = {"ceil", "floor"}
+always_bool_magic_methods = {"eq", "gt", "lt", "le", "ge"}
+
 def wrap_node(x):
     if not isinstance(x, SymNode):
         return x
@@ -303,7 +311,7 @@ def _make_node_magic(method, func):
     func = lru_cache(256)(func)
 
     def binary_magic_impl(self, other):
-        if method in ["min", "max"]:
+        if method in magic_methods_on_builtins:
             op = getattr(builtins, method)
         else:
             op = getattr(operator, method)
@@ -319,7 +327,7 @@ def _make_node_magic(method, func):
         out = func(expr, other_expr)
         out = sympy.expand(out)
         pytype: Type
-        if method in ["truediv"]:
+        if method in always_float_magic_methods:
             pytype = float
         else:
             pytype = self.pytype
@@ -330,11 +338,9 @@ def _make_node_magic(method, func):
 
     def unary_magic_impl(self):
         if SYM_FUNCTION_MODE:
-            if method in ["ceil", "floor"]:
+            if method in magic_methods_on_math:
                 op = getattr(math, method)
-            elif method == "sym_sqrt":
-                op = sym_sqrt
-            elif method in ["sym_float", "sym_int"]:
+            elif method in magic_methods_on_submodule:
                 op = getattr(sys.modules[__name__], method)
             else:
                 op = getattr(operator, method)
@@ -346,9 +352,9 @@ def _make_node_magic(method, func):
         out = func(expr)
         out = sympy.expand(out)
         pytype: Type
-        if method in ["ceil", "floor"]:
+        if method in always_int_magic_methods:
             pytype = int
-        elif method in ["sym_sqrt", "sym_float"]:
+        elif method in always_float_magic_methods:
             pytype = float
         elif method in ["sym_int"]:
             pytype = int

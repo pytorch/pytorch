@@ -179,11 +179,6 @@ from {config.inductor_import}.compile_fx import compile_fx_inner
 from {config.dynamo_import}.debug_utils import same_two_models
 """
 
-NVFUSER_IMPORT = """
-from torch.fx.passes.backends.nvfuser import NvFuserBackend
-nvfuser = NvFuserBackend()
-"""
-
 COMPILER_REPRO_OPTIONS = {
     "inductor": (INDUCTOR_IMPORT, "compile_fx_inner", "inductor_fails"),
     "inductor_accuracy": (
@@ -191,7 +186,6 @@ COMPILER_REPRO_OPTIONS = {
         "compile_fx_inner",
         "inductor_accuracy_fails",
     ),
-    "nvfuser": (NVFUSER_IMPORT, "nvfuser", "nvfuser_fails"),
 }
 
 
@@ -301,22 +295,6 @@ def inductor_fails(fx_g, args, check_str=None):
     try:
         compile_mod = compile_fx_inner(fx_g, args)
         compile_mod(args)
-    except Exception as e:
-        if check_str is not None and check_str not in repr(e):
-            return False
-        print(repr(e))
-        return True
-    return False
-
-
-def nvfuser_fails(fx_g, args, check_str=None):
-    from torch.fx.passes.backends.nvfuser import NvFuserBackend
-
-    nvfuser = NvFuserBackend()
-
-    try:
-        compile_mod = nvfuser(fx_g, args)
-        compile_mod = compile_mod(*args)
     except Exception as e:
         if check_str is not None and check_str not in repr(e):
             return False
