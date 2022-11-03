@@ -14,7 +14,12 @@ from torch._dynamo import config
 from torch._dynamo.utils import same
 from torch._inductor.utils import has_triton
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_distributed import MultiProcessTestCase, skip_if_lt_x_gpu, requires_nccl
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    import_transformers_or_skip,
+    skip_if_lt_x_gpu,
+    requires_nccl
+)
 import torch._dynamo.logging
 
 
@@ -48,6 +53,7 @@ def get_model(device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
     return m, inputs, outputs
 
 def get_hf_bert(rank):
+    # Note: use @import_transformers_or_skip on your test case if you use this
     try:
         from transformers import BertConfig, AutoModelForMaskedLM
     except ImportError:
@@ -127,6 +133,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
             self.assertTrue(same(correct_outputs, outputs))
 
     @skip_if_lt_x_gpu(2)
+    @import_transformers_or_skip()
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp(self):
