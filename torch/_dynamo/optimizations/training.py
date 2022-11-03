@@ -65,7 +65,7 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
             else:
                 mutated = has_mutation(gm, example_inputs)
         else:
-            log.warning(
+            log.info(
                 "inference_mode enabled. TorchDynamo could not check for mutation."
             )
     except NotImplementedError as e:
