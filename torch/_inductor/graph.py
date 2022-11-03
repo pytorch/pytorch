@@ -35,6 +35,7 @@ class GraphLowering(torch.fx.Interpreter):
         have the same size they get assigned the same symbolic variable.
         """
         size = [self.sizevars[i] for i in ex.size()]
+        self.name = "GraphLowering"
         stride = [None] * len(size)
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
@@ -93,6 +94,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_seeds = []
         self.name_to_buffer = {}
         self.creation_time = time.time()
+        self.name = "GraphLowering"
 
     def get_dtype(self, buffer_name):
         if buffer_name in self.constants:

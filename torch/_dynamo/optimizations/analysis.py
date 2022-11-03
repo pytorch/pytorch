@@ -24,6 +24,7 @@ class ShapeAliasingAndMutationProp(ShapeProp):
         self.input_alias_groups = set()
         self.storage_to_alias_group = dict()
         self.make_alias_group = itertools.count(1)
+        self.name = "ShapeAliasingAndMutation"
 
     def tensor_alias_group(self, value: torch.Tensor):
         """Assign a unique identifier to the storage of a given tensor"""

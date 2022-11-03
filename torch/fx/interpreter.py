@@ -73,7 +73,7 @@ class Interpreter:
         self.module = module
         self.submodules = dict(self.module.named_modules())
         self.env : Dict[Node, Any] = {}
-
+        self.name = "Interpreter"
         self.garbage_collect_values = garbage_collect_values
 
         if self.garbage_collect_values:
@@ -118,7 +118,11 @@ class Interpreter:
         if enable_io_processing:
             args = self.module.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
-        for node in tqdm(self.module.graph.nodes, desc=f"Compiling subgraph {str(list(self.module.graph.nodes))} in pass {self.__class__}", initial=1, position=0, leave=True):
+
+        ## Add max delay of 15s
+        ## Horace feedback: Increment log for each start and end of dynamo, AOT and inductor as default, below seems more useful for profiling. 
+        # Check out codecache.py instead as a better place to instrument stuff
+        for node in tqdm(self.module.graph.nodes, desc=f"{self.name}: {str(list(self.module.graph.nodes))}", initial=1, position=0, leave=True):
             if node in self.env:
                 # Short circuit if we have this value. This could
                 # be used, for example, for partial evaluation
