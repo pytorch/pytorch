@@ -1,10 +1,19 @@
+import copy
+import itertools
 import logging
 import random
 import weakref
 
 import torch
+import torch.nn as nn
 from torch import _prims
+from torch.fx.experimental.optimization import (
+    matches_module_pattern,
+    replace_node_module,
+)
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+from torch.nn import functional as F
+from torch.nn.modules.utils import _pair
 from torch.overrides import TorchFunctionMode
 
 log = logging.getLogger(__name__)
@@ -33,6 +42,127 @@ def replace_fx(gm: torch.fx.GraphModule):
                     )
                 )
             gm.graph.erase_node(node)
+    gm.recompile()
+    return gm
+
+
+class UnaryAttr(object):
+    def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
+        self.op_name = op_name
+        self.scalars_attr = scalars_attr if scalars_attr else []
+        self.algorithm_attr = algorithm_attr if algorithm_attr else ""
+        super(UnaryAttr, self).__init__()
+
+    def __call__(self, unary_module: nn.Module):
+        assert all(hasattr(unary_module, item) for item in self.scalars_attr)
+        scalars = [getattr(unary_module, item) for item in self.scalars_attr]
+
+        algorithm = ""
+        if self.algorithm_attr:
+            assert hasattr(unary_module, self.algorithm_attr)
+            algorithm = getattr(unary_module, self.algorithm_attr)
+
+        return self.op_name, scalars, algorithm
+
+
+class ConvUnary2d(nn.Conv2d):
+    def __init__(
+        self,
+        conv: nn.Module,
+        unary: nn.Module,
+    ):
+        super(ConvUnary2d, self).__init__(
+            conv.in_channels,
+            conv.out_channels,
+            conv.kernel_size,
+            conv.stride,
+            conv.padding,
+            conv.dilation,
+            conv.groups,
+            conv.bias is not None,
+            conv.padding_mode,
+            conv.weight.device,
+            conv.weight.dtype,
+        )
+        self._update_module_params(conv, unary)
+
+    def _update_module_params(self, conv, unary):
+        self.__dict__ = copy.deepcopy(conv.__dict__)
+        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
+            unary
+        )
+
+    def _conv_forward(self, input, weight, bias):
+        if self.padding_mode != "zeros":
+            return torch.ops.mkldnn._convolution_pointwise(
+                F.pad(
+                    input, self._reversed_padding_repeated_twice, mode=self.padding_mode
+                ),
+                weight,
+                bias,
+                _pair(0),
+                self.stride,
+                self.dilation,
+                self.groups,
+                self.attr,
+                self.scalars,
+                self.algorithm,
+            )
+        return torch.ops.mkldnn._convolution_pointwise(
+            input,
+            weight,
+            bias,
+            self.padding,
+            self.stride,
+            self.dilation,
+            self.groups,
+            self.attr,
+            self.scalars,
+            self.algorithm,
+        )
+
+    def forward(self, input):
+        return self._conv_forward(input, self.weight, self.bias)
+
+
+def fused_conv_unary_eval(conv: nn.Module, unary: nn.Module):
+    assert not (conv.training), "Fusion only for eval!"
+    return ConvUnary2d(
+        conv,
+        unary,
+    )
+
+
+def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
+    if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
+        return gm
+    is_cpu = all(
+        example_input.device == torch.device("cpu") for example_input in example_inputs
+    )
+    if not is_cpu:
+        return gm
+    modules = dict(gm.named_modules())
+
+    for (unary_module, _), (computation_module, fuse_func,) in itertools.product(
+        unary_modules_map.items(), computation_op_unary_op_fusion_map.items()
+    ):
+        pattern = (computation_module, unary_module)
+        for node in gm.graph.nodes:
+            if matches_module_pattern(pattern, node, modules):
+                if (
+                    len(node.args[0].users) > 1
+                ):  # Output of computation_node is used by other nodes
+                    continue
+                conv = modules[node.args[0].target]
+                unary_node = modules[node.target]
+                eval_mode = all(not n.training for n in [conv, unary_node])
+                if not eval_mode:
+                    continue
+                fused_conv = fuse_func(conv, unary_node)
+                replace_node_module(node.args[0], modules, fused_conv)
+                node.replace_all_uses_with(node.args[0])
+                gm.graph.erase_node(node)
+                gm.graph.lint()
     gm.recompile()
     return gm
 
@@ -163,3 +293,17 @@ def rand_like(x, **kwargs):
 
 
 replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
+
+
+computation_op_unary_op_fusion_map = {nn.Conv2d: fused_conv_unary_eval}
+
+
+unary_modules_map = {
+    nn.ReLU: UnaryAttr("relu"),
+    nn.Sigmoid: UnaryAttr("sigmoid"),
+    nn.Tanh: UnaryAttr("tanh"),
+    nn.Hardswish: UnaryAttr("hardswish"),
+    nn.LeakyReLU: UnaryAttr("leaky_relu", scalars_attr=["negative_slope"]),
+    nn.Hardtanh: UnaryAttr("hardtanh", scalars_attr=["min_val", "max_val"]),
+    nn.GELU: UnaryAttr("gelu", algorithm_attr="approximate"),
+}

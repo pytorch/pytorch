@@ -66,6 +66,10 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
   set_constructor_metadata();
 }
 
+void FunctionalTensorWrapper::freeze_storage() const {
+  functional_storage_impl()->freeze();
+}
+
 // Note [Functionalization: Alias Removal]
 // When someone calls a view() op during the functionalization pass, e.g. 'b = a.view(...)',
 // we link `b` and `a` to a shared Alias object to preserve the aliasing relationship.
@@ -302,12 +306,16 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_
       return r;
     }
   }
+
   auto impl = c10::make_intrusive<FunctionalTensorWrapper>(value_);
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  impl->level_ = level_;
+  impl->generation_ = generation_;
+  impl->view_metas_ = view_metas_;
   impl->refresh_numel();
   impl->refresh_contiguous();
   return impl;
@@ -531,6 +539,12 @@ bool isFunctionalTensorIListRef(c10::IListRef<T> list) {
 
 bool isFunctionalTensor(ITensorListRef list) {
   return isFunctionalTensorIListRef(list);
+}
+
+void freeze_functional_tensor(const Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(tensor));
+  auto functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+  functional_base_impl->freeze_storage();
 }
 
 Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {
