@@ -10,7 +10,7 @@ class SyncBatchNorm(Function):
         if not (
                 input.is_contiguous(memory_format=torch.channels_last) or
                 input.is_contiguous(memory_format=torch.channels_last_3d)
-            ):
+                ):
             input = input.contiguous()
         if weight is not None:
             weight = weight.contiguous()
@@ -110,7 +110,7 @@ class SyncBatchNorm(Function):
         if not (
                 grad_output.is_contiguous(memory_format=torch.channels_last) or
                 grad_output.is_contiguous(memory_format=torch.channels_last_3d)
-            ):
+                ):
             grad_output = grad_output.contiguous()
         saved_input, weight, mean, invstd, count_tensor = self.saved_tensors
         grad_input = grad_weight = grad_bias = None
