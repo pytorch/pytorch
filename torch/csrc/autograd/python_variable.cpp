@@ -1,8 +1,10 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/PythonFallbackKernel.h>
+#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/GPUTrace.h>
+#include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
@@ -31,6 +33,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
@@ -219,6 +222,14 @@ struct ConcretePyInterpreterVTable final
       const c10::OperatorHandle& op,
       c10::DispatchKeySet,
       torch::jit::Stack* stack) const override;
+  // NB: this is defined in python_dispatch.cpp
+  void python_op_registration_trampoline(
+      const c10::OperatorHandle& op,
+      c10::DispatchKey key,
+      torch::jit::Stack* stack) const override {
+    torch::impl::dispatch::python_op_registration_trampoline_impl(
+        op, key, stack);
+  }
 
   bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override;
   bool is_strides_like(const TensorImpl* self, at::MemoryFormat) const override;
@@ -294,6 +305,10 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
   // THPVariable_clear).
   // 2. We are decref-ing some other Python object. We don't do
   // PyObject resurrection on non-Tensors, so we just carry on as usual
+  if (is_tensor) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        !c10::impl::HermeticPyObjectTLS::get_state());
+  }
   if (is_tensor && Py_REFCNT(pyobj) > 1) {
     // It's still alive!  This can happen if a weak ref resurrected
     // the PyObject without flipping ownership.  At this point it is
@@ -314,7 +329,10 @@ class PyInterpreterHolder {
  public:
   PyInterpreterHolder()
       : impl_(new c10::impl::PyInterpreter(
-            ConcretePyInterpreterVTable::instance())) {}
+            ConcretePyInterpreterVTable::instance())) {
+    is_main_interpreter_ =
+        at::impl::PythonOpRegistrationTrampoline::registerInterpreter(impl_);
+  }
   // NB: intentionally leaks the PyInterpreter, as there may still be
   // references to it that are live, living in objects that aren't being
   // destructed while Python is being cleaned up.
@@ -324,9 +342,13 @@ class PyInterpreterHolder {
   c10::impl::PyInterpreter* get() const noexcept {
     return impl_;
   }
+  bool is_main_interpreter() const noexcept {
+    return is_main_interpreter_;
+  }
 
  private:
   c10::impl::PyInterpreter* impl_;
+  bool is_main_interpreter_;
 };
 PyInterpreterHolder self_interpreter;
 
@@ -350,6 +372,10 @@ c10::TensorImpl::SizesStridesPolicy parseSizesStridesPolicyArgument(
 
 c10::impl::PyInterpreter* getPyInterpreter() {
   return self_interpreter.get();
+}
+
+bool isMainPyInterpreter() {
+  return self_interpreter.is_main_interpreter();
 }
 
 std::string ConcretePyInterpreterVTable::name() const {
@@ -414,6 +440,13 @@ void activateCUDATrace() {
 PyObject* THPVariable_Wrap(at::TensorBase var) {
   if (!var.defined()) {
     Py_RETURN_NONE;
+  }
+
+  if (c10::impl::HermeticPyObjectTLS::get_state()) {
+    return THPVariable_NewWithVar(
+        (PyTypeObject*)THPVariableClass,
+        std::move(var),
+        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   }
 
   c10::optional<PyObject*> mb_obj =
@@ -489,6 +522,11 @@ bool isResurrectable(THPVariable* self) {
     return false;
   }
   auto const& tensor = THPVariable_Unpack(self);
+  // Check if this is hermetic. If it is, no resurrection.
+  if (tensor.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get()) !=
+      c10::make_optional((PyObject*)self)) {
+    return false;
+  }
   if (!tensor.defined() || tensor.use_count() <= 1) {
     return false;
   }
@@ -531,6 +569,7 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   // Flip THPVariable to be non-owning
   // (near use-after-free miss here: fresh MaybeOwned is created breaking
   // reference on Tensor in struct BEFORE we overwrite the old one)
+  TORCH_INTERNAL_ASSERT(!c10::impl::HermeticPyObjectTLS::get_state());
   self->cdata = MaybeOwned<Variable>::borrowed(tensor);
 
   // NB: At this point, tensor *could* be dead (e.g., some other C++ thread
@@ -582,7 +621,9 @@ static int THPVariable_clear(THPVariable* self) {
     //        unsafeIsBorrowed() is TRUE.  We're deallocating the PyObject
     //        because Tensor asked us to (it's already destructing).
 
-    if (!self->cdata.unsafeIsBorrowed()) {
+    if (!self->cdata.unsafeIsBorrowed() &&
+        tensor.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get()) ==
+            c10::make_optional((PyObject*)self)) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
@@ -1887,11 +1928,27 @@ static PyObject* THPVariable_NewWithVar(
     auto v = (THPVariable*)obj;
     // TODO: named constructor to avoid default initialization
     new (&v->cdata) MaybeOwned<Variable>();
-    v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
-    const auto& var = THPVariable_Unpack(v);
-    var.unsafeGetTensorImpl()->init_pyobj(self_interpreter.get(), obj, status);
-    if (check_has_torch_dispatch(obj)) {
-      var.unsafeGetTensorImpl()->set_python_dispatch(true);
+    if (c10::impl::HermeticPyObjectTLS::get_state()) {
+      // Do NOT initialize pyobj field on the tensor, you own the C++
+      v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
+      TORCH_INTERNAL_ASSERT(
+          !check_has_torch_dispatch(obj),
+          "While HermeticPyObject was enabled, we attempted to create a tensor "
+          "subclass with __torch_dispatch__.  This violates the invariant that "
+          "operations in HermeticPyObject have equivalent C++ implementations. "
+          "If your operator registered from Python operator registration isn't "
+          "doing anything strange, there may be an internal PyTorch bug involving "
+          "not appropriately disabling TorchDispatchMode before executing "
+          "Python op registration.");
+    } else {
+      // Normal codepath
+      v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
+      const auto& var = THPVariable_Unpack(v);
+      var.unsafeGetTensorImpl()->init_pyobj(
+          self_interpreter.get(), obj, status);
+      if (check_has_torch_dispatch(obj)) {
+        var.unsafeGetTensorImpl()->set_python_dispatch(true);
+      }
     }
   }
   return obj;
