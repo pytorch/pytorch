@@ -69,7 +69,9 @@ def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("scatter", self, dim, index, src, overload_name="src")
 
-    src_type = src.type().scalarType()
+    src_type = _type_utils.JitScalarType.from_value(
+        src, _type_utils.JitScalarType.UNDEFINED
+    )
     src_sizes = symbolic_helper._get_tensor_sizes(src)
     index_sizes = symbolic_helper._get_tensor_sizes(index)
 
@@ -85,13 +87,11 @@ def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
     else:
         # Check if scalar "src" has same type as self (PyTorch allows different
         # type for scalar src (but not when src is tensor)). If not, insert Cast node.
-        if self.type().scalarType() != src_type:
+        if _type_utils.JitScalarType.from_value(self) != src_type:
             src = g.op(
                 "Cast",
                 src,
-                to_i=_type_utils.JitScalarType.from_name(
-                    self.type().scalarType()
-                ).onnx_type(),
+                to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
             )
 
         return g.op(
