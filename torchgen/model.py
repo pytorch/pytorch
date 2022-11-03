@@ -91,6 +91,7 @@ class DispatchKey(Enum):
     VmapMode = auto()
     TESTING_ONLY_GenericWrapper = auto()
     TESTING_ONLY_GenericMode = auto()
+    PythonDispatcher = auto()
 
     Autograd = auto()
     CompositeImplicitAutograd = auto()

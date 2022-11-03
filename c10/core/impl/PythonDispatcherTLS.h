@@ -12,27 +12,29 @@ struct C10_API PythonDispatcherTLS {
   static PythonDispatcherTLS get_state();
   static void user_set_state(PyInterpreter* interpreter);
   static PyInterpreter* get_interpreter();
-  static void reset_state();
+  static void set_interpreter(PyInterpreter* state);
 
-  static void push_onto_pre_stack(std::shared_ptr<SafePyObject> mode, PyInterpreter* interpreter);
+  static void push_onto_pre_stack(
+      std::shared_ptr<SafePyObject> mode,
+      PyInterpreter* interpreter);
   static const std::shared_ptr<SafePyObject> pop_pre_stack();
   static const std::shared_ptr<SafePyObject>& get_pre_stack_at(int64_t idx);
   static int64_t pre_stack_len();
 
-  private:
-    std::vector<std::shared_ptr<c10::SafePyObject>> pre_dispatch_stack_;
-    PyInterpreter* interpreter_;
-    bool user_activated = false;
+ private:
+  std::vector<std::shared_ptr<c10::SafePyObject>> pre_dispatch_stack_;
+  PyInterpreter* interpreter_;
+  bool user_activated = false;
 };
 
 struct C10_API DisablePythonDispatcher {
-  DisablePythonDispatcher() : old_(PythonDispatcherTLS::get_state()) {
-    PythonDispatcherTLS::reset_state();
+  DisablePythonDispatcher() : old_(PythonDispatcherTLS::get_interpreter()) {
+    PythonDispatcherTLS::set_interpreter(nullptr);
   }
   ~DisablePythonDispatcher() {
-    PythonDispatcherTLS::set_state(old_);
+    PythonDispatcherTLS::set_interpreter(old_);
   }
-  PythonDispatcherTLS old_;
+  PyInterpreter* old_;
 };
 
 } // namespace impl

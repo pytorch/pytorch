@@ -90,11 +90,6 @@ class BaseTorchDispatchMode(TorchDispatchMode):
             kwargs = {}
         return func(*args, **kwargs)
 
-# TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
-# - We need a better user-facing api for _DisableTorchDispatch that
-#   is able to selectively disable __torch_dispatch__ of a particular class.
-# - It doesn't work with the tensor constructors (torch.tensor, torch.Tensor)
-# - Better name (see https://github.com/pytorch/pytorch/pull/63496#discussion_r694091694)
 
 class TorchPreDispatchMode:
     """
@@ -136,11 +131,6 @@ class TorchPreDispatchMode:
     def __exit__(self, exc_type, exc_val, exc_tb):
         _pop_pre_mode()
 
-    @classmethod
-    def push(cls, *args, **kwargs):
-        warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`")
-        instance = cls(*args, **kwargs)
-        return instance
 
 def _get_current_pre_dispatch_mode():
     stack_len = _len_torch_pre_dispatch_stack()

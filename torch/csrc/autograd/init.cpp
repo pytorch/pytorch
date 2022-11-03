@@ -70,7 +70,8 @@ struct EnableTorchFunction {
 };
 
 struct EnablePythonDispatcher {
-  EnablePythonDispatcher() : old_(c10::impl::PythonDispatcherTLS::get_interpreter()) {
+  EnablePythonDispatcher()
+      : old_(c10::impl::PythonDispatcherTLS::get_interpreter()) {
     c10::impl::PythonDispatcherTLS::user_set_state(getPyInterpreter());
   }
   ~EnablePythonDispatcher() {
@@ -728,7 +729,8 @@ static PyObject* push_on_torch_pre_dispatch_stack(
   if (arg != Py_None) {
     Py_INCREF(arg);
     c10::impl::PythonDispatcherTLS::push_onto_pre_stack(
-        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()), getPyInterpreter());
+        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()),
+        getPyInterpreter());
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

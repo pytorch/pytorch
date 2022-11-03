@@ -1190,7 +1190,7 @@ auto handle_torch_function(
 
 // Used for functions created in C++, e.g., C++ custom op, which doesn't use
 // PythonArgParser to get overloaded_args.
-enum class TorchFunctionName { TorchFunction, TorchPreDispatch, TorchDispatch };
+enum class TorchFunctionName { TorchFunction, TorchDispatch };
 
 auto TORCH_API handle_torch_function_no_python_arg_parser(
     at::ArrayRef<py::handle> overloaded_args,

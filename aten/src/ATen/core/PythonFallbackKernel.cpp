@@ -2,7 +2,6 @@
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <c10/core/SafePyObject.h>
-#include <iostream>
 
 namespace {
 

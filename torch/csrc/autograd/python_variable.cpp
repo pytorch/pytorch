@@ -2266,17 +2266,6 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   py::handle torch_api_function_overload = getTorchApiFunction(op);
 
   c10::DispatchKey k = ks.highestPriorityTypeId();
-  /*if (k == DispatchKey::PythonDispatcher) {
-    handle_torch_function_no_python_arg_parser(
-      overloaded_args,
-      args.ptr(),
-      kwargs.ptr(),
-      nullptr,
-      torch_api_function_overload.ptr(),
-      nullptr,
-      TorchFunctionName::TorchDispatch);
-  } */
-
   auto handler = torch_api_function_overload.attr(toString(k));
   if (handler.ptr() == nullptr) {
     throw python_error();

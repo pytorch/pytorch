@@ -4,6 +4,8 @@ import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from functorch.experimental.cond import cond
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.utils._python_dispatch import TorchPreDispatchMode
+
 
 class TestControlFlow(TestCase):
     def test_cond_no_trace(self):
@@ -344,6 +346,10 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         with self.assertRaises(AssertionError):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
+
+    def test_with_pre_dispatch_mode(self):
+        class A(TorchPreDispatchMode):
+
 
 if __name__ == '__main__':
     run_tests()

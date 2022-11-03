@@ -13,7 +13,8 @@ struct StashTorchPreDispatchModeGuard {
   }
 
   ~StashTorchPreDispatchModeGuard() {
-    c10::impl::PythonDispatcherTLS::push_onto_pre_stack(std::move(saved_mode_), interpreter_);
+    c10::impl::PythonDispatcherTLS::push_onto_pre_stack(
+        std::move(saved_mode_), interpreter_);
   }
 
   const std::shared_ptr<c10::SafePyObject>& get_cur_mode() {
@@ -25,5 +26,5 @@ struct StashTorchPreDispatchModeGuard {
   std::shared_ptr<at::SafePyObject> saved_mode_;
 };
 
-} // namespace torch_dispatch_mode
+} // namespace torch_pre_dispatch_mode
 } // namespace torch
