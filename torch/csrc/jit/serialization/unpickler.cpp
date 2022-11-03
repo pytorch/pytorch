@@ -863,13 +863,22 @@ void Unpickler::rebuildTensor(bool quantized) {
     }
     bool requires_grad = elements.at(idx).toBool();
     // elements[idx++] is empty backwards hooks
-    auto math_bits = elements.at(idx + 2).toGenericDict();
     at::TensorImpl* impl = result.unsafeGetTensorImpl();
     impl->set_storage_keep_dtype(storage_tensor.storage());
     impl->set_storage_offset(storage_offset);
     impl->set_sizes_and_strides(size, stride);
     result = autograd::make_variable(result, requires_grad);
-    torch::jit::setTensorMathBits(result, math_bits);
+
+    // Handle if math_bits were pickled.
+    // See `args` of _reduce_ex_internal
+    // for a regular tensor (final else case).
+    // NOTE: `math_bits` is the 7th arg.
+    bool has_math_bits = elements.size() >= 7;  // >= assuming more args were added later.
+    if (has_math_bits) {
+      auto math_bits = elements.at(idx + 2).toGenericDict();
+      torch::jit::setTensorMathBits(result, math_bits);
+    }
+
     stack_.emplace_back(std::move(result));
   });
 }
