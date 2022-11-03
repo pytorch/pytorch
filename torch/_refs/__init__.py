@@ -4081,8 +4081,9 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
         )
     assert isinstance(weight, Tensor)  # mypy
     # We implement it this way for numerical stability. We assume (in the stability optimisation)
-    # that 0 <= weight <= 1. We take the abs to deal with comples numbers
-    # We want to do operations near zero, which is where floating points are most precise
+    # that 0 <= weight <= 1. We take the abs to deal with complex numbers
+    # We want to perform operations near zero, which is where floating points are most precise
+    # thus, we perform the following optimisation:
     # If weight.abs() >= 0.5:
     #    return (1 - weight) * (start - end) + end
     mask = weight.abs() >= 0.5
