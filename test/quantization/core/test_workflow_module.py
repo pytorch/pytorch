@@ -17,7 +17,6 @@ from torch.ao.quantization import (
     default_observer,
     default_histogram_observer,
     default_per_channel_weight_observer,
-    _get_observer_dict,
     prepare,
     prepare_qat,
     convert,
@@ -26,6 +25,7 @@ from torch.ao.quantization import (
     get_embedding_qat_module_mappings,
     get_embedding_static_quant_module_mappings,
 )
+from torch.ao.quantization.quantize import _get_observer_dict
 
 import torch.nn as nn
 
@@ -1011,11 +1011,11 @@ class TestFusedObsFakeQuantModule(TestCase):
         )
 
         # Compare params with reference
-        torch.testing.assert_allclose(out, out_ref)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(out, out_ref)
+        torch.testing.assert_close(
             running_min_op, mod.activation_post_process.min_val
         )
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             running_max_op, mod.activation_post_process.max_val
         )
 
@@ -1066,11 +1066,11 @@ class TestFusedObsFakeQuantModule(TestCase):
             )
 
             # Compare params with reference
-            torch.testing.assert_allclose(out, out_ref)
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(out, out_ref)
+            torch.testing.assert_close(
                 running_min_op, mod.activation_post_process.min_val
             )
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 running_max_op, mod.activation_post_process.max_val
             )
 
@@ -1095,12 +1095,12 @@ class TestFusedObsFakeQuantModule(TestCase):
             x = torch.randn(5, 5, device=device)
             out = mod(x)
             out_ref = mod_ref(x)
-            torch.testing.assert_allclose(out, out_ref)
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(out, out_ref)
+            torch.testing.assert_close(
                 mod_ref.activation_post_process.min_val,
                 mod.activation_post_process.min_val,
             )
-            torch.testing.assert_allclose(
+            torch.testing.assert_close(
                 mod_ref.activation_post_process.max_val,
                 mod.activation_post_process.max_val,
             )
@@ -1151,20 +1151,20 @@ class TestFusedObsFakeQuantModule(TestCase):
                     False,
                 )
                 # Compare params with reference
-                torch.testing.assert_allclose(out, out_ref)
+                torch.testing.assert_close(out, out_ref)
                 if mod.observer_enabled[0]:
-                    torch.testing.assert_allclose(
+                    torch.testing.assert_close(
                         running_min_op, mod.activation_post_process.min_val
                     )
-                    torch.testing.assert_allclose(
+                    torch.testing.assert_close(
                         running_max_op, mod.activation_post_process.max_val
                     )
                 if mod.fake_quant_enabled:
-                    torch.testing.assert_allclose(scale, mod.scale)
-                    torch.testing.assert_allclose(zero_point, mod.zero_point)
+                    torch.testing.assert_close(scale, mod.scale)
+                    torch.testing.assert_close(zero_point, mod.zero_point)
 
-            torch.testing.assert_allclose(mod.state_dict()['activation_post_process.min_val'], running_min_op)
-            torch.testing.assert_allclose(mod.state_dict()['activation_post_process.max_val'], running_max_op)
+            torch.testing.assert_close(mod.state_dict()['activation_post_process.min_val'], running_min_op)
+            torch.testing.assert_close(mod.state_dict()['activation_post_process.max_val'], running_max_op)
 
     def test_fused_mod_reduce_range(self):
         obs = FusedMovingAvgObsFakeQuantize(quant_min=0, quant_max=255, dtype=torch.quint8, reduce_range=True)
