@@ -268,6 +268,9 @@ def check_node_is_binary(node):
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
+    # make sure the autograd is disabled.
+    if torch.is_grad_enabled():
+        return gm
     if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
         return gm
     is_cpu = all(
