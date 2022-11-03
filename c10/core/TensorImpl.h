@@ -9,6 +9,7 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/WrapDimMinimal.h>
+#include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/SizesAndStrides.h>
@@ -2043,7 +2044,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return c10::nullopt;
     } else if (interpreter == self_interpreter) {
       // NB: pyobj_ could still be null!
-      return c10::make_optional(_unchecked_untagged_pyobj());
+      if (c10::impl::HermeticPyObjectTLS::get_state()) {
+        return c10::nullopt;
+      } else {
+        return c10::make_optional(_unchecked_untagged_pyobj());
+      }
     } else {
       TORCH_CHECK(
           false,
