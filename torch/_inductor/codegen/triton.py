@@ -981,6 +981,7 @@ class TritonKernel(Kernel):
                     import triton
                     import triton.language as tl
                     from {config.inductor_import}.ir import ReductionHint
+                    from {config.inductor_import}.ir import TileHint
                     from {config.inductor_import}.triton_ops.autotune import {heuristics}
                     from {config.inductor_import}.utils import instance_descriptor
                 """
@@ -1021,8 +1022,14 @@ class TritonKernel(Kernel):
                 @triton.jit
             """
         else:
+            tile_hint = ""
+            if len(size_hints) == 2:
+                if len(signature) == 4:  # input, output and 2 args
+                    tile_hint = "tile_hint=TileHint.SQUARE,"
+                else:
+                    tile_hint = "tile_hint=TileHint.DEFAULT,"
             heuristics_line = f"""
-                @{heuristics}(size_hints={size_hints!r}, filename=__file__, meta={triton_meta!r})
+                @{heuristics}(size_hints={size_hints!r}, {tile_hint}filename=__file__, meta={triton_meta!r})
                 @triton.jit
             """
         code.splice(heuristics_line)
