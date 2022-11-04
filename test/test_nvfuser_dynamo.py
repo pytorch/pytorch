@@ -52,8 +52,8 @@ class TestNvFuserDynamo(TestCase):
         b = make_tensor((3), device="cuda", dtype=torch.float32)
 
         @torchdynamo.optimize("nvprims_nvfuser")
-        def func(a, b, w, b):
-            o = torch.matmul(a, b)
+        def func(mat1, mat2, w, b):
+            o = torch.matmul(mat1, mat2)
             return torch.batch_norm(o, w, b, None, None, True, 1e-2, 1e-5, True)
 
         # No warnings and no errors
