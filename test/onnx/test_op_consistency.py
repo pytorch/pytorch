@@ -324,8 +324,8 @@ ALLOWLIST_OP: AbstractSet[str] = frozenset(
 
 # Expected failures for onnx export.
 # The list should be sorted alphabetically by op name.
-# Q: When should I use skip vs vs dont_care vs xfail?
-# A: Use skip when we want to fix the test eventually but it doesn't fail consistently,
+# Q: When should I use fixme vs vs dont_care vs xfail?
+# A: Use fixme when we want to fix the test eventually but it doesn't fail consistently,
 #        e.g. the test is flaky or some tests pass. Otherwise, use xfail.
 #    Use dont_care if we don't care about the test passing, e.g. ONNX doesn't support the usage.
 #    Use xfail if a test fails now and we want to eventually fix the test.
