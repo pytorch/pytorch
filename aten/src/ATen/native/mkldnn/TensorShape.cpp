@@ -1,7 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/InferSize.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/core/Tensor.h>
 #include <c10/core/SymIntArrayRef.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -78,6 +79,9 @@ Tensor mkldnn_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optiona
 }
 
 Tensor mkldnn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
+  auto ndims = self.dim();
+  dim0 = maybe_wrap_dim(dim0, ndims);
+  dim1 = maybe_wrap_dim(dim1, ndims);
   const ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor y;
   std::vector<int> axes(x.ndims());
