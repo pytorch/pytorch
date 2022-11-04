@@ -1302,7 +1302,7 @@ There are two possible choices for which commit to use:
 For all practical purposes, most people can think of the commit being used as
 commit `B` (choice **1**).
 
-However, if you're modifying the workflow files (which govern CI behavior) there's
+However, if workflow files (which govern CI behavior) were modified (either by your PR or since dev branch were created ) there's
 a nuance to know about:
 The workflow files themselves get taken from checkpoint `C`, the merger of your
 PR and the `master` branch. But only the workflow files get taken from that merged
