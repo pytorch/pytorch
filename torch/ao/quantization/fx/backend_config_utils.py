@@ -16,9 +16,9 @@ from ..backend_config import BackendConfig
 from .quantization_patterns import QuantizeHandler
 from .fusion_patterns import DefaultFuseHandler
 
-from typing import Dict, Any, Callable, Optional
+from typing import Dict, Any, Callable, Optional, List
 
-__all__ = []
+__all__: List[str] = []
 
 def _get_quantize_handler_cls(
         observation_type,
