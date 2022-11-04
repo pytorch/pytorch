@@ -1287,7 +1287,7 @@ commit `B`:
 ```
        o---o---B (pr-commit)
       /         \
-     /           C (merged-commit)
+     /           C (refs/pull/42/merge)
     /           /
 ---o---o---o---A (merge-destination) - usually master
 ```
