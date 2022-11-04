@@ -169,8 +169,10 @@ def _register_lowering(
         assert not any(
             x == "out" for x in kwargs.keys()
         ), "out= ops aren't yet supported"
-        # kwargs tensors not supported yet
-        assert not any(isinstance(x, TensorBox) for x in kwargs.values())
+        # kwargs tensors not supported yet unless it's a fallback op
+        assert not any(isinstance(x, TensorBox) for x in kwargs.values()) or all(
+            fn in fallbacks for fn in aten_fn
+        )
 
         if (type_promotion_kind or convert_input_to_bool) and indices:
             if convert_input_to_bool:
