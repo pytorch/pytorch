@@ -959,10 +959,12 @@ def register_onednn_fusion_ops():
 
 register_onednn_fusion_ops()
 
+
 def create_fallback(kernel, *args, **kwargs):
     result, result_spec = ir.FallbackKernel.create(kernel, *args, **kwargs)
     result = list(map(TensorBox.create, result))
     return pytree.tree_unflatten(result, result_spec)
+
 
 def fallback_handler(kernel):
     fallbacks.add(kernel)
