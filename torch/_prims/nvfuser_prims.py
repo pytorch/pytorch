@@ -395,7 +395,10 @@ def register_native_batch_norm():
         # note: BN only promotes input to dtype of weight/bias, but keeps the same output dtype
         result_dtype = input.dtype
         computation_dtype, _ = elementwise_dtypes(
-            input, weight, bias, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
+            input,
+            weight,
+            bias,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
         )
 
         input_ = _maybe_convert_to_dtype(input, computation_dtype)
