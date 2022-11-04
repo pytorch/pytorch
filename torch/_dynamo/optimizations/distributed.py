@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
@@ -5,6 +6,8 @@ import torch
 import torch.fx.traceback as fx_traceback
 from torch import fx
 from torch.fx.node import Node
+
+log = logging.getLogger(__name__)
 
 
 def args_str(args):
@@ -38,9 +41,14 @@ def pretty_print_buckets(buckets: List[Bucket]):
     try:
         from tabulate import tabulate
 
-        print(tabulate(rows, headers=headers, tablefmt="simple_grid"))
+        log.info(
+            "\nDDPOptimizer bucket assignments\n"
+            + tabulate(rows, headers=headers, tablefmt="simple_grid")
+        )
     except ImportError:
-        print("Please `pip install tabulate` in order to pretty-print ddp bucket sizes")
+        log.info(
+            "Please `pip install tabulate` in order to pretty-print ddp bucket sizes"
+        )
 
 
 class DDPOptimizer:
@@ -49,7 +57,6 @@ class DDPOptimizer:
         bucket_bytes_cap: int,
         parameter_ids_to_ignore: List,
         backend_compile_fn,
-        debug=False,
         first_bucket_cap: Optional[int] = None,
     ):
         if first_bucket_cap is not None:
@@ -67,7 +74,6 @@ class DDPOptimizer:
 
         self.parameter_ids_to_ignore = parameter_ids_to_ignore
         self.backend_compile_fn = backend_compile_fn
-        self.debug = debug
 
     def _ignore_parameter(self, parameter):
         return id(parameter) in self.parameter_ids_to_ignore
@@ -116,11 +122,10 @@ class DDPOptimizer:
 
         # stash buckets for testing/debugging purposes
         self.buckets = buckets
-        if self.debug:
-            print(
-                f"DDPOptimizer used bucket cap {self.bucket_bytes_cap} and produced the following buckets:"
-            )
-            pretty_print_buckets(buckets)
+        log.info(
+            f"DDPOptimizer used bucket cap {self.bucket_bytes_cap} and produced the following buckets:"
+        )
+        pretty_print_buckets(buckets)
 
         if len(buckets) == 1:
             # bypass split/fuse logic if there is only one bucket
@@ -135,24 +140,23 @@ class DDPOptimizer:
         split_gm = fx.passes.split_module.split_module(
             gm, None, lambda node: partition_map[node]
         )
-        if self.debug:
-            print("---orig graph---")
-            print(str(gm.graph))
-            print("\n---split graph---")
-            print(str(split_gm.graph))
-            for name, module in split_gm.named_modules():
-                if "." not in name:
-                    # only print the submod graphs, not their children
-                    print(f"\n---{name} graph---")
-                    print(str(module.graph))
-            print("---------------")
+
+        debug_str = (
+            f"\n---orig graph---\n{gm.graph}\n"
+            + f"\n---split graph---\n{split_gm.graph}\n"
+        )
+        for name, module in split_gm.named_modules():
+            if "." not in name:
+                # only print the submod graphs, not their children
+                debug_str += f"\n---{name} graph---\n{module.graph}\n"
+        debug_str += "\n---------------\n"
+        log.debug(debug_str)
 
         # 3: compile each of the partitioned submodules using the user-provided compiler
         class SubmodCompiler(torch.fx.interpreter.Interpreter):
-            def __init__(self, module, compiler, debug=False):
+            def __init__(self, module, compiler):
                 super().__init__(module)
                 self.compiler = compiler
-                self.debug = debug
 
             def compile_submod(self, submod, args, kwargs):
                 """
@@ -195,8 +199,7 @@ class DDPOptimizer:
             def run_node(self, n: Node) -> Any:
                 with fx_traceback.append_stack_trace(n.stack_trace):
                     args, kwargs = self.fetch_args_kwargs_from_env(n)
-                    if self.debug:
-                        print(f"run_node {n.op}, {n.target} got args {args_str(args)}")
+                    log.debug(f"run_node {n.op}, {n.target} got args {args_str(args)}")
                     assert isinstance(args, tuple)
                     assert isinstance(kwargs, dict)
 
@@ -204,10 +207,7 @@ class DDPOptimizer:
                     # maybe this isn't sound in general, but only changing the target of a node might be ok?
                     if n.op == "call_module":
                         submod = self.fetch_attr(n.target)
-                        if self.debug:
-                            with open("debug_ddp_optimizer.log", "a") as dump_file:
-                                dump_file.write(f"\n---{n.target} graph---")
-                                dump_file.write(str(submod.graph))
+                        log.debug(f"\n---{n.target} graph---\n" + str(submod.graph))
                         compiled_submod = self.compile_submod(submod, args, kwargs)
                         self.module.delete_submodule(n.target)
                         n.target = "compiled_" + n.target
@@ -215,13 +215,10 @@ class DDPOptimizer:
                     # then we execute the modified node using the usual logic
                     return getattr(self, n.op)(n.target, args, kwargs)
 
-        submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn, self.debug)
+        submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn)
         submod_compiler.run(*example_inputs)
         split_gm.recompile()
 
-        if self.debug:
-            print("\n---final graph---")
-            print(str(split_gm.graph))
-            print("---------------")
+        log.debug("\n---final graph---\n" + str(split_gm.graph) + "\n---------------\n")
 
         return split_gm
