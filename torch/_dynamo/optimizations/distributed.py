@@ -146,7 +146,7 @@ class DDPOptimizer:
             + f"\n---split graph---\n{split_gm.graph}\n"
         )
         for name, module in split_gm.named_modules():
-            if "." not in name:
+            if "." not in name and len(name):
                 # only print the submod graphs, not their children
                 debug_str += f"\n---{name} graph---\n{module.graph}\n"
         debug_str += "\n---------------\n"
