@@ -129,7 +129,7 @@ dtype_precisions = {
     torch.float32: (1.3e-6, 1e-5),
     torch.float64: (1e-7, 1e-7),
     torch.complex32: (0.001, 1e-5),
-    torch.complex64: (1.5e-6, 1.5e-5),
+    torch.complex64: (1.3e-6, 1e-5),
     torch.complex128: (1e-7, 1e-7),
 }
 # Returns the "default" rtol and atol for comparing scalars or
