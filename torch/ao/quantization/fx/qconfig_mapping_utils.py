@@ -34,7 +34,7 @@ from ..qconfig_mapping_utils import (
 )
 
 
-__all__ = []
+__all__: List[str] = []
 
 
 
