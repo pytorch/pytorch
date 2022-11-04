@@ -172,16 +172,22 @@ class SupportedVecIsa(enum.Enum):
             elif dtype == torch.bfloat16:
                 return 32
             else:
-                raise NotImplementedError(f"Vectorization has not supported {dtype} yet")
+                raise NotImplementedError(
+                    f"Vectorization has not supported {dtype} yet"
+                )
         elif supported_isa == SupportedVecIsa.AVX2:
             if dtype == torch.float:
                 return 8
             elif dtype == torch.bfloat16:
                 return 16
             else:
-                raise NotImplementedError(f"Vectorization has not supported {dtype} yet")
+                raise NotImplementedError(
+                    f"Vectorization has not supported {dtype} yet"
+                )
         else:
-            raise NotImplementedError(f"Vectorization has not supported {supported_isa} yet")
+            raise NotImplementedError(
+                f"Vectorization has not supported {supported_isa} yet"
+            )
 
     @staticmethod
     def vec_size(dtype: torch.dtype = torch.float):
@@ -229,10 +235,7 @@ def get_cpu_proc_info():
 def supported_vector_isa():
     # TODO: Add ARM Vec here.
     # Dict(k: isa, v: number of float element)
-    vec_isa_info = [
-        SupportedVecIsa.AVX512,
-        SupportedVecIsa.AVX2
-    ]
+    vec_isa_info = [SupportedVecIsa.AVX512, SupportedVecIsa.AVX2]
 
     cpu_info_content = get_cpu_proc_info()
 
@@ -248,7 +251,10 @@ def supported_vector_isa():
         return SupportedVecIsa.INVALID
 
     for isa in vec_isa_info:
-        if isa in cpu_info_content and config.cpp.simdlen == SupportedVecIsa.isa_vec_bit_size(isa):
+        if (
+            isa in cpu_info_content
+            and config.cpp.simdlen == SupportedVecIsa.isa_vec_bit_size(isa)
+        ):
             return isa
 
     return SupportedVecIsa.INVALID
