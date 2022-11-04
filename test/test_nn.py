@@ -13235,8 +13235,10 @@ class TestNNDeviceType(NNTestCase):
             key_padding_mask = torch.randint(0, 2, (batch_size, src_len)).bool().to(device)
 
             # We'll need expanded versions of the masks for masking out the outputs below
-            attn_mask_expanded = attn_mask.reshape(1, 1, src_len, src_len).expand(batch_size, num_heads, src_len, src_len)
-            key_padding_mask_expanded = key_padding_mask.reshape(batch_size, 1, 1, src_len).expand(batch_size, num_heads, src_len, src_len)
+            attn_mask_expanded = attn_mask.reshape(1, 1, src_len, src_len) \
+                                          .expand(batch_size, num_heads, src_len, src_len)
+            key_padding_mask_expanded = key_padding_mask.reshape(batch_size, 1, 1, src_len) \
+                                                        .expand(batch_size, num_heads, src_len, src_len)
             merged_mask = attn_mask_expanded.logical_or(key_padding_mask_expanded)
 
             # Compute attention on the fast path
@@ -13245,16 +13247,27 @@ class TestNNDeviceType(NNTestCase):
             result_fast_path, _ = mta_model(query, key, value, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
 
             # Compute attention on the slow path
-            result_ref, _ = torch.nn.functional.multi_head_attention_forward(query.transpose(0,1), key.transpose(0,1), value.transpose(0,1),
+            result_ref, _ = torch.nn.functional.multi_head_attention_forward(query.transpose(0, 1),
+                                                                             key.transpose(0, 1),
+                                                                             value.transpose(0, 1),
                                                                              embed_dim, num_heads,
-                                                                             mta_model.in_proj_weight, mta_model.in_proj_bias,
-                                                                             mta_model.bias_k, mta_model.bias_v, mta_model.add_zero_attn,
-                                                                             mta_model.dropout, mta_model.out_proj.weight, mta_model.out_proj.bias,
+                                                                             mta_model.in_proj_weight,
+                                                                             mta_model.in_proj_bias,
+                                                                             mta_model.bias_k, mta_model.bias_v,
+                                                                             mta_model.add_zero_attn,
+                                                                             mta_model.dropout,
+                                                                             mta_model.out_proj.weight,
+                                                                             mta_model.out_proj.bias,
                                                                              training=mta_model.training,
-                                                                             key_padding_mask=key_padding_mask, need_weights=False,
-                                                                             attn_mask=attn_mask, use_separate_proj_weight=False,
-                                                                             q_proj_weight=mta_model.q_proj_weight, k_proj_weight=mta_model.k_proj_weight,
-                                                                             v_proj_weight=mta_model.v_proj_weight, average_attn_weights=False)
+                                                                             key_padding_mask=key_padding_mask,
+                                                                             need_weights=False,
+                                                                             attn_mask=attn_mask,
+                                                                             use_separate_proj_weight=False,
+                                                                             q_proj_weight=mta_model.q_proj_weight,
+                                                                             k_proj_weight=mta_model.k_proj_weight,
+                                                                             v_proj_weight=mta_model.v_proj_weight,
+                                                                             average_attn_weights=False,
+                                                                             )
             result_ref = result_ref.transpose(0, 1)  # Convert to batch-first
 
             # Rows which are completely masked out are nan, we need to exclude them from comparison
