@@ -46,11 +46,12 @@ class TestNvFuserDynamo(TestCase):
         self.assertEqual(eager_result, nvfuser_result)
 
     def test_dtype_correctness(self):
-        input1 = make_tensor((2, 4, 8), device="cuda", dtype=torch.float32)
+        input1 = make_tensor((2, 4, 8), device="cuda", dtype=torch.float16)
 
         @torchdynamo.optimize("nvprims_nvfuser")
         def func(a):
             tmp = a + 1.0
+            # nvfuser would promote output to fp32 in math, FusionDefinition should cast output dtype back
             return torch.where(tmp > 0, tmp, 0.0)
 
         # No warnings and no errors
