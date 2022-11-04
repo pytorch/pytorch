@@ -98,9 +98,6 @@ git commit -m "Generate C++ docs from pytorch/pytorch@${GITHUB_SHA}" || true
 git status
 
 if [[ "${WITH_PUSH:-}" == true ]]; then
-  # push to a temp branch first to trigger CLA check and satisfy branch protections
-  git push -u origin HEAD:pytorchbot/temp-branch-cpp -f
-  sleep 30
   git push -u origin
 fi
 

@@ -1,12 +1,17 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/DimVector.h>
+#include <ATen/core/functional.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/DimVector.h>
 #include <ATen/core/IListRef.h>
@@ -25,6 +30,179 @@
 #include <c10/util/SmallVector.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_conj_copy_native.h>
+#include <ATen/ops/_convert_indices_from_coo_to_csr.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo.h>
+#include <ATen/ops/_fw_primal_copy_native.h>
+#include <ATen/ops/_indices_copy_native.h>
+#include <ATen/ops/_make_dual.h>
+#include <ATen/ops/_make_dual_copy_native.h>
+#include <ATen/ops/_mkldnn_reshape.h>
+#include <ATen/ops/_mkldnn_transpose.h>
+#include <ATen/ops/_neg_view_copy_native.h>
+#include <ATen/ops/_reshape_alias_copy_native.h>
+#include <ATen/ops/_reshape_alias_native.h>
+#include <ATen/ops/_reshape_from_tensor_native.h>
+#include <ATen/ops/_shape_as_tensor_native.h>
+#include <ATen/ops/_sparse_broadcast_to.h>
+#include <ATen/ops/_sparse_broadcast_to_copy_native.h>
+#include <ATen/ops/_sparse_broadcast_to_native.h>
+#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_csr_tensor_unsafe.h>
+#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_stack_native.h>
+#include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/_unsafe_view_native.h>
+#include <ATen/ops/_values_copy_native.h>
+#include <ATen/ops/adjoint_native.h>
+#include <ATen/ops/alias.h>
+#include <ATen/ops/alias_copy_native.h>
+#include <ATen/ops/alias_native.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/as_strided_copy_native.h>
+#include <ATen/ops/as_strided_native.h>
+#include <ATen/ops/as_strided_scatter_native.h>
+#include <ATen/ops/atleast_1d.h>
+#include <ATen/ops/atleast_2d.h>
+#include <ATen/ops/atleast_3d.h>
+#include <ATen/ops/block_diag_native.h>
+#include <ATen/ops/broadcast_tensors_native.h>
+#include <ATen/ops/broadcast_to_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/cat_meta.h>
+#include <ATen/ops/cat_native.h>
+#include <ATen/ops/chunk_native.h>
+#include <ATen/ops/col_indices_copy_native.h>
+#include <ATen/ops/column_stack_native.h>
+#include <ATen/ops/concat_native.h>
+#include <ATen/ops/concatenate_native.h>
+#include <ATen/ops/crow_indices_copy_native.h>
+#include <ATen/ops/dense_dim_native.h>
+#include <ATen/ops/detach_copy_native.h>
+#include <ATen/ops/detach_native.h>
+#include <ATen/ops/diag.h>
+#include <ATen/ops/diag_embed.h>
+#include <ATen/ops/diag_embed_native.h>
+#include <ATen/ops/diag_native.h>
+#include <ATen/ops/diagflat_native.h>
+#include <ATen/ops/diagonal.h>
+#include <ATen/ops/diagonal_backward.h>
+#include <ATen/ops/diagonal_backward_native.h>
+#include <ATen/ops/diagonal_copy.h>
+#include <ATen/ops/diagonal_copy_native.h>
+#include <ATen/ops/diagonal_native.h>
+#include <ATen/ops/diagonal_scatter_native.h>
+#include <ATen/ops/dsplit_native.h>
+#include <ATen/ops/dstack_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_quantized.h>
+#include <ATen/ops/expand_as_native.h>
+#include <ATen/ops/expand_copy_native.h>
+#include <ATen/ops/expand_native.h>
+#include <ATen/ops/flatten_dense_tensors_native.h>
+#include <ATen/ops/flatten_native.h>
+#include <ATen/ops/from_blob.h>
+#include <ATen/ops/hsplit_native.h>
+#include <ATen/ops/hstack.h>
+#include <ATen/ops/hstack_native.h>
+#include <ATen/ops/index_select_native.h>
+#include <ATen/ops/indices_copy_native.h>
+#include <ATen/ops/lift_fresh_native.h>
+#include <ATen/ops/lift_native.h>
+#include <ATen/ops/mH_native.h>
+#include <ATen/ops/mT_native.h>
+#include <ATen/ops/matrix_H_native.h>
+#include <ATen/ops/meshgrid_native.h>
+#include <ATen/ops/moveaxis_native.h>
+#include <ATen/ops/movedim.h>
+#include <ATen/ops/movedim_native.h>
+#include <ATen/ops/narrow.h>
+#include <ATen/ops/narrow_copy.h>
+#include <ATen/ops/narrow_copy_native.h>
+#include <ATen/ops/narrow_native.h>
+#include <ATen/ops/new_empty_native.h>
+#include <ATen/ops/new_ones_native.h>
+#include <ATen/ops/numpy_T_native.h>
+#include <ATen/ops/permute_copy_native.h>
+#include <ATen/ops/permute_native.h>
+#include <ATen/ops/ravel_native.h>
+#include <ATen/ops/repeat_native.h>
+#include <ATen/ops/reshape_as_native.h>
+#include <ATen/ops/reshape_native.h>
+#include <ATen/ops/resize_native.h>
+#include <ATen/ops/row_stack_native.h>
+#include <ATen/ops/select.h>
+#include <ATen/ops/select_backward_native.h>
+#include <ATen/ops/select_copy_native.h>
+#include <ATen/ops/select_native.h>
+#include <ATen/ops/select_scatter_native.h>
+#include <ATen/ops/set_native.h>
+#include <ATen/ops/slice.h>
+#include <ATen/ops/slice_backward_native.h>
+#include <ATen/ops/slice_copy_native.h>
+#include <ATen/ops/slice_native.h>
+#include <ATen/ops/slice_scatter_native.h>
+#include <ATen/ops/sparse_coo_tensor.h>
+#include <ATen/ops/sparse_coo_tensor_native.h>
+#include <ATen/ops/sparse_dim_native.h>
+#include <ATen/ops/split_copy_native.h>
+#include <ATen/ops/split_native.h>
+#include <ATen/ops/split_with_sizes.h>
+#include <ATen/ops/split_with_sizes_copy_native.h>
+#include <ATen/ops/split_with_sizes_native.h>
+#include <ATen/ops/squeeze_copy_native.h>
+#include <ATen/ops/squeeze_native.h>
+#include <ATen/ops/stack_native.h>
+#include <ATen/ops/sub.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/sum_to_size_native.h>
+#include <ATen/ops/swapaxes_native.h>
+#include <ATen/ops/swapdims_native.h>
+#include <ATen/ops/t_copy_native.h>
+#include <ATen/ops/t_native.h>
+#include <ATen/ops/tensor.h>
+#include <ATen/ops/tensor_split.h>
+#include <ATen/ops/tensor_split_native.h>
+#include <ATen/ops/tile_native.h>
+#include <ATen/ops/transpose.h>
+#include <ATen/ops/transpose_copy_native.h>
+#include <ATen/ops/transpose_native.h>
+#include <ATen/ops/unbind.h>
+#include <ATen/ops/unbind_copy_native.h>
+#include <ATen/ops/unbind_native.h>
+#include <ATen/ops/unflatten_dense_tensors_native.h>
+#include <ATen/ops/unflatten_native.h>
+#include <ATen/ops/unfold_copy_native.h>
+#include <ATen/ops/unfold_native.h>
+#include <ATen/ops/unsafe_chunk_native.h>
+#include <ATen/ops/unsafe_split_native.h>
+#include <ATen/ops/unsafe_split_with_sizes_native.h>
+#include <ATen/ops/unsqueeze_copy_native.h>
+#include <ATen/ops/unsqueeze_native.h>
+#include <ATen/ops/values_copy_native.h>
+#include <ATen/ops/view_as_complex.h>
+#include <ATen/ops/view_as_complex_copy_native.h>
+#include <ATen/ops/view_as_native.h>
+#include <ATen/ops/view_as_real.h>
+#include <ATen/ops/view_as_real_copy_native.h>
+#include <ATen/ops/view_copy_native.h>
+#include <ATen/ops/view_native.h>
+#include <ATen/ops/vsplit_native.h>
+#include <ATen/ops/vstack.h>
+#include <ATen/ops/vstack_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/zeros_native.h>
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -739,9 +917,12 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   }
 }
 
-std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t dim) {
+std::vector<Tensor> tensor_split_sections_symint(const Tensor& self, c10::SymInt sym_sections, int64_t dim) {
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
+  // NB: intentional, sections specifies number of output tensors, which
+  // cannot be polymorphic
+  int64_t sections = sym_sections.guard_int(__FILE__, __LINE__);
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
   const auto dim_size = self.sym_size(dim_);
   std::vector<Tensor> splits(sections);
@@ -756,19 +937,28 @@ std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t d
   return splits;
 }
 
-std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim) {
+template <typename T>
+std::vector<Tensor> _tensor_split_indices(const Tensor& self, ArrayRef<T> indices, int64_t dim) {
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   int64_t num_indices = indices.size();
   std::vector<Tensor> splits(num_indices + 1);
-  int64_t start_idx = 0;
+  T start_idx(0);
   for (const auto split_idx : c10::irange(num_indices)) {
-    int64_t end_idx = indices[split_idx];
-    splits[split_idx] = at::slice(self, dim_, start_idx, end_idx);
+    auto end_idx = indices[split_idx];
+    splits[split_idx] = at::symint::slice<T>(self, dim_, start_idx, end_idx);
     start_idx = end_idx;
   }
-  splits[num_indices] = at::slice(self, dim_, start_idx, self.size(dim_));
+  splits[num_indices] = at::symint::slice<T>(self, dim_, start_idx, at::symint::size<T>(self, dim_));
   return splits;
+}
+
+std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim) {
+  return _tensor_split_indices(self, indices, dim);
+}
+
+std::vector<Tensor> tensor_split_indices_symint(const Tensor& self, SymIntArrayRef indices, int64_t dim) {
+  return _tensor_split_indices(self, indices, dim);
 }
 
 std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indices_or_sections, int64_t dim) {
@@ -996,8 +1186,8 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
   return result;
 }
 
-const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
-  auto storage_offset = storage_offset_.value_or(self.storage_offset());
+const Tensor &as_strided__symint(const Tensor& self, SymIntArrayRef size, SymIntArrayRef stride, optional<c10::SymInt> storage_offset_) {
+  auto storage_offset = storage_offset_.value_or(self.sym_storage_offset());
   setStrided(self, size, stride, storage_offset);
   return self;
 }
@@ -1382,6 +1572,23 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     }
   }
   return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
+}
+
+Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
+  if (self.is_sparse()) {
+    TORCH_CHECK(0, "_reshape_copy is not implemented for sparse tensors");
+  }
+  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+
+  if (self.is_mkldnn()) {
+    TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tesnors");
+  }
+
+  if (self.is_contiguous()) {
+    return self.view_symint(shape).clone(at::MemoryFormat::Contiguous);
+  } else {
+    return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
+  }
 }
 
 // Duplicate of above code for non-symbolic ints. Kept for BC purposes and to
@@ -2889,7 +3096,7 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     int64_t shift = 0;
-    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(self.dim());
+    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(0, self.dim());
     for (const auto d : dims) {
       if (self.sizes()[d] == 1) {
         TORCH_CHECK(axis != d, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");

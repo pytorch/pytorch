@@ -416,7 +416,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.concatenate: lambda tensors, dim=0, out=None: -1,  # alias for torch.concatenate
         torch.cdist: lambda x1, x2, p=2.0, compute_mode='use_mm_for_euclid_dist_if_necessary': -1,
         torch.ceil: lambda input, out=None: -1,
-        torch.celu: lambda input, alhpa=1., inplace=False: -1,
+        torch.celu: lambda input, alpha=1., inplace=False: -1,
         torch.chain_matmul: lambda *matrices, out=None: -1,
         torch.channel_shuffle: lambda input, groups : -1,
         torch.cholesky: lambda input, upper=False, out=None: -1,
@@ -572,7 +572,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.grid_sampler_2d: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
         torch.grid_sampler_3d: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
         torch.group_norm: lambda input, num_groups, weight=None, bias=None, eps=1e-05, cudnn_enabled=True: -1,
-        torch.gru: lambda input, hx, params, has_biases, num_layers, gropout, train, bidirectional, batch_first: -1,
+        torch.gru: lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1,
         torch.gru_cell: lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1,
         torch.gt: lambda input, other, out=None: -1,
         torch.greater: lambda input, other, out=None: -1,
@@ -1554,7 +1554,7 @@ has_torch_function = _add_docstr(
     Arguments
     ---------
     relevant_args : iterable
-        Iterable or aguments to check for __torch_function__ methods.
+        Iterable or arguments to check for __torch_function__ methods.
     Returns
     -------
     bool
