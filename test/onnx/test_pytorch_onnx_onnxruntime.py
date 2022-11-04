@@ -12477,7 +12477,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             input_names=["x"],
         )
         exported = onnx.load_from_string(f.getvalue())
-        expected_elem_type = torch.onnx.JitScalarType.from_dtype(x.dtype).onnx_type()
+        expected_elem_type = torch.onnx.JitScalarType.from_value(x).onnx_type()
         expected_output_type = onnx.helper.make_optional_type_proto(
             onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,))
         )
