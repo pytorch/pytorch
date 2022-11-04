@@ -1,11 +1,12 @@
 import dis
+import copy
 import torch
 import inspect
 import operator
 import traceback
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
+from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable, List
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
@@ -66,7 +67,7 @@ class ScopeContextManager(object):
         self.scope.module_type = type(current_module)
 
     def __enter__(self):
-        return
+        return self.scope
 
     def __exit__(self, *args):
         self.scope.module_path = self._prev_scope.module_path
@@ -93,6 +94,9 @@ class TracerBase:
     # Maps the containing module's name to the operator name
     scope : Scope
 
+    # Records the module call stack
+    scope_stack: List[Scope]
+
     # Mapping of node name to module scope
     node_name_to_scope: Dict[str, Tuple[str, type]]
 
@@ -115,7 +119,7 @@ class TracerBase:
             self.scope.module_path,
             self.scope.module_type,
         )
-        node.meta['nn_module_stack'] = {self.scope.module_path : self.scope.module_type}
+        node.meta['nn_module_stack'] = copy.copy(self.scope_stack)
         return node
 
     @compatibility(is_backward_compatible=True)
@@ -278,6 +282,7 @@ class GraphAppendingTracer(TracerBase):
         super().__init__()
         self.graph = graph
         self.scope = Scope("", None)
+        self.scope_stack = []
         self.node_name_to_scope = {}
 
 @compatibility(is_backward_compatible=False)

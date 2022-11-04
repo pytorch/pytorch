@@ -252,6 +252,7 @@ class Tracer(TracerBase):
         self.root_module_name: str = ""
         # Maps the containing module's name to the operator name
         self.scope = Scope("", None)
+        self.scope_stack: List[Scope] = []
 
         # Mapping of node name to module scope
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
@@ -435,11 +436,14 @@ class Tracer(TracerBase):
             value was returned from the ``Module`` invocation.
         """
         module_qualified_name = self.path_of_module(m)
-        with ScopeContextManager(self.scope, m, module_qualified_name):
+        with ScopeContextManager(self.scope, m, module_qualified_name) as _scope:
+            self.scope_stack.append(copy.copy(_scope))
             if not self.is_leaf_module(m, module_qualified_name):
                 ret_val = forward(*args, **kwargs)
             else:
                 ret_val = self.create_proxy("call_module", module_qualified_name, args, kwargs)
+            self.scope_stack.pop()
+
         return ret_val
 
     @compatibility(is_backward_compatible=False)
