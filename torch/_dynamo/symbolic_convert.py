@@ -1410,7 +1410,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             # A global var is inserted only after a STORE_GLOBAL happens to it
             symbolic_globals=collections.OrderedDict(),
             f_code=f_code,
-            export_export,
+            export=export,
         )
         self.one_graph: bool = one_graph
         self.export = export
