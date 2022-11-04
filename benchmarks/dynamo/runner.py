@@ -26,6 +26,7 @@ If you want to test float16
 
 import argparse
 import dataclasses
+import functools
 import glob
 import importlib
 import io
@@ -364,6 +365,22 @@ def build_summary():
     with open(f"{output_dir}/gh_build_summary.txt", "w") as gh_fh:
         gh_fh.write(comment)
 
+@functools.lru_cache(None)
+def archive_data():
+    day = datetime.today().strftime("%j")
+    prefix = datetime.today().strftime(f"day_{day}_%d_%m_%y")
+    return day, prefix
+
+@functools.lru_cache(None)
+def archive_name(dtype):
+    _, prefix = archive_data()
+    return f"{prefix}_performance_{dtype}_{randint(100, 999)}"
+
+def archive(src_dir, dest_dir_prefix, dtype):
+    # Copy the folder to archived location
+    dest = os.path.join(dest_dir_prefix, archive_name(dtype))
+    shutil.copytree(src_dir, dest, dirs_exist_ok=True)
+
 
 class Parser:
     def __init__(self, suites, devices, dtypes, compilers, flag_compilers, mode, output_dir):
@@ -486,17 +503,17 @@ class ParsePerformanceLogs(Parser):
                 df_accuracy = self.parsed_frames[suite]["accuracy"]
                 perf_rows = []
                 for model_name in df["name"]:
-                    perf_row = df[df["name"] == model_name]
+                    perf_row = df[df["name"] == model_name].copy()
                     acc_row = df_accuracy[df_accuracy["name"] == model_name]
                     for compiler in self.compilers:
                         if not perf_row.empty:
                             if acc_row.empty:
-                                perf_row[compiler].iloc[0] = 0.0
+                                perf_row.loc[0, compiler] = 0.0
                             elif acc_row[compiler].iloc[0] not in (
                                 "pass",
                                 "pass_due_to_skip",
                             ):
-                                perf_row[compiler].iloc[0] = 0.0
+                                perf_row.loc[0, compiler] = 0.0
                     perf_rows.append(perf_row)
                 df = pd.concat(perf_rows)
             df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
@@ -791,17 +808,17 @@ class AccuracyRegressionTracker:
                     continue
                 
                 df_cur, df_prev = [last2[i].untouched_parsed_frames[suite]["accuracy"] for i in (0, 1)]
-                flag_cur, flag_prev = [df[compiler].apply(lambda x: "pass" in x) for df in (df_cur, df_prev)]
-                flag = np.logical_and(np.logical_not(flag_cur), flag_prev)
-
-                df_prev = df_prev[flag]
-                df_cur = df_cur[flag]
-
+                df_merge = df_cur.merge(df_prev, on="name", suffixes=("_cur", "_prev"))
+                flag = np.logical_and(
+                    df_merge[compiler + "_prev"].apply(lambda x : "pass" in x),
+                    df_merge[compiler + "_cur"].apply(lambda x : "pass" not in x)
+                )
+                df_bad = df_merge[flag]
                 dfs.append(pd.DataFrame(data={
                     "compiler": compiler,
-                    "name": df_prev["name"],
-                    "prev_status": df_prev[compiler],
-                    "cur_status": df_cur[compiler],
+                    "name": df_bad["name"],
+                    "prev_status": df_bad[compiler + "_prev"],
+                    "cur_status": df_bad[compiler + "_cur"],
                 }))
 
             if not dfs:
@@ -931,19 +948,15 @@ class DashboardUpdater:
         self.output_dir = args.output_dir
         self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
         assert os.path.exists(self.lookup_file)
-        # self.archive()
 
     def archive(self):
+        dtype = self.args.dtypes[0]
         # Copy the folder to archived location
-        src = self.output_dir
-        day = datetime.today().strftime("%j")
-        prefix = datetime.today().strftime(f"day_{day}_%d_%m_%y")
-        target_dir = f"{prefix}_performance_{self.args.dtypes[0]}_{randint(100, 999)}"
-        target = os.path.join(self.args.dashboard_archive_path, target_dir)
-        shutil.copytree(src, target)
+        archive(self.output_dir, self.args.dashboard_archive_path, dtype)
+        day, _ = archive_data()
+        target_dir = archive_name(dtype)
 
         # Update lookup csv the folder to arhived logs
-        dtype = self.args.dtypes[0]
         subprocess.check_call(
             f'echo "{day},performance,{dtype},{target_dir}" >> {self.lookup_file}',
             shell=True,
@@ -977,8 +990,11 @@ class DashboardUpdater:
         ]
         all_lines = []
         for f in files:
-            with open(os.path.join(self.output_dir, f), "r") as fh:
-                all_lines.extend(fh.readlines())
+            try:
+                with open(os.path.join(self.output_dir, f), "r") as fh:
+                    all_lines.extend(fh.readlines())
+            except FileNotFoundError:
+                pass
 
         return "\n".join([x.rstrip() for x in all_lines])
 
@@ -992,7 +1008,7 @@ class DashboardUpdater:
                 "issue",
                 "comment",
                 "--repo=https://github.com/pytorch/torchdynamo.git",
-                "1831",
+                "681",
                 "-b",
                 comment,
             ]
@@ -1009,7 +1025,9 @@ class DashboardUpdater:
                 gh_fh.write("")
 
         comment = self.gen_comment()
-        # self.comment_on_gh(comment)
+        self.comment_on_gh(comment)
+
+        self.archive()
 
 
 if __name__ == "__main__":
@@ -1052,6 +1070,7 @@ if __name__ == "__main__":
             )
             raise e
         if not args.log_operator_inputs:
+            archive(output_dir, args.dashboard_archive_path, dtypes[0])
             parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir)
 
     if args.update_dashboard:
