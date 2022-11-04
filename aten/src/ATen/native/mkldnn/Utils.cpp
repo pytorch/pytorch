@@ -127,7 +127,7 @@ AttrFunction attr_func_gelu = [](torch::List<c10::optional<at::Scalar>> scalars,
   return ideep::attr_t::fuse_gelu(1.0, 0.f, 0.f, gelu_type);
 };
 
-const std::map<c10::string_view, AttrFunction>& fx_fusion_attr_map() {
+const std::map<c10::string_view, AttrFunction>& fusion_unary_attr_map() {
   static const std::map<c10::string_view, AttrFunction> fusion_attr_map{
       {"relu", ATTR_FUNC(relu)},
       {"sigmoid", ATTR_FUNC(sigmoid)},
