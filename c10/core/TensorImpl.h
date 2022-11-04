@@ -1307,7 +1307,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It can be expanded as needed in the future, e.g sparse Tensor.
    */
   inline bool support_as_strided() const {
-    return is_nested() ? false : device().supports_as_strided();
+    if (is_nested()) {
+      return false;
+    }
+    if (key_set_.has(DispatchKey::Functionalize)) {
+      return false;
+    }
+    return device().supports_as_strided();
   }
 
   // ~~~~~ Autograd API ~~~~~
