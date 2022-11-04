@@ -216,7 +216,7 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
 
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
- line {code.co_firstlineno} \ndue to: \n{traceback.format_exc(limit=-1, chain=False)}"
+ line {code.co_firstlineno} \ndue to: \n{traceback.format_exc(limit=-1)}"
 
     return msg
 
