@@ -180,16 +180,16 @@ class _SupportedVecIsa(enum.Enum):
 @functools.lru_cache(1)
 def get_cpu_proc_info():
     if sys.platform != "linux":
-        return ""
+        return []
 
-    isa_info = ""
+    isa_info = []
     with open("/proc/cpuinfo") as _cpu_info:
         _cpu_info_content = _cpu_info.read()
         if _SupportedVecIsa.isa_str(_SupportedVecIsa.AVX512) in _cpu_info_content:
-            isa_info += _SupportedVecIsa.isa_str(_SupportedVecIsa.AVX512)
+            isa_info.append(_SupportedVecIsa.AVX512)
 
         if _SupportedVecIsa.isa_str(_SupportedVecIsa.AVX2) in _cpu_info_content:
-            isa_info += _SupportedVecIsa.isa_str(_SupportedVecIsa.AVX2)
+            isa_info.append(_SupportedVecIsa.AVX2)
 
         return isa_info
 
@@ -202,17 +202,12 @@ def supported_vector_isa():
         _SupportedVecIsa.AVX2: 8,
     }
 
-    # TODO: Add windows support
-    if sys.platform != "linux":
-        return _SupportedVecIsa.INVALID
-
     if config.cpp.simdlen is None or config.cpp.simdlen <= 1:
         return _SupportedVecIsa.INVALID
 
     cpu_info_content = get_cpu_proc_info()
     for isa in vec_isa_info.keys():
-        isa_str = _SupportedVecIsa.isa_str(isa)
-        if isa_str in cpu_info_content and config.cpp.simdlen == vec_isa_info[isa]:
+        if isa in cpu_info_content and config.cpp.simdlen == vec_isa_info[isa]:
             return isa
 
     return _SupportedVecIsa.INVALID
@@ -244,10 +239,10 @@ def cpp_compile_command(input, output, include_pytorch=False):
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
+            {cpp_compiler()} {input} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
             {ipaths} {lpaths} {libs} {macros}
             -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
-            -o{output} {input}
+            -o{output}
         """,
     ).strip()
 

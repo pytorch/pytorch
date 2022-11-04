@@ -1004,7 +1004,9 @@ class FSDPTest(MultiProcessTestCase):
             for param in fsdp_model.parameters():
                 self.assertEqual(param.device, cpu_device)
         context = (
-            self.assertRaisesRegex(AssertionError, "Expected param to be on CPU")
+            self.assertRaisesRegex(
+                AssertionError, "Expects the `FlatParameter` to be offloaded to CPU"
+            )
             if expects_device_error
             else suppress()
         )
@@ -1031,7 +1033,9 @@ class FSDPTest(MultiProcessTestCase):
                 self.assertEqual(param.device, cpu_device)
             fsdp_loss = fsdp_loss.cuda()
         fsdp_unsharded_params = get_full_params(fsdp_model)
-        torch.testing.assert_allclose(ref_loss, fsdp_loss)
+        # TODO: Are mismatching dtypes actually ok here or did this pass silently before, because `check_dtype=False`
+        #  was the default?
+        torch.testing.assert_close(ref_loss, fsdp_loss, check_dtype=False)
         # Do not check for parameter parity if using mixed precision since (1)
         # the DDP parameters are in FP16 (from `half()`) while the FSDP
         # parameters are in FP32 (from `summon_full_params()`) and (2) DDP runs
