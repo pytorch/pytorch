@@ -263,6 +263,8 @@ struct MPSGraphCache
 
 };
 
+bool supportsVenturaOps();
+
 } // namespace mps
 } // namespace native
 } // namespace at

@@ -12,6 +12,7 @@ uint64_t MPSGeneratorImpl::seed() {
   this->set_current_seed(random);
   return random;
 }
+
 uint64_t MPSGeneratorImpl::current_seed() const {
   return seed_;
 }
@@ -378,6 +379,11 @@ private:
 };
 
 REGISTER_MPS_ALLOCATOR_CALLBACK("mps_graph_cache_callback", MPSGraphCacheCallback);
+
+bool supportsVenturaOps() {
+  id mpsCD = NSClassFromString(@"MPSGraph");
+  return [mpsCD instancesRespondToSelector:@selector(cumulativeSumWithTensor:axis:name:)] == YES;
+}
 
 } // namespace mps
 } // namespace native
