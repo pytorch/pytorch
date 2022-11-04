@@ -1248,6 +1248,16 @@ if(ANDROID)
   list(APPEND Caffe2_DEPENDENCY_LIBS log)
 endif()
 
+# ---[ Kernel asserts
+# Kernel asserts are enabled by default for CUDA and disabled for ROCm.
+# For ROCm, it can be enabled by setting ROCM_FORCE_ENABLE_GPU_ASSERTS
+if(USE_ROCM AND ROCM_FORCE_ENABLE_GPU_ASSERTS)
+  message(STATUS "Forcefully enabling kernel asserts on ROCM")
+elseif(USE_ROCM AND NOT ROCM_FORCE_ENABLE_GPU_ASSERTS)
+  message(STATUS "Disabling kernel asserts for ROCm")
+  caffe2_update_option(TORCH_DISABLE_GPU_ASSERTS ON)
+endif()
+
 # ---[ LLVM
 if(USE_LLVM)
   message(STATUS "Looking for LLVM in ${USE_LLVM}")
@@ -1270,6 +1280,21 @@ endif()
 
 # ---[ HIP
 if(USE_ROCM)
+  # This prevents linking in the libtinfo from /opt/conda/lib which conflicts with ROCm libtinfo.
+  # Currently only active for Ubuntu 20.04 and greater versions.
+  if(UNIX AND EXISTS "/etc/os-release")
+    file(STRINGS /etc/os-release OS_RELEASE)
+    string(REGEX REPLACE "NAME=\"([A-Za-z]+).*" "\\1" OS_DISTRO ${OS_RELEASE})
+    string(REGEX REPLACE ".*VERSION_ID=\"([0-9\.]+).*" "\\1" OS_VERSION ${OS_RELEASE})
+    if(OS_DISTRO STREQUAL "Ubuntu" AND OS_VERSION VERSION_GREATER_EQUAL "20.04")
+      find_library(LIBTINFO_LOC tinfo NO_CMAKE_PATH NO_CMAKE_ENVIRONMENT_PATH)
+      if(LIBTINFO_LOC)
+        get_filename_component(LIBTINFO_LOC_PARENT ${LIBTINFO_LOC} DIRECTORY)
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-rpath-link,${LIBTINFO_LOC_PARENT}")
+      endif()
+    endif()
+  endif()
+
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")

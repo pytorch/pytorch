@@ -30,6 +30,16 @@ except ImportError:
     HAS_REFS = False
 
 
+_orig_module_call = torch.nn.Module.__call__
+
+
+def is_fx_tracing_test() -> bool:
+    """
+    Copied from the hpc trainer codebase
+    """
+    return torch.nn.Module.__call__ is not _orig_module_call
+
+
 def ifdyn(count1, count2):
     if torch._dynamo.config.dynamic_shapes:
         return count1
@@ -872,8 +882,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(input1), correct1))
         self.assertTrue(same(opt_fn(input2), correct2))
 
-        self.assertEqual(cnt.frame_count, ifdyn(1, 2))
-        self.assertEqual(cnt.op_count, ifdyn(19, 4))
+        # Dyn recompiles are due to changes in hidden_state (Should we be guarding on this?)
+        self.assertEqual(cnt.frame_count, ifdyn(4, 2))
+        self.assertEqual(cnt.op_count, ifdyn(76, 4))
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -1015,6 +1026,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 8)
 
+    # TODO: make set_rng_state work with FakeTensor/aot_autograd
+    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_rng_state(self):
         def fn():
             state = torch.get_rng_state()
@@ -1468,8 +1481,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(y, 10)
 
-    # AssertionError: ABCMeta
-    @unittest.expectedFailure
     def test_sort_out(self):
 
         dtype = torch.float32
@@ -1487,8 +1498,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager")(fn)
         opt_fn()
 
-    # AssertionError: ABCMeta
-    @unittest.expectedFailure
     def test_sigmoid_out(self):
 
         dtype = torch.float32
@@ -1735,6 +1744,38 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager", nopython=True)(mod)
         args = (torch.randn(3, 4),)
         self.assertTrue(same(mod(*args), opt_mod(*args)))
+
+    def test_named_buffers(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("x", torch.ones(3))
+                self.register_buffer("y", torch.ones(3))
+
+            def forward(self, inp):
+                res = 0
+                for name, buffer in self.named_buffers():
+                    res += buffer.sum()
+
+                return inp.cos() + res
+
+        mod = Foo()
+        opt_mod = torch._dynamo.optimize("eager", nopython=True)(mod)
+        args = (torch.randn(3, 4),)
+        self.assertTrue(same(mod(*args), opt_mod(*args)))
+
+    def test_is_symbolic_tracing(self):
+        # Ensure no graph break here
+        def fn(x):
+            if is_fx_tracing_test():
+                return x * 2
+            return x * 4
+
+        a = torch.randn(4)
+        ref = fn(a)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(a)
+        self.assertTrue(same(ref, res))
 
 
 if __name__ == "__main__":

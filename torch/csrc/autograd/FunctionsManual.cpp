@@ -1098,15 +1098,15 @@ Tensor convolution_jvp(
     const Tensor& bias_p,
     const Tensor& bias_t,
     IntArrayRef stride,
-    IntArrayRef padding,
+    at::SymIntArrayRef padding,
     IntArrayRef dilation,
     bool transposed,
-    IntArrayRef output_padding,
+    at::SymIntArrayRef output_padding,
     int64_t groups) {
   auto bias_t_opt =
       bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
-      at::convolution(
+      at::convolution_symint(
           input_t,
           weight_p,
           c10::nullopt,
@@ -1116,7 +1116,7 @@ Tensor convolution_jvp(
           transposed,
           output_padding,
           groups) +
-      at::convolution(
+      at::convolution_symint(
           input_p,
           weight_t,
           bias_t_opt,
@@ -1136,10 +1136,10 @@ Tensor _convolution_jvp(
     const Tensor& bias_p,
     const Tensor& bias_t,
     IntArrayRef stride,
-    IntArrayRef padding,
+    at::SymIntArrayRef padding,
     IntArrayRef dilation,
     bool transposed,
-    IntArrayRef output_padding,
+    at::SymIntArrayRef output_padding,
     int64_t groups,
     bool benchmark,
     bool deterministic,
@@ -1148,7 +1148,7 @@ Tensor _convolution_jvp(
   auto bias_t_opt =
       bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
-      at::_convolution(
+      at::_convolution_symint(
           input_t,
           weight_p,
           c10::nullopt,
@@ -1162,7 +1162,7 @@ Tensor _convolution_jvp(
           deterministic,
           cudnn_enabled,
           allow_tf32) +
-      at::_convolution(
+      at::_convolution_symint(
           input_p,
           weight_t,
           bias_t_opt,
