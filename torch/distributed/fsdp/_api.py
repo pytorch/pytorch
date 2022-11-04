@@ -1,6 +1,7 @@
 """
 This file includes public APIs for FSDP such as the classes used for the
-constructor arguments.
+constructor arguments. We keep this file private and export everything through
+__init__.py.
 """
 
 from dataclasses import dataclass

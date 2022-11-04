@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
+from torch.distributed.fsdp._api import BackwardPrefetch
 from torch.distributed.fsdp._common_utils import (
     _all_handles,
     _assert_in_training_states,
@@ -19,7 +20,6 @@ from torch.distributed.fsdp._utils import (
     _no_dispatch_record_stream,
     p_assert,
 )
-from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.fsdp.flat_param import (
     _HandlesKey,
     FlatParameter,

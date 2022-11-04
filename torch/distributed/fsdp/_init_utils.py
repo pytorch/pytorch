@@ -20,6 +20,12 @@ import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
+from torch.distributed.fsdp._api import (
+    BackwardPrefetch,
+    CPUOffload,
+    MixedPrecision,
+    ShardingStrategy,
+)
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_param_to_fqns,
@@ -30,12 +36,6 @@ from torch.distributed.fsdp._common_utils import (
 from torch.distributed.fsdp._exec_order_utils import _ExecOrderData
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.fsdp._wrap_utils import _get_submodule_to_states
-from torch.distributed.fsdp.api import (
-    BackwardPrefetch,
-    CPUOffload,
-    MixedPrecision,
-    ShardingStrategy,
-)
 from torch.distributed.fsdp.flat_param import (
     _HandlesKey,
     FlatParameter,

@@ -30,6 +30,12 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     ActivationWrapper,
 )
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
+from torch.distributed.fsdp._api import (
+    BackwardPrefetch,
+    CPUOffload,
+    MixedPrecision,
+    ShardingStrategy,
+)
 from torch.distributed.fsdp._common_utils import (
     _get_param_to_fqns,
     FSDP_PREFIX,
@@ -67,12 +73,6 @@ from torch.distributed.fsdp._runtime_utils import (
     _wait_for_computation_stream,
 )
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
-from torch.distributed.fsdp.api import (
-    BackwardPrefetch,
-    CPUOffload,
-    MixedPrecision,
-    ShardingStrategy,
-)
 
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,

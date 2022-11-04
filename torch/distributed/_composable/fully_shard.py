@@ -4,6 +4,12 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import contract
+from torch.distributed.fsdp._api import (
+    BackwardPrefetch,
+    CPUOffload,
+    MixedPrecision,
+    ShardingStrategy,
+)
 from torch.distributed.fsdp._init_utils import (
     _init_buffer_state,
     _init_core_state,
@@ -17,12 +23,6 @@ from torch.distributed.fsdp._init_utils import (
 from torch.distributed.fsdp._runtime_utils import (
     _register_post_forward_hooks,
     _register_pre_forward_hooks,
-)
-from torch.distributed.fsdp.api import (
-    BackwardPrefetch,
-    CPUOffload,
-    MixedPrecision,
-    ShardingStrategy,
 )
 
 
