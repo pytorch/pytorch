@@ -9,21 +9,11 @@ from copy import deepcopy
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    _CHECKPOINT_PREFIX,
-    apply_activation_checkpointing,
-    checkpoint_wrapper,
-    CheckpointImpl,
-)
 from torch.distributed.fsdp import (
     CPUOffload,
     FlatParameter,
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
-)
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    FLAT_PARAM,
-    FSDP_WRAPPED_MODULE,
 )
 from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
@@ -120,7 +110,7 @@ class TestFSDPMisc(FSDPTest):
         def _check_equal(local, fsdp):
             with FSDP.summon_full_params(fsdp):
                 for p1, p2 in zip(fsdp.parameters(), local.parameters()):
-                    torch.testing.assert_allclose(p1, p2)
+                    torch.testing.assert_close(p1, p2)
 
         for sharding_strategy in [
             ShardingStrategy.FULL_SHARD,
@@ -415,7 +405,7 @@ class TestFSDPMisc(FSDPTest):
         module is on CPU after FSDP initialization, albeit after loging a
         warning, and that FSDP moves CPU input to GPU before the forward."""
         torch.cuda.set_device(self.rank)
-        regex = "Module is put on CPU"
+        regex = "passed-in `module` is on CPU"
         context = self.assertWarnsRegex(
             expected_warning=UserWarning, expected_regex=regex
         )
@@ -447,8 +437,7 @@ class TestFSDPMisc(FSDPTest):
             CUDAInitMode.CUDA_NEVER,
         )
         with self.assertRaisesRegex(
-            ValueError,
-            "Module has CPU parameters, but sync_module_states=True is specified.",
+            ValueError, "The module has CPU parameters when `sync_module_states=True`"
         ):
             FSDP(nested_wrapped_module, self.process_group, sync_module_states=True)
 
@@ -498,90 +487,6 @@ class TestFSDPMisc(FSDPTest):
             _assert_module_states(
                 fsdp, process_group=self.process_group, assert_fn=self.assertEqual
             )
-
-    @skip_if_lt_x_gpu(2)
-    def test_change_wrapped_module_after_ctor(self):
-        """
-        Tests changing an FSDP instance's wrapped module after the FSDP
-        constructor.
-        """
-        dist.set_debug_level(dist.DebugLevel.DETAIL)
-
-        class Model(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.seq1 = nn.Sequential(
-                    nn.Linear(5, 5),
-                    nn.Linear(5, 5),
-                )
-                self.seq2 = nn.Sequential(nn.Linear(5, 5))
-                self.lin = nn.Linear(5, 5)
-                self.relu = nn.ReLU()
-
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                return self.lin(self.relu(self.seq2(self.relu(self.seq1(x)))))
-
-        def get_fsdp_model():
-            fsdp_kwargs = {"use_orig_params": False}
-            model = Model().cuda()
-            model.seq1 = FSDP(model.seq1, **fsdp_kwargs)
-            model.seq2[0] = FSDP(model.seq2[0], **fsdp_kwargs)
-            model = FSDP(model, **fsdp_kwargs)
-            return model
-
-        # Wrap with `CheckpointWrapper` *after* FSDP construction
-        model = get_fsdp_model()
-        non_reentrant_wrapper = functools.partial(
-            checkpoint_wrapper,
-            offload_to_cpu=False,
-            checkpoint_impl=CheckpointImpl.NO_REENTRANT,
-        )
-        apply_activation_checkpointing(
-            model,
-            checkpoint_wrapper_fn=non_reentrant_wrapper,
-            check_fn=lambda submodule: isinstance(submodule, nn.Linear),
-        )
-
-        # Check that `seq2[0]` only has a single `FlatParameter` registered and
-        # that it has the `CheckpointWrapper` prefix in its FQN since it was
-        # registered to the `Linear` wrapped module in the FSDP constructor and
-        # only wrapped with `CheckpointWrapper` after
-        seq2_0_named_params = list(model.seq2[0].named_parameters())
-        self.assertEqual(len(seq2_0_named_params), 1)
-        self.assertTrue(type(seq2_0_named_params[0][1]) is FlatParameter)
-        self.assertTrue(_CHECKPOINT_PREFIX in seq2_0_named_params[0][0])
-
-        # Trigger the re-registration via `_lazy_init()`, and check for a
-        # warning, which is only emitted for DETAIL
-        with self.assertWarnsRegex(
-            UserWarning,
-            "The FSDP wrapped module changed from Linear.*to CheckpointWrapper",
-        ):
-            model._lazy_init()
-
-        # Check that now the `FlatParameter` is registered to the
-        # `CheckpointWrapper`, which is now the new wrapped module
-        seq2_0_named_params = list(model.seq2[0].named_parameters())
-        self.assertEqual(len(seq2_0_named_params), 1)
-        self.assertTrue(type(seq2_0_named_params[0][1]) is FlatParameter)
-        self.assertFalse(_CHECKPOINT_PREFIX in seq2_0_named_params[0][0])
-        self.assertFalse(isinstance(model.seq2[0].module, nn.Linear))
-
-        # Check that replacing a module *after* FSDP construction errors
-        model = get_fsdp_model()
-        # NOTE: Setting `model.seq2[0].module = nn.Linear(3, 3)` does not save
-        # to the FSDP instance's `module` attribute since `module` is a
-        # property, meaning that it would not actually change the wrapped
-        # module, so we use `setattr()` like in `_recursive_wrap()`.
-        setattr(model.seq2[0], FSDP_WRAPPED_MODULE, nn.Linear(3, 3))
-        with self.assertRaisesRegex(RuntimeError, "are invalid behavior"):
-            model._lazy_init()
-
-        # Check that deleting the `FlatParameter` errors
-        model = get_fsdp_model()
-        delattr(model.seq2[0].module, FLAT_PARAM)
-        with self.assertRaisesRegex(RuntimeError, "are invalid behavior"):
-            model._lazy_init()
 
 
 instantiate_parametrized_tests(TestFSDPMisc)

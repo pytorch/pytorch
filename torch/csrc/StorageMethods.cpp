@@ -41,7 +41,7 @@
 static PyObject* THPStorage_nbytes(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  return THPUtils_packUInt64(self->cdata->nbytes());
+  return py::cast(self->cdata->sym_nbytes()).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 

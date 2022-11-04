@@ -63,7 +63,8 @@ TABLE = {
         "eager": "--training --backend=eager ",
         "aot_eager": "--training --backend=aot_eager ",
         "aot_cudagraphs": "--training --backend=aot_cudagraphs ",
-        "aot_nvfuser": "--training --nvfuser --backend=aot_nvfuser ",
+        "aot_nvfuser": "--training --nvfuser --backend=aot_ts_nvfuser ",
+        "nvprims_nvfuser": "--training --backend=nvprims_nvfuser ",
         "inductor": "--training --inductor ",
         "inductor_no_cudagraphs": "--training --inductor --disable-cudagraphs ",
     },
@@ -71,8 +72,8 @@ TABLE = {
         "ts_nnc": "--speedup-ts",
         "ts_nvfuser": "-n100 --speedup-ts --nvfuser",
         "trt": "-n100 --speedup-trt",
-        "ts_nvfuser_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs_ts",
-        "inductor": "--inductor-settings --float32 -n50 --inductor",
+        "ts_nvfuser_cudagraphs": "--backend=cudagraphs_ts",
+        "inductor": "-n50 --inductor",
     },
 }
 
@@ -84,7 +85,7 @@ DEFAULTS = {
         "eager",
         "aot_eager",
         "aot_cudagraphs",
-        "aot_nvfuser",
+        "nvprims_nvfuser",
         "inductor",
         "inductor_no_cudagraphs",
     ],
@@ -258,7 +259,10 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         filters = DEFAULTS["quick"][suite]
                         cmd = f"{cmd} {filters}"
 
-                    if testing == "performance" and compiler == "inductor":
+                    if testing == "performance" and compiler in (
+                        "inductor",
+                        "inductor_no_cudagraphs",
+                    ):
                         cmd = f"{cmd} --cold_start_latency"
                     lines.append(cmd)
                 lines.append("")
@@ -448,6 +452,8 @@ class ParsePerformanceLogs(Parser):
             df_copy = df_copy.sort_values(
                 by=list(reversed(self.compilers)), ascending=False
             )
+            if "inductor" in self.compilers:
+                df_copy = df_copy.sort_values(by="inductor", ascending=False)
             self.untouched_parsed_frames[suite][metric] = df_copy
 
             if testing == "performance":
@@ -468,6 +474,9 @@ class ParsePerformanceLogs(Parser):
                     perf_rows.append(perf_row)
                 df = pd.concat(perf_rows)
             df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
+
+            if "inductor" in self.compilers:
+                df = df.sort_values(by="inductor", ascending=False)
             self.parsed_frames[suite][metric] = df
 
     def get_passing_entries(self, compiler, df):
