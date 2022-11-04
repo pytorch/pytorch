@@ -1358,6 +1358,8 @@ class InstructionTranslatorBase(object):
         # Stack of module being parsed, current nn.module is at the end of ordered dict
         self.nn_module_stack: Dict[str, str] = {}
 
+        self.export: bool = False
+
         if fake_tensors_available:
             with torch._subclasses.FakeTensorMode(
                 throw_on_data_dependent_ops=True,
