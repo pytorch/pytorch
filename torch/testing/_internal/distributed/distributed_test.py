@@ -4495,6 +4495,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(
             BACKEND == "ucc",
+            "Test not enabled for UCC backend",
         )
         @skip_if_lt_x_gpu(2)
         @parametrize("grad_as_bucket_view", [True, False])
@@ -4521,6 +4522,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(
             BACKEND == "ucc",
+            "Test not enabled for UCC backend",
         )
         @skip_if_lt_x_gpu(2)
         @parametrize("optimize_subset", [True, False])
@@ -4540,6 +4542,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(
             BACKEND == "ucc",
+            "Test not enabled for UCC backend",
         )
         @skip_if_lt_x_gpu(2)
         @parametrize("optimize_subset", [True, False])
