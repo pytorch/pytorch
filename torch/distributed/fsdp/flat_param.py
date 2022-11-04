@@ -5,7 +5,6 @@ from enum import auto, Enum
 from itertools import accumulate, chain
 from typing import (
     Any,
-    cast,
     Dict,
     Generator,
     Iterator,
@@ -30,7 +29,13 @@ from torch.distributed.fsdp._common_utils import (
 )
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
-from ._utils import _alloc_storage, _free_storage, _same_storage, p_assert
+from ._utils import (
+    _alloc_storage,
+    _free_storage,
+    _no_dispatch_record_stream,
+    _same_storage,
+    p_assert,
+)
 
 __all__ = [
     "FlatParameter",
@@ -1200,9 +1205,7 @@ class FlatParamHandle:
         self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
-        unsharded_flat_param.record_stream(
-            cast(torch._C.Stream, torch.cuda.current_stream())
-        )
+        _no_dispatch_record_stream(unsharded_flat_param, torch.cuda.current_stream())
         _free_storage(unsharded_flat_param)
 
     def _use_sharded_flat_param(self) -> None:
