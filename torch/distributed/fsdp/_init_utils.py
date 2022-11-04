@@ -29,6 +29,7 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.distributed.fsdp._exec_order_utils import _ExecOrderData
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
+from torch.distributed.fsdp._state_dict_utils import FullStateDictConfig, StateDictType
 from torch.distributed.fsdp._wrap_utils import _get_submodule_to_states
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
@@ -206,7 +207,9 @@ def _init_prefetching_state(
 
 
 def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
-    # TODO: after rebase
+    state._state_dict_type = StateDictType.FULL_STATE_DICT
+    state._state_dict_config = FullStateDictConfig()
+    state._full_param_ctx: Optional[Generator] = None
     return state
 
 

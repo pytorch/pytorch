@@ -5,7 +5,6 @@ import math
 import traceback
 import warnings
 from contextlib import contextmanager
-from dataclasses import dataclass
 from enum import auto, Enum
 from typing import (
     Any,
@@ -25,7 +24,6 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed import ProcessGroup
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    _CHECKPOINT_PREFIX,
     _CHECKPOINT_WRAPPED_MODULE,
     ActivationWrapper,
 )
@@ -88,6 +86,11 @@ from ._state_dict_utils import (
     _post_load_state_dict_hook,
     _post_state_dict_hook,
     _pre_load_state_dict_hook,
+    FullStateDictConfig,
+    LocalStateDictConfig,
+    ShardedStateDictConfig,
+    StateDictConfig,
+    StateDictType,
 )
 from ._utils import p_assert
 from .flat_param import FlatParameter, FlatParamHandle
@@ -112,90 +115,6 @@ __all__ = [
 
 
 FLAT_PARAM = "_flat_param"
-
-
-class StateDictType(Enum):
-    """
-    This enum indicates that which type of ``state_dict`` the FSDP module is
-    currently processing (returning or loading).
-    The default value is FULL_STATE_DICT to comply the PyTorch convention.
-    ..note::
-        FSDP currently supports three types of ``state_dict``:
-            1. ``state_dict/load_state_dict`: this pair of APIs return and load
-               the non-sharded, unflattened parameters. The semantics is the
-               same as using DDP.
-            2. ``_local_state_dict/_load_local_state_dict``: this pair of APIs return
-               and load local sharded, flattened parameters. The values returned
-               by ``_local_state_dict`` can be directly used by FSDP and is only
-               meaningful to FSDP (because parameters are flattened). Note that
-               these APIs are meant for use via the :func:`state_dict_type`
-               context manager as follows:
-                   >>> # xdoctest: +SKIP("undefined variables")
-                   >>> with fsdp.state_dict_type(StateDictType.LOCAL_STATE_DICT):
-                   ...     state = fsdp.state_dict()  # loads local state dict
-            3. ``_sharded_state_dict/_load_sharded_state_dict``: this pair of APIs
-               return and load sharded, unflattened parameters. The ``state_dict``
-               return by ``sharded_state_dict`` can be used by all other parallel
-               schemes (resharding may be required).
-    """
-
-    FULL_STATE_DICT = auto()
-    LOCAL_STATE_DICT = auto()
-    SHARDED_STATE_DICT = auto()
-
-
-@dataclass
-class StateDictConfig:
-    """
-    ``StateDictConfig`` is the base class for all state_dict configuration classes.
-    Users should instantiate a child version (i.e. ``FullStateDictConfig``) in
-    order to configure settings for the particular type of ``state_dict``
-    implementation FSDP will use.
-    """
-
-    offload_to_cpu: bool = False
-
-
-@dataclass
-class FullStateDictConfig(StateDictConfig):
-    """
-    ``FullStateDictConfig`` is a config class meant to be used with
-    ``StateDictType.FULL_STATE_DICT``. Currently, it accepts two parameters,
-    ``offload_to_cpu`` and ``rank0_only`` which can be configured to offload
-    the full ``state_dict`` to CPU and to materialize the ``state_dict`` on
-    rank 0 only. When used, it is recommended to enable both of these flags
-    together to optimize memory savings when taking checkpoints. Note that
-    this config class is meant for user via the :func:`state_dict_type`
-    context manager as follows:
-        >>> # xdoctest: +SKIP("undefined variables")
-        >>> fsdp = FSDP(model, auto_wrap_policy=...)
-        >>> cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-        >>> with FullyShardedDataParallel.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
-        >>>     state = fsdp.state_dict()
-        >>>     # state will be empty on non rank 0 and contain CPU tensors on rank 0.
-        >>> # To reload checkpoint for inference, finetuning, transfer learning, etc:
-        >>> model = model_fn() # Initialize model on CPU in preparation for wrapping with FSDP
-        >>> if dist.get_rank() == 0:
-        >>>     # Load checkpoint only on rank 0 to avoid memory redundancy
-        >>>     state_dict = torch.load("my_checkpoint.pt")
-        >>>     model.load_state_dict(state_dict)
-        >>> # All ranks initialize FSDP module as usual. ``sync_module_states`` argument
-        >>> # communicates loaded checkpoint states from rank 0 to rest of the world.
-        >>> fsdp = FSDP(model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
-        >>> # After this point, all ranks have FSDP model with loaded checkpoint.
-    """
-
-    rank0_only: bool = False
-
-
-@dataclass
-class LocalStateDictConfig(StateDictConfig):
-    pass
-
-
-@dataclass
-class ShardedStateDictConfig(StateDictConfig):
-    pass
 
 
 class OptimStateKeyType(Enum):
@@ -517,15 +436,12 @@ class FullyShardedDataParallel(nn.Module):
 
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
-        _init_state_dict_state(self)  # TODO: currently a no-op; need to refactor below
-        self._state_dict_type = StateDictType.FULL_STATE_DICT
-        self._state_dict_config = FullStateDictConfig()
+        _init_state_dict_state(self)
         self._register_state_dict_hook(_post_state_dict_hook)
         self._register_load_state_dict_pre_hook(
             _pre_load_state_dict_hook, with_module=True
         )
         self.register_load_state_dict_post_hook(_post_load_state_dict_hook)
-        self._full_param_ctx: Optional[Generator] = None
 
     @property
     def module(self) -> nn.Module:
@@ -799,32 +715,6 @@ class FullyShardedDataParallel(nn.Module):
                 FullyShardedDataParallel.set_state_dict_type(
                     module, prev_state_dict_type, prev_state_dict_config
                 )
-
-    def _convert_to_wrapped_module_name(self, module_name: str) -> str:
-        module_name = module_name.replace(f"{FSDP_PREFIX}", "")
-        module_name = module_name.replace(f"{FSDP_WRAPPED_MODULE}", "")
-        if module_name:
-            module_name = f"{module_name}."
-        # Activation checkpoint adds a prefix that has to be
-        # removed as well.
-        module_name = module_name.replace(_CHECKPOINT_PREFIX, "")
-        return module_name
-
-    @property
-    def _param_fqns(self) -> Iterator[Tuple[str, str, str]]:
-        if not self._has_params:
-            return
-        for param_name, module_name in self._handles[0].parameter_module_names():
-            module_name = self._convert_to_wrapped_module_name(module_name)
-            fqn = f"{module_name}{param_name}"
-            yield fqn, param_name, module_name
-
-    @property
-    def _shared_param_fqns(self) -> Iterator[Tuple[str, str, str]]:
-        for param_name, module_name in self._handles[0].shared_parameter_module_names():
-            module_name = self._convert_to_wrapped_module_name(module_name)
-            fqn = f"{module_name}{param_name}"
-            yield fqn, param_name, module_name
 
     def state_dict(self, *args, **kwargs):
         _lazy_init(self, self)
