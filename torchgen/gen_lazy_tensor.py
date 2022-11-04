@@ -313,6 +313,7 @@ def run_gen_lazy_tensor(
     per_operator_headers: bool = False,
     backend_name: str = default_args.backend_name,
     gen_forced_fallback_code: bool = False,
+    use_lazy_shape: bool = True,
     # the following arguments are temporary customization points for xla backend migration.
     # do not rely on them otherwise, they should be removed once migration is complete
     backend_namespace: str = "torch::lazy",
@@ -533,7 +534,7 @@ def run_gen_lazy_tensor(
     )
     # Generate IR node classes
     lazy_ir_obj = lazy_ir_generator(
-        backend_indices[backend_key], backend_name, node_base
+        backend_indices[backend_key], backend_name, node_base, use_lazy_shape
     )
 
     fm.write_with_template(
