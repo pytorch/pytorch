@@ -6144,20 +6144,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(ValueError, 'is not valid'):
             F.poisson_nll_loss(input, target, reduction='total')
 
-    def test_gaussian_nll_loss_reduction_modes(self):
-        input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
-        target = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
-        var = torch.tensor([[0.5, 1., 1.5], [1., 1.5, 2.]])
-        component_wise_loss = 0.5 * (torch.log(var) + (input - target)**2 / var)
-        self.assertEqual(component_wise_loss,
-                         F.gaussian_nll_loss(input, target, var, reduction='none'))
-        self.assertEqual(torch.sum(component_wise_loss),
-                         F.gaussian_nll_loss(input, target, var, reduction='sum'))
-        self.assertEqual(torch.mean(component_wise_loss),
-                         F.gaussian_nll_loss(input, target, var, reduction='mean'))
-        with self.assertRaisesRegex(ValueError, 'is not valid'):
-            F.gaussian_nll_loss(input, target, var, reduction='total')
-
     def test_gaussian_nll_loss_broadcasting(self):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
         target_full = torch.tensor([[1., 2., 3.], [1., 2., 3.]])
