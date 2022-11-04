@@ -180,6 +180,30 @@ def meta_linalg_eigh(self, uplo="L"):
     return (values, vectors)
 
 
+@register_meta(torch.ops.aten.clone)
+def clone_meta(input, memory_format: torch.memory_format = torch.preserve_format):
+    if memory_format != torch.preserve_format:
+        return torch.empty(
+            input.shape,
+            dtype=input.dtype,
+            layout=input.layout,
+            device=input.device,
+            requires_grad=input.requires_grad,
+            memory_format=memory_format,
+        )
+
+    # memory_format == torch.preserve_format
+    strides = utils.compute_elementwise_output_strides(input)
+    return torch.empty_strided(
+        input.shape,
+        strides,
+        dtype=input.dtype,
+        layout=input.layout,
+        device=input.device,
+        requires_grad=input.requires_grad,
+    )
+
+
 # From aten/src/ATen/native/ReflectionPad.cpp
 @register_meta(
     [aten.reflection_pad2d_backward.default, aten.replication_pad2d_backward.default]
@@ -1678,7 +1702,6 @@ def activate_meta():
             "aten::empty_strided",  # causing infinite recursion, test_meta.py
             "aten::clone",  # causing infinite recursion
             "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
-            "aten::randn",  # pin_memory parameter is not supported!, test_proxy_tensor.py -k test_make_fx_symbolic_exhaustive_randn_cpu_float32  # noqa: B950
             "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
             "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
             "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
