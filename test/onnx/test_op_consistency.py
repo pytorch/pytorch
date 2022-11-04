@@ -180,7 +180,7 @@ def dont_care(
     )
 
 
-def skip(
+def fixme(
     op_name: str,
     variant_name: str = "",
     *,
@@ -334,7 +334,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
         "ceil", dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
         reason=reason_onnx_does_not_support("Ceil")
     ),
-    skip("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
+    fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
     xfail(
         "div", variant_name="no_rounding_mode", dtypes=COMPLEX_TYPES,
         reason=reason_jit_tracer_error("complex types")
@@ -347,29 +347,29 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
         "div", variant_name="trunc_rounding", dtypes=(torch.float16,) + COMPLEX_TYPES,
         reason=reason_jit_tracer_error("f16 and complex types")
     ),
-    skip(
+    fixme(
         "div", variant_name="no_rounding_mode", dtypes=[torch.uint8, torch.int8, torch.int16],
         reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16"])
     ),
-    skip(
+    fixme(
         "div", variant_name="floor_rounding", dtypes=[torch.uint8, torch.int8, torch.int16],
         reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16"])
     ),
-    skip(
+    fixme(
         "div", variant_name="floor_rounding", dtypes=[torch.float64],
         reason=reason_onnx_runtime_does_not_support("Div", ["f64"])
     ),
-    skip(
+    fixme(
         "div", variant_name="trunc_rounding", dtypes=[torch.uint8, torch.int8, torch.int16],
         reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16"])
     ),
     xfail("floor_divide", dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
-    skip("floor_divide", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
+    fixme("floor_divide", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
     xfail(
         "remainder", dtypes=[torch.uint8, torch.int8, torch.int16], opsets=[opsets_before(11)],
         reason="Sub not defined for u8, i16 before opset 14. Mod is used after 11 so we support from opset 11.",
     ),
-    skip("remainder", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
+    fixme("remainder", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
     dont_care("sqrt", dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
     xfail("t", dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
     xfail("true_divide", dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
