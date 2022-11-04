@@ -140,7 +140,7 @@ def contract(func):
         return updated
 
     def get_state(module: nn.Module) -> Optional[_State]:
-        return module.__dict__.setdefault(
+        return module.__dict__.setdefault(  # type: ignore[call-overload]
             STATE_KEY,
             {},  # TODO(@yhcharles): this is a temporary fix, need a better way
         ).get(
