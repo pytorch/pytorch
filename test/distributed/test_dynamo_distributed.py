@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import logging
 import os
 import random
 import unittest
@@ -217,6 +218,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
                 },
             )
         )
+        cls._exit_stack.enter_context(patch.object(config, "log_level", logging.DEBUG))
         cls.rank = 0
         cls.device = f"cuda:{cls.rank}"
         cls.device_ids = None if "cuda" in cls.device else [cls.rank]
