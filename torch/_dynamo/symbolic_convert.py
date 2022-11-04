@@ -745,6 +745,14 @@ class InstructionTranslatorBase(object):
             self.push(right.call_method(self, "__contains__", [left], {}))
             if op == "not in":
                 self.UNARY_NOT(inst)
+        elif (
+            isinstance(left, UserFunctionVariable)
+            and isinstance(right, UserFunctionVariable)
+            and op in supported_is_const
+        ):
+            self.push(
+                ConstantVariable(supported_is_const[op](left.fn, right.fn), **options)
+            )
         else:
             unimplemented(f"COMPARE_OP {typestr(left)} {op} {typestr(right)}")
 
@@ -828,6 +836,14 @@ class InstructionTranslatorBase(object):
     def STORE_ATTR(self, inst):
         prior = self.copy_graphstate()
         val, obj = self.popn(2)
+
+        if isinstance(obj, NNModuleVariable):
+            # We don't allow side effects during export
+            # https://github.com/pytorch/torchdynamo/issues/1475
+            assert (
+                not self.export
+            ), f"Mutating module attribute {inst.argval} during export."
+
         try:
             self.output.guards.update(
                 BuiltinVariable(setattr)
