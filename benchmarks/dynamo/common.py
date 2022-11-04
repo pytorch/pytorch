@@ -791,14 +791,14 @@ def maybe_fresh_cache(fn, is_cold_start):
 
 
 @contextmanager
-def maybe_init_distributed(should_init_distributed, rank=0, world_size=1):
+def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_size=1):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
     try:
         if should_init_distributed:
             torch.cuda.set_device(rank)
             os.environ["MASTER_ADDR"] = "localhost"
-            os.environ["MASTER_PORT"] = "6789"
+            os.environ["MASTER_PORT"] = port
             torch.distributed.init_process_group(
                 "nccl", rank=rank, world_size=world_size
             )
@@ -1395,7 +1395,17 @@ def parse_args():
     parser.add_argument(
         "--ddp",
         action="store_true",
-        help="Wraps model in DDP before running it.",
+        help="Wraps model in DDP before running it, and uses dynamo DDPOptmizer (graph breaks) by default.",
+    )
+    parser.add_argument(
+        "--no-optimize-ddp",
+        action="store_true",
+        help="Disables dynamo DDPOptimizer (graph breaks). (Applies only when using --ddp benchmark mode).",
+    )
+    parser.add_argument(
+        "--distributed-master-port",
+        default="6789",
+        help="Port to bind for master process for torch.distributed.  Don't set unless you are seeing a conflict with another process using this port.",
     )
     parser.add_argument(
         "--dynamic-shapes",
@@ -1563,7 +1573,9 @@ def parse_args():
 
 def main(runner, original_dir=None):
     args = parse_args()
-    with maybe_init_distributed(args.ddp and args.only):
+    with maybe_init_distributed(
+        args.ddp and args.only, port=args.distributed_master_port
+    ):
         return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
             runner, args, original_dir
         )
@@ -1600,7 +1612,11 @@ def run(runner, args, original_dir=None):
             args.accuracy
         ), "DDP benchmark is currently only hooked up to --accuracy bench"
         assert args.training, "DDP benchmark requires --training mode"
-        torch._dynamo.config.optimize_ddp = True
+        if args.no_optimize_ddp:
+            torch._dynamo.config.optimize_ddp = False
+        else:
+            # TODO(whc) after enabling DDPOptimizer by default this could be removed or assert
+            torch._dynamo.config.optimize_ddp = True
 
     if args.accuracy:
         # Use small batch size. We use >1 batch size to ensure we test
