@@ -555,7 +555,7 @@ def _get_fixed_params_observed_lstm(
     tanh_qparams: Optional[Tuple[float, int]] = None,
     cell_state_qparams: Optional[Tuple[float, int]] = None,
     hidden_state_qparams: Optional[Tuple[float, int]] = None,
-) -> None:
+) -> torch.ao.nn.quantizable.LSTM:
     """
     Return an observed `torch.ao.nn.quantizable.LSTM` from a float `torch.nn.LSTM`
     with fixed scales and zero points assigned to the inner ops or submodules.
@@ -576,6 +576,10 @@ def _get_fixed_params_observed_lstm(
         `tanh_qparams`: (scale, zero_point) tuple for tanh activations
         `cell_state_qparams`: (scale, zero_point) for the cell state
         `hidden_state_qparams`: (scale, zero_point) for the hidden state and the output
+
+    Return:
+        A `torch.ao.nn.quantizable.LSTM` with FixedQParamsObservers or
+        FixedQParamsFakeQuantizes attached to the inner submodules.
     """
     def make_qconfig(scale: float, zero_point: int) -> torch.ao.quantization.QConfig:
         """
@@ -584,7 +588,7 @@ def _get_fixed_params_observed_lstm(
         if is_qat:
             activation = torch.ao.quantization.FixedQParamsFakeQuantize.with_args(
                 scale=scale, zero_point=zero_point)
-            weight = torch.ao.quantization.default_weight_fake_quantize
+            weight = torch.ao.quantization.default_weight_fake_quant
         else:
             activation = torch.ao.quantization.FixedQParamsObserver.with_args(
                 scale=scale, zero_point=zero_point)
