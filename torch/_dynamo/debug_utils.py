@@ -783,13 +783,19 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                 # Check Accuracy
                 compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
-                    log.warning("Accuracy failed for the TorchDyanmo produced graph")
+                    log.warning(
+                        "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
+                    )
                     dump_to_minify_after_dynamo(
                         fx.GraphModule(gm, copy.deepcopy(gm.graph)),
                         example_inputs,
                         compiler_name,
                     )
-                    raise ValueError("Bad accuracy detected")
+                    exc = ValueError("Bad accuracy detected.")
+                    exc.minifier_path = os.path.join(
+                        minifier_dir(), "minifier_launcher.py"
+                    )
+                    raise exc
             else:
                 try:
                     compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
