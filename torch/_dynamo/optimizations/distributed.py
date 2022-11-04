@@ -25,14 +25,18 @@ class Bucket:
     params: List[str] = field(default_factory=list)
     nodes: List[fx.Node] = field(default_factory=list)
 
+    # param_ids is just used for unit testing
+    param_ids: List = field(default_factory=list)
+
 
 def pretty_print_buckets(buckets: List[Bucket]):
     headers = ("Index", "Size (b)", "Param Names")
     rows = []
     for idx, bucket in enumerate(reversed(buckets)):
-        rows.append((idx, bucket.size, bucket.params[0]))
-        for param in bucket.params[1:]:
-            rows.append((None, None, param))
+        if len(bucket.params) > 0:
+            rows.append((idx, bucket.size, bucket.params[0]))
+            for param in bucket.params[1:]:
+                rows.append((None, None, param))
     try:
         from tabulate import tabulate
 
@@ -45,7 +49,6 @@ class DDPOptimizer:
     def __init__(
         self,
         bucket_bytes_cap: int,
-        parameters_to_ignore: List[str],
         backend_compile_fn,
         debug=False,
         first_bucket_cap: Optional[int] = None,
@@ -62,14 +65,19 @@ class DDPOptimizer:
         assert (
             self.first_bucket_cap <= self.bucket_bytes_cap
         ), "First bucket should be smaller/equal to other buckets to get comms warmed up ASAP"
-        self.parameters_to_ignore = parameters_to_ignore
+
         self.backend_compile_fn = backend_compile_fn
         self.debug = debug
 
+    def _ignore_parameter(self, parameter):
+        return hasattr(parameter, "_ddp_ignored") and parameter._ddp_ignored
+
     def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
         """
-        TODO:
-        - handle params_and_buffers_to_ignore
+        Implements graph splitting, first determining a set of of buckets by counting
+        parameter sizes in reverse graph order, then invoking the user/backend compiler
+        to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
+        and returns its callable.
         """
 
         # 1: compute the partition map according to DDP bucket logic
@@ -88,17 +96,22 @@ class DDPOptimizer:
             if node.op == "call_module":
                 target = gm.get_submodule(node.target)
                 for name, p in target.named_parameters():
-                    if p.requires_grad:
+                    param = target.get_parameter(name)
+                    if p.requires_grad and not self._ignore_parameter(param):
                         buckets[0].size += p.storage().nbytes()
-                        # TODO correct FQ name?
-                        buckets[0].params.append(f"{node}_{name}")
+                        buckets[0].params.append(f"{node.target}_{name}")
+                        buckets[0].param_ids.append(id(param))
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
-                if maybe_param.requires_grad:
+                if maybe_param.requires_grad and not self._ignore_parameter(
+                    maybe_param
+                ):
                     buckets[0].size += maybe_param.storage().nbytes()
                     buckets[0].params.append(node.target)
+                    buckets[0].param_ids.append(id(maybe_param))
 
             # All nodes have to be mapped to a bucket, even if they don't have their own params
+            # Ignored params still end up in buckets, we just don't count them towards the capacity
             buckets[0].nodes.append(node)
 
         # stash buckets for testing/debugging purposes
