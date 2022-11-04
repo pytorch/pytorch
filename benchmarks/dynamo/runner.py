@@ -227,7 +227,7 @@ def parse_args():
     parser.add_argument(
         "--archive-name",
         help="Directory name under dashboard-archive-path to copy output-dir to. "
-             "If not provided, a generated name is used."
+        "If not provided, a generated name is used.",
     )
     parser.add_argument(
         "--dashboard-gh-cli-path",
@@ -1008,9 +1008,18 @@ class DashboardUpdater:
     def archive(self):
         dtype = self.args.dtypes[0]
         # Copy the folder to archived location
-        archive(self.output_dir, self.args.dashboard_archive_path, self.args.archive_name, dtype)
+        archive(
+            self.output_dir,
+            self.args.dashboard_archive_path,
+            self.args.archive_name,
+            dtype,
+        )
         day, _ = archive_data(self.args.archive_name)
-        target_dir = default_archive_name(dtype) if self.args.archive_name is None else self.args.archive_name
+        target_dir = (
+            default_archive_name(dtype)
+            if self.args.archive_name is None
+            else self.args.archive_name
+        )
 
         # Update lookup csv the folder to arhived logs
         subprocess.check_call(
@@ -1134,7 +1143,9 @@ if __name__ == "__main__":
             )
             raise e
         if not args.log_operator_inputs:
-            archive(output_dir, args.dashboard_archive_path, args.archive_name, dtypes[0])
+            archive(
+                output_dir, args.dashboard_archive_path, args.archive_name, dtypes[0]
+            )
             parse_logs(
                 args, dtypes, suites, devices, compilers, flag_compilers, output_dir
             )
