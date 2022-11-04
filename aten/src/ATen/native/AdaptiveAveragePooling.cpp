@@ -130,9 +130,9 @@ namespace {
       Tensor out = input.mean({-1, -2}, /* keepdim = */ true);
       if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
         // assert ndim == 4, since ndim = 3 doesn't give channels_last
-        const int n = input.size(0);
-        const int c = input.size(1);
-        out.as_strided_({n, c, 1, 1}, {c, 1, c, c});
+        const auto n = input.sym_size(0);
+        const auto c = input.sym_size(1);
+        out.as_strided__symint({n, c, 1, 1}, {c, 1, c, c});
       }
       return out;
     } else {

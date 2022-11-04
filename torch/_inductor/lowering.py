@@ -164,8 +164,15 @@ def _register_lowering(
             args = args[0]
         # Only look at args that are Tensors
         indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
-        # kwargs tensors not supported yet
-        assert not any(isinstance(x, TensorBox) for x in kwargs.values())
+
+        # explicitly assert for "out=" ops for better error messages
+        assert not any(
+            x == "out" for x in kwargs.keys()
+        ), "out= ops aren't yet supported"
+        # kwargs tensors not supported yet unless it's a fallback op
+        assert not any(isinstance(x, TensorBox) for x in kwargs.values()) or all(
+            fn in fallbacks for fn in aten_fn
+        )
 
         if (type_promotion_kind or convert_input_to_bool) and indices:
             if convert_input_to_bool:
@@ -884,6 +891,74 @@ def addmm(inp: TensorBox, a: TensorBox, b: TensorBox, beta=1, alpha=1):
 @register_lowering(aten.bmm)
 def bmm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
+
+
+def register_onednn_fusion_ops():
+    if torch._C.has_mkldnn:
+
+        @register_lowering(torch.ops.mkldnn._convolution_pointwise)
+        def convolution_unary(
+            x: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            stride,
+            dilation,
+            groups,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionUnary.create(
+                    x,
+                    weight,
+                    bias,
+                    padding,
+                    stride,
+                    dilation,
+                    groups,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
+
+        @register_lowering(torch.ops.mkldnn._convolution_pointwise.binary)
+        def convolution_binary(
+            x: TensorBox,
+            other: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            stride,
+            dilation,
+            groups,
+            attr,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionBinary.create(
+                    x, other, weight, bias, padding, stride, dilation, groups, attr
+                )
+            )
+
+        @register_lowering(torch.ops.mkldnn._linear_pointwise)
+        def linear_unary(
+            x: TensorBox, w: TensorBox, b: TensorBox, attr, scalars, algorithm
+        ):
+            return TensorBox.create(
+                ir.LinearUnary.create(x, w, b, attr, scalars, algorithm)
+            )
+
+        @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
+        def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
+            return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
+
+    else:
+        pass
+
+
+register_onednn_fusion_ops()
 
 
 def fallback_handler(kernel):
@@ -3083,6 +3158,8 @@ def pow(a, b):
         ), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
+    elif isinstance(b, float) and b == 0.5:
+        return sqrt(a)
     elif isinstance(b, int) and b == 1:
         return a
     elif isinstance(b, int) and -32 < b < 32:

@@ -737,7 +737,7 @@ class Module:
         if you need to store extra state. This function is called when building the
         module's `state_dict()`.
 
-        Note that extra state should be pickleable to ensure working serialization
+        Note that extra state should be picklable to ensure working serialization
         of the state_dict. We only provide provide backwards compatibility guarantees
         for serializing Tensors; other objects may break backwards compatibility if
         their serialized pickled form changes.
@@ -1118,7 +1118,9 @@ class Module:
         return self._apply(convert)
 
     def register_full_backward_pre_hook(
-        self, hook: Callable[['Module', _grad_t], Union[None, _grad_t]]
+        self,
+        hook: Callable[["Module", _grad_t], Union[None, _grad_t]],
+        prepend: bool = False,
     ) -> RemovableHandle:
         r"""Registers a backward pre-hook on the module.
 
@@ -1141,6 +1143,17 @@ class Module:
             Modifying inputs inplace is not allowed when using backward hooks and
             will raise an error.
 
+        Args:
+            hook (Callable): The user-defined hook to be registered.
+            prepend (bool): If true, the provided ``hook`` will be fired before
+                all existing ``backward_pre`` hooks on this
+                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                ``hook`` will be fired after all existing ``backward_pre`` hooks
+                on this :class:`torch.nn.modules.Module`. Note that global
+                ``backward_pre`` hooks registered with
+                :func:`register_module_full_backward_pre_hook` will fire before
+                all hooks registered by this method.
+
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
@@ -1149,6 +1162,8 @@ class Module:
         """
         handle = hooks.RemovableHandle(self._backward_pre_hooks)
         self._backward_pre_hooks[handle.id] = hook
+        if prepend:
+            self._backward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
     def register_backward_hook(
@@ -1176,7 +1191,9 @@ class Module:
         return handle
 
     def register_full_backward_hook(
-        self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, _grad_t]]
+        self,
+        hook: Callable[["Module", _grad_t, _grad_t], Union[None, _grad_t]],
+        prepend: bool = False,
     ) -> RemovableHandle:
         r"""Registers a backward hook on the module.
 
@@ -1202,6 +1219,17 @@ class Module:
             Modifying inputs or outputs inplace is not allowed when using backward hooks and
             will raise an error.
 
+        Args:
+            hook (Callable): The user-defined hook to be registered.
+            prepend (bool): If true, the provided ``hook`` will be fired before
+                all existing ``backward`` hooks on this
+                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                ``hook`` will be fired after all existing ``backward`` hooks on
+                this :class:`torch.nn.modules.Module`. Note that global
+                ``backward`` hooks registered with
+                :func:`register_module_full_backward_hook` will fire before
+                all hooks registered by this method.
+
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
@@ -1216,6 +1244,8 @@ class Module:
 
         handle = hooks.RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
+        if prepend:
+            self._backward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
     def _get_backward_hooks(self):
@@ -1287,7 +1317,9 @@ class Module:
                               "some grad_input. Please use register_full_backward_hook to get the documented "
                               "behavior.")
 
-    def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+    def register_forward_pre_hook(
+        self, hook: Callable[..., None], prepend: bool = False
+    ) -> RemovableHandle:
         r"""Registers a forward pre-hook on the module.
 
         The hook will be called every time before :func:`forward` is invoked.
@@ -1301,6 +1333,17 @@ class Module:
         single modified value in the hook. We will wrap the value into a tuple
         if a single value is returned(unless that value is already a tuple).
 
+        Args:
+            hook (Callable): The user defined hook to be registered.
+            prepend (bool): If true, the provided ``hook`` will be fired before
+                all existing ``forward_pre`` hooks on this
+                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                ``hook`` will be fired after all existing ``forward_pre`` hooks
+                on this :class:`torch.nn.modules.Module`. Note that global
+                ``forward_pre`` hooks registered with
+                :func:`register_module_forward_pre_hook` will fire before all
+                hooks registered by this method.
+
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
@@ -1308,9 +1351,13 @@ class Module:
         """
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
         self._forward_pre_hooks[handle.id] = hook
+        if prepend:
+            self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
-    def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+    def register_forward_hook(
+        self, hook: Callable[..., None], prepend: bool = False
+    ) -> RemovableHandle:
         r"""Registers a forward hook on the module.
 
         The hook will be called every time after :func:`forward` has computed an output.
@@ -1324,6 +1371,17 @@ class Module:
         it will not have effect on forward since this is called after
         :func:`forward` is called.
 
+        Args:
+            hook (Callable): The user defined hook to be registered.
+            prepend (bool): If true, the provided ``hook`` will be fired before
+                all existing ``forward`` hooks on this
+                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                ``hook`` will be fired after all existing ``forward`` hooks on
+                this :class:`torch.nn.modules.Module`. Note that global
+                ``forward`` hooks registered with
+                :func:`register_module_forward_hook` will fire before all hooks
+                registered by this method.
+
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
@@ -1331,6 +1389,8 @@ class Module:
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
         self._forward_hooks[handle.id] = hook
+        if prepend:
+            self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
     def _slow_forward(self, *input, **kwargs):
@@ -1677,7 +1737,7 @@ class Module:
         ``strict=True`` are affected by modifications the hook makes to
         ``missing_keys`` or ``unexpected_keys``, as expected. Additions to either
         set of keys will result in an error being thrown when ``strict=True``, and
-        clearning out both missing and unexpected keys will avoid an error.
+        clearing out both missing and unexpected keys will avoid an error.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:

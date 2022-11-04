@@ -1004,7 +1004,7 @@ Example:
 hfftn = _add_docstr(_fft.fft_hfftn, r"""
 hfftn(input, s=None, dim=None, norm=None, *, out=None) -> Tensor
 
-Computes the n-dimensional discrete Fourier transform of a Herimitian symmetric
+Computes the n-dimensional discrete Fourier transform of a Hermitian symmetric
 :attr:`input` signal.
 
 :attr:`input` is interpreted as a one-sided Hermitian signal in the time

@@ -1,10 +1,19 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Pow.h>
 
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/native/Resize.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/float_power_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/pow_native.h>
+#include <ATen/ops/result_type.h>
+#endif
 
 namespace at {
 namespace meta {

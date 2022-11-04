@@ -34,6 +34,7 @@ import functools
 import warnings
 
 import torch
+from torch._C import _onnx as _C_onnx
 from torch.onnx import _type_utils, errors, symbolic_helper, symbolic_opset9 as opset9
 from torch.onnx._internal import jit_utils, registration
 
@@ -158,19 +159,25 @@ def __interpolate(
 #       issue for "cast" operators. Some symbolic functions depend on shape information of input tensor, which
 #       is lost after casting.
 def _try_cast_integer_to_float(g: jit_utils.GraphContext, *args):
-    floating_scalar_types = {"Half", "Float", "Double"}
+    floating_scalar_types = {
+        _type_utils.JitScalarType.HALF,
+        _type_utils.JitScalarType.FLOAT,
+        _type_utils.JitScalarType.DOUBLE,
+    }
     old_type = None
     # Cast the input tensor to Float if its scalarType is known and is not floating number.
     # If casting is performed, return the old scalarType, otherwise return None.
-    arg0_type = args[0].type().scalarType()
-    if arg0_type is not None:
+    arg0_type = _type_utils.JitScalarType.from_value(
+        args[0], _type_utils.JitScalarType.UNDEFINED
+    )
+    if arg0_type != _type_utils.JitScalarType.UNDEFINED:
         old_type = arg0_type
         if old_type not in floating_scalar_types:
-            # TODO(justinchuby): Remove the type ignore hint once _cast_Float is
-            # properly defined.
-            # NOTE: _cast_Float is generated programmatically so we need to make the
-            # type checker happy with ignore[attr-defined].
-            args = tuple(opset9._cast_Float(g, arg, False) for arg in args)  # type: ignore[attr-defined]
+            old_type = old_type.scalar_name()
+            args = tuple(
+                g.op("Cast", arg, to_i=_C_onnx.TensorProtoDataType.FLOAT)
+                for arg in args
+            )
         else:
             return (None,) + args
     else:
@@ -248,9 +255,7 @@ def mm(g: jit_utils.GraphContext, self, other):
         )
     zero_constant = g.op(
         "Constant",
-        value_t=torch.tensor(
-            [0], dtype=_type_utils.JitScalarType.from_name(scalar_type).dtype()
-        ),
+        value_t=torch.tensor([0], dtype=scalar_type.dtype()),
     )
 
     if symbolic_helper._try_get_scalar_type(self):

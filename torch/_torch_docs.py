@@ -8834,7 +8834,7 @@ Otherwise, if :attr:`some` is ``False``, this function returns the complete QR f
           If you plan to backpropagate through QR, note that the current backward implementation
           is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
           columns of :attr:`input` are linearly independent.
-          This behavior will propably change once QR supports pivoting.
+          This behavior will probably change once QR supports pivoting.
 
 .. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
           and may produce different (valid) decompositions on different device types
@@ -10227,7 +10227,7 @@ Args:
         as values.
     values (array_list): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1+K)-dimensonal tensor where ``K`` is the number
+        represents a (1+K)-dimensional tensor where ``K`` is the number
         of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows, ncols, *densesize)``. If
@@ -10287,7 +10287,7 @@ Args:
         values.
     values (array_list): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1+K)-dimensonal tensor where ``K`` is the number
+        represents a (1+K)-dimensional tensor where ``K`` is the number
         of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows, ncols, *densesize)``. If
@@ -10347,7 +10347,7 @@ Args:
         values.
     values (array_list): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1 + 2 + K)-dimensonal tensor where ``K`` is the
+        represents a (1 + 2 + K)-dimensional tensor where ``K`` is the
         number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
@@ -10412,7 +10412,7 @@ Args:
         as values.
     values (array_list): Initial blocks for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, and other types that
-        represents a (1 + 2 + K)-dimensonal tensor where ``K`` is the
+        represents a (1 + 2 + K)-dimensional tensor where ``K`` is the
         number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
@@ -11155,7 +11155,7 @@ add_docstr(
     r"""
 flip(input, dims) -> Tensor
 
-Reverse the order of a n-D tensor along given axis in dims.
+Reverse the order of an n-D tensor along given axis in dims.
 
 .. note::
     `torch.flip` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.flip`,
@@ -11312,7 +11312,7 @@ add_docstr(
     r"""
 rot90(input, k=1, dims=[0,1]) -> Tensor
 
-Rotate a n-D tensor by 90 degrees in the plane specified by dims axis.
+Rotate an n-D tensor by 90 degrees in the plane specified by dims axis.
 Rotation direction is from the first towards the second axis if k > 0, and from the second towards the first for k < 0.
 
 Args:
@@ -12397,7 +12397,7 @@ Alias for :func:`torch.linalg.det`
 add_docstr(
     torch.where,
     r"""
-where(condition, x, y) -> Tensor
+where(condition, x, y, *, out=None) -> Tensor
 
 Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
 
@@ -12408,7 +12408,8 @@ The operation is defined as:
         \text{x}_i & \text{if } \text{condition}_i \\
         \text{y}_i & \text{otherwise} \\
     \end{cases}
-
+"""
+    + r"""
 .. note::
     The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
@@ -12418,6 +12419,9 @@ Arguments:
                           where :attr:`condition` is ``True``
     y (Tensor or Scalar): value (if :attr:`y` is a scalar) or values selected at indices
                           where :attr:`condition` is ``False``
+
+Keyword args:
+    {out}
 
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
@@ -12450,7 +12454,9 @@ Example::
 
 .. note::
     See also :func:`torch.nonzero`.
-""",
+""".format(
+        **common_args
+    ),
 )
 
 add_docstr(
@@ -13113,7 +13119,7 @@ Args:
 
 Keyword args:
     output_size (int, optional): Total output size for the given axis
-        ( e.g. sum of repeats). If given, it will avoid stream syncronization
+        ( e.g. sum of repeats). If given, it will avoid stream synchronization
         needed to calculate output shape of the tensor.
 
 Returns:
@@ -13349,7 +13355,7 @@ Arguments:
     input (Tensor): quantized tensor
     kernel_size (list of int): the size of the sliding window
     stride (``list of int``, optional): the stride of the sliding window
-    padding (``list of int``, opttional): padding to be added on both sides, must be >= 0 and <= kernel_size / 2
+    padding (``list of int``, optional): padding to be added on both sides, must be >= 0 and <= kernel_size / 2
     dilation (``list of int``, optional): The stride between elements within a sliding window, must be > 0. Default 1
     ceil_mode (bool, optional):  If True, will use ceil instead of floor to compute the output shape.
         Defaults to False.
