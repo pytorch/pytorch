@@ -325,10 +325,10 @@
   - torch/csrc/lazy/**
   - test/cpp/lazy/**
   - test/lazy/**
-  - codegen/api/lazy.py
-  - codegen/dest/lazy_ir.py
-  - codegen/dest/lazy_ts_lowering.py
-  - codegen/gen_lazy_tensor.py
+  - torchgen/api/lazy.py
+  - torchgen/dest/lazy_ir.py
+  - torchgen/dest/lazy_ts_lowering.py
+  - torchgen/gen_lazy_tensor.py
   - aten/src/ATen/native/ts_native_functions.yaml
   approved_by:
   - alanwaketan
