@@ -33,4 +33,5 @@ Pod::Spec.new do |s|
         'VALID_ARCHS' => 'x86_64 arm64'
     }
     s.library = ['c++', 'stdc++']
+    s.frameworks = 'Accelerate'
 end
