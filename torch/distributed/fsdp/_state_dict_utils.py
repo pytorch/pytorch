@@ -241,9 +241,9 @@ def _common_summon_post_state_dict_hook(
     hook.
     """
     _replace_by_prefix(state_dict, prefix + f"{FSDP_PREFIX}", prefix)
-    assert module.training_state == TrainingState.SUMMON_FULL_PARAMS, (
-        "Inside the post_state_dict_hook but the state is not SUMMON_FULL_PARAMS."
-    )
+    assert (
+        module.training_state == TrainingState.SUMMON_FULL_PARAMS
+    ), "Inside the post_state_dict_hook but the state is not SUMMON_FULL_PARAMS."
     # Return early for trivial cases
     if not state_dict or not module._has_params:
         _exit_full_param_ctx(module)
