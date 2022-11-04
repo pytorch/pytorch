@@ -358,8 +358,11 @@ class Tensor(torch._C._TensorBase):
                 self.stride(),
                 self.requires_grad,
                 backward_hooks,
-                torch._utils.get_math_bits(self),
             )  # previously was self._backward_hooks
+
+            math_bits = torch._utils.get_tensor_mathbits(self)
+            if math_bits:
+                args = args + (math_bits,)  # type: ignore[assignment]
             return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):

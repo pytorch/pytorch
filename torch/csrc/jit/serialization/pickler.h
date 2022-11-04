@@ -296,28 +296,43 @@ uint64_t getStorageKey(const at::Tensor& tensor);
 // otherwise return false
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 
-enum MathBits : int8_t { kCONJ = 1, kNEG };
+// Return a map of Tensor Mathbits for serialization.
+// For now, it only takes care of `conj` and `neg` bit.
+inline std::unordered_map<std::string, bool> getTensorMathBits(
+    const at::Tensor& t) {
+  std::unordered_map<std::string, bool> math_bits{};
 
-// return a map of MathBits on Tensor
-inline std::unordered_map<int8_t, bool> getTensorMathBits(const at::Tensor& t) {
-  return {{MathBits::kCONJ, t.is_conj()}, {MathBits::kNEG, t.is_neg()}};
+  // Only add meta-data if the value is not default.
+  if (t.is_conj()) {
+    math_bits["conj"] = true;
+  }
+  if (t.is_neg()) {
+    math_bits["neg"] = true;
+  }
+  return math_bits;
 }
 
-// set MathBits on Tensor from map
+// set Tensor mathbits based on the map.
+// Refer: getTensorMathbits
 inline void setTensorMathBits(
     const at::Tensor& t,
-    std::unordered_map<int8_t, bool> math_bits) {
-  t._set_conj(math_bits[MathBits::kCONJ]);
-  t._set_neg(math_bits[MathBits::kNEG]);
+    std::unordered_map<std::string, bool> math_bits) {
+  for (auto& key_value_pair : math_bits) {
+    if (key_value_pair.first == "conj") {
+      t._set_conj(true);
+    } else if (key_value_pair.first == "neg") {
+      t._set_neg(true);
+    }
+  }
 }
 
-// set MathBits on Tensor from map
+// set Tensor metadata based on the map.
 inline void setTensorMathBits(
     const at::Tensor& t,
     c10::Dict<c10::IValue, c10::IValue> math_bits_idict) {
-  std::unordered_map<int8_t, bool> math_bits;
+  std::unordered_map<std::string, bool> math_bits;
   for (auto& pair : math_bits_idict) {
-    MathBits key = static_cast<MathBits>(pair.key().toInt());
+    auto key = *pair.key().toString();
     math_bits[key] = pair.value().toBool();
   }
   setTensorMathBits(t, math_bits);

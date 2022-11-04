@@ -481,15 +481,17 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::REDUCE);
 
   if (!quantized) {
-    // Only push it for regular tensor.
+    // Only push it for regular tensor if the dictionary is not empty.
     auto math_bits = torch::jit::getTensorMathBits(tensor);
-    // c10::Dict support only `int64_t` keys.
-    c10::Dict<int64_t, bool> math_bits_dict;
-    for (auto& pair : math_bits) {
-      math_bits_dict.insert_or_assign(
-          static_cast<int64_t>(pair.first), pair.second);
+    if (!math_bits.empty()) {
+      // IValues based on std::unordered_map<K, V> are slow and deprecated.
+      // Thus, pass a c10::Dict to pushDict.
+      c10::Dict<std::string, bool> math_bits_;
+      for (const auto& pair : math_bits) {
+        math_bits_.insert(pair.first, pair.second);
+      }
+      pushDict(math_bits_);
     }
-    pushDict(math_bits_dict);
   }
 
   push<PickleOpCode>(PickleOpCode::TUPLE);
