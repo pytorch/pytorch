@@ -312,7 +312,10 @@ def _flatten_optim_state_dict(
                 shard_state,
             )
             key = _OptimStateKey(tuple(unflat_param_names), True)
-            flat_osd_state[key] = flat_state
+            if flat_state:
+                # Only include non-empty states since as expected by
+                # `torch.optim.Optimizer` s
+                flat_osd_state[key] = flat_state
         else:  # do not flatten non-FSDP parameters' states
             assert len(unflat_param_names) == 1
             unflat_param_name = unflat_param_names[0]
