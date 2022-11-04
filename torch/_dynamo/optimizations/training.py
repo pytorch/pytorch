@@ -304,16 +304,7 @@ def nvprims_fw_bw_partition_fn(joint_module, joint_inputs):
         getattr(torch.ops.nvprims, prim)
         for prim in dir(torch.ops.nvprims)
         if isinstance(getattr(torch.ops.nvprims, prim), torch._ops.OpOverloadPacket)
-    } - {
-        # Remove random ops from recomputable ops
-        torch.ops.nvprims.rand_like,
-        # Remove reduction/normalization ops from recomputable ops
-        torch.ops.nvprims.sum,
-        torch.ops.nvprims.var,
-        torch.ops.nvprims.var_mean,
-        torch.ops.nvprims.native_batch_norm,
-        torch.ops.nvprims.amax,
-        torch.ops.nvprims.amin,
+        and getattr(torch.ops.nvprims, prim).is_recomputable
     }
 
     fw_gm, bw_gm = min_cut_rematerialization_partition(
