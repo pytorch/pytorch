@@ -51,7 +51,7 @@ class TestNvFuserDynamo(TestCase):
         @torchdynamo.optimize("nvprims_nvfuser")
         def func(a):
             tmp = a + 1.0
-            return self.where(tmp > 0, tmp, 0.0)
+            return torch.where(tmp > 0, tmp, 0.0)
 
         # No warnings and no errors
         with warnings.catch_warnings(record=True) as w:
