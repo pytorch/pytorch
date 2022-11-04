@@ -244,7 +244,7 @@ def augment_exc_message(exc, msg="\n"):
         exc.inner_exception, "minifier_path"
     ):
         msg += (
-            f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run"
+            f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
             "this script to find the smallest traced graph which reproduces this error.\n"
         )
 
