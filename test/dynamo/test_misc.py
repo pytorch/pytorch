@@ -1388,7 +1388,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_autograd_profiler_enabled(self):
         def fn(x):
             if torch.autograd._profiler_enabled():
-                    return x + 1
+                return x + 1
             else:
                 return x - 1
 
@@ -1399,13 +1399,15 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         if torch.autograd._profiler_enabled():
             torch.autograd._disable_profiler()
         assert not torch.autograd._profiler_enabled()
+        ref = fn(x)
         res = opt_fn(x)
-        self.assertTrue(same(res, x - 1))
+        self.assertTrue(same(ref, res))
 
         with torch.autograd.profiler.profile():
             assert torch.autograd._profiler_enabled()
+            ref = fn(x)
             res = opt_fn(x)
-            self.assertTrue(same(res, x + 1))
+            self.assertTrue(same(ref, res))
 
     def test_python_slice(self):
         def f1(input):
