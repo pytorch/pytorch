@@ -614,7 +614,7 @@ class CppKernel(Kernel):
         )
         reductions.mark_reduction(self.reduction_vars)
 
-        if config.cpp.simdlen:
+        if codecache.supported_vector_isa():
             # TODO(jansel): detect stride-1 dimension and vectorize that
             if reductions:
                 reductions.loops[-1].simd = True
@@ -705,7 +705,7 @@ class CppVecKernel(CppKernel):
 
     def __init__(self, args, num_threads):
         super(CppVecKernel, self).__init__(args, num_threads)
-        self.simd_len = config.cpp.simdlen
+        self.simd_len = codecache.SupportedVecIsa.vec_size()
         self.reduction_omp_dec: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
@@ -946,20 +946,21 @@ class CppKernelProxy(CppKernel):
         self.simd_vec_kernel: CppVecKernel = None
         self.simd_omp_kernel: CppKernel = None
 
-    def vectorize_most_inner_loop(self, loop_nest):
-        loop_nest.split_most_inner_loop(config.cpp.simdlen)
+    def vectorize_most_inner_loop(self, loop_nest, dtype=torch.float):
+        nelements = codecache.SupportedVecIsa.vec_size(dtype)
+        loop_nest.split_most_inner_loop(nelements)
         loop_with_tail = loop_nest.loops[-1]
         assert isinstance(loop_with_tail, LoopLevelWithTail)
 
         loop_with_tail.main_loop.simd_vec = True
 
         loop_with_tail.tail_loop.simd_omp = True
-        # We chope the loop into two cubes by the config.cpp.simdlen - main loop and tail loop.
+        # We chope the loop into two cubes by the nelements - main loop and tail loop.
         # Regarding the main loop, it is straightforward that it could be vectorized with
-        # config.cpp.simdlen. But for the tail loop, it still could be vectorized. For example,
-        # if the config.cpp.simdlen is 8(256bits), then the tail loop still could be vectorized
+        # nelements. But for the tail loop, it still could be vectorized. For example,
+        # if the nelements is 8(256bits), then the tail loop still could be vectorized
         # as 4(128bits).
-        loop_with_tail.tail_loop.simd_len = int(config.cpp.simdlen / 2)
+        loop_with_tail.tail_loop.simd_len = int(nelements / 2)
         loop_with_tail.tail_loop.simd_vec = False
 
         loop_with_tail.main_loop_body = self.simd_vec_kernel
@@ -991,7 +992,7 @@ class CppKernelProxy(CppKernel):
         ), LoopNest(loops[reduction_depth:])
         loops_nest_reduce.mark_reduction(self.simd_vec_kernel.reduction_vars)
 
-        if config.cpp.simdlen:
+        if codecache.supported_vector_isa():
             # TODO(jansel): detect stride-1 dimension and vectorize that
             if loops_nest_reduce:
                 loops_nest_reduce.loops[-1].simd = True
@@ -1347,7 +1348,7 @@ class LoopLevel:
     steps: sympy.Expr = sympy.Integer(1)
     parallel: int = 0
     simd_omp: bool = False
-    simd_len: int = config.cpp.simdlen
+    simd_len: int = codecache.SupportedVecIsa.vec_size()
     simd_vec: bool = False
     collapsed: bool = False
     reduction_vars: Dict[str, str] = None

@@ -147,28 +147,60 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
-class _SupportedVecIsa(enum.Enum):
+class SupportedVecIsa(enum.Enum):
     AVX512 = 1
     AVX2 = 2
     INVALID = -1
 
     def __bool__(self):
-        return self != _SupportedVecIsa.INVALID
+        return self != SupportedVecIsa.INVALID
+
+    @staticmethod
+    def isa_vec_bit_size(supported_isa: enum.Enum):
+        if supported_isa == SupportedVecIsa.AVX512:
+            return 512
+        elif supported_isa == SupportedVecIsa.AVX2:
+            return 256
+        else:
+            return 0
+
+    @staticmethod
+    def isa_vec_size(supported_isa: enum.Enum, dtype: torch.dtype = torch.float):
+        if supported_isa == SupportedVecIsa.AVX512:
+            if dtype == torch.float:
+                return 16
+            elif dtype == torch.bfloat16:
+                return 32
+            else:
+                raise NotImplementedError(f"Vectorization has not supported {dtype} yet")
+        elif supported_isa == SupportedVecIsa.AVX2:
+            if dtype == torch.float:
+                return 8
+            elif dtype == torch.bfloat16:
+                return 16
+            else:
+                raise NotImplementedError(f"Vectorization has not supported {dtype} yet")
+        else:
+            raise NotImplementedError(f"Vectorization has not supported {supported_isa} yet")
+
+    @staticmethod
+    def vec_size(dtype: torch.dtype = torch.float):
+        return SupportedVecIsa.isa_vec_size(supported_vector_isa(), dtype)
 
     @staticmethod
     def isa_str(supported_isa: enum.Enum):
-        if supported_isa == _SupportedVecIsa.AVX512:
+        if supported_isa == SupportedVecIsa.AVX512:
             return "avx512"
-        elif supported_isa == _SupportedVecIsa.AVX2:
+        elif supported_isa == SupportedVecIsa.AVX2:
             return "avx2"
         else:
             return ""
 
     @staticmethod
     def vec_macro(supported_isa: enum.Enum):
-        if supported_isa == _SupportedVecIsa.AVX512:
+        if supported_isa == SupportedVecIsa.AVX512:
             return "CPU_CAPABILITY_AVX512"
-        elif supported_isa == _SupportedVecIsa.AVX2:
+        elif supported_isa == SupportedVecIsa.AVX2:
             return "CPU_CAPABILITY_AVX2"
         else:
             return ""
@@ -185,11 +217,11 @@ def get_cpu_proc_info():
     isa_info = []
     with open("/proc/cpuinfo") as _cpu_info:
         _cpu_info_content = _cpu_info.read()
-        if _SupportedVecIsa.isa_str(_SupportedVecIsa.AVX512) in _cpu_info_content:
-            isa_info.append(_SupportedVecIsa.AVX512)
+        if SupportedVecIsa.isa_str(SupportedVecIsa.AVX512) in _cpu_info_content:
+            isa_info.append(SupportedVecIsa.AVX512)
 
-        if _SupportedVecIsa.isa_str(_SupportedVecIsa.AVX2) in _cpu_info_content:
-            isa_info.append(_SupportedVecIsa.AVX2)
+        if SupportedVecIsa.isa_str(SupportedVecIsa.AVX2) in _cpu_info_content:
+            isa_info.append(SupportedVecIsa.AVX2)
 
         return isa_info
 
@@ -197,20 +229,29 @@ def get_cpu_proc_info():
 def supported_vector_isa():
     # TODO: Add ARM Vec here.
     # Dict(k: isa, v: number of float element)
-    vec_isa_info = {
-        _SupportedVecIsa.AVX512: 16,
-        _SupportedVecIsa.AVX2: 8,
-    }
-
-    if config.cpp.simdlen is None or config.cpp.simdlen <= 1:
-        return _SupportedVecIsa.INVALID
+    vec_isa_info = [
+        SupportedVecIsa.AVX512,
+        SupportedVecIsa.AVX2
+    ]
 
     cpu_info_content = get_cpu_proc_info()
-    for isa in vec_isa_info.keys():
-        if isa in cpu_info_content and config.cpp.simdlen == vec_isa_info[isa]:
+
+    # If the simdlen is None, it indicates determin the vectroization length automatically
+    if config.cpp.simdlen is None:
+        for isa in vec_isa_info:
+            if isa in cpu_info_content:
+                return isa
+        return SupportedVecIsa.INVALID
+
+    # If the simdlen is less that, it indicates to disable the vectorization.
+    if config.cpp.simdlen <= 1:
+        return SupportedVecIsa.INVALID
+
+    for isa in vec_isa_info:
+        if isa in cpu_info_content and config.cpp.simdlen == SupportedVecIsa.isa_vec_bit_size(isa):
             return isa
 
-    return _SupportedVecIsa.INVALID
+    return SupportedVecIsa.INVALID
 
 
 def cpp_compile_command(input, output, include_pytorch=False):
@@ -219,7 +260,7 @@ def cpp_compile_command(input, output, include_pytorch=False):
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
-        macros = _SupportedVecIsa.vec_macro(valid_isa)
+        macros = SupportedVecIsa.vec_macro(valid_isa)
         if macros:
             macros = f"-D{macros}"
     else:

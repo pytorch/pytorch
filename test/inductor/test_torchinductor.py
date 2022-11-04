@@ -4393,6 +4393,60 @@ if HAS_CPU:
             not codecache.get_cpu_proc_info(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
+        def test_auto_simd(self):
+            self.assertTrue(codecache.SupportedVecIsa.isa_vec_size(codecache.SupportedVecIsa.AVX512, torch.float) == 16)
+            self.assertTrue(codecache.SupportedVecIsa.isa_vec_size(codecache.SupportedVecIsa.AVX512, torch.bfloat16) == 32)
+            self.assertTrue(codecache.SupportedVecIsa.isa_vec_size(codecache.SupportedVecIsa.AVX2, torch.float) == 8)
+            self.assertTrue(codecache.SupportedVecIsa.isa_vec_size(codecache.SupportedVecIsa.AVX2, torch.bfloat16) == 16)
+            self.assertTrue(codecache.SupportedVecIsa.isa_vec_bit_size(codecache.SupportedVecIsa.AVX512) == 512)
+            self.assertTrue(codecache.SupportedVecIsa.isa_vec_bit_size(codecache.SupportedVecIsa.AVX2) == 256)
+
+            with patch.object(config.cpp, "simdlen", None):
+                isa = codecache.supported_vector_isa()
+                self.assertTrue(isa)
+
+                if isa == codecache.SupportedVecIsa.AVX512:
+                    self.assertTrue(codecache.SupportedVecIsa.vec_size() == 16)
+                    self.assertTrue(codecache.SupportedVecIsa.vec_size(torch.bfloat16) == 32)
+                else:
+                    self.assertTrue(isa == codecache.SupportedVecIsa.AVX2)
+                    self.assertTrue(codecache.SupportedVecIsa.vec_size() == 8)
+                    self.assertTrue(codecache.SupportedVecIsa.vec_size(torch.bfloat16) == 16)
+
+            with patch.object(config.cpp, "simdlen", 0):
+                isa = codecache.supported_vector_isa()
+                self.assertFalse(isa)
+
+            with patch.object(config.cpp, "simdlen", 1):
+                isa = codecache.supported_vector_isa()
+                self.assertFalse(isa)
+
+            with patch.object(config.cpp, "simdlen", 257):
+                isa_matrix = codecache.supported_vector_isa()
+                self.assertFalse(isa)
+
+            with patch.object(config.cpp, "simdlen", 256):
+                isa_matrix = codecache.get_cpu_proc_info()
+                if codecache.SupportedVecIsa.AVX2 in isa_matrix:
+                    self.assertFalse(isa == codecache.SupportedVecIsa.AVX2)
+
+            with patch.object(config.cpp, "simdlen", 512):
+                isa_matrix = codecache.get_cpu_proc_info()
+                if codecache.SupportedVecIsa.AVX512 in isa_matrix:
+                    isa= codecache.supported_vector_isa()
+                    self.assertTrue(isa == codecache.SupportedVecIsa.AVX512)
+
+            with patch.object(config.cpp, "simdlen", 256):
+                isa_matrix = codecache.get_cpu_proc_info()
+                if codecache.SupportedVecIsa.AVX2 in isa_matrix:
+                    isa= codecache.supported_vector_isa()
+                    self.assertTrue(isa == codecache.SupportedVecIsa.AVX2)
+
+
+        @unittest.skipIf(
+            not codecache.get_cpu_proc_info(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
         def test_sign_cpu_only(self):
             def fn(x):
                 return (torch.sign(x),)
@@ -4453,7 +4507,7 @@ if HAS_CPU:
             x1 = torch.randn((10, 20))
             x2 = torch.randn((10, 20))
 
-            with patch.object(config.cpp, "simdlen", 8):
+            with patch.object(config.cpp, "simdlen", None):
                 torch._dynamo.reset()
                 metrics.reset()
                 traced = make_fx(fn)(x1, x2)
