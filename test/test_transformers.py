@@ -20,21 +20,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     IS_WINDOWS,
-    slowTest
+    slowTest,
+    set_default_dtype
 )
 from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater
 
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
-
-@contextlib.contextmanager
-def set_default_dtype(dtype):
-    saved_dtype = torch.get_default_dtype()
-    torch.set_default_dtype(dtype)
-    try:
-        yield
-    finally:
-        torch.set_default_dtype(saved_dtype)
 
 class TestTransformers(NNTestCase):
     _do_cuda_memory_leak_check = True
