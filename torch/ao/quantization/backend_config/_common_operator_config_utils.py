@@ -25,7 +25,7 @@ from ..fuser_method_mappings import (
 )
 from ..qconfig_mapping import _FIXED_QPARAMS_OP_TO_OBSERVER
 
-__all__ = []
+__all__: List[str] = []
 
 # TODO: rename to be more explict, e.g. qat_conv_relu
 _ConvMetadata = namedtuple(
