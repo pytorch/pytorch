@@ -12400,6 +12400,11 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/84577
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # Lazy tensor failures: mutating and aliasing ops should all have codegen'd kernels
+               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
+               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
+               # TypeError: must be real number, not SymFloat
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
            )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
