@@ -1,11 +1,20 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/Utils.h>
-#include <ATen/div_rtn.h>
 
 #include <ATen/native/im2col.h>
 #include <ATen/native/im2col_shape_check.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/col2im_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/im2col_native.h>
+#endif
 
 namespace at {
 namespace native {

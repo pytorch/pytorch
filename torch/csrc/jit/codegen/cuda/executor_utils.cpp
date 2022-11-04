@@ -845,11 +845,6 @@ void bindInputForExprEvaluation(
 
         const auto value =
             root_domain[dim]->hasExpandedExtent() ? 1 : tensor_arg_size;
-        if (value == 0 && cg_tensor->uses().empty()) {
-          // If there's no uses, ignore there's a size-0 dimension.
-          continue;
-        }
-        TORCH_INTERNAL_ASSERT(value != 0, "Cannot handle size-0 dimensions");
         bool should_bind = true;
         if (check_consistency) {
           const auto prev_value = expr_eval.evaluate(extent);
@@ -941,7 +936,7 @@ void initializeCudaContext() {
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
         *(c10::cuda::getFreeMutex()));
-    cudaFree(nullptr);
+    C10_CUDA_CHECK(cudaFree(nullptr));
   }
 }
 
@@ -1023,6 +1018,12 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   // compile to sass is not allowed prior to CUDA 11.1
   compile_to_sass = false;
 #endif
+
+  if (isOptionDisabled(DisableOption::CompileToSass)) {
+    // Allows manually disabling compilation to sass
+    //  so the intermediate ptx could be checked.
+    compile_to_sass = false;
+  }
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
   // which gives better backwards compatibility to work on older driver,
   // (since older driver doesn't necessrily recognize PTX emitted by new
