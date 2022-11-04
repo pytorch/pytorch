@@ -180,30 +180,6 @@ def meta_linalg_eigh(self, uplo="L"):
     return (values, vectors)
 
 
-@register_meta(torch.ops.aten.clone)
-def clone_meta(input, memory_format: torch.memory_format = torch.preserve_format):
-    if memory_format != torch.preserve_format:
-        return torch.empty(
-            input.shape,
-            dtype=input.dtype,
-            layout=input.layout,
-            device=input.device,
-            requires_grad=input.requires_grad,
-            memory_format=memory_format,
-        )
-
-    # memory_format == torch.preserve_format
-    strides = utils.compute_elementwise_output_strides(input)
-    return torch.empty_strided(
-        input.shape,
-        strides,
-        dtype=input.dtype,
-        layout=input.layout,
-        device=input.device,
-        requires_grad=input.requires_grad,
-    )
-
-
 # From aten/src/ATen/native/ReflectionPad.cpp
 @register_meta(
     [aten.reflection_pad2d_backward.default, aten.replication_pad2d_backward.default]
