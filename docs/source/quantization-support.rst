@@ -45,11 +45,9 @@ Utility functions
     :nosignatures:
     :template: classtemplate.rst
 
-    add_observer_
     swap_module
     propagate_qconfig_
     default_eval_fn
-    _get_observer_dict
 
 torch.quantization.quantize_fx
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
