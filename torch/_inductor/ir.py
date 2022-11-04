@@ -1327,6 +1327,15 @@ class View(BaseView):
         """
         Perform a reshape entirely by modifying indexing math
         """
+
+        old_numel = sympy_product(old_size)
+        if V.graph.sizevars.maybe_guard_equals(old_numel, 0):
+            new_numel = sympy_product(new_size)
+            V.graph.sizevars.guard_equals(new_numel, 0)
+            def reindex(index):
+                return [0]*len(old_size)
+            return reindex
+
         size_hint = V.graph.sizevars.size_hint
         vars = [sympy_symbol(f"view{i}") for i in range(len(new_size))]
 
