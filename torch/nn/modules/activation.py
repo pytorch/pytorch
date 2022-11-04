@@ -1188,9 +1188,12 @@ class MultiheadAttention(Module):
             attn_mask: attention mask of shape ``(seq_len, seq_len)``, mask type 0
             key_padding_mask: padding mask of shape ``(batch_size, seq_len)``, mask type 1
             query: query embeddings of shape ``(batch_size, seq_len, embed_dim)``
+        Returns:
+            merged_mask: merged mask
+            mask_type: merged mask type (0, 1, or 2)
         """
-        mask_type = None
-        merged_mask = None
+        mask_type: Optional[int] = None
+        merged_mask: Optional[Tensor] = None
         if attn_mask is not None:
             mask_type = 0
             merged_mask = attn_mask
