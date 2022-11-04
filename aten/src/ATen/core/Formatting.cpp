@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <tuple>
+#include <utility>
 
 namespace c10 {
 std::ostream& operator<<(std::ostream & out, Backend b) {
@@ -37,7 +38,7 @@ std::ostream& operator<<(std::ostream & out, Scalar s) {
 
 std::string toString(Scalar s) {
   std::stringstream out;
-  out << s;
+  out << std::move(s);
   return out.str();
 }
 }

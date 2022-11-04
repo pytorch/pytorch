@@ -47,8 +47,9 @@
 #include <ATen/ops/sqrt.h>
 #endif
 
-#include <vector>
 #include <c10/core/SymIntArrayRef.h>
+#include <utility>
+#include <vector>
 
 static const int MIOPEN_DIM_MAX = 5;
 
@@ -649,7 +650,7 @@ Tensor instance_norm(
   std::vector<SymInt> shape = input.sym_sizes().vec();
   SymInt b = input.sym_size(0);
   SymInt c = input.sym_size(1);
-  shape[1] = b * c;
+  shape[1] = b * std::move(c);
   shape[0] = SymInt(1);
 
   Tensor weight_ = repeat_if_defined(weight, b);
