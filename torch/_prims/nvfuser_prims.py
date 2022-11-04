@@ -393,9 +393,12 @@ def register_native_batch_norm():
         if torch._prims_common.is_complex_dtype(input.dtype):
             raise NotImplementedError("Complex tensors are not supported")
 
-        computation_dtype, result_dtype = reduction_dtypes(
-            input, REDUCTION_OUTPUT_TYPE_KIND.SAME
+        # note: BN only promotes input to dtype of weight/bias, but keeps the same output dtype
+        result_dtype = input.dtype
+        computation_dtype, _ = elementwise_dtypes(
+            [input, weight, bias], ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
         )
+
         input_ = _maybe_convert_to_dtype(input, computation_dtype)
         output, mean, rstd = prim(
             input_, weight, bias, running_mean, running_var, training, momentum, eps
