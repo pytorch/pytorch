@@ -33,6 +33,7 @@ import io
 import itertools
 import logging
 import os
+import re
 import shutil
 import subprocess
 from collections import defaultdict
@@ -224,6 +225,11 @@ def parse_args():
         help="Archived directory path",
     )
     parser.add_argument(
+        "--archive-name",
+        help="Directory name under dashboard-archive-path to copy output-dir to. "
+             "If not provided, a generated name is used."
+    )
+    parser.add_argument(
         "--dashboard-gh-cli-path",
         default=DASHBOARD_DEFAULTS["dashboard_gh_cli_path"],
         help="Github CLI path",
@@ -371,22 +377,37 @@ def build_summary():
 
 
 @functools.lru_cache(None)
-def archive_data():
-    day = datetime.today().strftime("%j")
-    prefix = datetime.today().strftime(f"day_{day}_%d_%m_%y")
+def archive_data(archive_name):
+    if archive_name is not None:
+        prefix_match = re.search(r"\w+(?=_performance)", archive_name)
+        if prefix_match is not None:
+            prefix = prefix_match.group(0)
+        else:
+            prefix = ""
+        day_match = re.search(r"day_(\d+)_", archive_name)
+        if day_match is not None:
+            day = day_match.group(1)
+        else:
+            day = "000"
+    else:
+        day = datetime.today().strftime("%j")
+        prefix = datetime.today().strftime(f"day_{day}_%d_%m_%y")
     return day, prefix
 
 
 @functools.lru_cache(None)
-def archive_name(dtype):
-    _, prefix = archive_data()
+def default_archive_name(dtype):
+    _, prefix = archive_data(None)
     return f"{prefix}_performance_{dtype}_{randint(100, 999)}"
 
 
-def archive(src_dir, dest_dir_prefix, dtype):
+def archive(src_dir, dest_dir_prefix, archive_name, dtype):
+    if archive_name is None:
+        archive_name = default_archive_name(dtype)
     # Copy the folder to archived location
-    dest = os.path.join(dest_dir_prefix, archive_name(dtype))
+    dest = os.path.join(dest_dir_prefix, archive_name)
     shutil.copytree(src_dir, dest, dirs_exist_ok=True)
+    print(f"copied contents of {src_dir} to {dest}")
 
 
 class Parser:
@@ -987,9 +1008,9 @@ class DashboardUpdater:
     def archive(self):
         dtype = self.args.dtypes[0]
         # Copy the folder to archived location
-        archive(self.output_dir, self.args.dashboard_archive_path, dtype)
-        day, _ = archive_data()
-        target_dir = archive_name(dtype)
+        archive(self.output_dir, self.args.dashboard_archive_path, self.args.archive_name, dtype)
+        day, _ = archive_data(self.args.archive_name)
+        target_dir = default_archive_name(dtype) if self.args.archive_name is None else self.args.archive_name
 
         # Update lookup csv the folder to arhived logs
         subprocess.check_call(
@@ -1113,7 +1134,7 @@ if __name__ == "__main__":
             )
             raise e
         if not args.log_operator_inputs:
-            archive(output_dir, args.dashboard_archive_path, dtypes[0])
+            archive(output_dir, args.dashboard_archive_path, args.archive_name, dtypes[0])
             parse_logs(
                 args, dtypes, suites, devices, compilers, flag_compilers, output_dir
             )
