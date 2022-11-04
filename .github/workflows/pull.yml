@@ -75,7 +75,7 @@ jobs:
           { config: "default", shard: 1, num_shards: 5, runner: "linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 5, runner: "linux.2xlarge" },
           { config: "default", shard: 3, num_shards: 5, runner: "linux.2xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "linux.2xlarge" },
+          { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge" },
           { config: "default", shard: 5, num_shards: 5, runner: "linux.2xlarge" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}

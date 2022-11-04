@@ -69,6 +69,7 @@ install_ubuntu() {
     vim \
     jq \
     libtool \
+    vim \
     unzip \
     gdb
 
