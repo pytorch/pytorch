@@ -1405,7 +1405,7 @@ def parse_args():
     parser.add_argument(
         "--distributed-master-port",
         default="6789",
-        help="Port to bind for master process for torch.distributed.  Don't set unless you are seeing a conflict with another process using this port.",
+        help="Port to bind for for torch.distributed.  Use the default unless it's conflicting with another user",
     )
     parser.add_argument(
         "--dynamic-shapes",
