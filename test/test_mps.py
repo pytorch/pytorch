@@ -6592,8 +6592,7 @@ class TestAdvancedIndexing(TestCase):
             # lots of duplicates interleaved with each other
             delta = torch.empty(i, dtype=torch.float32, device=device).uniform_(-1, 1)
 
-            # cumsum not supported on 'mps', fallback on 'cpu'
-            indices = delta.cpu().cumsum(0).long().to("mps")
+            indices = delta.cumsum(0).long().to("mps")
 
             # abs for int64 is not supported on mps, fallback on 'cpu' to calculate it
             input = torch.randn(indices.cpu().abs().max().to("mps") + 1, device=device)
@@ -7220,6 +7219,7 @@ class TestConsistency(TestCase):
         'cos': ['f32', 'i16', 'i32', 'u8', 'i64'],
         'cosh': ['f32', 'i16', 'i32', 'u8', 'i64'],
         'cov': ['f32'],
+        'cumsum': ['f16', 'f32', 'int16', 'int32'],
         'deg2rad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'diag': ['f32', 'i32'],
         'diag_embed': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
@@ -7447,6 +7447,7 @@ class TestConsistency(TestCase):
         'corrcoef': ['f32'],
         'cos': ['f32'],
         'cosh': ['f32'],
+        'cumsum': ['f16', 'f32'],
         'deg2rad': ['f16', 'f32'],
         'diag': ['f32'],
         'diag_embed': ['f16', 'f32'],
