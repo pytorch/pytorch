@@ -6,7 +6,7 @@ from unittest.mock import patch
 import numpy as np
 import torch
 import torch._dynamo
-from torch._dynamo.optimizations.distributed import DDPOptimizer, fx_name
+from torch._dynamo.optimizations.distributed import DDPOptimizer
 import torch._dynamo.test_case
 import torch.distributed as dist
 from contextlib import contextmanager
@@ -36,11 +36,12 @@ def init_weights(m):
         m.bias.data.fill_(0.01)
 
 class ToyModel(nn.Module):
-    def __init__(self, in_feat=10, hidden_feat=5000, num_hidden=2, out_feat=5):
+    def __init__(self, in_feat=10, hidden_feat=5000, out_feat=5):
         super().__init__()
         self.net = nn.Sequential(
             *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
-            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()] * num_hidden
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()]
             + [nn.Linear(hidden_feat, out_feat), nn.ReLU()]
         )
 
@@ -53,6 +54,43 @@ def get_model(device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
     inputs = torch.rand(bsz, in_feat).to(device)
     outputs = m(inputs)
     return m, inputs, outputs
+
+def get_custom_model(device):
+    class MyCustomLinear(torch.nn.Module):
+        def __init__(self):
+            super(MyCustomLinear, self).__init__()
+            self.weight = nn.Parameter(torch.randn(512, 512))
+
+        def forward(self, x):
+            return torch.mm(x, self.weight.t())
+
+    class MyLinear(torch.nn.Module):
+        def __init__(self):
+            super(MyLinear, self).__init__()
+            self.linear = torch.nn.Linear(512, 512)
+
+        def forward(self, x):
+            return self.linear(x)
+
+    class MyModule(torch.nn.Module):
+        def __init__(self):
+            super(MyModule, self).__init__()
+            mods = [
+                (MyLinear(), torch.nn.ReLU()),
+                # sandwitch the custom in the middle so it comes before and after
+                (MyCustomLinear(), torch.nn.ReLU()),
+                (MyLinear(), torch.nn.ReLU()),
+            ]
+            self.seq = torch.nn.Sequential(*[x for items in mods for x in items])
+
+        def forward(self, x):
+            return self.seq(x)
+
+    m = MyModule().to(device)
+    m.apply(init_weights)
+    inputs = torch.rand((512, 512)).to(device)
+    correct_outputs = m(inputs)
+    return m, inputs, correct_outputs
 
 def get_hf_bert(rank):
     # Note: use @import_transformers_or_skip on your test case if you use this
@@ -326,41 +364,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         the user-provided compiler is called by the DDPOptimizer which is
         doing the graph splitting
         """
-
-        class MyCustomLinear(torch.nn.Module):
-            def __init__(self):
-                super(MyCustomLinear, self).__init__()
-                self.weight = nn.Parameter(torch.randn(512, 512))
-
-            def forward(self, x):
-                return torch.mm(x, self.weight.t())
-
-        class MyLinear(torch.nn.Module):
-            def __init__(self):
-                super(MyLinear, self).__init__()
-                self.linear = torch.nn.Linear(512, 512)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                mods = [
-                    (MyLinear(), torch.nn.ReLU()),
-                    # sandwitch the custom in the middle so it comes before and after
-                    (MyCustomLinear(), torch.nn.ReLU()),
-                    (MyLinear(), torch.nn.ReLU()),
-                ]
-                self.seq = torch.nn.Sequential(*[x for items in mods for x in items])
-
-            def forward(self, x):
-                return self.seq(x)
-
-        m = MyModule().to(self.device)
-        m.apply(init_weights)
-        inputs = torch.rand((512, 512)).to(self.device)
-        correct_outputs = m(inputs)
+        m, inputs, correct_outputs = get_custom_model(self.device)
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=1)
 
         check_splits_compiler = CheckSplitsCompiler()
@@ -388,21 +392,24 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, 1)
 
     @patch.object(config, "optimize_ddp", False)
-    def test_ignored_parameters_2(self):
+    def test_ignored_parameters(self):
         """
         Verifies ddp graph-split logic ignores parameters marked to ignore on DDP module.
         Hooks up graph-split optimizer manually so it can peek at internal state.
         """
-        m, inputs, correct_outputs = self.get_model()
-        parameters_to_ignore = ["net.2.weight", "net.2.bias"]
+        m, inputs, correct_outputs = get_custom_model(self.device)
+        parameters_to_ignore = ["seq.2.weight", "seq.4.linear.bias"]
         DDP._set_params_and_buffers_to_ignore_for_model(m, parameters_to_ignore)
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
+        parameter_ids_to_ignore = [
+            id(ddp_m.module.get_parameter(p))
+            for p in ddp_m.parameters_to_ignore
+        ]
 
         check_splits_compiler = CheckSplitsCompiler()
-
         ddp_optimizer = DDPOptimizer(
             bucket_bytes_cap=ddp_m.bucket_bytes_cap,
-            parameters_to_ignore=ddp_m.parameters_to_ignore,
+            parameter_ids_to_ignore=parameter_ids_to_ignore,
             backend_compile_fn=check_splits_compiler.compile_fn
         )
 
@@ -413,10 +420,9 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 2)
-        fx_parameters_to_ignore = [fx_name(p) for p in parameters_to_ignore]
         for b in ddp_optimizer.buckets:
-            for p in b.params:
-                self.assertFalse(p in fx_parameters_to_ignore)
+            for p_id in b.param_ids:
+                self.assertFalse(p_id in parameter_ids_to_ignore)
 
 
 if __name__ == "__main__":

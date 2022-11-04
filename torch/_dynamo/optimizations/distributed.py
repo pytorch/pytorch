@@ -23,6 +23,7 @@ def args_str(args):
 class Bucket:
     size: int = 0
     params: List[str] = field(default_factory=list)
+    param_ids: List = field(default_factory=list)
     nodes: List[fx.Node] = field(default_factory=list)
 
 
@@ -42,20 +43,13 @@ def pretty_print_buckets(buckets: List[Bucket]):
         print("Please `pip install tabulate` in order to pretty-print ddp bucket sizes")
 
 
-def fx_name(fqn):
-    parts = fqn.split(".")
-    module = "self_" + "_".join(parts[:-1])
-    attr = parts[-1]
-    return module, attr
-
-
 class DDPOptimizer:
     def __init__(
         self,
         bucket_bytes_cap: int,
-        parameters_to_ignore: List[str],
+        parameter_ids_to_ignore: List,
         backend_compile_fn,
-        debug=True,
+        debug=False,
         first_bucket_cap: Optional[int] = None,
     ):
         if first_bucket_cap is not None:
@@ -71,10 +65,12 @@ class DDPOptimizer:
             self.first_bucket_cap <= self.bucket_bytes_cap
         ), "First bucket should be smaller/equal to other buckets to get comms warmed up ASAP"
 
-        self.parameters_to_ignore = set([fx_name(fqn) for fqn in parameters_to_ignore])
-
+        self.parameter_ids_to_ignore = parameter_ids_to_ignore
         self.backend_compile_fn = backend_compile_fn
         self.debug = debug
+
+    def _ignore_parameter(self, parameter):
+        return id(parameter) in self.parameter_ids_to_ignore
 
     def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
         """
@@ -100,23 +96,22 @@ class DDPOptimizer:
             if node.op == "call_module":
                 target = gm.get_submodule(node.target)
                 for name, p in target.named_parameters():
-                    if (str(node), name) in self.parameters_to_ignore:
-                        if self.debug:
-                            print(f"DDPOptimizer ignoring {node}.{name}")
-                        continue
-                    if p.requires_grad:
+                    param = target.get_parameter(name)
+                    if p.requires_grad and not self._ignore_parameter(param):
                         buckets[0].size += p.storage().nbytes()
-                        # Note, we can't reconstruct real fqn's due to how they get flattened,
-                        # but this is at least user-recognizable
-                        # (e.g. original net.some_parameter becomes self_net_some_parameter)
-                        buckets[0].params.append((str(node), name))
+                        buckets[0].params.append(f"{node.target}_{name}")
+                        buckets[0].param_ids.append(id(param))
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
-                if maybe_param.requires_grad:
+                if maybe_param.requires_grad and not self._ignore_parameter(
+                    maybe_param
+                ):
                     buckets[0].size += maybe_param.storage().nbytes()
                     buckets[0].params.append(node.target)
+                    buckets[0].param_ids.append(id(maybe_param))
 
             # All nodes have to be mapped to a bucket, even if they don't have their own params
+            # Ignored params still end up in buckets, we just don't count them towards the capacity
             buckets[0].nodes.append(node)
 
         # stash buckets for testing/debugging purposes
