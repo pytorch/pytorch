@@ -252,8 +252,8 @@ class Tracer(TracerBase):
         self.root_module_name: str = ""
         # Maps the containing module's name to the operator name
         self.scope = Scope("", None)
-        self.scope_stack: List[Scope] = []
-
+        # Records the module call stack
+        self.module_stack = {}
         # Mapping of node name to module scope
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
@@ -437,12 +437,14 @@ class Tracer(TracerBase):
         """
         module_qualified_name = self.path_of_module(m)
         with ScopeContextManager(self.scope, m, module_qualified_name) as _scope:
-            self.scope_stack.append(copy.copy(_scope))
+            # module_stack is an ordered dict so writing then deleting the
+            # entry is equivalent to push/pop on a list
+            self.module_stack[_scope.module_path] = str(_scope.module_type)
             if not self.is_leaf_module(m, module_qualified_name):
                 ret_val = forward(*args, **kwargs)
             else:
                 ret_val = self.create_proxy("call_module", module_qualified_name, args, kwargs)
-            self.scope_stack.pop()
+            del self.module_stack[_scope.module_path]
 
         return ret_val
 
