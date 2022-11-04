@@ -176,6 +176,8 @@ class Backend(object):
 
     _plugins: Dict[str, _BackendPlugin] = {}
 
+    backend_list = [UNDEFINED, GLOO, NCCL, UCC, MPI, TCP]
+
     def __new__(cls, name: str):
         if not isinstance(name, string_classes):
             raise ValueError("Backend name must be a string, but got: {}".format(name))
@@ -224,7 +226,8 @@ class Backend(object):
             f"{name.upper()} c10d backend creator function already exist"
         )
 
-        setattr(Backend, name.upper(), name.upper())
+        setattr(Backend, name.upper(), name.lower())
+        Backend.backend_list.append(name.lower())
         Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
 
 class BackendConfig(object):
@@ -233,36 +236,28 @@ class BackendConfig(object):
         self.device_backend_map: Dict[torch.device, Backend] = {}
         # error check to make sure the config string is valid
 
-        # base cases for when backend is a single string (without device types)
-        # TODO clean this up
-        if backend == Backend.UNDEFINED:
+        # Cases for when backend is a single string (without device types)
+        if backend == Backend.UNDEFINED or backend == Backend.NCCL:
             # default config when backend is not specified
             self.device_backend_map = {
                 "cpu": Backend.GLOO,
                 "cuda": Backend.NCCL,
             }
-        elif backend == Backend.GLOO:
-            self.device_backend_map = {
-                "cpu": Backend.GLOO,
-                "cuda": Backend.GLOO,
-            }
-        elif backend == Backend.NCCL:
-            self.device_backend_map = {
-                "cpu": Backend.GLOO,
-                "cuda": Backend.NCCL,
-            }
-        elif backend == Backend.MPI:
-            self.device_backend_map = {
-                "cpu": Backend.MPI,
-                "cuda": Backend.MPI,
-            }
         elif backend == Backend.UCC:
             self.device_backend_map = {
                 "cpu": Backend.UCC,
-                "cuda": Backend.UCC,
+                "cuda": Backend.NCCL,
+            }
+        elif backend.lower() in Backend.backend_list:
+            # backend applies to all devices (e.g. "GLOO", "MPI", "custom_backend")
+            backend_val = Backend(backend)
+            self.device_backend_map = {
+                "cpu": backend_val,
+                "cuda": backend_val,
             }
         else:
-            # parse the config str
+            # custom backend string in format of "{device_type1}:{backend1},{device_type2}:{backend2}"
+            # TODO
             pass
 
         required_devices = ["cpu", "cuda"]
@@ -3422,6 +3417,7 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         group_rank = global_rank
 
     backend = Backend(backend)
+    backend_config = BackendConfig(backend)
 
     with record_function(f"## process_group:init with ranks: {ranks}"):
         pg = _new_process_group_helper(
@@ -3430,6 +3426,7 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
             ranks,
             backend,
             default_store,
+            backend_config=backend_config,
             pg_options=pg_options,
             timeout=timeout,
         )
@@ -3449,12 +3446,6 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         # Use store based barrier here since barrier() used a bunch of
         # default devices and messes up NCCL internal state.
         _store_based_barrier(global_rank, default_store, timeout)
-        # Set sequence numbers for gloo and nccl process groups.
-        if pg != GroupMember.NON_GROUP_MEMBER and get_backend(pg) in [
-            Backend.GLOO,
-            Backend.NCCL,
-        ]:
-            pg._set_sequence_number_for_group()
 
     return pg
 

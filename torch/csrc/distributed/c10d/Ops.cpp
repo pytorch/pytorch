@@ -165,7 +165,7 @@ TORCH_LIBRARY(c10d, m) {
   // The following ProcessGroup, Work, and ReduceOp definitions are more like
   // declarations. They don't expose the details of the two classes into
   // TorchScript.
-  m.class_<ProcessGroup>("ProcessGroup").def(torch::init<>());
+  m.class_<ProcessGroup>("ProcessGroup").def(torch::init<int64_t, int64_t>());
   m.class_<Work>("Work")
       .def(torch::init<>())
       .def("wait", [](const c10::intrusive_ptr<Work>& self) { self->wait(); });

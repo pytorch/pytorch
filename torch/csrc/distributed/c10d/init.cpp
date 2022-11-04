@@ -1064,6 +1064,7 @@ Arguments:
           ::c10d::ProcessGroup,
           c10::intrusive_ptr<::c10d::ProcessGroup>,
           ::c10d::PyProcessGroup>(module, "ProcessGroup")
+          .def(py::init<int, int>())
           .def(
               py::init<
                   const c10::intrusive_ptr<::c10d::Store>&,

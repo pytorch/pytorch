@@ -63,8 +63,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     const std::string backend;
   };
 
-  // Not used, only used for TypeDef in Ops.cpp
-  explicit ProcessGroup();
+  // Not used, set for backwards compatibility and only used for TypeDef in Ops.cpp
+  explicit ProcessGroup(int rank, int size);
 
   explicit ProcessGroup(const c10::intrusive_ptr<::c10d::Store>& store, int rank, int size, c10::intrusive_ptr<Options> options);
   virtual ~ProcessGroup();

@@ -69,7 +69,7 @@ ProcessGroup::ProcessGroup(
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 }
 
-ProcessGroup::ProcessGroup() : rank_(-1), size_(-1) {}
+ProcessGroup::ProcessGroup(int rank, int size) : rank_(rank), size_(size) {}
 
 ProcessGroup::~ProcessGroup() {}
 
