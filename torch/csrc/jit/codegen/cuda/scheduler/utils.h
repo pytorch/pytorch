@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/maxinfo_propagator.h>
@@ -114,16 +115,6 @@ TORCH_CUDA_CU_API inline void parallelizeAllLike(
       selected_parallel_types,
       propagate_padding);
 }
-
-TORCH_CUDA_CU_API void computeAtInputs(
-    TensorView* consumer,
-    int pos,
-    ComputeAtMode mode = ComputeAtMode::Standard);
-
-TORCH_CUDA_CU_API void computeWithOutputs(
-    TensorView* producer,
-    int pos,
-    ComputeAtMode mode = ComputeAtMode::Standard);
 
 struct PersistentBufferInfo {
   std::vector<TensorView*> persistent_buffers;
@@ -312,14 +303,26 @@ struct BroadcastMultiple {
   int64_t lhs_multiple = 0;
 };
 
-// Returns a vector of counts, size = reference_tv->getRootDomain().size(), each
-// entry [i] is the number of inputs/outputs that have a non-broadcast dimension
-// mapped to the corresponding dimension in reference_tv. Count includes
-// reference_tv if reference_tv is an input or output. Count is multiplied by
-// data type size.
-std::vector<BroadcastMultiple> getBroadcastMultiples(
-    TensorView* reference_tv,
-    DataType index_type);
+struct BroadcastMultipleInformation {
+  std::vector<int> view_disjoint_set_ids;
+  std::vector<BroadcastMultiple> broadcast_multiples;
+};
+
+// Returns a vector of size reference_tv->getMaybeRFactorDomain().size() which
+// is a view disjoint set id of each of those iter domains. If entries share the
+// same value, they undergo view transformations in the fusion together.
+// Broadcast multiples are also of size
+// reference_tv->getMaybeRFactorDomain().size(), each entry [i] is the number of
+// inputs/outputs that have a non-broadcast dimension mapped to the
+// corresponding dimension in reference_tv. Broadcast multiples includes
+// reference_tv if reference_tv is an input or output. Broadcast multiples is
+// multiplied by data type size. In the case of view operations the broadcast
+// multiple is the full multiple size if any domain in the group maps to a
+// non-broadcast dimension in the given input/output. Otherwise if all
+// dimensions are broadcast that input/output will not contribute to the
+// multiple.
+TORCH_CUDA_CU_API BroadcastMultipleInformation
+getBroadcastMultiples(TensorView* reference_tv, DataType index_type);
 
 //! Collect maximum vectorization word size of a tensor whose
 //! innermost domain is leaf_merged_domain. Contig merging is taken
@@ -491,6 +494,47 @@ struct TORCH_CUDA_CU_API BoundedDirectionalTransformPropagator {
       std::unordered_set<TensorView*> included_tvs,
       Options options);
 };
+
+// Schedulers typically start by merging some axes together then splitting,
+// and propagating those transformations through the dag. What we want to
+// understand is if these merges can be supported through view operations.
+// For example it could be problematic to support a reduction fusion:
+//
+// tv0[2, 3, 4]
+// tv1 = sum(tv0, {1, 2})
+// tv2 = view(tv0, {6, 4})
+//
+// Since the first step of the reduction scheduler would be tv1->merge(1, 2).
+// If we tried to propagate this transformation through the view it would make
+// the view invalid. If we tried to propagate the view through the reduction,
+// it would attempt to merge a reduction and non-reduction dimension. So for
+// these types of fusions we would like to understand that the view considers
+// axis 1 and 2 of tv1 as "non-separable" axes.
+//
+// If IterDomains are disjoint in the returned set, then they are considered
+// "separable".
+// Warning: This pass generates the IdGraphs, not intended for use at runtime.
+TORCH_CUDA_CU_API DisjointSets<IterDomain*> disjointViewSets(Fusion* fusion);
+
+// Return if all trasnformations in all views match.
+// TODO: Should this be moved to registry.cpp/.h?
+// Warning: This pass generates the IdGraphs, not intended for use at runtime.
+TORCH_CUDA_CU_API bool allMatchingViews(Fusion* fusion);
+
+// Makes sure that there are no group id's left of pos that match right of pos.
+// e.g.
+// [1, 0, 0] pos 2 would return false
+// [1, 0, 0] pos 1 would return true
+TORCH_CUDA_CU_API bool breakIsDisjoint(std::vector<int> group_ids, int pos);
+
+// Generates an old to new map to reorder tv's domain as the rfactor order.
+// Priority is given to inner most dimensions for example:
+// rfactor [i0, i1, i2]
+// domain [i0*i2, i1]
+// will produce the map {{0, 1}, {1, 0}}
+// This is somewhat similar to orderTiledConcreteIdAsRoot
+TORCH_CUDA_CU_API std::unordered_map<int, int> domainReorderAsRfactorMap(
+    TensorView* tv);
 
 } // namespace scheduler_utils
 } // namespace cuda
