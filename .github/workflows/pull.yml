@@ -10,7 +10,7 @@ on:
       - landchecks/*
   workflow_dispatch:
   schedule:
-    - cron: 0 0 * * *
+    - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}

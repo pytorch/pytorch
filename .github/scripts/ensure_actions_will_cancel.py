@@ -42,11 +42,6 @@ if __name__ == "__main__":
             print("ERROR: duplicate workflow name:", name, file=sys.stderr)
             errors_found = True
         names.add(name)
-
-        expected = {
-            "group": EXPECTED_GROUP,
-            "cancel-in-progress": True,
-        }
         actual = data.get("concurrency", {})
         if not actual.get("group", "").startswith(EXPECTED_GROUP):
             print(
