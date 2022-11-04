@@ -92,8 +92,6 @@ class LlgaNodeWrapper {
   friend class LlgaGraphHelper;
 
  private:
-  void initOutputLayouts();
-
   Node* n;
 };
 
