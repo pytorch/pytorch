@@ -7747,12 +7747,12 @@ def reference_group_norm(inp: np.ndarray, num_groups: int, weight=None, bias=Non
     if weight is not None:
         # weight is a vector of length equal to the channel
         if len(Y.shape) > 2:
-            weight = np.tile(np.expand_dims(weight, 1), [1] + list(inp.shape[2:]))
+            weight = np.expand_dims(weight, [0] + [idx + 2 for idx in range(inp.ndim - 2)])
         Y = Y * weight
     if bias is not None:
         # bias is a vector of length equal to the channel
         if len(Y.shape) > 2:
-            bias = np.tile(np.expand_dims(bias, 1), [1] + list(inp.shape[2:]))
+            bias = np.expand_dims(bias, [0] + [idx + 2 for idx in range(inp.ndim - 2)])
         Y = Y + bias
     return Y
 
