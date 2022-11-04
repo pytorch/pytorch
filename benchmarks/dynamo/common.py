@@ -1917,7 +1917,13 @@ def run(runner, args, original_dir=None):
         optimize_ctx = nothing
         output_filename = "nothing.csv"
     elif args.backend:
-        optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
+        if args.backend == "ipex":
+            if args.amp:
+                optimize_ctx = torch._dynamo.optimize(backends.ipex_bf16)
+            else:
+                optimize_ctx = torch._dynamo.optimize(backends.ipex_fp32)
+        else:
+            optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"
