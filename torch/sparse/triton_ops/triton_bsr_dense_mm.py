@@ -1,6 +1,7 @@
 import torch
 import triton
 import triton.language as tl
+from typing import Optional
 
 
 def compressed_indices_to_plain_indices(cidx, pidx):
@@ -23,6 +24,128 @@ def compressed_indices_to_plain_indices(cidx, pidx):
     ).select(0, 0)
 
     return idx_linear.reshape(batch_numel, -1).sub_(cdim * batch_offset)
+
+
+@triton.jit
+def _bsr_strided_dense_rowspace_kernel(
+    BLOCKSIZE_ROW: tl.constexpr,
+    BLOCKSIZE_COL: tl.constexpr,
+    # values prologue
+    values_ptr,
+    values_batch_stride,
+    values_nnz_stride,
+    values_row_block_stride,
+    values_col_block_stride,
+    # values epilogue
+    # crow_indices prologue
+    crow_indices_ptr,
+    crow_indices_batch_stride,
+    crow_indices_stride,
+    # crow_indices epilogue
+    # col_indices prologue
+    col_indices_ptr,
+    col_indices_batch_stride,
+    col_indices_stride,
+    # col_indices epilogue
+    # dense prologue
+    dense_ptr,
+    dense_batch_stride,
+    dense_tiled_row_stride,
+    dense_tiled_col_stride,
+    dense_row_block_stride,
+    dense_col_block_stride,
+    # dense epilogue
+    # output prologue
+    output_ptr,
+    output_batch_stride,
+    output_tiled_row_stride,
+    output_tiled_col_stride,
+    output_row_block_stride,
+    output_col_block_stride,
+    # output epilogue
+    GROUP_SIZE_ROW: tl.constexpr,
+):
+    batch_pid = tl.program_id(axis=0)
+    row_block_pid = tl.program_id(axis=1)
+    col_block_pid = tl.program_id(axis=2)
+    n_block_rows = tl.num_programs(axis=1)
+    n_block_cols = tl.num_programs(axis=2)
+
+    row_block_pid, col_block_pid = tl.swizzle2d(
+        row_block_pid, col_block_pid, n_block_rows, n_block_cols, GROUP_SIZE_ROW
+    )
+
+    crow_indices_offset_ptr = (
+        crow_indices_ptr
+        + crow_indices_batch_stride * batch_pid
+        + crow_indices_stride * row_block_pid
+    )
+    nnz_offset = tl.load(crow_indices_offset_ptr)
+    nnz_offset_next = tl.load(crow_indices_offset_ptr + crow_indices_stride)
+
+    # Compute nnz for the row with number row_block_pid.
+    # If it is zero, skip the row.
+    row_nnz = nnz_offset_next - nnz_offset
+    if row_nnz == 0:
+        return
+
+    row_block_arange = tl.arange(0, BLOCKSIZE_ROW)
+    col_block_arange = tl.arange(0, BLOCKSIZE_COL)
+
+    # Pointers are set to the first block of the current row.
+    values_block_ptrs = (
+        values_ptr
+        + values_batch_stride * batch_pid
+        + values_nnz_stride * nnz_offset
+        + values_row_block_stride * row_block_arange[:, None]
+        + values_col_block_stride * col_block_arange[None, :]
+    )
+
+    # NOTE: dense is advanced into all dimensions but the tiled row one.
+    # That will be advanced in the loop according to values in col_indices.
+    dense_block_ptrs = (
+        dense_ptr
+        + dense_batch_stride * batch_pid
+        + dense_tiled_col_stride * col_block_pid
+        + dense_row_block_stride * col_block_arange[:, None]
+        + dense_col_block_stride * row_block_arange[None, :]
+    )
+
+    # Pointers are set to exact write-to locations
+    output_ptrs = (
+        output_ptr
+        + output_batch_stride * batch_pid
+        + output_tiled_row_stride * row_block_pid
+        + output_tiled_col_stride * col_block_pid
+        + output_row_block_stride * row_block_arange[:, None]
+        + output_col_block_stride * row_block_arange[None, :]
+    )
+
+    # Set pointer to the first nonzero element in the current row
+    col_index_nnz_ptr = (
+        col_indices_ptr
+        + col_indices_batch_stride * batch_pid
+        + col_indices_stride * nnz_offset
+    )
+
+    output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_ROW), tl.float32)
+    for _ in range(row_nnz):
+        values_block = tl.load(values_block_ptrs)
+
+        # find which row of dense needs to get loaded
+        # for multiplication with values_block.
+        dense_row_idx = tl.load(col_index_nnz_ptr)
+        dense_block = tl.load(dense_block_ptrs + dense_tiled_row_stride * dense_row_idx)
+
+        # do block mm
+        output_acc_block += tl.dot(values_block, dense_block)
+
+        # move val/col_index ptrs to the next block in the row
+        values_block_ptrs += values_nnz_stride
+        col_index_nnz_ptr += col_indices_stride
+
+    # write back the result
+    tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))
 
 
 @triton.jit
@@ -107,7 +230,7 @@ def _bsr_strided_sparse_rowspace_kernel(
 
     output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_ROW), tl.float32)
     col_index_nnz_ptr = col_indices_ptr + row_idx_nnz_offset * col_indices_stride
-    for nnz_idx in range(row_idx_nnz):
+    for _ in range(row_idx_nnz):
         values_block = tl.load(values_block_ptrs)
 
         # find which row of dense needs to get loaded
@@ -118,7 +241,7 @@ def _bsr_strided_sparse_rowspace_kernel(
         # do block mm
         output_acc_block += tl.dot(values_block, dense_block)
 
-        # move val ptrs to the next block in the row
+        # move val/col_index ptrs to the next block in the row
         values_block_ptrs += values_nnz_stride
         col_index_nnz_ptr += col_indices_stride
 
@@ -126,100 +249,9 @@ def _bsr_strided_sparse_rowspace_kernel(
     tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))
 
 
-def bsr_dense_mm(bsr, dense):
-    # TODO: insert checks
-    m, kl = bsr.shape[-2:]
-    kr, n = dense.shape[-2:]
-
-    # TODO: probably make sure that inputs are properly contiguous
-
-    # Required to undo the fake batch dimension insertion.
-    original_batch_dims_broadcasted = torch.broadcast_shapes(
-        bsr.shape[:-2], dense.shape[:-2]
-    )
-
-    # Short circuit if lhs is zero
-    if bsr._nnz() == 0:
-        return torch.zeros(
-            original_batch_dims_broadcasted + (m, n),
-            dtype=dense.dtype,
-            device=dense.device,
-        )
-
-    # Introduce fake batch dimension if not present for convenience.
-    def unsqueeze_batch_dim(t, n_non_batch_dims):
-        if t.dim() > n_non_batch_dims:
-            return t
-        else:
-            return t.unsqueeze(0)
-
-    crow_indices = unsqueeze_batch_dim(bsr.crow_indices(), 1)
-    col_indices = unsqueeze_batch_dim(bsr.col_indices(), 1)
-    values = unsqueeze_batch_dim(bsr.values(), 3)
-    dense = unsqueeze_batch_dim(dense, 2)
-    nnz = values.shape[-3]
-    blocksize = values.shape[-2:]
-
-    # Compute broadcasted batch dimension
-    bsr_batch_dims = values.shape[:-3]
-    dense_batch_dims = dense.shape[:-2]
-    batch_dims_broadcasted = torch.broadcast_shapes(bsr_batch_dims, dense_batch_dims)
-
-    # Allocate output
-    output = torch.zeros(
-        batch_dims_broadcasted + (m, n), dtype=dense.dtype, device=dense.device
-    )
-
-    # Broadcast batch dimensions and squash
-    def batch_broadcast_and_squash(t, batch_dims, invariant_dims):
-        return t.broadcast_to(batch_dims + invariant_dims).flatten(
-            0, len(batch_dims) - 1
-        )
-
-    crow_indices = batch_broadcast_and_squash(
-        crow_indices, batch_dims_broadcasted, (-1,)
-    )
-
-    # NOTE: now batch and nnz dimensions are merged to satisfy
-    # requirements imposed by _bsr_strided_sparse_rowspace_kernel.
-    # Turn it off once _bsr_strided_dense_rowspace_kernel is implemented.
-    col_indices = batch_broadcast_and_squash(
-        col_indices, batch_dims_broadcasted + (-1,), ()
-    )
-    values = batch_broadcast_and_squash(
-        values, batch_dims_broadcasted + (values.shape[-3],), values.shape[-2:]
-    )
-
-    dense = batch_broadcast_and_squash(dense, batch_dims_broadcasted, dense.shape[-2:])
-
-    # NOTE: output is contiguous, so batch_broadcast_and_squash will create a view
-    output = batch_broadcast_and_squash(
-        output, batch_dims_broadcasted, output.shape[-2:]
-    )
-
-    # NOTE: this function will ALWAYS create a view
-    def tile_to_blocksize(t, blocksize):
-        *rest, m, n = t.shape
-        new_shape = rest + [
-            m // blocksize[0],
-            blocksize[0],
-            n // blocksize[1],
-            blocksize[1],
-        ]
-        return t.reshape(new_shape).transpose(-3, -2)
-
-    # "Blockify" the row dimension of dense with blocksize[1]
-    # since dense is on the rhs of matmul
-    dense = tile_to_blocksize(dense, blocksize[::-1])
-    # "Blockify" the row dimension of output with blocksize[0]
-    # which is inherited from the bsr input.
-    # NOTE: tile_to_blocksize will create a view.
-    # NOTE: output.blocksize[-1] == dense.blocksize[-1],
-    # so it could be any value in [1, dense.shape[-1]).
-    # We need to probably use the largest possible blocksize
-    # so that it fits into SRAM.
-    output = tile_to_blocksize(output, (blocksize[0], blocksize[0]))
-
+def _run_sparse_rowspace_kernel(
+    blocksize, values, crow_indices, col_indices, dense, output
+):
     # Compute a vector of non-zero elements numbers per each row.
     # We want to ultimately iterate over non-zero rows.
     nnz_per_row = crow_indices[:, 1:] - crow_indices[:, :-1]
@@ -258,6 +290,145 @@ def bsr_dense_mm(bsr, dense):
         num_stages=4,
         num_warps=4,
     )
+
+
+def _run_dense_rowspace_kernel(
+    blocksize, values, crow_indices, col_indices, dense, output
+):
+    # Launch kernel
+    n_batches = dense.size(0)
+    n_block_rows = crow_indices.size(-1) - 1
+    n_block_cols = dense.size(-3)
+    grid = (n_batches, n_block_rows, n_block_cols)
+    _bsr_strided_dense_rowspace_kernel[grid](
+        *blocksize,
+        values,
+        *values.stride(),
+        crow_indices,
+        *crow_indices.stride(),
+        col_indices,
+        *col_indices.stride(),
+        dense,
+        *dense.stride(),
+        output,
+        *output.stride(),
+        GROUP_SIZE_ROW=4,
+        num_stages=4,
+        num_warps=4,
+    )
+
+
+def bsr_dense_mm(bsr, dense, is_sparse_rowspace_mode: Optional[bool] = None):
+    # TODO: insert checks
+    m, kl = bsr.shape[-2:]
+    kr, n = dense.shape[-2:]
+
+    # TODO: probably make sure that inputs are properly contiguous
+
+    # Required to undo the fake batch dimension insertion.
+    original_batch_dims_broadcasted = torch.broadcast_shapes(
+        bsr.shape[:-2], dense.shape[:-2]
+    )
+
+    # Short circuit if lhs is zero
+    if bsr._nnz() == 0:
+        return torch.zeros(
+            original_batch_dims_broadcasted + (m, n),
+            dtype=dense.dtype,
+            device=dense.device,
+        )
+
+    # TODO: insert switch
+    if is_sparse_rowspace_mode is None:
+        is_sparse_rowspace_mode = True
+
+    # Introduce fake batch dimension if not present for convenience.
+    def unsqueeze_batch_dim(t, n_non_batch_dims):
+        if t.dim() > n_non_batch_dims:
+            return t
+        else:
+            return t.unsqueeze(0)
+
+    crow_indices = unsqueeze_batch_dim(bsr.crow_indices(), 1)
+    col_indices = unsqueeze_batch_dim(bsr.col_indices(), 1)
+    values = unsqueeze_batch_dim(bsr.values(), 3)
+    dense = unsqueeze_batch_dim(dense, 2)
+    nnz = values.shape[-3]
+    blocksize = values.shape[-2:]
+
+    # Compute broadcasted batch dimension
+    bsr_batch_dims = values.shape[:-3]
+    dense_batch_dims = dense.shape[:-2]
+    batch_dims_broadcasted = torch.broadcast_shapes(bsr_batch_dims, dense_batch_dims)
+
+    # Allocate output
+    output = torch.zeros(
+        batch_dims_broadcasted + (m, n), dtype=dense.dtype, device=dense.device
+    )
+
+    # Broadcast batch dimensions and squash
+    def batch_broadcast_and_squash(t, batch_dims, invariant_dims):
+        return t.broadcast_to(batch_dims + invariant_dims).flatten(
+            0, len(batch_dims) - 1
+        )
+
+    crow_indices = batch_broadcast_and_squash(
+        crow_indices, batch_dims_broadcasted, (-1,)
+    )
+
+    if is_sparse_rowspace_mode:
+        # Flatten batch dimension with nnz dimension
+        # as required by the sparse rowspace kernel.
+        col_indices = batch_broadcast_and_squash(
+            col_indices, batch_dims_broadcasted + (-1,), ()
+        )
+        values = batch_broadcast_and_squash(
+            values, batch_dims_broadcasted + (values.shape[-3],), values.shape[-2:]
+        )
+    else:
+        col_indices = batch_broadcast_and_squash(
+            col_indices, batch_dims_broadcasted, (-1,)
+        )
+        values = batch_broadcast_and_squash(
+            values, batch_dims_broadcasted, values.shape[-3:]
+        )
+
+    dense = batch_broadcast_and_squash(dense, batch_dims_broadcasted, dense.shape[-2:])
+
+    # NOTE: output is contiguous, so batch_broadcast_and_squash will create a view
+    output = batch_broadcast_and_squash(
+        output, batch_dims_broadcasted, output.shape[-2:]
+    )
+
+    # NOTE: this function will ALWAYS create a view
+    def tile_to_blocksize(t, blocksize):
+        *rest, m, n = t.shape
+        new_shape = rest + [
+            m // blocksize[0],
+            blocksize[0],
+            n // blocksize[1],
+            blocksize[1],
+        ]
+        return t.reshape(new_shape).transpose(-3, -2)
+
+    # "Blockify" the row dimension of dense with blocksize[1]
+    # since dense is on the rhs of matmul
+    dense = tile_to_blocksize(dense, blocksize[::-1])
+    # "Blockify" the row dimension of output with blocksize[0]
+    # which is inherited from the bsr input.
+    # NOTE: tile_to_blocksize will create a view.
+    # NOTE: output.blocksize[-1] == dense.blocksize[-1],
+    # so it could be any value in [1, dense.shape[-1]).
+    # We need to probably use the largest possible blocksize
+    # so that it fits into SRAM.
+    output = tile_to_blocksize(output, (blocksize[0], blocksize[0]))
+
+    # Launch kernel
+    if is_sparse_rowspace_mode:
+        kernel = _run_sparse_rowspace_kernel
+    else:
+        kernel = _run_dense_rowspace_kernel
+    kernel(blocksize, values, crow_indices, col_indices, dense, output)
 
     # Block dims need to rejoin with the corresponding block dimensions
     # prior to reshape so that blocks do not end up being transposed.
