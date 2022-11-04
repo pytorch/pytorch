@@ -13122,9 +13122,9 @@ class TestNNDeviceType(NNTestCase):
         s = exp.sum(dim=3, keepdim=True).expand(exp.size())
         return exp / s
 
-    def test_masked_softmax_mask_types_0_1(self, device):
+    def test_masked_softmax_mask_types(self, device):
         # Test that mask type 0 (LxL attention mask), mask type 1 (BxL padding mask),
-        # and mask type 1 (generic BxHxLxL mask) are processed correctly on the
+        # and mask type 2 (generic BxHxLxL mask) are processed correctly on the
         # fast path and the results match explicit slow calculation.
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
 
@@ -13178,8 +13178,8 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     def test_masked_softmax_devices_parity(self):
-        # Test that softmax with mask type 0 (LxL attention mask) and mask type 1 (BxL padding mask)
-        # gives the same result on CPU and on CUDA
+        # Test that softmax with mask type 0 (LxL attention mask), mask type 1 (BxL padding mask),
+        # and mask type 2 (BxHxLxL generic mask) gives the same result on CPU and on CUDA.
 
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
         for (B, num_heads, L) in sizes:
@@ -13217,6 +13217,52 @@ class TestNNDeviceType(NNTestCase):
                     cpu_res = softmax_on_device(mask, input, "cpu")
                     cuda_res = softmax_on_device(mask, input, "cuda")
                     self.assertEqual(cpu_res, cuda_res, exact_dtype=True)
+
+    def test_multihead_self_attn_two_masks_fast_path(self, device):
+        """
+        Multihead self-attention should give the same result on the fast path (BetterTransformer) as on the slow path
+        when both attention mask (mask type 0) and key padding mask (mask type 1) are provided
+        """
+        with torch.no_grad():
+            embed_dim = 14
+            num_heads = 7
+            batch_size = 8
+            src_len = 5
+
+            query = value = key = torch.rand(batch_size, src_len, embed_dim).to(device)
+            # Create masks of two different types
+            attn_mask = torch.randint(0, 2, (src_len, src_len)).bool().to(device)
+            key_padding_mask = torch.randint(0, 2, (batch_size, src_len)).bool().to(device)
+
+            # We'll need expanded versions of the masks for masking out the outputs below
+            attn_mask_expanded = attn_mask.reshape(1, 1, src_len, src_len).expand(batch_size, num_heads, src_len, src_len)
+            key_padding_mask_expanded = key_padding_mask.reshape(batch_size, 1, 1, src_len).expand(batch_size, num_heads, src_len, src_len)
+            merged_mask = attn_mask_expanded.logical_or(key_padding_mask_expanded)
+
+            # Compute attention on the fast path
+            mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True, device=device)
+            mta_model.training = False
+            result_fast_path, _ = mta_model(query, key, value, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
+
+            # Compute attention on the slow path
+            result_ref, _ = torch.nn.functional.multi_head_attention_forward(query.transpose(0,1), key.transpose(0,1), value.transpose(0,1),
+                                                                             embed_dim, num_heads,
+                                                                             mta_model.in_proj_weight, mta_model.in_proj_bias,
+                                                                             mta_model.bias_k, mta_model.bias_v, mta_model.add_zero_attn,
+                                                                             mta_model.dropout, mta_model.out_proj.weight, mta_model.out_proj.bias,
+                                                                             training=mta_model.training,
+                                                                             key_padding_mask=key_padding_mask, need_weights=False,
+                                                                             attn_mask=attn_mask, use_separate_proj_weight=False,
+                                                                             q_proj_weight=mta_model.q_proj_weight, k_proj_weight=mta_model.k_proj_weight,
+                                                                             v_proj_weight=mta_model.v_proj_weight, average_attn_weights=False)
+            result_ref = result_ref.transpose(0, 1)  # Convert to batch-first
+
+            # Rows which are completely masked out are nan, we need to exclude them from comparison
+            mask_out = merged_mask[:, 0, :, :].all(-1, keepdim=True).expand(batch_size, src_len, embed_dim)
+            result_fast_path_masked = result_fast_path.masked_fill(mask_out, 0)
+            result_ref_masked = result_ref.masked_fill(mask_out, 0)
+
+            self.assertEqual(result_fast_path_masked, result_ref_masked)
 
     def test_masked_softmax(self, device):
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
