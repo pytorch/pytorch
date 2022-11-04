@@ -14,6 +14,8 @@ from torch import nn
 
 from torch.distributed.pipeline.sync._balance import balance_by_size, balance_by_time, blockpartition
 from torch.distributed.pipeline.sync._balance.profile import layerwise_sandbox
+from torch.testing._internal.common_utils import run_tests
+
 
 skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 
@@ -223,3 +225,7 @@ def test_already_has_grad():
 
     with pytest.raises(ValueError, match="some parameter already has gradient"):
         balance_by_time(1, model, sample, device="cpu")
+
+
+if __name__ == "__main__":
+    run_tests()

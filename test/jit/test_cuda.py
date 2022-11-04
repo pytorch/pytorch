@@ -23,7 +23,8 @@ TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 # If GPU is not available, then do not run the tests
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
-    JitTestCase = object  # noqa: F811
+    from torch.testing._internal.common_utils import NoTest
+    JitTestCase = NoTest  # noqa: F811
 
 TEST_LARGE_TENSOR = TEST_CUDA
 

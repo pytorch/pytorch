@@ -506,6 +506,7 @@ parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
 parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
+parser.add_argument('--individual-test', type=str)
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
 def run_unittest_help(argv):
@@ -637,8 +638,8 @@ def get_report_path(argv=UNITTEST_ARGS, pytest=False):
     test_report_path = os.path.join(test_report_path, test_filename)
     if pytest:
         test_report_path = test_report_path.replace('python-unittest', 'python-pytest')
-        os.makedirs(test_report_path, exist_ok=True)
         test_report_path = os.path.join(test_report_path, f"{test_filename}-{os.urandom(8).hex()}.xml")
+        os.makedirs(Path(test_report_path).parent, exist_ok=True)
         return test_report_path
     os.makedirs(test_report_path, exist_ok=True)
     return test_report_path
@@ -658,6 +659,22 @@ def sanitize_pytest_xml(xml_file: str):
         testcase.set("classname", classname)
         testcase.set("file", f"{file}.py")
     tree.write(xml_file)
+
+def count_pytest_test_cases(argv: List[str]) -> List[str]:
+    class TestCollectorPlugin:
+        def __init__(self):
+            self.tests = []
+
+        def pytest_collection_modifyitems(self, items):
+            for item in items:
+                self.tests.append(item.nodeid)
+
+    file = argv[0]
+
+    test_collector_plugin = TestCollectorPlugin()
+    import pytest
+    pytest.main([arg for arg in argv if arg != '-vv'] + ['--collect-only', '-qq'], plugins=[test_collector_plugin])
+    return test_collector_plugin.tests
 
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
@@ -690,27 +707,29 @@ def run_tests(argv=UNITTEST_ARGS):
 
     if TEST_IN_SUBPROCESS:
         failed_tests = []
-        test_cases = discover_test_cases_recursively(suite)
         for case in test_cases:
-            test_case_full_name = case.id().split('.', 1)[1]
+            if case.startswith("test/"):
+                case = case[len("test/"):]
             other_args = []
             if DISABLED_TESTS_FILE:
                 other_args.append('--import-disabled-tests')
             if SLOW_TESTS_FILE:
                 other_args.append('--import-slow-tests')
-            cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
+            if USE_PYTEST:
+                other_args.append('--use-pytest')
+            cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + ["--individual-test", case]
             string_cmd = " ".join(cmd)
             exitcode = shell(cmd)
             if exitcode != 0:
                 # This is sort of hacky, but add on relevant env variables for distributed tests.
-                if 'TestDistBackendWithSpawn' in test_case_full_name:
+                if 'TestDistBackendWithSpawn' in case:
                     backend = os.environ.get("BACKEND", "")
                     world_size = os.environ.get("WORLD_SIZE", "")
                     env_prefix = f"BACKEND={backend} WORLD_SIZE={world_size}"
                     string_cmd = env_prefix + " " + string_cmd
                 # Log the command to reproduce the failure.
                 print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
-                failed_tests.append(test_case_full_name)
+                failed_tests.append(case)
 
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
@@ -733,6 +752,8 @@ def run_tests(argv=UNITTEST_ARGS):
         import pytest
         os.environ["NO_COLOR"] = "1"
         os.environ["USING_PYTEST"] = "1"
+        if args.individual_test:
+            argv = argv[1:] + [args.individual_test]
         exit_code = pytest.main(args=argv + [f'--junit-xml-reruns={test_report_path}'] if TEST_SAVE_XML else [])
         del os.environ["USING_PYTEST"]
         if TEST_SAVE_XML:
@@ -1921,6 +1942,10 @@ def set_warn_always_context(new_val: bool):
         yield
     finally:
         torch.set_warn_always(old_val)
+
+
+class NoTest():
+    __test__ = False
 
 
 class TestCase(expecttest.TestCase):

@@ -9,7 +9,6 @@
 
 
 import signal
-import unittest
 import uuid
 from typing import Any, Dict
 from unittest.mock import call, patch, MagicMock
@@ -28,14 +27,14 @@ from torch.distributed.elastic.multiprocessing import SignalException
 from torch.distributed.elastic.multiprocessing.errors import ProcessFailure
 from torch.distributed.elastic.rendezvous import RendezvousHandler, RendezvousParameters
 from torch.distributed.elastic.utils.distributed import get_free_port
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def do_nothing():
     pass
 
 
-class WorkerStateTest(unittest.TestCase):
+class WorkerStateTest(TestCase):
     def test_is_running(self):
         for state in WorkerState:
             if state == WorkerState.HEALTHY or state == WorkerState.UNHEALTHY:
@@ -44,7 +43,7 @@ class WorkerStateTest(unittest.TestCase):
                 self.assertFalse(WorkerState.is_running(state))
 
 
-class WorkerGroupTest(unittest.TestCase):
+class WorkerGroupTest(TestCase):
     def test_worker_group_constructor(self):
         spec = WorkerSpec(
             role="test_trainer",
@@ -78,7 +77,7 @@ class WorkerGroupTest(unittest.TestCase):
         self.assertIsNone(worker_group.store)
 
 
-class RoleInstanceInfoTest(unittest.TestCase):
+class RoleInstanceInfoTest(TestCase):
     def test_compare(self):
         agent_role1 = _RoleInstanceInfo("role", 1, 10)
         agent_role2 = _RoleInstanceInfo("role", 2, 10)
@@ -152,7 +151,7 @@ def monres(state: WorkerState):
         return RunResult(state=state)
 
 
-class SimpleElasticAgentTest(unittest.TestCase):
+class SimpleElasticAgentTest(TestCase):
     def _get_worker_spec(
         self,
         max_restarts=1,

@@ -14,6 +14,7 @@ from torch.distributed.pipeline.sync import Pipe
 from torch.distributed.pipeline.sync.skip import pop, skippable, stash
 from torch.distributed.pipeline.sync.skip.portal import PortalBlue, PortalCopy, PortalOrange
 from torch.distributed.pipeline.sync.utils import partition_model
+from torch.testing._internal.common_utils import run_tests
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
@@ -108,3 +109,6 @@ def test_none_skip(setup_rpc):
 
     output.local_value().sum().backward()
     assert input.grad.mean().item() == 1
+
+if __name__ == "__main__":
+    run_tests()

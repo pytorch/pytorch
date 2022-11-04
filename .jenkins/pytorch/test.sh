@@ -791,8 +791,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   test_libtorch || true
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
-elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
-  test_functorch
 else
   install_torchvision
   install_triton

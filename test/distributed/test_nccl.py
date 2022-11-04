@@ -6,7 +6,7 @@ import torch.cuda.nccl as nccl
 import torch.cuda
 import torch.distributed as c10d
 
-from torch.testing._internal.common_utils import (TestCase, run_tests,
+from torch.testing._internal.common_utils import (NoTest, TestCase, run_tests,
                                                   IS_WINDOWS, load_tests,
                                                   TEST_WITH_ROCM,
                                                   sandcastle_skip_if)
@@ -22,7 +22,7 @@ load_tests = load_tests
 nGPUs = torch.cuda.device_count()
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
-    TestCase = object  # noqa: F811
+    TestCase = NoTest  # noqa: F811
 
 
 datatypes = [torch.float]

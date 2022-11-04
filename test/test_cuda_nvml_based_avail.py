@@ -13,7 +13,7 @@ with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "1"}):
     # Before executing the desired tests, we need to disable CUDA initialization and fork_handler additions that would
     # otherwise be triggered by the `torch.testing._internal.common_utils` module import
     from torch.testing._internal.common_utils import (parametrize, instantiate_parametrized_tests, run_tests, TestCase,
-                                                      IS_WINDOWS)
+                                                      IS_WINDOWS, NoTest)
     # NOTE: Because `remove_device_and_dtype_suffixes` initializes CUDA context (triggered via the import of
     # `torch.testing._internal.common_device_type` which imports `torch.testing._internal.common_cuda`) we need
     # to bypass that method here which should be irrelevant to the parameterized tests in this module.
@@ -22,7 +22,7 @@ with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "1"}):
     TEST_CUDA = torch.cuda.is_available()
     if not TEST_CUDA:
         print('CUDA not available, skipping tests', file=sys.stderr)
-        TestCase = object  # type: ignore[misc, assignment] # noqa: F811
+        TestCase = NoTest  # type: ignore[misc, assignment] # noqa: F811
 
 
 class TestExtendedCUDAIsAvail(TestCase):

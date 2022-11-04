@@ -253,7 +253,7 @@ class TestFXGraphPasses(JitTestCase):
         (TestPartitionFunctions.forward15, [['add_1', 'add', 'permute_1', 'view', 'permute_2', 'permute_3', 'permute']], False),
         (TestPartitionFunctions.forward16, [["permute_1", "add_1", "add"]], True),
         (TestPartitionFunctions.forward16, [['add_1', 'add', 'permute_1', 'view', 'permute_2', 'permute_3', 'permute']], False),
-    ])
+    ], name_fn=lambda x, y: f"fn_{x.__name__}_expected_partition_{y}")
     def test_partitioner(self, fn, expected_partition, bookend_non_compute_pass):
         traced = symbolic_trace(fn)
 
@@ -766,7 +766,7 @@ class TestFXMatcherUtils(JitTestCase):
         MultiOutputWithWithInvalidMatches,
         QuantizationFp8Pattern,
         NoAnchorFound,
-    ])
+    ], name_fn=lambda x: f"test_model_{x.__name__}")
     def test_subgraph_matcher(self, test_model):
 
         setup = getattr(test_model, "setup", None)

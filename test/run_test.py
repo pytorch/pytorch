@@ -5,7 +5,6 @@ import copy
 from datetime import datetime
 from distutils.util import strtobool
 from distutils.version import LooseVersion
-import functools
 import os
 import pathlib
 import shutil
@@ -131,48 +130,11 @@ TESTS = discover_tests(
         "distributed/elastic/utils/util_test",
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
+        "doctests",
     ]
 )
 
-# The doctests are a special case that don't correspond to a file that discover
-# tests can enable.
-TESTS = TESTS + ['doctests']
-
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
-
-# Tests need to be run with pytest.
-USE_PYTEST_LIST = [
-    "distributed/pipeline/sync/skip/test_api",
-    "distributed/pipeline/sync/skip/test_gpipe",
-    "distributed/pipeline/sync/skip/test_inspect_skip_layout",
-    "distributed/pipeline/sync/skip/test_leak",
-    "distributed/pipeline/sync/skip/test_portal",
-    "distributed/pipeline/sync/skip/test_stash_pop",
-    "distributed/pipeline/sync/skip/test_tracker",
-    "distributed/pipeline/sync/skip/test_verify_skippables",
-    "distributed/pipeline/sync/test_balance",
-    "distributed/pipeline/sync/test_bugs",
-    "distributed/pipeline/sync/test_checkpoint",
-    "distributed/pipeline/sync/test_copy",
-    "distributed/pipeline/sync/test_deferred_batch_norm",
-    "distributed/pipeline/sync/test_dependency",
-    "distributed/pipeline/sync/test_inplace",
-    "distributed/pipeline/sync/test_microbatch",
-    "distributed/pipeline/sync/test_phony",
-    "distributed/pipeline/sync/test_pipe",
-    "distributed/pipeline/sync/test_pipeline",
-    "distributed/pipeline/sync/test_stream",
-    "distributed/pipeline/sync/test_transparency",
-    "distributed/pipeline/sync/test_worker",
-    "distributions/test_constraints",
-    "distributions/test_transforms",
-    "distributions/test_utils",
-    "test_typing",
-    "distributed/elastic/events/lib_test",
-    "distributed/elastic/agent/server/test/api_test",
-    "test_deploy",
-    "distributed/test_c10d_error_logger.py"
-]
 
 WINDOWS_BLOCKLIST = [
     "distributed/nn/jit/test_instantiator",
@@ -322,6 +284,24 @@ DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS = {
     ],
 }
 
+PYTEST_INCOMPATIBLE = [
+    "test_jit",  # test_warn, I think pytest eats warnings
+    "test_jit_legacy",  # test_warn, I think pytest eats warnings
+    "test_quantization",  # class for op dummy_quant not implemented
+    "test_nn",  # test collection results in extra test?
+    "test_fx",  # symbolically traced variables cannot be used as inputs to control flow
+    "lazy/test_reuse_ir",  # Tried to register multiple backend fallbacks
+    "lazy/test_step_closures",  # Tried to register multiple backend fallbacks
+    "lazy/test_ts_opinfo",  # Tried to register multiple backend fallbacks
+    "test_mps",  # 'TestAvgPool' object has no attribute 'assertRaisesRegex'
+    "test_multiprocessing",  # some assertion failure about has_shm_files
+    "test_cuda",  # test_mem_get_info, memory freed doesn't match
+    "test_autograd",  # memory leak/amount of memory allocated doesn't match
+    "doctests",  # doesn't use run_test
+    "distributions/test_distributions",  # gets -inf for something
+    "inductor/test_torchinductor",  # Multiple backends
+]
+
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
 
@@ -404,18 +384,11 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def get_executable_command(options, allow_pytest, disable_coverage=False):
+def get_executable_command(options, disable_coverage=False):
     if options.coverage and not disable_coverage:
         executable = ["coverage", "run", "--parallel-mode", "--source=torch"]
     else:
         executable = [sys.executable, "-bb"]
-    if options.pytest:
-        if allow_pytest:
-            executable += ["-m", "pytest"]
-        else:
-            print_to_stderr(
-                "Pytest cannot be used for this test. Falling back to unittest."
-            )
     return executable
 
 
@@ -427,28 +400,20 @@ def run_test(
     extra_unittest_args=None,
     env=None,
 ) -> int:
-    unittest_args = options.additional_unittest_args.copy()
-    if options.verbose:
-        unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
-    if test_module in RUN_PARALLEL_BLOCKLIST:
-        unittest_args = [
-            arg for arg in unittest_args if not arg.startswith("--run-parallel")
-        ]
-    if extra_unittest_args:
-        assert isinstance(extra_unittest_args, list)
-        unittest_args.extend(extra_unittest_args)
 
-    # If using pytest, replace -f with equivalent -x
-    if options.pytest:
-        unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
-    elif IS_CI:
+    unittest_args = []
+    if test_module not in PYTEST_INCOMPATIBLE:
+        unittest_args.extend(["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX'])
+    # put these afterwards so that anything specified by the user comes after the defaults so they take precedence
+    unittest_args.extend(extra_unittest_args or [])
+    unittest_args.extend(options.additional_unittest_args)
+
+    if IS_CI:
         # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(["--import-slow-tests", "--import-disabled-tests"])
 
     # Extra arguments are not supported with pytest
-    executable = get_executable_command(
-        options, allow_pytest=not extra_unittest_args
-    )
+    executable = get_executable_command(options)
 
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
@@ -456,7 +421,7 @@ def run_test(
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
     log_fd, log_path = tempfile.mkstemp(dir=REPO_ROOT / "test" / "test-reports",
-                                        prefix="{}_".format(test_module.replace("\\", "-").replace("/", "-")))
+                                        prefix=f"{test_module}_".replace("\\", "-").replace("/", "-"))
     os.close(log_fd)
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
@@ -473,11 +438,8 @@ def test_cuda_primary_ctx(test_module, test_directory, options):
     )
 
 
-run_test_with_subprocess = functools.partial(run_test, extra_unittest_args=["--subprocess"])
-
-
-def get_run_test_with_subprocess_fn():
-    return lambda test_module, test_directory, options: run_test_with_subprocess(test_module, test_directory, options)
+def run_test_with_subprocess(test_module, test_directory, options):
+    return run_test(test_module, test_directory, options, extra_unittest_args=["--subprocess"])
 
 
 def _test_cpp_extensions_aot(test_directory, options, use_ninja):
@@ -773,24 +735,24 @@ def run_test_ops(test_module, test_directory, options):
 
 
 CUSTOM_HANDLERS = {
-    "test_cuda_primary_ctx": test_cuda_primary_ctx,
-    "test_cuda_nvml_based_avail": get_run_test_with_subprocess_fn(),
-    "test_cuda_trace": get_run_test_with_subprocess_fn(),
+    "test_cuda_primary_ctx": run_test_with_subprocess,
+    "test_cuda_nvml_based_avail": run_test_with_subprocess,
+    "test_cuda_trace": run_test_with_subprocess,
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
     "distributed/algorithms/quantization/test_quantization": test_distributed,
-    "distributed/test_c10d_nccl": get_run_test_with_subprocess_fn(),
-    "distributed/test_c10d_gloo": get_run_test_with_subprocess_fn(),
-    "distributed/test_c10d_common": get_run_test_with_subprocess_fn(),
-    "distributed/test_c10d_spawn_gloo": get_run_test_with_subprocess_fn(),
-    "distributed/test_c10d_spawn_nccl": get_run_test_with_subprocess_fn(),
-    "distributed/test_store": get_run_test_with_subprocess_fn(),
-    "distributed/test_pg_wrapper": get_run_test_with_subprocess_fn(),
-    "distributed/rpc/test_faulty_agent": get_run_test_with_subprocess_fn(),
-    "distributed/rpc/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
-    "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
-    "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
+    "distributed/test_c10d_nccl": run_test_with_subprocess,
+    "distributed/test_c10d_gloo": run_test_with_subprocess,
+    "distributed/test_c10d_common": run_test_with_subprocess,
+    "distributed/test_c10d_spawn_gloo": run_test_with_subprocess,
+    "distributed/test_c10d_spawn_nccl": run_test_with_subprocess,
+    "distributed/test_store": run_test_with_subprocess,
+    "distributed/test_pg_wrapper": run_test_with_subprocess,
+    "distributed/rpc/test_faulty_agent": run_test_with_subprocess,
+    "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
+    "distributed/rpc/test_share_memory": run_test_with_subprocess,
+    "distributed/rpc/cuda/test_tensorpipe_agent": run_test_with_subprocess,
     "doctests": run_doctests,
     "test_ops": run_test_ops,
     "test_ops_gradients": run_test_ops,
@@ -1236,8 +1198,6 @@ def main():
         os.environ['PARALLEL_TESTING'] = '1'
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
-                options_clone.pytest = True
             pool.apply_async(run_test_module, args=(test, test_directory, options_clone), callback=success_callback)
         pool.close()
         pool.join()
@@ -1248,8 +1208,6 @@ def main():
 
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
-                options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:
                 continue

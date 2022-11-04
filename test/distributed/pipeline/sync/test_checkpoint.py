@@ -16,6 +16,8 @@ import torch.cuda
 from torch.distributed.pipeline.sync.checkpoint import Checkpointing, checkpoint, is_checkpointing, is_recomputing
 from torch.distributed.pipeline.sync.dependency import fork, join
 from torch.distributed.pipeline.sync.microbatch import Batch
+from torch.testing._internal.common_utils import run_tests
+
 
 devices = ["cpu"]
 if torch.cuda.is_available():
@@ -158,3 +160,7 @@ def test_non_grad_output():
 
     output = checkpoint(model, input)
     output[0].backward()
+
+
+if __name__ == "__main__":
+    run_tests()
