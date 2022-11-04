@@ -40,8 +40,9 @@ from datetime import datetime
 from os.path import abspath, exists
 from random import randint
 
-import numpy as np
 import matplotlib.pyplot as plt
+
+import numpy as np
 import pandas as pd
 import torch
 
@@ -93,7 +94,7 @@ DEFAULTS = {
     "inference": ["ts_nvfuser_cudagraphs", "inductor"],
     "flag_compilers": {
         "training": ["inductor", "inductor_no_cudagraphs"],
-        "inference":["inductor"],
+        "inference": ["inductor"],
     },
     "dtypes": [
         "float32",
@@ -116,6 +117,7 @@ DASHBOARD_DEFAULTS = {
     "dashboard_gh_cli_path": "/data/home/anijain/miniconda/bin/gh",
 }
 
+
 def flag_speedup(x):
     return pd.isna(x) or x < 0.95
 
@@ -126,6 +128,7 @@ def flag_compilation_latency(x):
 
 def flag_compression_ratio(x):
     return pd.isna(x) or x < 0.9
+
 
 FLAG_FNS = {
     "speedup": flag_speedup,
@@ -154,7 +157,7 @@ def parse_args():
     parser.add_argument(
         "--flag-compilers",
         action="append",
-        help="List of compilers to flag issues. Same format as --compilers."
+        help="List of compilers to flag issues. Same format as --compilers.",
     )
     parser.add_argument(
         "--quick", action="store_true", help="Just runs one model. Helps in debugging"
@@ -252,6 +255,7 @@ def get_skip_tests(suite):
     skip_tests = map(lambda name: f"-x {name}", skip_tests)
     skip_str = " ".join(skip_tests)
     return skip_str
+
 
 def generate_csv_name(args, dtype, suite, device, compiler, testing):
     mode = get_mode(args)
@@ -365,16 +369,19 @@ def build_summary():
     with open(f"{output_dir}/gh_build_summary.txt", "w") as gh_fh:
         gh_fh.write(comment)
 
+
 @functools.lru_cache(None)
 def archive_data():
     day = datetime.today().strftime("%j")
     prefix = datetime.today().strftime(f"day_{day}_%d_%m_%y")
     return day, prefix
 
+
 @functools.lru_cache(None)
 def archive_name(dtype):
     _, prefix = archive_data()
     return f"{prefix}_performance_{dtype}_{randint(100, 999)}"
+
 
 def archive(src_dir, dest_dir_prefix, dtype):
     # Copy the folder to archived location
@@ -383,7 +390,9 @@ def archive(src_dir, dest_dir_prefix, dtype):
 
 
 class Parser:
-    def __init__(self, suites, devices, dtypes, compilers, flag_compilers, mode, output_dir):
+    def __init__(
+        self, suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+    ):
         self.suites = suites
         self.devices = devices
         self.dtypes = dtypes
@@ -402,8 +411,12 @@ class Parser:
 
 
 class ParsePerformanceLogs(Parser):
-    def __init__(self, suites, devices, dtypes, compilers, flag_compilers, mode, output_dir):
-        super().__init__(suites, devices, dtypes, compilers, flag_compilers, mode, output_dir)
+    def __init__(
+        self, suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+    ):
+        super().__init__(
+            suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+        )
         self.parsed_frames = defaultdict(lambda: defaultdict(None))
         self.untouched_parsed_frames = defaultdict(lambda: defaultdict(None))
         self.metrics = ["speedup", "compilation_latency", "compression_ratio"]
@@ -748,7 +761,9 @@ def parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_
     build_summary()
 
     parser_class = ParsePerformanceLogs
-    parser = parser_class(suites, devices, dtypes, compilers, flag_compilers, mode, output_dir)
+    parser = parser_class(
+        suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+    )
     parser.gen_summary_files()
     return
 
@@ -785,16 +800,29 @@ class AccuracyRegressionTracker:
         parsers = []
         for path in df["path"]:
             output_dir = os.path.join(self.args.dashboard_archive_path, path)
-            if os.path.exists(os.path.join(
-                output_dir, generate_csv_name(self.args, dtype, suite, device, compiler, "accuracy")
-            )):
-                parsers.append(ParsePerformanceLogs(
-                    [suite], [device], [dtype], [compiler], [compiler], get_mode(self.args), output_dir,
-                ))
+            if os.path.exists(
+                os.path.join(
+                    output_dir,
+                    generate_csv_name(
+                        self.args, dtype, suite, device, compiler, "accuracy"
+                    ),
+                )
+            ):
+                parsers.append(
+                    ParsePerformanceLogs(
+                        [suite],
+                        [device],
+                        [dtype],
+                        [compiler],
+                        [compiler],
+                        get_mode(self.args),
+                        output_dir,
+                    )
+                )
             if len(parsers) >= 2:
                 return parsers
         return None
-        
+
     def generate_comment(self):
         title = "## Accuracy Regressions ##\n"
         body = ""
@@ -806,20 +834,26 @@ class AccuracyRegressionTracker:
                 last2 = self.find_last_2(suite, device, dtype, compiler)
                 if last2 is None:
                     continue
-                
-                df_cur, df_prev = [last2[i].untouched_parsed_frames[suite]["accuracy"] for i in (0, 1)]
+
+                df_cur, df_prev = [
+                    last2[i].untouched_parsed_frames[suite]["accuracy"] for i in (0, 1)
+                ]
                 df_merge = df_cur.merge(df_prev, on="name", suffixes=("_cur", "_prev"))
                 flag = np.logical_and(
-                    df_merge[compiler + "_prev"].apply(lambda x : "pass" in x),
-                    df_merge[compiler + "_cur"].apply(lambda x : "pass" not in x)
+                    df_merge[compiler + "_prev"].apply(lambda x: "pass" in x),
+                    df_merge[compiler + "_cur"].apply(lambda x: "pass" not in x),
                 )
                 df_bad = df_merge[flag]
-                dfs.append(pd.DataFrame(data={
-                    "compiler": compiler,
-                    "name": df_bad["name"],
-                    "prev_status": df_bad[compiler + "_prev"],
-                    "cur_status": df_bad[compiler + "_cur"],
-                }))
+                dfs.append(
+                    pd.DataFrame(
+                        data={
+                            "compiler": compiler,
+                            "name": df_bad["name"],
+                            "prev_status": df_bad[compiler + "_prev"],
+                            "cur_status": df_bad[compiler + "_cur"],
+                        }
+                    )
+                )
 
             if not dfs:
                 continue
@@ -840,6 +874,7 @@ class AccuracyRegressionTracker:
         with open(f"{self.args.output_dir}/gh_accuracy_regression.txt", "w") as gh_fh:
             gh_fh.write(comment)
             print(comment)
+
 
 class RegressionTracker:
     """
@@ -1042,11 +1077,19 @@ if __name__ == "__main__":
 
     if args.inference:
         compilers = DEFAULTS["inference"] if args.compilers is None else args.compilers
-        flag_compilers = DEFAULTS["flag_compilers"]["inference"] if args.flag_compilers is None else args.flag_compilers
+        flag_compilers = (
+            DEFAULTS["flag_compilers"]["inference"]
+            if args.flag_compilers is None
+            else args.flag_compilers
+        )
     else:
         assert args.training
         compilers = DEFAULTS["training"] if args.compilers is None else args.compilers
-        flag_compilers = DEFAULTS["flag_compilers"]["training"] if args.flag_compilers is None else args.flag_compilers
+        flag_compilers = (
+            DEFAULTS["flag_compilers"]["training"]
+            if args.flag_compilers is None
+            else args.flag_compilers
+        )
 
     output_dir = args.output_dir
     args.compilers = compilers
@@ -1071,7 +1114,9 @@ if __name__ == "__main__":
             raise e
         if not args.log_operator_inputs:
             archive(output_dir, args.dashboard_archive_path, dtypes[0])
-            parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir)
+            parse_logs(
+                args, dtypes, suites, devices, compilers, flag_compilers, output_dir
+            )
 
     if args.update_dashboard:
         DashboardUpdater(args).update()
