@@ -2280,8 +2280,10 @@ class TestFrozenOptimizations(JitTestCase):
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_lin_bn_folding_autocast_scenario_cuda(self):
         module_pairs = [(nn.Linear, nn.BatchNorm1d), (nn.Linear, nn.BatchNorm2d), (nn.Linear, nn.BatchNorm3d)]
+        use_tracing = [True, False]
+        bn_running_stats = [True, False]
 
-        for modules in module_pairs:
+        for modules, tracing, track_stats in product(module_pairs, use_tracing, bn_running_stats):
             class LinearBN(torch.nn.Module):
                 def __init__(self, in_features, out_features):
                     super(LinearBN, self).__init__()
@@ -2293,20 +2295,6 @@ class TestFrozenOptimizations(JitTestCase):
                     return self.bn(x)
 
             mod_eager = LinearBN(32, 32).cuda().eval()
-            scripted_mod = torch.jit.script(mod_eager)
-            scripted_mod = torch.jit.freeze(scripted_mod)
-            FileCheck().check("linear").check_not("aten::batch_norm").run(scripted_mod.graph)
-            lin_node = scripted_mod.graph.findNode("aten::linear", True)
-            self.assertTrue(lin_node is not None)
-            weight_input = lin_node.namedInput("weight")
-            bias_input = lin_node.namedInput("bias")
-            self.assertTrue(bias_input is not None)
-            if modules[1] == nn.BatchNorm1d:
-                self.assertTrue(weight_input.type().dtype() == torch.half)
-                self.assertTrue(bias_input.type().dtype() == torch.half)
-            else:
-                self.assertTrue(weight_input.type().dtype() == torch.half)
-                self.assertTrue(bias_input.type().dtype() == torch.float)
 
             inps = [3, 32]
             if modules[1] == nn.BatchNorm2d:
@@ -2316,6 +2304,22 @@ class TestFrozenOptimizations(JitTestCase):
                 inps.append(inps[-1])
                 inps.append(inps[-1])
                 inps.append(inps[-1])
+
+            x = torch.rand(inps, dtype=torch.half).cuda()
+
+            if tracing:
+                scripted_mod = torch.jit.trace(mod_eager, (x))
+            else:
+                scripted_mod = torch.jit.script(mod_eager)
+            scripted_mod = torch.jit.freeze(scripted_mod)
+            FileCheck().check("linear").check_not("aten::batch_norm").run(scripted_mod.graph)
+            lin_node = scripted_mod.graph.findNode("aten::linear", True)
+            self.assertTrue(lin_node is not None)
+            weight_input = lin_node.namedInput("weight")
+            bias_input = lin_node.namedInput("bias")
+            self.assertTrue(bias_input is not None)
+            self.assertTrue(weight_input.type().dtype() == torch.half)
+            self.assertTrue(bias_input.type().dtype() == torch.half)
 
             x = torch.rand(inps, dtype=torch.half).cuda()
 
