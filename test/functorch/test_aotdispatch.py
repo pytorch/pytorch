@@ -952,6 +952,7 @@ aot_autograd_failures = {
     xfail('linalg.eig'),
     xfail('scatter_reduce', 'prod'),
 
+    # non-deterministic
     skip('as_strided_scatter'),
 
     # Too annoying to generate random inputs
