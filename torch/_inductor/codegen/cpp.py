@@ -311,6 +311,25 @@ class CppVecOverrides(OpOverrides):
     def square(a):
         return f"{a}.pow(2)"
 
+    @staticmethod
+    def sign(x):
+        code = BracesBuffer()
+        # auto tmp5 = tmp4 < 0 ? -1 : 1;
+        vec_zero = f"decltype({x})(0)"
+        vec_one = f"decltype({x})(1)"
+        blendv = f"decltype({x})::blendv({vec_zero}, {vec_one}, {vec_zero} < {x})"
+        left = V.kernel.cse.newvar()
+        code.writeline(f"auto {left} = {blendv};")
+
+        # auto tmp6 = tmp4 == 0 ? 0 : tmp5;
+        blendv = f"decltype({x})::blendv({vec_zero}, {vec_one}, {x} < {vec_zero})"
+        right = V.kernel.cse.newvar()
+        code.writeline(f"auto {right} = {blendv};")
+        result = V.kernel.cse.newvar()
+        code.writeline(f"auto {result} = {left} - {right};")
+        V.kernel.compute.splice(code)
+        return result
+
 
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
@@ -472,6 +491,19 @@ class CppOverrides(OpOverrides):
     def sigmoid(x):
         x = ops.exp(f"-{x}")
         return f"1 / (1 + {x})"
+
+    @staticmethod
+    def sign(x):
+        code = BracesBuffer()
+        # auto tmp5 = tmp4 < 0 ? -1 : 1;
+        left = V.kernel.cse.newvar()
+        right = V.kernel.cse.newvar()
+        result = V.kernel.cse.newvar()
+        code.writeline(f"auto {left} = {x} > 0 ? 1 : 0;")
+        code.writeline(f"auto {right} = {x} < 0 ? 1 : 0;")
+        code.writeline(f"auto {result} = {left} - {right};")
+        V.kernel.compute.splice(code)
+        return result
 
 
 class CppKernel(Kernel):
