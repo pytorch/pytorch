@@ -696,20 +696,15 @@ void GroupNormInputBackward(
       }
       const T_ACC c2 =
           (db_val * T_ACC(mean[i]) - ds_val) * T_ACC(rstd[i]) * T_ACC(rstd[i]) * T_ACC(rstd[i]) * s;
-      // std::cout << "n " << i / G << " g " << g << " c2 " << c2 << " db_val " << db_val << " ds_val " << ds_val << " T_ACC(mean[i]) " << T_ACC(mean[i]) << " T_ACC(rstd[i]) " << T_ACC(rstd[i]) << " s " << s << "\n";
       const T_ACC c3 = -c2 * T_ACC(mean[i]) - db_val * T_ACC(rstd[i]) * s;
-      // std::cout << "c3 " << c3 << "\n";
       for (const auto j : c10::irange(D)) {
         const int64_t c = g * D + j;
         const T* dY_ptr = dY + (i * D + j) * HxW;
         const T* X_ptr = X + (i * D + j) * HxW;
         T* dX_ptr = dX + (i * D + j) * HxW;
         const T_ACC c1 = T_ACC(rstd[i]) * (gamma_null ? T_ACC(1) : T_ACC(gamma[c]));
-        // std::cout << "c1 " << c1 << " T_ACC(rstd[i]) " << T_ACC(rstd[i]) << " T_ACC(gamma[c]) " << T_ACC(gamma[c]) << "\n";
         for (const auto k : c10::irange(HxW)) {
           dX_ptr[k] = c1 * T_ACC(dY_ptr[k]) + c2 * T_ACC(X_ptr[k]) + c3;
-          // std::cout << "dX_ptr[k] " << T_ACC(dX_ptr[k]) << "\n";
-          // std::cout << "T_ACC(dY_ptr[k]) " << T_ACC(dY_ptr[k]) << " T_ACC(X_ptr[k]) " << T_ACC(X_ptr[k]) << "\n";
         }
       }
     }
@@ -873,8 +868,6 @@ void GroupNormBackwardKernelImplInternal(
   T_ACC* ds_data = ds.data_ptr<T_ACC>();
   T_ACC* db_data = db.data_ptr<T_ACC>();
   ComputeInternalGradients<T, T_ACC>(N, C, HxW, dY_data, X_data, ds_data, db_data);
-  // std::cout << "ds " << ds << "\n";
-  // std::cout << "db " << db << "\n";
   if (dX_data != nullptr) {
     GroupNormInputBackward<T, PT, T_ACC>(
         N,
@@ -889,16 +882,13 @@ void GroupNormBackwardKernelImplInternal(
         ds_data,
         db_data,
         dX_data);\
-    // std::cout << "dX " << dX << "\n";
   }
   if (dgamma_data != nullptr) {
     GammaBackward<PT, T_ACC>(
         N, C, group, mean_data, rstd_data, ds_data, db_data, dgamma_data);
-    // std::cout << "dgamma " << dgamma << "\n";
   }
   if (dbeta_data != nullptr) {
     BetaBackward<PT, T_ACC>(N, C, db_data, dbeta_data);
-    // std::cout << "dbeta " << dbeta << "\n";
   }
 }
 
@@ -1283,7 +1273,6 @@ std::tuple<T_ACC, T_ACC> DsDbColumnwiseMoments(
     db_gamma += vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; },
       acc1_vec * Vec::loadu(gamma_ptr + d));
   }
-  // std::cout << "DsDbColumnwiseMoments 1 " << " ds_gamma " << ds_gamma << " db_gamma " << db_gamma << "\n";
   if (D - d > 0) {
     Vec acc0_vec{0}, acc1_vec{0};
     for (const auto m : c10::irange(HxW)) {
@@ -1301,7 +1290,6 @@ std::tuple<T_ACC, T_ACC> DsDbColumnwiseMoments(
     db_gamma += vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; },
       acc1_vec * Vec::loadu(gamma_ptr + d, D - d));
   }
-  // std::cout << "DsDbColumnwiseMoments 2 " << " ds_gamma " << ds_gamma << " db_gamma " << db_gamma << "\n";
   return std::tuple<T_ACC, T_ACC>(ds_gamma, db_gamma);
 }
 
@@ -1490,7 +1478,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
           HxW,
           C,
           D);
-        // std::cout << "ds_gamma " << ds_gamma << " db_gamma " << db_gamma << "\n";
+
         // step2 compute dX
         T* dX_ptr = dX_data + n * HxW * C + g * D;
         const PT* rstd_ptr = rstd_data + i;
@@ -1501,9 +1489,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
         data_index_step(n, N, g, G);
       }
     });
-    // std::cout << "ds " << ds << "\n";
-    // std::cout << "db " << db << "\n";
-    // std::cout << "dX " << dX << "\n";
+
     // step 3 compute dgamma & dbeta
     if (dgamma_data != nullptr) {
       GammaBackward<PT, T_ACC>(
@@ -1577,7 +1563,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
             const PT* gamma_ptr = gamma_null ? gamma_data : (gamma_data + g * D);
             T_ACC ds_val = tmp_buffer_data[n * 2 * G + 2 * g];
             T_ACC db_val = tmp_buffer_data[n * 2 * G + 2 * g + 1];
-            // std::cout << "ds_val " << ds_val << " db_val " << db_val << "\n";
+
             const T_ACC c2 =
             (db_val * T_ACC(*mean_ptr) - ds_val) * T_ACC(*rstd_ptr) * T_ACC(*rstd_ptr)* T_ACC(*rstd_ptr) * s;
             const T_ACC c3 = -c2 * T_ACC(*mean_ptr) - db_val * T_ACC(*rstd_ptr) * s;
@@ -1588,9 +1574,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
         }
       });
     }
-    // std::cout << "ds " << ds << "\n";
-    // std::cout << "db " << db << "\n";
-    // std::cout << "dX " << dX << "\n";
+
     // step 4 compute dgamma & dbeta
     if (dgamma_data != nullptr) {
       GammaBackward<PT, T_ACC>(
@@ -1619,7 +1603,6 @@ void GroupNormBackwardKernelImpl(
   const bool mixed_type = is_mixed_type(dY, gamma);
   switch (X.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      // std::cout << "Contiguous\n";
       AT_DISPATCH_FLOATING_TYPES_AND(
         ScalarType::BFloat16, X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
         if(mixed_type) {
@@ -1634,7 +1617,6 @@ void GroupNormBackwardKernelImpl(
     }
     case at::MemoryFormat::ChannelsLast:
     case at::MemoryFormat::ChannelsLast3d: {
-      // std::cout << "ChannelsLast nd\n";
       AT_DISPATCH_FLOATING_TYPES_AND(
         ScalarType::BFloat16, X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
         if(mixed_type) {
