@@ -1,6 +1,7 @@
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymNodeImpl.h>
 #include <array>
+#include <utility>
 
 namespace c10 {
 
@@ -23,14 +24,14 @@ static std::array<SymNode, 2> normalize_symfloats(SymFloat a_, SymFloat b_) {
   if (!b) {
     b = common->wrap_float(b_.as_float_unchecked());
   }
-  return {a, b};
+  return {std::move(a), std::move(b)};
 }
 
 SymFloat SymFloat::operator+(SymFloat sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return SymFloat(data_ + sci.data_);
   }
-  auto res = normalize_symfloats(*this, sci);
+  auto res = normalize_symfloats(*this, std::move(sci));
   return SymFloat(res[0]->add(res[1]));
 }
 
@@ -38,7 +39,7 @@ SymFloat SymFloat::operator-(SymFloat sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return SymFloat(data_ - sci.data_);
   }
-  auto res = normalize_symfloats(*this, sci);
+  auto res = normalize_symfloats(*this, std::move(sci));
   return SymFloat(res[0]->sub(res[1]));
 }
 
@@ -46,7 +47,7 @@ SymFloat SymFloat::operator*(SymFloat sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return SymFloat(data_ * sci.data_);
   }
-  auto res = normalize_symfloats(*this, sci);
+  auto res = normalize_symfloats(*this, std::move(sci));
   return SymFloat(res[0]->mul(res[1]));
 }
 
@@ -54,7 +55,7 @@ SymFloat SymFloat::operator/(SymFloat sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return SymFloat(data_ / sci.data_);
   }
-  auto res = normalize_symfloats(*this, sci);
+  auto res = normalize_symfloats(*this, std::move(sci));
   return SymFloat(res[0]->truediv(res[1]));
 }
 
