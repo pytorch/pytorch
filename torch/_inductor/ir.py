@@ -690,6 +690,8 @@ class Reduction(Loops):
             rtypes_to_inits = {
                 "sum": 0,
                 "prod": 1,
+                "any": 0,
+                "all": 0,
             }
 
             assert (
