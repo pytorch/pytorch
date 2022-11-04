@@ -37,15 +37,15 @@ Tensor cat_feature(
 
     const struct Block final {
       uvec3 size; // output texture size
-      uint32_t fill_0; // dummy
+      uint32_t fill0; // dummy
       uvec3 isize; // input texture size
-      uint32_t fill_1; // dummy
-      uint32_t batch_size; // input tensor's batch size
-      uint32_t ch_size; // input tensor's channel size
+      uint32_t fill1; // dummy
+      uint32_t batchSize; // input tensor's batch size
+      uint32_t chSize; // input tensor's channel size
       uint32_t
-          ch_interval; // channel interval (total # of channels for all tensors)
+          chInterval; // channel interval (total # of channels for all tensors)
       uint32_t
-          ch_size_allprior; // # of channels for tensor 0 to i-1 at ith tensor
+          chSizeAllprior; // # of channels for tensor 0 to i-1 at ith tensor
     } block{
         v_output.extents(),
         0u,
@@ -181,10 +181,12 @@ Tensor cat_height(
   return convert(v_output);
 }
 
-Tensor cat(const at::ITensorListRef& tensors, const int64_t dim) {
+Tensor cat(const at::ITensorListRef& tensors, const int64_t in_dim) {
   TORCH_CHECK(tensors.size() > 0, "Vulkan cat expects at least one tensor");
 
+  const int64_t dim = normalize_dim(in_dim, 4);
   auto materialized = tensors.materialize();
+  TORCH_INTERNAL_ASSERT(materialized.size() > 0, "Accessing empty array");
   const at::Tensor& tensor = materialized[0];
   int64_t cat_dim_size = 0;
   bool is_mult4ch = true;
@@ -209,6 +211,7 @@ Tensor cat(const at::ITensorListRef& tensors, const int64_t dim) {
   }
 
   auto result_size = tensor.sizes().vec();
+  TORCH_INTERNAL_ASSERT(result_size.size() > 0, "Accessing empty array");
   result_size[dim] = cat_dim_size;
 
   vTensor v_output{api::context(), result_size, tensor.options()};

@@ -178,7 +178,7 @@ def break_graph_if_unsupported(*, push):
                 user_stack = [self.frame_summary()] + list(reversed(exc.real_stack))
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-                # torchdynamo.explain() formats this a little nicer, and presents a slightly
+                # torch._dynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if (
                     config.print_graph_breaks
@@ -745,6 +745,14 @@ class InstructionTranslatorBase(object):
             self.push(right.call_method(self, "__contains__", [left], {}))
             if op == "not in":
                 self.UNARY_NOT(inst)
+        elif (
+            isinstance(left, UserFunctionVariable)
+            and isinstance(right, UserFunctionVariable)
+            and op in supported_is_const
+        ):
+            self.push(
+                ConstantVariable(supported_is_const[op](left.fn, right.fn), **options)
+            )
         else:
             unimplemented(f"COMPARE_OP {typestr(left)} {op} {typestr(right)}")
 
@@ -828,6 +836,14 @@ class InstructionTranslatorBase(object):
     def STORE_ATTR(self, inst):
         prior = self.copy_graphstate()
         val, obj = self.popn(2)
+
+        if isinstance(obj, NNModuleVariable):
+            # We don't allow side effects during export
+            # https://github.com/pytorch/torchdynamo/issues/1475
+            assert (
+                not self.export
+            ), f"Mutating module attribute {inst.argval} during export."
+
         try:
             self.output.guards.update(
                 BuiltinVariable(setattr)

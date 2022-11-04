@@ -101,12 +101,6 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
-function install_torchaudio() {
-  local commit
-  commit=$(get_pinned_commit audio)
-  pip_install --user "git+https://github.com/pytorch/audio.git@${commit}"
-}
-
 function install_torchvision() {
   local commit
   commit=$(get_pinned_commit vision)
@@ -123,10 +117,14 @@ function checkout_install_torchvision() {
   popd
 }
 
-function install_torchtext() {
-  local commit
-  commit=$(get_pinned_commit text)
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/text.git@${commit}"
+function install_torchaudio_nightly() {
+  NIGHTLY_VERSION="dev20221101"
+  pip_install --user --pre torchaudio==0.14.0.${NIGHTLY_VERSION} --extra-index-url https://download.pytorch.org/whl/nightly/cu117
+}
+
+function install_torchtext_nightly() {
+  NIGHTLY_VERSION="dev20221101"
+  pip_install --user --pre torchtext==0.14.0.${NIGHTLY_VERSION} --extra-index-url https://download.pytorch.org/whl/nightly/cu117
 }
 
 function clone_pytorch_xla() {
@@ -174,9 +172,8 @@ function checkout_install_torchdeploy() {
   pushd ..
   git clone --recurse-submodules https://github.com/pytorch/multipy.git
   pushd multipy
-  # with ABI flag change
   python multipy/runtime/example/generate_examples.py
-  pip install -e . --install-option="--abicxx"
+  pip install -e . --install-option="--cudatests"
   popd
   popd
 }
@@ -185,6 +182,7 @@ function test_torch_deploy(){
  pushd ..
  pushd multipy
  ./multipy/runtime/build/test_deploy
+ ./multipy/runtime/build/test_deploy_gpu
  popd
  popd
 }

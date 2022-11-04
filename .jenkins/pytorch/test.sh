@@ -135,9 +135,8 @@ fi
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    # Suppress vptr violations arising from multiple copies of pybind11
     export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=0
-    export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
+    export UBSAN_OPTIONS=print_stacktrace=1
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
@@ -180,9 +179,10 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     ulimit -s 81920
 
     (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
-    echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
+    echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
+    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_vptr_ubsan()")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
@@ -249,6 +249,12 @@ test_dynamo_shard() {
   assert_git_not_dirty
 }
 
+test_inductor_distributed() {
+  # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
+  # with if required # gpus aren't available
+  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed
+  assert_git_not_dirty
+}
 
 test_inductor() {
   python test/test_modules.py --verbose
@@ -737,6 +743,11 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
 elif [[ "$TEST_CONFIG" == deploy ]]; then
   checkout_install_torchdeploy
   test_torch_deploy
+elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
@@ -748,16 +759,12 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
-# Inductor CI sharding:
-# 1: unit test
-# 2: Huggingface
-# 3-7: TIMM
-# 8: TorchBench
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   test_inductor
+  test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
@@ -771,14 +778,14 @@ elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 8 && $NUM_TEST_SHARD
   install_timm
   id=$((SHARD_NUMBER-3))
   test_inductor_timm_shard $id
-elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 9 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchaudio
-  install_torchtext
+elif [[ "${TEST_CONFIG}" == *inductor_torchbench* && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchaudio_nightly
+  install_torchtext_nightly
   install_torchvision
   install_filelock
   install_triton
   checkout_install_torchbench
-  id=$((SHARD_NUMBER-8))
+  id=$((SHARD_NUMBER-1))
   test_inductor_torchbench_shard $id
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
