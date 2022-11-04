@@ -45,6 +45,25 @@ class TestNvFuserDynamo(TestCase):
         eager_result = func.__wrapped__(input1, input2)
         self.assertEqual(eager_result, nvfuser_result)
 
+    def test_batch_norm_implicit_dtype_promotion(self):
+        input1 = make_tensor((2, 3, 4, 5), device="cuda", dtype=torch.float32)
+        input2 = make_tensor((5, 5), device="cuda", dtype=torch.float32)
+        w = make_tensor((3), device="cuda", dtype=torch.float32)
+        b = make_tensor((3), device="cuda", dtype=torch.float32)
+
+        @torchdynamo.optimize("nvprims_nvfuser")
+        def func(a, b, w, b):
+            o = torch.matmul(a, b)
+            return torch.batch_norm(o, w, b, None, None, True, 1e-2, 1e-5, True)
+
+        # No warnings and no errors
+        with torch.cuda.amp.autocast():
+            with warnings.catch_warnings(record=True) as warning:
+                nvfuser_result = func(input1, input2, w, b)
+                self.assertEqual(len(warning), 0)
+            eager_result = func.__wrapped__(input1, input2, w, b)
+            self.assertEqual(eager_result, nvfuser_result)
+
 
 if __name__ == "__main__":
     run_tests()
