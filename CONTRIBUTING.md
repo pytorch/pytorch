@@ -1285,7 +1285,7 @@ For PRs, however, it's a bit more complicated. Consider this commit graph, where
 commit `B`:
 
 ```
-       o---o---B (pr-commit)
+       o---o---B (refs/pull/42/head)
       /         \
      /           C (refs/pull/42/merge)
     /           /
