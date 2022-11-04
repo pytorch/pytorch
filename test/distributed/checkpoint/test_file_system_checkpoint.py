@@ -113,14 +113,14 @@ class MyShardedModel3(torch.nn.Module):
 
 
 class TestDistributedStateDictSaveLoad(TestCase):
-    # @parametrize("thread_count", _THREAD_COUNTS)
-    # def test_read_write_only_tensor(self, thread_count) -> None:
-    def test_read_write_only_tensor(self) -> None:
+    @parametrize("thread_count", _THREAD_COUNTS)
+    def test_read_write_only_tensor(self, thread_count) -> None:
+    # def test_read_write_only_tensor(self) -> None:
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
 
-            # fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
-            fs_writer = FileSystemWriter(path=path)
+            fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+            # fs_writer = FileSystemWriter(path=path)
             save_state_dict(
                 state_dict=state_dict_to_save,
                 storage_writer=fs_writer,
@@ -149,13 +149,13 @@ class TestDistributedStateDictSaveLoad(TestCase):
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
 
-            # fs_writer = FileSystemWriter(
-            #     path=path, single_file_per_rank=True, thread_count=thread_count
-            # )
             fs_writer = FileSystemWriter(
-                path=path,
-                single_file_per_rank=True,
+                path=path, single_file_per_rank=True, thread_count=thread_count
             )
+            # fs_writer = FileSystemWriter(
+            #     path=path,
+            #     single_file_per_rank=True,
+            # )
             save_state_dict(
                 state_dict=state_dict_to_save,
                 storage_writer=fs_writer,
@@ -558,7 +558,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     )
 
 
-# instantiate_parametrized_tests(TestDistributedStateDictSaveLoad)
+instantiate_parametrized_tests(TestDistributedStateDictSaveLoad)
 # instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
 # instantiate_parametrized_tests(TestDistributedReshardOnLoad)
 
