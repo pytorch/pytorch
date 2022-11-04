@@ -584,6 +584,8 @@ class CppSizeVarAllocator(SizeVarAllocator):
             return f"{{{parts[0]}, }}"
         return f"{{{', '.join(parts)}}}"
 
+    def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+        return super().codegen_shape_tuple(shape)
 
 class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     """
