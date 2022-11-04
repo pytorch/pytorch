@@ -4,7 +4,7 @@ This file includes private common utilities for FSDP.
 
 import traceback
 from enum import auto, Enum
-from typing import Callable, Dict, List, no_type_check, Union
+from typing import Any, Callable, Dict, List, no_type_check, Union
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
@@ -18,15 +18,11 @@ FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
 
 
-class FSDPState:
-    """
-    This encompasses all FSDP state.
-    """
-
-
 # We leverage Python's dynamic attribute definition to unify the state
-# management for the wrapper and non-wrapper approaches.
-_State = Union[nn.Module, FSDPState]
+# management for the wrapper and non-wrapper approaches. The `Any` represents
+# the `_State` object in _composable/contract.py, but we do not import it to
+# avoid circular imports.
+_FSDPState = Union[nn.Module, Any]
 
 
 class TrainingState(Enum):
@@ -51,13 +47,13 @@ class HandleTrainingState(Enum):
     SUMMON_FULL_PARAMS = auto()
 
 
-def _is_composable(state: _State):
+def _is_composable(state: _FSDPState):
     # TODO: This is a temporary hack for differentiate between code paths.
     return not isinstance(state, nn.Module)
 
 
 @no_type_check
-def _all_handles(state: _State) -> List:
+def _all_handles(state: _FSDPState) -> List:
     return (
         state._handles
         if _is_composable(state)
@@ -168,7 +164,7 @@ def _apply_to_modules(
 
 @no_type_check
 def _assert_in_training_states(
-    state: _State,
+    state: _FSDPState,
     training_states: List[TrainingState],
 ) -> None:
     """Asserts that FSDP is in the states ``_training_states``."""
