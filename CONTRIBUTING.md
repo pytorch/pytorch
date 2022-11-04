@@ -1307,7 +1307,7 @@ a nuance to know about:
 The workflow files themselves get taken from checkpoint `C`, the merger of your
 PR and the `master` branch. But only the workflow files get taken from that merged
 checkpoint. Everything else (tests, code, etc) all get taken directly from your
-PR's commit (commit `B`)
+PR's commit (commit `B`). Please note, this scenario would never affect PRs authored by `ghstack` as they would not automatically ingest the updates from default branch.
 
 
 ## Dev Infra Office Hours
