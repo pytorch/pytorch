@@ -321,10 +321,21 @@ class RegisterDispatchKey:
                 for i, ret_name in enumerate(return_names)
             )
             returns = f'{sig.returns_type().cpp_type()}({", ".join(return_names)})'
-        else:
+        elif len(return_names) == 1:
             ret_name = return_names[0]
             updates = f"{copy_op}({func_res}, {ret_name});"
             returns = ret_name
+        else:
+            assert len(f.func.arguments.out) == 1
+            returns = ""
+            out_arg = f.func.arguments.out[0]
+            if out_arg.type.is_list_like():
+                updates = f"""\
+    for (int64_t i = 0; i < {func_res}.size(); ++i) {{
+        {copy_op}({func_res}[i], {out_arg.name}[i]);
+    }}"""
+            else:
+                updates = f"{copy_op}({func_res}, {out_arg.name});"
 
         functional_sig = self.wrapper_kernel_sig(g.functional)
         wrapper_name = sig.name()

@@ -63,6 +63,8 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
     ),
     value_(value)
 {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(value_));
+  TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   set_constructor_metadata();
 }
 
@@ -142,6 +144,8 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
     ),
     value_(view_value)
 {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(value_));
+  TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   set_constructor_metadata();
   // Copy the original tensor's ViewMeta vector and push the current one.
   if (base->view_metas_.size() > 0) {
@@ -158,10 +162,6 @@ functionalization::FunctionalStorageImpl* FunctionalTensorWrapper::functional_st
 void FunctionalTensorWrapper::commit_update() {
   auto storage_impl = functional_storage_impl();
   storage_impl->add_update(value_, view_metas_);
-  // Invariant: commit_update() is called during an inplace operation.
-  // Tensor inputs to the operation are synced before runnig the op,
-  // so the current tensor must be up-to-date with its alias at this point.
-  generation_ = storage_impl->generation();
 }
 
 bool FunctionalTensorWrapper::is_up_to_date() const {
@@ -176,7 +176,9 @@ void FunctionalTensorWrapper::mutate_view_meta(at::functionalization::ViewMeta m
   // So, these ops are special - they're mutation AND view ops. They get special codegen.
   // An example is transpose_, e.g. `a.transpose_()`
   // Calling transpose_() should ensure that a gets an alias, and append the new ViewMeta to a's current list of ViewMetas.
+  at::AutoDispatchSkipFunctionalize guard;
   value_ = meta.forward_fn(value_, meta.out_index);
+  TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
 }
 
 // Note [Functionalization: Mutation Removal]
@@ -208,15 +210,20 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   // TODO: going to need to change this if we want nested functionalize() transforms.
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(other));
   value_ = other;
+  TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
   // We need to propagate that metadata mutation to the wrapper (new size).
-  set_sizes_and_strides(value_.sym_sizes(), value_.sym_strides(), value_.sym_storage_offset());
+  auto sizes_ = value_.sym_sizes();
+  auto strides_ = value_.sym_strides();
+  auto storage_offset_ = value_.sym_storage_offset();
+  set_sizes_and_strides(sizes_, strides_, storage_offset_);
   if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
     // .to() should not re-entrantly go through functionalization.
     at::AutoDispatchSkipFunctionalize guard;
     // and we want _to_copy() to show up in the graph, not the composite .to() operator
     // (this can happen if autograd has already run by the time we enter this code)
     value_ = at::_to_copy(value_, c10::TensorOptions().dtype(dtype()).layout(layout()));
+    TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   }
 }
 
@@ -251,6 +258,7 @@ void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   // Then it's safe to throw out the old storage and replace it with the new, larger one.
   storage_ = c10::Storage(c10::make_intrusive<functionalization::FunctionalStorageImpl>(other));
   value_ = other;
+  TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   generation_ = 0;
   // And update the metadata on the wrapper to reflect the new sizes and strides
   set_sizes_and_strides(value_.sizes(), value_.strides());

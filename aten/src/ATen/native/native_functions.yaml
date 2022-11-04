@@ -4798,7 +4798,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: slice_scatter
+    CompositeExplicitAutogradNonFunctional: slice_scatter
   autogen: slice_scatter.out
   tags: canonical
 
@@ -4807,7 +4807,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: select_scatter
+    CompositeExplicitAutogradNonFunctional: select_scatter
   autogen: select_scatter.out
 
 - func: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
@@ -4815,7 +4815,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: diagonal_scatter
+    CompositeExplicitAutogradNonFunctional: diagonal_scatter
   autogen: diagonal_scatter.out
 
 - func: as_strided_scatter(Tensor self, Tensor src, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor
@@ -4823,7 +4823,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: as_strided_scatter_symint
+    CompositeExplicitAutogradNonFunctional: as_strided_scatter_symint
   autogen: as_strided_scatter.out
 
 - func: smm(Tensor self, Tensor mat2) -> Tensor

@@ -51,6 +51,7 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/CompositeExplicitAutogradFunctions.h>
+#include <ATen/CompositeExplicitAutogradNonFunctionalFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
@@ -1304,7 +1305,7 @@ std::vector<Shape> compute_shape_select_scatter(
       /*layout=*/c10::make_optional(src.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto out_meta = at::compositeexplicitautograd::select_scatter(
+  auto out_meta = at::compositeexplicitautogradnonfunctional::select_scatter(
       self_meta, src_meta, dim, index);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
@@ -1329,7 +1330,7 @@ std::vector<Shape> compute_shape_diagonal_scatter(
       /*layout=*/c10::make_optional(src.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto out_meta = at::compositeexplicitautograd::diagonal_scatter(
+  auto out_meta = at::compositeexplicitautogradnonfunctional::diagonal_scatter(
       self_meta, src_meta, offset, dim1, dim2);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
@@ -1355,7 +1356,7 @@ std::vector<Shape> compute_shape_slice_scatter_symint(
       /*layout=*/c10::make_optional(src.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto out_meta = at::compositeexplicitautograd::slice_scatter_symint(
+  auto out_meta = at::compositeexplicitautogradnonfunctional::slice_scatter_symint(
       self_meta, src_meta, dim, start, end, step);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
@@ -1380,7 +1381,7 @@ std::vector<Shape> compute_shape_as_strided_scatter_symint(
       /*layout=*/c10::make_optional(src.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto out_meta = at::compositeexplicitautograd::as_strided_scatter_symint(
+  auto out_meta = at::compositeexplicitautogradnonfunctional::as_strided_scatter_symint(
       self_meta, src_meta, size, stride, storage_offset);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
