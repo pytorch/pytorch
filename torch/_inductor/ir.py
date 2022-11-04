@@ -6,6 +6,7 @@ import logging
 import re
 import textwrap
 from collections import OrderedDict
+from contextlib import nullcontext
 from enum import Enum
 from functools import partial
 from inspect import signature
@@ -30,6 +31,7 @@ from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
+aten = torch.ops.aten
 
 
 def inverse_reorder(order):
@@ -2895,12 +2897,25 @@ class FallbackKernel(ExternKernelAlloc):
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
-        (
-            example_output,
-            tensor_args,
-            non_tensor_args,
-            unflatten_args,
-        ) = cls.process_kernel(kernel, *args, **kwargs)
+        fake_incorrect_kernels = (
+            aten._fft_r2c.default,
+            aten._fft_r2c.out,
+            aten._fft_c2r.default,
+            aten._fft_c2c.default,
+            aten._fft_c2c.out,
+            aten._linalg_svd.default,
+            aten._linalg_svd.U,
+        )
+        context = (
+            FakeTensorMode if kernel not in fake_incorrect_kernels else nullcontext
+        )
+        with context():
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+            ) = cls.process_kernel(kernel, *args, **kwargs)
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(
@@ -3381,6 +3396,166 @@ class ConvolutionUnary(ExternKernelAlloc):
         x = self.require_stride_order(x, self.layout.preferred_stride_order)
         self.inputs[0] = x
         self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
+
+
+class ConvolutionBinary(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._convolution_pointwise.binary",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        other: "TensorBox",
+        weight: "TensorBox",
+        bias: "TensorBox",
+        padding_: List[int],
+        stride_: List[int],
+        dilation_: List[int],
+        groups: int,
+        attr,
+    ):
+        kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
+        (inputs, constant_args, kernel_layout,) = _prepare_convolution_fusion_create(
+            cls, x, weight, bias, padding_, stride_, dilation_, groups
+        )
+        other = cls.require_stride1(cls.realize_input(other))
+        inputs.insert(1, other)
+        constant_args = constant_args + [attr]
+        return ConvolutionBinary(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+    def apply_constraint(self):
+        x = self.inputs[0]
+        # FixedLayout of input
+        x = self.require_stride_order(x, self.layout.preferred_stride_order)
+        self.inputs[0] = x
+        other = self.inputs[1]
+        # FixedLayout of other
+        other = self.require_stride_order(other, self.layout.preferred_stride_order)
+        self.inputs[1] = other
+        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
+
+
+class LinearUnary(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._linear_pointwise"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._linear_pointwise",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+
+    @classmethod
+    def create(cls, x, w, b, attr, scalars, algorithm):
+        kernel = "torch.ops.mkldnn._linear_pointwise"
+        x = cls.require_stride1(cls.realize_input(x))
+        w = cls.require_stride1(cls.realize_input(w))
+
+        *m, ic = x.get_size()
+        oc, ic = w.get_size()
+
+        inputs = [x, w]
+        constant_args = [attr, scalars, algorithm]
+        if b is not None:
+            b = cls.require_stride1(cls.realize_input(b))
+            inputs.append(b)
+        else:
+            constant_args.insert(0, b)
+
+        return LinearUnary(
+            layout=FlexibleLayout(
+                device=x.get_device(),
+                dtype=x.get_dtype(),
+                size=list(m) + [oc],
+            ),
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+    def apply_constraint(self):
+        pass
+
+
+class LinearBinary(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._linear_pointwise.binary"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._linear_pointwise.binary",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+
+    @classmethod
+    def create(cls, x, y, w, b, attr):
+        kernel = "torch.ops.mkldnn._linear_pointwise.binary"
+        x = cls.require_stride1(cls.realize_input(x))
+        y = cls.require_stride1(cls.realize_input(y))
+        w = cls.require_stride1(cls.realize_input(w))
+
+        *m, ic = x.get_size()
+        oc, ic = w.get_size()
+
+        inputs = [x, y, w]
+        constant_args = [attr]
+        if b is not None:
+            b = cls.require_stride1(cls.realize_input(b))
+            inputs.append(b)
+        else:
+            constant_args.insert(0, b)
+
+        return LinearBinary(
+            layout=FlexibleLayout(
+                device=x.get_device(),
+                dtype=x.get_dtype(),
+                size=list(m) + [oc],
+            ),
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+    def apply_constraint(self):
+        pass
 
 
 @dataclasses.dataclass
