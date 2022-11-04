@@ -199,4 +199,5 @@ function(caffe2_print_configuration_summary)
   # coreml
   message(STATUS "  USE_COREML_DELEGATE     : ${USE_COREML_DELEGATE}")
   message(STATUS "  BUILD_LAZY_TS_BACKEND   : ${BUILD_LAZY_TS_BACKEND}")
+  message(STATUS "  TORCH_DISABLE_GPU_ASSERTS : ${TORCH_DISABLE_GPU_ASSERTS}")
 endfunction()
