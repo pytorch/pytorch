@@ -180,7 +180,7 @@ def dont_care(
     )
 
 
-def skip(
+def fixme(
     op_name: str,
     variant_name: str = "",
     *,
@@ -330,7 +330,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
         "ceil", dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
         reason=reason_onnx_does_not_support("Ceil")
     ),
-    skip("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
+    fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
     dont_care("sqrt", dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
     xfail("t", dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
 )
