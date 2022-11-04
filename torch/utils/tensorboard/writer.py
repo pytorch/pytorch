@@ -423,7 +423,7 @@ class SummaryWriter(object):
         walltime = time.time() if walltime is None else walltime
         fw_logdir = self._get_file_writer().get_logdir()
         for tag, scalar_value in tag_scalar_dict.items():
-            fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + tag
+            fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + str(tag)
             assert self.all_writers is not None
             if fw_tag in self.all_writers.keys():
                 fw = self.all_writers[fw_tag]
