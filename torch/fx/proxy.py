@@ -11,7 +11,9 @@ from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
 import torch.fx.traceback as fx_traceback
 
-__all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError', 'Proxy', 'Attribute', 'ParameterProxy']
+__all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError',
+           'Proxy', 'Attribute', 'ParameterProxy', 'Scope',
+           'ScopeContextManager']
 
 
 @compatibility(is_backward_compatible=False)
@@ -56,8 +58,9 @@ class ScopeContextManager(object):
         self, scope: Scope, current_module: torch.nn.Module, current_module_path: str
     ):
         super().__init__()
-        self.prev_module_type = scope.module_type
-        self.prev_module_path = scope.module_path
+        self._prev_scope = Scope("", None)
+        self._prev_scope.module_type = scope.module_type
+        self._prev_scope.module_path = scope.module_path
         self.scope = scope
         self.scope.module_path = current_module_path
         self.scope.module_type = type(current_module)
@@ -66,8 +69,8 @@ class ScopeContextManager(object):
         return
 
     def __exit__(self, *args):
-        self.scope.module_path = self.prev_module_path
-        self.scope.module_type = self.prev_module_type
+        self.scope.module_path = self._prev_scope.module_path
+        self.scope.module_type = self._prev_scope.module_type
         return
 
 
