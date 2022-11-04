@@ -51,18 +51,23 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
     # 2) Mutation in the graph
     mutated = False
     try:
-        if functorch.compile.config.use_functionalize:
-            # There are two problematic classes we still exclude for now with
-            # functionalization:
-            #   - data mutation of inputs (fixed when we stop recording the
-            #   copy_ directly into the graph)
-            #   - metadata mutation of inputs (fixed if we do an extra partition
-            #   to avoid AotAutograd on the mutated inputs, or if we some how
-            #   get custom autograd function to reflect metadata changes to the
-            #   original tensor)
-            mutated = has_mutation(gm, example_inputs, inputs_only=True)
+        if not torch.is_inference_mode_enabled():
+            if functorch.compile.config.use_functionalize:
+                # There are two problematic classes we still exclude for now with
+                # functionalization:
+                #   - data mutation of inputs (fixed when we stop recording the
+                #   copy_ directly into the graph)
+                #   - metadata mutation of inputs (fixed if we do an extra partition
+                #   to avoid AotAutograd on the mutated inputs, or if we some how
+                #   get custom autograd function to reflect metadata changes to the
+                #   original tensor)
+                mutated = has_mutation(gm, example_inputs, inputs_only=True)
+            else:
+                mutated = has_mutation(gm, example_inputs)
         else:
-            mutated = has_mutation(gm, example_inputs)
+            log.info(
+                "inference_mode enabled. TorchDynamo could not check for mutation."
+            )
     except NotImplementedError as e:
         if "SparseTensorImpl" not in str(e):
             # TODO - TorchDynamo mutation analysis cannot handle sparse tensors.
