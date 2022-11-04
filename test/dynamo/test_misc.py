@@ -2761,6 +2761,35 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             dynamo_result = graph(x)
             self.assertTrue(same(real, dynamo_result))
 
+    def test_error_on_nested_fx_trace(self):
+        input = torch.rand(2, 3)
+
+        def f(x):
+            x + x
+
+        real = f(input)
+
+        optimized = torch._dynamo.optimize("eager")(f)
+        self.assertTrue(same(optimized(input), real))
+
+        with self.assertRaisesRegex(RuntimeError, "Detected that you are using FX"):
+            gm = torch.fx.symbolic_trace(optimized)
+
+    def test_inference_mode(self):
+        @torch.inference_mode()
+        def func(x, y):
+            return x.add(1.0) + y
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=True)
+        ref = func(x, y)
+        opt_func = torch._dynamo.optimize("eager")(func)
+
+        x1 = torch.ones(4, requires_grad=True)
+        res = opt_func(x1, y)
+        self.assertTrue(same(ref, res))
+        self.assertTrue(same(x, x1))
+
 
 class CustomFunc(torch.autograd.Function):
     @staticmethod
