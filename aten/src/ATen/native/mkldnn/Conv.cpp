@@ -238,8 +238,9 @@ Tensor _mkldnn_convolution(
     c10::optional<c10::string_view> algorithm = c10::nullopt) {
   ideep::attr_t op_attr = ideep::attr_t();
   if (attr != "none") {
-    auto it = fx_fusion_attr_map().find(attr);
-    TORCH_CHECK(it != fx_fusion_attr_map().end(), "Fusion behavior undefined.");
+    auto it = fusion_unary_attr_map().find(attr);
+    TORCH_CHECK(
+        it != fusion_unary_attr_map().end(), "Fusion behavior undefined.");
     op_attr = it->second(scalars, algorithm);
   }
   // See [Note: hacky wrapper removal for optional tensor]
@@ -313,6 +314,14 @@ Tensor mkldnn_convolution_pointwise(
       algorithm);
 }
 
+// Fuse convolution+binary_op+unary_op for good performance, which doing such
+// operation: output=unary_op(binary_op(conv(input_t, ...), other_t, alpha)).
+// The binary_attr means which binary_op is, it can be "add", or
+// other binary operation. the unary_attr means which unary_op is,
+// it can be "relu" or other unary operation, if it is none, meaning that
+// there doesn't have a unary post op. unary_scalars and unary_algorithm
+// are the parameters of the unary op, such as "hardtanh" has scalar parameters,
+// "gelu" has algorithm parameters.
 Tensor mkldnn_convolution_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
@@ -464,6 +473,14 @@ Tensor mkldnn_convolution_pointwise_binary(
   }
 }
 
+// Fuse convolution+binary_op+unary_op for good performance, which doing
+// such operation: other_t=unary_op(binary_op(conv(input_t, ...), other_t,
+// alpha)). The binary_attr means which binary_op is, it can be "add", or other
+// binary operation. the unary_attr means which unary_op is, it can be "relu" or
+// other unary operation, if it is none, meaning that there doesn't have a unary
+// post op. unary_scalars and unary_algorithm are the parameters of the unary
+// op, such as "hardtanh" has scalar parameters "gelu" has algorithm parameters.
+
 Tensor& mkldnn_convolution_pointwise_binary_(
     const Tensor& input_t,
     Tensor& other_t,
@@ -484,13 +501,13 @@ Tensor& mkldnn_convolution_pointwise_binary_(
       "mkldnn_convolution_add_: currently only support 2d and 3d")
   TORCH_CHECK(
       binary_attr == "add",
-      "mkldnn_convolution_pointwise_binary_: currently only add inplace fusion")
+      "mkldnn_convolution_pointwise_binary_: only support binary op fusion")
   TORCH_CHECK(
       !alpha.has_value() || alpha.value().to<float>() == 1.0,
-      "mkldnn_convolution_pointwise_binary: the alpha value should be none or 1.0");
+      "mkldnn_convolution_pointwise_binary: the alpha value for the binary op should be none(meaning 1.0) or 1.0");
   TORCH_CHECK(
       !unary_attr.has_value() || unary_attr.value() == "relu",
-      "mkldnn_convolution_pointwise_binary: the unary_attr value should be none or relu");
+      "mkldnn_convolution_pointwise_binary: only support none or relu unary op fusion after binary op");
 
   c10::MaybeOwned<Tensor> bias_maybe_owned =
       at::borrow_from_optional_tensor(bias_opt);

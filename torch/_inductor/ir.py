@@ -6,6 +6,7 @@ import logging
 import re
 import textwrap
 from collections import OrderedDict
+from contextlib import nullcontext
 from enum import Enum
 from functools import partial
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Union
@@ -29,6 +30,7 @@ from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
+aten = torch.ops.aten
 
 
 def inverse_reorder(order):
@@ -378,6 +380,11 @@ class ReductionHint(Enum):
     OUTER = 1
     OUTER_TINY = 2
     DEFAULT = 3
+
+
+class TileHint(Enum):
+    SQUARE = 0
+    DEFAULT = 1
 
 
 @dataclasses.dataclass
@@ -2890,12 +2897,25 @@ class FallbackKernel(ExternKernelAlloc):
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
-        (
-            example_output,
-            tensor_args,
-            non_tensor_args,
-            unflatten_args,
-        ) = cls.process_kernel(kernel, *args, **kwargs)
+        fake_incorrect_kernels = (
+            aten._fft_r2c.default,
+            aten._fft_r2c.out,
+            aten._fft_c2r.default,
+            aten._fft_c2c.default,
+            aten._fft_c2c.out,
+            aten._linalg_svd.default,
+            aten._linalg_svd.U,
+        )
+        context = (
+            FakeTensorMode if kernel not in fake_incorrect_kernels else nullcontext
+        )
+        with context():
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+            ) = cls.process_kernel(kernel, *args, **kwargs)
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(
