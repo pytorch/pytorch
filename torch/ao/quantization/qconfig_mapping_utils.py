@@ -1,5 +1,5 @@
 import re
-from typing import Dict, Callable, Union
+from typing import Dict, Callable, Union, List
 
 from .utils import (
     _get_combined_dict,
@@ -12,7 +12,7 @@ from .qconfig import QConfigAny
 from .qconfig_mapping import QConfigMapping
 
 
-__all__ = [
+__all__: List[str] = [
 ]
 
 
