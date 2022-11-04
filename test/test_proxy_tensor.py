@@ -316,8 +316,8 @@ class TestGenericProxyTensor(TestCase):
 
 def forward(self, x_1):
     zeros = torch.ops.aten.zeros.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    copy_ = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
-    return copy_
+    copy_ = torch.ops.aten.copy_.default(zeros, x_1);  x_1 = None
+    return zeros
     """)
 
     def test_make_fx_reentrant_dispatch(self):
