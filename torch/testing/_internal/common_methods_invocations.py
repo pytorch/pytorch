@@ -15558,7 +15558,7 @@ op_db: List[OpInfo] = [
             # Dispatches in Python to vector_norm. Not sure how to make this test happy
             # Happens to pass on complex64. Also a mystery
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                         dtypes=(torch.float32,)),)
+                         dtypes=(torch.float32,))
         ),
     ),
     OpInfo('t',
