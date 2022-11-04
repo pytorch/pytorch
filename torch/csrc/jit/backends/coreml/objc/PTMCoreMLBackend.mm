@@ -88,9 +88,14 @@ GenericList pack_outputs(const std::vector<TensorSpec>& output_specs, id<MLFeatu
       tensor.data_ptr<float>(),
       (float*)val.multiArrayValue.dataPointer,
       count * sizeof(float));
-    outputs.push_back(tensor);
+    outputs.push_back(std::move(tensor));
   }
-  return c10::impl::toList(outputs);
+  if(output_specs.size() > 1){
+    c10::List<c10::List<torch::Tensor>> output_res;
+    output_res.push_back(std::move(outputs));
+    return c10::impl::toList(std::move(output_res));
+  }
+  return c10::impl::toList(std::move(outputs));
 }
 
 class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
