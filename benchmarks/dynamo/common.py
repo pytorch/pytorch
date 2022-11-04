@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import collections
-from contextlib import contextmanager
 import copy
 import csv
 import functools
@@ -14,14 +13,15 @@ import subprocess
 import sys
 import time
 import warnings
+from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
 import torch
 
-import torch.distributed
 import torch._dynamo
 import torch._dynamo.utils
+import torch.distributed
 from microbenchmarks.operator_inp_utils import OperatorInputsMode
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.optimizations import backends
@@ -34,6 +34,7 @@ from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map
+
 try:
     from functorch._src.aot_autograd import set_model_name
 except ImportError:
@@ -788,6 +789,7 @@ def maybe_fresh_cache(fn, is_cold_start):
 
     return inner
 
+
 @contextmanager
 def maybe_init_distributed(should_init_distributed, rank=0, world_size=1):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
@@ -795,14 +797,15 @@ def maybe_init_distributed(should_init_distributed, rank=0, world_size=1):
     try:
         if should_init_distributed:
             torch.cuda.set_device(rank)
-            os.environ['MASTER_ADDR'] = 'localhost'
-            os.environ['MASTER_PORT'] = '6789'
-            torch.distributed.init_process_group("nccl", rank=rank, world_size=world_size)
+            os.environ["MASTER_ADDR"] = "localhost"
+            os.environ["MASTER_PORT"] = "6789"
+            torch.distributed.init_process_group(
+                "nccl", rank=rank, world_size=world_size
+            )
         yield
     finally:
         if should_init_distributed:
             torch.distributed.destroy_process_group()
-
 
 
 def xla_wrapper(model_iter_fn):
@@ -1116,7 +1119,9 @@ class BenchmarkRunner:
             try:
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
 
-                new_result = optimized_model_iter_fn(deepcopy_and_maybe_ddp(model), example_inputs)
+                new_result = optimized_model_iter_fn(
+                    deepcopy_and_maybe_ddp(model), example_inputs
+                )
             except Exception as e:
                 accuracy_status = "fail_to_run"
                 print(
@@ -1563,6 +1568,7 @@ def main(runner, original_dir=None):
             runner, args, original_dir
         )
 
+
 def run(runner, args, original_dir=None):
     # Pass the parsed args object to benchmark runner object
     runner.args = args
@@ -1587,7 +1593,12 @@ def run(runner, args, original_dir=None):
                 else CI_SKIP_INDCUTOR_INFERENCE
             )
     if args.ddp:
-        assert args.accuracy, "TODO: hook DDP support to --speedup mode"
+        # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
+        # but just to measure impact on singlenode of performing graph-breaks.
+        # Left it as a follow up to keep this PR isolated.
+        assert (
+            args.accuracy
+        ), "DDP benchmark is currently only hooked up to --accuracy bench"
         assert args.training, "DDP benchmark requires --training mode"
         torch._dynamo.config.optimize_ddp = True
 
