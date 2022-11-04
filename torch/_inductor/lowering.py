@@ -164,6 +164,11 @@ def _register_lowering(
             args = args[0]
         # Only look at args that are Tensors
         indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
+
+        # explicitly assert for "out=" ops for better error messages
+        assert not any(
+            x == "out" for x in kwargs.keys()
+        ), "out= ops aren't yet supported"
         # kwargs tensors not supported yet
         assert not any(isinstance(x, TensorBox) for x in kwargs.values())
 
@@ -3121,6 +3126,8 @@ def pow(a, b):
         ), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
+    elif isinstance(b, float) and b == 0.5:
+        return sqrt(a)
     elif isinstance(b, int) and b == 1:
         return a
     elif isinstance(b, int) and -32 < b < 32:

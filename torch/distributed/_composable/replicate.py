@@ -1,8 +1,10 @@
+from typing import List, Tuple
+
 import torch
 import torch.nn as nn
-from . import _ddp
 
-from typing import List, Tuple
+from . import _ddp
+from .contract import contract
 
 
 class DistributedState:
@@ -18,14 +20,17 @@ class ReplicateState(DistributedState):
     def mark_modules(self, *modules: nn.Module) -> None:
         for module in modules:
             self.modules.append(module)
-            # TODO(@yhcharles): do not directly set attribute
-            module._distributed_state = self  # type: ignore[assignment]
+            replicate.state(module)._distributed_state = self
+            replicate.state(module)._params_collected = False
 
     def _recursive_collect_params(self, module: nn.Module) -> None:
-        if (
-            getattr(module, "_distributed_state", None) is not None
-        ):  # managed by another API
+        # TODO: skip if managed by other APIs
+
+        if replicate.state(module) is None or getattr(
+            replicate.state(module), "_param_collected", False
+        ):
             return
+        replicate.state(module)._param_collected = True
 
         self._param_list.extend(
             param for param in module.parameters() if param.requires_grad
@@ -62,9 +67,11 @@ class ReplicateState(DistributedState):
 _default_state = ReplicateState()
 
 
+@contract
 def replicate(
-    *modules: nn.Module, dist_state: ReplicateState = _default_state
-) -> None:
+    module: nn.Module,  # NOTE: contract now supports single module only
+    dist_state: ReplicateState = _default_state,
+) -> nn.Module:
     r"""Replicates module(s)
 
     Args:
@@ -74,12 +81,13 @@ def replicate(
         >>> module = nn.Linear(3, 3)
         >>> replicate(module)
     """
-    dist_state.mark_modules(*modules)
+    dist_state.mark_modules(module)
+    return module
 
 
 def mark_root_module(
     module: nn.Module, dist_state: ReplicateState = _default_state
-) -> None:
+) -> nn.Module:
     r"""Mark the root module. Its sub-modules can be replicated.
 
     Args:
@@ -94,3 +102,4 @@ def mark_root_module(
     module.register_forward_hook(
         dist_state.root_module_forward_post_hook  # type: ignore[arg-type]
     )
+    return module
