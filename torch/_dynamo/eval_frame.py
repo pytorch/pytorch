@@ -240,7 +240,6 @@ def catch_errors_wrapper(callback):
                 with compile_lock:
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
-                        parameters_to_ignore=ddp_module.parameters_to_ignore,
                         backend_compile_fn=callback._torchdynamo_orig_callable,
                     )
                     hijacked_callback = convert_frame.convert_frame(
