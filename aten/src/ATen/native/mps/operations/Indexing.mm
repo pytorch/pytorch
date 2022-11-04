@@ -645,11 +645,14 @@ Tensor embedding_dense_backward_mps(
 
             MPSGraphTensor* indicesTensor = native_mps::mpsGraphUnrankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(indices.scalar_type()));
 
-            MPSGraphTensor *reshapedIndicesTensor = [mpsGraph  expandDimsOfTensor:indicesTensor
-                             axes:@[@-1]
-                             name:nil];
+            MPSGraphTensor* reshapedIndicesTensor = indicesTensor;
 
-            MPSGraphTensor *outgoingGradTensor;
+            if (num_indices_dims != 0)
+              reshapedIndicesTensor = [mpsGraph  expandDimsOfTensor:indicesTensor
+                              axes:@[@-1]
+                              name:nil];
+
+            MPSGraphTensor* outgoingGradTensor;
             outgoingGradTensor = [mpsGraph scatterNDWithUpdatesTensor:incomingGradTensor
                             indicesTensor:reshapedIndicesTensor
                                     shape:native_mps::getMPSShape(IntArrayRef(outgoing_gradient_shape.data(), outgoing_gradient_shape.size()))
