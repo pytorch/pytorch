@@ -45,6 +45,21 @@ class TestNvFuserDynamo(TestCase):
         eager_result = func.__wrapped__(input1, input2)
         self.assertEqual(eager_result, nvfuser_result)
 
+    def test_dtype_correctness(self):
+        input1 = make_tensor((2, 4, 8), device="cuda", dtype=torch.float32)
+
+        @torchdynamo.optimize("nvprims_nvfuser")
+        def func(a):
+            tmp = a + 1.0
+            return self.where(tmp > 0, tmp, 0.0)
+
+        # No warnings and no errors
+        with warnings.catch_warnings(record=True) as w:
+            nvfuser_result = func(input1)
+            self.assertEqual(len(w), 0)
+        eager_result = func.__wrapped__(input1)
+        self.assertEqual(eager_result, nvfuser_result)
+
 
 if __name__ == "__main__":
     run_tests()
