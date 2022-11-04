@@ -11,10 +11,10 @@ import torch
 
 from torch._prims_common import (
     DimsSequenceType,
+    elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     getnvFuserDtype,
     make_contiguous_strides_for,
-    reduction_dtypes,
     REDUCTION_OUTPUT_TYPE_KIND,
     ShapeType,
     TensorLikeType,
