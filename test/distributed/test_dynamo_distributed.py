@@ -411,7 +411,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         check_splits_compiler = CheckSplitsCompiler()
         ddp_optimizer = DDPOptimizer(
             bucket_bytes_cap=ddp_m.bucket_bytes_cap,
-            parameter_ids_to_ignore=parameter_ids_to_ignore,
             backend_compile_fn=check_splits_compiler.compile_fn
         )
 

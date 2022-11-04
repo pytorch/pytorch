@@ -26,8 +26,10 @@ def args_str(args):
 class Bucket:
     size: int = 0
     params: List[str] = field(default_factory=list)
-    param_ids: List = field(default_factory=list)
     nodes: List[fx.Node] = field(default_factory=list)
+
+    # param_ids is just used for unit testing
+    param_ids: List = field(default_factory=list)
 
 
 def pretty_print_buckets(buckets: List[Bucket]):
@@ -55,7 +57,6 @@ class DDPOptimizer:
     def __init__(
         self,
         bucket_bytes_cap: int,
-        parameter_ids_to_ignore: List,
         backend_compile_fn,
         first_bucket_cap: Optional[int] = None,
     ):
@@ -72,11 +73,10 @@ class DDPOptimizer:
             self.first_bucket_cap <= self.bucket_bytes_cap
         ), "First bucket should be smaller/equal to other buckets to get comms warmed up ASAP"
 
-        self.parameter_ids_to_ignore = parameter_ids_to_ignore
         self.backend_compile_fn = backend_compile_fn
 
     def _ignore_parameter(self, parameter):
-        return id(parameter) in self.parameter_ids_to_ignore
+        return hasattr(parameter, "_ddp_ignored") and parameter._ddp_ignored
 
     def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
         """
