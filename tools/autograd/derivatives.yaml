@@ -2890,3 +2890,7 @@
 
 - name: special_spherical_bessel_j0(Tensor x) -> Tensor
   x: non_differentiable
+
+- name: _reshape_copy(Tensor self, SymInt[] size) -> Tensor
+  self: grad.reshape_symint(self.sym_sizes())
+  result: auto_linear
