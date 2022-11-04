@@ -24,7 +24,7 @@ class TestWorkspace(unittest.TestCase):
         )
         workspace.ResetWorkspace()
 
-    def testRootFolder(self):
+    def testRootFolder(self):  # test
         self.assertEqual(workspace.ResetWorkspace(), True)
         self.assertEqual(workspace.RootFolder(), ".")
         self.assertEqual(workspace.ResetWorkspace("/tmp/caffe-workspace-test"), True)
