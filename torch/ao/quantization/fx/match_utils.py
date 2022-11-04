@@ -21,7 +21,7 @@ from torch.nn.utils.parametrize import type_before_parametrizations
 from typing import Any, Dict, List, Callable, Optional, Tuple, Type, Set
 
 
-__all__ = []
+__all__: List[str] = []
 
 # TODO(future PR): the 1st argument is typed as `List[Node]`, but a better type
 # would be a recursive `List[Union[Node, Tuple[Union[Node, ...]]]]`
