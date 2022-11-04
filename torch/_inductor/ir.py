@@ -2917,7 +2917,8 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        if isinstance(example_output, (list, tuple)):
+        example_output, example_output_spec = pytree.tree_flatten(example_output)
+        if not isinstance(example_output_spec, pytree.LeafSpec):
             packed = FallbackKernel(
                 MultiOutputLayout(tensor_args[0].get_device()),
                 kernel,
@@ -2925,7 +2926,7 @@ class FallbackKernel(ExternKernelAlloc):
                 non_tensor_args,
                 unflatten_args,
             )
-            return [
+            example_output = [
                 (
                     MultiOutput(
                         FixedLayout(
@@ -2943,19 +2944,23 @@ class FallbackKernel(ExternKernelAlloc):
                 for i in range(len(example_output))
             ]
         else:
-            return FallbackKernel(
-                FixedLayout(
-                    example_output.device,
-                    example_output.dtype,
-                    [sympy.Integer(s) for s in example_output.size()],
-                    [sympy.Integer(s) for s in example_output.stride()],
-                ),
-                kernel,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                kwargs,
-            )
+            example_output = [
+                FallbackKernel(
+                    FixedLayout(
+                        example_output[0].device,
+                        example_output[0].dtype,
+                        [sympy.Integer(s) for s in example_output[0].size()],
+                        [sympy.Integer(s) for s in example_output[0].stride()],
+                    ),
+                    kernel,
+                    tensor_args,
+                    non_tensor_args,
+                    unflatten_args,
+                    kwargs,
+                )
+            ]
+
+        return example_output, example_output_spec
 
     def apply_constraint(self):
         return super().apply_constraint()
