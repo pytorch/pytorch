@@ -58,6 +58,10 @@ def fuse_reindexing(reindex1, reindex2):
     return reindex
 
 
+def sorted_indices(li):
+    return [b[0] for b in sorted(enumerate(li), key=lambda i: i[1])]
+
+
 def stride_order2fill_order(order):
     """
     Convert stride order to fill order
@@ -102,6 +106,25 @@ def reads_from_conv(buf, var_ranges):
             if read_from_conv:
                 return True, addr
     return False, None
+
+
+def ir_node_to_tensor(x, guard_shape=True):
+    shape_fn = (
+        V.graph.sizevars.guard_static_shape
+        if guard_shape
+        else V.graph.sizevars.size_hint
+    )
+    size = [shape_fn(s) for s in x.get_size()]
+    if is_storage_and_layout(x):
+        stride = [shape_fn(s) for s in x.get_layout().stride]
+    else:
+        stride = torch._prims_common.make_contiguous_strides_for(size)
+    dtype = x.get_dtype()
+    device = x.get_device()
+    t = torch.empty_strided(
+        size=size, stride=stride, dtype=dtype, device=device
+    ).zero_()
+    return t
 
 
 def layout_priority_idx(reads_bufs, memory_addrs, var_ranges):
@@ -2242,7 +2265,13 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
-    def process_kernel(cls, kernel, *args, **kwargs):
+    def process_kernel(
+        cls,
+        kernel,
+        freeze_inputs,
+        *args,
+        **kwargs,
+    ):
         args_flat, args_spec = pytree.tree_flatten(args)
 
         is_arg_tensor = []
@@ -2266,29 +2295,22 @@ class ExternKernel(InputsKernel):
                     new_args.append(next(it_non_tensors))
             return pytree.tree_unflatten(new_args, args_spec)
 
-        tensor_args = [cls.realize_input(x) for x in tensor_args]
+        if freeze_inputs:
+            tensor_args = [cls.realize_input(x) for x in tensor_args]
 
-        # freeze layout otherwise our output stride calculation might
-        # become incorrect
-        for x in tensor_args:
-            if is_storage_and_layout(x):
-                as_storage_and_layout(x, freeze=True)
+            # freeze layout otherwise our output stride calculation might
+            # become incorrect
+            for x in tensor_args:
+                if is_storage_and_layout(x):
+                    as_storage_and_layout(x, freeze=True)
 
         # We don't have generic shape formulas, so just burn in the
         # shapes and run an example input.
         # TODO(jansel): replace this with dynamic shape formulas
         example_args = []
+
         for x in tensor_args:
-            size = [V.graph.sizevars.guard_static_shape(s) for s in x.get_size()]
-            stride = [
-                V.graph.sizevars.guard_static_shape(s) for s in x.get_layout().stride
-            ]
-            dtype = x.get_dtype()
-            device = x.get_device()
-            arg = torch.empty_strided(
-                size=size, stride=stride, dtype=dtype, device=device
-            ).zero_()
-            example_args.append(arg)
+            example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
         example_output = kernel(
             *unflatten_args(example_args, non_tensor_args), **kwargs
@@ -2381,22 +2403,27 @@ class ExternKernel(InputsKernel):
     @classmethod
     def require_stride_order(cls, x, order):
         # require x to have the layout as strided_ordered as order
-        if isinstance(
-            x.get_layout(), FlexibleLayout
-        ) and is_stride_order_storage_and_layout(x, order):
-            # fix flexiblelayout to be FixedLayout with stride_order
-            as_storage_and_layout(
-                x, freeze=True, want_contiguous=False, stride_order=order
-            )
-            return x
-        elif isinstance(x.get_layout(), FixedLayout) and x.layout.is_stride_ordered(
-            order
-        ):
-            return x
+        if is_storage_and_layout(x):
+            if isinstance(
+                x.get_layout(), FlexibleLayout
+            ) and is_stride_order_storage_and_layout(x, order):
+                # fix flexiblelayout to be FixedLayout with stride_order
+                as_storage_and_layout(
+                    x, freeze=True, want_contiguous=False, stride_order=order
+                )
+                return x
+            elif isinstance(
+                x.get_layout(), FixedLayout
+            ) and x.get_layout().is_stride_ordered(order):
+                return x
         x = cls.copy_input(x)
         as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
         assert is_stride_order_storage_and_layout(x, order)
         return x
+
+    @classmethod
+    def require_contiguous(cls, x):
+        return cls.require_stride_order(cls, list(reversed(range(len(x.get_size)))))
 
     def apply_constraint(self):
         pass
@@ -2813,43 +2840,6 @@ class DynamicScalar(IRNode):
         return ()
 
 
-class AdaptiveAvgPool2d(ExternKernelAlloc):
-    kernel = "aten._adaptive_avg_pool2d"
-
-    @classmethod
-    def create(cls, x, target_size):
-        # x = cls.require_stride1(cls.realize_input(x))
-        x = cls.realize_input(x)
-        output_size = [
-            *x.get_size()[: -len(target_size)],
-            *map(sympy.Integer, target_size),
-        ]
-        # contigouse stride order
-        stride_order = list(reversed(range(len(output_size))))
-        return cls(
-            FlexibleLayout(
-                x.get_device(),
-                x.get_dtype(),
-                output_size,
-                # TODO(jansel): fix channels last case
-                # FlexibleLayout.contiguous_strides(output_size),
-                stride_order,
-            ),
-            (x,),
-            (tuple(target_size),),
-        )
-
-    def apply_constraint(self):
-        x = self.inputs[0]
-        if isinstance(x.get_layout(), FixedLayout):
-            # fix self's layout to be the same order as x
-            self.freeze_layout_with_same_order(x.get_layout().stride)
-        else:
-            x = self.require_stride_order(x, self.layout.preferred_stride_order)
-            self.inputs[0] = x
-            self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
-
-
 @dataclasses.dataclass
 class FallbackKernel(ExternKernelAlloc):
     def __init__(
@@ -2915,7 +2905,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-            ) = cls.process_kernel(kernel, *args, **kwargs)
+            ) = cls.process_kernel(kernel, True, *args, **kwargs)
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(
@@ -3021,8 +3011,8 @@ class Convolution(ExternKernelAlloc):
         output_padding_: List[int],
         groups: int,
     ):
-        x = cls.require_stride1(cls.realize_input(x))
         weight = cls.require_stride1(cls.realize_input(weight))
+        x = cls.require_stride_order(x, sorted_indices(weight.get_stride()))
         stride = tuple(stride_)
         padding = tuple(padding_)
         dilation = tuple(dilation_)
@@ -3035,6 +3025,7 @@ class Convolution(ExternKernelAlloc):
         with FakeTensorMode():
             output, *_ = cls.process_kernel(
                 torch.ops.aten.convolution,
+                True,
                 x,
                 weight,
                 bias,

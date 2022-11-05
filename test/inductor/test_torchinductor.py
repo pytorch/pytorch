@@ -4308,6 +4308,35 @@ if HAS_CPU:
     CommonTemplate.install(CpuTests, "cpu")
 
     class CPUReproTests(TestCase):
+        def test_conv_stride_constraints(self):
+            # TorchDispatch doesn't work in our cuda invocation for some reason
+            m = torch.nn.Conv2d(5, 6, [3, 3])
+
+            def fn(inp, weight):
+                return (
+                    F.conv2d(
+                        inp, weight, None, m.stride, m.padding, m.dilation, m.groups
+                    ),
+                )
+
+            inp = torch.randn([2, 5, 16, 16])
+            inps = [inp, m.weight.to(memory_format=torch.channels_last)]
+            fn_fx = make_fx(fn)(*inps)
+            fn_compiled = compile_fx_inner(fn_fx, inps)
+            functions = []
+
+            class RecordFunctions(TorchDispatchMode):
+                def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                    kwargs = kwargs if kwargs else {}
+                    functions.append(func)
+                    return func(*args, **kwargs)
+
+            with RecordFunctions():
+                out = fn_compiled(inps)
+
+            self.assertTrue(out[0].is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(torch.ops.aten.copy_ not in functions)
+
         def test_inplace_squeeze_needed(self):
             mod = torch.nn.Sequential(
                 torch.nn.Linear(10, 10),
