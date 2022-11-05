@@ -7540,6 +7540,20 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # storage to a single storage would cause RuntimeError to be thrown
         self.assertRaises(RuntimeError, lambda: torch.zeros(1, 6).expand(5, 6).copy_(torch.zeros(5, 6)))
 
+    def test_copy_from_smaller_src_float16(self):
+        # https://github.com/pytorch/pytorch/issues/88543
+        # fbgemm APIs were used incorrectly in copy_impl. For example,
+        # fbgemm::Float16ToFloat_ref only considers the number of elements in
+        # out. If src doesn't have enough elements, the function will read out
+        # of bounds from src. The dtype of src is float16 here so that it goes
+        # through the code path that used to crash.
+        src = torch.empty((0, 2, 3), dtype=torch.float16)  # 0 elems
+        out = torch.empty(1, dtype=torch.complex64)  # 1 elem
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "Tensors must have the same number of elements, but got self: 1 and src: 0"):
+            out.real = src
+
     # FIXME: Port to a more appropriate test suite
     def _test_to_with_layout(self, layout):
         def test_copy_behavior(t, non_blocking=False):

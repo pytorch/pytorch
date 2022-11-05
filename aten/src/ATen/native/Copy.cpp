@@ -119,6 +119,13 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
+  // Make sure we don't go out of bounds in src while copying into self. For
+  // example, fbgemm::Float16ToFloat_ref only considers the size of self and
+  // assumes there's enough elements in src, which might not be the case.
+  TORCH_CHECK(
+    self.numel() == src.numel(),
+    "Tensors must have the same number of elements, but got ",
+    "self: ", self.numel(), " and src: ", src.numel());
 
   // FBGeMM kernel support exists only for the following case,
   // 1. Memory Format for source and destination tensors is contiguous.
