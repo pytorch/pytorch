@@ -178,6 +178,33 @@ def cache_on_self(fn):
     return wrapper
 
 
+def get_kernel_name(node_schedule):
+    OP_EXCLUDES = {"placeholder"}
+    return "_".join(
+        ["kernel", "fused"]
+        + [
+            str(origin.name)
+            for origin in functools.reduce(
+                operator.or_, [node.node.origins for node in node_schedule]
+            )
+            if origin.op not in OP_EXCLUDES
+        ]
+    )
+
+
+def gather_origins(args, kwargs):
+    import itertools
+
+    from .ir import ComputedBuffer, IRNode
+
+    def is_unrealized_node(n):
+        return isinstance(n, IRNode) and isinstance(n, ComputedBuffer)
+
+    kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
+    arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
+    return set(itertools.chain(*arg_origins, *kwarg_origins))
+
+
 def sympy_str(expr: sympy.Expr):
     """
     Normal sympy str is very slow, this is a lot faster.  The result are

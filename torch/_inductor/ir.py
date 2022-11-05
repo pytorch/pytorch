@@ -3503,6 +3503,7 @@ class StorageBox(MutableBox):
             data=self.data,
         )
         self.data.name = V.graph.register_buffer(self.data)
+        self.data.origins = self.origins
         return self.data.name
 
     def realize_hint(self):
