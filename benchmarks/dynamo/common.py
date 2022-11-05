@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import warnings
+from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
@@ -20,6 +21,7 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.utils
+import torch.distributed
 from microbenchmarks.operator_inp_utils import OperatorInputsMode
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.optimizations import backends
@@ -30,6 +32,7 @@ from torch._dynamo.utils import clone_inputs
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map
 
 try:
@@ -787,6 +790,24 @@ def maybe_fresh_cache(fn, is_cold_start):
     return inner
 
 
+@contextmanager
+def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_size=1):
+    # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
+    # Just manually implement the most important part of the dynamo behavior to reset/clear.
+    try:
+        if should_init_distributed:
+            torch.cuda.set_device(rank)
+            os.environ["MASTER_ADDR"] = "localhost"
+            os.environ["MASTER_PORT"] = port
+            torch.distributed.init_process_group(
+                "nccl", rank=rank, world_size=world_size
+            )
+        yield
+    finally:
+        if should_init_distributed:
+            torch.distributed.destroy_process_group()
+
+
 def xla_wrapper(model_iter_fn):
     """
     Wrap the model_iter_fn to run the model on XLA devices.
@@ -1045,12 +1066,18 @@ class BenchmarkRunner:
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip")
 
+        def deepcopy_and_maybe_ddp(model):
+            model = copy.deepcopy(model)
+            if self.args.ddp:
+                model = DDP(model)
+            return model
+
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
         try:
             fp64_outputs = self.run_n_iterations(
                 *cast_to_fp64(
-                    copy.deepcopy(model),
+                    deepcopy_and_maybe_ddp(model),
                     clone_inputs(example_inputs),
                 )
             )
@@ -1062,20 +1089,19 @@ class BenchmarkRunner:
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
-
         accuracy_status = "pass"
 
         with self.pick_grad(name, self.args.training):
             # Get results of native pytorch
             reset_rng_state()
             correct_result = self.run_n_iterations(
-                copy.deepcopy(model), clone_inputs(example_inputs)
+                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
             )
 
             # Rerun native pytorch
             reset_rng_state()
             correct_rerun_result = self.run_n_iterations(
-                copy.deepcopy(model), clone_inputs(example_inputs)
+                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
             )
             if not same(
                 correct_result,
@@ -1092,7 +1118,10 @@ class BenchmarkRunner:
             torch._dynamo.reset()
             try:
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                new_result = optimized_model_iter_fn(model, example_inputs)
+
+                new_result = optimized_model_iter_fn(
+                    deepcopy_and_maybe_ddp(model), example_inputs
+                )
             except Exception as e:
                 accuracy_status = "fail_to_run"
                 print(
@@ -1364,6 +1393,21 @@ def parse_args():
         help="Performs training",
     )
     parser.add_argument(
+        "--ddp",
+        action="store_true",
+        help="Wraps model in DDP before running it, and uses dynamo DDPOptmizer (graph breaks) by default.",
+    )
+    parser.add_argument(
+        "--no-optimize-ddp",
+        action="store_true",
+        help="Disables dynamo DDPOptimizer (graph breaks). (Applies only when using --ddp benchmark mode).",
+    )
+    parser.add_argument(
+        "--distributed-master-port",
+        default="6789",
+        help="Port to bind for for torch.distributed.  Use the default unless it's conflicting with another user",
+    )
+    parser.add_argument(
         "--dynamic-shapes",
         action="store_true",
         help="Runs a dynamic shapes version of the benchmark, if available.",
@@ -1529,9 +1573,12 @@ def parse_args():
 
 def main(runner, original_dir=None):
     args = parse_args()
-    return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
-        runner, args, original_dir
-    )
+    with maybe_init_distributed(
+        args.ddp and args.only, port=args.distributed_master_port
+    ):
+        return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
+            runner, args, original_dir
+        )
 
 
 def run(runner, args, original_dir=None):
@@ -1557,6 +1604,19 @@ def run(runner, args, original_dir=None):
                 if args.training
                 else CI_SKIP_INDCUTOR_INFERENCE
             )
+    if args.ddp:
+        # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
+        # but just to measure impact on singlenode of performing graph-breaks.
+        # Left it as a follow up to keep this PR isolated.
+        assert (
+            args.accuracy
+        ), "DDP benchmark is currently only hooked up to --accuracy bench"
+        assert args.training, "DDP benchmark requires --training mode"
+        if args.no_optimize_ddp:
+            torch._dynamo.config.optimize_ddp = False
+        else:
+            # TODO(whc) after enabling DDPOptimizer by default this could be removed or assert
+            torch._dynamo.config.optimize_ddp = True
 
     if args.accuracy:
         # Use small batch size. We use >1 batch size to ensure we test

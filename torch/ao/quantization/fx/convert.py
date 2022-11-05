@@ -98,7 +98,7 @@ def _has_none_qconfig(node: Argument, node_name_to_qconfig: Dict[str, QConfigAny
     """
     return isinstance(node, Node) and node.name in node_name_to_qconfig and node_name_to_qconfig[node.name] is None
 
-def _restore_st_run_weight_observers(observed: GraphModule, backend_config: BackendConfig) -> None:
+def _run_weight_observers(observed: GraphModule, backend_config: BackendConfig) -> None:
     """ Extract the subgraph that produces the weight for dynamic quant
     or weight only quant node and run the subgraph to observe the weight.
     Note that the observers of dynamic quant or weight only quant ops are
@@ -583,7 +583,7 @@ def convert(
 
     # always run weight observers in the top level forward method
     # for dynamic quant ops or weight only quant ops
-    _restore_st_run_weight_observers(model, backend_config)
+    _run_weight_observers(model, backend_config)
 
     graph_inputs: List[str] = []
     for node in model.graph.nodes:
