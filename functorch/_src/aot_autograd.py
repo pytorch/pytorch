@@ -381,6 +381,7 @@ def _delta_to_eval_guard_func(delta, flat_args, shape_env, arg_name):
     # function
     expr_to_tensor_ref = {}
     printer = AOTAutogradGuardPrinter(expr_to_tensor_ref, arg_name, shape_env)
+
     def extract_tensor_refs(tensor_idx, tensor):
         def _record(tensor_ref):
             if tensor_ref.sym_expr not in expr_to_tensor_ref:
@@ -414,7 +415,7 @@ def _delta_to_eval_guard_func(delta, flat_args, shape_env, arg_name):
         extract_tensor_refs(idx, tensor)
 
     chained = shape_env.and_chain_guards(delta)
-    return  printer.doprint(chained)
+    return printer.doprint(chained)
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, shape_env):
@@ -441,7 +442,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, s
     @wraps(compiled_fw)
     def new_fn(args):
         nonlocal compiled_fw
-        if compiled_guard_expr is not None and eval(compiled_guard_expr) == False:
+        if compiled_guard_expr is not None and not eval(compiled_guard_expr):
             breakpoint()
             # Guard failure, recompile
             with context(), track_graph_compiling("inference"):
@@ -648,7 +649,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 if needs_recompile:
                     if CompiledFunction.compiled_fw in autograd_cache:
                         del autograd_cache[CompiledFunction.compiled_fw]
-                    aot_dispatch_autograd(CompiledFunction.compiled_flat_fn, deduped_flat_tensor_args, CompiledFunction.compiled_aot_config, CompiledFunction.compiled_shape_env)
+                    aot_dispatch_autograd(
+                        CompiledFunction.compiled_flat_fn,
+                        deduped_flat_tensor_args,
+                        CompiledFunction.compiled_aot_config,
+                        CompiledFunction.compiled_shape_env)
 
             fw_outs = call_func_with_args(
                 CompiledFunction.compiled_fw, deduped_flat_tensor_args, disable_amp=disable_amp
@@ -656,14 +661,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             num_outs = CompiledFunction.num_outs
             num_symints = CompiledFunction.num_symints
             # Partitioners must put symint arguments at the end separate from tensor arguments
-            to_save = None
             if num_symints > 0:
                 ctx.save_for_backward(*fw_outs[num_outs:-num_symints])
-                to_save = fw_outs[num_outs:-num_symints]
                 ctx.symints = fw_outs[-num_symints:]
             else:
                 ctx.save_for_backward(*fw_outs[num_outs:])
-                to_save = fw_outs[num_outs:]
                 ctx.symints = []
 
             fw_outs_not_requiring_grad = [
@@ -1121,7 +1123,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             return compiled_fn(args)
 
         return new_func
-    
+
     fn_call = functional_call
     fn_call.mod = mod
     compiled_f = aot_function_simplified(fn_call, *top_args, **top_kwargs)
