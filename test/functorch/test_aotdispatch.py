@@ -423,7 +423,7 @@ class TestAOTAutograd(AOTTestCase):
                 return x.clone()
 
             @staticmethod
-            def forward(ctx, grad_output):
+            def backward(ctx, grad_output):
                 return grad_output + 1
 
         def f(x):
@@ -1122,7 +1122,6 @@ symbolic_aot_autograd_failures = {
 
     # Deleting this in a followup
     xfail('nn.functional.feature_alpha_dropout', 'with_train'),
-    xfail('nn.functional.pad', 'circular'),
     xfail('nn.functional.poisson_nll_loss', ''),
 
     xfail('nn.functional._scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
