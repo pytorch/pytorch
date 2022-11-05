@@ -39,6 +39,9 @@ IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
     "numpy",
     "numpy.core",
     "numpy.core._multiarray_umath",
+    # FX GraphModule might depend on builtins module and users usually
+    # don't extern builtins. Here we import it here by default.
+    "builtins",
 ]
 
 
