@@ -2268,7 +2268,6 @@ class ExternKernel(InputsKernel):
     def process_kernel(
         cls,
         kernel,
-        freeze_inputs,
         *args,
         **kwargs,
     ):
@@ -2295,14 +2294,13 @@ class ExternKernel(InputsKernel):
                     new_args.append(next(it_non_tensors))
             return pytree.tree_unflatten(new_args, args_spec)
 
-        if freeze_inputs:
-            tensor_args = [cls.realize_input(x) for x in tensor_args]
+        tensor_args = [cls.realize_input(x) for x in tensor_args]
 
-            # freeze layout otherwise our output stride calculation might
-            # become incorrect
-            for x in tensor_args:
-                if is_storage_and_layout(x):
-                    as_storage_and_layout(x, freeze=True)
+        # freeze layout otherwise our output stride calculation might
+        # become incorrect
+        for x in tensor_args:
+            if is_storage_and_layout(x):
+                as_storage_and_layout(x, freeze=True)
 
         # We don't have generic shape formulas, so just burn in the
         # shapes and run an example input.
@@ -2905,7 +2903,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-            ) = cls.process_kernel(kernel, True, *args, **kwargs)
+            ) = cls.process_kernel(kernel, *args, **kwargs)
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(
@@ -3025,7 +3023,6 @@ class Convolution(ExternKernelAlloc):
         with FakeTensorMode():
             output, *_ = cls.process_kernel(
                 torch.ops.aten.convolution,
-                True,
                 x,
                 weight,
                 bias,
