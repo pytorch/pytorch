@@ -1548,7 +1548,7 @@ class DistributedDataParallel(Module, Joinable):
         dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
 
     def _register_fused_optim(
-        self, optim: Type, *args, optim_params=None, **kwargs
+        self, optim: Type, *args, optim_params=None, set_to_none=False, **kwargs
     ):
         r"""
             Registers an optimizer with DDP such that the optimization for a
@@ -1570,6 +1570,11 @@ class DistributedDataParallel(Module, Joinable):
                 to optimize, similar to `params` argument of traditional `torch.optim`
                 Optimizers. If this is omitted, all DDP model parameters will be
                 optimized.
+                set_to_none (bool): Sets gradients to None at the end of
+                backward. This is helpful if your workflow has a optimizer.step()
+                running and the user would like for it to be a no-op. Note that
+                this feature is currently incompatible with ``optim_params`` and
+                will set _all_ gradients to None.
                 **kwargs: (Dict[str, Any]): Keyword arguments to forward to `optim_cls`.
 
         .. warning ::
@@ -1612,7 +1617,12 @@ class DistributedDataParallel(Module, Joinable):
         from torch.distributed.algorithms._optimizer_overlap import (
             _as_overlapped_optim,
         )
-
+        if set_to_none:
+            if optim_params is not None:
+                warnings.warn(
+                    "DDP _register_fused_optim with set_to_none=True and specifying optim_params is not well supported currently. All parameter gradients will be set to None. Please file an issue if you need this support."
+                )
+            self.reducer._set_grads_to_none()
         overlapped_optim = _as_overlapped_optim(
             optim, optim_params, *args, **kwargs
         )

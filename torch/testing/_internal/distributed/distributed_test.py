@@ -4364,6 +4364,38 @@ class DistributedTest:
             # type if it didn't exist.
             self.assertEqual(ddp_logging_data.get("comm_hook", ""), "")
 
+        @sandcastle_skip_if(
+            BACKEND == "ucc",
+            "Does not work for UCC"
+        )
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_optim_fused_set_to_none(self):
+            torch.cuda.set_device(self.rank)
+            model = LargeNet()
+            inp = torch.randn(1, 1000, device='cuda')
+            model = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(),
+                device_ids=[self.rank],
+            )
+            model._register_fused_optim(
+                torch.optim.Adam,
+                set_to_none=True,
+            )
+            optim = torch.optim.Adam(model.parameters())
+            orig_params = copy.deepcopy(list(model.parameters()))
+            loss = model(inp).sum()
+            loss.backward()
+            for new_param, orig_param in zip(model.parameters(), orig_params):
+                # Optimizer should have ran, changing the params
+                self.assertNotEqual(new_param, orig_param)
+
+            # since set_to_none=True, optim.step() should be a noop and not
+            # modify params further.
+            updated_params = copy.deepcopy(list(model.parameters()))
+            optim.step()
+            for new_param, prev_param in zip(model.parameters(), updated_params):
+                self.assertEqual(new_param, prev_param)
+
         def _test_ddp_hook_with_optimizer_parity(
             self, grad_as_bucket_view, static_graph, optim_cls,
             optimize_subset, *functional_optim_args, **functional_optim_kwargs
@@ -4424,9 +4456,11 @@ class DistributedTest:
                         )
                     else:
                         # API where optim_params is omitted
+                        print(f"RV: set_to_none=True")
                         ddp_model_with_optimizer_hook._register_fused_optim(
                             optim_cls,
                             *functional_optim_args,
+                            set_to_none=True,
                             **functional_optim_kwargs,
                         )
 
@@ -4450,16 +4484,31 @@ class DistributedTest:
 
                     # Run optimizer with hook model.
                     for i in range(6):
-                        ddp_model_with_optimizer_hook.zero_grad()
+                        if optimize_subset:
+                            ddp_model_with_optimizer_hook.zero_grad()
                         out = ddp_model_with_optimizer_hook(inp)
                         loss = out.sum()
                         loss.backward()
+                        if not optimize_subset:
+                            # We passed set_to_none=True, so should be None
+                            # grads after backward.
+                            for name, param in (
+                                ddp_model_with_optimizer_hook.named_parameters()
+                            ):
+                                self.assertTrue(
+                                    param.grad is None,
+                                    f"{name} has non None grad when None is expected."
+                                )
+                            print("RV: validated")
 
                     dist.barrier()
 
                     # Run regular model.
                     for i in range(6):
-                        ddp_model_with_no_hook.zero_grad()
+                        if optimize_subset:
+                            ddp_model_with_no_hook.zero_grad()
+                        else:
+                            ddp_model_with_no_hook.zero_grad(set_to_none=True)
                         out = ddp_model_with_no_hook(inp)
                         loss = out.sum()
                         loss.backward()
@@ -4493,10 +4542,10 @@ class DistributedTest:
                         )
                     dist.barrier()
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl" or BACKEND == "ucc",
-            "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
-        )
+        # @sandcastle_skip_if(
+        #     BACKEND == "nccl" or BACKEND == "ucc",
+        #     "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
+        # )
         @skip_if_lt_x_gpu(2)
         @parametrize("grad_as_bucket_view", [True, False])
         @parametrize("static_graph", [True, False])

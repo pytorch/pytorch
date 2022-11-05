@@ -95,6 +95,8 @@ class TORCH_API Reducer {
   // Cannot combine with the call of `register_comm_hook`.
   void register_builtin_comm_hook(c10d::BuiltinCommHookType comm_hook_type);
 
+  void set_grads_to_none(bool set_to_none);
+
   // Runs allreduce or installed communication hook given GradBucket instance.
   c10::intrusive_ptr<c10::ivalue::Future> run_comm_hook(
       GradBucket& grad_bucket);
@@ -511,6 +513,7 @@ class TORCH_API Reducer {
   // Cached bucket index to model parameter mapping. Populated after buckets
   // are rebuilt after which this mapping is static.
   mutable std::unordered_map<size_t, std::vector<at::Tensor>> cached_variables_for_bucket_;
+  bool set_grads_to_none_{false};
 
   friend class Logger;
 };
