@@ -36,19 +36,6 @@ torch::lazy::Value MaybeExpand(
       /*is_scalar_expand=*/false);
 }
 
-std::vector<int64_t> GetExpandDimensions(
-    const torch::lazy::Shape& shape,
-    std::vector<int64_t> dimensions) {
-  TORCH_CHECK_GE(dimensions.size(), shape.dim()) << shape;
-  int64_t base = dimensions.size() - shape.dim();
-  for (size_t i = 0; i < shape.dim(); ++i) {
-    if (dimensions[base + i] == -1) {
-      dimensions[base + i] = shape.size(i);
-    }
-  }
-  return dimensions;
-}
-
 } // namespace
 
 //////////////////////////////////////////////////////////////////////////////
