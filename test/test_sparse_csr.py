@@ -61,8 +61,12 @@ binary_ops_with_dense_output = list(filter(lambda op: op.name in binary_function
 UNARY_EWISE_CSR_ALLOW_AUTOGRAD = [
     'abs',
     'conj_physical',
+    'deg2rad',
     'neg',
-    'positive'
+    'positive',
+    'frac',
+    'nn.functional.relu',
+    'log1p'
 ]
 
 # This should be just an import from test_linalg instead of code duplication
@@ -2475,6 +2479,9 @@ class TestSparseCSR(TestCase):
             raise ValueError("Expected at least one 2D tensor in samples.")
 
         for sample in samples:
+            # We must skip samples of low dimensionality, we can't covert them to sparsed compressed layouts
+            if sample.input.ndim < 2:
+                continue
             sparse_input = sample.input.to_sparse_csr().requires_grad_(True)
 
             def fn(input):
