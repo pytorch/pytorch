@@ -6,6 +6,7 @@ from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from torch.fx.experimental.proxy_tensor import is_sym_node
 import copy
+import math
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -330,12 +331,12 @@ class AOTConfig:
     num_params_buffers: int
 
 
-def _delta_to_eval_guard_func(delta, flat_args, shape_env):
+def _delta_to_eval_guard_func(delta, flat_args, shape_env, arg_name):
     # We saw new guards introduced here, disjoint from the ones installed
     # upstream. We need to extract the values out and write a check
     # function
     expr_to_tensor_ref = {}
-    printer = AOTAutogradGuardPrinter(expr_to_tensor_ref, "deduped_flat_tensor_args", shape_env)
+    printer = AOTAutogradGuardPrinter(expr_to_tensor_ref, arg_name, shape_env)
     def extract_tensor_refs(tensor_idx, tensor):
         def _record(tensor_ref):
             if tensor_ref.sym_expr not in expr_to_tensor_ref:
@@ -385,7 +386,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, s
     delta = shape_env.guards_not_overlapping(pre_dispatch_guards)
     compiled_guard_expr = None
     if len(delta) > 0:
-        compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env)
+        compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env, "args")
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
@@ -561,7 +562,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             compiled_fw_func.chained = None
             delta = shape_env.guards_not_overlapping(pre_dispatch_guards)
             if len(delta) > 0:
-                compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env)
+                compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env, "deduped_flat_tensor_args")
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
@@ -585,6 +586,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             if CompiledFunction.guard_expr is not None:
                 Eq = sympy.Eq
                 Ne = sympy.Ne
+                Mod = sympy.Mod
+                floor = math.floor
 
                 # A guard expr is installed, which we need to evaluate before execution
                 # in case we need to recompile
@@ -592,8 +595,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 if eval(CompiledFunction.guard_expr):
                     needs_recompile = False
                 if needs_recompile:
-                    if CompileFunction.compiled_fw in autograd_cache:
-                        del autograd_cache[CompileFunction.compiled_fw]
+                    if CompiledFunction.compiled_fw in autograd_cache:
+                        del autograd_cache[CompiledFunction.compiled_fw]
                     aot_dispatch_autograd(CompiledFunction.compiled_flat_fn, deduped_flat_tensor_args, CompiledFunction.compiled_aot_config, CompiledFunction.compiled_shape_env)
 
             fw_outs = call_func_with_args(
