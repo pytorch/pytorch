@@ -209,12 +209,12 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             # activation_post_process are now added directly to nn.Sequentail/_FusedModule
             if needs_observation(child):
                 insert_activation_post_process(child)
-        elif _has_special_act_post_process(child):
-            special_act_post_process = _get_special_act_post_process(child)
-            insert_activation_post_process(child, special_act_post_process)
         elif non_leaf_module_list is not None and type_before_parametrizations(child) in non_leaf_module_list:
             if needs_observation(child):
                 insert_activation_post_process(child)
+        elif _has_special_act_post_process(child):
+            special_act_post_process = _get_special_act_post_process(child)
+            insert_activation_post_process(child, special_act_post_process)
         elif needs_observation(child) and type_before_parametrizations(child) in custom_module_class_mapping:
             observed_child = custom_module_class_mapping[type_before_parametrizations(child)].from_float(child)
             setattr(module, name, observed_child)
