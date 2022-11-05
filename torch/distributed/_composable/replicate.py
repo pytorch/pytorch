@@ -33,7 +33,9 @@ class ReplicateState(DistributedState):
         replicate.state(module)._param_collected = True
 
         self._param_list.extend(
-            param for param in module.parameters() if param.requires_grad
+            param
+            for param in module.parameters(recurse=False)
+            if param.requires_grad
         )
         for child in module.children():
             self._recursive_collect_params(child)
