@@ -2,8 +2,11 @@ import re
 import os
 import csv
 import sys
+import subprocess
 
 full_log = open(sys.argv[1], 'r').read()
+gist_url = open("url.log", "r").read().rstrip()
+hash = subprocess.check_output('git rev-parse HEAD'.split(' '), encoding='utf-8').rstrip()
 
 entries = re.split(r"Running (torchbench|huggingface|timm_models)\.py ([^.]+)\.\.\.", full_log)[1:]
 
@@ -14,6 +17,7 @@ c = 0
 i = 0
 
 out = csv.writer(sys.stdout, dialect='excel')
+out.writerow(["", hash, "", "", "", gist_url])
 
 def normalize_file(f):
     if "site-packages/" in f:
