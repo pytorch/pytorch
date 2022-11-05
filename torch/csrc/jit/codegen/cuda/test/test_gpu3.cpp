@@ -4778,6 +4778,32 @@ TEST_F(NVFuserTest, FusionExpandReduce2_CUDA) {
       LaunchParams(-1, 2, -1, 4, 2, 1));
 }
 
+TEST_F(NVFuserTest, FusionVectorComponentReduce_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(1, DataType::ComplexFloat);
+  fusion->addInput(tv0);
+  auto tv1 = view_as_real(tv0);
+  auto tv2 = sum(tv1, {-1});
+  fusion->addOutput(tv2);
+
+  inlineMost();
+
+  auto options =
+      at::TensorOptions().dtype(at::kComplexFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({1024}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion.get(), {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = at::view_as_real(t0).sum({-1});
+
+  testValidate(fusion.get(), cg_outputs, {t0}, {ref}, __LINE__, __FILE__, "");
+}
+
 TEST_F(NVFuserTest, FusionExpandBadShapeTest_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr;
