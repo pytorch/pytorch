@@ -167,7 +167,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
     for node in fx_module_with_metadata.graph.nodes:
         if node.op == "placeholder":
             # Input of graph.
-            v = g.addInput()
+            v = g.addInput(node.name)
             v.setType(torch._C.TensorType.create_from_tensor(node.meta["val"]))
             fx_name_to_ts_value[node.name] = v
         elif node.op == "call_function":
@@ -221,7 +221,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
                     )
                 current_attr = getattr(current_attr, sub_attr_name)
 
-            v = g.addInput()
+            v = g.addInput(node.name)
             v.setType(torch._C.TensorType.create_from_tensor(current_attr))
             fx_name_to_ts_value[node.name] = v
             ts_name_to_real_tensor[v.debugName()] = current_attr
