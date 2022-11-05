@@ -74,6 +74,8 @@ class TORCH_API ThreadLocalState {
   // TLS for saved tensors default hooks
   at::impl::SavedTensorDefaultHooksTLS saved_tensors_default_hooks_state_;
 
+  bool functionalization_reapply_views_state_;
+
   friend class ThreadLocalStateGuard;
 };
 
