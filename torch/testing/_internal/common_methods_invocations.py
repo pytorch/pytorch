@@ -3330,7 +3330,7 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         ((20, 6, 10, 10), 1, {'eps' : 1e-5}),
         ((1, 6, 3), 2, {'eps' : 0.5}),
         ((2, 6, 3), 2, {'eps' : -0.5}),
-        ((1, 2), 1, {'eps' : 1e-5}),
+        ((1, 3), 1, {'eps' : 1e-5}),
         ((0, 2), 1, {'eps' : 1e-5}),
         ((S, S, S), 1, {'eps' : 0.5}),
     )
