@@ -17,6 +17,7 @@ from .functional_rmsprop import _FunctionalRMSprop
 from .functional_rprop import _FunctionalRprop
 from .functional_adamax import _FunctionalAdamax
 from .utils import as_functional_optim
+from .apply_optimizer_in_backward import _apply_optimizer_in_backward
 
 
 # DistributedOptimizer imports torch.distributed.rpc names, so gate availability
