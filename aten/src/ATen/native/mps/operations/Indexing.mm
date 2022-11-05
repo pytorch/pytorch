@@ -349,20 +349,25 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
           MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
           MPSGraphTensor* sourceTensor = mpsGraphRankedPlaceHolder(mpsGraph, source);
           MPSGraphTensor* alphaTensor = mpsGraphScalarPlaceHolder(mpsGraph, alpha_f);
-          MPSGraphTensor* alphaSourceSlice = [mpsGraph multiplicationWithPrimaryTensor:sourceTensor
+
+          MPSGraphTensor* castedInputTensor = castMPSTensor(mpsGraph, inputTensor, kFloat);
+          MPSGraphTensor* castedSourceTensor = castMPSTensor(mpsGraph, sourceTensor, kFloat);
+          MPSGraphTensor* alphaSourceSlice = [mpsGraph multiplicationWithPrimaryTensor:castedSourceTensor
                                                                        secondaryTensor:alphaTensor
                                                                                   name:nil];
-          MPSGraphTensor* outputTensor = [mpsGraph scatterWithDataTensor:inputTensor
+                                                                                                                                 
+          MPSGraphTensor* outputTensor = [mpsGraph scatterWithDataTensor:castedInputTensor
                                                             updatesTensor:alphaSourceSlice
                                                             indicesTensor:indexTensor
                                                                      axis:dim
                                                                      mode:MPSGraphScatterModeAdd
                                                                      name:nil];
+          MPSGraphTensor* castedOutputTensor = castMPSTensor(mpsGraph, outputTensor, source.scalar_type());
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->indexTensor_ = indexTensor;
           newCachedGraph->sourceTensor_ = sourceTensor;
           newCachedGraph->alphaTensor_ = alphaTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
+          newCachedGraph->outputTensor_ = castedOutputTensor;
         }
         return newCachedGraph;
       });
@@ -372,7 +377,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
     Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
     Placeholder sourcePlaceholder = Placeholder(cachedGraph->sourceTensor_, source);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
-    MPSScalar alpha_scalar = getMPSScalar(alpha_f, source.scalar_type());
+    MPSScalar alpha_scalar = getMPSScalar(alpha_f, kFloat);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
