@@ -707,6 +707,7 @@ def run_tests(argv=UNITTEST_ARGS):
 
     if TEST_IN_SUBPROCESS:
         failed_tests = []
+        test_cases = count_pytest_test_cases(argv)
         for case in test_cases:
             if case.startswith("test/"):
                 case = case[len("test/"):]
