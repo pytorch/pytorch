@@ -271,7 +271,7 @@ test_inductor_huggingface_shard() {
   # Use test-reports directory under test folder will allow the CI to automatically pick up
   # the test reports and upload them to S3. Need to use full path here otherwise the script
   # will bark about file not found later on
-  TEST_REPORTS_DIR=`pwd`/test/test-reports
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
     --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
@@ -287,7 +287,7 @@ test_inductor_timm_shard() {
   # Use test-reports directory under test folder will allow the CI to automatically pick up
   # the test reports and upload them to S3. Need to use full path here otherwise the script
   # will bark about file not found later on
-  TEST_REPORTS_DIR=`pwd`/test/test-reports
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
     --device cuda --inductor --float32 --total-partitions 5 --partition-id "$1" \
