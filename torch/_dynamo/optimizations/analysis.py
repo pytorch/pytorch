@@ -121,10 +121,6 @@ def has_mutation(gm, example_inputs, inputs_only=False):
     true, we only check for mutation of inputs"""
     # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
 
-    # Clone the inputs such that intermediate tensors (not leaf tensors) with
-    # requires_grad to True are now converted to False to avoid Runtime Error
-    # like "leaf variable that requires grad is inplace modified"
-    example_inputs = clone_inputs(example_inputs)
     if fake_tensors_available and config.fake_tensor_propagation:
 
         def _wrap_to_fake_tensor(t, *, f_mode):
@@ -147,6 +143,10 @@ def has_mutation(gm, example_inputs, inputs_only=False):
         with fake_mode.restore() if hasattr(fake_mode, "restore") else fake_mode:
             ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     else:
+        # Clone the inputs such that intermediate tensors (not leaf tensors) with
+        # requires_grad to True are now converted to False to avoid Runtime Error
+        # like "leaf variable that requires grad is inplace modified"
+        example_inputs = clone_inputs(example_inputs)
         new_gm = copy.deepcopy(gm)
         example_inputs = copy.deepcopy(example_inputs)
         ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
