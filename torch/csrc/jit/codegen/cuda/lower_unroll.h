@@ -62,6 +62,8 @@ class TORCH_CUDA_CU_API UnrollPass : kir::ExprMutator {
   static bool canOmitElseClause(kir::ForLoop* fl);
 
  private:
+  void registerReplace(Expr* reference, Expr* new_expr, kir::Scope* scope);
+
   // Generate the for Expr replacement map
   UnrollPass(const std::vector<Expr*>& exprs);
 
