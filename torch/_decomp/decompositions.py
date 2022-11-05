@@ -429,31 +429,22 @@ def _nll_loss_backward(
 
 @register_decomposition(aten.addcmul_)
 def addcmul_(input: Tensor, tensor1, tensor2, value=None, out=None):
-    # breakpoint()
     prod = torch.mul(tensor1, tensor2)
-    if tensor1.size()[0] < tensor2.size()[0]:
-        prod = prod * 1
-    else:
-        prod = (prod + prod) / 2
     if value is not None:
-        prod = value * prod
+        # TODO(voz): Make add nicer
+        # argument 'alpha' must be Number, not NoneType
+        return torch.add(input, prod, alpha=value)
     return torch.add(input, prod)
 
 
 @register_decomposition(aten.addcdiv_)
 def addcdiv_(input: Tensor, tensor1, tensor2, value=None, out=None):
-    # breakpoint()
     res = torch.div(tensor1, tensor2)
     if value is not None:
-        res = value * res
+        # TODO(voz): Make add nicer
+        # argument 'alpha' must be Number, not NoneType
+        return torch.add(input, res, alpha=value)
     return torch.add(input, res)
-
-
-#    Tensor addcmul_decomp(const Tensor& self, const Tensor& tensor1,
-#                          const Tensor& tensor2, const Scalar& value) {
-# /     auto product = torch.mul(tensor1, tensor2);
-# //     return torch.add(self, product, value);
-# //   }
 
 
 @register_decomposition(aten.glu_backward)

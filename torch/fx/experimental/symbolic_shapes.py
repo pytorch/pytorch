@@ -563,7 +563,6 @@ class ShapeEnv(object):
 
         NOTE: Does not include implicit 0/1 or duck-shaping guards
         """
-        # breakpoint()
         return ShapeEnv.and_chain_guards(self.guards)
 
     def get_nontrivial_guards(self):

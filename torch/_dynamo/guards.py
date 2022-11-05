@@ -646,11 +646,9 @@ class CheckFunctionManager:
                     expr_to_tensor_ref[obj_expr][tensor_ref] = ""
 
         guard_expression = self.output_graph.shape_env.get_guard_expr()
-        # breakpoint()
         expr_as_str = guard_printer.doprint(guard_expression)
         # We may get into a state where symbolic shape keys (all should be found in replacements)
         # Have not been removed from the expression. This is a serious enough error state that we need to assert.
-
         for key in self.output_graph.shape_env.var_to_val.keys():
             assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
         finished_expressions.append(expr_as_str)
@@ -789,8 +787,8 @@ def guard_fail_hook(
     """
     called whenever a guard fails.
     """
-    # if not last:
-    #     return
+    if not last:
+        return
     scope = {rename_implicit(k): v for k, v in f_locals.items()}
     scope.update(guard_fn.closure_vars)
     reasons = []
@@ -800,12 +798,9 @@ def guard_fail_hook(
         # is updated to return a string explaining the failure.
         if isinstance(fail_reason, str):
             reasons.append(fail_reason)
-            # breakpoint()
-
             break
         elif isinstance(fail_reason, bool) and not fail_reason:
             reasons.append(part)
-            # breakpoint()
             break
     guard_failures[orig_code_map[code]].append(reasons)
 
