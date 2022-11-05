@@ -226,92 +226,44 @@ def detach_and_functionalize_pure(f, preserve_requires_grad=True):
 # the primals or tangents.
 def create_joint_forward_backward_pure(fn):
     def joint_forward_backward(
-        orig_primals: List[Any], orig_tangents: List[Any]
+        primals: List[Any], tangents: List[Any]
     ) -> Tuple[List[Any], List[Any]]:
-        primals = []
-        for orig_p in orig_primals:
-            if isinstance(orig_p, Tensor):
-                p = torch._to_functional_tensor(orig_p)
-                p.requires_grad = orig_p.requires_grad
-            else:
-                p = orig_p
-            primals.append(p)
+        # Call the forward pass
+        outs = fn(*primals)
+        # Get the inputs that need gradients
+        grad_primals = []
+        inputs_needs_grads = []
+        for p in primals:
+            is_grad_tensor = isinstance(p, Tensor) and p.requires_grad
+            inputs_needs_grads.append(is_grad_tensor)
+            if is_grad_tensor:
+                grad_primals.append(p)
 
-        torch._enable_functionalization(reapply_views=True)
-        try:
+        # Get the outputs that need gradients
+        assert len(tangents) == len(outs)
+        needed_outs = []
+        needed_tangents = []
+        for out, tangent in zip(outs, tangents):
+            if isinstance(out, Tensor) and out.requires_grad:
+                needed_outs.append(out)
+                needed_tangents.append(tangent)
 
-            # Call the forward pass
-            outs = fn(*primals)
-            # Get the inputs that need gradients
-            grad_primals = []
-            inputs_needs_grads = []
-            for p in primals:
-                is_grad_tensor = isinstance(p, Tensor) and p.requires_grad
-                inputs_needs_grads.append(is_grad_tensor)
-                if is_grad_tensor:
-                    grad_primals.append(p)
+        setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
 
-            # Get the outputs that need gradients
-            assert len(orig_tangents) == len(outs)
-            needed_outs = []
-            needed_orig_tangents = []
-            needed_tangents = []
-            for out, orig_tangent in zip(outs, orig_tangents):
-                if isinstance(out, Tensor) and out.requires_grad:
-                    needed_outs.append(out)
-                    needed_orig_tangents.append(orig_tangent)
-                    needed_tangents.append(torch._to_functional_tensor(orig_tangent))
-
-            setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
-
-            backward_out = []
-            # Call the backwards pass
-            if grad_primals:
-                with fx_traceback.override_stack_trace():
-                    backward_out = torch.autograd.grad(
-                        needed_outs,
-                        grad_primals,
-                        grad_outputs=needed_tangents,
-                        allow_unused=True,
-                    )
-        finally:
-            torch._disable_functionalization()
+        backward_out = []
+        # Call the backwards pass
+        if grad_primals:
+            with fx_traceback.override_stack_trace():
+                backward_out = torch.autograd.grad(
+                    needed_outs,
+                    grad_primals,
+                    grad_outputs=needed_tangents,
+                    allow_unused=True,
+                )
         backward_out_iter = iter(backward_out)
-        grads = [next(backward_out_iter) if i else None for i in inputs_needs_grads]
-
-        def prop_mut(origs, news):
-            for orig, new in zip(origs, news):
-                if not isinstance(orig, Tensor):
-                    continue
-                assert torch._is_functional_tensor(new)
-                torch._sync(new)
-                new_orig = torch._from_functional_tensor(new)
-                if new_orig is not orig:
-                    # TODO: if internal resize_ this would fail
-                    assert new_orig.shape == orig.shape
-                    orig.copy_(new_orig)
-        prop_mut(orig_primals, primals)
-        # TODO: Actually, the input tangents shouldn't ever actually get
-        # mutated...
-        prop_mut(needed_orig_tangents, needed_tangents)
-
-        def defun(t):
-            if not isinstance(t, Tensor) or not torch._is_functional_tensor(t):
-                return t
-            torch._sync(t)
-            return torch._from_functional_tensor(t)
-
-        orig_outs = [defun(t) for t in outs]
-        orig_grads = [defun(t) for t in grads]
-
-        if any(g is None for g in orig_grads):
-            warnings.warn(
-                "AOTAutograd compiled a function which has unused inputs "
-                "that have requires_grad=True; this could indicate an "
-                "AOTAutograd bug."
-            )
-
-        return orig_outs, orig_grads
+        return outs, [
+            next(backward_out_iter) if i else None for i in inputs_needs_grads
+        ]
 
     return joint_forward_backward
 
@@ -993,6 +945,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             return compiled_fn(args)
 
         return new_func
+
     compiled_f = aot_function_simplified(functional_call, *top_args, **top_kwargs)
 
     if top_kwargs:

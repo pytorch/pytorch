@@ -20,3 +20,4 @@ cat torchbench.log huggingface.log timm_models.log |
     tee sweep.log |
     gh gist create -d "Sweep logs for $(git rev-parse --abbrev-ref HEAD) $FLAG (TORCHDYNAMO_DYNAMIC_SHAPES=$TORCHDYNAMO_DYNAMIC_SHAPES) - $(git rev-parse HEAD) $DATE" - |
     tee url.log
+python log_extract.py sweep.log > final.csv

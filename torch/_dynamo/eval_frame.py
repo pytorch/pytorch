@@ -105,11 +105,13 @@ class _TorchDynamoContext:
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
         self.on_enter()
+        print(f"setting frame to {self.callback}")
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        print(f"unsetting frame to {self.prior}")
         set_eval_frame(self.prior)
         self.prior = unset
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
@@ -166,12 +168,14 @@ class _TorchDynamoContext:
                     return fn
 
             on_enter()
+            print(f"B setting frame to {callback}")
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
             finally:
+                print(f"B resetting frame to {callback}")
                 set_eval_frame(prior)
                 backend_ctx.__exit__(None, None, None)
 
