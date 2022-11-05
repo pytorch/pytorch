@@ -20,45 +20,6 @@ def _override_batchnorm_mixed_precision(module):
         if isinstance(mod, _BatchNorm):
             mod._wrap_overrides = {"mixed_precision": None}  # type: ignore[assignment]
 
-
-def _apply_to_tensors(
-    fn: Callable,
-    container: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence],
-) -> Any:
-    """Recursively apply to all tensor in different kinds of container types."""
-
-    def apply(
-        x: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]
-    ) -> Any:
-        if torch.is_tensor(x):
-            return fn(x)
-        elif hasattr(x, "__dataclass_fields__"):
-            dc = dataclasses.replace(x)
-            for f in dataclasses.fields(dc):
-                name = f.name
-                setattr(dc, name, apply(getattr(dc, name)))
-            return dc
-        elif isinstance(x, OrderedDict):
-            od = x.__class__()
-            for key, value in x.items():
-                od[key] = apply(value)
-            return od
-        elif isinstance(x, PackedSequence):
-            apply(x.data)
-            return x
-        elif isinstance(x, dict):
-            return {key: apply(value) for key, value in x.items()}
-        elif _is_namedtuple(x):
-            res = (apply(el) for el in x)
-            return type(x)(*res)
-        elif isinstance(x, (list, tuple, set)):
-            return type(x)(apply(el) for el in x)
-        else:
-            return x
-
-    return apply(container)
-
-
 @torch.no_grad()
 def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
     """

@@ -11,7 +11,8 @@ from torch.distributed.fsdp._common_utils import (
     _State,
     TrainingState,
 )
-from torch.distributed.fsdp._utils import _apply_to_tensors, p_assert
+from torch.distributed.fsdp._utils import p_assert
+from torch.distributed.utils import apply_to_tensors
 from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.fsdp.flat_param import (
     _HandlesKey,
@@ -565,7 +566,7 @@ def _register_pre_backward_hooks(
             state._needs_pre_backward_unshard[handles_key] = True
         return t
 
-    return _apply_to_tensors(_register_hook, outputs)
+    return apply_to_tensors(_register_hook, outputs)
 
 
 def _register_post_backward_hooks(
@@ -680,4 +681,4 @@ def _cast_fp_inputs_to_dtype(
         return y
 
     with torch.no_grad():
-        return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
+        return (apply_to_tensors(cast_fn, args), apply_to_tensors(cast_fn, kwargs))

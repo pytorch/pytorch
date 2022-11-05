@@ -12,7 +12,7 @@ from typing import List
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp._utils import _apply_to_tensors
+from torch.distributed.utils import apply_to_tensors
 from torch.distributed.fsdp._wrap_utils import _get_submodule_to_states
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.distributed.utils import _replace_by_prefix
@@ -81,7 +81,7 @@ class TestUtils(TestCase):
             total += t.numel()
             return t
 
-        new_data = _apply_to_tensors(fn, data)
+        new_data = apply_to_tensors(fn, data)
         self.assertEqual(total, expected)
         for i, v in enumerate(data):
             self.assertEqual(type(new_data[i]), type(v))
@@ -114,7 +114,7 @@ class TestUtils(TestCase):
 
         x = nn.utils.rnn.pack_padded_sequence(x, seq_length)
         x, h = rnn(x)
-        x = _apply_to_tensors(fill_fn, x)
+        x = apply_to_tensors(fill_fn, x)
         x, _ = nn.utils.rnn.pad_packed_sequence(x)
         self.assertEqual(torch.sum(x), 0)
 

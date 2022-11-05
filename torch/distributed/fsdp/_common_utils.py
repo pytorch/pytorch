@@ -12,6 +12,7 @@ import torch.nn as nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
+from torch.distributed.utils import _apply_to_modules
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
@@ -132,34 +133,6 @@ def _get_param_to_unflat_param_names(
         return_fn,
         param_to_unflat_param_names,
     )
-
-
-def _apply_to_modules(
-    root_module: torch.nn.Module,
-    module_fn: Callable,
-    return_fn: Callable,
-    *args,
-    **kwargs,
-):
-    """
-    Performs a pre-order traversal of the modules in the hierarchy rooted at
-    ``root_module``, applying ``module_fn`` at each module and finally
-    returning a value using ``return_fn``. The traversal constructs the full
-    module prefix name (e.g. "module.submodule." just like in model state dict)
-    and makes that available to ``module_fn``.
-    """
-
-    def f(module: torch.nn.Module, prefix: str, *args, **kwargs):
-        # Call the module function before recursing over children (pre-order)
-        module_fn(module, prefix, *args, **kwargs)
-        for submodule_name, submodule in module.named_children():
-            if submodule is not None:
-                new_prefix = prefix + submodule_name + "."
-                f(submodule, new_prefix, *args, **kwargs)
-
-    f(root_module, "", *args, **kwargs)
-    return return_fn(*args, **kwargs)
-
 
 @no_type_check
 def _assert_in_training_states(
