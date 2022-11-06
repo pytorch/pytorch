@@ -975,10 +975,10 @@ struct HelperInterpCubic : public HelperInterpBase {
 
         int64_t * idx_ptr;
         scalar_t * wt_ptr;
-        using accscalar_t = at::acc_type<scalar_t, true>;
+        using opmath_t = at::opmath_type<scalar_t>;
         for (const auto i : c10::irange(output_size)) {
-          const accscalar_t real_input_index =
-              area_pixel_compute_source_index<accscalar_t>(
+          const auto real_input_index =
+              area_pixel_compute_source_index<opmath_t>(
                   scale, i, align_corners, /*cubic=*/true);
           input_index = static_cast<int64_t>(floorf(real_input_index));
           get_cubic_upsample_coefficients<scalar_t>(coeffs, real_input_index - input_index);
