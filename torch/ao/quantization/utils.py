@@ -4,6 +4,7 @@ Utils shared by different modes of quantization (eager/graph)
 import warnings
 import functools
 import torch
+from torch.fx import Node
 from torch.ao.quantization.quant_type import QuantType
 from typing import Tuple, Any, Union, Callable, Dict, Optional
 from torch.nn.utils.parametrize import is_parametrized
@@ -11,10 +12,22 @@ from collections import OrderedDict
 from inspect import signature
 from inspect import getfullargspec
 
+NodePattern = Union[Tuple[Node, Node], Tuple[Node, Tuple[Node, Node]], Any]
+NodePattern.__module__ = "torch.ao.quantization.utils"
+
+# This is the Quantizer class instance from torch/quantization/fx/quantize.py.
+# Define separately to prevent circular imports.
+# TODO(future PR): improve this.
+# make this public once fixed (can't be public as is because setting the module directly
+# doesn't work)
+QuantizerCls = Any
+
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
 # TODO: not sure if typing supports recursive data types
-Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any]
+Pattern = Union[
+    Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any
+]
 Pattern.__module__ = "torch.ao.quantization.utils"
 
 # TODO: maybe rename this to MatchInputNode
@@ -126,6 +139,17 @@ def getattr_from_fqn(obj: Any, fqn: str) -> Any:
     Given an obj and a fqn such as "foo.bar.baz", returns gm.foo.bar.baz.
     """
     return functools.reduce(getattr, fqn.split("."), obj)
+
+def to_underlying_dtype(qdtype):
+    DTYPE_MAPPING = {
+        torch.quint8: torch.uint8,
+        torch.qint8: torch.int8,
+        torch.qint32: torch.int32,
+        torch.quint4x2: torch.uint8,
+        torch.quint2x4: torch.uint8,
+    }
+    assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + qdtype
+    return DTYPE_MAPPING[qdtype]
 
 def get_qparam_dict(observer_or_fake_quant):
     qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
@@ -524,6 +548,7 @@ def get_fqn_to_example_inputs(
 
 
 __all__ = [
+    "NodePattern",
     "Pattern",
     "MatchAllNode",
     "check_node",
@@ -548,4 +573,5 @@ __all__ = [
     "calculate_qmin_qmax",
     "has_no_children_ignoring_parametrizations",
     "get_fqn_to_example_inputs",
+    "to_underlying_dtype",
 ]
