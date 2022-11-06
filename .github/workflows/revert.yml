@@ -21,9 +21,10 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: '3.8'
           architecture: x64
-          cache: 'pip'
+          check-latest: false
+          cache: pip
       - run: pip install pyyaml==6.0
 
       - name: Setup committer id

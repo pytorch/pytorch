@@ -30,3 +30,13 @@
   desc: |
           This tag indicates if an operator doesn't guarentee bitwise equivalence
           across different runs of an operator with identical inputs.
+- tag: canonical
+  desc: |
+          Canonical aten ops is a subset of aten ops that remains after aten-to-aten decomposition and
+          functionalization pass. Canonical aten ops are fully functional and adhere to single static
+          assignment (SSA): this implies there will be no `inplace` or `_out` variants in this opset.
+          This opset is designed to serve as the functional IR to interface with compiler backends.
+          In contrast to primTorch, canonical aten opset doesn't decompose ops into explicit
+          type promotion and boardcasting ops.
+          Canonical aten ops is also effectively the opset produced by torchdynamo.export(aten_graph=True),
+          and thus can be used as an opset for export purpose.

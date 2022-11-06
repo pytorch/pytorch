@@ -25,7 +25,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+    - uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
       name: Setup dependencies
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
@@ -52,7 +52,8 @@ runs:
         .github/scripts/filter_test_configs.py \
           --test-matrix "${{ inputs.test-matrix }}" \
           --pr-number "${{ github.event.pull_request.number }}" \
-          --tag "${{ steps.parse-ref.outputs.tag }}"
+          --tag "${{ steps.parse-ref.outputs.tag }}" \
+          --event-name "${{ github.event_name }}"
 
     - name: Print the filtered test matrix
       shell: bash
