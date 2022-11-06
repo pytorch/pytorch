@@ -1,6 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import functools
+import operator
+
 import torch
-from typing import List, Union, Sequence
+from typing import List, Union, Sequence, Iterable
 from torch.distributed._tensor.api import DTensor
 
 
@@ -72,3 +75,7 @@ def normalize_dims(dims: Union[int, Sequence[int]], ndim: int) -> Sequence[int]:
     elif isinstance(dims, tuple):
         dims = tuple([normalize_dim(dim, ndim) for dim in dims])
     return dims
+
+
+def prod(xs: Iterable[int]) -> int:
+    return functools.reduce(operator.mul, xs, 1)

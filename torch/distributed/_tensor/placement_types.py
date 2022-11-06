@@ -52,7 +52,8 @@ class Shard(Placement):
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
         assert (
             tensor.size(self.dim) >= num_chunks
-        ), f"Tensors to be sharded on dim {self.dim} must be at least as large as the number of devices in that dimension {num_chunks}"
+        ), f"Tensors to be sharded on dim {self.dim} must be at least as large as "
+        f"the number of devices in that dimension {num_chunks}"
         # split tensor over dimension `dim` into n slices with padding if necessary
         tensor_list = list(tensor.tensor_split(num_chunks, self.dim))
         idx_start_to_pad = tensor.size(self.dim) % num_chunks
