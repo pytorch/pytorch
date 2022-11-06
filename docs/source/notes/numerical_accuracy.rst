@@ -34,7 +34,7 @@ even though mathematically it's an identical computation.
 
 Similarly, an operation applied to a tensor slice is not guaranteed to produce results that are
 identical to the slice of the result of the same operation applied to the full tensor. E.g. let
-``A`` be a 2-dimentional tensor. ``A.sum(-1)[0]`` is not guaranteed to be bitwise equal to
+``A`` be a 2-dimensional tensor. ``A.sum(-1)[0]`` is not guaranteed to be bitwise equal to
 ``A[:,0].sum()``.
 
 Extremal values

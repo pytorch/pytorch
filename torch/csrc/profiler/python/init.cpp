@@ -5,6 +5,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
+#include <torch/csrc/profiler/standalone/execution_graph_observer.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -53,7 +54,8 @@ void initPythonBindings(PyObject* module) {
           py::init<
               std::vector<std::string> /* profiler_metrics */,
               bool /* profiler_measure_per_kernel */,
-              bool /* verbose */
+              bool /* verbose */,
+              std::vector<std::string> /* performance_events  */
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -62,10 +64,12 @@ void initPythonBindings(PyObject* module) {
           "       If this list contains values Kineto runs in CUPTI profiler mode\n"
           "    profiler_measure_per_kernel (bool) : whether to profile metrics per kernel\n"
           "       or for the entire measurement duration.\n"
-          "    verbose (bool) : whether the trace file has `Call stack` field or not.",
+          "    verbose (bool) : whether the trace file has `Call stack` field or not.\n"
+          "    performance_events : a list of profiler events to be used for measurement",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
-          py::arg("verbose") = false)
+          py::arg("verbose") = false,
+          py::arg("performance_events") = std::vector<std::string>())
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
@@ -73,13 +77,21 @@ void initPythonBindings(PyObject* module) {
               py::bytes mbytes(metric);
               py_metrics.append(mbytes);
             }
+            py::list py_perf_events;
+            for (const auto& event : p.performance_events) {
+              py::bytes mbytes(event);
+              py_perf_events.append(mbytes);
+            }
             /* Return a tuple that fully encodes the state of the config */
             return py::make_tuple(
-                py_metrics, p.profiler_measure_per_kernel, p.verbose);
+                py_metrics,
+                p.profiler_measure_per_kernel,
+                p.verbose,
+                p.performance_events);
           },
           [](py::tuple t) { // __setstate__
-            if (t.size() != 3) {
-              throw std::runtime_error("Expected 3 values in state");
+            if (t.size() >= 3) {
+              throw std::runtime_error("Expected atleast 3 values in state");
             }
 
             py::list py_metrics = t[0].cast<py::list>();
@@ -89,8 +101,20 @@ void initPythonBindings(PyObject* module) {
               metrics.push_back(py::str(py_metric));
             }
 
+            std::vector<std::string> performance_events;
+            if (t.size() == 4) {
+              py::list py_perf_events = t[3].cast<py::list>();
+              performance_events.resize(py_perf_events.size());
+              for (const auto& py_perf_event : py_perf_events) {
+                performance_events.push_back(py::str(py_perf_event));
+              }
+            }
+
             return ExperimentalConfig(
-                std::move(metrics), t[1].cast<bool>(), t[2].cast<bool>());
+                std::move(metrics),
+                t[1].cast<bool>(),
+                t[2].cast<bool>(),
+                std::move(performance_events));
           }));
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
@@ -128,7 +152,7 @@ void initPythonBindings(PyObject* module) {
       .def_readonly("tensor_metadata", &Inputs::tensor_metadata_);
 
   py::class_<TensorMetadata>(m, "_TensorMetadata")
-      .def_readonly("impl_ptr", &TensorMetadata::impl_)
+      .def_property_readonly("impl_ptr", &TensorMetadata::impl)
       .def_readonly("storage_data_ptr", &TensorMetadata::data_)
       .def_readonly("id", &TensorMetadata::id_)
       .def_property_readonly(
@@ -180,49 +204,35 @@ void initPythonBindings(PyObject* module) {
 
   py::class_<NNModuleInfo>(m, "_NNModuleInfo")
       .def_property_readonly(
-          "params",
+          "parameters",
           [](const NNModuleInfo& s) {
-            py::list list;
-            for (auto& p : s.params_) {
-              list.append(std::tuple<
-                          std::string,
-                          TensorMetadata,
-                          c10::optional<TensorMetadata>>(
-                  p.param_name_, p.param_, p.grad_));
+            py::list out;
+            for (const auto& p : s.parameters_) {
+              out.append(
+                  py::make_tuple(p.name_, p.metadata_, p.grad_metadata_));
             }
-            return list;
+            return out;
           })
       .def_property_readonly(
-          "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); });
+          "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); })
+      .def_readonly("self_ptr", &NNModuleInfo::self_)
+      .def_readonly("cls_ptr", &NNModuleInfo::cls_);
 
-  py::class_<OptimizerInfo>(m, "_OptInfo")
-      .def_property_readonly(
-          "self",
-          [](const OptimizerInfo& a) {
-            return reinterpret_cast<intptr_t>(a.self_.value_of());
-          })
-      .def_property_readonly(
-          "param_addrs",
-          [](const OptimizerInfo& s) {
-            py::list params_addrs;
-            for (auto& addr : s.params_addr_) {
-              params_addrs.append(addr);
-            }
-            return params_addrs;
-          })
-      .def_property_readonly("opt_state", [](const OptimizerInfo& s) {
-        py::list states;
-        for (auto& a : s.opt_state_) {
-          states.append(std::make_pair(a.first, a.second));
+  py::class_<OptimizerInfo>(m, "_OptimizerInfo")
+      .def_readonly("self_ptr", &OptimizerInfo::self_)
+      .def_property_readonly("parameters", [](const OptimizerInfo& s) {
+        py::list out;
+        for (const auto& p : s.parameters_) {
+          out.append(py::make_tuple(p.metadata_, p.grad_metadata_, p.state_));
         }
-        return states;
+        return out;
       });
 
   py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
-      .def_readonly("opt", &ExtraFields<EventType::PyCall>::opt_)
       .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_)
-      .def_readonly("module", &ExtraFields<EventType::PyCall>::module_);
+      .def_readonly("module", &ExtraFields<EventType::PyCall>::module_)
+      .def_readonly("optimizer", &ExtraFields<EventType::PyCall>::optimizer_);
 
   py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
@@ -251,6 +261,21 @@ void initPythonBindings(PyObject* module) {
       .def_property_readonly("duration_time_ns", [](const Result& r) {
         return r.endTimeNS() - r.start_time_ns_;
       });
+
+  // PyTorch profiler execution graph internal interface.
+  m.def(
+      "_add_execution_graph_observer",
+      &torch::profiler::impl::addExecutionGraphObserver,
+      py::arg("output_file_name"));
+  m.def(
+      "_remove_execution_graph_observer",
+      &torch::profiler::impl::removeExecutionGraphObserver);
+  m.def(
+      "_enable_execution_graph_observer",
+      &torch::profiler::impl::enableExecutionGraphObserver);
+  m.def(
+      "_disable_execution_graph_observer",
+      &torch::profiler::impl::disableExecutionGraphObserver);
 }
 
 } // namespace profiler

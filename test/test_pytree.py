@@ -200,10 +200,12 @@ class TestPytree(TestCase):
 
     def test_treespec_repr(self):
         # Check that it looks sane
-        pytree = (0, [0, 0, 0])
+        pytree = (0, [0, 0, [0]])
         _, spec = tree_flatten(pytree)
-        self.assertEqual(
-            repr(spec), 'TreeSpec(tuple, None, [*, TreeSpec(list, None, [*, *, *])])')
+        self.assertEqual(repr(spec), ("TreeSpec(tuple, None, [*,\n"
+                                      "                       TreeSpec(list, None, [*,\n"
+                                      "                                             *,\n"
+                                      "                                             TreeSpec(list, None, [*])])])"))
 
     def test_broadcast_to_and_flatten(self):
         cases = [
