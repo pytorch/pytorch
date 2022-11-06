@@ -1,10 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import math
-
 import torch
 from typing import List, Sequence, Dict, Tuple, Optional, cast
 from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
 from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._tensor.ops.utils import prod
 
 
 def _replace_char_in_str(string: str, new_char: str, idx: int) -> str:
@@ -186,7 +185,7 @@ def einop_rule(
                         d in input_dim
                         and input_spec.dim_map[input_dim.index(d)] == mesh_dim
                     ):
-                        cost += math.prod(
+                        cost += prod(
                             input_spec.local_shape
                         ) * input_spec.mesh.size(mesh_dim)
                 costs.append(cost)
@@ -342,7 +341,7 @@ def reduction_rule(
                 input_spec.mesh, reshard_dim_map, [], input_spec.shape
             )
             schema_suggestion = OpSchema(
-                op_schema.func_schema, tuple([no_partial_spec]), {}
+                op_schema.func_schema, (no_partial_spec,), {}
             )
             _inplace_rewrap_schema_suggestion(schema_suggestion, op_schema)
             return OutputSharding(

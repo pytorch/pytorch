@@ -11,8 +11,6 @@ from typing import (
     Sequence,
     cast,
 )
-import functools
-import operator
 
 import torch
 from torch import Tensor
@@ -21,14 +19,11 @@ from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Re
 from torch.distributed._tensor.api import Shard
 from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import (
-    register_prop_rule,
     normalize_dim,
     normalize_dims,
+    prod,
+    register_prop_rule,
 )
-
-
-def _prod(xs: Iterable[int]) -> int:
-    return functools.reduce(operator.mul, xs, 1)
 
 
 Shape = Tuple[int, ...]
@@ -274,7 +269,7 @@ def infer_size(total_size: int, sizes: Shape) -> Shape:
     Infer the size of this dimension given the total_size.
     """
     infers = [i for i, s in enumerate(sizes) if s == -1]
-    size = _prod(sizes)
+    size = prod(sizes)
     assert len(infers) <= 1, "can only infer one size"
     if infers:
         size = -size
@@ -314,10 +309,10 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     - in the above, input is flattened into a single dimension and then split
       into two separate dimensions with different sizes from the input.
     """
-    from_nelem = _prod(from_size)
+    from_nelem = prod(from_size)
     to_size = infer_size(from_nelem, normalize_sizes(to_size))
 
-    assert from_nelem == _prod(to_size), "Total view shape does not add up"
+    assert from_nelem == prod(to_size), "Total view shape does not add up"
 
     from_idx = 0
     to_idx = 0
@@ -544,7 +539,7 @@ def propagate_shape_and_sharding(
                     shardable_dims[dim.input_dim, :] = False
             dim0 = cmd.input_dims[0]
             return (
-                _prod(get_dim_size(a)[0] for a in cmd.input_dims),
+                prod(get_dim_size(a)[0] for a in cmd.input_dims),
                 dim0
                 if isinstance(dim0, InputDim)
                 and dim0.input_dim in sharded_in_dims
