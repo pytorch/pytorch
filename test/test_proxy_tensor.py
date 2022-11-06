@@ -102,7 +102,7 @@ def skipOps(test_case_name, base_test_name, to_skip):
                 decorator = DecorateInfo(unittest.expectedFailure,
                                          test_case_name, base_test_name,
                                          device_type=device_type, dtypes=dtypes)
-                decorators.append(decorator)
+                # decorators.append(decorator)
             else:
                 decorator = DecorateInfo(unittest.skip("Skipped!"),
                                          test_case_name, base_test_name,
