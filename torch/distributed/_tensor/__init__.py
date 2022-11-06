@@ -9,7 +9,7 @@ from torch.distributed._tensor.placement_types import Placement, Shard, Replicat
 
 
 # Import all builtin dist tensor ops
-# import torch.distributed._tensor.ops
+import torch.distributed._tensor.ops
 
 
 def distribute_tensor(
