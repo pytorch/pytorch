@@ -7,4 +7,3 @@
                                        axis:(NSInteger)axis
                                        name:(NSString *)name;
 @end
-
