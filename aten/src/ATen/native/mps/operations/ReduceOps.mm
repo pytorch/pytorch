@@ -1649,8 +1649,6 @@ std::tuple<Tensor, Tensor> min_mps
 
 // Median of entire tensor into scalar result
 Tensor median_mps(const Tensor& input_t) {
-    bool is_mac_13 = false;
-    if (is_mac_13) {
 
     TORCH_INTERNAL_ASSERT(input_t.scalar_type() != ScalarType::Long, "median not supported for Long dtype on MPS");
 
@@ -1697,13 +1695,15 @@ Tensor median_mps(const Tensor& input_t) {
             MPSGraphTensor * reshapedTensor = [mpsGraph reshapeTensor:inputTensor 
                                                             withShape:@[@-1] 
                                                                   name:nil];
-
-            MPSGraphTensor * sortedTensor = [mpsGraph sortWithTensor:reshapedTensor
-                                                                axis:((NSUInteger) (int)0)
+            NSArray<MPSGraphTensor *> * outputMPSGraphTensors = [mpsGraph
+                                                                topKWithSourceTensor:reshapedTensor
+                                                                k:((NSUInteger) ((int)(num_in_elements/2)) + 1 )
                                                                 name:nil];
+        
+            MPSGraphTensor *sortedTensor = outputMPSGraphTensors[0];
             outputTensor = [mpsGraph sliceTensor:sortedTensor
                                                         dimension:0
-                                                        start:((NSUInteger) (int)((num_in_elements+1)/2 ) - 1)
+                                                        start:-1
                                                         length:1
                                                         name:nil];
 
@@ -1730,12 +1730,6 @@ Tensor median_mps(const Tensor& input_t) {
   }
 
   return output_t;
-
-  } else {
-    TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performace implications.");
-    return at::median(input_t.to("cpu"));
-  }
 }
 
 } // native
