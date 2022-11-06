@@ -130,7 +130,7 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
         if isinstance(inp, Number):
             return inp
         else:
-            assert hasattr(inp, "get_dtype")
+            assert hasattr(inp, "get_dtype"), type(inp)
             dim = len(inp.get_size())
             # construct a tmp tensor to feed into torch.result_type
             return torch.zeros([1] * dim, dtype=inp.get_dtype())
