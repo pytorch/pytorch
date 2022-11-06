@@ -8,6 +8,7 @@
 
 from unittest.mock import patch
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64, IS_WINDOWS
+import os
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -1301,6 +1302,10 @@ def _test_aot_autograd_helper(self, device, dtype, op):
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
 
+combined_symbolic_aot_autograd_failures = aot_autograd_failures
+if not os.environ.get('SUPPRESS_XFAILS', False):
+    combined_symbolic_aot_autograd_failures |= symbolic_aot_autograd_failures
+
 class TestEagerFusionOpInfo(AOTTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', aot_autograd_failures)
@@ -1313,7 +1318,7 @@ class TestEagerFusionOpInfo(AOTTestCase):
     @patch("functorch.compile.config.use_fake_tensor", True)
     @patch("functorch.compile.config.use_functionalize", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
-             aot_autograd_failures | symbolic_aot_autograd_failures)
+             combined_symbolic_aot_autograd_failures)
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 

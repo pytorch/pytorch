@@ -1,6 +1,7 @@
 # Owner(s): ["module: ProxyTensor"]
 
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+import os
 import torch
 import unittest
 import warnings
@@ -102,7 +103,8 @@ def skipOps(test_case_name, base_test_name, to_skip):
                 decorator = DecorateInfo(unittest.expectedFailure,
                                          test_case_name, base_test_name,
                                          device_type=device_type, dtypes=dtypes)
-                # decorators.append(decorator)
+                if not os.environ.get('SUPPRESS_XFAILS', False):
+                    decorators.append(decorator)
             else:
                 decorator = DecorateInfo(unittest.skip("Skipped!"),
                                          test_case_name, base_test_name,
