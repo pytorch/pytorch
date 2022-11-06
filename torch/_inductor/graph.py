@@ -8,7 +8,7 @@ import sympy
 import torch
 import torch.fx
 from torch._decomp import get_decompositions
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, guard_int
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -50,8 +50,8 @@ class GraphLowering(torch.fx.Interpreter):
         """
         Primarily used to weights
         """
-        size = [sympy.Integer(i) for i in ex.size()]
-        stride = [sympy.Integer(i) for i in ex.stride()]
+        size = [sympy.Integer(i) if isinstance(i, int) else i.node.expr for i in ex.size()]
+        stride = [sympy.Integer(i) if isinstance(i, int) else i.node.expr for i in ex.stride()]
         return size, stride
 
     def __init__(
