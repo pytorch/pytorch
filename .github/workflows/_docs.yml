@@ -38,17 +38,24 @@ jobs:
   build-docs:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.4xlarge]
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
           - docs_type: cpp
+            # We recently seeing lots of exit code 137 running this in Docker indicating
+            # an OOM issue when running the job, so this upgrades the runner from 4xlarge
+            # to the next available tier of 12xlarge. So much memory just to generate cpp
+            # doc
+            runner: linux.12xlarge
             # Nightly cpp docs take about 150m to finish, and the number is stable
             timeout-minutes: 180
           - docs_type: python
+            runner: linux.2xlarge
             # It takes less than 30m to finish python docs unless there are issues
             timeout-minutes: 30
           - docs_type: functorch
+            runner: linux.2xlarge
             # It takes less than 15m to finish functorch docs unless there are issues
             timeout-minutes: 15
     steps:

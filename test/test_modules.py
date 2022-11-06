@@ -11,7 +11,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck, skipIfMps)
+    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
+    gradgradcheck, skipIfMps, skipIfTorchInductor)
 from unittest.mock import patch, call
 
 
@@ -326,6 +327,7 @@ class TestModule(TestCase):
 
     @skipIfMps
     @modules(module_db)
+    @skipIfTorchInductor("to be fixed")
     def test_non_contiguous_tensors(self, device, dtype, module_info, training):
         # Check modules work with non-contiguous tensors
 
@@ -489,6 +491,7 @@ class TestModule(TestCase):
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
     @modules(module_db)
+    @skipIfTorchInductor("to be fixed")
     def test_cpu_gpu_parity(self, device, dtype, module_info, training):
         # TODO: RNN / GRU / LSTM don't support backwards on eval mode for cuDNN; skip this in a
         # nicer way for eval mode only.
@@ -579,7 +582,11 @@ class TestModule(TestCase):
 
     @skipIfMps
     @modules(module_db)
+    @skipIfTorchInductor("to be fixed")
     def test_memory_format(self, device, dtype, module_info, training):
+        is_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
+        # TODO tighten it to a specific module
+        atol, rtol = (3e-3, 7e-3) if is_sm86 else (None, None)
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False, training=training)
@@ -666,7 +673,7 @@ class TestModule(TestCase):
 
                         # === Compare outputs to (contiguous, contiguous) output. ===
                         if input_mem_format != torch.contiguous_format or module_mem_formats != torch.contiguous_format:
-                            self.assertEqual(outputs, desired_outputs)
+                            self.assertEqual(outputs, desired_outputs, rtol=rtol, atol=atol)
 
                         # === Check mem format of output. ===
                         _check_out_mem_format(outputs, input_mem_format, module_mem_format)

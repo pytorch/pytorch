@@ -7,6 +7,7 @@ from .fully_sharded_data_parallel import (
     LocalStateDictConfig,
     MixedPrecision,
     OptimStateKeyType,
+    ShardedStateDictConfig,
     ShardingStrategy,
     StateDictType,
 )

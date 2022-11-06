@@ -48,6 +48,7 @@ from torchgen.model import (
     BaseOperatorName,
     DEFAULT_KERNEL_NAMESPACE,
     DispatchKey,
+    FRAGMENT_NAMESPACES,
     FunctionSchema,
     is_cuda_dispatch_key,
     is_generic_dispatch_key,
@@ -1151,7 +1152,9 @@ def compute_argument_yaml(
         "type": cpp.argument_type(a, binds="__placeholder__", symint=False).cpp_type(),
     }
     if a.default is not None:
-        arg["default"] = pythonify_default(cpp.default_expr(a.default, a.type))
+        arg["default"] = pythonify_default(
+            cpp.default_expr(a.default, a.type, symint=False)
+        )
     if a.name in kwarg_only_set:
         arg["kwarg_only"] = True
     if a.name in out_arg_set:
@@ -1638,8 +1641,15 @@ def get_native_function_schema_registrations(
         else:
             custom_namespace = namespace
             tab = "\t"
+            # if the namespace is predefined, we should use define a library fragment
+            # instead of a new library
+            torch_library_macro = (
+                "TORCH_LIBRARY_FRAGMENT"
+                if namespace in FRAGMENT_NAMESPACES
+                else "TORCH_LIBRARY"
+            )
             schema_registrations += f"""
-TORCH_LIBRARY({custom_namespace}, m) {{
+{torch_library_macro}({custom_namespace}, m) {{
   {tab.join(schema_registrations_body)}
 }};"""
     return (aten_schema_registrations, schema_registrations)
