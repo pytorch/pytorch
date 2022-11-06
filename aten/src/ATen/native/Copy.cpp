@@ -119,64 +119,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
-  // Check here that we have enough numel in self, but use src numel when
-  // copying to not go out of bounds (see fbgemm::Float16ToFloat_ref).
-  TORCH_CHECK(
-    self.numel() >= src.numel(),
-    "Expected self to have more or equal number of elements than src, but got "
-    "self: ", self.numel(), " and src: ", src.numel());
-
-  // FBGeMM kernel support exists only for the following case,
-  // 1. Memory Format for source and destination tensors is contiguous.
-  // 2. Device for both the source and destination tensor is CPU.
-  // 3. dtype conversion between FP32->FP16 and FP16->FP32.
-  #ifdef USE_FBGEMM
-    if (((self.dtype() == at::kFloat && src.dtype() == at::kHalf) ||
-         (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
-        (self.device().is_cpu() && src.device().is_cpu()) &&
-        ((self.is_contiguous() && src.is_contiguous()) ||
-         (self.is_non_overlapping_and_dense() && self.strides() == src.strides()))) {
-
-      // See the numel check above.
-      auto min_numel = src.numel();
-
-      if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
-        auto* output_ptr =
-            reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
-        if (self.numel() < at::internal::GRAIN_SIZE) {
-          fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, min_numel);
-        } else {
-          at::parallel_for(
-              0,
-              min_numel,
-              at::internal::GRAIN_SIZE,
-              [&](int64_t begin, int64_t end) {
-                fbgemm::FloatToFloat16_simd(
-                    src.data_ptr<float>() + begin,
-                    output_ptr + begin,
-                  end - begin);
-              });
-        }
-      } else {
-        auto in_data = reinterpret_cast<fbgemm::float16*>(
-            src.data_ptr<at::Half>());
-        auto* output_ptr = self.data_ptr<float>();
-        if (self.numel() < at::internal::GRAIN_SIZE) {
-          fbgemm::Float16ToFloat_simd(in_data, output_ptr, min_numel);
-        } else {
-          at::parallel_for(
-              0,
-              min_numel,
-              at::internal::GRAIN_SIZE,
-              [&](int64_t begin, int64_t end) {
-                fbgemm::Float16ToFloat_simd(
-                    in_data + begin, output_ptr + begin, end - begin);
-              });
-        }
-      }
-      return self;
-    }
-  #endif
 
   if (self.is_same(src)) {
     return self;
@@ -203,6 +145,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return self;
   }
 
+  // XXX: Move to backend-specific code below?
   if (self.is_quantized() && !src.is_quantized()) {
     return quantized_copy_from_float_(self, src);
   }
@@ -218,6 +161,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     TORCH_CHECK(false, "Copying from quantized Tensor to non-quantized Tensor is not allowed, please use dequantize to get a float Tensor from a quantized Tensor");
   }
 
+  // XXX: Move to backend-specific code below?
   if (self.device().type() == at::kVulkan || src.device().type() == at::kVulkan) {
   #ifdef USE_VULKAN_API
     return vulkan::ops::copy_(self, src);
@@ -226,11 +170,12 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   #endif
   }
 
+  // XXX: Move to backend-specific code below?
   if (self.device().type() == at::kMetal || src.device().type() == at::kMetal) {
     return at::metal::metal_copy_(self, src);
   }
 
-
+  // TensorIterator
   auto iter = TensorIteratorConfig()
     .add_output(self)
     .add_input(src)
@@ -252,11 +197,29 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     device_type = kMPS;
   }
 
+  // XXX: Move to backend-specific code below?
   // TODO: if we need to, we can also enable this path for quantized tensor
   if (device_type == kCPU && copy_transpose_valid(self, src) && !self.is_quantized()) {
     copy_same_type_transpose_(self, src);
     return self;
   }
+
+  if (!self.is_complex() && src.is_complex()) {
+    TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
+  }
+
+  // Check here that we have enough numel in self, but use src numel when
+  // copying to not go out of bounds (see fbgemm::Float16ToFloat_ref). Make sure
+  // this is only enforced right before the backend-specific code is called.
+  TORCH_CHECK(
+    self.numel() >= src.numel(),
+    "Expected self to have more or equal number of elements than src, but got "
+    "self: ", self.numel(), " and src: ", src.numel());
+
+  // Unless there's a good reason not to do it, place backend-specific code here
+  // to make sure that behavior is consistent between backends. There's a number
+  // of early exits above. Also, TensorIteratorConfig().build() checks for
+  // broadcasting via mark_resize_outputs().
 
 #ifdef USE_MPS
   if (self.device().type() == at::kMPS || src.device().type() == at::kMPS) {
@@ -264,9 +227,58 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 #endif
 
-  if(!self.is_complex() && src.is_complex()) {
-    TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
+  // FBGeMM kernel support exists only for the following case,
+  // 1. Memory Format for source and destination tensors is contiguous.
+  // 2. Device for both the source and destination tensor is CPU.
+  // 3. dtype conversion between FP32->FP16 and FP16->FP32.
+#ifdef USE_FBGEMM
+  if (((self.dtype() == at::kFloat && src.dtype() == at::kHalf) ||
+       (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
+      (self.device().is_cpu() && src.device().is_cpu()) &&
+      ((self.is_contiguous() && src.is_contiguous()) ||
+       (self.is_non_overlapping_and_dense() && self.strides() == src.strides()))) {
+
+    // See the numel check above.
+    auto min_numel = src.numel();
+
+    if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
+      auto* output_ptr =
+          reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
+      if (self.numel() < at::internal::GRAIN_SIZE) {
+        fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, min_numel);
+      } else {
+        at::parallel_for(
+            0,
+            min_numel,
+            at::internal::GRAIN_SIZE,
+            [&](int64_t begin, int64_t end) {
+              fbgemm::FloatToFloat16_simd(
+                  src.data_ptr<float>() + begin,
+                  output_ptr + begin,
+                end - begin);
+            });
+      }
+    } else {
+      auto in_data = reinterpret_cast<fbgemm::float16*>(
+          src.data_ptr<at::Half>());
+      auto* output_ptr = self.data_ptr<float>();
+      if (self.numel() < at::internal::GRAIN_SIZE) {
+        fbgemm::Float16ToFloat_simd(in_data, output_ptr, min_numel);
+      } else {
+        at::parallel_for(
+            0,
+            min_numel,
+            at::internal::GRAIN_SIZE,
+            [&](int64_t begin, int64_t end) {
+              fbgemm::Float16ToFloat_simd(
+                  in_data + begin, output_ptr + begin, end - begin);
+            });
+      }
+    }
+    return self;
   }
+#endif
+
   copy_stub(device_type, iter, non_blocking);
   return self;
 }
