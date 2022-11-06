@@ -125,10 +125,51 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
-Tensor reapeat_interleave_mps(const Tensor& self, IntArrayRef repeats)
+Tensor repeat_interleave_mps(const Tensor& self,const Tensor& repeats,c10::optional<int64_t> dim,c10::optional<int64_t> output_size) {
   using namespace mps;
+ 
+  Tensor input = self;
 
-  
+
+  // Store conj and neg bits
+  const auto conj = input.is_conj();
+  if (conj) {
+    input = input.conj();
+  }
+  const auto neg = input.is_neg();
+  if (neg) {
+    input = input._neg_view();
+  }
+
+  if (!dim) {
+    input = input.flatten();
+    dim = 0;
+  }
+
+  Tensor repeats_ = repeats;
+  if (repeats.dim() == 0 || (repeats.dim() == 1 && repeats.size(0) == 1)) {
+    repeats_ = repeats.reshape({1}).expand({input.size(dim.value())});
+  } else if (repeats.dim() == 1) {
+    TORCH_CHECK(
+        repeats.size(0) == input.size(dim.value()),
+        "repeats must have the same size as input along dim")
+  } else {
+    AT_ERROR("repeats must be 0-dim or 1-dim tensor");
+  }
+
+  auto output = input.index_select(
+      dim.value(), at::repeat_interleave(repeats_, output_size));
+  // Restore conj and neg bits
+  if (conj) {
+    output = output.conj();
+  }
+  if (neg) {
+    output = output._neg_view();
+  }
   return output;
+}
+
+
+
 }
 }
