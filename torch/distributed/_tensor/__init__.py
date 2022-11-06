@@ -9,7 +9,7 @@ from torch.distributed._tensor.placement_types import Placement, Shard, Replicat
 
 
 # Import all builtin dist tensor ops
-import torch.distributed._tensor.ops
+# import torch.distributed._tensor.ops
 
 
 def distribute_tensor(
@@ -168,11 +168,11 @@ def distribute_module(
 
     # register input_fn as module forward pre hook
     if input_fn is not None:
-        module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs))  # type: ignore
+        module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs))  # type: ignore[operator]
     # register input_fn as module forward hook
     if output_fn is not None:
         module.register_forward_hook(
-            lambda mod, inputs, outputs: output_fn(outputs)  # type: ignore
+            lambda mod, inputs, outputs: output_fn(outputs)  # type: ignore[operator]
         )
 
     return module
