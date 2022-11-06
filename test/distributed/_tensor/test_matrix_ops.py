@@ -293,7 +293,6 @@ class DistMatrixOpsTest(DTensorTestBase):
             itertools.product(placement_specs, placement_specs)
         )
 
-        shard_specs_comb = [spec for spec in shard_specs_comb]
         # tests that currently pass
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
