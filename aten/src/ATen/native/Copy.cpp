@@ -119,11 +119,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
-  // Make sure we don't go out of bounds in src while copying into self. For
-  // example, fbgemm::Float16ToFloat_ref only considers the size of self and
-  // assumes there's enough elements in src, which might not be the case.
   // Check here that we have enough numel in self, but use src numel when
-  // copying.
+  // copying to not go out of bounds (see fbgemm::Float16ToFloat_ref).
   TORCH_CHECK(
     self.numel() >= src.numel(),
     "Expected self to have more or equal number of elements than src, but got "

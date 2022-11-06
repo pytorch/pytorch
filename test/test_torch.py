@@ -7582,11 +7582,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_copy_from_smaller_src_float16(self):
         # https://github.com/pytorch/pytorch/issues/88543
-        # fbgemm APIs were used incorrectly in copy_impl. For example,
-        # fbgemm::Float16ToFloat_ref only considers the number of elements in
-        # out. If src doesn't have enough elements, the function will read out
-        # of bounds from src. The dtype of src is float16 here so that it goes
-        # through the code path that used to crash.
+        # fbgemm APIs were used incorrectly in copy_impl. This used to read out
+        # of bounds by accessing src memory (because it has less elements).
         src = torch.empty((0, 2, 3), dtype=torch.float16)  # 0 elems
         out = torch.empty(1, dtype=torch.complex64)  # 1 elem
         # Triggers a copy that used to crash.
