@@ -47,31 +47,93 @@
 //                   ...)
 //
 // where & and * represent the C-style address-of and indirection operations.
+// #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ATen.h>
 
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/IListRef.h>
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/native/TensorAdvancedIndexingUtils.h>
-#include <ATen/core/IListRef.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ScatterGatherChecks.h>
+#include <ATen/native/TensorAdvancedIndexingUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_gather_sparse_backward.h>
+#include <ATen/ops/_gather_sparse_backward_native.h>
+#include <ATen/ops/_index_put_impl.h>
+#include <ATen/ops/_index_put_impl_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/argwhere_native.h>
+#include <ATen/ops/as_strided.h>
+#include <ATen/ops/broadcast_to.h>
+#include <ATen/ops/count_nonzero.h>
+#include <ATen/ops/count_nonzero_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_quantized.h>
+#include <ATen/ops/gather.h>
+#include <ATen/ops/gather_backward_native.h>
+#include <ATen/ops/gather_meta.h>
+#include <ATen/ops/gather_native.h>
+#include <ATen/ops/index.h>
+#include <ATen/ops/index_add_meta.h>
+#include <ATen/ops/index_add_native.h>
+#include <ATen/ops/index_copy_meta.h>
+#include <ATen/ops/index_copy_native.h>
+#include <ATen/ops/index_fill_native.h>
+#include <ATen/ops/index_meta.h>
+#include <ATen/ops/index_native.h>
+#include <ATen/ops/index_put_native.h>
+#include <ATen/ops/index_reduce_meta.h>
+#include <ATen/ops/index_reduce_native.h>
+#include <ATen/ops/index_select_backward_native.h>
+#include <ATen/ops/index_select_native.h>
+#include <ATen/ops/masked_fill_native.h>
+#include <ATen/ops/masked_scatter_native.h>
+#include <ATen/ops/masked_select_backward_native.h>
+#include <ATen/ops/masked_select_native.h>
+#include <ATen/ops/nonzero_native.h>
+#include <ATen/ops/nonzero_numpy_native.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/put_native.h>
+#include <ATen/ops/quantize_per_tensor.h>
+#include <ATen/ops/scatter_add_meta.h>
+#include <ATen/ops/scatter_add_native.h>
+#include <ATen/ops/scatter_meta.h>
+#include <ATen/ops/scatter_native.h>
+#include <ATen/ops/scatter_reduce_meta.h>
+#include <ATen/ops/scatter_reduce_native.h>
+#include <ATen/ops/take_along_dim_native.h>
+#include <ATen/ops/take_native.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
 #include <algorithm>
-#include <functional>
 #include <numeric>
 #include <vector>
 
@@ -1257,13 +1319,17 @@ Tensor index_select_quantized_cpu_(const Tensor & self, int64_t dim, const Tenso
   return at::native::index_select_out_cpu_(self, dim, index, result);
 }
 
-Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
+Tensor index_select_backward(const Tensor& grad, at::IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
+    return at::native::index_select_backward_symint(grad, c10::fromIntArrayRefSlow(self_sizes), dim, index);
+}
+
+Tensor index_select_backward_symint(const Tensor& grad, c10::SymIntArrayRef self_sizes, int64_t dim, const Tensor& index) {
   // for composite compliance, use out-of-place variant of
   // `index_add` if index tensor is a Tensor Subclass.
   if (isTensorSubclassLike(index)) {
-    return grad.new_zeros(self_sizes, grad.options()).index_add(dim, index, grad);
+    return grad.new_zeros_symint(self_sizes, grad.options()).index_add(dim, index, grad);
   }
-  return grad.new_zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
+  return grad.new_zeros_symint(self_sizes, grad.options()).index_add_(dim, index, grad);
 }
 
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Scalar& source) {
@@ -1446,6 +1512,10 @@ TORCH_IMPL_FUNC(scatter_src_out)
  const Tensor& index,
  const Tensor& src,
  const Tensor& out) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when index contains duplicate entries, src is a tensor,
+  // and reduce=None
+  at::globalContext().alertNotDeterministic("scatter with src tensor and reduce=None");
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
                scatter_stub);
