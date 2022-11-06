@@ -2563,8 +2563,8 @@ class TestNLLLoss(TestCase):
         # helper(2, 8, 4, 5, torch.int64)
         
     def test_median(self):
-        def helper_dtype_int64(n1, n2, n3):
-            cpu_x = torch.randint(50, (n1, n2, n3), device='cpu', dtype=torch.int64)
+        def helper_dtype_int32(n1, n2, n3):
+            cpu_x = torch.randint(50, (n1, n2, n3), device='cpu', dtype=torch.int32)
             mps_x = cpu_x.detach().clone().to('mps')
 
             result_cpu = torch.median(cpu_x)
@@ -2580,8 +2580,8 @@ class TestNLLLoss(TestCase):
 
             self.assertEqual(result_cpu, result_mps)
 
-        helper_dtype_int64(3, 3, 3)
-        helper_dtype_int64(2, 2, 2)
+        helper_dtype_int32(3, 3, 3)
+        helper_dtype_int32(2, 2, 2)
         helper_dtype_float32(2, 2, 2)
         helper_dtype_float32(3, 3, 3)
         
