@@ -168,11 +168,11 @@ def distribute_module(
 
     # register input_fn as module forward pre hook
     if input_fn is not None:
-        module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs))  # type: ignore[operator]
+        module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs))  # type: ignore[misc]
     # register input_fn as module forward hook
     if output_fn is not None:
         module.register_forward_hook(
-            lambda mod, inputs, outputs: output_fn(outputs)  # type: ignore[operator]
+            lambda mod, inputs, outputs: output_fn(outputs)  # type: ignore[misc]
         )
 
     return module
