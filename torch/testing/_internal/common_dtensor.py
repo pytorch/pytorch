@@ -97,7 +97,7 @@ class DTensorTestBase(MultiProcessTestCase):
         return NUM_DEVICES
 
     def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(DEVICE_TYPE, list(range(NUM_DEVICES)))  # type: ignore
+        return DeviceMesh(DEVICE_TYPE, list(range(NUM_DEVICES)))
 
     def init_pg(self, backend: str = "nccl") -> None:
         if backend == "nccl" and torch.cuda.device_count() < self.world_size:
@@ -156,7 +156,7 @@ def with_comms(
 
     @wraps(func)  # pyre-ignore[6]
     def wrapper(
-        self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore
+        self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
     ) -> None:
         # if backend not specified, and cuda available, then use nccl, else gloo
         pg_backend = (
@@ -167,7 +167,7 @@ def with_comms(
 
         self.device_type = "cuda" if pg_backend == "nccl" else "cpu"
         self.init_pg(backend=pg_backend)
-        func(self)  # type: ignore
+        func(self)  # type: ignore[operator]
         self.destroy_pg()
 
     return wrapper
@@ -316,7 +316,7 @@ class DTensorConverter(object):
                 if type(t) is torch.nn.Parameter:
                     r = torch.nn.Parameter(
                         r, requires_grad=r.requires_grad
-                    )  # type: ignore
+                    )  # type: ignore[call-overload]
                 return r
             else:
                 self.miss += 1
