@@ -1647,5 +1647,94 @@ std::tuple<Tensor, Tensor> min_mps
     return min_max_mps(input_t, dim, keepdim, MPSReductionType::MIN, "min_mps");
 }
 
+// Median of entire tensor into scalar result
+Tensor median_mps(const Tensor& input_t) {
+
+    if (@available(macOS 13.0, *) == false) {
+        TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
+                    "Falling back on CPU. This may have performace implications.");
+        return at::median(input_t.to("cpu"));
+      }
+
+    TORCH_INTERNAL_ASSERT(input_t.scalar_type() != ScalarType::Long, "median not supported for Long dtype on MPS");
+
+    namespace native_mps = at::native::mps;
+    using CachedGraph = native_mps::MPSUnaryCachedGraph;
+
+    native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
+
+    IntArrayRef input_shape = input_t.sizes();
+    int64_t num_input_dims = input_shape.size();
+
+    // calculate total no. of elements in the input tensor to reduce it to one dimension
+    NSMutableArray<NSNumber*> *apparent_input_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
+    int64_t num_in_elements = 1;
+    for(int i = 0; i < num_input_dims; i++) {
+        num_in_elements *= input_shape[i];
+    }
+
+    apparent_input_shape[0] = [NSNumber numberWithInt:num_in_elements];
+
+    Tensor output_t = at::native::empty_mps({}, input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+
+    if (output_t.numel() == 0 || num_in_elements == 0) {
+        return output_t;
+    }
+
+  @autoreleasepool {
+    string key = "median_mps:"+ mps::getMPSTypeString(input_t.scalar_type())  + mps::getTensorsStringKey(input_t);
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    // Initialize once if configuration not found in cache
+    if(!cachedGraph) {
+      native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+
+        CachedGraph *newCachedGraph = nil;
+
+        @autoreleasepool {
+            MPSGraph* mpsGraph = native_mps::make_mps_graph();
+            newCachedGraph = new CachedGraph(mpsGraph);
+
+            MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_t);
+
+            MPSGraphTensor* outputTensor = nil;
+
+
+            NSArray * oneDimShape = @[@-1];
+            MPSGraphTensor * reshapedTensor = [mpsGraph reshapeTensor:inputTensor withShape:oneDimShape name:nil];
+            MPSGraphTensor * sortedTensor = [mpsGraph
+                                                  sortWithTensor:reshapedTensor
+                                                  axis:((NSUInteger) (int)0)
+                                                  name:nil];
+            outputTensor = [mpsGraph sliceTensor:sortedTensor
+                                                        dimension:0
+                                                        start:((NSUInteger) (int)((num_in_elements+1)/2 ) - 1)
+                                                        length:1
+                                                        name:nil];
+
+            newCachedGraph->inputTensor_ = inputTensor;
+            newCachedGraph->outputTensor_ = outputTensor;
+        }
+        return newCachedGraph;
+      });
+      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+    }
+
+    auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);
+    auto outputPlaceholder = native_mps::Placeholder(cachedGraph->outputTensor_, output_t, @[@1]);
+
+    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{
+      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
+    };
+
+    NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *results = @{
+      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+    };
+
+    native_mps::runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+  }
+
+  return output_t;
+}
+
 } // native
 } // at
