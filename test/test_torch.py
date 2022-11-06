@@ -1478,6 +1478,46 @@ else:
                 'put_',
                 torch.device(device).type == 'cuda')
 
+    @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_scatter(self, device):
+        a = torch.randn(10, device=device)
+        indices = torch.tensor([0, 0], device=device)
+        values = torch.tensor([0., 1.], device=device)
+        result = torch.empty_like(a)
+
+        error_msg = 'scatter with src tensor and reduce=None'
+
+        error_cases = [
+            lambda: torch.Tensor.scatter(a, 0, indices, values),
+            lambda: torch.Tensor.scatter_(a, 0, indices, values),
+            lambda: torch.scatter(a, 0, indices, values),
+            lambda: torch.scatter(a, 0, indices, values, out=result),
+        ]
+
+        no_error_cases = [
+            lambda: torch.Tensor.scatter(a, 0, indices, 0),
+            lambda: torch.Tensor.scatter_(a, 0, indices, 0),
+            lambda: torch.scatter(a, 0, indices, 0),
+            lambda: torch.scatter(a, 0, indices, 0, out=result),
+
+            lambda: torch.Tensor.scatter(a, 0, indices, values, reduce='add'),
+            lambda: torch.Tensor.scatter_(a, 0, indices, values, reduce='add'),
+            lambda: torch.scatter(a, 0, indices, values, reduce='add'),
+            lambda: torch.scatter(a, 0, indices, values, out=result, reduce='add'),
+        ]
+
+        for error_case in error_cases:
+            self.check_nondeterministic_alert(
+                error_case,
+                error_msg)
+
+        for no_error_case in no_error_cases:
+            self.check_nondeterministic_alert(
+                no_error_case,
+                error_msg,
+                False)
+
     @skipIfMps
     def test_nondeterministic_alert_histc(self, device):
         a = torch.tensor([], device=device)
@@ -7549,10 +7589,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # through the code path that used to crash.
         src = torch.empty((0, 2, 3), dtype=torch.float16)  # 0 elems
         out = torch.empty(1, dtype=torch.complex64)  # 1 elem
-        with self.assertRaisesRegex(
-                RuntimeError,
-                "Tensors must have the same number of elements, but got self: 1 and src: 0"):
-            out.real = src
+        # Triggers a copy that used to crash.
+        out.real = src
 
     # FIXME: Port to a more appropriate test suite
     def _test_to_with_layout(self, layout):

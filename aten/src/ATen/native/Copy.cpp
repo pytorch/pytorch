@@ -122,9 +122,11 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // Make sure we don't go out of bounds in src while copying into self. For
   // example, fbgemm::Float16ToFloat_ref only considers the size of self and
   // assumes there's enough elements in src, which might not be the case.
+  // Check here that we have enough numel in self, but use src numel when
+  // copying.
   TORCH_CHECK(
-    self.numel() == src.numel(),
-    "Tensors must have the same number of elements, but got ",
+    self.numel() >= src.numel(),
+    "Expected self to have more or equal number of elements than src, but got "
     "self: ", self.numel(), " and src: ", src.numel());
 
   // FBGeMM kernel support exists only for the following case,
@@ -137,15 +139,19 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
         (self.device().is_cpu() && src.device().is_cpu()) &&
         ((self.is_contiguous() && src.is_contiguous()) ||
          (self.is_non_overlapping_and_dense() && self.strides() == src.strides()))) {
+
+      // See the numel check above.
+      auto min_numel = src.numel();
+
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
         auto* output_ptr =
             reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
         if (self.numel() < at::internal::GRAIN_SIZE) {
-          fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, self.numel());
+          fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, min_numel);
         } else {
           at::parallel_for(
               0,
-              self.numel(),
+              min_numel,
               at::internal::GRAIN_SIZE,
               [&](int64_t begin, int64_t end) {
                 fbgemm::FloatToFloat16_simd(
@@ -159,11 +165,11 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
             src.data_ptr<at::Half>());
         auto* output_ptr = self.data_ptr<float>();
         if (self.numel() < at::internal::GRAIN_SIZE) {
-          fbgemm::Float16ToFloat_simd(in_data, output_ptr, self.numel());
+          fbgemm::Float16ToFloat_simd(in_data, output_ptr, min_numel);
         } else {
           at::parallel_for(
               0,
-              self.numel(),
+              min_numel,
               at::internal::GRAIN_SIZE,
               [&](int64_t begin, int64_t end) {
                 fbgemm::Float16ToFloat_simd(
