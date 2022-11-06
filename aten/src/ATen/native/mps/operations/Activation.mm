@@ -1473,7 +1473,7 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
       MPSScalar beta_scalar = getMPSScalar(beta, ScalarType::Float);;
 
       @autoreleasepool {
-        string key = "softplus_out_mps:" + getTensorsStringKey({self});
+        string key = "softplus_out_mps:" + getTensorsStringKey({self}) + ":" + to_string(threshold.to<double>());
 
         CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
         if(!cachedGraph) {
@@ -1486,7 +1486,7 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
               newCachedGraph = new CachedGraph(mpsGraph);
               MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
-              MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, beta);
+              MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSScalarType(ScalarType::Float));
 
               MPSGraphTensor* reluTensor = [mpsGraph reLUWithTensor:inputTensor
                                                                name:nil];
@@ -1575,7 +1575,7 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps) (
       MPSStream* stream = getCurrentMPSStream();
 
       @autoreleasepool {
-        string key = "softplus_backward_out_mps:" + getTensorsStringKey({grad_output, self});
+        string key = "softplus_backward_out_mps:" + getTensorsStringKey({grad_output, self}) + ":" + to_string(threshold.to<double>());
 
         CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
         if(!cachedGraph) {
@@ -1590,7 +1590,7 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps) (
 
               MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
-              MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, beta);
+              MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSScalarType(ScalarType::Float));
 
               MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0
                                                                   shape:@[@1]
