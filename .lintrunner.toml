@@ -99,6 +99,8 @@ include_patterns = [
 exclude_patterns = [
     'torch/include/**',
     'torch/csrc/**',
+    'torch/_dynamo/**/*.py',
+    'torch/_inductor/**/*.py',
     'torch/distributed/elastic/agent/server/api.py',
     'torch/testing/_internal/**',
     'torch/distributed/fsdp/fully_sharded_data_parallel.py',
@@ -154,6 +156,7 @@ include_patterns = [
 exclude_patterns = [
     # (linbinyu) copied from internal repo
     'tools/code_analyzer/gen_operators_yaml.py',
+    'tools/dynamo/verify_dynamo.py',
     'tools/gen_vulkan_spv.py',
     'tools/test/gen_operators_yaml_test.py',
     'tools/test/gen_oplist_test.py',
@@ -286,8 +289,10 @@ include_patterns=['**']
 exclude_patterns=[
     '**/contrib/**',
     'third_party/**',
+    '**/*.bat',
     '**/*.expect',
     '**/*.ipynb',
+    '**/*.ps1',
     '**/*.ptl',
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
@@ -332,6 +337,7 @@ include_patterns = ['**']
 exclude_patterns = [
     '**/*.svg',
     '**/*Makefile',
+    '**/*Makefile_dashboard',
     '**/contrib/**',
     'third_party/**',
     '**/.gitattributes',
@@ -410,6 +416,35 @@ command = [
         This #include directly includes pybind11 without also including \
         #include <torch/csrc/utils/pybind.h>;  this means some important \
         specializations may not be included.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'ERROR_PRONE_ISINSTANCE'
+include_patterns = [
+    'torch/_refs/**/*.py',
+    'torch/_prims/**/*.py',
+    'torch/_prims_common/**/*.py',
+    'torch/_decomp/**/*.py',
+    'torch/_meta_registrations.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=isinstance\([^)]+(int|float)\)',
+    '--linter-name=ERROR_PRONE_ISINSTANCE',
+    '--error-name=error prone isinstance',
+    """--error-description=\
+        This line has an isinstance call that directly refers to \
+        int or float.  This is error-prone because you may also \
+        have wanted to allow SymInt or SymFloat in your test.  \
+        To suppress this lint, use an appropriate type alias defined \
+        in torch._prims_common; use IntLike/FloatLike when you would accept \
+        both regular and symbolic numbers, Dim for ints representing \
+        dimensions, or IntWithoutSymInt/FloatWithoutSymFloat if you really \
+        meant to exclude symbolic numbers.
     """,
     '--',
     '@{{PATHSFILE}}'
@@ -703,6 +738,11 @@ include_patterns = [
     'test/onnx/**/*.py',
     'test/test_dynamo_cudagraphs.py',
     'tools/**/*.py',
+    'torch/_dynamo/**/*.py',
+    'test/dynamo/**/*.py',
+    'benchmarks/dynamo/**/*.py',
+    'torch/_inductor/**/*.py',
+    'test/inductor/**/*.py',
     'torch/onnx/**/*.py',
     'torch/package/**/*.py',
     'torch/_decomp/**/*.py',

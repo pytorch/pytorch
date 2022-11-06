@@ -9,6 +9,7 @@
 
 #include <iostream>
 #include <exception>
+#include <mutex>
 
 namespace at {
 namespace autocast {
@@ -37,6 +38,14 @@ void set_xpu_enabled(bool new_enabled) {
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXPU, !new_enabled);
 }
 
+bool is_hpu_enabled() {
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastHPU);
+}
+
+void set_hpu_enabled(bool new_enabled) {
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastHPU, !new_enabled);
+}
+
 namespace {
 // Imitate Apex and cache some of the casts to streamline parameter reuse.
 // Our heuristic is to cache lower_precision_fp casts of fp32 model weights (see cached_cast below).
@@ -56,7 +65,8 @@ namespace {
 // directly against incoming TensorImpl*s.
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 using val_type = std::tuple<weakref_type, Tensor>;
-thread_local std::unordered_map<TensorImpl*, val_type> cached_casts;
+std::unordered_map<TensorImpl*, val_type> cached_casts;
+std::mutex cached_casts_mutex;
 
 // nesting tracks the nesting depth of the Python-side context manager.
 // When the autocast context manager exits to a nesting level that's outside
@@ -70,6 +80,9 @@ thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;
 // autocast_xpu_dtype is the lower_precision_fp used by AutocastXPU.
 thread_local at::ScalarType autocast_xpu_dtype = at::kBFloat16;
 
+// autocast_hpu_dtype is the lower_precision_fp used by AutocastHPU.
+thread_local at::ScalarType autocast_hpu_dtype = at::kBFloat16;
+
 // should we enabled the cache inside autocast.
 thread_local bool cache_enabled = true;
 
@@ -78,6 +91,7 @@ thread_local at::ScalarType autocast_gpu_dtype = at::kHalf;
 }
 
 void clear_cache() {
+  const std::lock_guard<std::mutex> lock(cached_casts_mutex);
   cached_casts.clear();
 }
 
@@ -101,6 +115,10 @@ at::ScalarType get_autocast_xpu_dtype() {
   return autocast_xpu_dtype;
 }
 
+at::ScalarType get_autocast_hpu_dtype() {
+  return autocast_hpu_dtype;
+}
+
 void set_autocast_cpu_dtype(at::ScalarType dtype) {
   TORCH_CHECK(
       dtype == at::kBFloat16,
@@ -114,6 +132,10 @@ void set_autocast_gpu_dtype(at::ScalarType dtype) {
 
 void set_autocast_xpu_dtype(at::ScalarType dtype) {
   autocast_xpu_dtype = dtype;
+}
+
+void set_autocast_hpu_dtype(at::ScalarType dtype) {
+  autocast_hpu_dtype = dtype;
 }
 
 bool is_autocast_cache_enabled() {
@@ -136,6 +158,7 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
                          arg.scalar_type() == at::kFloat && arg.requires_grad() &&
                          arg.is_leaf() && !arg.is_view() && cache_enabled);
     if (can_try_cache) {
+      const std::lock_guard<std::mutex> lock(cached_casts_mutex);
       auto it = cached_casts.find(arg.unsafeGetTensorImpl());
       if (it != cached_casts.end()) {
         return std::get<1>(it->second);

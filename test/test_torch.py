@@ -30,14 +30,14 @@ from functools import partial
 from torch import multiprocessing as mp
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, TEST_WITH_ROCM, run_tests,
+    TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, skipIfTorchInductor, slowTest,
     TEST_WITH_CROSSREF, skipIfTorchDynamo,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps)
+    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -1478,6 +1478,46 @@ else:
                 'put_',
                 torch.device(device).type == 'cuda')
 
+    @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_scatter(self, device):
+        a = torch.randn(10, device=device)
+        indices = torch.tensor([0, 0], device=device)
+        values = torch.tensor([0., 1.], device=device)
+        result = torch.empty_like(a)
+
+        error_msg = 'scatter with src tensor and reduce=None'
+
+        error_cases = [
+            lambda: torch.Tensor.scatter(a, 0, indices, values),
+            lambda: torch.Tensor.scatter_(a, 0, indices, values),
+            lambda: torch.scatter(a, 0, indices, values),
+            lambda: torch.scatter(a, 0, indices, values, out=result),
+        ]
+
+        no_error_cases = [
+            lambda: torch.Tensor.scatter(a, 0, indices, 0),
+            lambda: torch.Tensor.scatter_(a, 0, indices, 0),
+            lambda: torch.scatter(a, 0, indices, 0),
+            lambda: torch.scatter(a, 0, indices, 0, out=result),
+
+            lambda: torch.Tensor.scatter(a, 0, indices, values, reduce='add'),
+            lambda: torch.Tensor.scatter_(a, 0, indices, values, reduce='add'),
+            lambda: torch.scatter(a, 0, indices, values, reduce='add'),
+            lambda: torch.scatter(a, 0, indices, values, out=result, reduce='add'),
+        ]
+
+        for error_case in error_cases:
+            self.check_nondeterministic_alert(
+                error_case,
+                error_msg)
+
+        for no_error_case in no_error_cases:
+            self.check_nondeterministic_alert(
+                no_error_case,
+                error_msg,
+                False)
+
     @skipIfMps
     def test_nondeterministic_alert_histc(self, device):
         a = torch.tensor([], device=device)
@@ -2312,8 +2352,9 @@ else:
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumprod(x, 1)
         res2 = torch.tensor([]).to(device)
-        torch.cumprod(x, 1, out=res2)
-        self.assertEqual(res1, res2)
+        if not TEST_WITH_TORCHINDUCTOR:
+            torch.cumprod(x, 1, out=res2)
+            self.assertEqual(res1, res2)
         x.cumprod_(1)
         self.assertEqual(res1, x)
 
@@ -2959,10 +3000,9 @@ else:
                     dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=dest_noncontig)
                     src_size = size[:dim] + (num_src,) + size[dim + 1:]
                     src = make_tensor(src_size, device=device, dtype=dtype, noncontiguous=src_noncontig)
-                    idx = torch.randint(num_dest, (num_src,), dtype=idx_dtype, device=device)
-                    if index_noncontig:
-                        # noncontiguous_like fails with RuntimeError: XLA tensors do not have storage
-                        idx = torch.testing.make_non_contiguous(idx)
+                    idx = torch.testing.make_tensor(
+                        num_src, low=0, high=num_dest, dtype=idx_dtype, device=device, noncontiguous=index_noncontig
+                    )
                     expected = dest.clone()
                     dest.index_reduce_(dim, idx, src, reduce, include_self=include_self)
                     # fill rows in idx with reduction inits if include_self=False
@@ -4649,6 +4689,7 @@ else:
 
     @onlyCUDA
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @skipIfTorchInductor("pin_memory isn't yet supported in TorchInductor")
     def test_pin_memory_from_constructor(self, device):
         def _get_like(t, **kwargs):
             return [
@@ -5118,6 +5159,14 @@ else:
 
                 check_equal(condition, x, y)
                 check_equal(condition, y, x)
+                if self.device_type == "cuda":
+                    check_equal(condition, torch.tensor(x), y)
+                    check_equal(condition, y, torch.tensor(x))
+                    if not isinstance(y, torch.Tensor):
+                        check_equal(condition, torch.tensor(y), torch.tensor(x))
+                    if isinstance(y, torch.Tensor) and y.ndim > 0:
+                        check_equal(torch.tensor(True), x, y)
+                        check_equal(torch.tensor(True), y, x)
 
 
     def test_hook_remove(self, device):
@@ -5580,10 +5629,10 @@ class TestTorch(TestCase):
                             dest = make_tensor(dest.shape, device=device, dtype=dest.dtype, noncontiguous=True)
                         src = torch.randn(num_copy, *other_sizes, device=device)
                         if not src_contig:
-                            src = torch.testing.make_non_contiguous(src)
+                            src = noncontiguous_like(src)
                         idx = torch.randperm(num_dest, dtype=dtype, device=device).narrow(0, 0, num_copy)
                         if not index_contig:
-                            idx = torch.testing.make_non_contiguous(idx)
+                            idx = noncontiguous_like(idx)
                         # index_add_ without alpha argument
                         dest2 = dest.clone()
                         dest.index_add_(0, idx, src)
@@ -5665,15 +5714,6 @@ class TestTorch(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r"the unspecified dimension size -1 can be any value and is ambiguous"):
             torch.randn(2, 0).unflatten(1, (2, -1, 0))
-
-    def test_pytorch_library_disabled_env(self):
-        import subprocess
-        env = os.environ.copy()
-        env['PYTORCH_DISABLE_LIBRARY'] = '1'
-        try:
-            subprocess.check_output([sys.executable, '-c', 'import torch'], env=env)
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError("Could not 'import torch' with PYTORCH_DISABLE_LIBRARY=0") from e
 
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)
@@ -6795,6 +6835,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertRaises(RuntimeError, lambda: x.new(z.storage()))
 
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @skipIfTorchInductor("pin_memory isn't yet supported in TorchInductor")
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
