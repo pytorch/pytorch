@@ -195,6 +195,7 @@ class GraphLowering(torch.fx.Interpreter):
     def placeholder(self, target, args, kwargs):
         example: Union[torch.Tensor, SymInt] = super().placeholder(target, args, kwargs)
         if isinstance(example, SymInt):
+            self.graph_inputs[target] = example.node.expr
             return example.node.expr
         if config.static_weight_shapes and (
             len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes
@@ -276,6 +277,8 @@ class GraphLowering(torch.fx.Interpreter):
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
         for name, value in self.graph_inputs.items():
+            if isinstance(value, sympy.Expr):
+                continue
             value.realize()
             assert isinstance(value, TensorBox)
             value = value.data

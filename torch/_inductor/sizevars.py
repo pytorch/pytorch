@@ -459,6 +459,8 @@ class SizeVarAllocator(object):
         added = set()
 
         for name, value in graph_inputs.items():
+            if isinstance(value, Expr):
+                continue
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
@@ -470,6 +472,8 @@ class SizeVarAllocator(object):
                     assert shape in added, f"{shape} is needed but not added"
 
         for name, value in graph_inputs.items():
+            if isinstance(value, Expr):
+                continue
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
