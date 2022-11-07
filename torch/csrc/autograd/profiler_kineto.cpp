@@ -64,11 +64,40 @@ using torch::profiler::impl::ActiveProfilerType;
 using torch::profiler::impl::dtypesToStr;
 using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
+using torch::profiler::impl::op_input_t;
 using torch::profiler::impl::ProfilerStateBase;
 using torch::profiler::impl::PyExtraFieldsBase;
 using torch::profiler::impl::Result;
 using torch::profiler::impl::shapesToStr;
 using torch::profiler::impl::stacksToStr;
+using torch::profiler::impl::TensorMetadata;
+
+auto shapesAndDtypes(const std::vector<op_input_t>& inputs) {
+  std::vector<std::vector<int64_t>> shapes;
+  std::vector<std::string> dtypes;
+  for (const auto& i : inputs) {
+    c10::visit(
+        c10::overloaded(
+            [&](const TensorMetadata& t) {
+              shapes.emplace_back(t.sizes_);
+              dtypes.emplace_back(scalarTypeToTypeMeta(t.dtype_).name());
+            },
+            [&](const std::vector<TensorMetadata>&) {
+              shapes.emplace_back();
+              dtypes.emplace_back("TensorList");
+            },
+            [&](const c10::IValue&) {
+              shapes.emplace_back();
+              dtypes.emplace_back("Scalar");
+            },
+            [&](const auto&) {
+              shapes.emplace_back();
+              dtypes.emplace_back();
+            }),
+        i);
+  }
+  return std::make_pair(shapes, dtypes);
+}
 
 struct MetadataBase {
   MetadataBase(const std::shared_ptr<Result>& result)
@@ -151,14 +180,13 @@ struct AddGenericMetadata : public MetadataBase {
   }
 
   void operator()(ExtraFields<EventType::TorchOp>& op_event) {
-    auto& shapes = op_event.inputs_.shapes_;
-    if (!shapes.empty()) {
-      addMetadata("Input Dims", shapesToStr(shapes));
+    const auto shapes_and_dtypes = shapesAndDtypes(op_event.inputs_);
+    if (!shapes_and_dtypes.first.empty()) {
+      addMetadata("Input Dims", shapesToStr(shapes_and_dtypes.first));
     }
 
-    auto& dtypes = op_event.inputs_.dtypes_;
-    if (!dtypes.empty()) {
-      addMetadata("Input type", dtypesToStr(dtypes));
+    if (!shapes_and_dtypes.second.empty()) {
+      addMetadata("Input type", dtypesToStr(shapes_and_dtypes.second));
     }
 
     if (config_ && !config_->experimental_config.performance_events.empty()) {
@@ -685,12 +713,32 @@ KinetoEvent::KinetoEvent(
       parent = parent->parent_.lock();
     }
   }
+
+  result->visit_if_base<ExtraFields<EventType::TorchOp>>([&](const auto& op) {
+    std::tie(shapes_, dtypes_) = shapesAndDtypes(op.inputs_);
+  });
 }
 
 bool KinetoEvent::isPythonFunction() const {
   bool out{false};
   result_->visit_if_base<PyExtraFieldsBase>([&](const auto&) { out = true; });
   return out;
+}
+
+bool KinetoEvent::hasShapes() const {
+  return !shapes_.empty();
+}
+
+const c10::ArrayRef<std::vector<int64_t>> KinetoEvent::shapes() const {
+  return shapes_;
+}
+
+bool KinetoEvent::hasTypes() const {
+  return !dtypes_.empty();
+}
+
+const c10::ArrayRef<std::string> KinetoEvent::dtypes() const {
+  return dtypes_;
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::stack() const {
@@ -810,10 +858,6 @@ FORWARD_FROM_RESULT(deviceResourceId, kineto_info_.resource)
 
 TYPED_ATTR_WITH_DEFAULT(TorchOp, sequenceNr, e.sequence_number_, -1)
 TYPED_ATTR(TorchOp, fwdThreadId, e.sequence_number_ >= 0 ? e.forward_tid_ : 0)
-TYPED_ATTR(TorchOp, hasShapes, !e.inputs_.shapes_.empty())
-TYPED_ATTR(TorchOp, shapes, e.inputs_.shapes_)
-TYPED_ATTR(TorchOp, hasTypes, !e.inputs_.dtypes_.empty())
-TYPED_ATTR(TorchOp, dtypes, e.inputs_.dtypes_)
 TYPED_ATTR(TorchOp, scope, static_cast<uint8_t>(e.scope_))
 TYPED_ATTR(TorchOp, hasModuleHierarchy, !e.jit_modules_.empty())
 TYPED_ATTR(TorchOp, isAsync, e.is_async_)

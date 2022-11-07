@@ -190,7 +190,7 @@ class ExtraCUDACopyPattern(Pattern):
         dtypes = input_dtypes(event)
         if len(dtypes) < 2:
             return False
-        if dtypes[0] != dtypes[1]:
+        if dtypes[0] is None or dtypes[0] != dtypes[1]:
             return False
         event = to_event
         # Up one level
@@ -495,7 +495,7 @@ class Conv2dBiasFollowedByBatchNorm2dPattern(Pattern):
     def match(self, event: _ProfilerEvent):
         if event.name != "aten::conv2d":
             return False
-        if len(input_dtypes(event)) < 3 or input_dtypes(event)[2] == "":
+        if len(input_dtypes(event)) < 3 or input_dtypes(event)[2] is None:
             return False
         # This means bias=True
         event = self.go_up_until(
@@ -531,10 +531,7 @@ class MatMulDimInFP16Pattern(Pattern):
         if not input_dtypes(event):
             return False
         arg_dtype = input_dtypes(event)[0]
-        # TODO: Have a better way to check dtype_size
-        if (arg_dtype.endswith("c10::BFloat16")
-                or arg_dtype.endswith("c10::Half")) and not mutiple_of(
-                    input_shapes(event), 8):
+        if arg_dtype in (torch.bfloat16, torch.half) and not mutiple_of(input_shapes(event), 8):
             return True
         return False
 
@@ -586,12 +583,12 @@ def source_code_location(event: Optional[_ProfilerEvent]):
 
 def input_shapes(event: _ProfilerEvent):
     assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
-    return tuple([tuple(shape) for shape in event.extra_fields.inputs.shapes])
+    return tuple(tuple(getattr(i, "sizes", ())) for i in event.extra_fields.inputs)
 
 
 def input_dtypes(event: _ProfilerEvent):
     assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
-    return tuple(t for t in event.extra_fields.inputs.dtypes)
+    return tuple(getattr(i, "dtype", None) for i in event.extra_fields.inputs)
 
 
 def report_all_anti_patterns(prof,

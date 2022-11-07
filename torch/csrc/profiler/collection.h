@@ -45,12 +45,6 @@ struct TORCH_API RawTensorMetadataBase {
   explicit RawTensorMetadataBase(const at::Tensor& t);
 
   StorageImplData data_;
-
-  // Device is separated into DeviceType and DeviceIndex as Device
-  // doesn't have a default initializer (which the std::array initializer needs)
-  c10::DeviceType device_type_;
-  c10::DeviceIndex device_index_;
-
   c10::ScalarType dtype_;
   c10::Layout layout_;
   uint32_t dim_;
@@ -60,41 +54,41 @@ struct TORCH_API RawTensorMetadataBase {
 struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
   RawTensorMetadata() = default;
   RawTensorMetadata(const RawTensorMetadata&) = default;
-  explicit RawTensorMetadata(const at::Tensor& t)
-      : RawTensorMetadataBase(t), weak_self_{WeakTensor(t)} {};
+  explicit RawTensorMetadata(const at::Tensor& t);
 
-  // Wrap in `c10::optional` to make `weak_self_` default constructable.
+  // Wrap `weak_self_` in `c10::optional` and split device into components to
+  // keep struct default constructable. (which the std::array initializer needs)
   c10::optional<WeakTensor> weak_self_;
+  c10::DeviceType device_type_;
+  c10::DeviceIndex device_index_;
 };
 
 // Used during post processing.
-struct TensorMetadata : public RawTensorMetadataBase {
-  explicit TensorMetadata(const RawTensorMetadata& r)
-      : RawTensorMetadataBase(r),
-        weak_self_{r.weak_self_.value_or(WeakTensor(at::Tensor()))} {
-    SOFT_ASSERT(r.weak_self_.has_value());
-  }
-
-  c10::Device device() const {
-    return {device_type_, device_index_};
-  }
+struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
+  TensorMetadata(
+      const RawTensorMetadata& r,
+      const std::vector<int64_t>& sizes,
+      const std::vector<int64_t>& strides);
 
   TensorImplAddress impl() const {
     return weak_self_.get();
   }
 
   WeakTensor weak_self_;
+  c10::Device device_;
+  std::vector<int64_t> sizes_;
+  std::vector<int64_t> strides_;
+
+  // Set during `calculateUniqueTensorIDs`.
   c10::optional<TensorID> id_;
   c10::optional<AllocationID> allocation_id_;
 };
 
-struct Inputs {
-  std::vector<std::vector<int64_t>> shapes_;
-  std::vector<std::vector<int64_t>> strides_;
-  std::vector<c10::IValue> ivalues_;
-  std::vector<std::string> dtypes_;
-  std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
-};
+using op_input_t = c10::variant<
+    TensorMetadata,
+    std::vector<TensorMetadata>,
+    c10::IValue,
+    c10::nullopt_t>;
 
 // ============================================================================
 // == ExtraFields =============================================================
@@ -131,7 +125,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       TorchOpBasicFields&& f,
       uint64_t correlation_id,
       time_t end_time_ns,
-      Inputs&& inputs,
+      std::vector<op_input_t>&& inputs,
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
@@ -150,7 +144,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         perf_event_counters_{std::move(perf_event_counters)} {}
   uint64_t correlation_id_;
   time_t end_time_ns_;
-  Inputs inputs_;
+  std::vector<op_input_t> inputs_;
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;

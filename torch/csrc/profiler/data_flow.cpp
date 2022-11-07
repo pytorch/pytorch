@@ -21,6 +21,41 @@ struct RawTensorInfo {
   std::reference_wrapper<c10::optional<AllocationID>> allocation_id_ref_;
   std::reference_wrapper<c10::optional<TensorID>> id_ref_;
 };
+
+struct RawTensors {
+  std::vector<RawTensorInfo>& get() {
+    return tensors_;
+  }
+
+  void operator()(TensorMetadata& t) {
+    tensors_.emplace_back(RawTensorInfo{
+        t.impl(), t.data_, t.device_, false, t.allocation_id_, t.id_});
+  }
+
+  void operator()(c10::optional<TensorMetadata>& t) {
+    if (t.has_value()) {
+      (*this)(*t);
+    }
+  }
+
+  void operator()(ExtraFields<EventType::Allocation>& a) {
+    const StorageImplData ptr{a.ptr_};
+    const auto is_free = a.alloc_size_ < 0;
+    tensors_.emplace_back(RawTensorInfo{
+        NoTensorImpl, ptr, a.device(), is_free, a.allocation_id_, a.id_});
+  }
+
+  void operator()(std::vector<TensorMetadata>& t) {
+    for (auto& ti : t) {
+      (*this)(ti);
+    }
+  }
+
+  template <typename T>
+  void operator()(T&) {}
+
+  std::vector<RawTensorInfo> tensors_;
+};
 } // namespace
 
 void calculateUniqueTensorIDs(
@@ -33,62 +68,37 @@ void calculateUniqueTensorIDs(
   // Flatten results to a uniform representation.
   // --------------------------------------------------------------------------
   {
-    auto insert_tensor = [&tensors](TensorMetadata& m) {
-      tensors.emplace_back(RawTensorInfo{
-          m.impl(),
-          m.data_,
-          m.device(),
-          /*is_free_=*/false,
-          m.allocation_id_,
-          m.id_});
-    };
-
+    RawTensors raw_tensors;
     for (auto& result : sorted_results) {
       result->visit(c10::overloaded(
           [&](ExtraFields<EventType::TorchOp>& torch_op) {
-            for (auto& m : torch_op.inputs_.tensor_metadata_) {
-              if (m.has_value()) {
-                insert_tensor(*m);
-              }
+            for (auto& i : torch_op.inputs_) {
+              c10::visit(raw_tensors, i);
             }
-          },
-          [&](ExtraFields<EventType::Allocation>& alloc_op) {
-            // We won't know which allocations are for Tensor storage yet.
-            // We'll filter after we see all of the op inputs.
-            tensors.emplace_back(RawTensorInfo{
-                NoTensorImpl,
-                StorageImplData(alloc_op.ptr_),
-                alloc_op.device(),
-                /*is_free_=*/alloc_op.alloc_size_ < 0,
-                alloc_op.allocation_id_,
-                alloc_op.id_});
           },
           [&](ExtraFields<EventType::PyCall>& py_call) {
             // torch.nn.Module
             if (py_call.module_.has_value()) {
               for (auto& p : py_call.module_->parameters_) {
-                insert_tensor(p.metadata_);
-                if (p.grad_metadata_.has_value()) {
-                  insert_tensor(*p.grad_metadata_);
-                }
+                raw_tensors(p.metadata_);
+                raw_tensors(p.grad_metadata_);
               }
             }
 
             // torch.optim.Optimizer
             if (py_call.optimizer_.has_value()) {
               for (auto& p : py_call.optimizer_->parameters_) {
-                insert_tensor(p.metadata_);
-                if (p.grad_metadata_.has_value()) {
-                  insert_tensor(*p.grad_metadata_);
-                }
+                raw_tensors(p.metadata_);
+                raw_tensors(p.grad_metadata_);
                 for (auto& state_i : p.state_) {
-                  insert_tensor(state_i.second);
+                  raw_tensors(state_i.second);
                 }
               }
             }
           },
-          [](const auto&) {}));
+          [&](auto& i) { raw_tensors(i); }));
     }
+    tensors = std::move(raw_tensors.tensors_);
   }
 
   // Assign IDs to solve ABA for Storage.
