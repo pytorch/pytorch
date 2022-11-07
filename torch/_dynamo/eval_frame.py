@@ -347,6 +347,7 @@ def optimize(
         def toy_example(a, b):
             ...
     """
+    print("test")
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
     if sys.platform == "win32":
