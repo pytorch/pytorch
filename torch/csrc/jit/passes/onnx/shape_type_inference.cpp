@@ -76,16 +76,13 @@ std::pair<TypePtr, bool> MergeInferredType(
 void MergeInferredTypeAndSetMap(
     Value* dest_v,
     TypePtr existing_type,
-    TypePtr inferred_type,
-    bool set_constant_value_map) {
+    TypePtr inferred_type) {
   TypePtr mergedType;
   bool inferred;
   std::tie(mergedType, inferred) =
       MergeInferredType(existing_type, inferred_type);
   dest_v->setType(mergedType);
-  if (set_constant_value_map) {
-    ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
-  }
+  ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
 }
 
 namespace {
@@ -1888,6 +1885,8 @@ void UpdateReliable(
       nodeTypeReliableForTracer.end();
   if (!inferred && !isTypeReliableForTracer &&
       !output->node()->kind().is_onnx()) {
+    // TODO(84661): This warning comes before setType in symbolic_fn.
+    // tracked in #84661
     TORCH_WARN(
         "The shape inference of ",
         output->node()->kind().toDisplayString(),
@@ -2041,6 +2040,17 @@ void ONNXShapeTypeInference(
       GRAPH_DEBUG(
           "ONNX graph after shape inference: ", prettyPrint(*model_proto));
     }
+  } else if (n->output()
+                 ->type()
+                 ->cast<TensorType>()
+                 ->sizes()
+                 .concrete_sizes()
+                 .has_value()) {
+    // Custom setType output should get in here if it's set correctly. They will
+    // be updated to inferred for later updatereliable function.
+    for (auto node_output : n->outputs()) {
+      ConstantValueMap::SetUseInferredType(node_output->debugName(), true);
+    }
   }
 
   SpecialPostProcess(n);
@@ -2082,20 +2092,7 @@ void ONNXShapeTypeInference(
   // reliable shape but its shape is not in ConstantValueMap. So we need this
   // logic to update ConstantValueMap.
   for (auto node_output : n->outputs()) {
-    if (ConstantValueMap::HasTypeReliable(node_output->debugName())) {
-      auto reliable =
-          ConstantValueMap::GetTypeReliable(node_output->debugName())
-              .value_or(false);
-      if (reliable && !ConstantValueMap::HasShape(node_output->debugName())) {
-        // TODO: ListType case
-        if (auto output_tensor_type = node_output->type()->cast<TensorType>()) {
-          if (output_tensor_type->dim()) {
-            auto symbolic_sizes = output_tensor_type->symbolic_sizes();
-            UpdateShapeConstantValueMap(node_output, symbolic_sizes);
-          }
-        }
-      }
-    }
+    UpdateShapeConstantIfReliable(node_output);
   }
 
   GRAPH_DEBUG(
@@ -2341,6 +2338,22 @@ void ONNXShapeTypeInference(
   SetGraphInputTypeReliable(graph.get());
   ONNXShapeTypeInference(graph->block(), params_dict, opset_version);
   ConstantValueMap::ClearMaps();
+}
+
+void UpdateShapeConstantIfReliable(torch::jit::Value* node_output) {
+  if (ConstantValueMap::HasTypeReliable(node_output->debugName())) {
+    auto reliable = ConstantValueMap::GetTypeReliable(node_output->debugName())
+                        .value_or(false);
+    if (reliable && !ConstantValueMap::HasShape(node_output->debugName())) {
+      // TODO: ListType case
+      if (auto output_tensor_type = node_output->type()->cast<TensorType>()) {
+        if (output_tensor_type->dim()) {
+          auto symbolic_sizes = output_tensor_type->symbolic_sizes();
+          UpdateShapeConstantValueMap(node_output, symbolic_sizes);
+        }
+      }
+    }
+  }
 }
 
 } // namespace jit

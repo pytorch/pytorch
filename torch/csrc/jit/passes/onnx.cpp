@@ -14,7 +14,6 @@
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
 #include <unordered_map>
-
 namespace torch {
 namespace jit {
 
@@ -326,10 +325,17 @@ void NodeToONNX(
           ONNXShapeTypeInference(const_node, empty_params_dict, opset_version);
           env[old] = const_node->output();
         } else {
-          // ConstantValueMap has been set in shape inference,
-          // set_constant_value_map = false here to avoid redundancy.
+          // An update in ConstantValueMap is also needed here, since
+          // the user setType can be only accessed in this step, and it
+          // should be reliable.
           MergeInferredTypeAndSetMap(
-              outputs[i], old->type(), outputs[i]->type(), false);
+              outputs[i], old->type(), outputs[i]->type());
+          UpdateReliable(
+              outputs[i], AreInputsReliableOrStatic(outputs[i]->node()));
+          // For the node type that does not have ComputeConstant logic, it may
+          // have reliable shape but its shape is not in ConstantValueMap. So we
+          // need to update ConstantValueMap.
+          UpdateShapeConstantIfReliable(outputs[i]);
 
           // Copy over source location and scope information to all nodes
           // created by the symbolic
