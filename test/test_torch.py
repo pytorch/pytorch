@@ -7587,7 +7587,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         src = torch.empty((0, 2, 3), dtype=torch.float16)  # 0 elems
         out = torch.empty(1, dtype=torch.complex64)  # 1 elem
         # Triggers a copy that used to crash.
-        out.real = src
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"output with shape \[1\] doesn't match the broadcast shape \[0, 2, 3\]"):
+            out.real = src
 
     # FIXME: Port to a more appropriate test suite
     def _test_to_with_layout(self, layout):
