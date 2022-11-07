@@ -1,7 +1,7 @@
 import dataclasses
 import traceback
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Set, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Set, Tuple, Union
 
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
@@ -9,8 +9,7 @@ from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
     _is_namedtuple,
 )
 from torch.nn.utils.rnn import PackedSequence
-
-FSDP_FLATTENED = "_fsdp_flattened"
+from torch.utils._mode_utils import no_dispatch
 
 
 def _contains_batchnorm(module):
@@ -61,33 +60,6 @@ def _apply_to_tensors(
     return apply(container)
 
 
-def _apply_to_modules(
-    root_module: torch.nn.Module,
-    module_fn: Callable,
-    return_fn: Callable,
-    *args,
-    **kwargs,
-):
-    """
-    Performs a pre-order traversal of the modules in the hierarchy rooted at
-    ``root_module``, applying ``module_fn`` at each module and finally
-    returning a value using ``return_fn``. The traversal constructs the full
-    module prefix name (e.g. "module.submodule." just like in model state dict)
-    and makes that available to ``module_fn``.
-    """
-
-    def f(module: torch.nn.Module, prefix: str, *args, **kwargs):
-        # Call the module function before recursing over children (pre-order)
-        module_fn(module, prefix, *args, **kwargs)
-        for submodule_name, submodule in module.named_children():
-            if submodule is not None:
-                new_prefix = prefix + submodule_name + "."
-                f(submodule, new_prefix, *args, **kwargs)
-
-    f(root_module, "", *args, **kwargs)
-    return return_fn(*args, **kwargs)
-
-
 @torch.no_grad()
 def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
     """
@@ -130,30 +102,22 @@ def _free_storage(tensor: torch.Tensor) -> bool:
     return not already_freed
 
 
-def _set_fsdp_flattened(tensor: torch.Tensor) -> None:
-    """
-    Sets an attribute on ``tensor`` to mark it as flattened by FSDP. This is to
-    avoid re-flattening it during nested construction.
-    """
-    setattr(tensor, FSDP_FLATTENED, True)
-
-
-def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
-    """Returns if ``tensor`` has been marked as flattened by FSDP."""
-    return getattr(tensor, FSDP_FLATTENED, False)
-
-
 def _same_storage(x: torch.Tensor, y: torch.Tensor) -> bool:
     """Returns if ``x`` and ``y`` share the same storage."""
     # NOTE: CPU and GPU tensors are ensured to have different data pointers.
     return x.storage().data_ptr() == y.storage().data_ptr()
 
 
-def p_assert(cond: Any, s: Any, raise_assertion_error: bool = True) -> None:
+def p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
     """This is used as an alternate to ``assert`` when in the backward context
     to print the error message ``s`` since otherwise, it is swallowed."""
     if not cond:
         print(s)
         traceback.print_stack()
         if raise_assertion_error:
-            raise AssertionError
+            raise AssertionError(s)
+
+
+def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.cuda.Stream) -> None:
+    with no_dispatch():
+        tensor.record_stream(cast(torch._C.Stream, stream))
