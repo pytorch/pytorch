@@ -4,7 +4,7 @@ set -eou pipefail
 
 
 DISTRIBUTION=$(. /etc/os-release;echo $ID$VERSION_ID)
-DRIVER_VERSION="515.57"
+DRIVER_VERSION="515.76"
 DRIVER_FN="NVIDIA-Linux-x86_64-${DRIVER_VERSION}.run"
 YUM_REPO_URL="https://nvidia.github.io/nvidia-docker/${DISTRIBUTION}/nvidia-docker.repo"
 
