@@ -52,7 +52,8 @@ runs:
         .github/scripts/filter_test_configs.py \
           --test-matrix "${{ inputs.test-matrix }}" \
           --pr-number "${{ github.event.pull_request.number }}" \
-          --tag "${{ steps.parse-ref.outputs.tag }}"
+          --tag "${{ steps.parse-ref.outputs.tag }}" \
+          --event-name "${{ github.event_name }}"
 
     - name: Print the filtered test matrix
       shell: bash

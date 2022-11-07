@@ -6890,6 +6890,23 @@ def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwa
     for input, target, var, kwargs in gen_shape_kwargs():
         yield SampleInput(input, args=(target, var, ), kwargs=kwargs)
 
+def error_inputs_gaussian_nll_loss(op_info, device, **kwargs):
+    _make = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # invalid reduction value
+    yield ErrorInput(SampleInput(_make(10, 2, 3), _make(10, 2, 3), _make((10, 2, 3), low=0), reduction="abc"),
+                     error_type=ValueError, error_regex="abc is not valid")
+
+    # var is of incorrect shape
+    yield ErrorInput(SampleInput(_make(10, 2, 3), _make(10, 2, 3), _make((10, 2, 2), low=0)),
+                     error_type=ValueError, error_regex="var is of incorrect size")
+
+    # target is of incorrect shape
+    yield ErrorInput(SampleInput(_make(10, 2, 3), _make(10, 2, 2), _make((10, 2, 3), low=0)),
+                     error_type=RuntimeError,
+                     error_regex=(r"The size of tensor a \(3\) must match the size of tensor b \(2\) "
+                                  r"at non-singleton dimension 2"))
+
 def _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -9055,6 +9072,11 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
+                   supports_sparse=True,
+                   supports_sparse_csr=True,
+                   supports_sparse_csc=True,
+                   supports_sparse_bsr=True,
+                   supports_sparse_bsc=True,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/51283#issuecomment-770614273
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
@@ -9319,6 +9341,11 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
+                   supports_sparse=True,
+                   supports_sparse_csr=True,
+                   supports_sparse_csc=True,
+                   supports_sparse_bsr=True,
+                   supports_sparse_bsc=True,
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=(torch.bfloat16, torch.float16, torch.float32, torch.float64)),
@@ -9528,10 +9555,6 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
-                   skips=(
-                       DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
-                                    'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                   ),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -16174,6 +16197,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_gaussian_nll_loss,
+        error_inputs_func=error_inputs_gaussian_nll_loss,
         skips=(
             # Pre-existing condition (calls .item); needs to be fixed
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
