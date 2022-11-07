@@ -19,6 +19,8 @@ def is_available() -> bool:
 if is_available() and not torch._C._c10d_init():
     raise RuntimeError("Failed to initialize torch.distributed")
 
+# Custom Runtime Errors thrown from the distributed package
+DistBackendError = torch._C._DistBackendError
 
 if is_available():
     from torch._C._distributed_c10d import (
@@ -77,13 +79,13 @@ if is_available():
 
     set_debug_level_from_env()
 
-    # Custom Runtime Errors thrown from the distributed package
-    DistBackendError: RuntimeError = torch._C._DistBackendError
-
 else:
     # This stub is sufficient to get
     #   python test/test_public_bindings.py -k test_correct_module_names
     # working even when USE_DISTRIBUTED=0.  Feel free to add more
     # stubs as necessary.
-    class ProcessGroup:  # type: ignore[no-redef]
+    # We cannot define stubs directly because they confuse pyre
+
+    class _ProcessGroupStub:
         pass
+    sys.modules["torch.distributed"].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]
