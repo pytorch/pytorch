@@ -471,7 +471,7 @@ def register_pointwise(
     return fn
 
 
-@register_lowering(aten.where, broadcast=False, type_promotion_kind=None)
+@register_lowering([aten.where, prims.where], broadcast=False, type_promotion_kind=None)
 def where(cond, a, b):
     def fn(*args):
         return ops.where(*args)
@@ -573,7 +573,7 @@ def ceil(x):
     return make_pointwise(fn)(x)
 
 
-@register_lowering(aten.floor)
+@register_lowering([aten.floor, prims.floor])
 def floor(x):
     if is_integer_type(x):
         return x
@@ -1443,7 +1443,7 @@ def _unwrap(x):
     return x
 
 
-@register_lowering([torch.tensor, aten.scalar_tensor])
+@register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     assert layout in (None, torch.strided)
     assert pin_memory is False
@@ -3232,49 +3232,6 @@ def copy_(dst, src, non_blocking=False):
     return mutate_to(dst, src)
 
 
-@make_pointwise
-def floordiv(a, b):
-    return ops.floordiv(a, b)
-
-
-@make_pointwise
-def truncdiv(a, b):
-    return ops.truncdiv(a, b)
-
-
-@register_lowering(aten.div.Tensor_mode)
-def div_mode(a, b, rounding_mode=None):
-    both_integer = is_integer_type(a) and is_integer_type(b)
-    both_boolean = is_boolean_type(a) and is_boolean_type(b)
-
-    # floordiv and truncdiv need special handling for integer tensors on Triton,
-    # see the discussion at https://github.com/openai/triton/issues/605
-    if rounding_mode == "floor":
-        assert not both_boolean, "floordiv operands can not be boolean at the same time"
-        return floordiv(a, b) if both_integer else floor(div(a, b))
-    if rounding_mode == "trunc":
-        assert not both_boolean, "truncdiv operands can not be boolean at the same time"
-        return truncdiv(a, b) if both_integer else trunc(div(a, b))
-    return div(a, b)
-
-
-@register_lowering([aten.div], broadcast=True)
-def div(a, b):
-    def fn(*args):
-        return ops.div(*args)
-
-    dtype = get_promoted_dtype(
-        a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
-    # truediv produces a float tensor even if both operands are integer types
-    if is_integer_type(a) and is_integer_type(b):
-        dtype = torch.get_default_dtype()
-    return make_pointwise(fn, override_return_dtype=dtype)(
-        a if isinstance(a, Number) else to_dtype(a, dtype),
-        b if isinstance(b, Number) else to_dtype(b, dtype),
-    )
-
-
 @register_lowering([aten.mul], broadcast=True)
 def mul(a, b):
     both_bool = is_boolean_type(a) and is_boolean_type(b)
@@ -3285,18 +3242,20 @@ def mul(a, b):
         return make_pointwise(fn)(a, b)
 
 
-# TODO(lezcano) I believe the casting behaviour of prims.div is wrong
-# https://github.com/pytorch/pytorch/issues/84412
-# div prim performs truncation division on integer inputs
-#   and true division for floating and complex inputs
+# NOTE: prims.div maps to a / b in C, so performs truncation division on
+#   integer inputs and true division for floating and complex inputs.
 @register_lowering([prims.div], broadcast=True)
-def div_prim(a, b):
+def div(a, b):
     is_integral = is_boolean_type(a) or is_integer_type(a)
 
     if is_integral:
-        return div_mode(a, b, rounding_mode="floor")
+        def fn(*args):
+            return ops.truncdiv(*args)
     else:
-        return div(a, b)
+        def fn(*args):
+            return ops.div(*args)
+
+    return make_pointwise(fn)(a, b)
 
 @register_lowering([aten.fmod, prims.fmod])
 def fmod(a, b):
