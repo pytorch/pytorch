@@ -79,14 +79,14 @@ def meta_randperm(n, *, generator=None, out):
 def meta_randint(
     high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
 ):
-    return torch.empty(size, dtype=dtype, device=device)
+    return torch.empty(size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
 
 
 @register_meta(aten.randint.low)
 def meta_randint_low(
     low, high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
 ):
-    return torch.empty(size, dtype=dtype, device=device)
+    return torch.empty(size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
 
 
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
