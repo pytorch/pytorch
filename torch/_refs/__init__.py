@@ -463,7 +463,7 @@ def ceil(a):
 @out_wrapper()
 def complex(real: TensorLikeType, imag: TensorLikeType) -> TensorLikeType:
     def _allowed_dtypes():
-        return (torch.float32, torch.float64, torch.float16)
+        return {torch.float32, torch.float64, torch.float16}
 
     check(
         real.dtype in _allowed_dtypes() and imag.dtype in _allowed_dtypes(),
