@@ -7,6 +7,7 @@
 
 #include <ATen/core/PhiloxRNGEngine.h>
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
 #include <c10/util/BFloat16.h>
