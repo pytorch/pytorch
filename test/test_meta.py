@@ -1345,6 +1345,4 @@ if __name__ == "__main__":
                 print_op_str_if_not_supported(op_str.strip())
         sys.exit(0)
 
-    import torch._dispatch.python as d
-    with d.enable_python_dispatcher():
-        run_tests()
+    run_tests()
