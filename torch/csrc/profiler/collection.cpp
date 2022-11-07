@@ -259,6 +259,11 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
 
   event->start_time_ = torch::profiler::impl::getApproximateTime();
   event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
+  if (!config_.experimental_config.performance_events.empty()) {
+    const size_t n = config_.experimental_config.performance_events.size();
+    event->counters_ = std::make_unique<perf_counters_t>(n, 0);
+    perf_profiler_->Enable();
+  }
   return out;
 }
 
@@ -340,7 +345,8 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         jit_module(),
         extra_args(),
         gpu_fallback(),
-        event->allow_tf32_cublas_};
+        event->allow_tf32_cublas_,
+        std::move(event->counters_)};
 
     out.emplace_back(Result::create(
         time_converter(event->start_time_), tid, kineto_info, std::move(e)));
@@ -481,6 +487,11 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
     const ProfilerConfig& config)
     : tid_{tid}, config_{config}, kineto_info_{kineto::kineto_ids()} {
   torch::profiler::impl::kineto::recordThreadInfo();
+  if (config_.experimental_config.performance_events.size()) {
+    perf_profiler_ =
+        std::make_unique<torch::profiler::impl::linux_perf::PerfProfiler>();
+    perf_profiler_->Configure(config_.experimental_config.performance_events);
+  }
 }
 
 RecordQueue::RecordQueue(

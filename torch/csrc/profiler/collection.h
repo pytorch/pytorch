@@ -15,8 +15,10 @@
 #include <c10/util/variant.h>
 #include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/data_flow.h>
+#include <torch/csrc/profiler/events.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/orchestration/python_tracer.h>
+#include <torch/csrc/profiler/perf.h>
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/python_stub.h>
@@ -128,7 +130,8 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
       FallbackPair&& gpu_fallback,
-      bool allow_tf32_cublas)
+      bool allow_tf32_cublas,
+      std::unique_ptr<perf_counters_t>&& perf_event_counters)
       : TorchOpBasicFields(std::move(f)),
         correlation_id_{correlation_id},
         end_time_ns_{end_time_ns},
@@ -137,7 +140,8 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
         gpu_fallback_{std::move(gpu_fallback)},
-        allow_tf32_cublas_{allow_tf32_cublas} {}
+        allow_tf32_cublas_{allow_tf32_cublas},
+        perf_event_counters_{std::move(perf_event_counters)} {}
   uint64_t correlation_id_;
   time_t end_time_ns_;
   std::vector<op_input_t> inputs_;
@@ -146,6 +150,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   extra_args_t extra_args_;
   FallbackPair gpu_fallback_;
   bool allow_tf32_cublas_;
+  std::unique_ptr<perf_counters_t> perf_event_counters_;
 };
 
 template <>
@@ -402,6 +407,7 @@ struct KinetoObserverContext : public at::ObserverContext {
     approx_time_t end_time_{std::numeric_limits<approx_time_t>::min()};
 
     bool allow_tf32_cublas_;
+    std::unique_ptr<perf_counters_t> counters_;
   };
 
   explicit KinetoObserverContext(Event* event) : event_{event} {}
@@ -444,6 +450,8 @@ class InputOutputEncoder final {
   AppendOnlyList<c10::IValue, IO_ENCODER_DEFAULT_BLOCK_SIZE> ivalues_;
 };
 
+using perf_profiler_t = torch::profiler::impl::linux_perf::PerfProfiler;
+
 class TORCH_API ThreadLocalSubqueue {
  public:
   ThreadLocalSubqueue(const uint64_t tid, const ProfilerConfig& config);
@@ -478,10 +486,15 @@ class TORCH_API ThreadLocalSubqueue {
     return kineto_info_;
   }
 
+  inline void disable_perf_profiler(perf_counters_t& counters) const {
+    perf_profiler_->Disable(counters);
+  }
+
  private:
   uint64_t tid_;
   ProfilerConfig config_;
   kineto::DeviceAndResource kineto_info_;
+  std::unique_ptr<perf_profiler_t> perf_profiler_;
 
   friend class RecordQueue;
   // See `containers.h` for block size benchmarks.
