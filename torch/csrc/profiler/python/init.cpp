@@ -254,7 +254,9 @@ void initPythonBindings(PyObject* module) {
       .def_property_readonly(
           "typed",
           [](const Result& r) {
-            return py::make_tuple(r.tag(), r.extra_fields_);
+            return py::make_tuple(
+                r.tag(),
+                py::cast(r.extra_fields_, py::return_value_policy::reference));
           })
       .def_property_readonly(
           "id",
