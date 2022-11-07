@@ -164,8 +164,15 @@ def _register_lowering(
             args = args[0]
         # Only look at args that are Tensors
         indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
-        # kwargs tensors not supported yet
-        assert not any(isinstance(x, TensorBox) for x in kwargs.values())
+
+        # explicitly assert for "out=" ops for better error messages
+        assert not any(
+            x == "out" for x in kwargs.keys()
+        ), "out= ops aren't yet supported"
+        # kwargs tensors not supported yet unless it's a fallback op
+        assert not any(isinstance(x, TensorBox) for x in kwargs.values()) or all(
+            fn in fallbacks for fn in aten_fn
+        )
 
         if (type_promotion_kind or convert_input_to_bool) and indices:
             if convert_input_to_bool:
@@ -917,6 +924,36 @@ def register_onednn_fusion_ops():
                 )
             )
 
+        @register_lowering(torch.ops.mkldnn._convolution_pointwise.binary)
+        def convolution_binary(
+            x: TensorBox,
+            other: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            stride,
+            dilation,
+            groups,
+            attr,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionBinary.create(
+                    x, other, weight, bias, padding, stride, dilation, groups, attr
+                )
+            )
+
+        @register_lowering(torch.ops.mkldnn._linear_pointwise)
+        def linear_unary(
+            x: TensorBox, w: TensorBox, b: TensorBox, attr, scalars, algorithm
+        ):
+            return TensorBox.create(
+                ir.LinearUnary.create(x, w, b, attr, scalars, algorithm)
+            )
+
+        @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
+        def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
+            return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
+
     else:
         pass
 
@@ -1106,7 +1143,6 @@ if has_torchvision_roi_align():
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
-make_fallback(aten.as_strided_scatter)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
@@ -1854,6 +1890,14 @@ def index_put_(self, indices, values, accumulate=False):
     if x_ndim == 0:
         self = view(self, [])
     return self
+
+
+@register_lowering(aten.as_strided_scatter, type_promotion_kind=None)
+def as_strided_scatter(self, src, size, stride, storage_offset=None):
+    output = clone(self)
+    output_view = as_strided(output, size, stride, storage_offset)
+    copy_(output_view, src)
+    return output
 
 
 @register_lowering(aten.scatter, type_promotion_kind=None)

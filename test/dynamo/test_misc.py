@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import abc
 import collections
 import copy
 import dataclasses
@@ -2670,6 +2671,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    def test_user_function_variable_supports_type_abcmeta_argument(self):
+        class Foo(metaclass=abc.ABCMeta):
+            @abc.abstractclassmethod
+            def read(self):
+                pass
+
+        class Bar(Foo):
+            def read(self):
+                return "Hello World!"
+
+        class Baz:
+            pass
+
+        def gn(x, tys=(Bar, Baz)):
+            if Bar in tys:
+                return x - 1
+            else:
+                return x + 1
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(2, 3)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(torch.allclose(ref, res))
+
     def test_repro_graph_breaks_in__get_item_by_idx(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -2731,6 +2760,35 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             graph, _ = torch._dynamo.export(m, x)
             dynamo_result = graph(x)
             self.assertTrue(same(real, dynamo_result))
+
+    def test_error_on_nested_fx_trace(self):
+        input = torch.rand(2, 3)
+
+        def f(x):
+            x + x
+
+        real = f(input)
+
+        optimized = torch._dynamo.optimize("eager")(f)
+        self.assertTrue(same(optimized(input), real))
+
+        with self.assertRaisesRegex(RuntimeError, "Detected that you are using FX"):
+            gm = torch.fx.symbolic_trace(optimized)
+
+    def test_inference_mode(self):
+        @torch.inference_mode()
+        def func(x, y):
+            return x.add(1.0) + y
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=True)
+        ref = func(x, y)
+        opt_func = torch._dynamo.optimize("eager")(func)
+
+        x1 = torch.ones(4, requires_grad=True)
+        res = opt_func(x1, y)
+        self.assertTrue(same(ref, res))
+        self.assertTrue(same(x, x1))
 
 
 class CustomFunc(torch.autograd.Function):
