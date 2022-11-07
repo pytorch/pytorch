@@ -1,6 +1,5 @@
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <c10/core/TensorImpl.h>
-#include <iostream>
 
 namespace at {
 namespace impl {
