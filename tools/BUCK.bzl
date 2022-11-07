@@ -213,6 +213,18 @@ def define_tools_targets(
         base_module = "",
         deps = [
             torchgen_deps,
+            ":gen_aten_vulkan_glsl_lib",
+        ],
+    )
+
+    python_library(
+        name = "gen_aten_vulkan_glsl_lib",
+        srcs = [
+            "gen_vulkan_glsl.py",
+        ],
+        base_module = "tools",
+        deps = [
+            torchgen_deps,
         ],
     )
 
@@ -223,6 +235,20 @@ def define_tools_targets(
             "PUBLIC",
         ],
         deps = [
+            ":gen_aten_vulkan_glsl_lib",
+            ":gen_aten_vulkan_spv_lib",
+        ],
+    )
+
+    python_test(
+        name = "vulkan_codegen_test",
+        srcs = [
+            "test/test_vulkan_codegen.py",
+        ],
+        contacts = contacts,
+        visibility = ["PUBLIC"],
+        deps = [
+            ":gen_aten_vulkan_glsl_lib",
             ":gen_aten_vulkan_spv_lib",
         ],
     )

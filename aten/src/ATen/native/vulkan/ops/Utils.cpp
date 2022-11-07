@@ -19,17 +19,20 @@ namespace packing {
 static api::ShaderSource get_nchw_to_image_shader(const vTensor& v_dst) {
   if (v_dst.is_quantized()) {
     switch (v_dst.storage_type()) {
-      case StorageType::TEXTURE_3D:
+      case api::StorageType::TEXTURE_3D:
         return VK_KERNEL(nchw_to_image_quantized);
       default:
         TORCH_CHECK(false, "No kernel available!");
+      case api::StorageType::BUFFER:
+      case api::StorageType::UNKNOWN:
+        TORCH_CHECK(false, "Requested storage type must be a texture type.");
     }
   }
 
   switch (v_dst.storage_type()) {
-    case StorageType::TEXTURE_3D:
+    case api::StorageType::TEXTURE_3D:
       return VK_KERNEL(nchw_to_image);
-    case StorageType::TEXTURE_2D:
+    case api::StorageType::TEXTURE_2D:
       return VK_KERNEL(nchw_to_image2d);
     default:
       TORCH_CHECK(false, "No kernel available!");
@@ -39,17 +42,20 @@ static api::ShaderSource get_nchw_to_image_shader(const vTensor& v_dst) {
 static api::ShaderSource get_image_to_nchw_shader(const vTensor& v_src) {
   if (v_src.is_quantized()) {
     switch (v_src.storage_type()) {
-      case StorageType::TEXTURE_3D:
+      case api::StorageType::TEXTURE_3D:
         return VK_KERNEL(image_to_nchw_quantized);
       default:
         TORCH_CHECK(false, "No kernel available!");
+      case api::StorageType::BUFFER:
+      case api::StorageType::UNKNOWN:
+        TORCH_CHECK(false, "Requested storage type must be a texture type.");
     }
   }
 
   switch (v_src.storage_type()) {
-    case StorageType::TEXTURE_3D:
+    case api::StorageType::TEXTURE_3D:
       return VK_KERNEL(image_to_nchw);
-    case StorageType::TEXTURE_2D:
+    case api::StorageType::TEXTURE_2D:
       return VK_KERNEL(image2d_to_nchw);
     default:
       TORCH_CHECK(false, "No kernel available!");
@@ -400,7 +406,7 @@ void pack_buffer_to_vtensor(
     api::PipelineBarrier& pipeline_barrier) {
   api::Context* const context = api::context();
 
-  if (v_self.storage_type() == StorageType::BUFFER) {
+  if (v_self.storage_type() == api::StorageType::BUFFER) {
     packing::record_nchw_to_buffer_op(
         context, buffer, v_self, pipeline_barrier, VK_NULL_HANDLE);
   } else {
@@ -428,7 +434,7 @@ void pack_vtensor_to_staging(
   api::Context* const context = api::context();
   api::PipelineBarrier pipeline_barrier{};
 
-  if (v_self.storage_type() == StorageType::BUFFER) {
+  if (v_self.storage_type() == api::StorageType::BUFFER) {
     packing::record_buffer_to_nchw_op(
         context, v_self, staging, pipeline_barrier, fence_handle);
   } else {

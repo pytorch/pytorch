@@ -3314,16 +3314,16 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         foo_event = [event for event in function_events if "foo" in event.name][0]
         self.assertEqual(foo_event.count, 1)
 
-    def test_record_function_new_signatures(self):
+    def test_record_function_legacy(self):
         # Test the new _record_function ops work
         # Note: Remove once record_function uses these directly
         x = torch.randn(10, 10)
         with profile(use_kineto=kineto_available()) as p:
-            record = torch.ops.profiler._record_function_enter_new("bar", None)
+            handle = torch.ops.profiler._record_function_enter("bar", None)
             try:
                 y = x * 2 + 4
             finally:
-                torch.ops.profiler._record_function_exit(record)
+                torch.ops.profiler._record_function_exit(handle)
 
         function_events = p.function_events
         foo_event = [event for event in function_events if "bar" in event.name][0]
@@ -5880,6 +5880,23 @@ for shape in [(1,), ()]:
         run_tests(lambda v: v.unsqueeze_(0))
         run_tests(lambda v: v.swapdims_(0, 0))
         run_tests(lambda v: v.swapaxes_(0, 0))
+
+    def test_autograd_inplace_view_of_view(self):
+        x = torch.zeros(2)
+        with torch.no_grad():
+            y = x.view(2)
+        y.requires_grad_(True)
+        z = y.view(2)
+        with self.assertRaisesRegex(RuntimeError, "a view of a view .* is being .* inside the no_grad block"):
+            z /= 2
+
+        x = torch.zeros(2)
+        with torch.inference_mode():
+            y = x.view(2)
+        y.requires_grad_(True)
+        z = y.view(2)
+        with self.assertRaisesRegex(RuntimeError, "a view of a view .* is being .* inside the inference_mode"):
+            z /= 2
 
     # TODO This is not the correct behavior -
     # See https://github.com/pytorch/pytorch/issues/49825#issuecomment-794466627

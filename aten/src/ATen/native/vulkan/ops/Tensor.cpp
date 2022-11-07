@@ -71,8 +71,8 @@ c10::SmallVector<int64_t, 6u> calc_channels_last_strides(
 c10::SmallVector<int64_t, 6u> calc_strides(
     const IntArrayRef sizes,
     const at::MemoryFormat memory_format,
-    const StorageType storage_type) {
-  if (storage_type == StorageType::BUFFER) {
+    const api::StorageType storage_type) {
+  if (storage_type == api::StorageType::BUFFER) {
     switch (memory_format) {
       case MemoryFormat::Contiguous:
         return calc_contiguous_strides(sizes);
@@ -97,12 +97,12 @@ c10::SmallVector<int64_t, 6u> calc_strides(
 c10::SmallVector<int64_t, 6u> calc_gpu_sizes(
     const IntArrayRef sizes,
     const at::MemoryFormat memory_format,
-    const StorageType storage_type) {
+    const api::StorageType storage_type) {
   size_t ndim = sizes.size();
 
   // For buffer formats, the innermost dim (i.e. where the stride is 1) will be
   // aligned up.
-  if (storage_type == StorageType::BUFFER) {
+  if (storage_type == api::StorageType::BUFFER) {
     c10::SmallVector<int64_t, 6u> gpu_sizes{sizes};
 
     switch (memory_format) {
@@ -173,10 +173,10 @@ c10::SmallVector<int64_t, 6u> calc_gpu_sizes(
  */
 api::utils::uvec3 create_image_extents(
     const IntArrayRef gpu_sizes,
-    const StorageType storage_type) {
+    const api::StorageType storage_type) {
   size_t ndim = gpu_sizes.size();
 
-  if (storage_type == StorageType::BUFFER) {
+  if (storage_type == api::StorageType::BUFFER) {
     // image extents do not apply to buffer storage
     return {0u, 0u, 0u};
   } else {
@@ -198,8 +198,8 @@ api::UniformParamsBuffer make_metadata_uniform(
     api::Context* const context,
     const IntArrayRef sizes,
     const IntArrayRef strides,
-    const StorageType storage_type) {
-  if (storage_type != StorageType::BUFFER) {
+    const api::StorageType storage_type) {
+  if (storage_type != api::StorageType::BUFFER) {
     return api::UniformParamsBuffer();
   }
 
@@ -223,7 +223,7 @@ vTensor::vTensor(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options,
-    const StorageType storage_type)
+    const api::StorageType storage_type)
     : options_(options),
       memory_format_(get_memory_format(options)),
       // Calculate sizes and strides
@@ -252,7 +252,7 @@ vTensor::vTensor(
     const TensorOptions& options,
     double q_scale,
     int64_t q_zero_point,
-    const StorageType storage_type)
+    const api::StorageType storage_type)
     : options_(options),
       memory_format_(get_memory_format(options)),
       // Calculate sizes and strides
@@ -333,7 +333,7 @@ vTensor::BufferMetadata vTensor::get_cpu_buffer_metadata() const {
 api::VulkanImage allocate_image(
     api::Context* const context_ptr,
     api::utils::uvec3& extents,
-    const StorageType storage_type,
+    const api::StorageType storage_type,
     const VkFormat image_format) {
   api::Adapter* adapter_ptr = context_ptr->adapter_ptr();
 
@@ -348,11 +348,11 @@ api::VulkanImage allocate_image(
   VkImageViewType image_view_type = VK_IMAGE_VIEW_TYPE_3D;
 
   switch (storage_type) {
-    case StorageType::TEXTURE_3D:
+    case api::StorageType::TEXTURE_3D:
       image_type = VK_IMAGE_TYPE_3D;
       image_view_type = VK_IMAGE_VIEW_TYPE_3D;
       break;
-    case StorageType::TEXTURE_2D:
+    case api::StorageType::TEXTURE_2D:
       image_type = VK_IMAGE_TYPE_2D;
       image_view_type = VK_IMAGE_VIEW_TYPE_2D;
       break;
@@ -376,12 +376,12 @@ api::VulkanImage allocate_image(
 api::VulkanBuffer allocate_buffer(
     api::Context* const context_ptr,
     const int64_t numel,
-    const StorageType storage_type,
+    const api::StorageType storage_type,
     const c10::ScalarType dtype) {
   api::Adapter* adapter_ptr = context_ptr->adapter_ptr();
 
   switch (storage_type) {
-    case StorageType::BUFFER:
+    case api::StorageType::BUFFER:
       break;
     default:
       // Return an empty VulkanBuffer if Buffer storage is not used
@@ -394,7 +394,7 @@ api::VulkanBuffer allocate_buffer(
 
 vTensorStorage::vTensorStorage(
     api::Context* const context,
-    const StorageType storage_type,
+    const api::StorageType storage_type,
     const IntArrayRef gpu_sizes,
     const at::ScalarType dtype)
     : context_(context),

@@ -223,11 +223,7 @@ Tensor& copy_(Tensor& dst, const Tensor& src) {
     }
     // CPU -> Vulkan
     else {
-      if (v_self.storage_type() == StorageType::BUFFER) {
-        pack_cpu_to_vulkan(src, v_self);
-      } else {
-        pack_cpu_to_vulkan(src.contiguous(), v_self);
-      }
+      pack_cpu_to_vulkan(src.contiguous(src.suggest_memory_format()), v_self);
     }
   }
   // Vulkan -> X
@@ -250,7 +246,7 @@ Tensor& copy_(Tensor& dst, const Tensor& src) {
   return dst;
 }
 
-ops::vTensor to_vulkan(at::Tensor& src, const StorageType storage_type) {
+ops::vTensor to_vulkan(at::Tensor& src, const api::StorageType storage_type) {
   TORCH_CHECK(
       src.device().type() == at::kCPU,
       "Vulkan to_vulkan(): input tensor must be a CPU tensor!")

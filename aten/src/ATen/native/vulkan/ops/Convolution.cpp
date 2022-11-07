@@ -287,7 +287,7 @@ static api::ShaderSource get_shader(
     const Conv2dMethod method,
     const bool transposed,
     const bool quantized) {
-  api::ShaderSource shader;
+  api::ShaderInfo shader;
 
   if (quantized) {
     if (transposed) {
@@ -296,39 +296,36 @@ static api::ShaderSource get_shader(
 
     switch (method) {
       case Conv2dSlidingWindow:
-        shader = VK_KERNEL(quantized_conv2d);
-        return shader;
+        shader = VK_SHADER(quantized_conv2d);
+        break;
       case Conv2dDepthwise:
-        shader = VK_KERNEL(quantized_conv2d_dw);
-        return shader;
+        shader = VK_SHADER(quantized_conv2d_dw);
+        break;
       case Conv2dPointwise:
-        shader = VK_KERNEL(quantized_conv2d_pw_2x2);
-        // Set explicitly for now. In the future, this will be set automatically
-        // by shader codegen.
-        shader.out_tile_size = {2u, 2u, 1u};
-        return shader;
+        shader = VK_SHADER(quantized_conv2d_pw_2x2);
+        break;
+        // todo fail for quantized transposed conv
     }
+    return shader.shader_src;
   }
 
   if (transposed) {
-    shader = VK_KERNEL(conv_transpose2d);
-    return shader;
+    shader = VK_SHADER(conv_transpose2d);
+    return shader.shader_src;
   }
 
   switch (method) {
     case Conv2dSlidingWindow:
-      shader = VK_KERNEL(conv2d);
-      return shader;
+      shader = VK_SHADER(conv2d);
+      break;
     case Conv2dDepthwise:
-      shader = VK_KERNEL(conv2d_dw);
-      return shader;
+      shader = VK_SHADER(conv2d_dw);
+      break;
     case Conv2dPointwise:
-      shader = VK_KERNEL(conv2d_pw_2x2);
-      // Set explicitly for now. In the future, this will be set automatically
-      // by shader codegen.
-      shader.out_tile_size = {2u, 2u, 1u};
-      return shader;
+      shader = VK_SHADER(conv2d_pw_2x2);
+      break;
   }
+  return shader.shader_src;
 }
 
 //
@@ -521,7 +518,7 @@ vTensor pack_weights(
       api::context(),
       weight_rearranged.sizes(),
       weight_arg.options(),
-      quantized ? StorageType::TEXTURE_3D : StorageType::TEXTURE_2D,
+      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
   if (quantized) {
@@ -546,7 +543,7 @@ vTensor pack_biases(
       api::context(),
       bias_rearranged.sizes(),
       weight.options(),
-      quantized ? StorageType::TEXTURE_3D : StorageType::TEXTURE_2D,
+      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
   if (quantized) {

@@ -26,12 +26,6 @@ struct LastAccess {
       : stage{stage_flags}, access{access_flags} {}
 };
 
-enum class StorageType {
-  TEXTURE_3D,
-  TEXTURE_2D,
-  BUFFER,
-};
-
 class vTensorStorage final {
  public:
   // Do not allow empty vTensorStorage construction
@@ -39,7 +33,7 @@ class vTensorStorage final {
 
   vTensorStorage(
       api::Context* context,
-      const StorageType storage_type,
+      const api::StorageType storage_type,
       const IntArrayRef sizes,
       const at::ScalarType dtype);
 
@@ -57,7 +51,7 @@ class vTensorStorage final {
   // Context
   api::Context* context_;
 
-  StorageType storage_type_;
+  api::StorageType storage_type_;
 
   // Resource sizings
   api::utils::uvec3 extents_;
@@ -96,7 +90,7 @@ class vTensor final {
       api::Context* context,
       IntArrayRef sizes,
       const TensorOptions& options,
-      const StorageType storage_type = StorageType::TEXTURE_3D);
+      const api::StorageType storage_type = api::StorageType::TEXTURE_3D);
 
   // Default constructor with quantization parameters
   vTensor(
@@ -105,7 +99,7 @@ class vTensor final {
       const TensorOptions& options,
       double q_scale,
       int64_t q_zero_point,
-      const StorageType storage_type = StorageType::TEXTURE_3D);
+      const api::StorageType storage_type = api::StorageType::TEXTURE_3D);
 
   // Used for passing buffer sizes and strides data to shaders
   struct BufferMetadata {
@@ -162,7 +156,7 @@ class vTensor final {
    Texture Access
   */
 
-  inline StorageType storage_type() const {
+  inline api::StorageType storage_type() const {
     return view_->storage_type_;
   }
 
