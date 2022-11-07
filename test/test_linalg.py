@@ -2476,28 +2476,6 @@ class TestLinalg(TestCase):
         result = torch.linalg.svd(a, full_matrices=False)
         self.assertEqual(result.S, S)
 
-    # This test doesn't work with MAGMA backend https://github.com/pytorch/pytorch/issues/72106
-    @skipMeta
-    @skipCUDAIfRocm
-    @skipCUDAIfNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_svd_nan_error(self, device, dtype):
-        for svd in [torch.svd, torch.linalg.svd]:
-            # if input contains NaN then an error is triggered for svd
-            # When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
-            # When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.
-            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|The algorithm failed to converge)'
-            a = torch.full((3, 3), float('nan'), dtype=dtype, device=device)
-            a[0] = float('nan')
-            with self.assertRaisesRegex(torch.linalg.LinAlgError, error_msg):
-                svd(a)
-            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|\(Batch element 1\): The algorithm failed to converge)'
-            a = torch.randn(3, 33, 33, dtype=dtype, device=device)
-            a[1, 0, 0] = float('nan')
-            with self.assertRaisesRegex(torch.linalg.LinAlgError, error_msg):
-                svd(a)
-
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
