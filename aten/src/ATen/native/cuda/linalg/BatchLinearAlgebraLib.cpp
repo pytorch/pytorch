@@ -862,7 +862,6 @@ void svd_cusolver(const Tensor& A,
                   const Tensor& V,
                   const Tensor& info) {
   // Here U and V are F-contig whenever they are defined (i.e. whenever compute_uv=true)
-  const auto batch_size = batchCount(A);
   const auto m = A.size(-2);
   const auto n = A.size(-1);
   const auto k = std::min(m, n);
@@ -875,6 +874,9 @@ void svd_cusolver(const Tensor& A,
   if (driver_v == "gesvd") {
     svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv);
   } else if (driver_v == "gesvdj") {
+    // See the benchmarks in
+    // https://github.com/pytorch/pytorch/pull/88502#issuecomment-1303860789
+    // The m <= 32 && n <= 32 restrictions come from the limitations of the cusolver backend. See the cusolver docs
     if (m <= 32 && n <= 32) {
       svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
     } else {
