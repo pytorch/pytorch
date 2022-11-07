@@ -20,7 +20,7 @@ import numpy as np
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
-from torch.onnx import _constants, _experimental, utils
+from torch.onnx import _constants, _experimental, _fx, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype
 from torch.types import Number
@@ -731,3 +731,45 @@ def verify(
             check_dtype=check_dtype,
             acceptable_error_percentage=acceptable_error_percentage,
         )
+
+
+@_beartype.beartype
+def verify_model_with_positional_args(
+    model: Union[torch.nn.Module, Callable],
+    input_args: Union[torch.Tensor, Tuple[Any, ...]],
+    check_shape: bool = True,
+    check_dtype: bool = True,
+    rtol: float = 0.001,
+    atol: float = 1e-7,
+    acceptable_error_percentage: Optional[float] = None,
+    **_,
+):
+    if isinstance(model, torch.nn.Module):
+        onnx_model = _fx._export_module(model, *input_args)
+    elif callable(model):
+        onnx_model = _fx._export_function(model, *input_args)
+    else:
+        raise ValueError(
+            f"model must be a torch.nn.Module or Callable but got {type(model)}"
+        )
+
+    import onnx
+
+    onnx.save(onnx_model, "model.onnx")
+    ort_session = _ort_session("model.onnx", ort_providers=("CPUExecutionProvider",))
+    model_copy = _try_clone_model(model)
+    _compare_ort_pytorch_model(
+        model=model_copy,
+        ort_session=ort_session,
+        input_args=input_args,
+        rtol=rtol,
+        atol=atol,
+        check_shape=check_shape,
+        check_dtype=check_dtype,
+        acceptable_error_percentage=acceptable_error_percentage,
+        input_kwargs=None,
+        additional_test_inputs=None,
+        remained_onnx_input_idx=None,
+        flatten=False,
+        ignore_none=True,
+    )
