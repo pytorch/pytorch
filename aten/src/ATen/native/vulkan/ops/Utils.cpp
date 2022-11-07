@@ -159,7 +159,6 @@ void record_nchw_to_buffer_op(
     vTensor& v_dst,
     api::PipelineBarrier pipeline_barrier,
     const VkFence fence_handle) {
-  uint32_t buf_len = api::utils::safe_downcast<uint32_t>(v_dst.numel());
   uint32_t gpu_buf_len = api::utils::safe_downcast<uint32_t>(v_dst.gpu_numel());
 
   api::utils::uvec3 global_size = {gpu_buf_len, 1u, 1u};
@@ -196,7 +195,6 @@ void record_buffer_to_nchw_op(
     api::PipelineBarrier pipeline_barrier,
     const VkFence fence_handle) {
   uint32_t buf_len = api::utils::safe_downcast<uint32_t>(v_src.numel());
-  uint32_t gpu_buf_len = api::utils::safe_downcast<uint32_t>(v_src.gpu_numel());
 
   api::utils::uvec3 global_size = {buf_len, 1u, 1u};
   api::utils::uvec3 local_size = {4u, 1u, 1u};
