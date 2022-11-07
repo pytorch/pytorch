@@ -79,14 +79,18 @@ def meta_randperm(n, *, generator=None, out):
 def meta_randint(
     high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
 ):
-    return torch.empty(size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 @register_meta(aten.randint.low)
 def meta_randint_low(
     low, high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
 ):
-    return torch.empty(size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
@@ -265,20 +269,20 @@ def meta_pad2d(self, padding):
         return self.new_empty((nbatch, nplane, output_h, output_w))
 
 
+@register_meta([aten.bernoulli.default, aten.bernoulli.out])
+@out_wrapper()
+def meta_bernoulli(self, *, generator=None):
+    return torch.empty_like(self)
+
+
 @register_meta(aten.bernoulli_.float)
 def meta_bernoulli_(self, p=0.5, generator=None):
     return self
 
 
 @register_meta(aten.bernoulli.p)
-def meta_bernoulli(self, p=0.5, generator=None):
+def meta_bernoulli_p(self, p=0.5, generator=None):
     return torch.empty_like(self)
-
-
-@register_meta(aten.bernoulli.out)
-def meta_bernoulli_out(self, *, generator=None, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out
 
 
 @register_meta(aten._fused_moving_avg_obs_fq_helper.default)

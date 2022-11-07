@@ -9215,7 +9215,7 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_diag),
     OpInfo('diag_embed',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
-           supports_out=False,
+           supports_out=True,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
