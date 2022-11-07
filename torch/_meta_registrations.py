@@ -76,13 +76,17 @@ def meta_randperm(n, *, generator=None, out):
 
 
 @register_meta(aten.randint.default)
-def meta_randint(high, size, *, dtype=torch.long, **kwargs):
-    return torch.empty(size, dtype=dtype, **kwargs)
+def meta_randint(
+    high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
+):
+    return torch.empty(size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
 
 
 @register_meta(aten.randint.low)
-def meta_randint_low(low, high, size, *, dtype=torch.long, **kwargs):
-    return torch.empty(size, dtype=dtype, **kwargs)
+def meta_randint_low(
+    low, high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
+):
+    return torch.empty(size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
 
 
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
@@ -96,6 +100,23 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
 
 @register_meta(aten.copy_.default)
 def meta_copy_(self, src, non_blocking=False):
+    return self
+
+
+def inferUnsqueezeGeometry(tensor, dim):
+    result_sizes = list(tensor.size())
+    result_strides = list(tensor.stride())
+    new_stride = 1 if dim >= tensor.dim() else result_sizes[dim] * result_strides[dim]
+    result_sizes.insert(dim, 1)
+    result_strides.insert(dim, new_stride)
+    return result_sizes, result_strides
+
+
+@register_meta(aten.unsqueeze_.default)
+def meta_unsqueeze_(self, dim):
+    dim = maybe_wrap_dim(dim, self.dim() + 1)
+    g_sizes, g_strides = inferUnsqueezeGeometry(self, dim)
+    self.as_strided_(g_sizes, g_strides)
     return self
 
 
@@ -249,6 +270,17 @@ def meta_bernoulli_(self, p=0.5, generator=None):
     return self
 
 
+@register_meta(aten.bernoulli.p)
+def meta_bernoulli(self, p=0.5, generator=None):
+    return torch.empty_like(self)
+
+
+@register_meta(aten.bernoulli.out)
+def meta_bernoulli_out(self, *, generator=None, out):
+    torch._resize_output_(out, self.size(), self.device)
+    return out
+
+
 @register_meta(aten._fused_moving_avg_obs_fq_helper.default)
 def meta__fused_moving_avg_obs_fq_helper(
     self,
@@ -301,12 +333,6 @@ def _compute_reduction_shape(self, dims, keepdim):
         return tuple(self.shape[i] if i not in dims else 1 for i in range(self.ndim))
 
     return utils.compute_reduction_output_shape(self.shape, dims)
-
-
-@register_meta(aten.bernoulli.out)
-def meta_bernoulli(self, *, generator=None, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out
 
 
 # FakeTensors (meta tensors with a device) will report device as meta
@@ -1107,6 +1133,33 @@ def meta_zero_(self):
     return self
 
 
+@register_meta(
+    [
+        aten.mul_.Scalar,
+        aten.div_.Scalar,
+        aten.mul_.Tensor,
+        aten.div_.Tensor,
+        aten.logical_and_.default,
+        aten.logical_or_.default,
+        aten.logical_xor_.default,
+    ],
+)
+def meta_binop_inplace(self, other):
+    return self
+
+
+@register_meta(
+    [
+        aten.add_.Scalar,
+        aten.sub_.Scalar,
+        aten.add_.Tensor,
+        aten.sub_.Tensor,
+    ],
+)
+def meta_binop_inplace_alph(self, other, alpha=1):
+    return self
+
+
 @register_meta(aten.zero.default)
 def meta_zero(self):
     return self.new_empty(self.shape)
@@ -1461,7 +1514,7 @@ def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
         dim_post_expr = 1
     min = -dim_post_expr
     max = dim_post_expr - 1
-    assert not (dim < min or dim > max)
+    assert not (dim < min or dim > max), f"dim {dim} out of bounds ({min}, {max})"
     if dim < 0:
         dim += dim_post_expr
     return dim
@@ -1495,7 +1548,7 @@ def meta_gather(self, dim, index, sparse_grad=False):
     if not is_index_empty:
         check(
             index.dtype == torch.long,
-            lambda: "gather(): Expected dtype int64 for index",
+            lambda: f"gather(): Expected dtype int64 for index, but got {index.dtype}",
         )
         gather_shape_check(self, wrapped_dim, index)
     return self.new_empty(index.shape)

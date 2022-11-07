@@ -1140,7 +1140,6 @@ symbolic_tensor_failures = {
     xfail('argsort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('argwhere', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
-    xfail('bernoulli', ''),  # aten.bernoulli.default - couldn't find symbolic meta function/decomposition
     xfail('bucketize', ''),  # aten.bucketize.Tensor - couldn't find symbolic meta function/decomposition
     xfail('cartesian_prod', ''),  # Tensors of type TensorImpl do not have numel
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1465,7 +1464,6 @@ inplace_symbolic_tensor_failures = {
     xfail('trunc', ''),  # aten.trunc_.default - couldn't find symbolic meta function/decomposition
     xfail('uniform', ''),  # aten.uniform_.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
-    xfail('unsqueeze', ''),  # aten.unsqueeze_.default - couldn't find symbolic meta function/decomposition
     xfail('xlogy', ''),  # aten.xlogy_.Tensor - couldn't find symbolic meta function/decomposition
 }
 
