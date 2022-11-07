@@ -971,6 +971,7 @@ class FakeTensorMode(TorchDispatchMode):
             aten.zeros.default,
             aten.detach.default,
             aten.set_.source_Storage_storage_offset,
+            aten._sparse_coo_tensor_with_dims_and_tensors.default,
         ]
 
     @property
