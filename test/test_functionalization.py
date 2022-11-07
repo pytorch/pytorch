@@ -159,8 +159,7 @@ def forward(self, a_1):
     _reshape_alias_copy_2 = torch.ops.aten._reshape_alias_copy.default(view_copy_5, [16, 64, 128, 128], [1048576, 16384, 128, 1]);  view_copy_5 = None
     detach_copy_1 = torch.ops.aten.detach_copy.default(_reshape_alias_copy_2);  _reshape_alias_copy_2 = None
     return detach_copy_1
-    """)
-
+    """)  # noqa: B950
 
     def test_simple(self):
         def f(x):
