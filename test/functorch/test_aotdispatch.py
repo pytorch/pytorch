@@ -416,6 +416,21 @@ class TestAOTAutograd(AOTTestCase):
 
         self.assertEqual(ref_out, test_out)
 
+    def test_custom_autograd(self):
+        class CustomFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output + 1
+
+        def f(x):
+            return CustomFn.apply(x)
+
+        self.verify_aot_autograd(f, [torch.randn(3)])
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_autocast_disable_guard(self):
         guard = torch._C._DisableAutocast()
@@ -1032,7 +1047,6 @@ symbolic_aot_autograd_failures = {
     xfail('inner', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kron', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('lerp', ''),  # aten.lerp.Scalar - couldn't find symbolic meta function/decomposition
     xfail('linalg.cholesky_ex', ''),  # aten.linalg_cholesky_ex.default - couldn't find symbolic meta functio...
     xfail('linalg.cond', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('linalg.cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
@@ -1105,6 +1119,11 @@ symbolic_aot_autograd_failures = {
     xfail('msort', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mv', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nanmedian', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
+
+    # Deleting this in a followup
+    xfail('nn.functional.feature_alpha_dropout', 'with_train'),
+    xfail('nn.functional.poisson_nll_loss', ''),
+
     xfail('nn.functional._scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d_backward.default - couldn't ...
     xfail('nn.functional.adaptive_max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1295,7 +1314,7 @@ class TestEagerFusionOpInfo(AOTTestCase):
     @skipIfNoSympy
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
-    @patch("functorch.compile.config.use_functionalize", False)
+    @patch("functorch.compile.config.use_functionalize", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
              aot_autograd_failures | symbolic_aot_autograd_failures)
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):

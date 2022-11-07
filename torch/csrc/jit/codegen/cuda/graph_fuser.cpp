@@ -2172,7 +2172,10 @@ void decomposeLinearOps(Block* block) {
 void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping(
       {{aten::expand, prim::expand_copy},
-       {aten::expand_as, prim::expand_as_copy}});
+       {aten::expand_as, prim::expand_as_copy},
+       {aten::permute, prim::permute_copy},
+       {aten::transpose, prim::transpose_copy},
+       {aten::t, prim::t_copy}});
   // TODO: revert disabled aten::view
   //    ({{aten::view, prim::view_copy},
   //     {aten::reshape, prim::reshape_copy},
@@ -2224,7 +2227,10 @@ void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
 void revertAliasCopyOps(std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping(
       {{prim::expand_copy, aten::expand},
-       {prim::expand_as_copy, aten::expand_as}});
+       {prim::expand_as_copy, aten::expand_as},
+       {prim::permute_copy, aten::permute},
+       {prim::transpose_copy, aten::transpose},
+       {prim::t_copy, aten::t}});
   // TODO: revert disabled aten::view
   //    ({{prim::view_copy, aten::view},
   //     {prim::flatten_copy, aten::flatten},

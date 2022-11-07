@@ -85,6 +85,7 @@ __all__ = [
     "isnan",
     "isreal",
     "i0",
+    "lerp",
     "lgamma",
     "log",
     "log1p",
@@ -4109,6 +4110,36 @@ def arange(
     )
 
 
+@register_decomposition(torch.ops.aten.lerp)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("start", "end", "weight"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
+    check(
+        start.dtype == end.dtype,
+        lambda: f"expected dtype {start.dtype} for `end` but got dtype {end.dtype}",
+    )
+    if isinstance(weight, Number):
+        weight = start.new_full((), weight)  # type: ignore[arg-type]
+    else:
+        check(
+            start.dtype == weight.dtype,
+            lambda: f"expected dtype {start.dtype} for `weight` but got dtype {weight.dtype}",  # type: ignore[union-attr]
+        )
+    assert isinstance(weight, Tensor)  # mypy
+    # We implement it this way for numerical stability. We assume (in the stability optimisation)
+    # that 0 <= weight <= 1. We take the abs to deal with comples numbers
+    # We want to do operations near zero, which is where floating points are most precise
+    # If weight.abs() >= 0.5:
+    #    return (1 - weight) * (start - end) + end
+    mask = weight.abs() >= 0.5
+    coeff = torch.where(mask, weight - 1, weight)
+    base = torch.where(mask, end, start)
+    return coeff * (end - start) + base
+
+
 @register_decomposition(torch.ops.aten.linspace)
 @out_wrapper()
 def linspace(
@@ -4968,6 +4999,7 @@ hypot_ = _make_inplace(hypot)
 igamma_ = _make_inplace(igamma)
 igammac_ = _make_inplace(igammac)
 le_ = _make_inplace(le)
+lerp_ = _make_inplace(lerp)
 lgamma_ = _make_inplace(lgamma)
 log10_ = _make_inplace(log10)
 log1p_ = _make_inplace(log1p)
