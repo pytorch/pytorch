@@ -91,7 +91,8 @@ nn/qat/ @jerryzh168
 /torch/testing/_internal/common_methods_invocations.py @mruberry @ngimel
 /torch/testing/_internal/common_device_type.py @mruberry @ngimel
 test/test_ops.py @mruberry @ngimel
-test/test_ops_gradients.py @mruberry @ngimel
+test/test_ops_gradients.py @mruberry @ngimel @soulitzer
+test/test_ops_fwd_gradients.py @mruberry @ngimel @soulitzer
 test/test_unary_ufuncs.py @mruberry @ngimel
 test/test_binary_ufuncs.py @mruberry @ngimel
 test/test_reductions.py @mruberry @ngimel
