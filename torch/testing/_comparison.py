@@ -1228,7 +1228,7 @@ def assert_close(
 
         :func:`~torch.testing.assert_close` is highly configurable with strict default settings. Users are encouraged
         to :func:`~functools.partial` it to fit their use case. For example, if an equality check is needed, one might
-        define an ``assert_equal`` that uses zero tolrances for every ``dtype`` by default:
+        define an ``assert_equal`` that uses zero tolerances for every ``dtype`` by default:
 
         >>> import functools
         >>> assert_equal = functools.partial(torch.testing.assert_close, rtol=0, atol=0)

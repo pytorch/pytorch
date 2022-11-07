@@ -1,4 +1,5 @@
 import argparse
+import copy
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import NamedTuple, Sequence, Iterable, Any, List, Dict, Optional, Tuple
@@ -24,19 +25,26 @@ from .tools_common import (
     NodeSet,
     is_node_output_tensor,
 )
-import warnings
 
 
 __all__ = ['FxNetAccNodesFinder', 'FxNetSplitterInternalError', 'Subgraph', 'SplitResult', 'generate_inputs_for_submodules']
 _LOGGER = logging.getLogger(__name__)
 
+DEFAULT_MIN_ACC_MODULE_SIZE = 1
+DEFAULT_SKIP_FUSION = False
+DEFAULT_ALLOW_NON_TENSOR = False
 
 class _SplitterSettingBase:
-    def __init__(self):
+    def __init__(
+        self,
+        min_acc_module_size=DEFAULT_MIN_ACC_MODULE_SIZE,
+        skip_fusion=DEFAULT_SKIP_FUSION,
+        allow_non_tensor=DEFAULT_ALLOW_NON_TENSOR
+    ):
         parser = argparse.ArgumentParser()
         parser.add_argument(
             "--min_acc_module_size",
-            default=1,
+            required=False,
             type=int,
             help="Minimum size limit of an accelerator subgraph.",
         )
@@ -62,9 +70,9 @@ class _SplitterSettingBase:
         )
         args, unknown = parser.parse_known_args()
 
-        self.min_acc_module_size: int = args.min_acc_module_size
-        self.skip_fusion: bool = args.skip_fusion
-        self.allow_non_tensor: bool = args.allow_non_tensor
+        self.min_acc_module_size: int = args.min_acc_module_size if args.min_acc_module_size else min_acc_module_size
+        self.skip_fusion: bool = args.skip_fusion if args.skip_fusion else skip_fusion
+        self.allow_non_tensor: bool = args.allow_non_tensor if args.allow_non_tensor else allow_non_tensor
 
 
 @compatibility(is_backward_compatible=False)
@@ -200,7 +208,8 @@ class SplitResult(NamedTuple):
 def generate_inputs_for_submodules(
     model: torch.nn.Module,
     inputs: Sequence[Any],
-    target_submodules: Iterable[str]
+    target_submodules: Iterable[str],
+    deepcopy: bool = False,
 ) -> Dict[str, Any]:
     """
     Generate inputs for targeting submdoules in the given model. Note that if two submodules refer to the same obj, this
@@ -220,17 +229,24 @@ def generate_inputs_for_submodules(
     submodule_to_names = dict((mod, name) for name, mod in model.named_modules())
 
     def pre_forward(module, module_inputs):
-        results[submodule_to_names[module]] = module_inputs
-    try:
-        for name, mod in model.named_modules():
-            if name in target_submodules:
-                handles.append(mod.register_forward_pre_hook(pre_forward))
-        model(*inputs)
-    except Exception as e:
-        warnings.warn(f"Failed to generate submodule inputs because of the following error:\n{e}")
-    finally:
+        results[submodule_to_names[module]] = copy.deepcopy(module_inputs) if deepcopy else module_inputs
+
+    for name, mod in model.named_modules():
+        if name in target_submodules:
+            handles.append(mod.register_forward_pre_hook(pre_forward))
+
+    def clean_up_handles():
         for h in handles:
             h.remove()
+
+    try:
+        with torch.no_grad():
+            model(*inputs)
+    except Exception as e:
+        clean_up_handles()
+        raise e
+
+    clean_up_handles()
     return results
 
 
