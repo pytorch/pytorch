@@ -1452,6 +1452,59 @@ def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
 
 
+@register_meta([aten.scatter.value, aten.scatter.value_out])
+@out_wrapper()
+def scatter_value(self, dim, index, value):
+    return scatter_meta_impl(self, dim, index)
+
+
+@register_meta([aten.scatter_.value])
+def scatter__value(self, dim, index, value):
+    scatter_meta_impl(self, dim, index)
+    return self
+
+
+@register_meta([aten.scatter.src, aten.scatter.src_out])
+@out_wrapper()
+def scatter_src(self, dim, index, src):
+    return scatter_meta_impl(self, dim, index, src)
+
+
+@register_meta([aten.scatter_.src])
+def scatter__src(self, dim, index, src):
+    scatter_meta_impl(self, dim, index, src)
+    return self
+
+
+@register_meta([aten.scatter.value_reduce, aten.scatter.value_reduce_out])
+@out_wrapper()
+def scatter_value_reduce(self, dim, index, value, *, reduce):
+    return scatter_meta_impl(self, dim, index, None, reduce)
+
+
+@register_meta([aten.scatter_.value_reduce])
+def scatter__value_reduce(self, dim, index, value, *, reduce):
+    scatter_meta_impl(self, dim, index, None, reduce)
+    return self
+
+
+@register_meta([aten.scatter.reduce, aten.scatter.reduce_out])
+@out_wrapper()
+def scatter_reduce(self, dim, index, src, *, reduce):
+    return scatter_meta_impl(self, dim, index, src, reduce)
+
+
+@register_meta([aten.scatter_.reduce])
+def scatter__reduce(self, dim, index, src, *, reduce):
+    scatter_meta_impl(self, dim, index, src, reduce)
+    return self
+
+
+@register_meta(aten.scatter_add.default)
+def meta_scatter_add(self, dim, index, src):
+    return scatter_meta_impl(self, dim, index, src, "add")
+
+
 # hacky: Please remove after math.ceil works with arange
 @register_meta(aten.arange.default)
 def arange(end, **kwargs):
@@ -1659,11 +1712,6 @@ def scatter_meta_impl(self, dim, index, src=None, reduce_=None, use_new_options=
     if reduce_ is not None:
         # Check if we have a valid reduce operator.
         get_operator_enum(reduce_, use_new_options)
-
-
-@register_meta(aten.scatter_add.default)
-def meta_scatter_add(self, dim, index, src):
-    scatter_meta_impl(self, dim, index, src, "add")
     return self.new_empty(self.shape)
 
 
