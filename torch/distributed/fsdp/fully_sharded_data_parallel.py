@@ -50,9 +50,7 @@ from torch.distributed.fsdp._init_utils import (
     _init_state_dict_state,
 )
 from torch.distributed.fsdp._runtime_utils import (
-    _cast_buffers_to_dtype_and_device,
     _clear_grads_if_needed,
-    _get_buffers_and_dtypes_for_checkpoint,
     _lazy_init,
     _post_forward,
     _post_forward_reshard,
@@ -512,6 +510,7 @@ class FullyShardedDataParallel(nn.Module):
             _pre_load_state_dict_hook, with_module=True
         )
         self.register_load_state_dict_post_hook(_post_load_state_dict_hook)
+        self._full_param_ctx: Optional[Generator] = None
 
     @property
     def module(self) -> nn.Module:
@@ -813,104 +812,8 @@ class FullyShardedDataParallel(nn.Module):
             yield fqn, param_name, module_name
 
     def state_dict(self, *args, **kwargs):
-        """
-        This is the entry point of all three FSDP ``state_dict`` APIs: full,
-        local, and sharded. For the full state dict
-        (``StateDictType.FULL_STATE_DICT``), FSDP attempts to unshard the model
-        on all ranks, which may result in an OOM error if the full model cannot
-        fit on a single GPU. In that case, users may pass in a
-        :class:`FullStateDictConfig` to only save the checkpoint on rank 0 and/
-        or to offload it to CPU memory layer by layer, enabling much larger
-        checkpoints. If the full model cannot fit in CPU memory, then users may
-        instead take a local state dict (``StateDictType.LOCAL_STATE_DICT``)
-        that only saves the local shard of the model. The sharded state dict
-        (``StateDictType.SHARDED_STATE_DICT``) saves the model parameters as
-        ``ShardedTensor`` s. The ``state_dict`` type can be configured using
-        the :meth:`state_dict_type` context manager.
-
-        Example::
-
-            >>> # xdoctest: +SKIP("undefined variables")
-            >>> import torch
-            >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-            >>> from torch.distributed.fsdp import StateDictType
-            >>> torch.cuda.set_device(device_id)
-            >>> my_module = nn.Linear(...)
-            >>> sharded_module = FSDP(my_module)
-            >>> full_state_dict_config = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-            >>> with FSDP.state_dict_type(sharded_module, StateDictType.FULL_STATE_DICT, full_state_dict_config):
-            >>>     full_dict = sharded_module.state_dict()
-            >>> full_dict.keys()
-            >>> odict_keys(['weight', 'bias'])
-            >>> # using local state dict
-            >>> with FSDP.state_dict_type(sharded_module, StateDictType.LOCAL_STATE_DICT):
-            >>>     local_dict = sharded_module.state_dict()
-            >>> local_dict.keys()
-            >>> odict_keys(['flat_param', 'inner.flat_param'])
-
-        .. warning:: This needs to be called on all ranks since it uses
-            collective communications.
-        """
-        # TODO (rohan-varma): separate these out once a state_dict pre-hook
-        # is available.
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
         _lazy_init(self, self)
-        if self._is_root:
-            _clear_grads_if_needed(self._fsdp_handles(self))
-        if self._state_dict_type == StateDictType.FULL_STATE_DICT:
-            # Get config args
-            full_state_dict_config = (
-                self._state_dict_config
-                if self._state_dict_config is not None
-                else FullStateDictConfig()
-            )
-            rank0_only = full_state_dict_config.rank0_only
-            offload_to_cpu = full_state_dict_config.offload_to_cpu
-            summon_ctx = (
-                self._summon_full_params(
-                    recurse=False,
-                    writeback=False,
-                    offload_to_cpu=offload_to_cpu,
-                    rank0_only=rank0_only,
-                )
-                if self.training_state != TrainingState.SUMMON_FULL_PARAMS
-                else contextlib.suppress()
-            )
-            with summon_ctx:
-                # Since buffers stay in their low precision throughout runtime,
-                # we must explicitly restore them to their original dtypes for
-                # model checkpointing. We have the root module cast for all
-                # submodules.
-                # TODO: Investigate if this can and should be refactored into
-                # `summon_full_params()`.
-                if self._is_root and self._mixed_precision_enabled_for_buffers():
-                    buffers, buffer_dtypes = _get_buffers_and_dtypes_for_checkpoint(
-                        self, self
-                    )
-                    _cast_buffers_to_dtype_and_device(
-                        buffers, buffer_dtypes, self.compute_device
-                    )
-                state_dict = super().state_dict(*args, **kwargs)
-
-            # TODO: support offload to CPU in post state dict hook.
-            if not rank0_only or self.rank == 0:
-                return state_dict
-            else:
-                return {}
-
-        elif (
-            self._state_dict_type == StateDictType.LOCAL_STATE_DICT
-            or self._state_dict_type == StateDictType.SHARDED_STATE_DICT
-        ):
-            if self._has_params and not self._handles[0].uses_sharded_strategy:
-                raise RuntimeError(
-                    "sharded_state_dict/local_state_dict can only be called "
-                    "when parameters are flatten and sharded."
-                )
-            return super().state_dict(*args, **kwargs)
-        else:
-            raise ValueError(f"Unknown StateDictType {self._state_dict_type}.")
+        return super().state_dict(*args, **kwargs)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """
