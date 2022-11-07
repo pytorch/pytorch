@@ -4907,7 +4907,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 n, k = k, n
             Id = torch.eye(k, dtype=X.dtype, device=X.device).expand(*(X.size()[:-2]), k, k)
             eps = 10 * n * torch.finfo(X.dtype).eps
-            torch.testing.assert_allclose(X.mH @ X, Id, atol=eps, rtol=0.)
+            torch.testing.assert_close(X.mH @ X, Id, atol=eps, rtol=0.)
 
 
         def assert_weight_allclose_Q(weight, W):
@@ -4920,7 +4920,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             Q *= R.diagonal(dim1=-2, dim2=-1).sgn().unsqueeze(-2)
             if wide_matrix:
                 Q = Q.mT
-            torch.testing.assert_allclose(Q, weight, atol=1e-5, rtol=0.)
+            torch.testing.assert_close(Q, weight, atol=1e-5, rtol=0.)
 
 
         for shape, dtype, use_linear in product(((4, 4), (5, 3), (3, 5)),  # square/ tall / wide
@@ -4979,7 +4979,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     w_new = w_new.mT
                 if can_initialize:
                     m.weight = w_new
-                    torch.testing.assert_allclose(w_new, m.weight, atol=1e-5, rtol=0.)
+                    torch.testing.assert_close(w_new, m.weight, atol=1e-5, rtol=0.)
                 else:
                     msg = "assign to the matrix exponential or the Cayley parametrization"
                     with self.assertRaisesRegex(NotImplementedError, msg):
@@ -6143,20 +6143,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                          F.poisson_nll_loss(input, target, reduction='mean'))
         with self.assertRaisesRegex(ValueError, 'is not valid'):
             F.poisson_nll_loss(input, target, reduction='total')
-
-    def test_gaussian_nll_loss_reduction_modes(self):
-        input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
-        target = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
-        var = torch.tensor([[0.5, 1., 1.5], [1., 1.5, 2.]])
-        component_wise_loss = 0.5 * (torch.log(var) + (input - target)**2 / var)
-        self.assertEqual(component_wise_loss,
-                         F.gaussian_nll_loss(input, target, var, reduction='none'))
-        self.assertEqual(torch.sum(component_wise_loss),
-                         F.gaussian_nll_loss(input, target, var, reduction='sum'))
-        self.assertEqual(torch.mean(component_wise_loss),
-                         F.gaussian_nll_loss(input, target, var, reduction='mean'))
-        with self.assertRaisesRegex(ValueError, 'is not valid'):
-            F.gaussian_nll_loss(input, target, var, reduction='total')
 
     def test_gaussian_nll_loss_broadcasting(self):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
