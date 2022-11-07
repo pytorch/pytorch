@@ -140,7 +140,7 @@ class RedistributeTest(DTensorTestBase):
         )
 
         self.assertEqual(partial_tensor.size(), partial_local.size())
-        self.assertEqual(partial_local * 4, global_partial_tensor.to_local())
+        self.assertEqual(partial_local * self.world_size, global_partial_tensor.to_local())
 
         # test backward to have replicate grad on partial
         global_partial_tensor.backward(torch.ones_like(global_partial_tensor))
