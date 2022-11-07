@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 import torch
-from torch.ao.quantization.observer import _PartialWrapper
 from torch.ao.quantization.utils import Pattern
 from enum import Enum
 
@@ -42,8 +41,6 @@ EXTRA_INPUTS_GETTER_DICT_KEY = "extra_inputs_getter"
 NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY = "num_tensor_args_to_observation_type"
 INPUT_TYPE_TO_INDEX_DICT_KEY = "input_type_to_index"
 INPUT_OUTPUT_OBSERVED_DICT_KEY = "input_output_observed"
-OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY = "overwrite_output_fake_quantize"
-OVERWRITE_OUTPUT_OBSERVER_DICT_KEY = "overwrite_output_observer"
 
 
 # TODO: maybe rename this to something that's not related to observer
@@ -77,6 +74,8 @@ class DTypeWithConstraints:
     quant_max_upper_bound: Union[int, float, None] = None
     scale_min_lower_bound: Union[int, float, None] = None
     scale_max_upper_bound: Union[int, float, None] = None
+    fixed_scale: Optional[float] = None
+    fixed_zero_point: Optional[int] = None
 
 
 @dataclass
@@ -336,8 +335,6 @@ class BackendPatternConfig:
         self._num_tensor_args_to_observation_type: Dict[int, ObservationType] = {}
         self._input_type_to_index: Dict[str, int] = {}
         self._input_output_observed: Optional[bool] = None
-        self._overwrite_output_fake_quantize: Optional[_PartialWrapper] = None
-        self._overwrite_output_observer: Optional[_PartialWrapper] = None
 
     def set_observation_type(self, observation_type: ObservationType) -> BackendPatternConfig:
         """
@@ -433,14 +430,6 @@ class BackendPatternConfig:
         self._input_output_observed = input_output_observed
         return self
 
-    def _set_overwrite_output_fake_quantize(self, overwrite_output_fake_quantize: _PartialWrapper) -> BackendPatternConfig:
-        self._overwrite_output_fake_quantize = overwrite_output_fake_quantize
-        return self
-
-    def _set_overwrite_output_observer(self, overwrite_output_observer: _PartialWrapper) -> BackendPatternConfig:
-        self._overwrite_output_observer = overwrite_output_observer
-        return self
-
     @classmethod
     def from_dict(cls, backend_pattern_config_dict: Dict[str, Any]) -> BackendPatternConfig:
         """
@@ -487,8 +476,6 @@ class BackendPatternConfig:
             backend_pattern_config_dict.get(NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY, {}))
         conf._set_input_type_to_index(backend_pattern_config_dict.get(INPUT_TYPE_TO_INDEX_DICT_KEY, {}))
         conf._set_input_output_observed(backend_pattern_config_dict.get(INPUT_OUTPUT_OBSERVED_DICT_KEY, None))
-        conf._set_overwrite_output_fake_quantize(backend_pattern_config_dict.get(OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY, None))
-        conf._set_overwrite_output_observer(backend_pattern_config_dict.get(OVERWRITE_OUTPUT_OBSERVER_DICT_KEY, None))
         return conf
 
     def to_dict(self) -> Dict[str, Any]:
@@ -521,8 +508,4 @@ class BackendPatternConfig:
             backend_pattern_config_dict[INPUT_TYPE_TO_INDEX_DICT_KEY] = self._input_type_to_index
         if self._input_output_observed is not None:
             backend_pattern_config_dict[INPUT_OUTPUT_OBSERVED_DICT_KEY] = self._input_output_observed
-        if self._overwrite_output_fake_quantize is not None:
-            backend_pattern_config_dict[OVERWRITE_OUTPUT_FAKE_QUANTIZE_DICT_KEY] = self._overwrite_output_fake_quantize
-        if self._overwrite_output_observer is not None:
-            backend_pattern_config_dict[OVERWRITE_OUTPUT_OBSERVER_DICT_KEY] = self._overwrite_output_observer
         return backend_pattern_config_dict

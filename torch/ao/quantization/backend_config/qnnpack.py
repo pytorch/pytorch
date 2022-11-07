@@ -129,7 +129,6 @@ def get_qnnpack_backend_config() -> BackendConfig:
         qnnpack_default_op_quint8_dtype_config,
     ]
     fixed_qparams_op_dtype_configs = [
-        qnnpack_default_op_qint8_symmetric_dtype_config,
         qnnpack_default_op_quint8_dtype_config,
     ]
     share_qparams_op_dtype_configs = [

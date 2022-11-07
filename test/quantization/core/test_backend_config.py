@@ -13,10 +13,8 @@ from torch.ao.quantization.backend_config import (
     DTypeWithConstraints,
     ObservationType,
 )
-from torch.ao.quantization.fake_quantize import FixedQParamsFakeQuantize
 from torch.ao.quantization.fuser_method_mappings import reverse_sequential_wrapper2
 from torch.ao.quantization.fx.quantization_patterns import _default_root_node_getter
-from torch.ao.quantization.observer import default_fixed_qparams_range_0to1_observer
 
 
 class TestBackendConfig(QuantizationTestCase):
@@ -118,7 +116,6 @@ class TestBackendConfig(QuantizationTestCase):
         "input": 1,
         "weight": 2,
     }
-    _fake_quantize = FixedQParamsFakeQuantize.with_args(observer=default_fixed_qparams_range_0to1_observer)
 
     def _extra_inputs_getter(self, p):
         return (torch.rand(3, 3),)
@@ -141,9 +138,7 @@ class TestBackendConfig(QuantizationTestCase):
             ._set_extra_inputs_getter(self._extra_inputs_getter) \
             ._set_num_tensor_args_to_observation_type(self._num_tensor_args_to_observation_type) \
             ._set_input_type_to_index(self._input_type_to_index) \
-            ._set_input_output_observed(False) \
-            ._set_overwrite_output_fake_quantize(self._fake_quantize) \
-            ._set_overwrite_output_observer(default_fixed_qparams_range_0to1_observer)
+            ._set_input_output_observed(False)
 
     def _get_backend_pattern_config_dict1(self):
         return {
@@ -167,8 +162,6 @@ class TestBackendConfig(QuantizationTestCase):
             "num_tensor_args_to_observation_type": self._num_tensor_args_to_observation_type,
             "input_type_to_index": self._input_type_to_index,
             "input_output_observed": False,
-            "overwrite_output_fake_quantize": self._fake_quantize,
-            "overwrite_output_observer": default_fixed_qparams_range_0to1_observer
         }
 
     def test_backend_op_config_set_observation_type(self):
@@ -246,18 +239,6 @@ class TestBackendConfig(QuantizationTestCase):
         conf._set_input_output_observed(False)
         self.assertEqual(conf._input_output_observed, False)
 
-    def test_backend_op_config_set_overwrite_output_fake_quantize(self):
-        conf = BackendPatternConfig(torch.sigmoid)
-        self.assertTrue(conf._overwrite_output_fake_quantize is None)
-        conf._set_overwrite_output_fake_quantize(self._fake_quantize)
-        self.assertEqual(conf._overwrite_output_fake_quantize, self._fake_quantize)
-
-    def test_backend_op_config_set_overwrite_output_observer(self):
-        conf = BackendPatternConfig(torch.sigmoid)
-        self.assertTrue(conf._overwrite_output_observer is None)
-        conf._set_overwrite_output_observer(default_fixed_qparams_range_0to1_observer)
-        self.assertEqual(conf._overwrite_output_observer, default_fixed_qparams_range_0to1_observer)
-
     def test_backend_op_config_from_dict(self):
         conf_dict1 = self._get_backend_pattern_config_dict1()
         conf1 = BackendPatternConfig.from_dict(conf_dict1)
@@ -273,8 +254,6 @@ class TestBackendConfig(QuantizationTestCase):
         self.assertEqual(len(conf1._num_tensor_args_to_observation_type), 0)
         self.assertEqual(len(conf1._input_type_to_index), 0)
         self.assertTrue(conf1._input_output_observed is None)
-        self.assertTrue(conf1._overwrite_output_fake_quantize is None)
-        self.assertTrue(conf1._overwrite_output_observer is None)
         # Test temporary/internal keys
         conf_dict2 = self._get_backend_pattern_config_dict2()
         conf2 = BackendPatternConfig.from_dict(conf_dict2)
@@ -290,8 +269,6 @@ class TestBackendConfig(QuantizationTestCase):
         self.assertEqual(conf2._num_tensor_args_to_observation_type, self._num_tensor_args_to_observation_type)
         self.assertEqual(conf2._input_type_to_index, self._input_type_to_index)
         self.assertEqual(conf2._input_output_observed, False)
-        self.assertEqual(conf2._overwrite_output_fake_quantize, self._fake_quantize)
-        self.assertEqual(conf2._overwrite_output_observer, default_fixed_qparams_range_0to1_observer)
 
     def test_backend_op_config_to_dict(self):
         conf1 = self._get_backend_op_config1()

@@ -1,3 +1,4 @@
+import copy
 import operator
 import torch
 import torch.nn.functional as F
@@ -23,6 +24,7 @@ from ..fuser_method_mappings import (
     fuse_linear_bn,
     fuse_convtranspose_bn,
 )
+from ..observer import FixedQParamsObserver
 from ..qconfig_mapping import _FIXED_QPARAMS_OP_TO_OBSERVER
 
 # TODO: rename to be more explict, e.g. qat_conv_relu
@@ -393,21 +395,43 @@ def _get_default_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPat
     )
     return configs
 
+def _add_fixed_qparams_to_dtype_configs(
+    dtype_configs: List[DTypeConfig],
+    observer: FixedQParamsObserver,
+) -> List[DTypeConfig]:
+    """
+    Return a copy of the list of DTypeConfigs where activations are subject to the fixed qparams
+    constraints specified in the observer.
+
+    If `scale_min_lower_bound` or `scale_max_upper_bound` is specified in the activations, throw an
+    exception since these settings are incompatible with fixed qparams ops.
+    """
+    fixed_scale = observer.scale
+    fixed_zero_point = observer.zero_point
+    new_dtype_configs = []
+    for dtype_config in dtype_configs:
+        dc = copy.deepcopy(dtype_config)
+        for dtype_with_constraints in [dc.input_dtype_with_constraints, dc.output_dtype_with_constraints]:
+            dtype_with_constraints.fixed_scale = fixed_scale
+            dtype_with_constraints.fixed_zero_point = fixed_zero_point
+            if dtype_with_constraints.scale_min_lower_bound is not None:
+                raise ValueError("scale_min_lower_bound is invalid for fixed qparams ops: %s" % dtype_config)
+            if dtype_with_constraints.scale_max_upper_bound is not None:
+                raise ValueError("scale_max_upper_bound is invalid for fixed qparams ops: %s" % dtype_config)
+        new_dtype_configs.append(dc)
+    return new_dtype_configs
+
 def _get_fixed_qparams_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
     fixed_qparams_op_configs = []
-    for fixed_qparam_op, output_observer in _FIXED_QPARAMS_OP_TO_OBSERVER.items():
+    for fixed_qparam_op, obs_ctr in _FIXED_QPARAMS_OP_TO_OBSERVER.items():
+        # Specify fixed qparams constraints through the dtype configs
+        obs = obs_ctr()
+        assert isinstance(obs, FixedQParamsObserver)
+        new_dtype_configs = _add_fixed_qparams_to_dtype_configs(dtype_configs, obs)
         fixed_qparams_op_configs.append(
-            # TODO: The _overwrite_output keys are temporary, since we don't want to put observer
-            # in the configs we expect that it's provided by user
-            # What we want to put here is the requirement on observers, in this case dtype,
-            # quant_min, quant_max etc., but we need to first move all configs to
-            # backend_config_dict to do that, we'll remove these keys after we fully migrated
-            # everything to use backend_config_dict
             BackendPatternConfig(fixed_qparam_op)
                 .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
-                .set_dtype_configs(dtype_configs)
-                ._set_overwrite_output_fake_quantize(FixedQParamsFakeQuantize.with_args(observer=output_observer))
-                ._set_overwrite_output_observer(output_observer))
+                .set_dtype_configs(new_dtype_configs))
     return fixed_qparams_op_configs
 
 def _get_share_qparams_op_configs(dtype_configs):

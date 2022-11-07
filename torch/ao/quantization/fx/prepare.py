@@ -18,9 +18,6 @@ from ..observer import (
     ObserverBase,
 )
 from ..qconfig import (
-    obs_or_fq_ctr_equals,
-    float16_dynamic_qconfig,
-    float16_static_qconfig,
     is_reuse_input_qconfig,
     QConfigAny,
 )
@@ -44,8 +41,6 @@ from torch.ao.quantization.utils import (
     Pattern,
     NodePattern,
 )
-
-from torch.ao.quantization import FixedQParamsFakeQuantize
 
 from ._equalize import (
     is_equalization_observer,
@@ -91,14 +86,12 @@ from ..utils import (
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
     activation_is_statically_quantized,
-    activation_is_int8_quantized,
 )
 
 from ..backend_config.utils import (
     get_pattern_to_dtype_configs,
     get_module_to_qat_module,
     get_fusion_pattern_to_root_node_getter,
-    get_fixed_qparams_op_to_overwrite_output_observer,
 )
 from ..backend_config import (
     BackendConfig,
@@ -826,13 +819,7 @@ def maybe_insert_output_observer_for_node(
         (not is_standalone_module)
 
     if should_insert_observer:
-        act_post_process_ctr = qconfig.activation
-        if activation_is_int8_quantized(qconfig):
-            act_post_process_ctr = qhandler.get_activation_ctr(
-                qconfig,
-                matched_pattern,
-                is_qat)
-        observer = act_post_process_ctr()
+        observer = qconfig.activation()
         return insert_observer(node, observer, model, modules, graph)
     else:
         return None
@@ -1392,51 +1379,6 @@ def insert_observers_for_model(
 
     return results_node
 
-def _validate_fixed_qparams_qconfigs(
-        model: GraphModule,
-        node_name_to_qconfig: Dict[str, QConfigAny],
-        backend_config: BackendConfig):
-    """
-    Validate whether the correct observers are configured for fixed qparams ops in the model, if any.
-    """
-    # TODO: handle fp16 qconfigs properly
-    allowed_observer_ctrs = [
-        float16_dynamic_qconfig.activation,
-        float16_static_qconfig.activation,
-    ]
-    named_modules = dict(model.named_modules(remove_duplicate=False))
-    fixed_qparams_op_to_overwrite_output_observer = \
-        get_fixed_qparams_op_to_overwrite_output_observer(backend_config)
-    for node in model.graph.nodes:
-        if node.op == "call_function":
-            module_type_or_function_or_method = node.target
-        elif node.op == "call_module":
-            module_type_or_function_or_method = type(named_modules[node.target])
-        else:
-            module_type_or_function_or_method = None
-
-        if module_type_or_function_or_method in fixed_qparams_op_to_overwrite_output_observer:
-            bad_observer = True
-            qconfig = node_name_to_qconfig.get(node.name, None)
-            if qconfig is None:
-                bad_observer = False
-            else:
-                for observer_ctr in allowed_observer_ctrs + [
-                        fixed_qparams_op_to_overwrite_output_observer[module_type_or_function_or_method]]:
-                    if obs_or_fq_ctr_equals(
-                            qconfig.activation,
-                            FixedQParamsFakeQuantize.with_args(observer=observer_ctr)) or \
-                            obs_or_fq_ctr_equals(qconfig.activation, observer_ctr):
-                        bad_observer = False
-            if bad_observer:
-                raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "
-                                 "'%s' type: '%s'. Please use torch.ao.quantization.get_default_qconfig_mapping or "
-                                 "torch.ao.quantization.get_default_qat_qconfig_mapping"
-                                 " instead. Example: \n"
-                                 "    qconfig_mapping = get_default_qconfig_mapping(\"fbgemm\") \n"
-                                 "    model = prepare_fx(model, qconfig_mapping, example_inputs)"
-                                 "" % (node.format_node(), module_type_or_function_or_method))
-
 def run_prepare_fx_on_standalone_modules(
     model: torch.nn.Module,
     is_qat: bool,
@@ -1609,7 +1551,6 @@ def prepare(
     equalization_node_name_to_qconfig = generate_node_name_to_qconfig(
         model, modules, model.graph, _equalization_config, node_name_to_scope)
     node_name_to_qconfig = generate_node_name_to_qconfig(model, modules, model.graph, qconfig_mapping, node_name_to_scope)
-    _validate_fixed_qparams_qconfigs(model, node_name_to_qconfig, backend_config)
 
     # match the patterns that will get quantized
     standalone_module_names = list(prepare_custom_config.standalone_module_names.keys())
