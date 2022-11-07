@@ -835,7 +835,7 @@ following matrix shows how the log level can be adjusted via the combination of 
 Distributed has a custom Exception type derived from `RuntimeError` called `torch.distributed.DistBackendError`. This exception is thrown when a backend-specific error occurs. For example, if
 the `NCCL` backend is used and the user attempts to use a GPU that is not available to the `NCCL` library.
 
-.. autoclass:: DistBackendError
+.. autoclass:: torch.distributed.DistBackendError
 
 .. warning::
     The DistBackendError exception type is an experimental feature is subject to change.
