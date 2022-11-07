@@ -23,6 +23,12 @@ class CommonRulesTest(DTensorTestBase):
     def parse_schema(self, schema_str):
         return FunctionSchema.parse(schema_str)
 
+    @property
+    def world_size(self) -> int:
+        # hard code world size to 4 as we need to test
+        # at least with 2d mesh
+        return 4
+
     @with_comms
     def test_einop_basic_propagation(self):
         # plain einsum, mm

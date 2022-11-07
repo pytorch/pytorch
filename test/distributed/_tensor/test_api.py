@@ -34,6 +34,12 @@ class MyModel(nn.Module):
 
 
 class DTensorAPITest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        # hard code world size to 4 as we need to test
+        # at least with 2d mesh
+        return 4
+
     @with_comms
     def test_distribute_tensor(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
