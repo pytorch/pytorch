@@ -239,7 +239,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
-        return f"tl.libdevice.signbitf({x}) if ({x}).dtype is tl.float32 else {x} < 0"
+        return f"tl.libdevice.signbit({x}) if ({x}).dtype is tl.float32 else {x} < 0"
 
     @staticmethod
     def fmod(a, b):
@@ -259,11 +259,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def isinf(x):
-        return f"tl.libdevice.isinfd({x}) if ({x}).dtype is tl.float64 else tl.libdevice.isinff({x})"
+        return f"tl.libdevice.isinf({x})"
 
     @staticmethod
     def isnan(x):
-        return f"tl.libdevice.isnand({x}) if ({x}).dtype is tl.float64 else tl.libdevice.isnanf({x})"
+        return f"tl.libdevice.isnan({x})"
 
     @staticmethod
     def round(x):
@@ -986,6 +986,7 @@ class TritonKernel(Kernel):
                     import triton
                     import triton.language as tl
                     from {config.inductor_import}.ir import ReductionHint
+                    from {config.inductor_import}.ir import TileHint
                     from {config.inductor_import}.triton_ops.autotune import {heuristics}
                     from {config.inductor_import}.utils import instance_descriptor
                 """
@@ -1026,8 +1027,14 @@ class TritonKernel(Kernel):
                 @triton.jit
             """
         else:
+            tile_hint = ""
+            if len(size_hints) == 2:
+                if len(signature) == 4:  # input, output and 2 args
+                    tile_hint = "tile_hint=TileHint.SQUARE,"
+                else:
+                    tile_hint = "tile_hint=TileHint.DEFAULT,"
             heuristics_line = f"""
-                @{heuristics}(size_hints={size_hints!r}, filename=__file__, meta={triton_meta!r})
+                @{heuristics}(size_hints={size_hints!r}, {tile_hint}filename=__file__, meta={triton_meta!r})
                 @triton.jit
             """
         code.splice(heuristics_line)
