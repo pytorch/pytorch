@@ -1776,6 +1776,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: cumsum_out
+    MPS: cumsum_out_mps
 
 - func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -2484,11 +2485,17 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: frac.out
   variants: function, method
+  dispatch:
+    SparseCPU, SparseCUDA: frac_sparse
+    SparseCsrCPU, SparseCsrCUDA: frac_sparse_csr
 
 - func: frac_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: frac.out
   variants: function, method
+  dispatch:
+    SparseCPU, SparseCUDA: frac_sparse_
+    SparseCsrCPU, SparseCsrCUDA: frac_sparse_csr_
 
 - func: frac.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -2497,6 +2504,8 @@
   dispatch:
     CPU, CUDA: frac_out
     MPS: frac_out_mps
+    SparseCPU, SparseCUDA: frac_sparse_out
+    SparseCsrCPU, SparseCsrCUDA: frac_sparse_csr_out
 
 - func: full.names(int[] size, Scalar fill_value, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   device_check: NoCheck
@@ -4025,15 +4034,21 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: deg2rad
+    SparseCPU, SparseCUDA: deg2rad_sparse
+    SparseCsrCPU, SparseCsrCUDA: deg2rad_sparse_csr
 
 - func: deg2rad_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: deg2rad_
+    SparseCPU, SparseCUDA: deg2rad_sparse_
+    SparseCsrCPU, SparseCsrCUDA: deg2rad_sparse_csr_
 
 - func: deg2rad.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: deg2rad_out
+    SparseCPU, SparseCUDA: deg2rad_sparse_out
+    SparseCsrCPU, SparseCsrCUDA: deg2rad_sparse_csr_out
 
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -4247,6 +4262,7 @@
   dispatch:
     SparseCPU, SparseCUDA: neg_sparse
     SparseCsrCPU, SparseCsrCUDA: neg_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_neg
   tags: canonical
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
@@ -4256,6 +4272,7 @@
   dispatch:
     SparseCPU, SparseCUDA: neg_sparse_
     SparseCsrCPU, SparseCsrCUDA: neg_sparse_csr_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_neg_
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -4305,6 +4322,11 @@
   dispatch:
     CompositeImplicitAutograd: reshape_symint
     CompositeImplicitAutogradNestedTensor: reshape_nested
+
+- func: _reshape_copy(Tensor self, SymInt[] size) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _reshape_copy_symint
 
 # NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
 # They are not user-facing, hence the leading underscore. Please don't use it
@@ -9838,6 +9860,14 @@
     CUDA: foreach_tensor_addcdiv_scalarlist_cuda_
   autogen: _foreach_addcdiv.ScalarList_out
 
+- func: _foreach_addcdiv_.Tensor(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Tensor scalars) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_addcdiv_tensor_slow_
+    CUDA: foreach_tensor_addcdiv_tensor_cuda_
+  autogen: _foreach_addcdiv.Tensor_out
+
 - func: _foreach_addcmul_.ScalarList(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> ()
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
@@ -9845,6 +9875,14 @@
     CPU: foreach_tensor_addcmul_scalarlist_slow_
     CUDA: foreach_tensor_addcmul_scalarlist_cuda_
   autogen: _foreach_addcmul.ScalarList_out
+
+- func: _foreach_addcmul_.Tensor(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Tensor scalars) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_addcmul_tensor_slow_
+    CUDA: foreach_tensor_addcmul_tensor_cuda_
+  autogen: _foreach_addcmul.Tensor_out
 
 - func: _foreach_addcdiv.Scalar(Tensor[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -9867,12 +9905,26 @@
     CPU: foreach_tensor_addcdiv_scalarlist_slow
     CUDA: foreach_tensor_addcdiv_scalarlist_cuda
 
+- func: _foreach_addcdiv.Tensor(Tensor[] self, Tensor[] tensor1, Tensor[] tensor2, Tensor scalars) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_addcdiv_tensor_slow
+    CUDA: foreach_tensor_addcdiv_tensor_cuda
+
 - func: _foreach_addcmul.ScalarList(Tensor[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar[] scalars) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
     CPU: foreach_tensor_addcmul_scalarlist_slow
     CUDA: foreach_tensor_addcmul_scalarlist_cuda
+
+- func: _foreach_addcmul.Tensor(Tensor[] self, Tensor[] tensor1, Tensor[] tensor2, Tensor scalars) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_addcmul_tensor_slow
+    CUDA: foreach_tensor_addcmul_tensor_cuda
 
 - func: _foreach_maximum.List(Tensor[] self, Tensor[] other) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
