@@ -3842,7 +3842,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
-        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
+        # @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
         @skip_if_no_gpu
         def test_all_reduce_multigpu(self):
             group, group_id, rank = self._init_global_test()
@@ -3860,7 +3860,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
-        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
+        # @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
         @skip_if_no_gpu
         def test_all_reduce_multigpu_complex(self):
             group, group_id, rank = self._init_global_test()
@@ -7619,9 +7619,11 @@ class DistributedTest:
             # to be caught inline.
             # All ranks report same error when there is a # of parameter
             # mismatch since we use allgather in the impl.
+            print(f'starting _determine_expected_error_verify_model_across_rank, rank: {self.rank}')
             if diff_num_params:
                 expected_err = "DDP expects same model across all ranks"
                 ctx = self.assertRaisesRegex(RuntimeError, expected_err)
+                # ctx = open("/tmp/whatever", "w")
                 return ctx, expected_err
 
             is_detail_dbg_mode = (
@@ -7630,22 +7632,28 @@ class DistributedTest:
             if self.rank == 0:
                 if dist.get_backend(group_to_use) == dist.Backend.NCCL and not is_detail_dbg_mode:
                     expected_err = "Caught collective operation timeout"
+                    # ctx = open("/tmp/whatever", "w")
                     ctx = self.assertRaisesRegex(RuntimeError, expected_err)
                 else:
                     expected_err = None
+                    # ctx = open("/tmp/whatever", "w")
                     ctx = self.assertRaises(RuntimeError)
             else:
                 expected_err = "appears not to match"
+                # ctx = open("/tmp/whatever", "w")
                 ctx = self.assertRaisesRegex(RuntimeError, expected_err)
+            print(f'finishing _determine_expected_error_verify_model_across_rank, rank: {self.rank}')
             return ctx, expected_err
 
         def _test_verify_model_across_rank(self, use_logger):
+            print('starting _test_verify_model_across_rank')
             group_gloo = dist.new_group(
                 timeout=timedelta(seconds=60), backend=dist.Backend.GLOO
             )
             # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
             # determinism.
             os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            os.environ["TORCH_UCC_BLOCKING_WAIT"] = "all"
             group_to_use = dist.new_group(
                 backend=dist.get_backend(), timeout=timedelta(seconds=5)
             )
@@ -7667,6 +7675,10 @@ class DistributedTest:
             # not be properly initialized.
             net.module.lin = nn.Linear(100 if self.rank == 0 else 10, 1)
 
+            is_detail_dbg_mode = (
+                dist.get_debug_level() == dist.DebugLevel.DETAIL
+            )
+
             # if we pass a logger we can verify that it was logged
             with ctx:
                 if use_logger:
@@ -7682,7 +7694,10 @@ class DistributedTest:
                     )
                 # Should only be run by rank 0, and blocking_wait catches and
                 # reports exception.
+                print(f'approaching first barrier, rank: {self.rank}')
                 dist.barrier(group_to_use)
+            
+            print(f'made it past first barrier, rank: {self.rank}')
 
             # We don't check when self.rank != 0 because the logger doesn't log
             # the error "Caught collective operation" as that is not thrown in the reducer.
@@ -7692,22 +7707,24 @@ class DistributedTest:
             # Perform gloo-based barrier to ensure one rank doesn't exit test
             # early which causes failure with Barrier.sync.
             dist.barrier(group_gloo)
+            print('finished _test_verify_model_across_rank')
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
+        # @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
         @skip_if_lt_x_gpu(2)
         def test_verify_model_across_rank_with_logger(self):
             self._test_verify_model_across_rank(use_logger=True)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
+        # @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
         @skip_if_lt_x_gpu(2)
         def test_verify_model_across_rank_without_logger(self):
             self._test_verify_model_across_rank(use_logger=False)
 
         def _run_test_ddp_model_with_diff_params(self, ctx, net, ddp_group, group_gloo):
+            print('starting _run_test_ddp_model_with_diff_params')
             with ctx:
                 net = torch.nn.parallel.DistributedDataParallel(
                     net.to(self.rank),
@@ -7717,16 +7734,18 @@ class DistributedTest:
                 # Should only be run by rank 0, and blocking_wait catches and
                 # reports exception.
                 dist.barrier(ddp_group)
+            print('made it past first barrier')
 
             # can't use verify_ddp_error_logged here because net was never properly constructed
 
             # Perform gloo-based barrier to ensure one rank doesn't exit test
             # early which causes failure with Barrier.sync.
             dist.barrier(group_gloo)
+            print('finished _run_test_ddp_model_with_diff_params')
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
+        # @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
         @skip_if_lt_x_gpu(2)
         def test_ddp_model_diff_shape_across_ranks(self):
             group_gloo = dist.new_group(
@@ -7735,6 +7754,7 @@ class DistributedTest:
             # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
             # determinism.
             os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            os.environ["TORCH_UCC_BLOCKING_WAIT"] = "all"
             group_to_use = dist.new_group(
                 backend=dist.get_backend(), timeout=timedelta(seconds=10)
             )
@@ -7749,7 +7769,7 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
+        # @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
         @skip_if_lt_x_gpu(2)
         def test_ddp_model_diff_num_params_across_ranks(self):
             group_gloo = dist.new_group(
@@ -7758,6 +7778,7 @@ class DistributedTest:
             # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
             # determinism.
             os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            os.environ["TORCH_UCC_BLOCKING_WAIT"] = "all"
             group_to_use = dist.new_group(
                 backend=dist.get_backend(), timeout=timedelta(seconds=10)
             )
