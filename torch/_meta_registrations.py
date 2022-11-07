@@ -272,7 +272,11 @@ def meta_pad2d(self, padding):
 @register_meta([aten.bernoulli.default, aten.bernoulli.out])
 @out_wrapper()
 def meta_bernoulli(self, *, generator=None):
-    return torch.empty_like(self)
+    if device_hint(self) == "cuda":
+        # https://github.com/pytorch/pytorch/issues/88612
+        return torch.empty_like(self).contiguous()
+    else:
+        return torch.empty_like(self)
 
 
 @register_meta(aten.bernoulli_.float)
@@ -282,7 +286,11 @@ def meta_bernoulli_(self, p=0.5, generator=None):
 
 @register_meta(aten.bernoulli.p)
 def meta_bernoulli_p(self, p=0.5, generator=None):
-    return torch.empty_like(self)
+    if device_hint(self) == "cuda":
+        # https://github.com/pytorch/pytorch/issues/88612
+        return torch.empty_like(self).contiguous()
+    else:
+        return torch.empty_like(self)
 
 
 @register_meta(aten._fused_moving_avg_obs_fq_helper.default)
@@ -1512,6 +1520,7 @@ def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
     return torch.empty_like(self)
 
 
+# TODO: Deduplicate this with canonicalize_dim
 def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     if dim_post_expr <= 0:
         assert wrap_scalar
