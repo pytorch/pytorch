@@ -872,17 +872,15 @@ void Unpickler::rebuildTensor(bool quantized) {
     // Handle if math_bits were pickled.
     // See `args` of _reduce_ex_internal
     // for a regular tensor (final else case).
+    // Tensors pickled before this patch didn't
+    // have this argument for storing MathBits,
+    // in that case, we do nothing.
     // NOTE: `math_bits` is the 7th arg.
     // NOTE: This is only meant for regular tensor and not quantized!
-    if (!quantized) {
-      bool has_math_bits = elements.size() == 7;
-      // Tensors pickled before this patch didn't
-      // have this argument for storing MathBits,
-      // in that case, we do nothing.
-      if (has_math_bits) {
-        auto math_bits = elements.at(idx + 2).toGenericDict();
-        torch::jit::setTensorMathBits(result, math_bits);
-      }
+    if (!quantized && elements.size() == 7) {
+      // We skip the backward_hooks pointed at idx + 1.
+      auto math_bits = elements.at(idx + 2).toGenericDict();
+      torch::jit::setTensorMathBits(result, math_bits);
     }
 
     stack_.emplace_back(std::move(result));
