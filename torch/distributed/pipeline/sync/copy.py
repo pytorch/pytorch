@@ -45,10 +45,10 @@ class Copy(torch.autograd.Function):
                     y = x.to(get_device(next_stream), non_blocking=True)
                     output.append(y)
 
-                    # 'prev_stream' is not where 'x' has been allocated.
+                    # `prev_stream` is not where `x` has been allocated.
                     record_stream(x, prev_stream)
-                    # 'y' has been allocated on 'next_stream'.
-                    # It might be used on the current stream captured as 'output_stream'.
+                    # `y` has been allocated on `next_stream`.
+                    # It might be used on the current stream captured as `output_stream`.
                     record_stream(y, output_stream)
                 else:
                     output.append(x)
@@ -69,10 +69,10 @@ class Copy(torch.autograd.Function):
                     y = x.to(get_device(prev_stream), non_blocking=True)
                     grad_input.appendleft(y)
 
-                    # 'next_stream' is not where 'x' has been allocated.
+                    # `next_stream` is not where `x` has been allocated.
                     record_stream(x, next_stream)
-                    # 'y' has been allocated on 'prev_stream'.
-                    # It might be used on the current stream captured as 'input_stream'.
+                    # `y` has been allocated on `prev_stream`.
+                    # It might be used on the current stream captured as `input_stream`.
                     record_stream(y, input_stream)
                 else:
                     grad_input.appendleft(x)
