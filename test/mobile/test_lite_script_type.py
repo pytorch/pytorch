@@ -82,6 +82,8 @@ class TestLiteScriptModule(TestCase):
         #    ('returns',
         #     ((('name', ''), ('type', 'Tensor'), ('default_value', None)),)))))
 
+        assert False
+
         sample_input = torch.tensor(5)
         script_module = torch.jit.script(Bar())
 
