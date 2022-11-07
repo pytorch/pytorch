@@ -1,6 +1,4 @@
 # Owner(s): ["module: onnx"]
-import unittest
-
 import onnx.checker
 import torch
 from torch import nn

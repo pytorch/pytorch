@@ -10,13 +10,13 @@ import copy
 import difflib
 import io
 import itertools
-import onnx
 import os
 import tempfile
 import warnings
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
+import onnx
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -758,7 +758,9 @@ def verify_model_with_positional_args(
         tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
         model_file_path: str = os.path.join(tmpdir_path, "model.onnx")
         onnx.save(onnx_model, model_file_path)
-        ort_session = _ort_session(model_file_path, ort_providers=("CPUExecutionProvider",))
+        ort_session = _ort_session(
+            model_file_path, ort_providers=("CPUExecutionProvider",)
+        )
 
     model_copy = _try_clone_model(model)
     _compare_ort_pytorch_model(

@@ -306,10 +306,7 @@ def _export(
     return model_proto
 
 
-def _export_function(
-    fn: Callable, *args,
-    use_binary_format: bool = True
-):
+def _export_function(fn: Callable, *args, use_binary_format: bool = True):
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(args)
     # Translate callable to FX graph.
@@ -319,15 +316,11 @@ def _export_function(
         graph_module,
         *args,
         decomposition_table=_onnx_friendly_decomposition_table,
-        use_binary_format=use_binary_format
+        use_binary_format=use_binary_format,
     )
 
 
-def _export_module(
-    module: torch.nn.Module,
-    *args,
-    use_binary_format: bool = True
-):
+def _export_module(module: torch.nn.Module, *args, use_binary_format: bool = True):
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(args)
     # Convert nn.Module to FX graph
@@ -340,5 +333,5 @@ def _export_module(
         graph_module,
         *args,
         decomposition_table=_onnx_friendly_decomposition_table,
-        use_binary_format=use_binary_format
+        use_binary_format=use_binary_format,
     )
