@@ -447,10 +447,9 @@ def _pre_backward_hook(
 
         # If the handles have been prefetched, this `_unshard()` simply
         # switches to using the unsharded parameter
-        handles_to_unshard = _get_handles_executing_backward(_handles)
         _unshard(
             state,
-            handles_to_unshard,
+            _handles,
             state._streams["unshard"],
             state._streams["pre_unshard"],
         )
@@ -846,23 +845,12 @@ def _prefetch_handles(
     handles_to_prefetch, current_training_state = _get_handles_to_prefetch(
         state, current_handles_key
     )
-    is_backward_prefetching = current_training_state in (
-        HandleTrainingState.BACKWARD_PRE,
-        HandleTrainingState.BACKWARD_POST,
-    )
     for handles_key in handles_to_prefetch:
-        # For backward prefetching, only prefetch handles if they are executing
-        # in the current backward
-        handles_to_unshard = (
-            _get_handles_executing_backward(handles_key)
-            if is_backward_prefetching
-            else handles_key
-        )
         # Prefetch the next set of handles without synchronizing to allow
         # the sync to happen as late as possible to maximize overlap
         _unshard(
             state,
-            handles_to_unshard,
+            handles_key,
             state._streams["unshard"],
             state._streams["pre_unshard"],
         )

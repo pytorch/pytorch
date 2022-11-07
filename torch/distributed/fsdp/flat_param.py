@@ -1087,6 +1087,11 @@ class FlatParamHandle:
                 if self.uses_sharded_strategy
                 else torch.zeros_like(flat_param)
             )
+            p_assert(
+                flat_param.size() == flat_param._unpadded_unsharded_size,
+                "Expects `flat_param` to have unpadded unsharded size "
+                f"{flat_param._unpadded_unsharded_size} but got {flat_param.size()}",
+            )
             # Set the unpadded unsharded gradient to be a view into the padded one,
             # which owns the storage
             flat_param.grad = flat_param._padded_unsharded_grad[  # type: ignore[attr-defined]
