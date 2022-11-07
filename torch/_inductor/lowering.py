@@ -170,8 +170,10 @@ def _register_lowering(
         assert not any(
             x == "out" for x in kwargs.keys()
         ), "out= ops aren't yet supported"
-        # kwargs tensors not supported yet
-        assert not any(isinstance(x, TensorBox) for x in kwargs.values())
+        # kwargs tensors not supported yet unless it's a fallback op
+        assert not any(isinstance(x, TensorBox) for x in kwargs.values()) or all(
+            fn in fallbacks for fn in aten_fn
+        )
 
         if (type_promotion_kind or convert_input_to_bool) and indices:
             if convert_input_to_bool:
@@ -960,17 +962,13 @@ def register_onednn_fusion_ops():
 register_onednn_fusion_ops()
 
 
-def create_fallback(kernel, *args, **kwargs):
-    result, result_spec = ir.FallbackKernel.create(kernel, *args, **kwargs)
-    result = list(map(TensorBox.create, result))
-    return pytree.tree_unflatten(result, result_spec)
-
-
 def fallback_handler(kernel):
     fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
-        return create_fallback(kernel, *args, **kwargs)
+        return pytree.tree_map(
+            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
+        )
 
     return handler
 
@@ -994,7 +992,9 @@ def native_dropout(x, p, train):
         config.fallback_random
     ), "this should be handled in decomps unless config.fallback_random"
     if train:
-        return create_fallback(aten.native_dropout, x, p, train)
+        return pytree.tree_map(
+            TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
+        )
 
     return x, ones_like(x, dtype=torch.bool)
 
@@ -1140,7 +1140,6 @@ if has_torchvision_roi_align():
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
-make_fallback(aten.as_strided_scatter)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
@@ -1888,6 +1887,14 @@ def index_put_(self, indices, values, accumulate=False):
     if x_ndim == 0:
         self = view(self, [])
     return self
+
+
+@register_lowering(aten.as_strided_scatter, type_promotion_kind=None)
+def as_strided_scatter(self, src, size, stride, storage_offset=None):
+    output = clone(self)
+    output_view = as_strided(output, size, stride, storage_offset)
+    copy_(output_view, src)
+    return output
 
 
 @register_lowering(aten.scatter, type_promotion_kind=None)
