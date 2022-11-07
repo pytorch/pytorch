@@ -138,6 +138,22 @@ class IndentedBuffer:
             buf.write("\n")
         return buf.getvalue()
 
+    def getrawvalue(self):
+        buf = StringIO()
+        for line in self._lines:
+            if isinstance(line, DeferredLine):
+                line = line()
+                if line is None:
+                    continue
+            assert isinstance(line, str)
+            # backslash implies line continuation
+            if line.endswith("\\"):
+                buf.write(line[:-1])
+            else:
+                buf.write(line)
+                buf.write("\n")
+        return buf.getvalue()
+
     def clear(self):
         self._lines.clear()
 

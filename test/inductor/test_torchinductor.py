@@ -4090,6 +4090,7 @@ class CommonTemplate:
             "test_as_strided",  # buffer reuse
             "test_cat",  # alias
             "test_lowmem_dropout1",  # None as output
+            "test_reduction1",  # Reduction
             "test_relu",  # multiple inputs
             "test_transpose",  # multiple outputs, buffer clear
             "test_upsample_bilinear2d_b",  # single input, single output
