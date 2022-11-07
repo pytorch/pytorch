@@ -194,7 +194,7 @@ class SupportedVecIsa(enum.Enum):
         return SupportedVecIsa.isa_vec_size(supported_vector_isa(), dtype)
 
     @staticmethod
-    def isa_str(supported_isa: enum.Enum):
+    def str(supported_isa: enum.Enum):
         if supported_isa == SupportedVecIsa.AVX512:
             return "avx512"
         elif supported_isa == SupportedVecIsa.AVX2:
@@ -211,6 +211,15 @@ class SupportedVecIsa(enum.Enum):
         else:
             return ""
 
+    @staticmethod
+    def build_arch_flags(supported_isa: enum.Enum):
+        if supported_isa == SupportedVecIsa.AVX512:
+            return "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+        elif supported_isa == SupportedVecIsa.AVX2:
+            return "-mavx2 -mfma"
+        else:
+            return ""
+
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
 # might have too much redundant content that is useless for ISA check. Hence,
@@ -220,15 +229,70 @@ def get_cpu_proc_info():
     if sys.platform != "linux":
         return []
 
+    AVX512_CODE = """
+#include <immintrin.h>
+
+int main()
+{
+    __m512i a = _mm512_set_epi8(0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0);
+    __m512i b = a;
+    __mmask64 equality_mask = _mm512_cmp_epi8_mask(a, b, _MM_CMPINT_EQ);
+    return 0;
+}
+    """
+
+    AVX2_CODE = """
+#include <immintrin.h>
+
+int main()
+{
+    __m256i a = {0};
+    a = _mm256_abs_epi16(a);
+    __m256i x;
+    _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
+    return 0;
+}
+    """
+
+    def is_legal_isa(isa: SupportedVecIsa):
+        key, input_path = write(
+            AVX512_CODE if isa == SupportedVecIsa.AVX512 else AVX2_CODE, "cpp", extra=""
+        )
+        from filelock import FileLock
+
+        lock_dir = get_lock_dir()
+        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        with lock:
+            output_path = input_path[:-3] + "isa_chk"
+            if os.path.exists(output_path):
+                os.remove(output_path)
+
+            build_cmd = f"{cpp_compiler()} {input_path} {SupportedVecIsa.build_arch_flags(isa)} -o{output_path}".split(
+                " "
+            )
+            try:
+                subprocess.check_output(build_cmd, stderr=subprocess.STDOUT)
+                subprocess.check_call(output_path)
+            except Exception:
+                return False
+
+            return True
+
     isa_info = []
     with open("/proc/cpuinfo") as _cpu_info:
         _cpu_info_content = _cpu_info.read()
-        if SupportedVecIsa.isa_str(SupportedVecIsa.AVX512) in _cpu_info_content:
-            isa_info.append(SupportedVecIsa.AVX512)
-
-        if SupportedVecIsa.isa_str(SupportedVecIsa.AVX2) in _cpu_info_content:
-            isa_info.append(SupportedVecIsa.AVX2)
-
+        for cur_isa in [SupportedVecIsa.AVX512, SupportedVecIsa.AVX2]:
+            if SupportedVecIsa.str(cur_isa) in _cpu_info_content and is_legal_isa(
+                cur_isa
+            ):
+                isa_info.append(cur_isa)
         return isa_info
 
 
