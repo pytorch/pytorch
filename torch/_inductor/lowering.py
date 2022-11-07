@@ -3298,6 +3298,20 @@ def div_prim(a, b):
     else:
         return div(a, b)
 
+@register_lowering([aten.fmod, prims.fmod])
+def fmod(a, b):
+    is_integral = is_boolean_type(a) or is_integer_type(a)
+
+    if is_integral:
+        def fn(a, b):
+            return ops.mod(a, b)
+    else:
+        def fn(a, b):
+            return ops.fmod(a, b)
+
+    return make_pointwise(fn)(a, b)
+
+
 
 # TODO - enable builtin and disable decomp to lower to ptx instruction
 # Causes compilation to not complete on timm_vision_transformers inference
@@ -3391,7 +3405,6 @@ register_pointwise(
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
-register_pointwise(aten.fmod)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
 register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)
