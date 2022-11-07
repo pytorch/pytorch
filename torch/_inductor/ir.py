@@ -2391,11 +2391,12 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_stride1(cls, x):
-        if len(x.get_stride()) == 0:
-            return x
-        for stride in x.get_stride():
-            if stride == 1:
+        if is_storage_and_layout(x):
+            if len(x.get_stride()) == 0:
                 return x
+            for stride in x.get_stride():
+                if stride == 1:
+                    return x
         return cls.copy_input(x)
 
     @classmethod
