@@ -4263,7 +4263,7 @@ between ``0`` and ``self.size(dim) - 1`` inclusive.
 
 Additionally accepts an optional :attr:`reduce` argument that allows
 specification of an optional reduction operation, which is applied to all
-values in the tensor :attr:`src` into :attr:`self` at the indicies
+values in the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index`. For each value in :attr:`src`, the reduction
 operation is applied to an index in :attr:`self` which is specified by
 its index in :attr:`src` for ``dimension != dim`` and by the corresponding
