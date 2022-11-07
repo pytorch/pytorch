@@ -99,7 +99,7 @@ def profile_sizes(
     tensor_idx = batch.find_tensor_idx()
     latent_scale = batch[tensor_idx].size(0) / chunks
     for i, x in enumerate(batch):
-        if torch.is_tensor(x):
+        if not torch.is_tensor(x):
             continue
         batch[i] = x[:1].detach().to(device).requires_grad_(x.requires_grad)
 
