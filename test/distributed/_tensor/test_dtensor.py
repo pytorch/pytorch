@@ -40,7 +40,7 @@ class DTensorTest(DTensorTestBase):
             size=dist_tensor_shape,
             requires_grad=True,
         )
-        self.assertEqual(dist_tensor.size(), torch.Size((12, 3)))
+        self.assertEqual(dist_tensor.size(), torch.Size((self.world_size * 3, 3)))
 
         with self.assertWarnsRegex(UserWarning, "To construct"):
             DTensor(
@@ -76,7 +76,7 @@ class DTensorTest(DTensorTestBase):
             local_tensor, device_mesh, shard1_spec, size=global_shape
         )
         # will affect stride after DT initialized
-        self.assertEqual(dist_tensor.stride(), (16, 1))
+        self.assertEqual(dist_tensor.stride(), (4 * self.world_size, 1))
 
         # if initialized from a transposed mat
         local_tensor = torch.randn(8, 4, 8)
@@ -86,7 +86,8 @@ class DTensorTest(DTensorTestBase):
         dist_tensor = DTensor(
             local_tensor_t, device_mesh, shard1_spec, size=global_shape
         )
-        self.assertEqual(dist_tensor.stride(), (32, 1, 128))
+        global_stride = (8 * self.world_size, 1, 32 * self.world_size)
+        self.assertEqual(dist_tensor.stride(), global_stride)
 
     @with_comms
     def test_from_local(self):
@@ -96,7 +97,7 @@ class DTensorTest(DTensorTestBase):
         sharded_tensor = DTensor.from_local(
             local_tensor, device_mesh, shard_spec
         )
-        self.assertEqual(sharded_tensor.size(), torch.Size([12, 3]))
+        self.assertEqual(sharded_tensor.size(), torch.Size([self.world_size * 3, 3]))
 
         replica_spec = [Replicate()]
         ddp_tensor = DTensor.from_local(local_tensor, device_mesh, replica_spec)
@@ -216,40 +217,6 @@ class DTensorTest(DTensorTestBase):
         self.assertNotEqual(sharded_tensor.placements, shard_spec)
 
     @with_comms
-    def test_dtensor_spec_local_shard_offset(self):
-        device_mesh = DeviceMesh(
-            self.device_type, torch.arange(self.world_size).reshape(2, 2)
-        )
-        tensor_shape = (3 * self.world_size, 3 * self.world_size)
-        # sharding specs and its corresponding local shard offsets
-        shard_spec_and_offsets = [
-            (
-                [Shard(0), Replicate()],
-                (3 * (self.world_size // 2) * (self.rank // 2), 0),
-            ),
-            (
-                [Shard(1), Replicate()],
-                (0, 3 * (self.world_size // 2) * (self.rank // 2)),
-            ),
-            (
-                [Replicate(), Shard(0)],
-                (3 * (self.world_size // 2) * (self.rank % 2), 0),
-            ),
-            (
-                [Replicate(), Shard(1)],
-                (0, 3 * (self.world_size // 2) * (self.rank % 2)),
-            ),
-        ]
-
-        # loop through all sharding specs and check local shard offsets
-        logical_tensor = torch.randn(tensor_shape)
-        for shard_spec, expected_shard_offsets in shard_spec_and_offsets:
-            dtensor = distribute_tensor(logical_tensor, device_mesh, shard_spec)
-            self.assertEqual(
-                expected_shard_offsets, dtensor._spec.local_offsets
-            )
-
-    @with_comms
     def test_dtensor_properties(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]
@@ -348,6 +315,40 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(dist_tensor.size(), torch.Size([12, 3, 6]))
         self.assertEqual(dist_tensor.device.type, self.device_type)
         self.assertEqual(dist_tensor.to_local().device.type, self.device_type)
+
+    @with_comms
+    def test_dtensor_spec_local_shard_offset(self):
+        device_mesh = DeviceMesh(
+            self.device_type, torch.arange(self.world_size).reshape(2, 4)
+        )
+        tensor_shape = (3 * self.world_size, 3 * self.world_size)
+        # sharding specs and its corresponding local shard offsets
+        shard_spec_and_offsets = [
+            (
+                [Shard(0), Replicate()],
+                (3 * (self.world_size // 2) * (self.rank // 4), 0),
+            ),
+            (
+                [Shard(1), Replicate()],
+                (0, 3 * (self.world_size // 2) * (self.rank // 4)),
+            ),
+            (
+                [Replicate(), Shard(0)],
+                (3 * (self.world_size // 4) * (self.rank % 4), 0),
+            ),
+            (
+                [Replicate(), Shard(1)],
+                (0, 3 * (self.world_size // 4) * (self.rank % 4)),
+            ),
+        ]
+
+        # loop through all sharding specs and check local shard offsets
+        logical_tensor = torch.randn(tensor_shape)
+        for shard_spec, expected_shard_offsets in shard_spec_and_offsets:
+            dtensor = distribute_tensor(logical_tensor, device_mesh, shard_spec)
+            self.assertEqual(
+                expected_shard_offsets, dtensor._spec.local_offsets
+            )
 
 
 if __name__ == "__main__":
