@@ -58,31 +58,30 @@ Linear algebra (``torch.linalg``)
 ---------------------------------
 
 Non-finite values
-^^^^^^^^^^^^^^^^^
+"""""""""""""""""
 
 The external libraries (backends) that ``torch.linalg`` uses provide no guarantees on their behaviour
 when the inputs have non-finite values like ``inf`` or ``NaN``. As such, neither does PyTorch.
 The operations may return a tensor with non-finite values, or raise an exception, or even segfault.
 
-Consider using :func:`torch.isfinite` before calling these functions to detect this situation if your
-inputs may contain these values.
+Consider using :func:`torch.isfinite` before calling these functions to detect this situation.
 
 Extremal values in linalg
-^^^^^^^^^^^^^^^^^^^^^^^^^
+"""""""""""""""""""""""""
 
-What's considered `Extremal Values`_ in the context of ``torch.linalg`` is a bit more subtle than in the rest of PyTorch.
+Functions within ``torch.linalg`` have more `Extremal Values`_ than other PyTorch functions.
 
 :ref:`linalg solvers` and :ref:`linalg inverses` assume that the input matrix ``A`` is invertible. If it is close to
-being, non-invertible (for example, a matrix that a has a very small singular value), then these algorithms may silently return
+being non-invertible (for example, if it has a very small singular value), then these algorithms may silently return
 incorrect results. These matrices are said to be `ill-conditioned <https://nhigham.com/2020/03/19/what-is-a-condition-number/>`_.
-If provided with ill-conditioned inputs, the results of these functions may vary when using the same input on different devices
-or when using different backends via the keyword ``driver``.
+If provided with ill-conditioned inputs, the result of these functions they may vary when using the same inputs on different
+devices or when using different backends via the keyword ``driver``.
 
-Similarly, spectral operations like ``svd``, ``eig``, and ``eigh`` may silently return incorrect results (and their gradients may be infinite)
-when their inputs have eigenvalues that are close to each other. This is because the algorithms used to compute these decompositions
+Spectral operations like ``svd``, ``eig``, and ``eigh`` may also return incorrect results (and their gradients may be infinite)
+when their inputs have singular values that are close to each other. This is because the algorithms used to compute these decompositions
 struggle to converge for these inputs.
 
-Running the computation in ``float64`` (as NumPy does by default) often helps, but it does not solve these issue in all cases.
+Running the computation in ``float64`` (as NumPy does by default) often helps, but it does not solve these issues in all cases.
 Analyzing the spectrum of the inputs via :func:`torch.linalg.svdvals` or their condition number via :func:`torch.linalg.cond`
 may help to detect these issues.
 
