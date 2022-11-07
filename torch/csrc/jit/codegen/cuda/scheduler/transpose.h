@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/transpose_heuristic.h>
 
+#define SUPPORT_SPLITTING_INNERMOST_DIM 0
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -99,6 +101,13 @@ TORCH_CUDA_CU_API LaunchParams scheduleTranspose(
 //! Utility for canSchedule interface to check if this fusion has at least two
 //! groups, each with a fully broadcasted reference tensor.
 TORCH_CUDA_CU_API bool hasAtLeastTwoValidGroups(Fusion* fusion);
+
+// If can schedule at runtime, returns empty string, otherwise returns the
+// reason why we should not schedule at runtime.
+TORCH_CUDA_CU_API std::string getTransposeRuntimeRejectReason(
+    Fusion* fusion,
+    HeuristicSummary* data_cache,
+    SchedulerRuntimeInfo& runtime_info);
 
 } // namespace cuda
 } // namespace fuser
