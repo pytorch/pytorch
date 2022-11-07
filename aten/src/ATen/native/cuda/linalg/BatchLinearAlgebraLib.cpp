@@ -724,7 +724,7 @@ inline static void svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, 
   if (compute_uv && !full_matrices) {
     if (!U_.is_alias_of(U)) {
       U.copy_(U_.narrow(-1, 0, k));
-    } 
+    }
     if (!V_.is_alias_of(V)) {
       V.copy_(V_.narrow(-1, 0, k));
     }
