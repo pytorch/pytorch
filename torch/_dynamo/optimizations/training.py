@@ -14,7 +14,6 @@ from torch.nn import Module
 from torch.utils._pytree import tree_map
 
 from .. import config
-from ..debug_utils import wrap_compiler_debug
 from ..utils import clone_inputs, count_calls, counters
 from .analysis import has_mutation
 from .backends import BACKENDS
@@ -52,18 +51,23 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
     # 2) Mutation in the graph
     mutated = False
     try:
-        if functorch.compile.config.use_functionalize:
-            # There are two problematic classes we still exclude for now with
-            # functionalization:
-            #   - data mutation of inputs (fixed when we stop recording the
-            #   copy_ directly into the graph)
-            #   - metadata mutation of inputs (fixed if we do an extra partition
-            #   to avoid AotAutograd on the mutated inputs, or if we some how
-            #   get custom autograd function to reflect metadata changes to the
-            #   original tensor)
-            mutated = has_mutation(gm, example_inputs, inputs_only=True)
+        if not torch.is_inference_mode_enabled():
+            if functorch.compile.config.use_functionalize:
+                # There are two problematic classes we still exclude for now with
+                # functionalization:
+                #   - data mutation of inputs (fixed when we stop recording the
+                #   copy_ directly into the graph)
+                #   - metadata mutation of inputs (fixed if we do an extra partition
+                #   to avoid AotAutograd on the mutated inputs, or if we some how
+                #   get custom autograd function to reflect metadata changes to the
+                #   original tensor)
+                mutated = has_mutation(gm, example_inputs, inputs_only=True)
+            else:
+                mutated = has_mutation(gm, example_inputs)
         else:
-            mutated = has_mutation(gm, example_inputs)
+            log.info(
+                "inference_mode enabled. TorchDynamo could not check for mutation."
+            )
     except NotImplementedError as e:
         if "SparseTensorImpl" not in str(e):
             # TODO - TorchDynamo mutation analysis cannot handle sparse tensors.
@@ -200,7 +204,7 @@ def mem_efficient_fusion_kwargs(use_decomps):
 
 
 class AotMemEfficientFusion(AotAutogradStrategy):
-    """Use Min cut rematerilization and NVFuser with AOT Autograd"""
+    """Use Min cut rematerilization and TorchScript+nvFuser with AOT Autograd"""
 
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=True)
@@ -208,7 +212,7 @@ class AotMemEfficientFusion(AotAutogradStrategy):
 
 
 class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
-    """Use Min cut rematerilization and NVFuser with AOT Autograd"""
+    """Use Min cut rematerilization and TorchScript+nvFuser with AOT Autograd"""
 
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=False)
@@ -244,7 +248,7 @@ aot_inductor_debug = AotInductorDebug.compile_fn
 
 
 class AOTMemEfficientFusionWithContext:
-    """Pass nvfuser context to TorchDynamo"""
+    """Pass TorchScript+nvFuser context to TorchDynamo"""
 
     def __init__(self, use_decomps=True):
         self.backend_ctx_ctor = lambda: torch.jit.fuser("fuser2")
@@ -261,67 +265,9 @@ aot_mem_efficient_fusion = AOTMemEfficientFusionWithContext(True)
 aot_mem_efficient_fusion_no_decomp = AOTMemEfficientFusionWithContext(False)
 
 
-class AotPrimsNvfuser(AotAutogradStrategy):
-    """
-    Use FX graph partitioner + Aten2Prims ref + trace executor + nvFuser
-    """
-
-    def __init__(self, gm: torch.fx.GraphModule, example_inputs):
-        super(AotPrimsNvfuser, self).__init__(gm, example_inputs)
-
-        from functorch.compile import min_cut_rematerialization_partition
-
-        from torch.fx.passes.backends.nvfuser import NvFuserBackend
-
-        self.nvfuser = NvFuserBackend()
-        self.min_cut_rematerialization_partition = min_cut_rematerialization_partition
-        self.populate_aten2aten_decomps()
-
-    def populate_aten2aten_decomps(self):
-        from torch._decomp import get_decompositions
-
-        aten = torch.ops.aten
-        default_decompositions = {
-            aten.detach,
-            aten.gelu_backward,
-            aten.leaky_relu_backward,
-            aten.sigmoid_backward,
-            aten.threshold_backward,
-            aten.hardtanh_backward,
-            aten.hardsigmoid_backward,
-            aten.hardswish_backward,
-            aten.tanh_backward,
-            aten.silu_backward,
-            aten.elu_backward,
-            aten.cudnn_batch_norm,
-            aten.cudnn_batch_norm_backward,
-            aten.masked_fill.Scalar,
-            aten.masked_fill.Tensor,
-            aten.elu,
-            aten.leaky_relu,
-            aten.hardtanh,
-            aten.hardswish,
-            aten.hardsigmoid,
-            aten.rsub,
-            aten.native_batch_norm_backward,
-        }
-
-        self.aten2aten_decompositions = get_decompositions(default_decompositions)
-
-    def candidate(self):
-        return BACKENDS["aot_autograd"](
-            self.gm,
-            self.example_inputs,
-            fw_compiler=wrap_compiler_debug(self.nvfuser, "nvfuser"),
-            partition_fn=self.min_cut_rematerialization_partition,
-            decompositions=self.aten2aten_decompositions,
-        )
-
-
-aot_prims_nvfuser = AotPrimsNvfuser.compile_fn
-
-
 def prims_executor(gm, inputs, *, executor):
+    from functorch.compile import make_boxed_func
+
     # This function is called once per forward/backward pass of a graph in AOT
     # Autograd. We use it to set up the nvFuser-specific FX graph and return
     # execute function.
@@ -335,7 +281,7 @@ def prims_executor(gm, inputs, *, executor):
         prim_gm = make_fx(gm)(*inputs)
 
     # Then we return a callable that executes the "prim_gm" graph
-    return partial(execute, prim_gm, executor=executor)
+    return make_boxed_func(partial(execute, prim_gm, executor=executor))
 
 
 def create_nvprims_backend(*, executor):
@@ -489,7 +435,7 @@ def raw_aot_autograd_cudagraphs(model, inputs):
 
     def _wrapped_bw_compiler(*args, **kwargs):
         # stop TorchDynamo from trying to compile our generated backwards pass
-        return disable(bw_compiler(*args, **kwargs))  # type: ignore[operator]
+        return disable(disable(bw_compiler)(*args, **kwargs))  # type: ignore[operator]
 
     bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
     kwargs["bw_compiler"] = _wrapped_bw_compiler
@@ -525,27 +471,22 @@ def create_aot_backends():
     # by using the relevant fuser with torch.jit.fuser(...)
     BACKENDS["aot_ts"] = aot_ts
 
-    # prims_nvfuser uses the prims and AOT-Autograd to get FX-aten IR. And then
-    # directly lowers to NVFuser without relying no Torchscript.
-    BACKENDS["prims_nvfuser"] = aot_prims_nvfuser
-
     # "nvprims" is a subset of PrimTorch primitives that are guaranteed to be
     # supported by nvFuser. This is the preferred backend for nvFuser+PrimTorch.
     BACKENDS["nvprims_nvfuser"] = aot_nvprims_nvfuser
     # This is useful for debugging. Can be removed later.
     BACKENDS["nvprims_aten"] = aot_nvprims_aten
 
-    # aot_nvfuser uses the memory efficient fusion algorithm from AOT Autograd.
-    # It uses min cut rematerialization algorithm, and uses nvfuser as the
-    # compiler backend. This is the most optimized setting with nvfuser for
-    # training.
-    BACKENDS["aot_nvfuser"] = aot_mem_efficient_fusion
+    # aot_ts_nvfuser uses the memory efficient fusion algorithm from AOT Autograd.
+    # It uses min cut rematerialization algorithm, uses nvFuser as the
+    # compiler backend, and TorchScript as the frontend.
+    BACKENDS["aot_ts_nvfuser"] = aot_mem_efficient_fusion
 
-    # Similar to aot_nvfuser, but disables the decompositions. Decompositions
+    # Similar to aot_ts_nvfuser, but disables the decompositions. Decompositions
     # can cause accuracy deviations. This setting allows us to compare accuracy
     # without worrying about the impact of decomposisitons. More details at
     # https://github.com/pytorch/torchdynamo/issues/611
-    BACKENDS["aot_nvfuser_nodecomps"] = aot_mem_efficient_fusion_no_decomp
+    BACKENDS["aot_ts_nvfuser_nodecomps"] = aot_mem_efficient_fusion_no_decomp
 
     # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
     # for debugging and can serve as a perf baseline.
