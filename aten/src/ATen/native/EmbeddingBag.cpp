@@ -1,10 +1,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/native/EmbeddingBag.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorOperators.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/native/EmbeddingBag.h>
 
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/NonSymbolicBC.h>
@@ -16,10 +17,6 @@
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmConvert.h>
 #else
-#include <caffe2/perfkernels/embedding_lookup_idx.h>
-#endif
-
-#ifdef BUILD_CAFFE2
 #include <caffe2/perfkernels/embedding_lookup_idx.h>
 #endif
 
@@ -85,7 +82,6 @@ std::pair<Tensor, Tensor> promoteIndicesAndOffsets(
                                           : offsets.toType(commonType)};
 }
 
-#if defined(USE_FBGEMM) || defined(BUILD_CAFFE2)
 // Determines if we can use a fast implementation for index_select_add, which
 // is only applicable if special conditions are met
 template<typename index_t>
@@ -95,7 +91,7 @@ bool is_fast_path_index_select(const Tensor& src, Tensor& output, index_t paddin
   // check dtype supported
   auto dtype_supported =
       src.scalar_type() == kFloat || src.scalar_type() == kHalf;
-#if defined(BUILD_CAFFE2)
+#if !defined(USE_FBGEMM) // Caffe2 additionally support bf16
   dtype_supported = dtype_supported || src.scalar_type() == kBFloat16;
 #endif
   return fast_path && dtype_supported;
@@ -110,29 +106,11 @@ bool is_fast_path_index_select_scale(const Tensor& src, const Tensor& scale, Ten
   // check dtype supported
   auto dtype_supported =
       src.scalar_type() == kFloat || src.scalar_type() == kHalf;
-#if defined(BUILD_CAFFE2)
+#if !defined(USE_FBGEMM) // Caffe2 additionally support bf16
   dtype_supported = dtype_supported || src.scalar_type() == kBFloat16;
 #endif
   return fast_path && dtype_supported;
 }
-#else /* !USE_FBGEMM && !BUILD_CAFFE2 */
-template <typename index_t>
-bool is_fast_path_index_select(
-    const Tensor& src,
-    Tensor& output,
-    index_t padding_idx) {
-  return false;
-}
-
-template <typename index_t>
-bool is_fast_path_index_select_scale(
-    const Tensor& src,
-    const Tensor& scale,
-    Tensor& output,
-    index_t padding_idx) {
-  return false;
-}
-#endif /* USE_FBGEMM || BUILD_CAFFE2 */
 
 template<typename index_t>
 bool is_fast_path(const Tensor& src, const c10::optional<Tensor>& scale, Tensor& output, index_t padding_idx) {
@@ -242,7 +220,6 @@ index_select_add(
   auto* select_indices_data = select_indices.data_ptr<index_t>();
   auto* output_data = output.data_ptr<data_t>();
 
-#if defined(USE_FBGEMM) || defined(BUILD_CAFFE2)
   if (is_fast_path_index_select(src, output, padding_idx)) {
     auto src_contig = src.contiguous();
     auto* src_data = src_contig.data_ptr<data_t>();
@@ -301,14 +278,13 @@ index_select_add(
           });
       return;
     }
-#endif /* USE_FBGEMM */
 
-#if defined(BUILD_CAFFE2)
+#else
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 = at::zeros({output_size, ddim}, output.options().dtype(at::kFloat));
     auto* output_data_fp32 = output_fp32.data_ptr<float>();
-    using bVec = Vectorized<BFloat16>;
-    using fVec = Vectorized<float>;
+    using bVec = vec::Vectorized<BFloat16>;
+    using fVec = vec::Vectorized<float>;
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           caffe2::EmbeddingLookupIdx(
@@ -323,32 +299,35 @@ index_select_add(
               /*scale_bias=*/nullptr,
               /*normalize_by_lengths=*/false,
               /*out=*/output_data_fp32 + start_idx * ddim);
-          // Convert FP32 intermediate buffer result back to FP16/BF16 for
-          // output dtype
-          if (std::is_same<data_t, at::Half>::value) {
-            // FP16
-            for (const auto d : c10::irange(ddim)) {
-              (output_data + i * ddim)[d] =
-                  static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
-            }
-          } else {
-            // BF16
-            int64_t d = 0;
-            for (; d < ddim - (ddim % bVec::size()); d += bVec::size()) {
-              fVec temp_fp32_0 = fVec::loadu(output_data_fp32 + ddim * i + d);
-              fVec temp_fp32_1 = fVec::loadu(output_data_fp32 + ddim * i + d + fVec::size());
-              convert_float_bfloat16(temp_fp32_0, temp_fp32_1).store(output_data + i * ddim + d);
-            }
-            for (; d < ddim; d++) {
-              (output_data + i * ddim)[d] =
-                  static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
+          for (int64_t i = start_idx; i < end_idx; i++) {
+            // Convert FP32 intermediate buffer result back to FP16/BF16 for
+            // output dtype
+            if (std::is_same<data_t, at::Half>::value) {
+              // FP16
+              for (const auto d : c10::irange(ddim)) {
+                (output_data + i * ddim)[d] =
+                    static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
+              }
+            } else {
+              // BF16
+              int64_t d = 0;
+              for (; d < ddim - (ddim % bVec::size()); d += bVec::size()) {
+                fVec temp_fp32_0 = fVec::loadu(output_data_fp32 + ddim * i + d);
+                fVec temp_fp32_1 =
+                    fVec::loadu(output_data_fp32 + ddim * i + d + fVec::size());
+                convert_float_bfloat16(temp_fp32_0, temp_fp32_1)
+                    .store(output_data + i * ddim + d);
+              }
+              for (; d < ddim; d++) {
+                (output_data + i * ddim)[d] =
+                    static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
+              }
             }
           }
         });
     return;
 #endif /* BUILD_CAFFE2 */
   }
-#endif /* USE_FBGEMM || BUILD_CAFFE2 */
   TORCH_CHECK(select_indices.numel() == add_indices.numel());
   auto* src_data = src.data_ptr<data_t>();
   auto* add_indices_data = add_indices.data_ptr<index_t>();
@@ -617,7 +596,6 @@ index_select_scale_add(
   auto* select_indices_data = select_indices.data_ptr<index_t>();
   auto* output_data = output.data_ptr<data_t>();
 
-#if defined(USE_FBGEMM) || defined(BUILD_CAFFE2)
   if (is_fast_path_index_select_scale(src, scale, output, padding_idx)) {
     auto src_contig = src.contiguous();
     auto* src_data = src_contig.data_ptr<data_t>();
@@ -641,7 +619,7 @@ index_select_scale_add(
     Tensor scale_fp32 = at::empty(scale.sizes(), scale.options().dtype(at::kFloat));
     auto* scale_data_fp32 = scale_fp32.data_ptr<float>();
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM)
     if (std::is_same<data_t, at::Half>::value) {
       using float16 = uint16_t;
       fbgemm::Float16ToFloat_simd(
@@ -682,8 +660,7 @@ index_select_scale_add(
           });
       return;
     }
-#endif /* USE_FBGEMM */
-#ifdef BUILD_CAFFE2
+#else
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 =
         at::zeros({output_size, ddim}, output.options().dtype(at::kFloat));
@@ -691,8 +668,8 @@ index_select_scale_add(
     for (const auto i : c10::irange(scale.numel())) {
       scale_data_fp32[i] = static_cast<float>(scale_data[i]);
     }
-    using bVec = Vectorized<BFloat16>;
-    using fVec = Vectorized<float>;
+    using bVec = vec::Vectorized<BFloat16>;
+    using fVec = vec::Vectorized<float>;
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           caffe2::EmbeddingLookupIdx(
@@ -707,32 +684,35 @@ index_select_scale_add(
               /*scale_bias=*/nullptr,
               /*normalize_by_lengths=*/false,
               /*out=*/output_data_fp32 + start_idx * ddim);
-          // Convert FP32 intermediate buffer result back to FP16/BF16 for
-          // output dtype
-          if (std::is_same<data_t, at::Half>::value) {
-            // FP16
-            for (const auto d : c10::irange(ddim)) {
-              (output_data + i * ddim)[d] =
-                  static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
-            }
-          } else {
-            // BF16
-            int64_t d = 0;
-            for (; d < ddim - (ddim % bVec::size()); d += bVec::size()) {
-              fVec temp_fp32_0 = fVec::loadu(output_data_fp32 + ddim * i + d);
-              fVec temp_fp32_1 = fVec::loadu(output_data_fp32 + ddim * i + d + fVec::size());
-              convert_float_bfloat16(temp_fp32_0, temp_fp32_1).store(output_data + i * ddim + d);
-            }
-            for (; d < ddim; d++) {
-              (output_data + i * ddim)[d] =
-                  static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
+          for (int64_t i = start_idx; i < end_idx; i++) {
+            // Convert FP32 intermediate buffer result back to FP16/BF16 for
+            // output dtype
+            if (std::is_same<data_t, at::Half>::value) {
+              // FP16
+              for (const auto d : c10::irange(ddim)) {
+                (output_data + i * ddim)[d] =
+                    static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
+              }
+            } else {
+              // BF16
+              int64_t d = 0;
+              for (; d < ddim - (ddim % bVec::size()); d += bVec::size()) {
+                fVec temp_fp32_0 = fVec::loadu(output_data_fp32 + ddim * i + d);
+                fVec temp_fp32_1 =
+                    fVec::loadu(output_data_fp32 + ddim * i + d + fVec::size());
+                convert_float_bfloat16(temp_fp32_0, temp_fp32_1)
+                    .store(output_data + i * ddim + d);
+              }
+              for (; d < ddim; d++) {
+                (output_data + i * ddim)[d] =
+                    static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
+              }
             }
           }
         });
     return;
 #endif /* BUILD_CAFFE2 */
   }
-#endif /* USE_FBGEMM || BUILD_CAFFE2 */
   AT_ASSERT(select_indices.numel() == add_indices.numel());
   auto* src_data = src.data_ptr<data_t>();
   auto* add_indices_data = add_indices.data_ptr<index_t>();
