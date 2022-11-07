@@ -4,7 +4,6 @@ from typing import Any, Callable, Iterable, List, no_type_check, Optional, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
@@ -411,7 +410,11 @@ def _pre_backward_hook(
     _handles: List[FlatParamHandle],
     *unused: Any,
 ) -> Any:
-    """Prepares ``_handles`` 's ``FlatParameter`` s for gradient computation."""
+    """
+    This is the pre-backward hook to prepare a *module* for the backward pass.
+    This includes unsharding ``FlatParameter`` s since the original parameters
+    are needed for gradient computation and prefetching for the next *module*.
+    """
     _handles_key = tuple(_handles)  # avoid shadowing `handles_key`
     # Only run the pre-backward hook once per group of handles involved in the
     # same module forward computation
@@ -443,8 +446,12 @@ def _pre_backward_hook(
 
         # If the handles have been prefetched, this `_unshard()` simply
         # switches to using the unsharded parameter
+        handles_to_unshard = _get_handles_executing_backward(_handles)
         _unshard(
-            state, _handles, state._streams["unshard"], state._streams["pre_unshard"]
+            state,
+            handles_to_unshard,
+            state._streams["unshard"],
+            state._streams["pre_unshard"],
         )
         torch.cuda.current_stream().wait_stream(state._streams["unshard"])
 
@@ -452,9 +459,36 @@ def _pre_backward_hook(
         # actually unshard these handles
         state._needs_pre_backward_unshard[_handles_key] = False
         _prefetch_handles(state, _handles_key)
-        for handle in _handles:
-            handle.prepare_gradient_for_backward()
         state._ran_pre_backward_hook[_handles_key] = True
+
+
+@no_type_check
+def _flat_param_pre_backward_hook(
+    state: _FSDPState,
+    handle: FlatParamHandle,
+    *unused: Any,
+):
+    """
+    This is the pre-backward hook to prepare a *``FlatParameter``* and its
+    gradient for the backward pass, which includes pre-allocating the padded
+    unsharded gradient.
+    """
+    # Use a flag to ensure this hook only runs once per backward since
+    # empirically the hook may run multiple times per backward
+    if handle._ran_flat_param_pre_backward_hook:
+        return
+    _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
+    p_assert(
+        handle._training_state == HandleTrainingState.BACKWARD_PRE,
+        "Expects the module pre-backward hook to have run",
+    )
+    with torch.autograd.profiler.record_function(
+        "FullyShardedDataParallel._flat_param_pre_backward_hook"
+    ):
+        handles_executing_backward = _get_handles_executing_backward([handle])
+        if handles_executing_backward:
+            handle.prepare_gradient_for_backward()
+            handle._ran_flat_param_pre_backward_hook = True
 
 
 @no_type_check
@@ -476,8 +510,9 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
-    param = handle.flat_param
-    param._post_backward_called = True
+    flat_param = handle.flat_param
+    flat_param._post_backward_called = True
+    handle._ran_flat_param_pre_backward_hook = False
     with torch.autograd.profiler.record_function(
         "FullyShardedDataParallel._post_backward_hook"
     ):
@@ -488,9 +523,9 @@ def _post_backward_hook(
         )
         handle._training_state = HandleTrainingState.BACKWARD_POST
 
-        if param.grad is None:
+        if flat_param.grad is None:
             return
-        if param.grad.requires_grad:
+        if flat_param.grad.requires_grad:
             raise RuntimeError("FSDP does not support gradients of gradients")
 
         free_unsharded_flat_param = _should_free_in_backward(state, handle)
@@ -508,9 +543,15 @@ def _post_backward_hook(
         # Wait for all ops in the current stream (e.g. gradient
         # computation) to finish before reduce-scattering the gradient
         state._streams["post_backward"].wait_stream(torch.cuda.current_stream())
-
         with torch.cuda.stream(state._streams["post_backward"]):
-            unsharded_grad_data = param.grad.data
+            if handle._needs_padding:
+                p_assert(
+                    hasattr(flat_param, "_padded_unsharded_grad"),
+                    "Expects to have `_padded_unsharded_grad`",
+                )
+                unsharded_grad_data = flat_param._padded_unsharded_grad.data
+            else:
+                unsharded_grad_data = flat_param.grad.data
             if state._exec_order_data.is_first_iter:  # only check once
                 _check_comm_hook(
                     state._communication_hook, state._communication_hook_state
@@ -519,7 +560,9 @@ def _post_backward_hook(
                 state
             ):
                 # TODO: Use the low precision communication hook directly
-                param.grad.data = param.grad.to(state.mixed_precision.reduce_dtype)
+                flat_param.grad.data = flat_param.grad.to(
+                    state.mixed_precision.reduce_dtype
+                )
 
             if handle.uses_sharded_strategy:
                 # We clear `.grad` to permit multiple backwards. This avoids a
@@ -527,42 +570,52 @@ def _post_backward_hook(
                 # ahead of the first backward pass reduction, which is possible
                 # since the reduction is issued in a separate stream and is
                 # async and would result in reducing the wrong gradient.
-                unsharded_grad = param.grad.data
-                param.grad = None
-                p_assert(
-                    len(unsharded_grad.size()) == 1,
-                    f"Expects gradient to be flattened but got {unsharded_grad.size()}",
+                padded_unsharded_grad = (
+                    flat_param._padded_unsharded_grad
+                    if handle._needs_padding
+                    else flat_param.grad.data
                 )
-                chunks = list(unsharded_grad.chunk(state.world_size))
-                numel_to_pad = (
-                    state.world_size * chunks[0].numel() - unsharded_grad.numel()
+                flat_param.grad = None
+
+                new_sharded_grad = torch.empty(
+                    flat_param._sharded_size,
+                    dtype=padded_unsharded_grad.dtype,
+                    device=padded_unsharded_grad.device,
                 )
-                padded_unsharded_grad = F.pad(unsharded_grad, [0, numel_to_pad])
-                new_sharded_grad = torch.zeros_like(chunks[0])  # padded
                 state._communication_hook(
                     state._communication_hook_state,
                     padded_unsharded_grad,
                     new_sharded_grad,
                 )
-                _cast_grad_to_param_dtype(state, handle, new_sharded_grad, param)
+                if handle._needs_padding:
+                    # Allow the padded unsharded gradient to be garbage
+                    # collected after this hook returns
+                    delattr(flat_param, "_padded_unsharded_grad")
+                _cast_grad_to_param_dtype(state, handle, new_sharded_grad, flat_param)
 
                 # Save the sharded gradient in `_saved_grad_shard` to support
                 # gradient accumulation -- for multiple backwards, the gradient
                 # reductions may happen in arbitrary order
-                accumulate_grad = hasattr(param, "_saved_grad_shard")
+                accumulate_grad = hasattr(flat_param, "_saved_grad_shard")
                 if accumulate_grad:
-                    _check_grad_to_accumulate(new_sharded_grad, param._saved_grad_shard)
-                    param._saved_grad_shard += new_sharded_grad
+                    _check_grad_to_accumulate(
+                        new_sharded_grad, flat_param._saved_grad_shard
+                    )
+                    flat_param._saved_grad_shard += new_sharded_grad
                 else:
-                    param._saved_grad_shard = new_sharded_grad
-                sharded_grad = param._saved_grad_shard
+                    flat_param._saved_grad_shard = new_sharded_grad
+                sharded_grad = flat_param._saved_grad_shard
             else:
-                state._communication_hook(state._communication_hook_state, param.grad)
+                state._communication_hook(
+                    state._communication_hook_state, flat_param.grad
+                )
                 # For `NO_SHARD`, we can keep the low precision gradients by
                 # simply omitting the cast altogether
                 if not handle._keep_low_precision_grads:
-                    _cast_grad_to_param_dtype(state, handle, param.grad, param)
-                sharded_grad = param.grad.data
+                    _cast_grad_to_param_dtype(
+                        state, handle, flat_param.grad, flat_param
+                    )
+                sharded_grad = flat_param.grad.data
 
             if handle._config.offload_params:
                 # Offload the gradient to CPU to ensure parameters and
@@ -570,9 +623,9 @@ def _post_backward_hook(
                 # TODO: Investigate why `NO_SHARD` breaks correctness when
                 # using `non_blocking=True` here.
                 non_blocking = handle.uses_sharded_strategy
-                param._cpu_grad.copy_(  # type: ignore[attr-defined]
+                flat_param._cpu_grad.copy_(  # type: ignore[attr-defined]
                     sharded_grad.detach(), non_blocking=non_blocking
-                )  # synchronized in the post-backward callback
+                )  # synchronized in the final post-backward callback
                 # Since the sharded gradient is produced in the post-backward
                 # stream and consumed later in the computation stream, inform
                 # the caching allocator
@@ -728,11 +781,9 @@ def _catch_all_reshard(
         free_unsharded_flat_params: List[bool] = []
         handles_to_reshard: List[FlatParamHandle] = []
         for handle in state._handles:
-            # TODO: This already-resharded check is brittle:
-            # https://github.com/pytorch/pytorch/issues/83956
             already_resharded = (
-                handle.flat_param.data_ptr()
-                == handle.flat_param._local_shard.data_ptr()
+                not handle.uses_sharded_strategy
+                or handle.flat_param._full_param_padded.storage().size() == 0
             )
             if already_resharded:
                 continue
@@ -755,6 +806,9 @@ def _finalize_params(
     """Finalizes the parameters before the next iteration."""
     for handle in state._handles:
         flat_param = handle.flat_param
+        if hasattr(flat_param, "_padded_unsharded_grad"):
+            delattr(flat_param, "_padded_unsharded_grad")
+        handle._ran_flat_param_pre_backward_hook = False
         if flat_param.requires_grad:
             if hasattr(flat_param, "_post_backward_hook_state"):
                 p_assert(
@@ -788,12 +842,28 @@ def _prefetch_handles(
     """
     if not current_handles_key:
         return
-    handles_to_prefetch = _get_handles_to_prefetch(state, current_handles_key)
+    handles_to_prefetch, current_training_state = _get_handles_to_prefetch(
+        state, current_handles_key
+    )
+    is_backward_prefetching = current_training_state in (
+        HandleTrainingState.BACKWARD_PRE,
+        HandleTrainingState.BACKWARD_POST,
+    )
     for handles_key in handles_to_prefetch:
+        # For backward prefetching, only prefetch handles if they are executing
+        # in the current backward
+        handles_to_unshard = (
+            _get_handles_executing_backward(handles_key)
+            if is_backward_prefetching
+            else handles_key
+        )
         # Prefetch the next set of handles without synchronizing to allow
         # the sync to happen as late as possible to maximize overlap
         _unshard(
-            state, handles_key, state._streams["unshard"], state._streams["pre_unshard"]
+            state,
+            handles_to_unshard,
+            state._streams["unshard"],
+            state._streams["pre_unshard"],
         )
         state._handles_prefetched[handles_key] = True
 
@@ -802,10 +872,11 @@ def _prefetch_handles(
 def _get_handles_to_prefetch(
     state: _FSDPState,
     current_handles_key: _HandlesKey,
-) -> List[_HandlesKey]:
+) -> Tuple[List[_HandlesKey], HandleTrainingState]:
     """
     Returns a :class:`list` of the handles keys to prefetch for the next
-    module(s), where ``current_handles_key`` represents the current module.
+    module(s), where ``current_handles_key`` represents the current module, and
+    the current handle training state.
 
     "Prefetching" refers to running the unshard logic early (without
     synchronization), and the "next" modules depend on the recorded execution
@@ -848,7 +919,7 @@ def _get_handles_to_prefetch(
             if state._needs_pre_forward_unshard.get(target_handles_key, False)
             and not state._handles_prefetched.get(target_handles_key, False)
         ]
-    return target_handles_keys
+    return target_handles_keys, training_state
 
 
 def _get_training_state(
@@ -974,6 +1045,12 @@ def _register_pre_backward_hooks(
         state._needs_pre_backward_unshard[handles_key] = False
         state._ran_pre_backward_hook[handles_key] = False
 
+        for handle in handles_key:
+            flat_param_hook = functools.partial(
+                _flat_param_pre_backward_hook, state, handle
+            )
+            handle.flat_param.register_hook(flat_param_hook)
+
     def _register_hook(t: torch.Tensor) -> torch.Tensor:
         if t.requires_grad:
             t.register_hook(functools.partial(_pre_backward_hook, state, handles))
@@ -1070,6 +1147,26 @@ def _clear_grads_if_needed(
     for handle in handles:
         if handle._use_orig_params:
             handle._clear_grads_if_needed()
+
+
+@no_type_check
+def _get_handles_executing_backward(
+    handles: Iterable[FlatParamHandle],
+) -> List[FlatParamHandle]:
+    """
+    Returns the handles in ``handles`` that are executing in the current
+    backward.
+    """
+    handles_executing_backward = []
+    for handle in handles:
+        p_assert(
+            hasattr(handle.flat_param, "_post_backward_hook_state"),
+            f"Expects {handle} to have registered a post-backward hook",
+        )
+        acc_grad = handle.flat_param._post_backward_hook_state[0]
+        if torch._C._will_engine_execute_node(acc_grad):
+            handles_executing_backward.append(handle)
+    return handles_executing_backward
 
 
 @no_type_check

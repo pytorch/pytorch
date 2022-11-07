@@ -339,6 +339,7 @@ class FlatParamHandle:
         self._use_orig_params = use_orig_params
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
+        self._ran_flat_param_pre_backward_hook = False
         self._init_flat_param(params, module, use_orig_params)
         self._use_unsharded_views(as_params=False)
 
@@ -1071,6 +1072,26 @@ class FlatParamHandle:
                     f"but got size {flat_param.grad.size()}",
                 )
             flat_param.grad = None
+        # If the unsharded gradient needs padding, then pre-allocate the padded
+        # unsharded gradient to avoid an allocation and D2D copy in the
+        # post-backward hook. If it does not need padding, then let the
+        # autograd engine construct the gradient normally to avoid an
+        # unnecessary allocation.
+        if self._needs_padding:
+            p_assert(
+                not hasattr(flat_param, "_padded_unsharded_grad"),
+                f"{self} already has `_padded_unsharded_grad` on rank {self.rank}",
+            )
+            flat_param._padded_unsharded_grad = (  # type: ignore[attr-defined]
+                torch.zeros_like(flat_param._full_param_padded)  # type: ignore[attr-defined]
+                if self.uses_sharded_strategy
+                else torch.zeros_like(flat_param)
+            )
+            # Set the unpadded unsharded gradient to be a view into the padded one,
+            # which owns the storage
+            flat_param.grad = flat_param._padded_unsharded_grad[  # type: ignore[attr-defined]
+                : flat_param._unpadded_unsharded_size.numel()  # type: ignore[attr-defined]
+            ]
 
     def prepare_gradient_for_optim(self):
         """
@@ -1892,6 +1913,13 @@ class FlatParamHandle:
         return (
             self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
             and self._uses_param_mixed_precision
+        )
+
+    @property
+    def _needs_padding(self) -> bool:
+        return (
+            self.uses_sharded_strategy
+            and self.flat_param._padded_unsharded_size != self.flat_param._unpadded_unsharded_size  # type: ignore[attr-defined]
         )
 
 
