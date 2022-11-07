@@ -830,10 +830,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return r
 
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
-        if (
-            has_symbolic_sizes
-            and func not in self.functions_with_cpp_meta_impl_that_support_symint
-        ):
+        if has_symbolic_sizes and not self.cpp_meta_supports_symint(func):
             from torch._decomp import meta_table as meta_table
 
             if func == aten.size.default:
@@ -873,7 +870,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
-            if func not in self.functions_with_cpp_meta_impl_that_support_symint:
+            if not self.cpp_meta_supports_symint(func):
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"
                 )
@@ -964,9 +961,10 @@ class FakeTensorMode(TorchDispatchMode):
 
         return wrap
 
-    @property
-    def functions_with_cpp_meta_impl_that_support_symint(self):
-        return [
+    def cpp_meta_supports_symint(self, func):
+        if torch.Tag.view_copy in func.tags:  # type: ignore[attr-defined]
+            return True
+        return func in [
             aten.empty_strided.default,
             aten.as_strided_scatter.default,
             aten.as_strided.default,
