@@ -29,7 +29,9 @@ import sympy
 
 import torch
 from torch import fx
+from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._pytree import tree_map
 
 from . import config, logging as torchdynamo_logging
 
@@ -985,3 +987,102 @@ def _get_debug_dir(root_dir):
 def get_debug_dir():
     debug_root = config.debug_dir_root
     return _get_debug_dir(debug_root)
+
+
+def get_fake_value(node, tx):
+    """
+    Run the computation represented by `node` using fake tensors and return the result.
+    """
+    from .exc import TorchRuntimeError, unimplemented, Unsupported
+
+    op = node.op
+    fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+
+    def visit(n: torch.fx.Node):
+        return n.meta["example_value"]
+
+    args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
+    args = tree_map(fake_wrapper, args)
+    kwargs = tree_map(fake_wrapper, kwargs)
+
+    nnmodule = None
+    if op == "call_module":
+        nnmodule = tx.output.nn_modules[node.target]
+
+        if not is_lazy_module(nnmodule):
+            nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+
+    if op == "call_module" and is_lazy_module(nnmodule):
+        assert nnmodule is not None
+        # In the case of a lazy module, we want to run
+        # the pre-hooks which initialize it
+        nnmodule(*args, **kwargs)
+    try:
+        with tx.fake_mode, enable_python_dispatcher():
+            return wrap_fake_exception(
+                lambda: run_node(tx.output, node, args, kwargs, nnmodule)
+            )
+    except Unsupported:
+        raise
+    except RuntimeError as e:
+        if isinstance(e, DataDependentOutputException):
+            if config.capture_scalar_outputs and node.target == "item":
+                return torch.zeros(size=(), dtype=args[0].dtype).item()
+            else:
+                unimplemented(f"data dependent operator: {e.func}")
+        elif isinstance(e, DynamicOutputShapeException):
+            unimplemented(f"dynamic shape operator: {e.func}")
+        raise TorchRuntimeError() from e
+
+
+def run_node(output_graph, node, args, kwargs, nnmodule):
+    op = node.op
+    try:
+        if op == "call_function":
+            return node.target(*args, **kwargs)
+        elif op == "call_method":
+            return getattr(args[0], node.target)(*args[1:], **kwargs)
+        elif op == "call_module":
+            assert nnmodule is not None
+            return nnmodule(*args, **kwargs)
+        elif op == "get_attr":
+            return output_graph.get_submodule(node.target)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
+        ) from e
+    raise AssertionError(op)
+
+
+def get_real_value(node, output_graph):
+    """
+    Run the actual computation represented by `node` and return the result.
+    This will execute any dependent nodes in the graph as well.
+    """
+    cache = output_graph.real_value_cache
+    if node in cache:
+        return cache[node]
+
+    op = node.op
+    args, kwargs = torch.fx.node.map_arg(
+        (node.args, node.kwargs),
+        lambda n: get_real_value(n, output_graph),
+    )
+
+    if op == "call_module":
+        nn_module = output_graph.nn_modules[node.target]
+        if not is_lazy_module(nn_module):
+            nn_module = copy.deepcopy(nn_module)
+        else:
+            # In the case of a lazy module, we want to run
+            # the pre-hooks which initialize it
+            nn_module(*args, **kwargs)
+    else:
+        nn_module = None
+
+    try:
+        real_value = run_node(output_graph, node, args, kwargs, nn_module)
+        cache[node] = real_value
+    except RuntimeError as e:
+        raise TorchRuntimeError() from e
+    return real_value

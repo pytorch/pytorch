@@ -24,7 +24,7 @@ from ..utils import (
     specialize_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import VariableTracker
+from .base import VariableTracker, wrap_fx_proxy
 from .lists import ListVariable, TupleVariable
 from .misc import AutocastModeVariable, ProfilerContextWrapperVariable
 from .nn_module import NNModuleVariable
@@ -172,7 +172,7 @@ class TorchVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        # print("CALLING ON TORCH", self.value)
+        print("CALLING ON TORCH", self.value)
         from . import (
             ConstantVariable,
             DynamicShapeVariable,
@@ -308,7 +308,7 @@ class TorchVariable(VariableTracker):
             def get_state_from_generator():
                 return self.value()
 
-            return TensorVariable.create(
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -344,7 +344,7 @@ class TorchVariable(VariableTracker):
                 example_value = args[0].proxy.node.meta["example_value"]
 
             self.value.__module__ = self.__module__
-            return TensorVariable.create(
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -363,7 +363,7 @@ class TorchVariable(VariableTracker):
         ):
             # TODO(voz): This is rewritten as a call_method because
             # torch.numel(x) w/ sym shapes raises a RuntimeError and x.numel() does not
-            return TensorVariable.create(
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method",
@@ -373,16 +373,15 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
-        if (
-            all([isinstance(x, DynamicShapeVariable) for x in args])
-        ):
+        if all([isinstance(x, DynamicShapeVariable) for x in args]):
             if self.value == math.sqrt:
                 from torch.fx.experimental.symbolic_shapes import sym_sqrt
+
                 fn_ = sym_sqrt
             else:
                 fn_ = self.value
 
-            out = TensorVariable.create(
+            out = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -405,7 +404,7 @@ class TorchVariable(VariableTracker):
                 for x in args[0].items:
                     if isinstance(x.value, numpy.generic):
                         x.value = x.value.item()
-            tensor_variable = TensorVariable.create(
+            tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -475,7 +474,7 @@ class TorchVariable(VariableTracker):
         dim = args[0] if args else kwargs.get("dim", variables.ConstantVariable(None))
 
         def fake_softmax(input):
-            return variables.TensorVariable.create(
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -527,7 +526,7 @@ class TorchVariable(VariableTracker):
         ) = normalize_args(*args, **kwargs)
 
         def fake_cross_entropy_loss(input, target):
-            return variables.TensorVariable.create(
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -713,7 +712,7 @@ class TorchPyOperator(VariableTracker):
             p_args[2] = false_node
 
         # Store the invocation as a call
-        return variables.TensorVariable.create(
+        return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",

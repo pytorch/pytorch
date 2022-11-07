@@ -116,7 +116,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return o
 
         torch._dynamo.testing.standard_test(
-            self, unpack4, 2, expected_ops=5, expected_ops_dynamic=8
+            self, unpack4, 2, expected_ops=5, expected_ops_dynamic=7
         )
 
     def test_unpack5(self):
@@ -129,7 +129,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return o
 
         torch._dynamo.testing.standard_test(
-            self, unpack5, 2, expected_ops=5, expected_ops_dynamic=8
+            self, unpack5, 2, expected_ops=5, expected_ops_dynamic=7
         )
 
     def test_matmul1(self):
@@ -1146,6 +1146,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.run()(fn2)(torch.randn(4))
         self.assertEqual(cnts2.frame_count, 0)
 
+    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_nested_disable_decorator(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1582,6 +1583,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 1)
 
     @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
+    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_unsupported_fake_tensor(self):
         def f(x):
             return torch.quantize_per_tensor(x, 0.1, 10, torch.quint8)
@@ -1971,7 +1973,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return a + b / (a - b)
 
         self.assertRaises(
-            torch._dynamo.exc.BackendCompilerFailed,
+            torch._dynamo.exc.InternalTorchDynamoError,
             lambda: fn(torch.randn(10), torch.randn(10)),
         )
 

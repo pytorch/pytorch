@@ -21,7 +21,7 @@ from ..utils import (
     istype,
     proxy_args_kwargs,
 )
-from .base import MutableLocal, typestr, VariableTracker
+from .base import MutableLocal, typestr, VariableTracker, wrap_fx_proxy
 from .functions import invoke_and_store_as_constant
 from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
@@ -198,7 +198,7 @@ class NNModuleVariable(VariableTracker):
                 if is_lazy:
                     self.module_type = mod.cls_to_become
 
-                return variables.TensorVariable.create(
+                return wrap_fx_proxy(
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_module",
@@ -452,7 +452,7 @@ class NNModuleVariable(VariableTracker):
 
             proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
 
-            return variables.TensorVariable.create(
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method",

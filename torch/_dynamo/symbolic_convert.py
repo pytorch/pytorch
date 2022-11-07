@@ -54,7 +54,7 @@ from .utils import (
     graph_break_dup_warning_checker,
     istype,
 )
-from .variables.base import MutableLocal, typestr, VariableTracker
+from .variables.base import MutableLocal, typestr, VariableTracker, wrap_fx_proxy
 from .variables.builder import VariableBuilder
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
@@ -743,7 +743,7 @@ class InstructionTranslatorBase(object):
             isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
         ) and op in supported_tensors:
             self.push(
-                TensorVariable.create(
+                wrap_fx_proxy(
                     self,
                     supported_tensors[op](left.as_proxy(), right.as_proxy()),
                     **options,
@@ -1050,12 +1050,12 @@ class InstructionTranslatorBase(object):
         elif isinstance(seq, TensorVariable):
             proxy = seq.as_proxy()
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable.create(self, proxy[i], **options))
+                self.push(wrap_fx_proxy(self, proxy[i], **options))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable.create(self, proxy[i], **options))
+                self.push(wrap_fx_proxy(self, proxy[i], **options))
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
 

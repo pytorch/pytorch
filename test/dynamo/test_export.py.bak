@@ -75,7 +75,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
     def test_export_shape_control_flow_1(self):
         def func(x):
             if x.shape[0] > 10:
-                return x.cos()
+                return x.cos() 
             return x.sin()
 
         opt_func = torch._dynamo.optimize("eager")(func)
@@ -91,10 +91,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
         hit = False
         for guard in out_guards:
-            if guard.name == "symbolic_shape_expression":
+            if guard.name == 'symbolic_shape_expression':
                 hit = True
-                self.assertTrue("x.size()[0] <= 10" in guard.code_list)
-
+                self.assertExpectedInline(guard.code_list, 
+                """(x.size()[0] <= 10 and x.size()[1] == x.stride()[0])"""
+                )
+        
         self.assertTrue(hit)
 
     def test_export_graph_bypass(self):
