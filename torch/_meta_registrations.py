@@ -103,17 +103,21 @@ def meta_copy_(self, src, non_blocking=False):
     return self
 
 
+def inferUnsqueezeGeometry(tensor, dim):
+    result_sizes = list(tensor.size())
+    result_strides = list(tensor.stride())
+    new_stride = 1 if dim >= tensor.dim() else result_sizes[dim] * result_strides[dim]
+    result_sizes.insert(dim, 1)
+    result_strides.insert(dim, new_stride)
+    return result_sizes, result_strides
+
+
 @register_meta(aten.unsqueeze_.default)
 def meta_unsqueeze_(self, dim):
-    wrapped_dim = maybe_wrap_dim(dim, self.dim())
-    # new strides
-    new_stride = 1 if dim >= self.dim() else self.size(dim) * self.stride(dim)
-    strides = list(self.stride())
-    strides.insert(dim, new_stride)
-    # new size
-    size = list(self.size())
-    size.insert(dim, 1)
-    return torch.ops.aten.as_strided_(self, size, strides)
+    dim = maybe_wrap_dim(dim, self.dim() + 1)
+    g_sizes, g_strides = inferUnsqueezeGeometry(self, dim)
+    self.as_strided_(g_sizes, g_strides)
+    return self
 
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
@@ -866,22 +870,6 @@ def meta_index_Tensor(self, indices):
         else:
             replacement_shape = list(index.shape)
     return self.new_empty(before_shape + replacement_shape + after_shape)
-
-
-# TODO: this shouldn't be necessary
-# @register_meta([aten.add.Tensor])
-# def meta_add(self, other, *, alpha=1):
-#     check(
-#         torch.is_tensor(self),
-#         lambda: f"expected self to be tensor but got {type(self)}",
-#     )
-#     out_shape = self.shape
-#     if torch.is_tensor(other):
-#         out_shape = _broadcast_shapes(self.shape, other.shape)
-#     _, out_dtype = elementwise_dtypes(
-#         self, other, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-#     )
-#     return self.new_empty(out_shape, dtype=out_dtype)
 
 
 @register_meta([aten.convolution_backward.default])
