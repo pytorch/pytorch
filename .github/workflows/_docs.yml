@@ -57,8 +57,8 @@ jobs:
             timeout-minutes: 30
           - docs_type: functorch
             runner: linux.2xlarge
-            # It takes less than 30m to finish functorch docs unless there are issues
-            timeout-minutes: 30
+            # It takes less than 15m to finish functorch docs unless there are issues
+            timeout-minutes: 15
     # Set a fixed name for this job instead of using the current matrix-generated name, i.e. build-docs (cpp, linux.12xlarge, 180)
     # The current name requires updating the Rockset last docs push query from test-infra every time the matrix is updated
     name: build-docs-${{ matrix.docs_type }}-${{ inputs.push }}
@@ -99,7 +99,9 @@ jobs:
         timeout-minutes: ${{ matrix.timeout-minutes }}
         id: build-docs
         env:
-          WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
+          # After https://github.com/pytorch/pytorch/pull/88373, pull workflow can now be run periodically,
+          # so this can be wrongly set to true
+          WITH_PUSH: ${{ inputs.push }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           DOCS_TYPE: ${{ matrix.docs_type }}
           RUN_DOXYGEN: ${{ inputs.run-doxygen }}
