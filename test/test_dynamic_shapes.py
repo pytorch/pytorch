@@ -407,7 +407,9 @@ def print_seen():
     for key, reason in seen_failed:
         # Make sure the generated line is lint clean
         msg = f"    {key},  # {reason}"
-        msg = msg[:msg.find("\n")]
+        eol = msg.find("\n")
+        if eol != -1:
+            msg = msg[:eol]
         out.append(msg[:120])
 
     print("expected_failure_sym_magic_methods = {")
@@ -418,15 +420,15 @@ if COLLECT_EXPECT:
     atexit.register(print_seen)
 
 expected_failure_sym_magic_methods = {
-    ('floordiv', 'SymFloat', 'float'),  # Cannot convert complex to floa
-    ('floordiv', 'float', 'SymFloat'),  # Cannot convert complex to floa
-    ('floordiv', 'SymFloat', 'SymFloat'),  # Cannot convert complex to floa
+    ('floordiv', 'SymFloat', 'float'),  # Cannot convert complex to float
+    ('floordiv', 'float', 'SymFloat'),  # Cannot convert complex to float
+    ('floordiv', 'SymFloat', 'SymFloat'),  # Cannot convert complex to float
     ('floordiv', 'SymFloat', 'int'),  # Scalars are not close!
     ('floordiv', 'float', 'SymInt'),  # Scalars are not close!
     ('floordiv', 'SymFloat', 'SymInt'),  # Scalars are not close!
-    ('floordiv', 'SymInt', 'float'),  # Cannot convert complex to floa
-    ('floordiv', 'int', 'SymFloat'),  # Cannot convert complex to floa
-    ('floordiv', 'SymInt', 'SymFloat'),  # Cannot convert complex to floa
+    ('floordiv', 'SymInt', 'float'),  # Cannot convert complex to float
+    ('floordiv', 'int', 'SymFloat'),  # Cannot convert complex to float
+    ('floordiv', 'SymInt', 'SymFloat'),  # Cannot convert complex to float
 }
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")

@@ -270,6 +270,7 @@ unary_magic_methods = {
     'neg',
 }
 
+# TODO: sym_int should also work on floats
 magic_methods_not_on_float = {"sym_int"}
 
 magic_methods_on_builtins = {"min", "max"}
