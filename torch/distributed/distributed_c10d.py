@@ -1396,6 +1396,7 @@ def exception_handler(func):
                     "func_name": f"{func.__name__}",
                     "args": f"{args}, {kwargs}",
                     "backend": f"{get_backend()}",
+                    "device": f"{_get_pg_device(kwargs.get('group'))}",
                     "world_size": f"{get_world_size()}",
                     "global_rank": f"{get_rank()}",
                     "local_rank": f"{get_rank(kwargs.get('group'))}",
