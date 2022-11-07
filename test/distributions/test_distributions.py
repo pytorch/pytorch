@@ -1421,7 +1421,7 @@ class TestDistributions(DistributionsTestCase):
         # theoretical results.
         dist = Poisson(rate_zero)
         dist.log_prob(torch.ones_like(rate_zero)).backward()
-        torch.testing.assert_allclose(rate_zero.grad, torch.inf)
+        self.assertEqual(rate_zero.grad, torch.inf)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_sample(self):
