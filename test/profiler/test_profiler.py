@@ -6,6 +6,7 @@ import json
 import os
 import re
 import tempfile
+import textwrap
 import unittest
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -1370,6 +1371,237 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(c_id, c_id_new)
         self.assertEqual(d_id, c_id_new)
 
+    @staticmethod
+    def _format_allocations(profiled_code):
+        gc.collect()
+        with profile(profile_memory=True, record_shapes=True) as prof:
+            profiled_code()
+            gc.collect()
+
+        root_events = prof.profiler.kineto_results.experimental_event_tree()
+        events = sorted(_utils.traverse_dfs(root_events), key=lambda x: x.start_time_ns)
+        allocations = tuple(
+            event.extra_fields
+            for event in events
+            if isinstance(event.extra_fields, torch._C._profiler._ExtraFields_Allocation)
+        )
+
+        return textwrap.indent("\n".join(
+            f"{repr(i.id):>5}{' ' * 6}"
+            f"{repr(i.allocation_id):>5}{' ' * 6}"
+            f"{'Allocation' if i.alloc_size > 0 else 'Free'}"
+            for i in allocations
+        ), " " * 12)
+
+    def test_tensorimpl_invalidation_set(self) -> None:
+        def profiled_code(add_empty_set: bool):
+            x = torch.ones((1,))
+
+            # Determines if new storage is created before or after the old one
+            # is destroyed.
+            if add_empty_set:
+                x.set_()
+
+            x.set_(torch.ones((1,)).storage())
+            x.view_as(x)
+
+        self.assertExpectedInline(
+            self._format_allocations(lambda: profiled_code(add_empty_set=False)),
+            """\
+                0          1      Allocation
+                0          2      Allocation
+                0          1      Free
+                0          2      Free"""
+        )
+
+        self.assertExpectedInline(
+            self._format_allocations(lambda: profiled_code(add_empty_set=True)),
+            """\
+                0          1      Allocation
+                0          1      Free
+                0          2      Allocation
+                0          2      Free"""
+        )
+
+    def test_tensorimpl_invalidation_keep_alive(self) -> None:
+        def profiled_code(add_empty_set: bool):
+            x = torch.ones((1,))
+            x_storages = [x.storage()]
+            for _ in range(3):
+                x.set_()
+                x.set_(torch.ones((1,)).storage())
+
+                # This keeps the StorageImpls alive and preserves the chain.
+                # (Despite the `set_()` call.)
+                x_storages.append(x.storage())
+            x.view_as(x)
+
+            # Free storage in a deterministic fashion.
+            while x_storages:
+                x_storages.pop()
+                gc.collect()
+
+            # Determines if new storage is created before or after the old one
+            # is destroyed.
+            if add_empty_set:
+                x.set_()
+
+            for _ in range(3):
+                x.set_(torch.ones((1,)).storage())
+            x.view_as(x)
+
+            del x
+            gc.collect()
+
+        self.assertExpectedInline(
+            self._format_allocations(lambda: profiled_code(add_empty_set=False)),
+            """\
+                0          1      Allocation
+                0          2      Allocation
+                0          4      Allocation
+                0          5      Allocation
+                0          4      Free
+                0          2      Free
+                0          1      Free
+                0          6      Allocation
+                0          5      Free
+                0          7      Allocation
+                0          6      Free
+                0          8      Allocation
+                0          7      Free
+                0          8      Free"""
+        )
+
+        self.assertExpectedInline(
+            self._format_allocations(lambda: profiled_code(add_empty_set=True)),
+            """\
+                0          1      Allocation
+                0          2      Allocation
+                0          4      Allocation
+                0          5      Allocation
+                0          4      Free
+                0          2      Free
+                0          1      Free
+                0          5      Free
+                0          6      Allocation
+                0          7      Allocation
+                0          6      Free
+                0          8      Allocation
+                0          7      Free
+                0          8      Free"""
+        )
+
+    def test_tensorimpl_invalidation_full(self) -> None:
+        def profiled_code():
+            x = torch.ones((1,))
+            x_storages = [x.storage()]
+            for _ in range(3):
+                x.set_()
+                x.set_(torch.ones((1,)).storage())
+                x_storages.append(x.storage())
+            x.view_as(x)
+
+            # Free storage in a deterministic fashion.
+            while x_storages:
+                x_storages.pop()
+                gc.collect()
+
+            for _ in range(3):
+                x.set_(torch.ones((1,)).storage())
+
+            for _ in range(3):
+                x.set_()
+                x.set_(torch.ones((1,)).storage())
+
+            for i in range(4):
+                x.resize_((1 + i,))
+            x.view_as(x)
+
+        self.assertExpectedInline(
+            self._format_allocations(profiled_code),
+            """\
+                0          1      Allocation
+                0          2      Allocation
+                0          4      Allocation
+                0          5      Allocation
+                0          4      Free
+                0          2      Free
+                0          1      Free
+                0          6      Allocation
+                0          5      Free
+                0          7      Allocation
+                0          6      Free
+                0          8      Allocation
+                0          7      Free
+                0          8      Free
+                0          9      Allocation
+                0          9      Free
+                0         10      Allocation
+                0         10      Free
+                0         11      Allocation
+                0         12      Allocation
+                0         11      Free
+                0         13      Allocation
+                0         12      Free
+                0         14      Allocation
+                0         13      Free
+                0         14      Free"""
+        )
+
+    def test_tensorimpl_invalidation_scalar_args(self) -> None:
+        def profiled_code():
+            with torch.no_grad():
+                x = torch.ones((1,))
+                for _ in range(10):
+                    x.add_(2)
+
+        self.assertExpectedInline(
+            self._format_allocations(profiled_code),
+            """\
+                0          1      Allocation
+                1          2      Allocation
+                2          3      Allocation
+                2          3      Free
+                1          2      Free
+                3          4      Allocation
+                4          5      Allocation
+                4          5      Free
+                3          4      Free
+                5          6      Allocation
+                6          7      Allocation
+                6          7      Free
+                5          6      Free
+                7          8      Allocation
+                8          9      Allocation
+                8          9      Free
+                7          8      Free
+                9         10      Allocation
+               10         11      Allocation
+               10         11      Free
+                9         10      Free
+               11         12      Allocation
+               12         13      Allocation
+               12         13      Free
+               11         12      Free
+               13         14      Allocation
+               14         15      Allocation
+               14         15      Free
+               13         14      Free
+               15         16      Allocation
+               16         17      Allocation
+               16         17      Free
+               15         16      Free
+               17         18      Allocation
+               18         19      Allocation
+               18         19      Free
+               17         18      Free
+               19         20      Allocation
+               20         21      Allocation
+               20         21      Free
+               19         20      Free
+                0          1      Free""")
+
+
     def test_module_and_optimizer_ids(self) -> None:
         model = torch.nn.Linear(2, 1, bias=True)
         optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
@@ -1521,6 +1753,26 @@ class TestTorchTidyProfiler(TestCase):
 
         self.assertEqual(len(tensor_impls), repeats)
         self.assertEqual(len(set(tensor_impls)), repeats)
+
+    def test_allocation_id_uniqueness(self) -> None:
+        repeats = 1_000
+        with profile(profile_memory=True, record_shapes=True) as p:
+            for _ in range(repeats):
+                torch.ones((1,))
+            gc.collect()
+
+        roots = p.profiler.kineto_results.experimental_event_tree()
+        id_set = set()
+        for e in _utils.traverse_dfs(roots):
+            fields = e.extra_fields
+            if isinstance(fields, torch._C._profiler._ExtraFields_TorchOp):
+                id_set |= {t.allocation_id for t in fields.inputs.tensor_metadata if t is not None}
+
+            elif isinstance(fields, torch._C._profiler._ExtraFields_Allocation):
+                id_set.add(fields.allocation_id)
+
+        id_set.difference_update([None])
+        self.assertEqual(repeats, len(id_set))
 
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:

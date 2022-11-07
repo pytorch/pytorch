@@ -79,12 +79,13 @@ struct TensorMetadata : public RawTensorMetadataBase {
     return {device_type_, device_index_};
   }
 
-  TensorImplAddress impl() {
+  TensorImplAddress impl() const {
     return weak_self_.get();
   }
 
   WeakTensor weak_self_;
   c10::optional<TensorID> id_;
+  c10::optional<AllocationID> allocation_id_;
 };
 
 struct Inputs {
@@ -194,6 +195,7 @@ struct ExtraFields<EventType::Allocation> : RawAllocation {
   }
 
   c10::optional<TensorID> id_;
+  c10::optional<AllocationID> allocation_id_;
 };
 
 template <>
