@@ -150,7 +150,7 @@ using qcat_nhwc_fn = Tensor (*)(
     int64_t dim,
     double scale,
     int64_t zero_point);
-using qtopk_fn = void(*)(Tensor&, Tensor&, const Tensor&, int64_t, int64_t, bool, bool);
+using qtopk_fn = void(*)(Tensor&, Tensor&, const Tensor&, int64_t, int64_t, bool, bool, bool);
 
 using qbatch_norm_fn = void(*)(int64_t, int64_t, int64_t, int64_t, int64_t, const Tensor&, const Tensor&, const Tensor&, Tensor&);
 

@@ -21,6 +21,7 @@ void topk_impl_loop(
     const int64_t dim_size,
     const bool largest,
     const bool sorted,
+    const bool stable,
     char** data, const int64_t* strides, const int64_t n) {
 
   using elem_t = std::pair<accscalar_t, int64_t>;
@@ -49,36 +50,52 @@ void topk_impl_loop(
       if (largest) {
         std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
           [](const elem_t& x, const elem_t& y) -> bool {
-            return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
+            return (((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first)) || (x.second < y.second));
           });
       } else {
         std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
           [](const elem_t& x, const elem_t& y) -> bool {
-            return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
+            return (((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first)) || (x.second < y.second));
           });
       }
     } else {
       if (largest) {
-        std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
+        if (stable) {
+          std::sort(queue.begin(), queue.end(),
+          [](const elem_t& x, const elem_t& y) -> bool {
+            return (((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first)) || (x.second < y.second));
+          });
+        }
+        else {
+          std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
           [](const elem_t& x, const elem_t& y) -> bool {
             return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
           });
-        if (sorted) {
-          std::sort(queue.begin(), queue.begin() + k - 1,
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
-            });
+          if (sorted) {
+            std::sort(queue.begin(), queue.begin() + k - 1,
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first));
+              });
+          }
         }
       } else {
-        std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
+        if (stable) {
+          std::sort(queue.begin(), queue.end(),
+          [](const elem_t& x, const elem_t& y) -> bool {
+            return (((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first)) || (x.second < y.second));
+          });
+        }
+        else {
+          std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
           [](const elem_t& x, const elem_t& y) -> bool {
             return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
           });
-        if (sorted) {
-          std::sort(queue.begin(), queue.begin() + k -1,
-            [](const elem_t& x, const elem_t& y) -> bool {
-              return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
-            });
+          if (sorted) {
+            std::sort(queue.begin(), queue.begin() + k -1,
+              [](const elem_t& x, const elem_t& y) -> bool {
+                return ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first));
+              });
+          }
         }
       }
     }

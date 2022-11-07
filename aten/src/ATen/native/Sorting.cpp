@@ -53,7 +53,7 @@ namespace meta {
 using namespace native;
 
 TORCH_META_FUNC(topk)
-(const Tensor& self, int64_t k, int64_t dim_, bool largest, bool sorted) {
+(const Tensor& self, int64_t k, int64_t dim_, bool largest, bool sorted, bool stable) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
   TORCH_CHECK(
       k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
@@ -832,6 +832,7 @@ TORCH_IMPL_FUNC(topk_out_cpu)
     int64_t dim_,
     bool largest,
     bool sorted,
+    bool stable,
     const Tensor& values,
     const Tensor& indices) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
@@ -843,7 +844,7 @@ TORCH_IMPL_FUNC(topk_out_cpu)
     values.copy_(self);
     indices.zero_();
   } else {
-    topk_stub(kCPU, values, indices, self, k, dim, largest, sorted);
+    topk_stub(kCPU, values, indices, self, k, dim, largest, sorted, stable);
   }
 }
 

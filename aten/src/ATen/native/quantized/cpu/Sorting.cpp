@@ -30,14 +30,15 @@ std::tuple<Tensor&, Tensor&> quantized_topk_out_cpu(
     int64_t k,
     int64_t dim_,
     bool largest,
-    bool sorted) {
+    bool sorted,
+    bool stable) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
   TORCH_CHECK(
       k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
       "selected index k out of range");
   _allocate_or_resize_output_with_indices(values, indices, self, dim_, k);
 
-  qtopk_stub(kCPU, values, indices, self, k, dim, largest, sorted);
+  qtopk_stub(kCPU, values, indices, self, k, dim, largest, sorted, stable);
 
   return std::forward_as_tuple(values, indices);
 }
@@ -47,7 +48,8 @@ std::tuple<Tensor, Tensor> topk_quantized_cpu(
     int64_t k,
     int64_t dim,
     bool largest,
-    bool sorted) {
+    bool sorted,
+    bool stable) {
   auto qscheme = self.qscheme();
   TORCH_CHECK(
       qscheme == QScheme::PER_TENSOR_AFFINE ||
@@ -59,7 +61,7 @@ std::tuple<Tensor, Tensor> topk_quantized_cpu(
     self.q_scale(),
     self.q_zero_point());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return quantized_topk_out_cpu(values, indices, self, k, dim, largest, sorted);
+  return quantized_topk_out_cpu(values, indices, self, k, dim, largest, sorted, stable);
 }
 
 DEFINE_DISPATCH(qtopk_stub);

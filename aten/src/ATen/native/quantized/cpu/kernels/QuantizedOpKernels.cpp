@@ -2268,7 +2268,8 @@ void qtopk_kernel(Tensor& values,
     int64_t k,
     int64_t dim,
     bool largest,
-    bool sorted) {
+    bool sorted,
+    bool stable) {
   auto sizes = self.sizes();
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
@@ -2289,7 +2290,7 @@ void qtopk_kernel(Tensor& values,
       static_assert(sizeof(scalar_t) == sizeof(underlying_t), "");
       return topk_impl_loop<underlying_t, underlying_t>(
           mode_values_stride, mode_indices_stride, tmp_values_stride,
-          k, sizes[dim], largest, sorted, data, strides, n);
+          k, sizes[dim], largest, sorted, stable, data, strides, n);
     };
 
     int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, sizes[dim]);
