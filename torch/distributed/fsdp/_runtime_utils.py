@@ -806,7 +806,10 @@ def _finalize_params(
     """Finalizes the parameters before the next iteration."""
     for handle in state._handles:
         flat_param = handle.flat_param
-        if hasattr(flat_param, "_padded_unsharded_grad"):
+        # Delete the padded unsharded gradient to free memory in case it was
+        # pre-allocated unnecessarily (i.e. pre-backward ran but post-backward
+        # did not). However, for `no_sync()`, we must preserve it.
+        if hasattr(flat_param, "_padded_unsharded_grad") and state._sync_gradients:
             delattr(flat_param, "_padded_unsharded_grad")
         handle._ran_flat_param_pre_backward_hook = False
         if flat_param.requires_grad:

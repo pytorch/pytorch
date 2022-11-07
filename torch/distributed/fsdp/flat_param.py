@@ -1008,11 +1008,16 @@ class FlatParamHandle:
         self.flat_param.grad = self.flat_param._saved_grad_shard  # type: ignore[attr-defined]
         delattr(self.flat_param, "_saved_grad_shard")
 
+    @no_type_check
     def prepare_gradient_for_backward(self):
         """
         Prepares the gradient for the backward computation by saving and
         clearing any existing sharded gradient in ``.grad`` to enable computing
         a new unsharded gradient.
+
+        Args:
+            sync_gradients (bool): ``False`` if in ``no_sync()`` and ``True``
+                otherwise.
         """
         p_assert(
             self._training_state
@@ -1020,16 +1025,23 @@ class FlatParamHandle:
             "Expects to be in `BACKWARD_PRE` or `IDLE` (if prefetching)",
         )
         flat_param = self.flat_param
-        if flat_param.grad is not None and (
-            flat_param.grad.size() != flat_param._unpadded_unsharded_size
-            or flat_param.grad.device != flat_param.device  # grad on CPU
-        ):
+        has_grad = flat_param.grad is not None
+        has_grad_and_not_in_no_sync = (
+            has_grad and flat_param.grad.size() != flat_param._unpadded_unsharded_size
+        )
+        has_grad_and_in_no_sync = (
+            has_grad and flat_param.grad.size() == flat_param._unpadded_unsharded_size
+        )
+        has_grad_and_cpu_offloading = (
+            has_grad and flat_param.grad.device != flat_param.device
+        )  # grad on CPU
+        if has_grad_and_not_in_no_sync or has_grad_and_cpu_offloading:
             self._check_on_compute_device(self.flat_param)
             grad_offloaded = flat_param.grad.device != self.device
             p_assert(
                 not grad_offloaded or self._config.offload_params,
-                f"Expects the sharded gradient to be on {self.device} "
-                f"but got {flat_param.grad.device}",
+                f"Expects the sharded gradient to be on {self.device} but got "
+                f"{flat_param.grad.device}",
             )
             prev_iter_synced_gradients = (
                 flat_param.grad.size()
@@ -1077,7 +1089,7 @@ class FlatParamHandle:
         # post-backward hook. If it does not need padding, then let the
         # autograd engine construct the gradient normally to avoid an
         # unnecessary allocation.
-        if self._needs_padding:
+        if self._needs_padding and not has_grad_and_in_no_sync:
             p_assert(
                 not hasattr(flat_param, "_padded_unsharded_grad"),
                 f"{self} already has `_padded_unsharded_grad` on rank {self.rank}",
