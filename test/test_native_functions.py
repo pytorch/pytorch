@@ -24,7 +24,7 @@ class TestNativeFunctions(TestCase):
             ("foo",),
             (2, "foo"),
             ("foo", 3),
-            ["foo", ],
+            ["foo"],
             [2, "foo"],
             ["foo", 3],
             "foo",
