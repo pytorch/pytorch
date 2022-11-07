@@ -347,11 +347,6 @@ class GraphLowering(torch.fx.Interpreter):
             if value.get_dtype() != torch.float32:
                 self.disable_cpp_wrapper("inputs not FP32")
 
-    def check_output_for_cpp_buffer(self):
-        for item in self.graph_outputs:
-            if isinstance(item, ir.NoneAsConstantBuffer):
-                self.disable_cpp_wrapper("NoneAsConstantBuffer")
-
     def check_constant_for_cpp_buffer(self):
         if self.constants:
             self.disable_cpp_wrapper("Constants")
@@ -359,7 +354,6 @@ class GraphLowering(torch.fx.Interpreter):
     def check_cpp_wrapper(self):
         self.check_device_for_cpp_buffer()
         self.check_input_for_cpp_buffer()
-        self.check_output_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):

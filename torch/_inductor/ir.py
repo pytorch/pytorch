@@ -1365,6 +1365,9 @@ class ReinterpretView(BaseView):
             return f"as_strided({self.get_name()}, {size}, {stride}, {offset})"
         return f"as_strided({self.get_name()}, {size}, {stride})"
 
+    def cpp_wrapper_codegen_reference(self):
+        return self.codegen_reference()
+
 
 class SliceView(View):
     @classmethod
@@ -1785,6 +1788,9 @@ class Buffer(IRNode):
     def codegen_reference(self):
         return self.get_name()
 
+    def cpp_wrapper_codegen_reference(self):
+        return self.codegen_reference()
+
     def decide_layout(self):
         pass
 
@@ -1839,10 +1845,16 @@ class RandSeedBuffer(ConstantBuffer):
         # the value does not get clobbered by the time backwards is run.
         return self.get_name() + ".clone()"
 
+    def cpp_wrapper_codegen_reference(self):
+        return self.codegen_reference()
+
 
 class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return "None"
+
+    def cpp_wrapper_codegen_reference(self):
+        return "at::Tensor()"
 
 
 class ShapeAsConstantBuffer(IRNode):
@@ -1852,6 +1864,9 @@ class ShapeAsConstantBuffer(IRNode):
 
     def codegen_reference(self):
         return str(self.shape)
+
+    def cpp_wrapper_codegen_reference(self):
+        return self.codegen_reference()
 
 
 @dataclasses.dataclass

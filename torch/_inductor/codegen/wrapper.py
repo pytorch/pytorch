@@ -271,6 +271,7 @@ class WrapperCodeGen(CodeGen):
                     f"from {config.inductor_import}.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
                 )
 
+        self.set_output_refs()
         self.write_prefix()
 
         for name, value in V.graph.constants.items():
@@ -283,6 +284,9 @@ class WrapperCodeGen(CodeGen):
         self.write_get_cuda_stream = functools.lru_cache(None)(
             self.write_get_cuda_stream
         )
+
+    def set_output_refs(self):
+        self.output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
 
     def write_prefix(self):
         self.prefix.splice(
@@ -394,9 +398,9 @@ class WrapperCodeGen(CodeGen):
         self.allocated.add(output_buffer.get_name())
         self.write_reuse_line(input_buffer, output_buffer)
 
-    def generate_return(self, result, output_refs):
-        if output_refs:
-            result.writeline("return (" + ", ".join(output_refs) + ", )")
+    def generate_return(self, result):
+        if self.output_refs:
+            result.writeline("return (" + ", ".join(self.output_refs) + ", )")
         else:
             result.writeline("return ()")
 
@@ -431,8 +435,7 @@ class WrapperCodeGen(CodeGen):
                 else:
                     result.writeline(line)
 
-            output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
-            self.generate_return(result, output_refs)
+            self.generate_return(result)
 
         self.generate_end(result)
 
@@ -518,6 +521,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self._call_func_id = next(CppWrapperCodeGen.call_func_id)
         super().__init__()
 
+    def set_output_refs(self):
+        self.output_refs = [
+            x.cpp_wrapper_codegen_reference() for x in V.graph.graph_outputs
+        ]
+
     def write_prefix(self):
         self.prefix.splice(
             """
@@ -532,13 +540,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
         with self.prefix.indent():
             inputs_len = len(V.graph.graph_inputs.keys())
-            output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
-            if output_refs:
-                if len(output_refs) == 1:
+            if self.output_refs:
+                if len(self.output_refs) == 1:
                     output_types = "at::Tensor"
                 else:
                     output_return_type = "at::Tensor"
-                    output_return_types = [output_return_type] * len(output_refs)
+                    output_return_types = [output_return_type] * len(self.output_refs)
                     output_return_types = ", ".join(output_return_types)
                     output_types = f"std::tuple<{output_return_types}>"
             else:
@@ -603,13 +610,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def wrap_kernel_call(self, name, call_args):
         return "{}({});".format(name, ", ".join(call_args))
 
-    def generate_return(self, result, output_refs):
-        if output_refs:
-            if len(output_refs) == 1:
-                result.writeline("return " + output_refs[0] + "; }''' )")
+    def generate_return(self, result):
+        if self.output_refs:
+            if len(self.output_refs) == 1:
+                result.writeline("return " + self.output_refs[0] + "; }''' )")
             else:
                 result.writeline(
-                    "return std::make_tuple(" + ", ".join(output_refs) + "); }''' )"
+                    "return std::make_tuple("
+                    + ", ".join(self.output_refs)
+                    + "); }''' )"
                 )
         else:
             result.writeline("return; }''' )")
