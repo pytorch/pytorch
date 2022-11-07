@@ -184,7 +184,7 @@ cmake_dependent_option(
     "BUILD_TEST" OFF)
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
-option(USE_ASAN "Use Address Sanitizer" OFF)
+option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
@@ -285,6 +285,7 @@ if(NOT USE_XNNPACK AND CMAKE_VERSION VERSION_LESS ${XNNPACK_MIN_CMAKE_VER})
 endif()
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
+option(TORCH_DISABLE_GPU_ASSERTS "Disable GPU asserts by default" OFF)
 # Ensure that an ITT build is the default for x86 CPUs
 cmake_dependent_option(
   USE_ITT "Use Intel(R) VTune Profiler ITT functionality" ON
@@ -928,8 +929,8 @@ if(NOT MSVC)
 endif()
 
 if(USE_ASAN)
-    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=address")
-    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address")
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=address -fsanitize=undefined")
+    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address -fsanitize=undefined")
 endif()
 
 if(USE_TSAN)

@@ -85,6 +85,7 @@ __all__ = [
     "isnan",
     "isreal",
     "i0",
+    "lerp",
     "lgamma",
     "log",
     "log1p",
@@ -4060,6 +4061,36 @@ def arange(
     )
 
 
+@register_decomposition(torch.ops.aten.lerp)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("start", "end", "weight"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
+    check(
+        start.dtype == end.dtype,
+        lambda: f"expected dtype {start.dtype} for `end` but got dtype {end.dtype}",
+    )
+    if isinstance(weight, Number):
+        weight = start.new_full((), weight)  # type: ignore[arg-type]
+    else:
+        check(
+            start.dtype == weight.dtype,
+            lambda: f"expected dtype {start.dtype} for `weight` but got dtype {weight.dtype}",  # type: ignore[union-attr]
+        )
+    assert isinstance(weight, Tensor)  # mypy
+    # We implement it this way for numerical stability. We assume (in the stability optimisation)
+    # that 0 <= weight <= 1. We take the abs to deal with comples numbers
+    # We want to do operations near zero, which is where floating points are most precise
+    # If weight.abs() >= 0.5:
+    #    return (1 - weight) * (start - end) + end
+    mask = weight.abs() >= 0.5
+    coeff = torch.where(mask, weight - 1, weight)
+    base = torch.where(mask, end, start)
+    return coeff * (end - start) + base
+
+
 @register_decomposition(torch.ops.aten.linspace)
 @out_wrapper()
 def linspace(
@@ -4438,7 +4469,7 @@ zeros_like = partial(full_like, fill_value=False)
 
 ones_like = partial(full_like, fill_value=True)
 
-# TODO: add pin_memory support
+
 @register_decomposition(torch.ops.aten.randn.default)
 @out_wrapper()
 def randn(
@@ -4447,10 +4478,9 @@ def randn(
     device: Optional[torch.device] = None,
     layout: Optional[torch.layout] = None,
     requires_grad: bool = False,
-    pin_memory: Optional[bool] = None,
+    pin_memory: bool = False,
 ) -> TensorLikeType:
-
-    check(pin_memory is None, lambda: "pin_memory parameter is not supported!")
+    utils.check_pin_memory(pin_memory)
 
     shape_ = utils.extract_shape_from_varargs(shape)
 
