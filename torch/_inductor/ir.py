@@ -691,7 +691,7 @@ class Reduction(Loops):
                 "sum": 0,
                 "prod": 1,
                 "any": 0,
-                "all": 0,
+                # "all" is desugared to `!any(!val)`
             }
 
             assert (
