@@ -2,6 +2,7 @@ import logging
 import operator
 import os
 import time
+from typing import Union
 
 import sympy
 
@@ -10,6 +11,7 @@ import torch.fx
 from torch._decomp import get_decompositions
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, guard_int
 from torch.utils._mode_utils import no_dispatch
+from torch import SymInt
 
 from . import config, ir
 from .codegen.wrapper import WrapperCodeGen
@@ -191,7 +193,9 @@ class GraphLowering(torch.fx.Interpreter):
         return alt_name
 
     def placeholder(self, target, args, kwargs):
-        example: torch.Tensor = super().placeholder(target, args, kwargs)
+        example: Union[torch.Tensor, SymInt] = super().placeholder(target, args, kwargs)
+        if isinstance(example, SymInt):
+            return example.node.expr
         if config.static_weight_shapes and (
             len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes
         ):

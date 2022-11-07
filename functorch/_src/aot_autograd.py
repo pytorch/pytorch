@@ -499,10 +499,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     with torch.no_grad():
         with track_graph_compiling("joint"):
             fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
-            fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
+            orig_fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
-            fw_outs = fw_outs[_num_outs:]
+            fw_outs = orig_fw_outs[_num_outs:]
+            non_symint_outs = [n for n in fw_outs if not is_sym_node(n)]
             symint_outs = [n for n in fw_outs if is_sym_node(n)]
             _num_symints = len(symint_outs)
 
@@ -552,11 +553,17 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             all_args = list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             del contiguous_args
             if CompiledFunction.compiled_bw is None:
-                # TODO - pass in fake tensors ?
+                # TODO: pass in static arguments as real tensors, not fake
+                # tensor
+                all_fake_args = (
+                    [n.meta['val'] for n in symint_outs]
+                    + [n.meta['val'] for n in non_symint_outs]
+                    + [n.meta['val'] for n in orig_fw_outs[:_num_outs]]
+                )
                 context = disable_autocast_manager if disable_amp else nullcontext
                 with context(), track_graph_compiling("backward", True):
                     CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                        bw_module, all_args
+                        bw_module, all_fake_args
                     )
 
             ctx.maybe_clear_saved_tensors()
