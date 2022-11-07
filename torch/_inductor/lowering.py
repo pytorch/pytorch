@@ -690,10 +690,14 @@ def repeat(x, repeats):
 @register_lowering(aten._unsafe_view, type_promotion_kind=None)
 @register_lowering(aten.view, type_promotion_kind=None)
 @register_lowering(aten.reshape, type_promotion_kind=None)
-def view(x, sizes):
+def view(x, sizes_or_dtype):
+    # view could also take dtype as its parameter
+    if isinstance(sizes_or_dtype, torch.dtype):
+        return to_dtype(x, sizes_or_dtype)
+
     assert isinstance(x, TensorBox)
-    assert isinstance(sizes, (list, tuple))
-    return TensorBox(View.create(x.data, sizes))
+    assert isinstance(sizes_or_dtype, (list, tuple))
+    return TensorBox(View.create(x.data, sizes_or_dtype))
 
 
 @register_lowering(aten.permute, type_promotion_kind=None)
