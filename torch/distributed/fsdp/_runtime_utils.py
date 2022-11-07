@@ -413,7 +413,8 @@ def _pre_backward_hook(
     """
     This is the pre-backward hook to prepare a *module* for the backward pass.
     This includes unsharding ``FlatParameter`` s since the original parameters
-    are needed for gradient computation and prefetching for the next *module*.
+    are needed for gradient computation and includes prefetching for the next
+    *module*.
     """
     _handles_key = tuple(_handles)  # avoid shadowing `handles_key`
     # Only run the pre-backward hook once per group of handles involved in the
