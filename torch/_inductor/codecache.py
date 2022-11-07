@@ -185,9 +185,7 @@ class SupportedVecIsa(enum.Enum):
                     f"Vectorization has not supported {dtype} yet"
                 )
         else:
-            raise NotImplementedError(
-                f"Vectorization has not supported {supported_isa} yet"
-            )
+            return 1
 
     @staticmethod
     def vec_size(dtype: torch.dtype = torch.float):

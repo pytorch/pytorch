@@ -722,7 +722,7 @@ class CppVecKernel(CppKernel):
     def transform_index(self, index: sympy.Expr):
         expanded_index = sympy.expand(index)
         assert self.simd_len
-        assert self.simd_len > 0
+        assert self.simd_len >= 1
         most_inner_var = self.itervars[-1]
         replacement = {most_inner_var: most_inner_var * self.simd_len}
         new_index = sympy_subs(expanded_index, replacement)
@@ -1362,7 +1362,7 @@ class LoopLevel:
             )
         else:
             reduction = ""
-        simd = f"simd simdlen({self.simd_len}) " if self.simd_omp else ""
+        simd = f"simd simdlen({self.simd_len}) " if self.simd_omp and self.simd_len > 1 else ""
         if self.parallel:
             # TODO(jansel): look into chunk size and other schedules
             line1 = f"#pragma omp for{reduction} "
