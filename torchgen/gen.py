@@ -2502,7 +2502,11 @@ def gen_source_files(
         lambda: {
             "ops_headers": [
                 "\n".join(
-                    f"#include <ATen/ops/{f.root_name}_ops.h>"
+                    f"#include <ATen/ops/{f.root_name}_ops.h>\n"
+                    # NB: this include is important as it ensures we
+                    # set the visibility on generated view_copy kernels
+                    # correctly
+                    f"#include <ATen/ops/{f.root_name}_native.h>"
                     for f in (
                         [g.view] if g.view_copy is None else [g.view, g.view_copy]
                     )

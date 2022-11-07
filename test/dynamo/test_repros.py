@@ -1273,6 +1273,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    # https://github.com/pytorch/torchdynamo/issues/1446
+    def test_grad_mode_carrying_correct_state_after_graph_break(self):
+        def fn(x):
+            with torch.no_grad():
+                y = x * 3
+                print("Break")
+                z = x + 2
+            return y, z
+
+        x = torch.randn(3, requires_grad=True)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        y, z = opt_fn(x)
+        self.assertFalse(y.requires_grad)
+        self.assertFalse(z.requires_grad)
+
     def test_abc_setattr(self):
         # tests that we correctly bail out of __setattr__ calls
 

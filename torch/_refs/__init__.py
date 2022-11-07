@@ -4472,7 +4472,7 @@ zeros_like = partial(full_like, fill_value=False)
 
 ones_like = partial(full_like, fill_value=True)
 
-# TODO: add pin_memory support
+
 @register_decomposition(torch.ops.aten.randn.default)
 @out_wrapper()
 def randn(
@@ -4481,10 +4481,9 @@ def randn(
     device: Optional[torch.device] = None,
     layout: Optional[torch.layout] = None,
     requires_grad: bool = False,
-    pin_memory: Optional[bool] = None,
+    pin_memory: bool = False,
 ) -> TensorLikeType:
-
-    # check(pin_memory is None, lambda: "pin_memory parameter is not supported!")
+    # utils.check_pin_memory(pin_memory)
 
     shape_ = utils.extract_shape_from_varargs(shape)
 

@@ -958,7 +958,7 @@ class FakeTensorMode(TorchDispatchMode):
         return wrap
 
     def cpp_meta_supports_symint(self, func):
-        if torch.Tag.view_copy in func.tags:
+        if torch.Tag.view_copy in func.tags:  # type: ignore[attr-defined]
             return True
         return func in [
             aten.empty_strided.default,
