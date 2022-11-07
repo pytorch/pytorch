@@ -122,7 +122,6 @@ __all__ = [
     "bitwise_right_shift",
     "bitwise_xor",
     "clamp_min",
-    "complex",
     "copysign",
     "div",
     "eq",
@@ -457,32 +456,6 @@ def bitwise_not(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def ceil(a):
     return prims.ceil(a)
-
-
-@register_decomposition(torch.ops.aten.complex)
-@out_wrapper()
-def complex(real: TensorLikeType, imag: TensorLikeType) -> TensorLikeType:
-    def _allowed_dtypes():
-        return {torch.float32, torch.float64, torch.float16}
-
-    check(
-        real.dtype in _allowed_dtypes() and imag.dtype in _allowed_dtypes(),
-        lambda: (
-            f"Expected both inputs to be Half, Float or Double tensors but got "
-            f"{real.dtype} and {imag.dtype}"
-        ),
-    )
-    higher_dtype = utils.get_higher_dtype(real.dtype, imag.dtype)
-    check(
-        higher_dtype is not None,
-        lambda: f"Cannot get higher dtype: got {real.dtype} and {imag.dtype}",
-    )
-    result_dtype = utils.corresponding_complex_dtype(higher_dtype)  # type: ignore[arg-type]
-    common_shape = _broadcast_shapes(real.shape, imag.shape)
-    a = torch.empty(common_shape, dtype=result_dtype)
-    a.real = real
-    a.imag = imag
-    return a
 
 
 @register_decomposition(torch.ops.aten.conj_physical)

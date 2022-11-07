@@ -68,7 +68,11 @@ def torch_to_refs_map():
 
     # Support conversions
     for s in torch._refs._conversions.__all__:
-        r[getattr(torch.Tensor, s)] = torch._refs._conversions.__dict__.get(s)
+        tensor_attr = getattr(torch.Tensor, s, None)
+        if tensor_attr is not None:
+            r[tensor_attr] = torch._refs._conversions.__dict__.get(s)
+        else:
+            r[getattr(torch, s)] = torch._refs._conversions.__dict__.get(s)
 
     return r
 

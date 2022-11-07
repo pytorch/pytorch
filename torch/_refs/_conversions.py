@@ -1,6 +1,12 @@
 import torch
+import torch._prims_common as utils
 
-from torch._prims_common import TensorLikeType
+# Utilities should come BEFORE this import
+from torch._decomp import register_decomposition
+
+from torch._prims_common import check, TensorLikeType
+from torch._prims_common.wrappers import out_wrapper
+from torch._refs import _broadcast_shapes
 
 # Data conversion references.
 #
@@ -10,6 +16,7 @@ from torch._prims_common import TensorLikeType
 # (like int).
 
 __all__ = [
+    # dtypes
     "bfloat16",
     "bool",
     "byte",
@@ -23,6 +30,8 @@ __all__ = [
     "int",
     "long",
     "short",
+    # misc
+    "complex",
 ]
 
 
@@ -61,3 +70,29 @@ int = _make_conversion_method("int", torch.int)
 long = _make_conversion_method("long", torch.long)
 
 short = _make_conversion_method("short", torch.short)
+
+
+@register_decomposition(torch.ops.aten.complex)
+@out_wrapper()
+def complex(real: TensorLikeType, imag: TensorLikeType) -> TensorLikeType:
+    def _allowed_dtypes():
+        return {torch.float32, torch.float64, torch.float16}
+
+    check(
+        real.dtype in _allowed_dtypes() and imag.dtype in _allowed_dtypes(),
+        lambda: (
+            f"Expected both inputs to be Half, Float or Double tensors but got "
+            f"{real.dtype} and {imag.dtype}"
+        ),
+    )
+    higher_dtype = utils.get_higher_dtype(real.dtype, imag.dtype)
+    check(
+        higher_dtype is not None,
+        lambda: f"Cannot get higher dtype: got {real.dtype} and {imag.dtype}",
+    )
+    result_dtype = utils.corresponding_complex_dtype(higher_dtype)  # type: ignore[arg-type]
+    common_shape = _broadcast_shapes(real.shape, imag.shape)
+    a = torch.empty(common_shape, dtype=result_dtype)
+    a.real = real
+    a.imag = imag
+    return a
