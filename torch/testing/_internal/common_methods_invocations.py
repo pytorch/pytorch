@@ -17221,6 +17221,14 @@ python_ref_db = [
         torch_opinfo_name="bitwise_xor",
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.complex",
+        torch_opinfo_name="complex",
+        skips=(
+            # Test doesn't account for complex's type promotion semantics
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+        )
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.copysign",
         torch_opinfo_name="copysign",
         supports_nvfuser=False,
