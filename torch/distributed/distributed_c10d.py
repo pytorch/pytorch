@@ -261,7 +261,7 @@ class BackendConfig(object):
             pass
 
         required_devices = ["cpu", "cuda"]
-        print(f"{backend=}, {self.device_backend_map=}")
+        print(f"backend={backend}, device_maps={self.device_backend_map}")
         for device in required_devices:
             assert device in self.device_backend_map
 
