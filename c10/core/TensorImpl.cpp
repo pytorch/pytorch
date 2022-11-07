@@ -772,7 +772,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
   SizesVector newDims(sizes_and_strides.begin(), sizes_and_strides.end());
   newDims[0] += num;
   if (!storage_.data()) {
-    Resize(std::move(newDims));
+    Resize(newDims);
     return;
   }
   const auto newNumel = c10::multiply_integers(newDims.begin(), newDims.end());
