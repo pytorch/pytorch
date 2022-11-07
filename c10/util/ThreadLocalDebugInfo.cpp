@@ -1,6 +1,8 @@
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <utility>
+
 namespace c10 {
 
 C10_DEFINE_TLS_static(std::shared_ptr<ThreadLocalDebugInfo>, tls_debug_info);
@@ -67,7 +69,7 @@ DebugInfoGuard::DebugInfoGuard(
     return;
   }
   prev_info_ = debug_info;
-  ThreadLocalDebugInfo::_push(kind, info);
+  ThreadLocalDebugInfo::_push(kind, std::move(info));
   active_ = true;
 }
 

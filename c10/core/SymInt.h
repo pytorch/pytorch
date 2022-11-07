@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <numeric>
+#include <utility>
 
 namespace c10 {
 
@@ -56,7 +57,7 @@ class C10_API SymInt {
       data_ = s.data_;
     }
   }
-  SymInt(SymInt&& s) : data_(s.data_) {
+  SymInt(SymInt&& s) noexcept : data_(s.data_) {
     s.data_ = 0;
   }
 
@@ -70,7 +71,7 @@ class C10_API SymInt {
     }
     return *this;
   }
-  SymInt& operator=(SymInt&& s) {
+  SymInt& operator=(SymInt&& s) noexcept {
     if (this != &s) {
       release_(); // release the current SymNode if any
       data_ = s.data_;
@@ -151,23 +152,23 @@ class C10_API SymInt {
 #endif
   }
 
-  SymInt operator+(SymInt sci) const;
-  SymInt operator-(SymInt sci) const;
-  SymInt operator*(SymInt sci) const;
-  SymInt operator/(SymInt sci) const;
-  SymInt operator%(SymInt sci) const;
-  bool operator==(SymInt sci) const;
-  bool operator!=(SymInt p2) const;
-  bool operator<(SymInt sci) const;
-  bool operator<=(SymInt sci) const;
-  bool operator>(SymInt sci) const;
-  bool operator>=(SymInt sci) const;
-  void operator*=(SymInt sci);
-  void operator+=(SymInt sci);
-  void operator/=(SymInt sci);
+  SymInt operator+(const SymInt& sci) const;
+  SymInt operator-(const SymInt& sci) const;
+  SymInt operator*(const SymInt& sci) const;
+  SymInt operator/(const SymInt& sci) const;
+  SymInt operator%(const SymInt& sci) const;
+  bool operator==(const SymInt& sci) const;
+  bool operator!=(const SymInt& p2) const;
+  bool operator<(const SymInt& sci) const;
+  bool operator<=(const SymInt& sci) const;
+  bool operator>(const SymInt& sci) const;
+  bool operator>=(const SymInt& sci) const;
+  void operator*=(const SymInt& sci);
+  void operator+=(const SymInt& sci);
+  void operator/=(const SymInt& sci);
 
-  SymInt min(SymInt sci) const;
-  SymInt max(SymInt sci) const;
+  SymInt min(const SymInt& sci) const;
+  SymInt max(const SymInt& sci) const;
 
   SymInt operator*(int64_t sci) const;
   bool operator<(int64_t sci) const;
@@ -231,9 +232,9 @@ inline c10::SymInt multiply_integers(const C& container) {
       container.begin(),
       container.end(),
       c10::SymInt(1),
-      [](c10::SymInt a, c10::SymInt b) { return a * b; });
+      [](const c10::SymInt& a, const c10::SymInt& b) { return a * b; });
 }
 
-C10_API std::ostream& operator<<(std::ostream& os, SymInt s);
-C10_API SymInt operator-(SymInt s);
+C10_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
+C10_API SymInt operator-(const SymInt& s);
 } // namespace c10
