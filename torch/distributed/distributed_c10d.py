@@ -226,8 +226,8 @@ class Backend(object):
             f"{name.upper()} c10d backend creator function already exist"
         )
 
-        setattr(Backend, name.upper(), name.lower())
-        Backend.backend_list.append(name.lower())
+        setattr(Backend, name.upper(), name.upper())
+        Backend.backend_list.append(name.upper())
         Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
 
 class BackendConfig(object):
@@ -248,7 +248,7 @@ class BackendConfig(object):
                 "cpu": Backend.UCC,
                 "cuda": Backend.NCCL,
             }
-        elif backend.lower() in Backend.backend_list:
+        elif backend.upper() in Backend.backend_list:
             # backend applies to all devices (e.g. "GLOO", "MPI", "custom_backend")
             backend_val = Backend(backend)
             self.device_backend_map = {
@@ -909,8 +909,6 @@ def _new_process_group_helper(
             return GroupMember.NON_GROUP_MEMBER
 
     for device, backend in backend_config.get_device_backend_map().items():
-        print(device, backend)
-
         # Use the group name as prefix in the default store, such that
         # a single store can be reused by multiple groups.
         prefix_store = PrefixStore(f"{device}/", prefix_store)
@@ -997,6 +995,13 @@ def _new_process_group_helper(
         # Set sequence numbers for gloo and nccl backends.
         if backend in [Backend.GLOO, Backend.NCCL]:
             backend_pg._set_sequence_number_for_group()
+
+        # If the type is a sublcass of ProcessGroup then return this process group immediately
+        # TODO: This defaults to the old behavior for PythonProcessGroups which overwrites the
+        # ProcessGroup instance
+        if issubclass(type(backend_pg), ProcessGroup):
+            pg = backend_pg
+            break
 
         print(f"finished creating {backend_pg} for device {device}")
         pg._set_backend(torch.device(device), backend_pg)
