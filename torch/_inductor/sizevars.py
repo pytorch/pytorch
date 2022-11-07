@@ -587,6 +587,7 @@ class CppSizeVarAllocator(SizeVarAllocator):
     def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         return super().codegen_shape_tuple(shape)
 
+
 class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     """
     A wrapper around .virtualize.ops that uses var range information to
