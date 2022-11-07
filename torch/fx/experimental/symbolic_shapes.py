@@ -265,6 +265,7 @@ magic_methods = {
 
 unary_magic_methods = {
     'sym_float',
+    'sym_int',
     'ceil',
     'neg',
 }
