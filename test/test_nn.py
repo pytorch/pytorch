@@ -13277,6 +13277,30 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(result_fast_path_masked, result_ref_masked)
 
+    def test_multihead_self_attn_two_masks_fast_path_mock(self, device):
+        """
+        Multihead self-attention should take fast path when both attention mask (mask type 0)
+        and key padding mask (mask type 1) are provided at the same time
+        """
+        with torch.no_grad():
+            embed_dim = 14
+            num_heads = 7
+            batch_size = 8
+            src_len = 5
+
+            query = value = key = torch.rand(batch_size, src_len, embed_dim).to(device)
+            # Create masks of two different types
+            attn_mask = torch.randint(0, 2, (src_len, src_len)).bool().to(device)
+            key_padding_mask = torch.randint(0, 2, (batch_size, src_len)).bool().to(device)
+
+            with mock.patch('torch._native_multi_head_attention') as fastpath_mock:
+                # Compute attention on the fast path
+                mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True, device=device)
+                mta_model.training = False
+                mta_model(query, key, value, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
+                # If mock was called, fastpath was taken
+                self.assertTrue(fastpath_mock.called)
+
     def test_masked_softmax(self, device):
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
         for (B, num_heads, L) in sizes:
