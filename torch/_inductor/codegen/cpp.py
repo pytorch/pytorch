@@ -74,6 +74,17 @@ def reduction_combine(reduction_type, var, next_value):
     return f"{var} = std::{reduction_type}({var}, {next_value})"
 
 
+def reduction_combine_vec(reduction_type, var, next_value):
+    if reduction_type == "max":
+        return f"{var} = at::vec::maximum({var}, {next_value})"
+    elif reduction_type == "min":
+        return f"{var} = at::vec::minimum({var}, {next_value})"
+    elif reduction_type == "sum":
+        return f"{var} += {next_value}"
+    else:
+        raise NotImplementedError()
+
+
 index_value_name_counter = 1
 
 
@@ -288,6 +299,37 @@ class CppVecOverrides(OpOverrides):
         # a and b are integer type
         return f"{a} / {b}"
 
+    @staticmethod
+    def minimum(a, b):
+        return f"at::vec::minimum({a}, {b})"
+
+    @staticmethod
+    def maximum(a, b):
+        return f"at::vec::maximum({a}, {b})"
+
+    @staticmethod
+    def square(a):
+        return f"{a}.pow(2)"
+
+    @staticmethod
+    def sign(x):
+        code = BracesBuffer()
+        # auto tmp5 = tmp4 < 0 ? -1 : 1;
+        vec_zero = f"decltype({x})(0)"
+        vec_one = f"decltype({x})(1)"
+        blendv = f"decltype({x})::blendv({vec_zero}, {vec_one}, {vec_zero} < {x})"
+        left = V.kernel.cse.newvar()
+        code.writeline(f"auto {left} = {blendv};")
+
+        # auto tmp6 = tmp4 == 0 ? 0 : tmp5;
+        blendv = f"decltype({x})::blendv({vec_zero}, {vec_one}, {x} < {vec_zero})"
+        right = V.kernel.cse.newvar()
+        code.writeline(f"auto {right} = {blendv};")
+        result = V.kernel.cse.newvar()
+        code.writeline(f"auto {result} = {left} - {right};")
+        V.kernel.compute.splice(code)
+        return result
+
 
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
@@ -449,6 +491,19 @@ class CppOverrides(OpOverrides):
     def sigmoid(x):
         x = ops.exp(f"-{x}")
         return f"1 / (1 + {x})"
+
+    @staticmethod
+    def sign(x):
+        code = BracesBuffer()
+        # auto tmp5 = tmp4 < 0 ? -1 : 1;
+        left = V.kernel.cse.newvar()
+        right = V.kernel.cse.newvar()
+        result = V.kernel.cse.newvar()
+        code.writeline(f"auto {left} = {x} > 0 ? 1 : 0;")
+        code.writeline(f"auto {right} = {x} < 0 ? 1 : 0;")
+        code.writeline(f"auto {result} = {left} - {right};")
+        V.kernel.compute.splice(code)
+        return result
 
 
 class CppKernel(Kernel):
@@ -651,6 +706,7 @@ class CppVecKernel(CppKernel):
     def __init__(self, args, num_threads):
         super(CppVecKernel, self).__init__(args, num_threads)
         self.simd_len = config.cpp.simdlen
+        self.reduction_omp_dec: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
     def is_single_step_var(self, var: sympy.Symbol, index: sympy.Expr):
@@ -697,6 +753,62 @@ class CppVecKernel(CppKernel):
         assert new_index != expanded_index
         line = f"{value}.store({var} + {cexpr(new_index)});"
         self.stores.writeline(name, line)
+
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+        assert reduction_type in {"max", "min", "sum"}
+        assert dtype == torch.float
+        assert src_dtype == torch.float
+        reduce_map = {"max": "maximum", "min": "minimum"}
+
+        vec_ns = "at::vec"
+        vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
+
+        if reduction_type not in self.reduction_omp_dec:
+            vec_reduc_prefix = "#pragma omp declare reduction("
+            vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
+            if reduction_type == "sum":
+                vec_reduc_prefix += "omp_out += omp_in"
+            else:
+                vec_reduc_prefix += (
+                    f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
+                )
+            vec_reduc_prefix += ")"
+            vec_reduc_prefix += " initializer("
+            vec_reduc_prefix += "omp_priv={{"
+            vec_reduc_prefix += f"{reduction_init(reduction_type, dtype)}"
+            vec_reduc_prefix += "}})"
+            self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
+            self.reduction_prefix.writeline(vec_reduc_prefix)
+
+        tmpvar = self.cse.generate(
+            self.loads, f"reduction {name} {cexpr(index)}", write=False
+        )
+        tmpvar_vec = f"{tmpvar}_vec"
+
+        index = self.rename_indexing(index)
+        self.reduction_vars[tmpvar] = reduction_type
+        self.reduction_prefix.writeline(
+            f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
+        )
+        self.reduction_prefix.writeline(
+            f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
+        )
+        self.stores.writeline(
+            None, f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
+        )
+
+        reduce_all_body = "{"
+        if reduction_type == "sum":
+            reduce_all_body += "return x + y;"
+        else:
+            reduce_all_body += f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
+        reduce_all_body += "}"
+        vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
+        self.reduction_suffix.writeline(
+            name,
+            f"{tmpvar} = {vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec});",
+        )
+        self.cse.store_cache[name] = tmpvar
 
 
 class CppVecKernelChecker(CppVecKernel):
@@ -752,7 +864,14 @@ class CppVecKernelChecker(CppVecKernel):
         return self.simd_vec
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        self.simd_vec = False
+        if (
+            dtype == torch.float
+            and src_dtype == torch.float
+            and reduction_type in ["max", "min", "sum"]
+        ):
+            pass
+        else:
+            self.simd_vec = False
         return self.simd_vec
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -824,16 +943,15 @@ class CppVecKernelChecker(CppVecKernel):
 class CppKernelProxy(CppKernel):
     def __init__(self, args=None, num_threads=None):
         super(CppKernelProxy, self).__init__(args, num_threads)
-        self.simd_vec_kernel = None
-        self.simd_omp_kernel = None
+        self.simd_vec_kernel: CppVecKernel = None
+        self.simd_omp_kernel: CppKernel = None
 
     def vectorize_most_inner_loop(self, loop_nest):
         loop_nest.split_most_inner_loop(config.cpp.simdlen)
         loop_with_tail = loop_nest.loops[-1]
         assert isinstance(loop_with_tail, LoopLevelWithTail)
 
-        self.simd_vec_kernel.simd = False
-        self.simd_vec_kernel.fast_vec = True
+        loop_with_tail.main_loop.simd_vec = True
 
         loop_with_tail.tail_loop.simd_omp = True
         # We chope the loop into two cubes by the config.cpp.simdlen - main loop and tail loop.
@@ -857,51 +975,141 @@ class CppKernelProxy(CppKernel):
 
         assert self.simd_vec_kernel.itervars == self.simd_omp_kernel.itervars
         assert self.simd_vec_kernel.ranges == self.simd_omp_kernel.ranges
+        assert (
+            self.simd_vec_kernel.reduction_vars == self.simd_omp_kernel.reduction_vars
+        )
 
         itervars = self.simd_vec_kernel.itervars
         rangs = self.simd_vec_kernel.ranges
         loops = [LoopLevel(var, size) for var, size in zip(itervars, rangs)]
-
-        # TODO: Support reductions
-        loops_nest_non_reduc, _ = LoopNest(loops[: self.reduction_depth]), LoopNest(
-            loops[self.reduction_depth :]
+        assert (
+            self.simd_vec_kernel.reduction_depth == self.simd_omp_kernel.reduction_depth
         )
+        reduction_depth = self.simd_vec_kernel.reduction_depth
+        loops_nest_non_reduce, loops_nest_reduce = LoopNest(
+            loops[:reduction_depth]
+        ), LoopNest(loops[reduction_depth:])
+        loops_nest_reduce.mark_reduction(self.simd_vec_kernel.reduction_vars)
 
-        assert config.cpp.simdlen
-        loops_nest_non_reduc.loops[-1].simd_omp = True
+        if config.cpp.simdlen:
+            # TODO(jansel): detect stride-1 dimension and vectorize that
+            if loops_nest_reduce:
+                loops_nest_reduce.loops[-1].simd = True
+            elif loops_nest_non_reduce:
+                loops_nest_non_reduce.loops[-1].simd = True
 
         par_depth = 0
-        if loops_nest_non_reduc:
+        reduction_par_depth = 0
+        if loops_nest_non_reduce:
             par_depth = self.simd_vec_kernel.decide_parallel_depth(
-                self.simd_vec_kernel.call_ranges[: self.reduction_depth], threads
+                self.simd_vec_kernel.call_ranges[:reduction_depth], threads
             )
+        else:
+            reduction_par_depth = self.simd_vec_kernel.decide_parallel_depth(
+                self.simd_vec_kernel.call_ranges[reduction_depth:], threads
+            )
+
+        # If the most inner loop of the reduction will be vectorized, the vectorization
+        # will add a vec variable for reduction. Take the code snippet as an example:
+        #     float tmp1 = 0;
+        #     for(long i1=0; i1<8; i1+=1) {
+        #        auto tmp0 = in_ptr0[i1];
+        #        tmp1 += tmp0;
+        #     }
+        # The vectorization will add tmp1_vec for reduction and then the loop will be transformed
+        # as follows.
+        #     float tmp1 = 0;
+        #     auto tmp1_vec = at::vec::Vectorized<float>(tmp1);
+        #     for(long i1=0; i1<1; i1+=1) {
+        #        auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i1));
+        #        tmp1_vec += tmp0;
+        #     }
+        #     tmp1 = at::vec::vec_reduce_all<float>([]
+        #       (at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;},
+        #       tmp1_vec);
+        #     for(long i1=8; i1<8; i1+=1) {
+        #        auto tmp0 = in_ptr0[i1];
+        #        tmp1 += tmp0;
+        #     }
+        # It means that the vectorization introduce another reduction variable(tmp1_vec).
+        # If the most inner loop of the reduction is not a parallelized but its parent reduction
+        # loop is parallized, the new added reduction variable(tmp1_vec) could not be added
+        # to the parallelized loop reduction. So we skip this case and does not vectorize it.
+        if reduction_par_depth > 0 and reduction_par_depth != len(
+            loops_nest_reduce.loops
+        ):
+            return self.simd_omp_kernel.codegen_loops(code, worksharing)
 
         with contextlib.ExitStack() as stack:
             if par_depth:
                 worksharing.parallel(threads)
-                loops_nest_non_reduc.mark_parallel(par_depth)
+                loops_nest_non_reduce.mark_parallel(par_depth)
+            elif reduction_par_depth:
+                # need to close the worksharing scope to define reduction vars outside it
+                worksharing.close()
+                loops_nest_reduce.mark_parallel(reduction_par_depth)
             elif threads > 1:
                 if worksharing.single():
                     stack.enter_context(code.indent())
 
-            self.vectorize_most_inner_loop(loops_nest_non_reduc)
+            non_reduce_loops = loops_nest_non_reduce.loops
+            reduce_loops = loops_nest_reduce.loops
+            loop_with_tail: LoopLevelWithTail = None
 
-            for loop in loops_nest_non_reduc.loops[0:-1]:
+            if loops_nest_reduce:
+                self.vectorize_most_inner_loop(loops_nest_reduce)
+                loop_with_tail = loops_nest_reduce.loops[-1]
+                # The most inner loop will be vectorized
+                reduce_loops = reduce_loops[0:-1]
+            else:
+                self.vectorize_most_inner_loop(loops_nest_non_reduce)
+                loop_with_tail = loops_nest_non_reduce.loops[-1]
+                # The most inner loop will be vectorized
+                non_reduce_loops = non_reduce_loops[0:-1]
+
+            # The reductions loops are always the loop body of non-reduction loops
+            for loop in non_reduce_loops:
                 code.writelines(loop.lines())
                 stack.enter_context(code.indent())
 
-            loop_with_tail: LoopLevelWithTail = loops_nest_non_reduc.loops[-1]
-            for loop, kernel in (
-                (loop_with_tail.main_loop, loop_with_tail.main_loop_body),
-                (loop_with_tail.tail_loop, loop_with_tail.tail_loop_body),
-            ):
+            with contextlib.ExitStack() as stack_outer:
+                if self.simd_vec_kernel.reduction_prefix:
+                    stack_outer.enter_context(code.indent())
+                code.splice(self.simd_vec_kernel.reduction_prefix)
 
-                code.writelines(loop.lines())
+                if reduction_par_depth:
+                    worksharing.parallel(threads)
+
                 with contextlib.ExitStack() as stack:
-                    stack.enter_context(code.indent())
-                    code.splice(kernel.loads)
-                    code.splice(kernel.compute)
-                    code.splice(kernel.stores)
+                    for loop in reduce_loops:
+                        code.writelines(loop.lines())
+                        stack.enter_context(code.indent())
+
+                    def gen_vectorized_loop(loop, kernel, write_reduction_suffix=False):
+                        code.writelines(loop.lines())
+                        with contextlib.ExitStack() as stack:
+                            stack.enter_context(code.indent())
+                            code.splice(kernel.loads)
+                            code.splice(kernel.compute)
+                            code.splice(kernel.stores)
+                        if write_reduction_suffix:
+                            code.splice(kernel.reduction_suffix)
+
+                    # Regarding the vectorized reduction loop, we need to call reduce_all to to reduce
+                    # the vectorize as a single scalar. Hence, we set write_reduction_suffix to True to
+                    # gen the code.
+                    gen_vectorized_loop(
+                        loop_with_tail.main_loop, loop_with_tail.main_loop_body, True
+                    )
+
+                    gen_vectorized_loop(
+                        loop_with_tail.tail_loop, loop_with_tail.tail_loop_body, False
+                    )
+
+                if reduction_par_depth:
+                    worksharing.close()
+
+                code.splice(loop_with_tail.tail_loop_body.reduction_suffix)
 
 
 class CppScheduling:
@@ -1146,13 +1354,14 @@ class LoopLevel:
 
     def lines(self):
         if self.reduction_vars:
+            suffix = "_vec" if self.simd_vec else ""
             reduction = " " + " ".join(
-                f"reduction({RTYPE_TO_CPP[rtype]}:{var})"
+                f"reduction({RTYPE_TO_CPP[rtype]}:{var}{suffix})"
                 for var, rtype in self.reduction_vars.items()
             )
         else:
             reduction = ""
-        simd = f"simd simdlen({self.simd_len})" if self.simd_omp else ""
+        simd = f"simd simdlen({self.simd_len}) " if self.simd_omp else ""
         if self.parallel:
             # TODO(jansel): look into chunk size and other schedules
             line1 = f"#pragma omp for{reduction} "
@@ -1218,18 +1427,21 @@ class LoopNest:
         main_loop_range = ir.IndexingDiv(most_inner_loop.size, sympy_factor)
 
         main_loop = LoopLevel(most_inner_loop.var, main_loop_range)
-        main_loop.parallel = 1 if most_inner_loop.parallel > 0 else 0
+        main_loop.parallel = most_inner_loop.parallel
         main_loop.collapsed = False
+        main_loop.reduction_vars = most_inner_loop.reduction_vars
 
         offset = main_loop_range * sympy_factor
         tail_loop = LoopLevel(most_inner_loop.var, most_inner_loop.size)
         tail_loop.offset = offset
-        tail_loop.parallel = 1 if most_inner_loop.parallel > 0 else 0
+        tail_loop.parallel = most_inner_loop.parallel
         tail_loop.collapsed = False
+        tail_loop.reduction_vars = most_inner_loop.reduction_vars
 
         loop_with_tail = LoopLevelWithTail(main_loop, tail_loop)
         loop_with_tail.parallel = 0
         loop_with_tail.collapsed = False
+
         self.loops[-1] = loop_with_tail
 
     def codegen(self, code, stack):
