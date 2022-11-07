@@ -33,8 +33,8 @@ from torch.ao.quantization.fx.match_utils import (
 
 from torch.ao.quantization import (
     QuantType,
-    _get_quant_type_to_str,
 )
+from torch.ao.quantization.quant_type import _get_quant_type_to_str
 
 from torch.ao.quantization import (
     QuantStub,
