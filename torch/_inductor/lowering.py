@@ -3298,19 +3298,22 @@ def div_prim(a, b):
     else:
         return div(a, b)
 
+
 @register_lowering([aten.fmod, prims.fmod])
 def fmod(a, b):
     is_integral = is_boolean_type(a) or is_integer_type(a)
 
     if is_integral:
+
         def fn(a, b):
             return ops.mod(a, b)
+
     else:
+
         def fn(a, b):
             return ops.fmod(a, b)
 
     return make_pointwise(fn)(a, b)
-
 
 
 # TODO - enable builtin and disable decomp to lower to ptx instruction
