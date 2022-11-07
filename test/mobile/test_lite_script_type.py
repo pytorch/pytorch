@@ -82,7 +82,7 @@ class TestLiteScriptModule(TestCase):
         #    ('returns',
         #     ((('name', ''), ('type', 'Tensor'), ('default_value', None)),)))))
 
-        assert False
+        raise AssertionError("testing if in OSS CI")
 
         sample_input = torch.tensor(5)
         script_module = torch.jit.script(Bar())
