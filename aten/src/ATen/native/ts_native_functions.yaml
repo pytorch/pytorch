@@ -102,7 +102,7 @@ full_codegen:
   - pow.Tensor_Scalar
   - pow.Tensor_Tensor
   - random
-  - random.from
+  - random._from
   - random.to
   - reciprocal
   - relu

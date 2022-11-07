@@ -1290,7 +1290,7 @@
   self: rad2deg_backward(grad)
   result: auto_element_wise
 
-- name: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
+- name: random_._from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
   result: self_t.zero_()
 
