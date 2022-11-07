@@ -40,6 +40,12 @@ def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, s
         op_overload_packet = getattr(torch.ops.aten, attr_name)
         if not isinstance(op_overload_packet, torch._ops.OpOverloadPacket):
             continue
+
+        exporter_look_up_key = op_overload_packet._qualified_op_name
+        if registration.registry.get_function_group(exporter_look_up_key) is None:
+            # This aten op doesn't have ONNX exporter.
+            continue
+
         for overload_name in op_overload_packet.overloads():
             op_overload = getattr(op_overload_packet, overload_name)
             # This line maps torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, torch.ops.aten.add.out, etc
@@ -49,6 +55,7 @@ def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, s
             # TODO(wechi): in the future, we might want to write individual exporter for each overload, if,
             # for example, they have different type promotion rules. If so, just map different overloads to
             # different exporter keys.
+
             table[op_overload] = op_overload_packet._qualified_op_name
 
     return table
@@ -299,7 +306,10 @@ def _export(
     return model_proto
 
 
-def _export_function(fn: Callable, *args, use_binary_format: bool = True):
+def _export_function(
+    fn: Callable, *args,
+    use_binary_format: bool = True
+):
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(args)
     # Translate callable to FX graph.
@@ -309,11 +319,15 @@ def _export_function(fn: Callable, *args, use_binary_format: bool = True):
         graph_module,
         *args,
         decomposition_table=_onnx_friendly_decomposition_table,
-        use_binary_format=use_binary_format,
+        use_binary_format=use_binary_format
     )
 
 
-def _export_module(module: torch.nn.Module, *args, use_binary_format: bool = True):
+def _export_module(
+    module: torch.nn.Module,
+    *args,
+    use_binary_format: bool = True
+):
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(args)
     # Convert nn.Module to FX graph
@@ -326,5 +340,5 @@ def _export_module(module: torch.nn.Module, *args, use_binary_format: bool = Tru
         graph_module,
         *args,
         decomposition_table=_onnx_friendly_decomposition_table,
-        use_binary_format=use_binary_format,
+        use_binary_format=use_binary_format
     )

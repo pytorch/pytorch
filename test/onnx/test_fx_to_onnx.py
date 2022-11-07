@@ -5,7 +5,7 @@ import onnx.checker
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.onnx._fx import _export_function, _export_module
+from torch.onnx._internal._fx import _export_function, _export_module
 from torch.testing._internal import common_utils
 
 
@@ -19,7 +19,6 @@ class TestFxToOnnx(common_utils.TestCase):
         onnx_model = _export_function(func, torch.randn(1, 1, 2))
         onnx.checker.check_model(onnx_model)
 
-    @unittest.skip("nn.Module and stateful callable are not exportable to ONNX yet.")
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
