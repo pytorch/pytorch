@@ -75,6 +75,8 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt) \
   _CATCH_GENERIC_ERROR(                                                 \
       OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)        \
+  _CATCH_GENERIC_ERROR(                                                 \
+      DistBackendError, THPException_DistBackendError, retstmnt)        \
   _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)             \
   catch (torch::PyTorchError & e) {                                     \
     auto msg = torch::processErrorMsg(e.what());                        \
@@ -146,7 +148,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError;
+    *THPException_OutOfMemoryError, *THPException_DistBackendError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.

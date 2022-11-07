@@ -19,6 +19,8 @@ def is_available() -> bool:
 if is_available() and not torch._C._c10d_init():
     raise RuntimeError("Failed to initialize torch.distributed")
 
+# Custom Runtime Errors thrown from the distributed package
+DistBackendError = torch._C._DistBackendError
 
 if is_available():
     from torch._C._distributed_c10d import (

@@ -13,7 +13,7 @@
 #include <c10/util/StringUtil.h>
 
 PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError;
+    *THPException_OutOfMemoryError, *THPException_DistBackendError;
 
 #define ASSERT_TRUE(cond) \
   if (!(cond))            \
@@ -62,6 +62,16 @@ could not be completed because the input matrix is singular.",
   ASSERT_TRUE(
       PyModule_AddObject(
           module, "_OutOfMemoryError", THPException_OutOfMemoryError) == 0);
+
+  ASSERT_TRUE(
+      THPException_DistBackendError = PyErr_NewExceptionWithDoc(
+          "torch.distributed.DistBackendError",
+          "Exception raised when a backend error occurs in distributed",
+          PyExc_RuntimeError,
+          nullptr));
+  ASSERT_TRUE(
+      PyModule_AddObject(
+          module, "_DistBackendError", THPException_DistBackendError) == 0);
 
   return true;
 }
