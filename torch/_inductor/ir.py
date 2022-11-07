@@ -2917,15 +2917,6 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        packed = FallbackKernel(
-            MultiOutputLayout(tensor_args[0].get_device()),
-            kernel,
-            tensor_args,
-            non_tensor_args,
-            unflatten_args,
-            kwargs,
-        )
-
         def generate_output(output, index=""):
             if isinstance(output, list):
                 return list(
@@ -2946,7 +2937,14 @@ class FallbackKernel(ExternKernelAlloc):
                             [sympy.Integer(s) for s in output.size()],
                             [sympy.Integer(s) for s in output.stride()],
                         ),
-                        packed,
+                        FallbackKernel(
+                            MultiOutputLayout(output.device),
+                            kernel,
+                            tensor_args,
+                            non_tensor_args,
+                            unflatten_args,
+                            kwargs,
+                        ),
                         index,
                     )
                     if output is not None
