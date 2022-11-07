@@ -2421,7 +2421,7 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_contiguous(cls, x):
-        return cls.require_stride_order(cls, list(reversed(range(len(x.get_size)))))
+        return cls.require_stride_order(cls, list(reversed(range(len(x.get_size())))))
 
     def apply_constraint(self):
         pass
