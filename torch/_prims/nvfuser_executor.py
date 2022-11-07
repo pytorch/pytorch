@@ -30,10 +30,9 @@ else:
 
 import os
 
-dump_nvtx = False
-if os.getenv("PYTORCH_NVFUSER_DUMP_NVTX"):
-    dump_nvtx = True
-
+@lru_cache(None)
+def get_nvprim_dump_nvtx():
+  return os.getenv("PYTORCH_NVFUSER_DUMP_NVTX")
 
 DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
     {
@@ -254,7 +253,7 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
             arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number))
         )
 
-        if dump_nvtx:
+        if get_nvprim_dump_nvtx():
             torch.cuda.nvtx.range_push(
                 "fusion: {0}, graph: {1}".format(
                     fusion.id(),
@@ -275,7 +274,7 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
             fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
             unflatten_spec,  # type: ignore[has-type]
         )
-        if dump_nvtx:
+        if get_nvprim_dump_nvtx():
             torch.cuda.nvtx.range_pop()
         return result
     else:
@@ -479,7 +478,7 @@ def nvfuser_execute_partitioned(gm: GraphModule, *args, executor_parameters=None
         use_python_fusion_cache=use_python_fusion_cache,
     )
     if is_partitioned:
-        if dump_nvtx:
+        if get_nvprim_dump_nvtx():
             return NVTXInterpreter(gm).run(*args)
         else:
             return gm(*args)
