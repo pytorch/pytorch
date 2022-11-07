@@ -283,7 +283,7 @@ class GradModeVariable(ContextWrappingVariable):
         return "_C._set_grad_enabled"
 
     def fn_name(self):
-        if self.target_values:
+        if self.target_values[0]:
             return "enable_grad"
         else:
             return "no_grad"
