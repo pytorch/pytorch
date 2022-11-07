@@ -1,4 +1,3 @@
-# Owner(s): ["module: onnx"]
 import copy
 import itertools
 import operator
@@ -61,7 +60,11 @@ def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, s
     return table
 
 
-_op_overload_to_exporter_key_table = _create_op_overload_to_exporter_key_table()
+# Dictionary that maps torch.ops.aten.* to exporter look up key; e.g.,
+# _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[torch.add.Tensor] is "aten::add".
+# In subsequent code, torch.ops.aten.add.Tensor's exporter is found by
+# registration.registry.get_function_group("aten::add").
+_OP_OVERLOAD_TO_EXPORTER_KEY_TABLE = _create_op_overload_to_exporter_key_table()
 
 
 def _create_onnx_friendly_decomposition_table() -> Dict[
@@ -73,14 +76,17 @@ def _create_onnx_friendly_decomposition_table() -> Dict[
         # Skip decomposition for op_overload as long as that op_overload has a corresponding ONNX exporter.
         if (
             "torch._refs" in decomp_fn.__module__
-            or op_overload in _op_overload_to_exporter_key_table
+            or op_overload in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
         ):
             continue
         decomposition_table[op_overload] = decomp_fn
     return decomposition_table
 
 
-_onnx_friendly_decomposition_table = _create_onnx_friendly_decomposition_table()
+# This is a subset of PyTorch's built-in aten-to-aten decomposition. If an aten
+# op (e.g., torch.ops.aten.add.Tensor) has exporter, we exclude the op's decomposition
+# function in the _ONNX_FRIENDLY_DECOMPOSITION_TABLE.
+_ONNX_FRIENDLY_DECOMPOSITION_TABLE = _create_onnx_friendly_decomposition_table()
 
 
 def _retrieve_or_wrap_scalar_as_constant(
@@ -181,9 +187,9 @@ def _export_fx_to_ts(fx_module_with_metadata):
             # aten ops and other statless functions.
             if (
                 isinstance(node.target, torch._ops.OpOverload)
-                and node.target in _op_overload_to_exporter_key_table
+                and node.target in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
             ):
-                exporter_key = _op_overload_to_exporter_key_table[node.target]
+                exporter_key = _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[node.target]
                 symbolic_function_group = registration.registry.get_function_group(
                     exporter_key
                 )
@@ -315,7 +321,7 @@ def _export_function(fn: Callable, *args, use_binary_format: bool = True):
     return _export(
         graph_module,
         *args,
-        decomposition_table=_onnx_friendly_decomposition_table,
+        decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
     )
 
@@ -332,6 +338,6 @@ def _export_module(module: torch.nn.Module, *args, use_binary_format: bool = Tru
     return _export(
         graph_module,
         *args,
-        decomposition_table=_onnx_friendly_decomposition_table,
+        decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
     )
