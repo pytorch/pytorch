@@ -1574,6 +1574,23 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
+Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
+  if (self.is_sparse()) {
+    TORCH_CHECK(0, "_reshape_copy is not implemented for sparse tensors");
+  }
+  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+
+  if (self.is_mkldnn()) {
+    TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tesnors");
+  }
+
+  if (self.is_contiguous()) {
+    return self.view_symint(shape).clone(at::MemoryFormat::Contiguous);
+  } else {
+    return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
+  }
+}
+
 // Duplicate of above code for non-symbolic ints. Kept for BC purposes and to
 // minimize breakages.
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
@@ -3079,7 +3096,7 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     int64_t shift = 0;
-    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(self.dim());
+    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(0, self.dim());
     for (const auto d : dims) {
       if (self.sizes()[d] == 1) {
         TORCH_CHECK(axis != d, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
