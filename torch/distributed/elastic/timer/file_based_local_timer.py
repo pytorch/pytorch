@@ -75,7 +75,7 @@ class FileTimerClient(TimerClient):
         file_path: str, the path of a FIFO special file. ``FileTimerServer``
                         must have created it by calling os.mkfifo().
 
-        signal: singal, the signal to use to kill the process. Using a
+        signal: signal, the signal to use to kill the process. Using a
                         negative or zero signal will not kill the process.
     """
     def __init__(self, file_path: str, signal=signal.SIGKILL) -> None:
