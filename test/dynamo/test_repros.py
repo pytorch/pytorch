@@ -30,6 +30,16 @@ except ImportError:
     HAS_REFS = False
 
 
+_orig_module_call = torch.nn.Module.__call__
+
+
+def is_fx_tracing_test() -> bool:
+    """
+    Copied from the hpc trainer codebase
+    """
+    return torch.nn.Module.__call__ is not _orig_module_call
+
+
 def ifdyn(count1, count2):
     if torch._dynamo.config.dynamic_shapes:
         return count1
@@ -1471,8 +1481,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(y, 10)
 
-    # AssertionError: ABCMeta
-    @unittest.expectedFailure
     def test_sort_out(self):
 
         dtype = torch.float32
@@ -1490,8 +1498,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager")(fn)
         opt_fn()
 
-    # AssertionError: ABCMeta
-    @unittest.expectedFailure
     def test_sigmoid_out(self):
 
         dtype = torch.float32
@@ -1757,6 +1763,19 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager", nopython=True)(mod)
         args = (torch.randn(3, 4),)
         self.assertTrue(same(mod(*args), opt_mod(*args)))
+
+    def test_is_symbolic_tracing(self):
+        # Ensure no graph break here
+        def fn(x):
+            if is_fx_tracing_test():
+                return x * 2
+            return x * 4
+
+        a = torch.randn(4)
+        ref = fn(a)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(a)
+        self.assertTrue(same(ref, res))
 
 
 if __name__ == "__main__":
