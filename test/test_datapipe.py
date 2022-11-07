@@ -54,6 +54,7 @@ from torch.utils.data.datapipes.utils.snapshot import (
 )
 from torch.utils.data.datapipes.dataframe import CaptureDataFrame
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
+from torch.utils.data.datapipes.iter.grouping import SHARDING_PRIORITIES
 
 try:
     import dill
@@ -2352,6 +2353,9 @@ class NumbersDataset(IterDataPipe):
         for i in range(self.size):
             yield i
 
+    def __len__(self):
+        return self.size
+
 
 class TestGraph(TestCase):
     class CustomIterDataPipe(IterDataPipe):
@@ -2662,6 +2666,40 @@ class TestSharding(TestCase):
             torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, i)
             items += list(sharded_dp)
         self.assertEqual(sorted(all_items), sorted(items))
+
+    def test_sharding_groups(self):
+        def construct_sharded_pipe():
+            sharding_pipes = []
+            dp = NumbersDataset(size=90)
+            dp = dp.sharding_filter(sharding_group_filter=SHARDING_PRIORITIES.DISTRIBUTED)
+            sharding_pipes.append(dp)
+            dp = dp.sharding_filter(sharding_group_filter=SHARDING_PRIORITIES.MULTIPROCESSING)
+            sharding_pipes.append(dp)
+            dp = dp.sharding_filter(sharding_group_filter=300)
+            sharding_pipes.append(dp)
+            return dp, sharding_pipes
+
+        dp, sharding_pipes = construct_sharded_pipe()
+
+        for pipe in sharding_pipes:
+            pipe.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DISTRIBUTED)
+            pipe.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
+            pipe.apply_sharding(3, 1, sharding_group=300)
+
+        actual = list(dp)
+        expected = [17, 47, 77]
+        self.assertEquals(expected, actual)
+        self.assertEquals(3, len(dp))
+
+        dp, _ = construct_sharded_pipe()
+        dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
+        with self.assertRaises(Exception):
+            dp.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
+
+        dp, _ = construct_sharded_pipe()
+        dp.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
+        with self.assertRaises(Exception):
+            dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
 
     def test_sharding_length(self):
         numbers_dp = dp.iter.IterableWrapper(range(13))
