@@ -37,6 +37,7 @@ identical to the slice of the result of the same operation applied to the full t
 ``A`` be a 2-dimensional tensor. ``A.sum(-1)[0]`` is not guaranteed to be bitwise equal to
 ``A[:,0].sum()``.
 
+
 Extremal values
 ---------------
 
@@ -63,10 +64,11 @@ The external libraries (backends) that ``torch.linalg`` uses provide no guarante
 when the inputs have non-finite values like ``inf`` or ``NaN``. As such, neither does PyTorch.
 The operations may return a tensor with non-finite values, or raise an exception, or even segfault.
 
-Consider using :func:`torch.isfinite` before calling these functions if your inputs may contain these values.
+Consider using :func:`torch.isfinite` before calling these functions to detect this situation if your
+inputs may contain these values.
 
-Extremal values
-^^^^^^^^^^^^^^^
+Extremal values in linalg
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 What's considered `Extremal Values`_ in the context of ``torch.linalg`` is a bit more subtle than in the rest of PyTorch.
 
@@ -76,12 +78,12 @@ incorrect results. These matrices are said to be `ill-conditioned <https://nhigh
 If provided with ill-conditioned inputs, the results of these functions may vary when using the same input on different devices
 or when using different backends via the keyword ``driver``.
 
-Similarly, spectral operations like ``svd``, ``eig``, and ``eigh`` may return incorrect results (and their gradients may be infinite)
-when their inputs have eigenvalues that are too close to each other as the approximate algorithms used to compute these decompositions
+Similarly, spectral operations like ``svd``, ``eig``, and ``eigh`` may silently return incorrect results (and their gradients may be infinite)
+when their inputs have eigenvalues that are close to each other. This is because the algorithms used to compute these decompositions
 struggle to converge for these inputs.
 
-Running the computation in ``float64`` (as NumPy does by default) often helps, but it does not solve the issue in all cases.
-Otherwise, analyzing the spectrum of the inputs via :func:`torch.linalg.svdvals` or their condition number via :func:`torch.linalg.cond`
+Running the computation in ``float64`` (as NumPy does by default) often helps, but it does not solve these issue in all cases.
+Analyzing the spectrum of the inputs via :func:`torch.linalg.svdvals` or their condition number via :func:`torch.linalg.cond`
 may help to detect these issues.
 
 
