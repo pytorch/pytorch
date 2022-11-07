@@ -55,7 +55,8 @@ void initPythonBindings(PyObject* module) {
           py::init<
               std::vector<std::string> /* profiler_metrics */,
               bool /* profiler_measure_per_kernel */,
-              bool /* verbose */
+              bool /* verbose */,
+              std::vector<std::string> /* performance_events  */
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -64,10 +65,12 @@ void initPythonBindings(PyObject* module) {
           "       If this list contains values Kineto runs in CUPTI profiler mode\n"
           "    profiler_measure_per_kernel (bool) : whether to profile metrics per kernel\n"
           "       or for the entire measurement duration.\n"
-          "    verbose (bool) : whether the trace file has `Call stack` field or not.",
+          "    verbose (bool) : whether the trace file has `Call stack` field or not.\n"
+          "    performance_events : a list of profiler events to be used for measurement",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
-          py::arg("verbose") = false)
+          py::arg("verbose") = false,
+          py::arg("performance_events") = std::vector<std::string>())
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
@@ -75,13 +78,21 @@ void initPythonBindings(PyObject* module) {
               py::bytes mbytes(metric);
               py_metrics.append(mbytes);
             }
+            py::list py_perf_events;
+            for (const auto& event : p.performance_events) {
+              py::bytes mbytes(event);
+              py_perf_events.append(mbytes);
+            }
             /* Return a tuple that fully encodes the state of the config */
             return py::make_tuple(
-                py_metrics, p.profiler_measure_per_kernel, p.verbose);
+                py_metrics,
+                p.profiler_measure_per_kernel,
+                p.verbose,
+                p.performance_events);
           },
           [](py::tuple t) { // __setstate__
-            if (t.size() != 3) {
-              throw std::runtime_error("Expected 3 values in state");
+            if (t.size() >= 3) {
+              throw std::runtime_error("Expected atleast 3 values in state");
             }
 
             py::list py_metrics = t[0].cast<py::list>();
@@ -91,8 +102,20 @@ void initPythonBindings(PyObject* module) {
               metrics.push_back(py::str(py_metric));
             }
 
+            std::vector<std::string> performance_events;
+            if (t.size() == 4) {
+              py::list py_perf_events = t[3].cast<py::list>();
+              performance_events.resize(py_perf_events.size());
+              for (const auto& py_perf_event : py_perf_events) {
+                performance_events.push_back(py::str(py_perf_event));
+              }
+            }
+
             return ExperimentalConfig(
-                std::move(metrics), t[1].cast<bool>(), t[2].cast<bool>());
+                std::move(metrics),
+                t[1].cast<bool>(),
+                t[2].cast<bool>(),
+                std::move(performance_events));
           }));
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
