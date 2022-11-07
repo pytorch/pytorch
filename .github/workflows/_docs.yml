@@ -100,7 +100,8 @@ jobs:
         id: build-docs
         env:
           # After https://github.com/pytorch/pytorch/pull/88373, pull workflow can now be run periodically,
-          # so this can be wrongly set to true
+          # so using a schedule event to determine if the docs should be pushed or not doesn't hold true
+          # anymore
           WITH_PUSH: ${{ inputs.push }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           DOCS_TYPE: ${{ matrix.docs_type }}
