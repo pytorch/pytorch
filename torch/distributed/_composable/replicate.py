@@ -26,15 +26,15 @@ class ReplicateState(DistributedState):
     def _recursive_collect_params(self, module: nn.Module) -> None:
         # TODO: skip if managed by other APIs
 
-        if replicate.state(module) is None or getattr(
-            replicate.state(module), "_param_collected", False
-        ):
-            return
-        replicate.state(module)._param_collected = True
+        if hasattr(replicate.state(module), "_params_collected"):
+            if replicate.state(module)._params_collected:
+                return
+            replicate.state(module)._params_collected = True
 
         self._param_list.extend(
             param
             for param in module.parameters(recurse=False)
+            # for param in module.parameters()
             if param.requires_grad
         )
         for child in module.children():
