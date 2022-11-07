@@ -128,6 +128,7 @@ class _ExtraFields_Backend: ...
 class _ExtraFields_Allocation:
     ptr: int
     id: Optional[int]
+    allocation_id: Optional[int]
     alloc_size: int
     total_allocated: int
     total_reserved: int

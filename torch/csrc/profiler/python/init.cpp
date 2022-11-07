@@ -155,6 +155,7 @@ void initPythonBindings(PyObject* module) {
       .def_property_readonly("impl_ptr", &TensorMetadata::impl)
       .def_readonly("storage_data_ptr", &TensorMetadata::data_)
       .def_readonly("id", &TensorMetadata::id_)
+      .def_readonly("allocation_id", &TensorMetadata::allocation_id_)
       .def_property_readonly(
           "layout",
           [](const TensorMetadata& metadata) {
@@ -189,6 +190,7 @@ void initPythonBindings(PyObject* module) {
             return reinterpret_cast<intptr_t>(a.ptr_);
           })
       .def_readonly("id", &allocation_t::id_)
+      .def_readonly("allocation_id", &allocation_t::allocation_id_)
       .def_readonly("alloc_size", &allocation_t::alloc_size_)
       .def_readonly("total_allocated", &allocation_t::total_allocated_)
       .def_readonly("total_reserved", &allocation_t::total_reserved_)
