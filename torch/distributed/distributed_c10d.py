@@ -226,8 +226,8 @@ class Backend(object):
             f"{name.upper()} c10d backend creator function already exist"
         )
 
-        setattr(Backend, name.upper(), name.upper())
-        Backend.backend_list.append(name.upper())
+        setattr(Backend, name.upper(), name.lower())
+        Backend.backend_list.append(name.lower())
         Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
 
 class BackendConfig(object):
@@ -248,7 +248,7 @@ class BackendConfig(object):
                 "cpu": Backend.UCC,
                 "cuda": Backend.NCCL,
             }
-        elif backend.upper() in Backend.backend_list:
+        elif backend.lower() in Backend.backend_list:
             # backend applies to all devices (e.g. "GLOO", "MPI", "custom_backend")
             backend_val = Backend(backend)
             self.device_backend_map = {
@@ -261,7 +261,7 @@ class BackendConfig(object):
             pass
 
         required_devices = ["cpu", "cuda"]
-        print(self.device_backend_map)
+        print(f"{backend=}, {self.device_backend_map=}")
         for device in required_devices:
             assert device in self.device_backend_map
 
