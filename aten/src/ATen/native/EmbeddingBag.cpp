@@ -307,6 +307,8 @@ index_select_add(
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 = at::zeros({output_size, ddim}, output.options().dtype(at::kFloat));
     auto* output_data_fp32 = output_fp32.data_ptr<float>();
+    using bVec = Vectorized<BFloat16>;
+    using fVec = Vectorized<float>;
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           caffe2::EmbeddingLookupIdx(
@@ -321,10 +323,23 @@ index_select_add(
               /*scale_bias=*/nullptr,
               /*normalize_by_lengths=*/false,
               /*out=*/output_data_fp32 + start_idx * ddim);
-          for (const auto i : c10::irange(output_size)) {
-            // Convert FP32 intermediate buffer result back to FP16/BF16 for
-            // output dtype
+          // Convert FP32 intermediate buffer result back to FP16/BF16 for
+          // output dtype
+          if (std::is_same<data_t, at::Half>::value) {
+            // FP16
             for (const auto d : c10::irange(ddim)) {
+              (output_data + i * ddim)[d] =
+                  static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
+            }
+          } else {
+            // BF16
+            int64_t d = 0;
+            for (; d < ddim - (ddim % bVec::size()); d += bVec::size()) {
+              fVec temp_fp32_0 = fVec::loadu(output_data_fp32 + ddim * i + d);
+              fVec temp_fp32_1 = fVec::loadu(output_data_fp32 + ddim * i + d + fVec::size());
+              convert_float_bfloat16(temp_fp32_0, temp_fp32_1).store(output_data + i * ddim + d);
+            }
+            for (; d < ddim; d++) {
               (output_data + i * ddim)[d] =
                   static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
             }
@@ -676,6 +691,8 @@ index_select_scale_add(
     for (const auto i : c10::irange(scale.numel())) {
       scale_data_fp32[i] = static_cast<float>(scale_data[i]);
     }
+    using bVec = Vectorized<BFloat16>;
+    using fVec = Vectorized<float>;
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           caffe2::EmbeddingLookupIdx(
@@ -690,10 +707,23 @@ index_select_scale_add(
               /*scale_bias=*/nullptr,
               /*normalize_by_lengths=*/false,
               /*out=*/output_data_fp32 + start_idx * ddim);
-          for (const auto i : c10::irange(output_size)) {
-            // Convert FP32 intermediate buffer result back to FP16/BF16 for
-            // output dtype
+          // Convert FP32 intermediate buffer result back to FP16/BF16 for
+          // output dtype
+          if (std::is_same<data_t, at::Half>::value) {
+            // FP16
             for (const auto d : c10::irange(ddim)) {
+              (output_data + i * ddim)[d] =
+                  static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
+            }
+          } else {
+            // BF16
+            int64_t d = 0;
+            for (; d < ddim - (ddim % bVec::size()); d += bVec::size()) {
+              fVec temp_fp32_0 = fVec::loadu(output_data_fp32 + ddim * i + d);
+              fVec temp_fp32_1 = fVec::loadu(output_data_fp32 + ddim * i + d + fVec::size());
+              convert_float_bfloat16(temp_fp32_0, temp_fp32_1).store(output_data + i * ddim + d);
+            }
+            for (; d < ddim; d++) {
               (output_data + i * ddim)[d] =
                   static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
             }
