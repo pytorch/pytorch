@@ -360,8 +360,8 @@ class GraphLowering(torch.fx.Interpreter):
         if config.cpp_wrapper:
             self.check_cpp_wrapper()
             if self._can_use_cpp_wrapper:
-                self.wrapper_code = CppWrapperCodeGen()
                 self.sizevars = CppSizeVarAllocator(self._shape_env)
+                self.wrapper_code = CppWrapperCodeGen()
                 return
         self.wrapper_code = WrapperCodeGen()
         return
