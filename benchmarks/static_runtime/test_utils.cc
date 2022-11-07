@@ -172,7 +172,7 @@ void compareResults(
     EXPECT_TRUE(actual.isTuple());
     auto lhs = expect.toTupleRef().elements();
     auto rhs = actual.toTupleRef().elements();
-    EXPECT_TRUE(lhs.size() == rhs.size());
+    ASSERT_TRUE(lhs.size() == rhs.size());
     for (size_t i = 0; i < lhs.size(); i++) {
       compareResults(lhs[i], rhs[i]);
     }
@@ -180,7 +180,7 @@ void compareResults(
     EXPECT_TRUE(actual.isList());
     auto lhs = expect.toList();
     auto rhs = actual.toList();
-    EXPECT_TRUE(lhs.size() == rhs.size());
+    ASSERT_TRUE(lhs.size() == rhs.size());
     for (size_t i = 0; i < lhs.size(); i++) {
       compareResults(lhs[i], rhs[i]);
     }
@@ -191,7 +191,7 @@ void compareResults(
     EXPECT_TRUE(lhs.size() == rhs.size());
     for (auto& lh : lhs) {
       auto f = rhs.find(lh.key());
-      EXPECT_FALSE(f == rhs.end());
+      ASSERT_FALSE(f == rhs.end());
       compareResults(lh.value(), f->value());
     }
   } else {
