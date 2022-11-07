@@ -1135,7 +1135,6 @@ symbolic_tensor_failures = {
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
     xfail('addr', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('aminmax', ''),  # aten.aminmax.default - couldn't find symbolic meta function/decomposition
-    xfail('argmax', ''),  # aten.argmax.default - couldn't find symbolic meta function/decomposition
     xfail('argmin', ''),  # aten.argmin.default - couldn't find symbolic meta function/decomposition
     xfail('argsort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('argwhere', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
