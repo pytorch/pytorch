@@ -1362,7 +1362,11 @@ class LoopLevel:
             )
         else:
             reduction = ""
-        simd = f"simd simdlen({self.simd_len}) " if self.simd_omp and self.simd_len > 1 else ""
+        simd = (
+            f"simd simdlen({self.simd_len}) "
+            if self.simd_omp and self.simd_len > 1
+            else ""
+        )
         if self.parallel:
             # TODO(jansel): look into chunk size and other schedules
             line1 = f"#pragma omp for{reduction} "
