@@ -96,13 +96,6 @@ class _ProfilerEvent:
     @property
     def duration_time_ns(self) -> int: ...
 
-class _Inputs:
-    shapes: List[List[int]]
-    dtypes: List[str]
-    strides: List[List[int]]
-    ivalues: List[Union[int, float, bool, complex]]
-    tensor_metadata: List[Optional[_TensorMetadata]]
-
 class _TensorMetadata:
     impl_ptr: Optional[int]
     storage_data_ptr: Optional[int]
@@ -114,12 +107,20 @@ class _TensorMetadata:
     def device(self) -> device: ...
     @property
     def dtype(self) -> dtype: ...
+    @property
+    def sizes(self) -> List[int]: ...
+    @property
+    def strides(self) -> List[int]: ...
+
+Scalar = Union[int, float, bool, complex]
+Input = Optional[Union[_TensorMetadata, List[_TensorMetadata], Scalar]]
 
 class _ExtraFields_TorchOp:
-    inputs: _Inputs
     sequence_number: int
     allow_tf32_cublas: bool
 
+    @property
+    def inputs(self) -> List[Input]: ...
     @property
     def scope(self) -> RecordScope: ...
 
