@@ -45,6 +45,8 @@ Decompositions
     svd
     svdvals
 
+.. _linalg solvers:
+
 Solvers
 -------
 
@@ -56,6 +58,8 @@ Solvers
     solve_triangular
     lu_solve
     lstsq
+
+.. _linalg inverses:
 
 Inverses
 --------
