@@ -358,13 +358,13 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims){
 
   set_axes_and_shapes(self, dims, axes, apparent_input_shape, apparent_output_shape, output_shape);
 
-  int64_t* raw_output_shape = (int64_t *)malloc([output_shape count] * sizeof(int64_t));
-  for(int i=0; i < [output_shape count]; i++) {
+  std::vector<int64_t> raw_output_shape([output_shape count]);
+  for(auto i: c10::irange(raw_output_shape.size())) {
     raw_output_shape[i] = [output_shape[i] longValue];
   }
 
   Tensor output_t = at::native::empty_mps(
-                      IntArrayRef(raw_output_shape, [output_shape count]),
+                      IntArrayRef(raw_output_shape),
                       ScalarType::Long,
                       c10::nullopt,
                       kMPS,
@@ -372,8 +372,6 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims){
                       c10::nullopt);
 
   reduction_out_mps(self, dims, false, self.scalar_type(), const_cast<Tensor&>(output_t), MPSReductionType::COUNT_NONZERO, "count_nonzero_mps");
-
-  free(raw_output_shape);
 
   return output_t;
 }
@@ -1569,8 +1567,8 @@ std::tuple<Tensor, Tensor> min_max_mps
     // Use this if keepdim is false
     int64_t num_output_dims = num_input_dims - 1;
 
-    int64_t* malloc_apparent_out_shape = (int64_t *)malloc(num_input_dims * sizeof(int64_t));
-    int64_t* malloc_out_shape = (int64_t *)malloc(num_output_dims * sizeof(int64_t));
+    std::vector<int64_t> vec_apparent_out_shape(num_input_dims);
+    std::vector<int64_t> vec_out_shape(num_output_dims);
 
     apparent_out_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
     // Counter for shape when keepdim is false
@@ -1578,12 +1576,12 @@ std::tuple<Tensor, Tensor> min_max_mps
     for(int i = 0; i < num_input_dims; i++) {
         if(dim_ == i) {
             apparent_out_shape[i] = @1;
-            malloc_apparent_out_shape[i] = 1;
+            vec_apparent_out_shape[i] = 1;
         }
         else {
             apparent_out_shape[i] = [NSNumber numberWithInt:input_shape[i]];
-            malloc_apparent_out_shape[i] = input_shape[i];
-            malloc_out_shape[out_i] = input_shape[i];
+            vec_apparent_out_shape[i] = input_shape[i];
+            vec_out_shape[out_i] = input_shape[i];
             out_i++;
         }
     }
@@ -1592,30 +1590,29 @@ std::tuple<Tensor, Tensor> min_max_mps
     Tensor indices_t;
     if(!keepdim) {
      output_t = at::native::empty_mps(
-                      IntArrayRef(malloc_out_shape, num_output_dims),
+                      IntArrayRef(vec_out_shape),
                       input_t.scalar_type(),
                       c10::nullopt,
                       kMPS,
                       c10::nullopt,
                       c10::nullopt);
      indices_t = at::native::empty_mps(
-                      IntArrayRef(malloc_out_shape, num_output_dims),
+                      IntArrayRef(vec_out_shape),
                       ScalarType::Long,
                       c10::nullopt,
                       kMPS,
                       c10::nullopt,
                       c10::nullopt);
-    }
-    else {
+    } else {
       output_t = at::native::empty_mps(
-                      IntArrayRef(malloc_apparent_out_shape, num_input_dims),
+                      IntArrayRef(vec_apparent_out_shape),
                       input_t.scalar_type(),
                       c10::nullopt,
                       kMPS,
                       c10::nullopt,
                       c10::nullopt);
      indices_t = at::native::empty_mps(
-                      IntArrayRef(malloc_apparent_out_shape, num_input_dims),
+                      IntArrayRef(vec_apparent_out_shape),
                       ScalarType::Long,
                       c10::nullopt,
                       kMPS,
@@ -1624,15 +1621,11 @@ std::tuple<Tensor, Tensor> min_max_mps
     }
 
     if (output_t.numel() == 0 || input_t.numel() == 0) {
-        free(malloc_out_shape);
-        free(malloc_apparent_out_shape);
         return std::tuple<Tensor, Tensor>{output_t, indices_t};
     }
 
     min_max_out_mps(input_t, dim, keepdim, output_t, indices_t, reduction_type, func_name);
 
-    free(malloc_out_shape);
-    free(malloc_apparent_out_shape);
     return std::tuple<Tensor, Tensor>{output_t, indices_t};
 }
 
