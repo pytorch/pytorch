@@ -698,7 +698,7 @@ inline static void svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, 
   auto n = A.size(-1);
   auto k = std::min(m, n);
   // The kernel assumes full_matrices == true
-  // If full_matrices == false, we create auxiliary tensors of the right size and copy the results back
+  // If full_matrices == false and m != n, we create auxiliary tensors of the right size and copy the results back
   auto U_ = U;
   auto V_ = V;
   if (compute_uv && !full_matrices) {
@@ -711,7 +711,6 @@ inline static void svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, 
     } else if (m < n) {
       // Size of V with full_matrices == True
       sizes.end()[-2] = n;
-      sizes.end()[-1] = n;
       V_ = V.new_empty(sizes).mT();
     }
   }
@@ -721,11 +720,12 @@ inline static void svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, 
     apply_svd_cusolver_gesvdjBatched<scalar_t>(A, U_, S, V_, infos, compute_uv);
   });
 
-  // Copy the result back
+  // Copy the result back if we created any new matrix
   if (compute_uv && !full_matrices) {
-    if (m > n) {
+    if (!U_.is_alias_of(U)) {
       U.copy_(U_.narrow(-1, 0, k));
-    } else if (m < n) {
+    } 
+    if (!V_.is_alias_of(V)) {
       V.copy_(V_.narrow(-1, 0, k));
     }
   }
