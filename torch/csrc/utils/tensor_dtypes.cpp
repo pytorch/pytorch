@@ -52,6 +52,8 @@ std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarType) {
       return std::make_pair("quint4x2", "");
     case at::ScalarType::QUInt2x4:
       return std::make_pair("quint2x4", "");
+    case at::ScalarType::Bit16:
+      return std::make_pair("bit16", "");
     default:
       throw std::runtime_error("Unimplemented scalar type");
   }
