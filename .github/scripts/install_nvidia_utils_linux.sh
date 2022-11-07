@@ -74,8 +74,7 @@ install_nvidia_driver_amzn2() {
                     DEVICE_ENABLED=$(cat /sys/bus/pci/devices/$PCI_ID/enable)
 
                     echo "Reseting $PCI_ID (enabled state: $DEVICE_ENABLED)"
-                    # This requires sudo permission of course
-                    sudo echo "1" > /sys/bus/pci/devices/$PCI_ID/reset
+                    echo "1" > /sys/bus/pci/devices/$PCI_ID/reset
                     sleep 1
                 done
             fi
