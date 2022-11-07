@@ -719,7 +719,6 @@ def xfail_inherited_tests(tests):
 
 @skipIfNoSympy
 @xfail_inherited_tests([
-    "test_inplace_metadata",
     "test_mode_tracing_factory_function",
     "test_make_fx_overloads",
     "test_resnet18_backward_trace",

@@ -9215,7 +9215,9 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_diag),
     OpInfo('diag_embed',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
-           supports_out=True,
+           # TODO: this is very questionable, because we do have
+           # diag_embed.out but it's not bound to Python somehow
+           supports_out=False,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
@@ -17874,6 +17876,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.diag_embed",
         torch_opinfo_name="diag_embed",
+        supports_out=True,
         supports_nvfuser=False,
     ),
     PythonRefInfo(
