@@ -115,7 +115,7 @@ static void setup_vit_base_patch16_224_bcast5(Fusion* fusion, void* null) {
   auto t6 = set(t5);
   auto t7 = broadcast(t6, bcast_pattern0);
   auto t8 = add(t4, t7);
-  auto t9 = randlike(t8);
+  auto t9 = rand_like(t8);
   auto d34 =
       sub(IrBuilder::create<Double>(1.0), IrBuilder::create<Double>(0.0));
   auto t10 = lt(t9, d34);
@@ -139,7 +139,6 @@ static void setup_vit_base_patch16_224_bcast5(Fusion* fusion, void* null) {
   auto t20 = sum(t37, {2});
   auto t24 = broadcast(t20, bcast_pattern1);
   auto d95 = castOp(DataType::Double, t2->axis(2)->extent());
-  auto d96 = mul(IrBuilder::create<Double>(1.0), d95);
   auto d105 = reciprocal(d95);
   auto t25 = mul(t24, d105);
   auto t26 = add(t25, IrBuilder::create<Double>(1e-6));
@@ -289,7 +288,7 @@ static void setup_vit_base_patch16_224_norm_inner3(Fusion* fusion, void* null) {
   auto t10 = broadcast(t9, {false, false, false, true});
   auto t11 = reciprocal(t10);
   auto t12 = mul(t8, t11);
-  auto t13 = randlike(t12);
+  auto t13 = rand_like(t12);
   auto d79 = sub(IrBuilder::create<Double>(1), IrBuilder::create<Double>(0));
   auto t14 = lt(t13, d79);
   auto t15 = castOp(DataType::Float, t14);
@@ -320,8 +319,6 @@ static void NvFuserScheduler_TIMM_vit_base_patch16_224_norm_inner3(
 
   at::manual_seed(0);
   auto fp16_options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  auto fp32_options =
-      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
   auto t0 = at::randn(input_shape, fp16_options);
 
@@ -367,7 +364,7 @@ static void setup_vit_base_patch16_224_bcast_outer6(
   auto t9 = add(IrBuilder::create<Double>(1), t8);
   auto t10 = mul(IrBuilder::create<Double>(0.5), t9);
   auto t11 = mul(t6, t10);
-  auto t12 = randlike(t11);
+  auto t12 = rand_like(t11);
   auto d66 = sub(IrBuilder::create<Double>(1), IrBuilder::create<Double>(0));
   auto t13 = lt(t12, d66);
   auto t14 = castOp(DataType::Float, t13);
@@ -456,7 +453,7 @@ static void setup_vit_base_patch16_224_bcast_inner6(
   auto t9 = add(IrBuilder::create<Double>(1), t8);
   auto t10 = mul(IrBuilder::create<Double>(0.5), t9);
   auto t11 = mul(t6, t10);
-  auto t12 = randlike(t11);
+  auto t12 = rand_like(t11);
   auto d66 = sub(IrBuilder::create<Double>(1), IrBuilder::create<Double>(0));
   auto t13 = lt(t12, d66);
   auto t14 = castOp(DataType::Float, t13);
