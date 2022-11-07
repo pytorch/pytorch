@@ -9,6 +9,7 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/WrapDimMinimal.h>
+#include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/SizesAndStrides.h>
@@ -1306,7 +1307,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It can be expanded as needed in the future, e.g sparse Tensor.
    */
   inline bool support_as_strided() const {
-    return is_nested() ? false : device().supports_as_strided();
+    if (is_nested()) {
+      return false;
+    }
+    if (key_set_.has(DispatchKey::Functionalize)) {
+      return false;
+    }
+    return device().supports_as_strided();
   }
 
   // ~~~~~ Autograd API ~~~~~
@@ -2037,7 +2044,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return c10::nullopt;
     } else if (interpreter == self_interpreter) {
       // NB: pyobj_ could still be null!
-      return c10::make_optional(_unchecked_untagged_pyobj());
+      if (c10::impl::HermeticPyObjectTLS::get_state()) {
+        return c10::nullopt;
+      } else {
+        return c10::make_optional(_unchecked_untagged_pyobj());
+      }
     } else {
       TORCH_CHECK(
           false,

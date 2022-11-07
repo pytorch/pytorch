@@ -120,6 +120,16 @@ def meta_max(self):
     return self.new_empty(())
 
 
+@register_meta(aten.max.dim)
+def meta_max_dim(self, dim, keepdim=False):
+    dim = utils.reduction_dims(self.shape, (dim,))
+    output_shape = _compute_reduction_shape(self, dim, keepdim)
+    return (
+        self.new_empty(output_shape),
+        self.new_empty(output_shape, dtype=torch.long),
+    )
+
+
 @register_meta([aten.min.default])
 def meta_min(self):
     return self.new_empty(())
@@ -299,6 +309,17 @@ def meta_bernoulli(self, *, generator=None, out):
     return out
 
 
+# FakeTensors (meta tensors with a device) will report device as meta
+# when running meta kernels. Here, access the "fake device" of FakeTensor if it
+# exists so meta kernels which have diverge per device will be more
+# accurate when run with FakeTensors
+def device_hint(tensor) -> "str":
+    if isinstance(tensor, torch._subclasses.FakeTensor):
+        return tensor.fake_device.type
+    else:
+        return "cuda"  # default to cuda
+
+
 @register_meta(aten.convolution.default)
 def meta_conv(
     input_tensor: torch.Tensor,
@@ -404,8 +425,8 @@ def meta_conv(
     def is_channels_last(ten):
         return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
 
-    def pick_memory_format(device_hint):
-        if device_hint == "cuda":
+    def pick_memory_format():
+        if device_hint(input_tensor) == "cuda":
             if is_channels_last(input_tensor) or is_channels_last(weight):
                 return torch.channels_last
         else:
@@ -439,15 +460,7 @@ def meta_conv(
         )
     out = input_tensor.new_empty((input_tensor.shape[0], out_channels, *shape_out))
 
-    from torch._subclasses.fake_tensor import FakeTensor
-
-    if isinstance(input_tensor, FakeTensor):
-        device_hint = input_tensor.fake_device.type
-    else:
-        device_hint = "cuda"  # default to cuda
-
-    mem_fmt = pick_memory_format(device_hint)
-    out = out.to(memory_format=mem_fmt)  # type: ignore[call-overload]
+    out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
     return out
 
 
@@ -655,7 +668,13 @@ def meta_adaptive_avg_pool2d(self, output_size):
         self.ndim == 3 or self.ndim == 4,
         lambda: f"Expected 3D or 4D tensor, but got {self.shape}",
     )
-    return self.new_empty(self.shape[:-2] + tuple(output_size))
+    output_shape = self.shape[:-2] + tuple(output_size)
+    memory_format = utils.suggest_memory_format(self)
+    # need to set memory_format to preserve the memory format of the input
+    # channel last input should have channel last output
+    return torch.empty(
+        output_shape, dtype=self.dtype, device=self.device, memory_format=memory_format
+    )
 
 
 @register_meta(aten._adaptive_avg_pool3d.default)
@@ -994,7 +1013,7 @@ def meta_embedding_bag(
         else:
             return is_fast_path_index_select(src, output, padding_idx)
 
-    if offsets.device.type != "cpu":
+    if device_hint(offsets) != "cpu":
         offset2bag = indices.new_empty(indices.size(0))
         bag_size = indices.new_empty(offsets.size())
         if mode == MODE_MAX:
@@ -1017,7 +1036,7 @@ def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     output, offset2bag, bag_size, max_indices = meta_embedding_bag(
         weight, indices, offsets, *args
     )
-    if offsets.device.type == "cpu":
+    if device_hint(offsets) == "cpu":
         bag_size = offsets.new_empty(offsets.size())
     return output, offset2bag, bag_size, max_indices
 
@@ -1088,6 +1107,11 @@ def meta_zero_(self):
     return self
 
 
+@register_meta(aten.zero.default)
+def meta_zero(self):
+    return self.new_empty(self.shape)
+
+
 @register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
 def meta_fill_(self, val):
     return self
@@ -1095,7 +1119,7 @@ def meta_fill_(self, val):
 
 @register_meta([aten.fill.Tensor, aten.fill.Scalar])
 def meta_fill(self, val):
-    return self.new_empty(self.shape)
+    return torch.empty_like(self)
 
 
 @register_meta(aten.relu_.default)
