@@ -38,8 +38,9 @@ def layerwise_sandbox(module: nn.Sequential, device: torch.device,) -> Generator
 def detach(batch: Batch) -> None:
     """Detaches from autograd graph."""
     for i, x in enumerate(batch):
-        if torch.is_tensor(x):
-            batch[i] = x.detach().requires_grad_(x.requires_grad)
+        if not torch.is_tensor(x):
+            continue
+        batch[i] = x.detach().requires_grad_(x.requires_grad)
 
 
 
@@ -98,7 +99,7 @@ def profile_sizes(
     tensor_idx = batch.find_tensor_idx()
     latent_scale = batch[tensor_idx].size(0) / chunks
     for i, x in enumerate(batch):
-        if not torch.is_tensor(x):
+        if torch.is_tensor(x):
             continue
         batch[i] = x[:1].detach().to(device).requires_grad_(x.requires_grad)
 
