@@ -31,7 +31,7 @@ def _test_copy_wait(prev_stream, next_stream, cuda_sleep=None):
         assert torch.allclose(z.sum(), torch.tensor(100.0, device=device))
         z.norm().backward()
     with use_stream(prev_stream):
-        assert torch.allclose(x.grad.sum(), torch.tensor(10.0, device=device))
+        assert torch.allclose(x[0].grad.sum(), torch.tensor(10.0, device=device))
 
 
 def test_copy_wait_cpu_cpu():
