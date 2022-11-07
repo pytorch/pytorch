@@ -50,6 +50,8 @@ def profile_times(module: nn.Sequential, sample: Union[List[Any], Tensor], timeo
 
     _batch = Batch(sample)
     for i, x in enumerate(_batch):
+        if not torch.is_tensor(x):
+            continue
         _batch[i] = x.detach().to(device).requires_grad_(x.requires_grad)
 
     time_bufs: List[List[float]] = [[] for _ in module]
@@ -95,6 +97,8 @@ def profile_sizes(
 
     latent_scale = batch[0].size(0) / chunks
     for i, x in enumerate(batch):
+        if not torch.is_tensor(x):
+            continue
         batch[i] = x[:1].detach().to(device).requires_grad_(x.requires_grad)
 
     for layer in layerwise_sandbox(module, device):
