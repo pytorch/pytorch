@@ -254,6 +254,15 @@ Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   return output;
 }
 
+Tensor _triton_bsr_dense_mm(
+    const Tensor& bsr,
+    const Tensor& dense,
+    c10::optional<Tensor>& out,
+    c10::optional<bool> is_sparse_rowspace_mode) {
+  TORCH_CHECK(false, "_triton_bsr_dense_mm: Triton kernel should be overwritten in Python.");
+  return Tensor {};
+}
+
 
 } // namespace native
 } // namespace at

@@ -318,7 +318,13 @@ def _run_dense_rowspace_kernel(
     )
 
 
-def bsr_dense_mm(bsr, dense, is_sparse_rowspace_mode: Optional[bool] = None):
+def bsr_dense_mm(
+    bsr: torch.Tensor,
+    dense: torch.Tensor,
+    *,
+    out: torch.Tensor = None,
+    is_sparse_rowspace_mode: Optional[bool] = None,
+):
     # TODO: insert checks
     m, kl = bsr.shape[-2:]
     kr, n = dense.shape[-2:]
@@ -361,10 +367,11 @@ def bsr_dense_mm(bsr, dense, is_sparse_rowspace_mode: Optional[bool] = None):
     dense_batch_dims = dense.shape[:-2]
     batch_dims_broadcasted = torch.broadcast_shapes(bsr_batch_dims, dense_batch_dims)
 
-    # Allocate output
-    output = torch.zeros(
-        batch_dims_broadcasted + (m, n), dtype=dense.dtype, device=dense.device
-    )
+    # Allocate out
+    if out is None:
+        out = torch.zeros(
+            batch_dims_broadcasted + (m, n), dtype=dense.dtype, device=dense.device
+        )
 
     # Broadcast batch dimensions and squash
     def batch_broadcast_and_squash(t, batch_dims, invariant_dims):
@@ -395,10 +402,8 @@ def bsr_dense_mm(bsr, dense, is_sparse_rowspace_mode: Optional[bool] = None):
 
     dense = batch_broadcast_and_squash(dense, batch_dims_broadcasted, dense.shape[-2:])
 
-    # NOTE: output is contiguous, so batch_broadcast_and_squash will create a view
-    output = batch_broadcast_and_squash(
-        output, batch_dims_broadcasted, output.shape[-2:]
-    )
+    # NOTE: out is contiguous, so batch_broadcast_and_squash will create a view
+    out = batch_broadcast_and_squash(out, batch_dims_broadcasted, out.shape[-2:])
 
     # NOTE: this function will ALWAYS create a view
     def tile_to_blocksize(t, blocksize):
@@ -414,25 +419,25 @@ def bsr_dense_mm(bsr, dense, is_sparse_rowspace_mode: Optional[bool] = None):
     # "Blockify" the row dimension of dense with blocksize[1]
     # since dense is on the rhs of matmul
     dense = tile_to_blocksize(dense, blocksize[::-1])
-    # "Blockify" the row dimension of output with blocksize[0]
+    # "Blockify" the row dimension of out with blocksize[0]
     # which is inherited from the bsr input.
     # NOTE: tile_to_blocksize will create a view.
-    # NOTE: output.blocksize[-1] == dense.blocksize[-1],
+    # NOTE: out.blocksize[-1] == dense.blocksize[-1],
     # so it could be any value in [1, dense.shape[-1]).
     # We need to probably use the largest possible blocksize
     # so that it fits into SRAM.
-    output = tile_to_blocksize(output, (blocksize[0], blocksize[0]))
+    out = tile_to_blocksize(out, (blocksize[0], blocksize[0]))
 
     # Launch kernel
     if is_sparse_rowspace_mode:
         kernel = _run_sparse_rowspace_kernel
     else:
         kernel = _run_dense_rowspace_kernel
-    kernel(blocksize, values, crow_indices, col_indices, dense, output)
+    kernel(blocksize, values, crow_indices, col_indices, dense, out)
 
     # Block dims need to rejoin with the corresponding block dimensions
     # prior to reshape so that blocks do not end up being transposed.
-    return output.transpose(-3, -2).reshape(original_batch_dims_broadcasted + (m, n))
+    return out.transpose(-3, -2).reshape(original_batch_dims_broadcasted + (m, n))
 
 
 if __name__ == "__main__":

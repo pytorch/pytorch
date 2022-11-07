@@ -6155,6 +6155,11 @@
     SparseCPU: s_addmm_sparse_dense_cpu_
     SparseCUDA: s_addmm_sparse_dense_cuda_
 
+- func: _triton_bsr_dense_mm(Tensor bsr, Tensor dense, Tensor? out, bool? is_sparse_rowspace_mode=None) -> Tensor
+  variants: function
+  dispatch:
+    SparseCsrCPU: _triton_bsr_dense_mm
+
 - func: _addmm_activation.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, bool use_gelu=False, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
