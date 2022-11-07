@@ -13277,13 +13277,15 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(result_fast_path_masked, result_ref_masked)
 
-    @onlyNativeDeviceTypes
+    @torch.no_grad()
+    @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
+    @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
     def test_multihead_self_attn_two_masks_fast_path_mock(self, device):
         """
         Multihead self-attention should take fast path when both attention mask (mask type 0)
         and key padding mask (mask type 1) are provided at the same time on CPU and CUDA
         """
-        with torch.no_grad(), torch.autocast(device_type=device, enabled=False):
+        with torch.autocast(device_type=device, enabled=False):
             embed_dim = 14
             num_heads = 7
             batch_size = 8
