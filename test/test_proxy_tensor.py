@@ -1375,7 +1375,6 @@ inplace_symbolic_tensor_failures = {
     xfail('addcmul', ''),  # aten.addcmul_.default - couldn't find symbolic meta function/decomposition
     xfail('addmm', ''),  # aten.addmm_.default - couldn't find symbolic meta function/decomposition
     xfail('addmm', 'decomposed'),  # aten.addmm_.default - couldn't find symbolic meta function/decomposition
-    xfail('as_strided', ''),  # aten.as_strided_.default - couldn't find symbolic meta function/decomposition
     xfail('asin', ''),  # aten.asin_.default - couldn't find symbolic meta function/decomposition
     xfail('asinh', ''),  # aten.asinh_.default - couldn't find symbolic meta function/decomposition
     xfail('atan2', ''),  # aten.atan2_.default - couldn't find symbolic meta function/decomposition
@@ -1391,6 +1390,8 @@ inplace_symbolic_tensor_failures = {
     xfail('cosh', ''),  # aten.cosh_.default - couldn't find symbolic meta function/decomposition
     xfail('cumsum', ''),  # aten.cumsum_.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.digamma_.default - couldn't find symbolic meta function/decomposition
+    xfail('div', 'floor_rounding'),  # aten.div_.Tensor_mode - couldn't find symbolic meta function/decomposition
+    xfail('div', 'trunc_rounding'),  # aten.div_.Tensor_mode - couldn't find symbolic meta function/decomposition
     xfail('eq', ''),  # aten.eq_.Tensor - couldn't find symbolic meta function/decomposition
     xfail('erf', ''),  # aten.erf_.default - couldn't find symbolic meta function/decomposition
     xfail('erfc', ''),  # aten.erfc_.default - couldn't find symbolic meta function/decomposition
@@ -1426,6 +1427,7 @@ inplace_symbolic_tensor_failures = {
     xfail('neg', ''),  # aten.neg_.default - couldn't find symbolic meta function/decomposition
     xfail('nextafter', ''),  # aten.nextafter_.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.celu', ''),  # aten.celu_.default - couldn't find symbolic meta function/decomposition
+    xfail('nn.functional.dropout3d', ''),  # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.elu', ''),  # aten.elu_.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.hardsigmoid', ''),  # aten.hardsigmoid_.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.mish', ''),  # aten.mish_.default - couldn't find symbolic meta function/decomposition
