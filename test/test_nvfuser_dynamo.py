@@ -108,6 +108,41 @@ class TestNvFuserDynamo(TestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (1, 2))
         self.assertEqual(get_num_ins_outs(bw_graph), (2, 1))
 
+    def test_batch_norm_implicit_dtype_promotion(self):
+        input1 = make_tensor((2, 3, 4, 5), device="cuda", dtype=torch.float32)
+        input2 = make_tensor((5, 5), device="cuda", dtype=torch.float32)
+        w = make_tensor((3), device="cuda", dtype=torch.float32)
+        b = make_tensor((3), device="cuda", dtype=torch.float32)
+
+        @torchdynamo.optimize("nvprims_nvfuser")
+        def func(mat1, mat2, w, b):
+            o = torch.matmul(mat1, mat2)
+            return torch.batch_norm(o, w, b, None, None, True, 1e-2, 1e-5, True)
+
+        # No warnings and no errors
+        with torch.cuda.amp.autocast():
+            with warnings.catch_warnings(record=True) as warning:
+                nvfuser_result = func(input1, input2, w, b)
+                self.assertEqual(len(warning), 0)
+            eager_result = func.__wrapped__(input1, input2, w, b)
+            self.assertEqual(eager_result, nvfuser_result)
+
+    def test_dtype_correctness(self):
+        input1 = make_tensor((2, 4, 8), device="cuda", dtype=torch.float16)
+
+        @torchdynamo.optimize("nvprims_nvfuser")
+        def func(a):
+            tmp = a + 1.0
+            # nvfuser would promote output to fp32 in math, FusionDefinition should cast output dtype back
+            return torch.where(tmp > 0, tmp, 0.0)
+
+        # No warnings and no errors
+        with warnings.catch_warnings(record=True) as w:
+            nvfuser_result = func(input1)
+            self.assertEqual(len(w), 0)
+        eager_result = func.__wrapped__(input1)
+        self.assertEqual(eager_result, nvfuser_result)
+
 
 if __name__ == "__main__":
     run_tests()
