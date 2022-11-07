@@ -1,7 +1,9 @@
 # Owner(s): ["module: onnx"]
 
-import numpy as np
+import io
 
+import numpy as np
+import onnx
 import torch
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
 from torch.onnx import _constants, symbolic_helper
@@ -281,6 +283,115 @@ class TestONNXShapeInference(common_utils.TestCase):
         input.setType(input.type().with_dtype(torch.long).with_sizes([2]))
         reduce_prod = g.op("ReduceProd", input)
         self.run_test(g, reduce_prod.node(), expect_tensor("Long", shape=(1,)))
+
+
+class TestONNXCustomOpShapeInference(common_utils.TestCase):
+
+    opset_version = _constants.ONNX_MAX_OPSET
+
+    def test_single_customOp_setType(self):
+
+        self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
+
+        class CustomInverse(torch.nn.Module):
+            def forward(self, x):
+                return torch.inverse(x) + x
+
+        def linalg_inv_setType(g, self):
+            return g.op("com.microsoft::Inverse", self).setType(self.type())
+
+        def linalg_inv_NO_setType(g, self):
+            return g.op("com.microsoft::Inverse", self)
+
+        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_setType, 9)
+        model = CustomInverse()
+        x = torch.randn(2, 3, 3)
+        f = io.BytesIO()
+        torch.onnx.export(
+            model,
+            (x,),
+            f,
+            opset_version=self.opset_version,
+            custom_opsets={"com.microsoft": 1},
+        )
+
+        model_proto = onnx.load(io.BytesIO(f.getvalue()))
+        dims = model_proto.graph.value_info[0].type.tensor_type.shape.dim
+        for i in range(len(dims)):
+            self.assertTrue(dims[i].HasField("dim_value"))
+        for dim, rank in zip(dims, x.size()):
+            self.assertEqual(dim.dim_value, rank)
+
+    def test_single_customOp_NO_setType(self):
+
+        self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
+
+        class CustomInverse(torch.nn.Module):
+            def forward(self, x):
+                return torch.inverse(x) + x
+
+        def linalg_inv_NO_setType(g, self):
+            return g.op("com.microsoft::Inverse", self)
+
+        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_NO_setType, 9)
+        model = CustomInverse()
+        x = torch.randn(2, 3, 3)
+        f = io.BytesIO()
+        torch.onnx.export(
+            model,
+            (x,),
+            f,
+            opset_version=self.opset_version,
+            custom_opsets={"com.microsoft": 1},
+        )
+
+        model_proto = onnx.load(io.BytesIO(f.getvalue()))
+        dims = model_proto.graph.value_info[0].type.tensor_type.shape.dim
+        for i in range(len(dims)):
+            self.assertTrue(dims[i].HasField("dim_param"))
+
+    def test_customOp_with_onnxOp_setType(self):
+
+        self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
+
+        class CustomInverse(torch.nn.Module):
+            def forward(self, x, y, z):
+                x = torch.inverse(x)
+                return x + y + z
+
+        def linalg_inv_setType(g, self):
+            return g.op("com.microsoft::Inverse", self).setType(
+                self.type().with_dtype(torch.float).with_sizes([2, 3, 10, 10])
+            )
+
+        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_setType, 9)
+        model = CustomInverse()
+        x = torch.randn(2, 3, 10, 10)
+        y = torch.randn(2, 3, 10, 10)
+        z = torch.randn(2, 3, 10, 10)
+        f = io.BytesIO()
+        torch.onnx.export(
+            model,
+            (x, y, z),
+            f,
+            opset_version=self.opset_version,
+            custom_opsets={"com.microsoft": 1},
+        )
+
+        model_proto = onnx.load(io.BytesIO(f.getvalue()))
+        # To validate the shape of inverse Op, we need to find inverse output name,
+        # and then use it to identify its value_info for the shape.
+        for node in model_proto.graph.node:
+            if node.op_type == "Inverse":
+                output_name = node.output
+                break
+        for value_info in model_proto.graph.value_info:
+            if value_info.name == output_name:
+                dims = value_info.type.tensor_type.shape.dim
+                for i in range(len(dims)):
+                    self.assertTrue(dims[i].HasField("dim_value"))
+                for dim, rank in zip(dims, x.size()):
+                    self.assertEqual(dim.dim_value, rank)
 
 
 if __name__ == "__main__":
