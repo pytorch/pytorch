@@ -37,7 +37,7 @@ try:
     import torch._inductor.config
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
-    from torch._inductor import config
+    from torch._inductor import codecache, config, metrics
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
@@ -52,7 +52,6 @@ except (ImportError, AssertionError) as e:
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
-
 
 HAS_CPU = False
 try:
@@ -1333,6 +1332,62 @@ class CommonTemplate:
             ),
             check_lowp=False,
         )
+
+    # For gpu path, there has a accurcy issue,
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv  bn test")
+    def test_conv_bn_fuse(self):
+        input_shapes = {1: (112,), 2: (112, 112), 3: (55, 55, 55)}
+        conv_modules = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
+        bn_modules = {
+            1: torch.nn.BatchNorm1d,
+            2: torch.nn.BatchNorm2d,
+            3: torch.nn.BatchNorm3d,
+        }
+        options = itertools.product(
+            [1, 2, 3],
+            [True, False],
+            [1, 3],
+            [1, 2],
+            [1, 4],
+        )
+
+        for (
+            dim,
+            bias,
+            kernel_size,
+            dilation,
+            groups,
+        ) in options:
+            oC = 32 * groups
+            iC = 3 * groups
+            x_shape = (1, iC) + input_shapes[dim]
+            mod = torch.nn.Sequential(
+                conv_modules[dim](
+                    iC,
+                    oC,
+                    kernel_size=kernel_size,
+                    dilation=dilation,
+                    groups=groups,
+                    bias=bias,
+                ),
+                bn_modules[dim](oC),
+            ).eval()
+            test_memory_format = [torch.contiguous_format]
+            # TODO: GPU path doesn't support channels_last now.
+            if not HAS_CUDA and dim > 1:
+                channels_last = (
+                    torch.channels_last if dim == 2 else torch.channels_last_3d
+                )
+                test_memory_format.append(channels_last)
+            for memory_format in test_memory_format:
+                v = torch.randn(x_shape, dtype=torch.float32).to(
+                    memory_format=memory_format
+                )
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
 
     # For gpu path, there has a accurcy issue,
     # see https://github.com/pytorch/pytorch/issues/87745.
@@ -3410,6 +3465,18 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64, 64)])
 
+    def test_as_strided_scatter(self):
+        def fn(a, b):
+            return aten.as_strided_scatter(
+                a * 8 + 10,
+                b * 2 - 4,
+                size=(a.shape[0], a.shape[1] // 2),
+                stride=(a.shape[1], 2),
+                storage_offset=0,
+            )
+
+        self.common(fn, [torch.randn(10, 1024), torch.randn(10, 512)])
+
     def test_select_scatter(self):
         def fn(x, a, b):
             return (
@@ -4237,6 +4304,20 @@ class CommonTemplate:
                 else:
                     self.assertEqual(len(inps), 0)
 
+    @unittest.skipIf(HAS_CUDA, "histogramdd only supports cpu")
+    def test_kwargs(self):
+        def fn(x, y):
+            return torch.histogramdd(
+                x,
+                bins=[3, 3],
+                weight=y,
+            )
+
+        self.common(
+            fn,
+            [torch.randn((4, 2)), torch.randn((4))],
+        )
+
 
 if HAS_CPU:
 
@@ -4333,6 +4414,75 @@ if HAS_CPU:
             gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
             self.assertFalse(complex_memory_overlap(gathered))
             self.assertFalse(complex_memory_overlap(gathered.t()))
+
+        # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
+        # supported, the vectorization will not work and skip this test case. For ARM or
+        # other platforms support, we just need to add the ISA info to the supported_vector_isa
+        # and include proper aten vectorization head file.
+        @unittest.skipIf(
+            not codecache.get_cpu_proc_info(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_vec_kernel_cpu_only(self):
+            def fn(x1, x2):
+                # Current, there are some limitations as follows.
+                #   rsqrt:
+                #     assert [both a fallback and a decomp for same kernel: aten.rsqrt.default]
+                #   round:
+                #     couldn't find symbolic meta function/decomposition
+                #   fmod/logical_and/logic_or:
+                #     vec kernel has not support to_type
+                x = torch.abs(x1)
+                x = torch.sin(x)
+                x = torch.neg(x)
+                x = torch.square(x)
+                x = torch.sigmoid(x)
+                x = torch.relu(x)
+                x = torch.cos(x)
+                x = torch.exp(x)
+                x = torch.sqrt(x)
+                x = torch.add(x, x1)
+                x = torch.sub(x, x2)
+                x = torch.mul(x, x1)
+                x = torch.div(x, x1)
+                x = torch.pow(x, 10)
+                x = torch.log(x)
+                x = torch.floor(x)
+                x = torch.ceil(x)
+                x = torch.trunc(x)
+                x = torch.lgamma(x)
+                x = torch.fmod(x, x2)
+                res = x + x2
+                return (res,)
+
+            x1 = torch.randn((10, 20))
+            x2 = torch.randn((10, 20))
+
+            with patch.object(config.cpp, "simdlen", 8):
+                torch._dynamo.reset()
+                metrics.reset()
+                traced = make_fx(fn)(x1, x2)
+                compiled = compile_fx_inner(traced, [x1, x2])
+                assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+                torch._dynamo.reset()
+                metrics.reset()
+                x1 = x1.permute(1, 0)
+                x2 = torch.randn((20, 10))
+                traced = make_fx(fn)(x1, x2)
+                compiled = compile_fx_inner(traced, [x1, x2])
+                assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+                torch._dynamo.reset()
+                metrics.reset()
+                x1 = torch.randn((10, 7))
+                x2 = torch.randn((10, 7))
+                traced = make_fx(fn)(x1, x2)
+                compiled = compile_fx_inner(traced, ([x1, x2]))
+                assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
 
 if HAS_CUDA:
