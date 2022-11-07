@@ -330,6 +330,7 @@
   - torchgen/dest/lazy_ts_lowering.py
   - torchgen/gen_lazy_tensor.py
   - aten/src/ATen/native/ts_native_functions.yaml
+  - .github/ci_commit_pins/xla.txt
   approved_by:
   - alanwaketan
   - JackCaoG
