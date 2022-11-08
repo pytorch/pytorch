@@ -387,9 +387,26 @@ static inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const 
     return false;
   }
 
-  auto input_memory_format = input.suggest_memory_format();
-  auto weight_memory_format = weight.suggest_memory_format();
+  // The settings of is_channels_last_contiguous_ and is_channels_last_ may be not aligned
+  // due to reshaping for channels last will get wrong stride at the dimention where the size is 1.
+  // See the issue https://github.com/pytorch/pytorch/issues/78611.
+  auto suggest_memory_format = [](const Tensor& input) -> at::MemoryFormat {
+    if (input.layout() == at::kStrided) {
+      if (input.unsafeGetTensorImpl()->is_strides_like_channels_last() ||
+          input.unsafeGetTensorImpl()->is_contiguous(at::MemoryFormat::ChannelsLast)) {
+      return at::MemoryFormat::ChannelsLast;
+      }
+      else if (
+        input.unsafeGetTensorImpl()->is_strides_like_channels_last_3d() ||
+        input.unsafeGetTensorImpl()->is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+        return at::MemoryFormat::ChannelsLast3d;
+      }
+    } 
+    return at::MemoryFormat::Contiguous;
+  };
 
+  auto input_memory_format = suggest_memory_format(input);
+  auto weight_memory_format = suggest_memory_format(weight);
   bool can_use_mkldnn_channels_last_2d =
       (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
       (weight_memory_format == at::MemoryFormat::ChannelsLast);
