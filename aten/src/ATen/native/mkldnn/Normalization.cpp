@@ -173,6 +173,25 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   }
 }
 
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_legit(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var,
+    bool train,
+    double momentum,
+    double eps) {
+  return mkldnn_batch_norm(input, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
+}
+
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_legit_no_stats(
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    bool train,
+    double momentum,
+    double eps) {
+  return mkldnn_batch_norm(input, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
+}
+
+
 std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad_output,
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt,
     bool train,
@@ -205,6 +224,22 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
       mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradb),
                                               optTypeMetaToScalarType(weight.options().dtype_opt()),
                                               weight.options().device_opt())));
+}
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_legit_backward(const Tensor& grad_output,
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, Tensor& running_mean, Tensor& running_var, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt,
+    bool train,
+    double eps,
+    std::array<bool,3> grad_input_mask) {
+  return mkldnn_batch_norm_backward(grad_output, input, weight_opt, running_mean, running_var, save_mean_opt, save_invstd_opt, train, eps, grad_input_mask);
+}
+
+std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_legit_no_stats_backward(const Tensor& grad_output,
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt,
+    bool train,
+    double eps,
+    std::array<bool,3> grad_input_mask) {
+  return mkldnn_batch_norm_backward(grad_output, input, weight_opt, Tensor(), Tensor(), save_mean_opt, save_invstd_opt, train, eps, grad_input_mask);
 }
 
 } // namespace native

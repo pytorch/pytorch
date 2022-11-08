@@ -411,6 +411,32 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps
   return std::make_tuple(output, save_mean, save_var);
 }
 
+//     MPS: batch_norm_legit_mps
+std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_mps
+                  (const Tensor& self,
+                   const c10::optional<Tensor>& weight_opt,
+                   const c10::optional<Tensor>& bias_opt,
+                   Tensor& running_mean,
+                   Tensor& running_var,
+                   bool train,
+                   double momentum,
+                   double epsilon) {
+
+  return batch_norm_mps(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, epsilon);
+}
+
+//     MPS: batch_norm_legit_no_stats_mps
+std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_no_stats_mps
+                  (const Tensor& self,
+                   const c10::optional<Tensor>& weight_opt,
+                   const c10::optional<Tensor>& bias_opt,
+                   bool train,
+                   double momentum,
+                   double epsilon) {
+
+  return batch_norm_mps(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, epsilon);
+}
+
 string get_mem_string(c10::MemoryFormat memory_format) {
   string mem_format_key;
   switch(memory_format) {
@@ -798,6 +824,32 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
 
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 
+}
+
+std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_backward_mps
+                  (const Tensor& grad_out,
+                   const Tensor& input,
+                   const c10::optional<Tensor>& weight_opt,
+                   Tensor& running_mean,
+                   Tensor& running_var,
+                   const c10::optional<Tensor>& save_mean_opt,
+                   const c10::optional<Tensor>& save_var_opt,
+                   bool train,
+                   double epsilon,
+                   std::array<bool,3> grad_input_mask) {
+  return batch_norm_backward_mps(grad_out, input, weight_opt, running_mean, running_var, save_mean_opt, save_var_opt, train, epsilon, grad_input_mask);
+}
+
+std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_no_stats_backward_mps
+                  (const Tensor& grad_out,
+                   const Tensor& input,
+                   const c10::optional<Tensor>& weight_opt,
+                   const c10::optional<Tensor>& save_mean_opt,
+                   const c10::optional<Tensor>& save_var_opt,
+                   bool train,
+                   double epsilon,
+                   std::array<bool,3> grad_input_mask) {
+  return batch_norm_backward_mps(grad_out, input, weight_opt, Tensor(), Tensor(), save_mean_opt, save_var_opt, train, epsilon, grad_input_mask);
 }
 
 // Layer norm forward for MPS

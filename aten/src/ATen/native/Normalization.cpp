@@ -787,6 +787,21 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
   return batch_norm_cpu_out(self, weight_opt, bias_opt, running_mean_opt, running_var_opt, train, momentum, eps, output, save_mean, save_var);
 }
 
+
+//     CPU: batch_norm_legit_cpu
+std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_cpu(
+    const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    Tensor& running_mean, Tensor& running_var, bool train, double momentum, double eps) {
+  return batch_norm_cpu(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
+}
+
+//     CPU: batch_norm_legit_no_stats_cpu
+std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_no_stats_cpu(
+    const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    bool train, double momentum, double eps) {
+  return batch_norm_cpu(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
+}
+
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_out, const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt,
                                                            bool train, double eps, std::array<bool,3> grad_input_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -806,6 +821,16 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_ou
       return batch_norm_backward_cpu_template<scalar_t, scalar_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, eps, grad_input_mask);
     }
   });
+}
+
+std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_backward_cpu(const Tensor& grad_out, const Tensor& self, const c10::optional<Tensor>& weight_opt, Tensor& running_mean, Tensor& running_var, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt,
+                                                           bool train, double eps, std::array<bool,3> grad_input_mask) {
+  return batch_norm_backward_cpu(grad_out, self, weight_opt, running_mean, running_var, save_mean_opt, save_invstd_opt, train, eps, grad_input_mask);
+}
+
+std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_no_stats_backward_cpu(const Tensor& grad_out, const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt,
+                                                           bool train, double eps, std::array<bool,3> grad_input_mask) {
+  return batch_norm_backward_cpu(grad_out, self, weight_opt, Tensor(), Tensor(), save_mean_opt, save_invstd_opt, train, eps, grad_input_mask);
 }
 
 TORCH_IMPL_FUNC(renorm_out)(const Tensor& self, const Scalar& p, int64_t dim,
