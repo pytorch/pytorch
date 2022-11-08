@@ -74,22 +74,6 @@ class ExportDiagnostic(infra.Diagnostic):
         self.with_stack(stack)
         self.cpp_call_stack = stack
 
-    def with_model_source_location(
-        self: _ExportDiagnostic,
-    ) -> _ExportDiagnostic:
-        # TODO: Implement this.
-        # self.locations.append(...)
-        raise NotImplementedError()
-        return self
-
-    def with_export_source_location(
-        self: _ExportDiagnostic,
-    ) -> _ExportDiagnostic:
-        # TODO: Implement this.
-        # self.locations.append(...)
-        raise NotImplementedError()
-        return self
-
 
 class ExportDiagnosticEngine(infra.DiagnosticEngine):
     """PyTorch ONNX Export diagnostic engine.
@@ -115,7 +99,6 @@ class ExportDiagnosticEngine(infra.DiagnosticEngine):
             name="torch.onnx",
             version=torch.__version__,
             diagnostic_type=ExportDiagnostic,
-            options=None,
         )
 
     @property
@@ -150,6 +133,7 @@ def create_export_diagnostic_context():
     try:
         yield context
     finally:
+        context.pretty_print(context.options.log_verbose, context.options.log_level)
         context = engine.background_context
 
 
