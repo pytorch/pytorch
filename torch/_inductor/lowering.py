@@ -169,8 +169,10 @@ def _register_lowering(
         assert not any(
             x == "out" for x in kwargs.keys()
         ), "out= ops aren't yet supported"
-        # kwargs tensors not supported yet
-        assert not any(isinstance(x, TensorBox) for x in kwargs.values())
+        # kwargs tensors not supported yet unless it's a fallback op
+        assert not any(isinstance(x, TensorBox) for x in kwargs.values()) or all(
+            fn in fallbacks for fn in aten_fn
+        )
 
         if (type_promotion_kind or convert_input_to_bool) and indices:
             if convert_input_to_bool:
@@ -1141,7 +1143,6 @@ if has_torchvision_roi_align():
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
-make_fallback(aten.as_strided_scatter)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
@@ -1889,6 +1890,14 @@ def index_put_(self, indices, values, accumulate=False):
     if x_ndim == 0:
         self = view(self, [])
     return self
+
+
+@register_lowering(aten.as_strided_scatter, type_promotion_kind=None)
+def as_strided_scatter(self, src, size, stride, storage_offset=None):
+    output = clone(self)
+    output_view = as_strided(output, size, stride, storage_offset)
+    copy_(output_view, src)
+    return output
 
 
 @register_lowering(aten.scatter, type_promotion_kind=None)
@@ -2993,7 +3002,7 @@ def _validate_reduction_axis(x, axis):
     axis = list(axis)
     for i in range(len(axis)):
         if axis[i] < 0:
-            axis[i] += len(size)
+            axis[i] += len(size) if len(size) else 1
         assert 0 <= axis[i] < len(size) or (len(size) == 0 and axis[i] == 0)
     assert len(set(axis)) == len(axis), "reduction axis not unique"
     return axis
