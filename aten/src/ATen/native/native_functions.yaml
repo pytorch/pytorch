@@ -3803,6 +3803,7 @@
   dispatch:
     CUDA: batch_norm_cuda_out
     MPS: batch_norm_mps_out
+    CPU: batch_norm_cpu_out
 
 - func: batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)
   dispatch:
