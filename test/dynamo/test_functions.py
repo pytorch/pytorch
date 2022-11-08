@@ -331,7 +331,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_T(x):
-        return x.T
+        return torch.ones_like(x.T)
 
     @make_test
     def test_is_sparse(x):
