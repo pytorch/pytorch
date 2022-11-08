@@ -171,6 +171,7 @@ def main() -> None:
         filtered_test_matrix = test_matrix
 
 
+    # TODO: DEBUG, to be removed back to == "schedule"
     if args.event_name != "schedule":
         for config in filtered_test_matrix.get("include", []):
             selected_mode = random.choices(
