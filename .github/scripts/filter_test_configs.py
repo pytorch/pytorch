@@ -8,6 +8,7 @@ import requests
 from typing import Any, Dict, Set, List
 import yaml
 import warnings
+import random
 
 PREFIX = "test-config/"
 
@@ -32,11 +33,12 @@ VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}" for label in {
     "xla",
 }}
 
-# Supported mode when running periodically
+# Supported mode when running periodically. For simplicity, a random weight
+# will be assigned to each mode so that they can be chosen at random
 SUPPORTED_PERIODICAL_MODES = {
-    # DEBUG: TO BE UNCOMMENTED
-    # "mem_leak_check",
-    "rerun_disabled_tests",
+    # TODO: DEBUG TO BE RESET TO 0.5 before committing
+    "mem_leak_check": 0.0,
+    "rerun_disabled_tests": 1.0,
 }
 
 
@@ -169,11 +171,13 @@ def main() -> None:
         filtered_test_matrix = test_matrix
 
 
-    # DEBUG: TO BE REMOVED
     if args.event_name != "schedule":
         for config in filtered_test_matrix.get("include", []):
-            for mode in SUPPORTED_PERIODICAL_MODES:
-                config[mode] = mode
+            selected_mode = random.choices(
+                list(SUPPORTED_PERIODICAL_MODES.keys()),
+                weights=SUPPORTED_PERIODICAL_MODES.values(),
+                k=1)
+            config[selected_mode] = selected_mode[0]
 
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
