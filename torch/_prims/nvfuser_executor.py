@@ -383,6 +383,7 @@ def maybe_partition_graph(
             allowed_single_node_partition_ops=_allowed_single_node_partition_ops,
         )
         partitions = partitioner.propose_partitions()
+        partitioner.remove_bookend_non_compute_ops(partitions)
         if len(partitions) == 0:
             warn(
                 "No partition found for the graph. "
