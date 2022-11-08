@@ -1,17 +1,51 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Parallel.h>
 #include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorUtils.h>
 
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/batch_norm.h>
 #include <ATen/native/Normalization.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_batch_norm_impl_index.h>
+#include <ATen/ops/_batch_norm_impl_index_backward_native.h>
+#include <ATen/ops/_batch_norm_impl_index_native.h>
+#include <ATen/ops/alias.h>
+#include <ATen/ops/batch_norm.h>
+#include <ATen/ops/batch_norm_native.h>
+#include <ATen/ops/batch_norm_update_stats_native.h>
+#include <ATen/ops/cudnn_batch_norm.h>
+#include <ATen/ops/cudnn_batch_norm_backward.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/instance_norm_native.h>
+#include <ATen/ops/linalg_vector_norm.h>
+#include <ATen/ops/mean.h>
+#include <ATen/ops/miopen_batch_norm.h>
+#include <ATen/ops/miopen_batch_norm_backward.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/native_batch_norm.h>
+#include <ATen/ops/native_batch_norm_backward.h>
+#include <ATen/ops/native_batch_norm_backward_native.h>
+#include <ATen/ops/native_batch_norm_native.h>
+#include <ATen/ops/renorm_native.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/sqrt.h>
+#endif
 
 #include <vector>
 #include <c10/core/SymIntArrayRef.h>

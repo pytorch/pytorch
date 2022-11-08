@@ -5,12 +5,12 @@ from enum import auto, Enum
 from itertools import accumulate, chain
 from typing import (
     Any,
-    cast,
     Dict,
     Generator,
     Iterator,
     List,
     NamedTuple,
+    no_type_check,
     Optional,
     Sequence,
     Set,
@@ -23,16 +23,19 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torch.distributed.fsdp._common_utils import (
+    _set_fsdp_flattened,
+    HandleTrainingState,
+)
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
 from ._utils import (
     _alloc_storage,
     _free_storage,
+    _no_dispatch_record_stream,
     _same_storage,
-    _set_fsdp_flattened,
     p_assert,
 )
-
 
 __all__ = [
     "FlatParameter",
@@ -42,7 +45,6 @@ __all__ = [
     "SharedParamInfo",
     "HandleConfig",
     "HandleShardingStrategy",
-    "HandleTrainingState",
 ]
 
 
@@ -104,21 +106,13 @@ class HandleShardingStrategy(Enum):
     NO_SHARD = auto()
 
 
-class HandleTrainingState(Enum):
-    IDLE = auto()
-    FORWARD = auto()
-    BACKWARD_PRE = auto()
-    BACKWARD_POST = auto()
-    SUMMON_FULL_PARAMS = auto()
-
-
 @dataclass
 class HandleConfig:
     sharding_strategy: HandleShardingStrategy
     offload_params: bool
     low_prec_param_dtype: Optional[torch.dtype]
     low_prec_reduce_dtype: Optional[torch.dtype]
-    keep_low_precision_grads: Optional[bool] = False
+    keep_low_precision_grads: bool = False
 
 
 class FlatParameter(nn.Parameter):
@@ -136,7 +130,7 @@ class FlatParameter(nn.Parameter):
         parameter data is saved in ``self._local_shard``, and a new ``Tensor``
         ``self._full_param_padded`` is created, which is the all-gather
         destination and owns the unsharded parameter storage thereafter. (See
-        :meth:`FullyShardedDataParallel._init_param_attributes`.)
+        :meth:`FlatParamHandle.init_flat_param_attributes`.)
         - Throughout runtime, the parameter data changes storages as needed,
         e.g. to the sharded flattened parameter, reduced-precision sharded
         flattened parameter, or the unsharded flattened parameter.
@@ -170,6 +164,8 @@ class FlatParameter(nn.Parameter):
             (i.e. some per-parameter state) used to customize pre-flatten and
             post-unflatten behavior. This is experimental, and users should not
             depend on its existence in the future.
+        _modules (Set[nn.Module]): Modules that contain some original parameter
+            that is flattened into the ``FlatParameter``.
 
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
@@ -212,6 +208,13 @@ class FlatParameter(nn.Parameter):
         _shared_params (Optional[List[nn.Parameter]]): The original shared
             parameter variables if ``use_orig_params=True`` and ``None``
             otherwise.
+        _tensors (Optional[List[Optional[Tensor]]]): This saves the ``Tensor``
+            views created in the forward and tracked by autograd when
+            ``use_orig_params=True`` and is ``None`` otherwise. This is to
+            preserve those ``Tensor`` variables for the backward to ensure that
+            the ``FlatParameter`` 's ``AccumulateGrad`` object does not change
+            in which case the post-backward hook does not run. This is relevant
+            for cases like reentrant activation checkpointing.
         _is_grad_none (Optional[List[bool]]): A mask over the original
             parameters' gradients indicating if it is logically ``None`` or not
             if ``use_orig_params=True`` and ``None`` otherwise. This is needed
@@ -259,6 +262,9 @@ class FlatParameter(nn.Parameter):
         self._fqns = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
         self._param_extensions = tuple(param_extensions)
+        self._modules = set(pi.module for pi in self._param_infos).union(
+            set(spi.module for spi in self._shared_param_infos)
+        )
         assert (params is None) == (shared_params is None)
         if params is not None:
             assert shared_params is not None and len(shared_params) == len(
@@ -273,12 +279,19 @@ class FlatParameter(nn.Parameter):
             self._is_grad_none: Optional[List[bool]] = [
                 False for _ in range(len(params))
             ]
+            self._tensors: Optional[List[Optional[Tensor]]] = [
+                None for _ in range(len(self._params))
+            ]
         else:
             self._params = None
             self._shared_params = None
             self._is_grad_none = None
+            self._tensors = None
         self._unpadded_unsharded_size = self.size()
         _set_fsdp_flattened(self)
+        # Tracks whether the `FlatParameter`'s post-backward hook has been
+        # called to modify the behavior of the post-backward callback
+        self._post_backward_called = False
 
 
 class FlatParamHandle:
@@ -416,7 +429,10 @@ class FlatParamHandle:
                         else param_name
                     )
                     prefixed_param_names.append(prefixed_param_name)
-        assert requires_grad is not None
+        assert requires_grad is not None, (
+            "Passed-in `params` were not found in the module tree\n"
+            f"params: {params}\nmodule: {module}"
+        )
         self.flat_param = FlatParamHandle.flatten_params(
             params_to_flatten, requires_grad
         )
@@ -676,6 +692,73 @@ class FlatParamHandle:
             self.flat_param._shard_param_offsets[:],  # type: ignore[attr-defined]
         )
 
+    @no_type_check
+    @torch.no_grad()
+    def init_flat_param_attributes(self) -> None:
+        """
+        This initializes some attributes on the handle's ``FlatParameter``.
+        This should be called during lazy initialization since it requires the
+        parameter to be on the compute device if not offloading to CPU and we
+        want to give users the chance to move the parameter appropriately after
+        the FSDP constructor.
+
+        For each tensor attribute on the ``FlatParameter``, see the unshard and
+        reshard methods in this class for the allocation and free pattern.
+        """
+        flat_param = self.flat_param
+        cpu_device = torch.device("cpu")
+        if self._config.offload_params:
+            p_assert(
+                flat_param.device == cpu_device,
+                "Expects the `FlatParameter` to be offloaded to CPU since CPU "
+                "offloading is enabled. You may be accidentally moving the "
+                f"model to {flat_param.device} after the FSDP constructor.",
+            )
+        flat_param._local_shard = flat_param.data
+        if self._config.offload_params:
+            # Pin the memory for faster H2D transfer
+            flat_param._local_shard = flat_param._local_shard.pin_memory()
+            # Pre-allocate the sharded gradient on CPU to enable non-blocking
+            # D2H transfer during the backward pass
+            flat_param._cpu_grad = torch.zeros_like(
+                flat_param._local_shard, device=cpu_device
+            ).pin_memory()
+        if self._config.low_prec_param_dtype is not None:
+            # For parameter mixed precision, we maintain a low precision
+            # sharded tensor on the compute device to be all-gathered (for
+            # sharded strategies) or directly used (for `NO_SHARD`) for
+            # computation.
+            flat_param._mp_shard = torch.zeros_like(
+                flat_param._local_shard,
+                device=self.device,
+                dtype=self._config.low_prec_param_dtype,
+            )
+            _free_storage(flat_param._mp_shard)
+        if self.uses_sharded_strategy:
+            # We maintain a padded unsharded tensor that serves as the
+            # all-gather destination and owns the original parameter storages.
+            unsharded_param_dtype = (
+                self._config.low_prec_param_dtype or flat_param.dtype
+            )  # use low precision if parameter mixed precision is enabled
+            padded_unsharded_numel = flat_param.numel() * self.world_size
+            flat_param._full_param_padded = torch.zeros(
+                padded_unsharded_numel,
+                device=self.device,
+                dtype=unsharded_param_dtype,
+            )
+            flat_param._padded_unsharded_size = flat_param._full_param_padded.size()
+            _free_storage(flat_param._full_param_padded)
+
+            if self._config.low_prec_param_dtype is not None:
+                # For parameter mixed precision, we maintain a full precision
+                # padded unsharded tensor for when we force full precision.
+                flat_param._full_prec_full_param_padded = torch.zeros(
+                    padded_unsharded_numel,
+                    device=self.device,
+                    dtype=flat_param.dtype,  # full precision
+                )
+                _free_storage(flat_param._full_prec_full_param_padded)
+
     ###################
     # UNSHARD/RESHARD #
     ###################
@@ -835,11 +918,15 @@ class FlatParamHandle:
             unsharded_size
         )  # this `.view()` is not autograd visible
         in_forward = self._training_state == HandleTrainingState.FORWARD
+        in_pre_backward = self._training_state == HandleTrainingState.BACKWARD_PRE
         if self._use_orig_params:
-            # NOTE: When not in the forward, `as_params=True` suffices since we
-            # only need to restore the tensor *values* for backward computation
-            # and do not fresh `Tensor` views.
-            self._use_unsharded_views(as_params=(not in_forward))
+            # We use `Tensor` views in the forward so that they are tracked by
+            # autograd. We use them in the pre-backward as well to support
+            # reentrant activation checkpointing, which needs the views to be
+            # tracked by autograd in the backward pass's recomputed forward.
+            self._use_unsharded_views(
+                as_params=(not in_forward and not in_pre_backward)
+            )
         elif in_forward:
             self._use_unsharded_views(as_params=False)
 
@@ -903,7 +990,9 @@ class FlatParamHandle:
             self._check_sharded(flat_param.grad)
             flat_param._saved_grad_shard = flat_param.grad  # type: ignore[attr-defined]
             sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
-        dist.all_gather_into_tensor(padded_unsharded_grad, sharded_grad, self.process_group)
+        dist.all_gather_into_tensor(
+            padded_unsharded_grad, sharded_grad, self.process_group
+        )
         unsharded_size = self.flat_param._unpadded_unsharded_size
         flat_param.grad = padded_unsharded_grad[: unsharded_size.numel()].view(
             unsharded_size
@@ -1116,9 +1205,7 @@ class FlatParamHandle:
         self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
-        unsharded_flat_param.record_stream(
-            cast(torch._C.Stream, torch.cuda.current_stream())
-        )
+        _no_dispatch_record_stream(unsharded_flat_param, torch.cuda.current_stream())
         _free_storage(unsharded_flat_param)
 
     def _use_sharded_flat_param(self) -> None:
@@ -1198,8 +1285,27 @@ class FlatParamHandle:
                 param.data = view
             elif as_params:
                 module.register_parameter(param_name, nn.Parameter(view))
-            else:
-                setattr(module, param_name, view)
+            else:  # `as_params=False`
+                param_var: Tensor = view
+                if self._use_orig_params:
+                    if self._training_state == HandleTrainingState.FORWARD:
+                        assert self.flat_param._tensors is not None
+                        # Save the `Tensor` for the pre-backward
+                        self.flat_param._tensors[i] = view  # save for pre-backward
+                    elif self._training_state == HandleTrainingState.BACKWARD_PRE:
+                        # Use the saved `Tensor` variable from the forward to
+                        # preserve the autograd graph so that the post-backward
+                        # hook fires (e.g. for reentrant AC)
+                        assert self.flat_param._tensors is not None  # mypy
+                        tensor = self.flat_param._tensors[i]
+                        p_assert(
+                            tensor is not None,
+                            "Expects `Tensor` to have been saved in forward",
+                        )
+                        tensor.data = view  # type: ignore[union-attr]
+                        assert tensor is not None  # mypy
+                        param_var = tensor
+                setattr(module, param_name, param_var)
         for i, (
             param_name,
             module,
@@ -1341,6 +1447,11 @@ class FlatParamHandle:
             setattr(module, param_name, param)
             prim_param = getattr(prim_module, prim_param_name)
             param.data = prim_param  # could be both empty and non-empty
+        if self._training_state == HandleTrainingState.BACKWARD_POST:
+            assert self.flat_param._tensors is not None  # mypy
+            # Clear the saved `Tensor`s since they are unneeded now
+            for i in range(len(self.flat_param._tensors)):
+                self.flat_param._tensors[i] = None  # type: ignore[index]
 
     @torch.no_grad()
     def _use_sharded_grad_views(self) -> None:
@@ -1466,7 +1577,8 @@ class FlatParamHandle:
                 # memory and owns the gradient storage, so it will never
                 # require gradient writeback.
                 flat_param_grad = (
-                    flat_param.grad if self.uses_sharded_strategy or not self._config.offload_params
+                    flat_param.grad
+                    if self.uses_sharded_strategy or not self._config.offload_params
                     else flat_param._cpu_grad  # type: ignore[attr-defined]
                 )
                 needs_grad_writeback = flat_param_grad is None or not _same_storage(
@@ -1768,8 +1880,22 @@ class FlatParamHandle:
         return self._config.low_prec_param_dtype is not None
 
     @property
+    def _uses_reduce_mixed_precision(self) -> bool:
+        return self._config.low_prec_reduce_dtype is not None
+
+    @property
+    def _keep_low_precision_grads(self) -> bool:
+        return self._config.keep_low_precision_grads
+
+    @property
     def _force_full_precision(self) -> bool:
         return (
             self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
             and self._uses_param_mixed_precision
         )
+
+
+# A handles key represents the group of `FlatParamHandle`s involved in a given
+# module's forward. These will be all-gathered together in the pre-forward and
+# pre-backward.
+_HandlesKey = Tuple[FlatParamHandle, ...]
