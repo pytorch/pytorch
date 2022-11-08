@@ -1464,7 +1464,6 @@ inplace_symbolic_tensor_failures = {
     xfail('trunc', ''),  # aten.trunc_.default - couldn't find symbolic meta function/decomposition
     xfail('uniform', ''),  # aten.uniform_.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
-    xfail('unsqueeze', ''),  # aten.unsqueeze_.default - couldn't find symbolic meta function/decomposition
     xfail('xlogy', ''),  # aten.xlogy_.Tensor - couldn't find symbolic meta function/decomposition
 }
 
