@@ -866,6 +866,7 @@ class FullyShardedDataParallel(nn.Module):
                 yield
             return
 
+        _lazy_init(self, self)
         with _unshard_params(
             module=self,
             state=self,

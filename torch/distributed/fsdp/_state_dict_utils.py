@@ -126,8 +126,8 @@ def _common_pre_state_dict_hook(
     """Performs the pre-state_dict tasks shared by all state_dict types."""
     if torch.cuda.is_available():
         torch.cuda.synchronize()
-    if fsdp_state.is_root:
-        _lazy_init(fsdp_state, module)
+    # TODO: need to check if this is always correct for composable FSDP.
+    _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     # if fsdp_state.is_root:
     #    _clear_grads_if_needed(_all_handles(fsdp_state))
@@ -337,7 +337,7 @@ def _full_pre_load_state_dict_hook(
     state_dict: Dict[str, Any],
     prefix: str,
 ) -> None:
-    _lazy_init(module, module)
+    _lazy_init(fsdp_state, module)
     _enter_unshard_params_ctx(module, fsdp_state, recurse=False, writeback=True)
     _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
 
@@ -430,7 +430,7 @@ def _local_pre_load_state_dict_hook(
     state_dict. The flat_param should be a ShardedTensor. This hook converts
     the ShardedTensor to a tensor. No copy happen unless padding is required.
     """
-    _lazy_init(module, module)
+    _lazy_init(fsdp_state, module)
     _replace_by_prefix(state_dict, prefix, f"{prefix}{FSDP_PREFIX}")
     fqn = f"{prefix}{FSDP_PREFIX}{FLAT_PARAM}"
     if fqn not in state_dict:
@@ -543,7 +543,7 @@ def _sharded_pre_load_state_dict_hook(
     The hook combines the unflattened, sharded parameters (ShardedTensor) to
     a new FlatParameter and shards the new FlatParameter to the local chunk.
     """
-    _lazy_init(module, module)
+    _lazy_init(fsdp_state, module)
     _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
     if not _has_fsdp_params(module, fsdp_state):
         return
