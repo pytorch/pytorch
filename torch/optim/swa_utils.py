@@ -5,7 +5,7 @@ import warnings
 
 import torch
 from torch.nn import Module
-from torch.optim.lr_scheduler import _LRScheduler
+from torch.optim.lr_scheduler import LRScheduler
 
 __all__ = ['AveragedModel', 'update_bn', 'SWALR']
 
@@ -196,7 +196,7 @@ def update_bn(loader, model, device=None):
     model.train(was_training)
 
 
-class SWALR(_LRScheduler):
+class SWALR(LRScheduler):
     r"""Anneals the learning rate in each parameter group to a fixed value.
 
     This learning rate scheduler is meant to be used with Stochastic Weight

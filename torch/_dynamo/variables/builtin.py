@@ -326,7 +326,10 @@ class BuiltinVariable(VariableTracker):
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
             except TypeError as exc:
-                log.warning(f"incorrect arg count {handler} {exc}")
+                if not has_constant_handler:
+                    log.warning(
+                        f"incorrect arg count {handler} {exc} and no constant handler"
+                    )
                 handler = None
 
         if handler:
