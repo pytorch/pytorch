@@ -164,7 +164,8 @@ def _unshard_params(
         return
 
     for handle in handles:
-        assert handle._training_state == HandleTrainingState.IDLE
+        if handle._training_state != HandleTrainingState.IDLE:
+            raise ValueError(f"Current handle state is {handle._training_state}")
 
     for handle in handles:
         handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
@@ -186,7 +187,6 @@ def _unshard_params(
         try:
             yield
         finally:
-            # state.training_state = TrainingState.IDLE
             for handle in handles:
                 handle._training_state = HandleTrainingState.IDLE
     else:
