@@ -291,43 +291,17 @@ class TestMkldnnFusion(JitTestCase):
                             x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
                             mod.conv.groups, attr, None, unary_attr, [], None
                         )
-                    self.assertEqual(ref, fused)
+                        # for binary add, we support inplace version.
+                        if attr == "add":
+                            fused_inplace = torch.ops.mkldnn._convolution_pointwise_(
+                                x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
+                                mod.conv.groups, attr, None, unary_attr, [], None
+                            )
+                            self.assertEqual(ref, other)
+                            self.assertEqual(ref, fused_inplace)
 
-    def test_conv_add_relu_inplace(self):
-        class M(nn.Module):
-            def __init__(self, dim, in_channels, out_channels, dilation, groups, bias, **kwargs):
-                super(M, self).__init__()
-                self.conv1 = CONV_MODULES[dim](in_channels, out_channels, dilation=dilation, groups=groups, bias=bias, **kwargs)
-                self.conv2 = CONV_MODULES[dim](in_channels, out_channels, dilation=dilation, groups=groups, bias=bias, **kwargs)
+                        self.assertEqual(ref, fused)
 
-            def forward(self, x):
-                y1 = self.conv1(x)
-                y2 = self.conv2(x)
-                y1 += y2
-                return y1
-
-        input_shapes = {2: (112, 112), 3: (55, 55, 55)}
-        for dim in [2, 3]:
-            channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
-            options = itertools.product([True, False], [True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last])
-            for has_relu, bias, dilation, groups, memory_format in options:
-                oC = 32 * groups
-                iC = 3 * groups
-                x_shape = (1, iC) + input_shapes[dim]
-                x = torch.randn(x_shape, dtype=torch.float32).to(memory_format=memory_format)
-                mod = M(dim, iC, oC, dilation, groups, bias, kernel_size=3)
-                mod = mod.to(memory_format=memory_format).eval()
-                with torch.no_grad():
-                    ref = mod(x)
-                    unary_attr = None
-                    if has_relu:
-                        ref.relu_()
-                        unary_attr = "relu"
-                    fused = torch.ops.mkldnn._convolution_pointwise_(
-                        x, mod.conv1(x), mod.conv2.weight, mod.conv2.bias, mod.conv2.padding, mod.conv2.stride,
-                        mod.conv2.dilation, mod.conv2.groups, "add", None, unary_attr, [], None
-                    )
-                self.assertEqual(ref, fused)
 
     def test_linear_binary_fusion_ops(self):
         class M(nn.Module):

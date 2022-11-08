@@ -10,6 +10,8 @@
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
+#include <utility>
+
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
     true,
@@ -786,7 +788,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
           sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
   auto oldData = std::move(storage_.data_ptr());
   auto oldSize = numel_;
-  Resize(newCapacity);
+  Resize(std::move(newCapacity));
   auto* newData = raw_mutable_data(data_type_);
   if (data_type_.copy()) {
     TORCH_CHECK(
@@ -838,7 +840,7 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
   auto oldSize = numel_;
   SmallVector<int64_t, 5> oldDims(
       sizes_and_strides.begin(), sizes_and_strides.end());
-  Resize(newCapacity);
+  Resize(std::move(newCapacity));
   // Allocate new memory but don't copy over the data
   raw_mutable_data(data_type_);
   sizes_and_strides_.set_sizes(oldDims);
