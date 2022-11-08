@@ -31,7 +31,7 @@ on:
       cuda-arch-list:
         required: false
         type: string
-        default: "5.2"
+        default: "8.0"
         description: |
           List of CUDA architectures CI build should target.
 
@@ -54,8 +54,8 @@ on:
 jobs:
   build:
     # Don't run on forked repos
-    if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.2xlarge]
+    if: github.repository_owner == 'weiwangmeta'
+    runs-on: [self-hosted, linux.gcp.a100]
     timeout-minutes: 240
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
