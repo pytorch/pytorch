@@ -1685,6 +1685,21 @@ def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
         (), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
 
+@register_meta(aten.topk.default)
+def topk_meta(self, k, dim=-1, largest=True, sorted=True):
+    # From aten/src/ATen/native/Sorting.cpp
+    dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
+    check(
+        k >= 0 and k <= (self.size(dim) if self.dim() > 0 else 1),
+        lambda: "selected index k out of range",
+    )
+    sliceSize = 1 if self.dim() == 0 else self.size(dim)
+    check(k >= 0 and k <= sliceSize, lambda: "k not in range for dimension")
+
+    topKSize = list(self.shape)
+    if len(topKSize) > 0:
+        topKSize[dim] = k
+    return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
