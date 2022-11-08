@@ -178,17 +178,16 @@ def cache_on_self(fn):
     return wrapper
 
 
-def get_kernel_name(node_schedule):
-    OP_EXCLUDES = {"placeholder"}
+def get_fused_kernel_name(node_schedule):
     return "_".join(
-        ["kernel", "fused"]
+        ["fused"]
         + [
             str(origin.name)
             for origin in functools.reduce(
                 operator.or_, [node.node.origins for node in node_schedule]
             )
-            if origin.op not in OP_EXCLUDES
-        ]
+            if origin.op == "call_function"
+        ][0 : config.kernel_name_max_ops]
     )
 
 
@@ -198,7 +197,7 @@ def gather_origins(args, kwargs):
     from .ir import ComputedBuffer, IRNode
 
     def is_unrealized_node(n):
-        return isinstance(n, IRNode) and isinstance(n, ComputedBuffer)
+        return isinstance(n, IRNode) and not isinstance(n, ComputedBuffer)
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]

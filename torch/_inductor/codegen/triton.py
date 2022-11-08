@@ -16,7 +16,7 @@ from .. import config, ir, scheduler
 from ..ir import ReductionHint
 from ..utils import (
     free_symbol_startswith,
-    get_kernel_name,
+    get_fused_kernel_name,
     instance_descriptor,
     sympy_product,
     sympy_subs,
@@ -1272,14 +1272,21 @@ class TritonScheduling:
 
         wrapper = V.graph.wrapper_code
         src_code = kernel.codegen_kernel()
-        kernel_name = get_kernel_name(node_schedule)
-        wrapper.kernels[src_code] = kernel_name
-        subs_name = kernel_name
-        src_code = src_code.replace("KERNEL_NAME", subs_name)
-        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
-        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
-        src_code = src_code.replace("#pragma CMT", "#")
-        wrapper.define_kernel(kernel_name, src_code)
+        if src_code in wrapper.kernels:
+            kernel_name = wrapper.kernels[src_code]
+        else:
+            kernel_name = (
+                "triton_"
+                + get_fused_kernel_name(node_schedule)
+                + wrapper.next_kernel_suffix()
+            )
+            wrapper.kernels[src_code] = kernel_name
+            subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
+            src_code = src_code.replace("KERNEL_NAME", subs_name)
+            # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
+            # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
+            src_code = src_code.replace("#pragma CMT", "#")
+            wrapper.define_kernel(kernel_name, src_code)
         kernel.call_kernel(wrapper, kernel_name)
         self.scheduler.free_buffers()
 
