@@ -442,7 +442,6 @@ class TensorVariable(VariableTracker):
             args = [variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)]
             result = self.call_method(tx, "permute", args, {})
 
-
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
 
