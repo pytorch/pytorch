@@ -34,6 +34,12 @@ on:
         default: "5.2"
         description: |
           List of CUDA architectures CI build should target.
+      runner:
+        required: false
+        type: string
+        default: "linux.2xlarge"
+        description: |
+          List of CUDA architectures CI build should target.
 
       test-matrix:
         required: false
@@ -55,7 +61,7 @@ jobs:
   build:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
