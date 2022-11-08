@@ -126,8 +126,8 @@ def _common_pre_state_dict_hook(
     """Performs the pre-state_dict tasks shared by all state_dict types."""
     if torch.cuda.is_available():
         torch.cuda.synchronize()
-    if fsdp_state.is_root:
-        _lazy_init(fsdp_state, module)
+    # TODO: need to check if this is always correct for composable FSDP.
+    _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     # if fsdp_state.is_root:
     #    _clear_grads_if_needed(_all_handles(fsdp_state))
