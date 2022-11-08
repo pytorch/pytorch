@@ -402,25 +402,19 @@ class TestDataFlow(TestCase):
                     y.zero_()
                     return {"x0": torch.ones_like(x), "y0": torch.zeros_like(y)}
 
-        # `record_function` makes a Tensor to hold its handle which is why we
-        # see `aten::zeros` for `T0` and `T1`.
         inputs = {"x": torch.ones((1,)), "y": torch.ones((1,))}
         self.assertExpectedInline(
             self._run_and_format_data_flow(inputs, f),
             """\
-            x:       T2
-            y:       T3
-            x0:      T4
-            y0:      T5
+            x:       T0
+            y:       T1
+            x0:      T2
+            y0:      T3
 
-            aten::zeros                                ->  T0(v0)
-            [memory]                  T0(v0*)          ->
-            aten::zeros                                ->  T1(v0)
-            [memory]                  T1(v0*)          ->
-            aten::zero_               T2(v0)           ->  T2(v1)
-            aten::zero_               T3(v0)           ->  T3(v1)
-            aten::ones_like           T2(v1)           ->  T4(v0)
-            aten::zeros_like          T3(v1)           ->  T5(v0)""",
+            aten::zero_               T0(v0)           ->  T0(v1)
+            aten::zero_               T1(v0)           ->  T1(v1)
+            aten::ones_like           T0(v1)           ->  T2(v0)
+            aten::zeros_like          T1(v1)           ->  T3(v0)""",
         )
 
     def test_data_flow_graph_non_op_allocations(self) -> None:
