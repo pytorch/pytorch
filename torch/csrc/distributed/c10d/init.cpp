@@ -236,6 +236,19 @@ void _register_builtin_comm_hook(
   reducer.register_builtin_comm_hook(comm_hook_type);
 }
 
+// Customize the metaclass of ::c10d::ReduceOp for the backward compatibility.
+// https://github.com/pytorch/pytorch/pull/84243 changed ::c10d::ReduceOp to struct
+// from enum, sacrificing some of the Python built-in function supports such as
+// `isinstance` (see https://github.com/pytorch/pytorch/issues/87191) and
+// `copy` (see https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700).
+// Below, we define a custom `isinstance` in CPython/pybind11 (`reduceopmeta___instancecheck__`)
+// and modify the default metaclass of pybind11 (`GetReduceOpMetaclass`)
+// so that `isinstance(torch.distributed.ReduceOp.SUM, torch.distributed.ReduceOp)`
+// returns :obj:`True` as if `ReduceOp` is enum.
+// Ref:
+//   - https://docs.python.org/3/extending/newtypes_tutorial.html
+//   - https://docs.python.org/3/c-api/typeobj.html?highlight=tp_methods
+//   - https://github.com/pybind/pybind11/issues/2696
 static PyObject* reduceopmeta___instancecheck__(
     PyObject* self,
     PyObject* args) {
