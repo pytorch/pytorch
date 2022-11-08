@@ -3019,9 +3019,27 @@ class Convolution(ExternKernelAlloc):
         output_padding_: List[int],
         groups: int,
     ):
+        with torch._subclasses.FakeTensorMode():
+            x_fake = ir_node_to_tensor(x, guard_shape=False)
+            weight_fake = ir_node_to_tensor(weight, guard_shape=False)
+            bias_fake = (
+                ir_node_to_tensor(bias, guard_shape=False) if bias is not None else bias
+            )
+            output = torch.ops.aten.convolution(
+                x_fake,
+                weight_fake,
+                bias_fake,
+                stride_,
+                padding_,
+                dilation_,
+                transposed,
+                output_padding_,
+                groups,
+            )
+            req_stride_order = get_stride_order(output.stride())
 
-        weight = cls.require_stride1(cls.realize_input(weight))
-        x = cls.require_stride_order(x, get_stride_order(weight.get_stride()))
+        weight = cls.require_stride_order(weight, req_stride_order)
+        x = cls.require_stride_order(x, req_stride_order)
         stride = tuple(stride_)
         padding = tuple(padding_)
         dilation = tuple(dilation_)
