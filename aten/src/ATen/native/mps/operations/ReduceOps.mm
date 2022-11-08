@@ -1658,7 +1658,6 @@ std::tuple<Tensor, Tensor> min_mps
     return min_max_mps(input_t, dim, keepdim, MPSReductionType::MIN, "min_mps");
 }
 
-
 static bool mpsSupportsSort() {
   id mpsCD = NSClassFromString(@"MPSGraph");
   return [mpsCD instancesRespondToSelector:@selector(sortWithTensor:axis:name:)] == YES;
@@ -1867,6 +1866,29 @@ void median_out_mps
 
 }
 
+// in case mps sortWithTensor do not supported on macOS
+std::tuple<Tensor&, Tensor&> median_from_cpu(
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim, Tensor & valuesI, Tensor & indicesI, IntArrayRef vec_out_shape, IntArrayRef vec_apparent_out_shape) {
+      // Tensor a = at::median(self.to("cpu"));
+      Tensor values;
+      Tensor indices;
+    if (!keepdim){
+        values = at::empty({vec_out_shape}, self.options());
+        indices = at::empty({vec_out_shape}, self.options().dtype(kLong));
+
+      }
+      else{
+          values = at::empty({vec_apparent_out_shape}, self.options());
+          indices = at::empty({vec_apparent_out_shape}, self.options().dtype(kLong));
+      }
+      at::median_out(values, indices, self, dim, keepdim);
+
+  valuesI.copy_(values);
+  indicesI.copy_(indices);
+  return std::forward_as_tuple(valuesI, indicesI);
+}
 
 TORCH_API ::std::tuple<at::Tensor &,at::Tensor &> median_out_mps
     (const at::Tensor & input_t,
@@ -1874,12 +1896,6 @@ TORCH_API ::std::tuple<at::Tensor &,at::Tensor &> median_out_mps
     bool keepdim,
     at::Tensor & values,
     at::Tensor & indices){
-
-  if(!mpsSupportsSort()){
-      TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performace implications.");
-      return median_out_cpu(input_t.to("cpu"), dim, keepdim, values, indices);
-  }
 
   TORCH_INTERNAL_ASSERT(input_t.scalar_type() != ScalarType::Long, "median not supported for Long dtype on MPS");
 
@@ -1949,6 +1965,12 @@ TORCH_API ::std::tuple<at::Tensor &,at::Tensor &> median_out_mps
     if (values.numel() == 0 || input_t.numel() == 0) {
         return std::tuple<Tensor&, Tensor&>{values, indices};
     }
+
+    if(!mpsSupportsSort()){
+      TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
+                    "Falling back on CPU. This may have performace implications.");
+    return median_from_cpu(input_t.to("cpu"), dim, keepdim, values, indices, IntArrayRef(vec_out_shape),IntArrayRef(vec_apparent_out_shape) );
+  }
 
     median_out_mps(input_t, dim, keepdim, values, indices, "median_out_mps");
 

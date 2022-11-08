@@ -2572,10 +2572,10 @@ class TestNLLLoss(TestCase):
 
             self.assertEqual(result_cpu, result_mps)
 
-            for dim in [0, 1, 2, 3]:
+            for dim in [0, 1, 2]:
                 for keepdim in [True, False]:
-                    y, idx = torch.median(mps_x, dim=dim, keepdim=keepdim)
-                    refy, refidx = torch.median(cpu_x, dim=dim, keepdim=keepdim)
+                    y, idx = torch.median(cpu_x, dim=dim, keepdim=keepdim)
+                    refy, refidx = torch.median(mps_x, dim=dim, keepdim=keepdim)
                     self.assertEqual(y, refy)
                     self.assertEqual(idx, refidx)
 
@@ -2588,10 +2588,10 @@ class TestNLLLoss(TestCase):
 
             self.assertEqual(result_cpu, result_mps)
 
-            for dim in [0, 1, 2, 3]:
+            for dim in [0, 1, 2]:
                 for keepdim in [True, False]:
-                    y, idx = torch.median(mps_x, dim=dim, keepdim=keepdim)
-                    refy, refidx = torch.median(cpu_x, dim=dim, keepdim=keepdim)
+                    y, idx = torch.median(cpu_x, dim=dim, keepdim=keepdim)
+                    refy, refidx = torch.median(mps_x, dim=dim, keepdim=keepdim)
                     self.assertEqual(y, refy)
                     self.assertEqual(idx, refidx)
 
