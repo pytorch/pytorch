@@ -5,7 +5,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 
-NUM_PROCS = 2
+NUM_PROCS = 1 if os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1" else 2
 
 
 class ShardJob:
