@@ -766,7 +766,8 @@ def load(
         if pickle_module is not None:
             raise RuntimeError("Can not safely load weights when expiclit picke_module is specified")
     else:
-        pickle_module = pickle
+        if pickle_module is None:
+            pickle_module = pickle
 
     _check_dill_version(pickle_module)
 
