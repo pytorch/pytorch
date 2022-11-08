@@ -213,10 +213,8 @@ def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_type = StateDictType.FULL_STATE_DICT
     state_dict_config: StateDictConfig = FullStateDictConfig()
     state._state_dict_config = state_dict_config
-    full_param_ctx: Optional[Generator] = None
-    # TODO: For composable API, this should be a dict that maps from a module to
-    # handles.
-    state._full_param_ctx = full_param_ctx
+    unshard_params_ctx: Dict[nn.Module, Generator] = {}
+    state._unshard_params_ctx = unshard_params_ctx
     return state
 
 
