@@ -1638,9 +1638,11 @@ class TestNestedTensorDeviceType(TestCase):
             if (i == 0):
                 continue
             nt_unsqueezed = nt.unsqueeze(i)
+            self.assertTrue(nt_unsqueezed.is_contiguous())
             size_idx = i if i < 0 else i - 1
             self.assertEqual(nt_unsqueezed._nested_tensor_size()[:, size_idx], torch.ones(2, dtype=torch.long))
             nt_squeezed = nt_unsqueezed.squeeze(i)
+            self.assertTrue(nt_squeezed.is_contiguous())
             self.assertEqual(nt_squeezed, nt)
 
     @dtypes(torch.float, torch.float16, torch.double)
