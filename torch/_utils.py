@@ -1,4 +1,3 @@
-import copyreg
 import sys
 import traceback
 import warnings
@@ -308,7 +307,6 @@ def _rebuild_qtensor(
     return tensor
 
 
-# Should not be used, this is kept only for BC of loading old serialized parameters
 def _rebuild_parameter(data, requires_grad, backward_hooks):
     param = torch.nn.Parameter(data, requires_grad)
     # NB: This line exists only for backwards compatibility; the
@@ -317,62 +315,6 @@ def _rebuild_parameter(data, requires_grad, backward_hooks):
     param._backward_hooks = backward_hooks
 
     return param
-
-
-def _rebuild_parameter_v2(data, requires_grad, backward_hooks, state):
-    param = torch.nn.Parameter(data, requires_grad)
-    # NB: This line exists only for backwards compatibility; the
-    # general expectation is that backward_hooks is an empty
-    # OrderedDict.  See Note [Don't serialize hooks]
-    param._backward_hooks = backward_hooks
-
-    # Restore state on Parameter like python attr.
-    param = _set_obj_state(param, state)
-    return param
-
-
-def _get_obj_state(obj):
-    # Get the state of the python subclass
-    # This loosely mimicks the function on the object class but since Tensor do not inherit
-    # from it, we cannot call that function directly
-    # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
-    getstate_fn = getattr(obj, "__getstate__", None)
-    if getstate_fn:
-        state = getstate_fn()
-    else:
-        slots_to_save = copyreg._slotnames(obj.__class__)  # type: ignore[attr-defined]
-        if slots_to_save:
-            state = (
-                obj.__dict__,
-                {
-                    name: getattr(obj, name)
-                    for name in slots_to_save
-                    if hasattr(obj, name)
-                },
-            )
-        else:
-            state = obj.__dict__
-
-    return state
-
-
-def _set_obj_state(obj, state):
-    if isinstance(state, tuple):
-        if not len(state) == 2:
-            raise RuntimeError(f"Invalid serialized state: {state}")
-        dict_state = state[0]
-        slots_state = state[1]
-    else:
-        dict_state = state
-        slots_state = None
-
-    for k, v in dict_state.items():
-        setattr(obj, k, v)
-
-    if slots_state:
-        for k, v in slots_state.items():
-            setattr(obj, k, v)
-    return obj
 
 
 def _import_dotted_name(name):
