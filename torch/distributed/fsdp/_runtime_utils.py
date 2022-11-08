@@ -559,10 +559,23 @@ def _post_backward_hook(
             if handle._uses_reduce_mixed_precision and not _low_precision_hook_enabled(
                 state
             ):
-                # TODO: Use the low precision communication hook directly
-                flat_param.grad.data = flat_param.grad.to(
-                    state.mixed_precision.reduce_dtype
-                )
+                if handle.uses_sharded_strategy and handle._needs_padding:
+                    # For this case, we must cast `_padded_unsharded_grad`
+                    # since it owns the underlying storage.
+                    flat_param._padded_unsharded_grad.data = (
+                        flat_param._padded_unsharded_grad.to(
+                            state.mixed_precision.reduce_dtype
+                        )
+                    )
+                    flat_param.grad.data = flat_param._padded_unsharded_grad[
+                        : flat_param._unpadded_unsharded_size.numel()
+                    ]
+                else:
+                    # TODO: Use the low precision communication hook directly
+                    # (though the `if` case may not be so easily unified)
+                    flat_param.grad.data = flat_param.grad.to(
+                        state.mixed_precision.reduce_dtype
+                    )
 
             if handle.uses_sharded_strategy:
                 # We clear `.grad` to permit multiple backwards. This avoids a
@@ -580,7 +593,7 @@ def _post_backward_hook(
                 new_sharded_grad = torch.empty(
                     flat_param._sharded_size,
                     dtype=padded_unsharded_grad.dtype,
-                    device=padded_unsharded_grad.device,
+                    device=state.compute_device,
                 )
                 state._communication_hook(
                     state._communication_hook_state,
@@ -1038,10 +1051,11 @@ def _register_pre_backward_hooks(
         state._ran_pre_backward_hook[handles_key] = False
 
         for handle in handles_key:
-            flat_param_hook = functools.partial(
-                _flat_param_pre_backward_hook, state, handle
-            )
-            handle.flat_param.register_hook(flat_param_hook)
+            if handle.flat_param.requires_grad:
+                flat_param_hook = functools.partial(
+                    _flat_param_pre_backward_hook, state, handle
+                )
+                handle.flat_param.register_hook(flat_param_hook)
 
     def _register_hook(t: torch.Tensor) -> torch.Tensor:
         if t.requires_grad:

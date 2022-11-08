@@ -1030,7 +1030,9 @@ class FlatParamHandle:
             has_grad and flat_param.grad.size() != flat_param._unpadded_unsharded_size
         )
         has_grad_and_in_no_sync = (
-            has_grad and flat_param.grad.size() == flat_param._unpadded_unsharded_size
+            has_grad
+            and flat_param.grad.size() == flat_param._unpadded_unsharded_size
+            and flat_param.grad.size() != flat_param._sharded_size
         )
         has_grad_and_cpu_offloading = (
             has_grad and flat_param.grad.device != flat_param.device
