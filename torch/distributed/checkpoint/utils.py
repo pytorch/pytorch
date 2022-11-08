@@ -4,7 +4,7 @@ from .api import (
     CheckpointException,
     _wrap_exception,
     _is_wrapped_exception,
-    WRAPPED_EXCEPTION
+    WRAPPED_EXCEPTION,
 )
 
 import torch
@@ -20,12 +20,20 @@ from .metadata import (
     MetadataIndex,
 )
 
+__all__ = []
 
-T = TypeVar('T')
-R = TypeVar('R')
+T = TypeVar("T")
+R = TypeVar("R")
 
-def _get_failure_dict(results: List[Union[T, WRAPPED_EXCEPTION]]) -> Dict[int, WRAPPED_EXCEPTION]:
-    return cast(Dict[int, WRAPPED_EXCEPTION], {i: err for i, err in enumerate(results) if _is_wrapped_exception(err)})
+
+def _get_failure_dict(
+    results: List[Union[T, WRAPPED_EXCEPTION]]
+) -> Dict[int, WRAPPED_EXCEPTION]:
+    return cast(
+        Dict[int, WRAPPED_EXCEPTION],
+        {i: err for i, err in enumerate(results) if _is_wrapped_exception(err)},
+    )
+
 
 class _DistWrapper:
     """
@@ -36,7 +44,13 @@ class _DistWrapper:
     All variants that take functions are exception robust, meaning that if one or more
     ranks raise errors, all ranks will observe those.
     """
-    def __init__(self, group: Optional[dist.ProcessGroup], use_dist: bool, coordinator_rank: int):
+
+    def __init__(
+        self,
+        group: Optional[dist.ProcessGroup],
+        use_dist: bool,
+        coordinator_rank: int,
+    ):
         self.group = group
         self.use_dist = use_dist
         self.coordinator_rank = coordinator_rank
@@ -64,7 +78,8 @@ class _DistWrapper:
             dist.broadcast_object_list(
                 object_list=object_list,
                 group=self.group,
-                src=self.coordinator_rank)
+                src=self.coordinator_rank,
+            )
         return cast(T, object_list[0])
 
     def gather_object(self, object: T) -> Optional[List[T]]:
@@ -72,13 +87,17 @@ class _DistWrapper:
         Same as c10d::gather_object but works without distributed enabled.
         """
         if self.use_dist:
-            gather_objs = cast(List[T], [None] * dist.get_world_size(self.group)) if self.is_coordinator else None
+            gather_objs = (
+                cast(List[T], [None] * dist.get_world_size(self.group))
+                if self.is_coordinator
+                else None
+            )
 
             dist.gather_object(
                 obj=object,
                 object_gather_list=gather_objs if self.is_coordinator else None,
                 dst=self.coordinator_rank,
-                group=self.group
+                group=self.group,
             )
             result = gather_objs
         else:
@@ -90,12 +109,12 @@ class _DistWrapper:
         Same as c10d::all_gather_object but works without distributed enabled.
         """
         if self.use_dist:
-            gather_objs = cast(List[T], [None] * dist.get_world_size(self.group))
+            gather_objs = cast(
+                List[T], [None] * dist.get_world_size(self.group)
+            )
 
             dist.all_gather_object(
-                object_list=gather_objs,
-                obj=object,
-                group=self.group
+                object_list=gather_objs, obj=object, group=self.group
             )
         else:
             gather_objs = [object]
@@ -109,9 +128,11 @@ class _DistWrapper:
             gather_result = cast(List[T], [None])
             dist.scatter_object_list(
                 scatter_object_output_list=gather_result,
-                scatter_object_input_list=object_list if self.is_coordinator else None,
+                scatter_object_input_list=object_list
+                if self.is_coordinator
+                else None,
                 src=self.coordinator_rank,
-                group=self.group
+                group=self.group,
             )
 
             local_reply = gather_result[0]
@@ -124,7 +145,7 @@ class _DistWrapper:
         self,
         step: str,
         map_fun: Callable[[], T],
-        reduce_fun: Callable[[List[T]], List[R]]
+        reduce_fun: Callable[[List[T]], List[R]],
     ) -> R:
         """
         Compute a value on each rank, then do centralized reduce on a single rank, followed by a scatter.
@@ -150,12 +171,17 @@ class _DistWrapper:
             if len(node_failures) == 0:
                 try:
                     # N.B. why can't mypy cast List[R] to List[Union[R, WRAPPED_EXCEPTION]]?
-                    all_results = cast(List[Union[R, CheckpointException]], reduce_fun(cast(List[T], all_data)))
+                    all_results = cast(
+                        List[Union[R, CheckpointException]],
+                        reduce_fun(cast(List[T], all_data)),
+                    )
                 except BaseException as e:
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
-                all_results = [CheckpointException(step, node_failures)] * self.get_world_size()
+                all_results = [
+                    CheckpointException(step, node_failures)
+                ] * self.get_world_size()
 
         result = self.scatter_object(all_results)
         if isinstance(result, CheckpointException):
@@ -166,7 +192,7 @@ class _DistWrapper:
         self,
         step: str,
         map_fun: Callable[[], T],
-        reduce_fun: Callable[[List[T]], R]
+        reduce_fun: Callable[[List[T]], R],
     ) -> R:
         """
         Compute a value on each rank, then do centralized reduce on a single rank, followed by a broadcast.
@@ -244,43 +270,64 @@ class _DistWrapper:
             try:
                 result = map_fun()
             except BaseException as e:
-                result = CheckpointException(step, {self.rank: _wrap_exception(e)})
+                result = CheckpointException(
+                    step, {self.rank: _wrap_exception(e)}
+                )
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
         return cast(T, final_result)
 
+
 def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
     if index.offset is None:
-        raise ValueError(f"Cannot lookup {index.fqn} since its a ShardedTensor and no offset was provided")
+        raise ValueError(
+            f"Cannot lookup {index.fqn} since its a ShardedTensor and no offset was provided"
+        )
 
     shards = tensor.local_shards()
     # index fast path
     if index.index is not None:
-        if len(shards) > index.index and torch.Size(shards[index.index].metadata.shard_offsets) == index.offset:
+        if (
+            len(shards) > index.index
+            and torch.Size(shards[index.index].metadata.shard_offsets)
+            == index.offset
+        ):
             return shards[index.index]
 
     for shard in shards:
         if torch.Size(shard.metadata.shard_offsets) == index.offset:
             return shard
-    raise ValueError(f"Could not find shard at '{index.offset}' for FQN: '{index.fqn}'")
+    raise ValueError(
+        f"Could not find shard at '{index.offset}' for FQN: '{index.fqn}'"
+    )
 
-def find_tensor_shard(tensor: torch.Tensor, index: MetadataIndex) -> torch.Tensor:
+
+def find_tensor_shard(
+    tensor: torch.Tensor, index: MetadataIndex
+) -> torch.Tensor:
     if isinstance(tensor, ShardedTensor):
         return _find_shard(tensor, index).tensor
     if index.offset is not None:
         # special case looking up a tensor by origin
         if index.offset == torch.Size([0] * len(tensor.size())):
             return tensor
-        raise ValueError(f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'")
+        raise ValueError(
+            f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'"
+        )
     return tensor
 
-def find_state_dict_object(state_dict: STATE_DICT_TYPE, index: MetadataIndex) -> Any:
+
+def find_state_dict_object(
+    state_dict: STATE_DICT_TYPE, index: MetadataIndex
+) -> Any:
     if index.fqn not in state_dict:
         raise ValueError(f"Could not find FQN: '{index.fqn}'")
     obj = state_dict[index.fqn]
     if isinstance(obj, torch.Tensor):
         return find_tensor_shard(obj, index)
     elif index.offset is not None:
-        raise ValueError(f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'")
+        raise ValueError(
+            f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'"
+        )
     return obj
