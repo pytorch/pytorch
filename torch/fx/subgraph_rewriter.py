@@ -5,10 +5,10 @@ from ._symbolic_trace import symbolic_trace
 from ._compatibility import compatibility
 
 import copy
-from typing import Callable, Dict, List, NamedTuple, Optional, Set
+from typing import Callable, Dict, List, NamedTuple, Optional, Set, Union
 import torch
 
-__all__ = ['Match', 'replace_pattern', 'replace_pattern_with_filter']
+__all__ = ['Match', 'replace_pattern', 'replace_pattern_with_filters']
 
 @compatibility(is_backward_compatible=True)
 class Match(NamedTuple):
@@ -65,7 +65,11 @@ def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
 
 
 @compatibility(is_backward_compatible=True)
-def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -> List[Match]:
+def replace_pattern(
+    gm: GraphModule,
+    pattern: Union[Callable, GraphModule],
+    replacement: Union[Callable, GraphModule]
+) -> List[Match]:
     """
     Matches all possible non-overlapping sets of operators and their
     data dependencies (``pattern``) in the Graph of a GraphModule
@@ -185,11 +189,11 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
 
 # Experimental API, not backward compatible
 @compatibility(is_backward_compatible=False)
-def replace_pattern_with_filter(
+def replace_pattern_with_filters(
     gm: GraphModule,
-    pattern: Callable,
-    replacement: Callable,
-    match_filter: Callable[["InternalMatch", Graph, Graph], bool],  # type: ignore[name-defined]
+    pattern: Union[Callable, GraphModule],
+    replacement: Union[Callable, GraphModule],
+    match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]],  # type: ignore[name-defined]
 ) -> List[Match]:
     """
     See replace_pattern for documentation. This function is an overload with an additional match_filter argument.
@@ -200,30 +204,44 @@ def replace_pattern_with_filter(
             definition of InternalMatch.
     """
 
-    return _replace_pattern(gm, pattern, replacement, match_filter)
+    return _replace_pattern(gm, pattern, replacement, match_filters)
 
 
 def _replace_pattern(
     gm: GraphModule,
-    pattern: Callable,
-    replacement: Callable,
-    match_filter: Optional[Callable[["InternalMatch", Graph, Graph], bool]] = None  # type: ignore[name-defined]
+    pattern: Union[Callable, GraphModule],
+    replacement: Union[Callable, GraphModule],
+    match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]] = None  # type: ignore[name-defined]
 ) -> List[Match]:
 
     from torch.fx.passes.utils.matcher_utils import SubgraphMatcher, InternalMatch
 
+    if match_filters is None:
+        match_filters = []
+
     # Get the graphs for `gm`, `pattern`, `replacement`
     original_graph: Graph = gm.graph
-    pattern_graph: Graph = symbolic_trace(pattern).graph
-    replacement_graph: Graph = symbolic_trace(replacement).graph
+
+    if isinstance(pattern, GraphModule):
+        pattern_graph = pattern.graph
+    else:
+        pattern_graph = symbolic_trace(pattern).graph
+
+    if isinstance(replacement, GraphModule):
+        replacement_graph = replacement.graph
+    else:
+        replacement_graph = symbolic_trace(replacement).graph
 
     matcher = SubgraphMatcher(pattern_graph, match_output=False, match_placeholder=False,
                               remove_overlapping_matches=True)
     _matches: List[InternalMatch] = matcher.match(original_graph)
 
     # Filter out matches that don't match the filter
-    if match_filter:
-        _matches = [m for m in _matches if match_filter(m, original_graph, pattern_graph)]
+    _matches = [
+        m for m in _matches
+        if all(match_filter(m, original_graph, pattern_graph)
+               for match_filter in match_filters)
+    ]
 
     replacement_placeholders = [n for n in replacement_graph.nodes if n.op == "placeholder"]
 

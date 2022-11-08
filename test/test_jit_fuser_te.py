@@ -2202,7 +2202,9 @@ class TestTEFuser(JitTestCase):
         def test(fn, args):
             trace = torch.jit.trace(fn, args)
             self.assertAllFused(trace.graph_for(*args))
-            torch.testing.assert_allclose(fn(*args), trace(*args))
+            # TODO: Are `NaN`'s actually ok here or did this pass silently before, because `equal_nan=True` was the
+            #  default?
+            torch.testing.assert_close(fn(*args), trace(*args), equal_nan=True)
 
         def bn(i, x):
             return torch.batch_norm(i, x, x, x, x, False, 0.1, 1e-4, False).relu()
