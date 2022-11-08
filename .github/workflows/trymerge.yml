@@ -21,8 +21,9 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.8
-          cache: 'pip'
+          python-version: '3.8'
+          check-latest: false
+          cache: pip
           architecture: x64
       - run: pip install pyyaml==6.0
 
