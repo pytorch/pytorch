@@ -14,7 +14,6 @@ from .backend_config import (
     DTypeConfig,
     ObservationType,
 )
-from ..fake_quantize import FixedQParamsFakeQuantize
 from ..fuser_method_mappings import (
     reverse_sequential_wrapper2,
     reverse2,
@@ -412,8 +411,8 @@ def _add_fixed_qparams_to_dtype_configs(
     for dtype_config in dtype_configs:
         dc = copy.deepcopy(dtype_config)
         for dtype_with_constraints in [dc.input_dtype_with_constraints, dc.output_dtype_with_constraints]:
-            dtype_with_constraints.fixed_scale = fixed_scale
-            dtype_with_constraints.fixed_zero_point = fixed_zero_point
+            dtype_with_constraints.fixed_scale = float(fixed_scale)
+            dtype_with_constraints.fixed_zero_point = int(fixed_zero_point)
             if dtype_with_constraints.scale_min_lower_bound is not None:
                 raise ValueError("scale_min_lower_bound is invalid for fixed qparams ops: %s" % dtype_config)
             if dtype_with_constraints.scale_max_upper_bound is not None:

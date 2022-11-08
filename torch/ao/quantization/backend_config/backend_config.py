@@ -66,8 +66,9 @@ class ObservationType(Enum):
 @dataclass
 class DTypeWithConstraints:
     """
-    Config for specifying additional constraints for a given dtype, such as quantization value
-    ranges and scale value ranges, to be used in :class:`~torch.ao.quantization.backend_config.DTypeConfig`.
+    Config for specifying additional constraints for a given dtype, such as quantization
+    value ranges, scale value ranges, and fixed quantization params, to be used in
+    :class:`~torch.ao.quantization.backend_config.DTypeConfig`.
     """
     dtype: Optional[torch.dtype] = None
     quant_min_lower_bound: Union[int, float, None] = None
