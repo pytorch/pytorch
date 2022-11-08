@@ -15,21 +15,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.nn.utils import stateless
 from torch.onnx._globals import GLOBALS as ONNX_GLOBALS
-from torch.onnx._internal import registration
-
-
-class GraphWrapper(torch._C.Graph):
-    """A graph replacement of torch.onnx.utils.jit_utils.GraphContext
-
-    Some symbolic_opset*.py functions requires extra information in
-    addition to torch._C.Graph itself. GraphContext contains those
-    information. GraphContext is not reused here because it introduces
-    extra TorchScript dependency and we want to move away from it.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.opset = ONNX_GLOBALS.export_onnx_opset_version
+from torch.onnx._internal import jit_utils, registration
 
 
 def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, str]:
@@ -164,7 +150,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
     # TODO(wechi): To get rid of TorchScript dependency,
     # "g" should just be onnx.GraphProto or an equivalent
     # data structure in ONNXScript.
-    g = GraphWrapper()
+    g = torch._C.Graph()
     # In the following loop, a TorchScript graph is created to
     # represent the input FX graph with ONNX symbols (e.g., onnx::add).
     # To connect the values to nodes in the TorchScript graph, we maintian
@@ -200,11 +186,23 @@ def _export_fx_to_ts(fx_module_with_metadata):
                 assert symbolic_function_group is not None
                 symbolic_fn = symbolic_function_group.get(14)
                 assert symbolic_fn is not None
+                # TODO(wechi): current type checking throws when feeding torch._C.Graph
+                # to symbolic_opset*.py functions, so we need the following wrapper.
+                # After we get rid of TorchScript, we can remove this wrapper.
+                graph_context = jit_utils.GraphContext(
+                    graph=g,
+                    block=g.block(),  # Pointless. Just make linter happy.
+                    opset=ONNX_GLOBALS.export_onnx_opset_version,
+                    original_node=g.insertPoint(),  # Pointless. Just make linter happy.
+                    params_dict={},  # Pointless. Just make linter happy.
+                    env={},  # Pointless. Just make linter happy.
+                )
+                # Map FX inputs to ONNX inputs and fill optional inputs with default values.
                 ts_args = _wrap_fx_args_as_ts_args(
-                    g, fx_module_with_metadata, node, fx_name_to_ts_value
+                    graph_context, fx_module_with_metadata, node, fx_name_to_ts_value
                 )
                 # The returned value could be a value of a tuple of values.
-                v = symbolic_fn(g, *ts_args)
+                v = symbolic_fn(graph_context, *ts_args)
                 # One fx node could produce multiple outputs (e.g., tuple of tensors); in
                 # that case, v is a tuple of TorchScript values.
                 fx_name_to_ts_value[node.name] = v
