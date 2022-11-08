@@ -6,13 +6,14 @@ import caffe2.python.onnx.backend as c2
 
 import numpy as np
 import onnx
+import pytorch_test_common
 import torch.ao.nn.quantized as nnq
 import torch.nn as nn
 import torch.onnx
 from torch.testing._internal import common_utils
 
 
-class TestQuantizedOps(common_utils.TestCase):
+class TestQuantizedOps(pytorch_test_common.ExportTestCase):
     def generic_test(
         self, model, sample_inputs, input_names=None, decimal=3, relaxed_check=False
     ):
