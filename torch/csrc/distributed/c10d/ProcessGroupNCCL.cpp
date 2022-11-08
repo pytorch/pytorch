@@ -85,9 +85,8 @@ ncclRedOpRAII unpackPreMulSum(
   ncclRedOp_t preMulSum;
   bool has_tensor = preMulSupplement->tensor_factor.defined();
   auto residence = has_tensor ? ncclScalarDevice : ncclScalarHostImmediate;
-  T* ptr_factor = has_tensor
-      ? preMulSupplement->tensor_factor.data_ptr<T>()
-      : nullptr;
+  T* ptr_factor =
+      has_tensor ? preMulSupplement->tensor_factor.data_ptr<T>() : nullptr;
   T scalar_factor = T(preMulSupplement->double_factor);
   ncclRedOpCreatePreMulSum(
       &preMulSum,

@@ -237,13 +237,15 @@ void _register_builtin_comm_hook(
 }
 
 // Customize the metaclass of ::c10d::ReduceOp for the backward compatibility.
-// https://github.com/pytorch/pytorch/pull/84243 changed ::c10d::ReduceOp to struct
-// from enum, sacrificing some of the Python built-in function supports such as
-// `isinstance` (see https://github.com/pytorch/pytorch/issues/87191) and
-// `copy` (see https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700).
-// Below, we define a custom `isinstance` in CPython/pybind11 (`reduceopmeta___instancecheck__`)
-// and modify the default metaclass of pybind11 (`GetReduceOpMetaclass`)
-// so that `isinstance(torch.distributed.ReduceOp.SUM, torch.distributed.ReduceOp)`
+// https://github.com/pytorch/pytorch/pull/84243 changed ::c10d::ReduceOp to
+// struct from enum, sacrificing some of the Python built-in function supports
+// such as `isinstance` (see https://github.com/pytorch/pytorch/issues/87191)
+// and `copy` (see
+// https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700). Below,
+// we define a custom `isinstance` in CPython/pybind11
+// (`reduceopmeta___instancecheck__`) and modify the default metaclass of
+// pybind11 (`GetReduceOpMetaclass`) so that
+// `isinstance(torch.distributed.ReduceOp.SUM, torch.distributed.ReduceOp)`
 // returns :obj:`True` as if `ReduceOp` is enum.
 // Ref:
 //   - https://docs.python.org/3/extending/newtypes_tutorial.html
@@ -658,8 +660,7 @@ This class does not support ``__members__`` property.)");
             if (py::isinstance<py::float_>(preMulSupplement_factor)) {
               return ::c10d::makeNCCLPreMulSum(t[1].cast<double>());
             } else {
-              return ::c10d::makeNCCLPreMulSum(
-                  t[1].cast<at::Tensor>());
+              return ::c10d::makeNCCLPreMulSum(t[1].cast<at::Tensor>());
             }
           }));
 
