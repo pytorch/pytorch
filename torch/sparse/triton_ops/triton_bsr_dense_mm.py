@@ -346,7 +346,7 @@ def bsr_dense_mm(
 
     # TODO: insert switch
     if is_sparse_rowspace_mode is None:
-        is_sparse_rowspace_mode = True
+        is_sparse_rowspace_mode = False
 
     # Introduce fake batch dimension if not present for convenience.
     def unsqueeze_batch_dim(t, n_non_batch_dims):
