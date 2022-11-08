@@ -182,17 +182,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *linux-focal-py3.7-gcc7-build*  ]]; then
   export USE_GLOO_WITH_OPENSSL=ON
 fi
 
-# TODO: Remove after xenial->focal migration
-if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
-    export BUILD_STATIC_RUNTIME_BENCHMARK=ON
-  fi
-fi
-
-if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-focal-py3* ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
-    export BUILD_STATIC_RUNTIME_BENCHMARK=ON
-  fi
+if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
+  export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
