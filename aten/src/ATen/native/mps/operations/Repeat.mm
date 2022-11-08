@@ -125,11 +125,102 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
-Tensor repeat_interleave_mps(const Tensor& self,const Tensor& repeats,c10::optional<int64_t> dim,c10::optional<int64_t> output_size) {
-  using namespace mps;
- 
-  Tensor input = self;
+static inline Tensor repeat_interleave_common(
+    const Tensor& repeats,
+    c10::optional<int64_t> output_size) {
+  TORCH_CHECK(
+      repeats.dim() == 1, "repeat_interleave only accept 1D vector as repeat");
+  TORCH_CHECK(
+      repeats.scalar_type() == at::kLong || repeats.scalar_type() == at::kInt,
+      "repeats has to be Long or Int tensor");
+  if (repeats.size(0) == 0) {
+    return at::empty_like(repeats, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  Tensor repeats_ = repeats.contiguous();
+  Tensor cumsum = repeats.cumsum(0);
+  int64_t total;
+  if (output_size.has_value()) {
+    total = output_size.value();
+  } else {
+    total = cumsum[-1].item<int64_t>();
+    TORCH_CHECK(
+        (repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
+  }
 
+  Tensor result = at::empty({total}, repeats.options());
+  index_t* repeat_ptr = repeats_.data_ptr<index_t>();
+  int64_t* cumsum_ptr = cumsum.data_ptr<int64_t>();
+  index_t* result_ptr = result.data_ptr<index_t>();
+  compute(repeat_ptr, cumsum_ptr, result_ptr, repeats.size(0), total);
+  return result;
+}
+
+Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optional<int64_t> output_size) {
+
+  using namespace mps;
+  MPSStream* stream = getCurrentMPSStream();
+
+  Tensor output;
+
+  AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_cpu", [&]() {
+    output = repeat_interleave_common<index_t, compute_cpu<index_t>>(
+        repeat, output_size);
+  });
+
+ struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* intpuTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
+
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
+  @autoreleasepool {
+    // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types etc match the earlier created MPSGraph
+    string key = "repeat_interleave_mps:" + getMPSTypeString({self});
+                               
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    if(!cachedGraph) {
+      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+        CachedGraph *newCachedGraph = nil;
+
+        @autoreleasepool {
+          MPSGraph* mpsGraph = make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
+
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          MPSGraphTensor* outputTensor = [mpsGraph tileTensor:inputTensor
+                                               withMultiplier:output_size
+                                                         name:nil];
+
+          newCachedGraph->inputTensor_ = inputTensor;
+          newCachedGraph->outputTensor_ = outputTensor;
+        }
+        return newCachedGraph;
+      });
+
+      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+    }
+
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, output_size);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
+
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()
+    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* output = @{
+      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+    };
+
+    runMPSGraph(stream, cachedGraph->graph(), feeds, output);
+  }
+
+  return output;
+}
+
+Tensor repeat_interleave_mps(const Tensor& self,const Tensor& repeats,c10::optional<int64_t> dim,c10::optional<int64_t> output_size) {
+  Tensor input = self;
 
   // Store conj and neg bits
   const auto conj = input.is_conj();
@@ -157,18 +248,23 @@ Tensor repeat_interleave_mps(const Tensor& self,const Tensor& repeats,c10::optio
     AT_ERROR("repeats must be 0-dim or 1-dim tensor");
   }
 
-  auto output = input.index_select(
-      dim.value(), at::repeat_interleave(repeats_, output_size));
+  auto ret = input.index_select(
+      dim.value(), repeat_interleave_mps(repeats_, output_size));
   // Restore conj and neg bits
   if (conj) {
-    output = output.conj();
+    ret = ret.conj();
   }
   if (neg) {
-    output = output._neg_view();
+    ret = ret._neg_view();
   }
-  return output;
+  return ret;
 }
 
+Tensor repeat_interleave_mps(const Tensor& self,int64_t repeats,c10::optional<int64_t> dim,c10::optional<int64_t> output_size) {
+  at::Tensor repeats_ =
+      at::empty(1, self.options().dtype(at::kLong)).fill_(repeats);
+  return repeat_interleave_mps(self, repeats_, dim, output_size);
+}
 
 
 }
