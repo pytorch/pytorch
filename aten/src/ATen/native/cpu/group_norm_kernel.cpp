@@ -157,7 +157,7 @@ std::tuple<float, float> ColumnwiseMoments(
 }
 
 template <typename scalar_t, typename param_t>
-inline void calc_mean_var(
+inline void CalcMeanVar(
   const scalar_t* X_ptr,
   param_t* mean_ptr,
   param_t* rstd_ptr,
@@ -178,7 +178,7 @@ inline void calc_mean_var(
 }
 
 template <>
-inline void calc_mean_var(
+inline void CalcMeanVar(
   const BFloat16* X_ptr,
   float* mean_ptr,
   float* rstd_ptr,
@@ -223,7 +223,7 @@ inline void calc_mean_var(
 }
 
 template <typename scalar_t, typename param_t>
-inline void apply_scale_bias(
+inline void ApplyScaleBias(
   scalar_t* Y_ptr,
   const scalar_t* X_ptr,
   const param_t* scale_ptr,
@@ -240,7 +240,7 @@ inline void apply_scale_bias(
 }
 
 template <>
-inline void apply_scale_bias(
+inline void ApplyScaleBias(
   BFloat16* Y_ptr,
   const BFloat16* X_ptr,
   const float* scale_ptr,
@@ -366,7 +366,7 @@ void GroupNormKernelImplChannelsLastInternal(
         for (const auto m : c10::irange(HxW)) {
           const T* X_ptr = X_data + n * HxW * C + m * C + g * D;
           T* Y_ptr = Y_data + n * HxW * C + m * C + g * D;
-          apply_scale_bias<T, T_ACC>(Y_ptr, X_ptr, scale_ptr, bias_ptr, D);
+          ApplyScaleBias<T, T_ACC>(Y_ptr, X_ptr, scale_ptr, bias_ptr, D);
         }
 
         data_index_step(n, N, g, G);
@@ -406,7 +406,7 @@ void GroupNormKernelImplChannelsLastInternal(
         T_ACC* mean_ptr = buffer_ptr + n * 2 * C;
         T_ACC* rstd_ptr = mean_ptr + C;
         const T* X_ptr = X_data + i * C;
-        calc_mean_var<T, T_ACC>(X_ptr, mean_ptr, rstd_ptr, C);
+        CalcMeanVar<T, T_ACC>(X_ptr, mean_ptr, rstd_ptr, C);
         data_index_step(n, N, m, HxW);
       }
     });
@@ -470,7 +470,7 @@ void GroupNormKernelImplChannelsLastInternal(
         T* Y_ptr = Y_data + i * C;
         T_ACC* scale_ptr = buffer_data + n * 2 * C;
         T_ACC* bias_ptr = scale_ptr + C;
-        apply_scale_bias<T, T_ACC>(Y_ptr, X_ptr, scale_ptr, bias_ptr, C);
+        ApplyScaleBias<T, T_ACC>(Y_ptr, X_ptr, scale_ptr, bias_ptr, C);
         data_index_step(n, N, m, HxW);
       }
     });
@@ -606,7 +606,7 @@ void ComputeInternalGradients(
 }
 
 template <typename PT, typename T_ACC>
-inline void calc_db_ds(
+inline void CalcDsDb(
     const T_ACC* ds_ptr,
     const T_ACC* db_ptr,
     bool gamma_null,
@@ -629,7 +629,7 @@ inline void calc_db_ds(
 }
 
 template <>
-inline void calc_db_ds(
+inline void CalcDsDb(
     const float* ds_ptr,
     const float* db_ptr,
     bool gamma_null,
@@ -686,7 +686,7 @@ void GroupNormInputBackward(
       const T_ACC* ds_ptr = ds + i * D;
       const T_ACC* db_ptr = db + i * D;
       const PT* gamma_ptr = gamma + g * D;
-      calc_db_ds(ds_ptr, db_ptr, gamma_null, gamma_ptr, d, K, ds_arr.data(), db_arr.data());
+      CalcDsDb(ds_ptr, db_ptr, gamma_null, gamma_ptr, d, K, ds_arr.data(), db_arr.data());
       T_ACC ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T_ACC(0));
       T_ACC db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), T_ACC(0));
       for (const auto j : c10::irange(d, D)) {
@@ -892,15 +892,15 @@ void GroupNormBackwardKernelImplInternal(
   }
 }
 
-template <typename scalar_t, typename param_t>
-inline void calc_ds_db_channels_last(
-  const scalar_t* dY_ptr,
-  const scalar_t* X_ptr,
-  param_t* ds_ptr,
-  param_t* db_ptr,
+template <typename T, typename T_ACC>
+inline void DsDbRowwiseMomentsChannelsLast(
+  const T* dY_ptr,
+  const T* X_ptr,
+  T_ACC* ds_ptr,
+  T_ACC* db_ptr,
   int64_t C) {
-  using Vec = vec::Vectorized<vec::vec_scalar_t<param_t>>;
-  constexpr int64_t K = vec::Vectorized<scalar_t>::size();
+  using Vec = vec::Vectorized<vec::vec_scalar_t<T>>;
+  constexpr int64_t K = vec::Vectorized<T>::size();
   const int64_t inner_size = C / K * K;
   int64_t d = 0;
   for (; d < inner_size; d+= K) {
@@ -927,7 +927,7 @@ inline void calc_ds_db_channels_last(
 }
 
 template <>
-inline void calc_ds_db_channels_last(
+inline void DsDbRowwiseMomentsChannelsLast(
   const BFloat16* dY_ptr,
   const BFloat16* X_ptr,
   float* ds_ptr,
@@ -980,7 +980,7 @@ inline void calc_ds_db_channels_last(
 }
 
 template <typename T, typename PT, typename T_ACC>
-void apply_input_backward_channles_last(
+void ApplyInputGradientsChannelsLast(
   const T* dY_data,
   const T* X_data,
   T* dX_data,
@@ -1045,9 +1045,8 @@ void apply_input_backward_channles_last(
   }
 }
 
-// TODO add specialization for T = BFloat16, PT = BFloat16
 template <>
-void apply_input_backward_channles_last(
+void ApplyInputGradientsChannelsLast(
   const BFloat16* dY_data,
   const BFloat16* X_data,
   BFloat16* dX_data,
@@ -1151,7 +1150,7 @@ void apply_input_backward_channles_last(
 }
 
 template <>
-void apply_input_backward_channles_last(
+void ApplyInputGradientsChannelsLast(
   const BFloat16* dY_data,
   const BFloat16* X_data,
   BFloat16* dX_data,
@@ -1242,7 +1241,7 @@ void apply_input_backward_channles_last(
 }
 
 template <typename T, typename PT, typename T_ACC>
-std::tuple<T_ACC, T_ACC> DsDbColumnwiseMoments(
+std::tuple<T_ACC, T_ACC> CalcInternalGradientsChannelsLast(
     const T* X_data,
     const T* dY_data,
     const PT* gamma_ptr,
@@ -1294,7 +1293,7 @@ std::tuple<T_ACC, T_ACC> DsDbColumnwiseMoments(
 }
 
 template <>
-std::tuple<float, float> DsDbColumnwiseMoments(
+std::tuple<float, float> CalcInternalGradientsChannelsLast(
   const BFloat16* X_data,
   const BFloat16* dY_data,
   const float* gamma_ptr,
@@ -1355,7 +1354,7 @@ std::tuple<float, float> DsDbColumnwiseMoments(
 }
 
 template <>
-std::tuple<float, float> DsDbColumnwiseMoments(
+std::tuple<float, float> CalcInternalGradientsChannelsLast(
   const BFloat16* X_data,
   const BFloat16* dY_data,
   const BFloat16* gamma_ptr,
@@ -1462,14 +1461,14 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
       int64_t n{0}, g{0};
       data_index_init(begin, n, N, g, G);
       for (const auto i : c10::irange(begin, end)) {
-        // step 1 compute ds & db
+        // Step 1. Compute internal gradients.
         T_ACC* ds_ptr = ds_data + i * D;
         T_ACC* db_ptr = db_data + i * D;
         T_ACC ds_gamma, db_gamma;
         const T* X_ptr = X_data + n * HxW * C + g * D;
         const T* dY_ptr = dY_data + n * HxW * C + g * D;
         const PT* gamma_ptr = gamma_null ? gamma_data : (gamma_data + g * D);
-        std::tie(ds_gamma, db_gamma) = DsDbColumnwiseMoments<T, PT, T_ACC>(
+        std::tie(ds_gamma, db_gamma) = CalcInternalGradientsChannelsLast<T, PT, T_ACC>(
           X_ptr,
           dY_ptr,
           gamma_ptr,
@@ -1479,25 +1478,17 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
           C,
           D);
 
-        // step2 compute dX
+        // Step 2. Compute dX.
         T* dX_ptr = dX_data + n * HxW * C + g * D;
         const PT* rstd_ptr = rstd_data + i;
         const T_ACC c2 =
             (db_gamma * T_ACC(mean_data[i]) - ds_gamma) * T_ACC(rstd_data[i]) * T_ACC(rstd_data[i]) * T_ACC(rstd_data[i]) * s;
         const T_ACC c3 = -c2 * T_ACC(mean_data[i]) - db_gamma * T_ACC(rstd_data[i]) * s;
-        apply_input_backward_channles_last<T, PT, T_ACC>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, HxW, C, D, true);
+        ApplyInputGradientsChannelsLast<T, PT, T_ACC>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, HxW, C, D, true);
         data_index_step(n, N, g, G);
       }
     });
 
-    // step 3 compute dgamma & dbeta
-    if (dgamma_data != nullptr) {
-      GammaBackward<PT, T_ACC>(
-          N, C, group, mean_data, rstd_data, ds_data, db_data, dgamma_data);
-    }
-    if (dbeta_data != nullptr) {
-      BetaBackward<PT, T_ACC>(N, C, db_data, dbeta_data);
-    }
   } else {
     // parallel on N * HxW.
     int num_threads = at::get_num_threads();
@@ -1509,7 +1500,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
       X.options().dtype(c10::CppTypeToScalarType<T_ACC>::value));
     T_ACC* tmp_buffer_data = tmp_buffer.data_ptr<T_ACC>();
 
-    // step 1
+    // Step 1. Each thread compute their own internal gradients to the buffer.
     at::parallel_for(0, N * HxW, 1, [&](int64_t begin, int64_t end) {
       int tid = at::get_thread_num();
       T_ACC* buffer_ptr = buffer_data + tid * N * 2 * C;
@@ -1521,12 +1512,13 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
         const T* X_ptr = X_data + i * C;
         const T* dY_ptr = dY_data + i * C;
 
-        calc_ds_db_channels_last<T, T_ACC>(dY_ptr, X_ptr, ds_ptr, db_ptr, C);
+        DsDbRowwiseMomentsChannelsLast<T, T_ACC>(dY_ptr, X_ptr, ds_ptr, db_ptr, C);
         data_index_step(n, N, m, HxW);
       }
     });
 
-    // step 2
+    // Step 2. Collect internal gradients from each thread and
+    // get the final internal gradients to ds, db, and tmp_buffer.
     for (const auto n : c10::irange(N)) {
       for (const auto g : c10::irange(G)) {
         T_ACC ds_gamma{0}, db_gamma{0};
@@ -1548,7 +1540,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
       }
     }
 
-    // step 3 compute dx
+    // Step 3. Compute dx.
     if (dX_data != nullptr) {
       at::parallel_for(0, N * HxW, 1, [&](int64_t begin, int64_t end) {
         int64_t n{0}, m{0};
@@ -1567,7 +1559,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
             const T_ACC c2 =
             (db_val * T_ACC(*mean_ptr) - ds_val) * T_ACC(*rstd_ptr) * T_ACC(*rstd_ptr)* T_ACC(*rstd_ptr) * s;
             const T_ACC c3 = -c2 * T_ACC(*mean_ptr) - db_val * T_ACC(*rstd_ptr) * s;
-            apply_input_backward_channles_last<T, PT, T_ACC>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, HxW, C, D, false);
+            ApplyInputGradientsChannelsLast<T, PT, T_ACC>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, HxW, C, D, false);
           }
 
           data_index_step(n, N, m, HxW);
@@ -1575,16 +1567,16 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
       });
     }
 
-    // step 4 compute dgamma & dbeta
-    if (dgamma_data != nullptr) {
-      GammaBackward<PT, T_ACC>(
-          N, C, group, mean_data, rstd_data, ds_data, db_data, dgamma_data);
-    }
-    if (dbeta_data != nullptr) {
-      BetaBackward<PT, T_ACC>(N, C, db_data, dbeta_data);
-    }
   }
 
+  // Finally compute dgamma and dbeta.
+  if (dgamma_data != nullptr) {
+    GammaBackward<PT, T_ACC>(
+        N, C, group, mean_data, rstd_data, ds_data, db_data, dgamma_data);
+  }
+  if (dbeta_data != nullptr) {
+    BetaBackward<PT, T_ACC>(N, C, db_data, dbeta_data);
+  }
 }
 
 void GroupNormBackwardKernelImpl(
