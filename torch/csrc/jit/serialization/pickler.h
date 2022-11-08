@@ -322,6 +322,8 @@ inline void setTensorMathBits(
       t._set_conj(true);
     } else if (key_value_pair.first == "neg") {
       t._set_neg(true);
+    } else {
+      TORCH_CHECK(false, "Unexpected key for setTensorMathBits.");
     }
   }
 }
