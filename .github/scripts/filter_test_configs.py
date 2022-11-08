@@ -34,7 +34,8 @@ VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}" for label in {
 
 # Supported mode when running periodically
 SUPPORTED_PERIODICAL_MODES = {
-    "mem_leak_check",
+    # DEBUG: TO BE UNCOMMENTED
+    # "mem_leak_check",
     "rerun_disabled_tests",
 }
 
