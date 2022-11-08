@@ -16,13 +16,14 @@ import warnings
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
+import onnx
 
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
-from torch.onnx import _constants, _experimental, _fx, utils
+from torch.onnx import _constants, _experimental, utils
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, _fx
 from torch.types import Number
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
@@ -753,10 +754,14 @@ def verify_model_with_positional_args(
             f"model must be a torch.nn.Module or Callable but got {type(model)}"
         )
 
-    import onnx
+    with torch.no_grad(), contextlib.ExitStack() as stack:
+        tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
+        model_file_path: str = os.path.join(tmpdir_path, "model.onnx")
+        onnx.save(onnx_model, model_file_path)
+        ort_session = _ort_session(
+            model_file_path, ort_providers=("CPUExecutionProvider",)
+        )
 
-    onnx.save(onnx_model, "model.onnx")
-    ort_session = _ort_session("model.onnx", ort_providers=("CPUExecutionProvider",))
     model_copy = _try_clone_model(model)
     _compare_ort_pytorch_model(
         model=model_copy,
