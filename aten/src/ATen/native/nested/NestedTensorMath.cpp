@@ -695,7 +695,7 @@ Tensor unsqueeze_nested(const Tensor& self, int64_t dim) {
   if (wrapped_dim == ndim) {
     new_stride = stridemat.new_ones({stridemat.size(0), 1});
   } else {
-    new_stride = (stridemat.select(1, mat_dim - 1) * sizemat.select(1, mat_dim - 1)).unsqueeze(-1);
+    new_stride = (stridemat.select(1, mat_dim) * sizemat.select(1, mat_dim)).unsqueeze(-1);
   }
   Tensor stridemat_unsqueezed = at::cat({stridemat.slice(1, 0, mat_dim),
                                          new_stride,
