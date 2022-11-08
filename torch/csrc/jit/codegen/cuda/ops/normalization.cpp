@@ -589,8 +589,7 @@ ForwardNormResult batch_norm(
     // During inference, mean/invstd output are empty tensors
     // on CPU, but not on CUDA. We need to make sure we have the same
     // behavior as with eager mode on CUDA.
-    mean = set(running_mean); // use set to avoid "trivial input forwarding NOT
-                              // IMPLEMENTED" error
+    mean = running_mean;
     invstd = unbiased_invstd;
     y = mul(x_sub_mean, invstd_bcast);
   }
@@ -843,8 +842,10 @@ ForwardNormResult instance_norm(
         broadcast(unbiased_invstd, channels_only_broadcast_mask);
 
     // During inference, mean/invstd output are empty tensors
-    mean = TensorViewBuilder().shape(std::vector<int64_t>{0}).build();
-    invstd = TensorViewBuilder().shape(std::vector<int64_t>{0}).build();
+    // on CPU, but not on CUDA. We need to make sure we have the same
+    // behavior as with eager mode on CUDA.
+    mean = running_mean;
+    invstd = unbiased_invstd;
     y = mul(x_sub_mean, invstd_bcast);
   }
 

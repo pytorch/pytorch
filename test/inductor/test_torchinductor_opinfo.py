@@ -321,7 +321,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
-    "linalg.pinv.hermitian": {f32, f64},
     "lu_unpack": {f32, f64},
     "masked.argmax": {f16, f32, f64, i32},
     "masked.argmin": {f16, f32, f64, i32},
