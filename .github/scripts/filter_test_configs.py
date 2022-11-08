@@ -173,12 +173,13 @@ def main() -> None:
 
     # TODO: DEBUG, to be removed back to == "schedule"
     if args.event_name != "schedule":
+        selected_mode = random.choices(
+            list(SUPPORTED_PERIODICAL_MODES.keys()),
+            weights=list(SUPPORTED_PERIODICAL_MODES.values()),
+            k=1)[0]
+
         for config in filtered_test_matrix.get("include", []):
-            selected_mode = random.choices(
-                list(SUPPORTED_PERIODICAL_MODES.keys()),
-                weights=list(SUPPORTED_PERIODICAL_MODES.values()),
-                k=1)
-            config[selected_mode] = selected_mode[0]
+            config[selected_mode] = selected_mode
 
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
