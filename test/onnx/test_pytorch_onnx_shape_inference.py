@@ -300,9 +300,6 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
         def linalg_inv_setType(g, self):
             return g.op("com.microsoft::Inverse", self).setType(self.type())
 
-        def linalg_inv_NO_setType(g, self):
-            return g.op("com.microsoft::Inverse", self)
-
         torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_setType, 9)
         model = CustomInverse()
         x = torch.randn(2, 3, 3)
@@ -381,9 +378,10 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
         # To validate the shape of inverse Op, we need to find inverse output name,
         # and then use it to identify its value_info for the shape.
+        output_name = ""
         for node in model_proto.graph.node:
             if node.op_type == "Inverse":
-                output_name = node.output
+                output_name = node.output[0]
                 break
         for value_info in model_proto.graph.value_info:
             if value_info.name == output_name:
