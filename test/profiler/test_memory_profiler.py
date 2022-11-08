@@ -6,9 +6,10 @@ import textwrap
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
 import torch
-from torch._C._profiler import _EventType
+from torch._C._profiler import _EventType, _TensorMetadata
 from torch.profiler import _memory_profiler, _utils
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.utils._pytree import tree_flatten
 
 
 profile = functools.partial(
@@ -62,6 +63,33 @@ class LazyLinear(torch.nn.Module):
             self.bias = torch.nn.Parameter(torch.empty(self.out_features))
 
         return torch.nn.functional.linear(x, self.weight, self.bias)
+
+
+class RecordInputOutputDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
+    def __init__(self):
+        self.results = []
+
+    def mark_region(self, name: str):
+        self.results.append((name, (), ()))
+
+    @staticmethod
+    def flat_ids(args):
+        flat_args = tree_flatten(args)[0]
+        return tuple(
+            (t._cdata, t.storage().data_ptr())
+            for t in flat_args
+            if isinstance(t, torch.Tensor) and t.storage()
+        )
+
+    def __torch_dispatch__(self, func, types, args=..., kwargs=None):
+        args = args or []
+        kwargs = kwargs or {}
+        flat_inputs = self.flat_ids(args) + self.flat_ids(kwargs)
+        out = func(*args, **kwargs)
+        flat_outputs = self.flat_ids(out)
+        if (flat_inputs or flat_outputs) and "_record_function_enter" not in func.name():
+            self.results.append((func.name(), flat_inputs, flat_outputs))
+        return out
 
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
@@ -822,6 +850,61 @@ class TestMemoryProfilerE2E(TestCase):
             assert_category(p, _memory_profiler.Category.PARAMETER)
             assert_category(p.grad, _memory_profiler.Category.GRADIENT)
 
+    def _run_and_format_categories(self, fn, indent=12):
+        """Generate summary of assigned categories for expecttest."""
+
+        # Use `__torch_dispatch__` to collect ground truth.
+        with RecordInputOutputDispatchMode() as record_ops, profile() as prof:
+            fn(lambda name: record_ops.mark_region(f"-- {name} ".ljust(105, "-")))
+
+        memory_profile = prof._memory_profile()
+        ptr_pair_to_key: Dict[Tuple[int, int], _memory_profiler.TensorKey] = {}
+        snapshot = memory_profile._category_snapshot()
+
+        # Build map from observed live Tensors to the memory profiler's
+        # TensorKey representation.
+        for op in memory_profile._op_tree.dfs():
+            if op.typed[0] == _EventType.TorchOp:
+                inputs = tree_flatten(op.typed[1].inputs)[0]
+                for t in (i for i in inputs if isinstance(i, _TensorMetadata)):
+                    key = _memory_profiler.TensorKey.from_tensor(t)
+                    if key:
+                        ptr_pair_to_key[(t.impl_ptr, t.storage_data_ptr)] = key
+
+        def format_categories(ptr_pair: int):
+            target_key = ptr_pair_to_key.get(ptr_pair, None)
+            if target_key is None:
+                return "???"
+
+            matches = tuple(
+                (version, category.name if category else "???")
+                for (key, version), category in snapshot.items()
+                if key == target_key
+            )
+            assert matches, "Failed to lookup Tensor"
+
+            # Deduplicate version bumps which don't change the category.
+            categories = [matches[0][1]]
+            for _, category in matches:
+                if category != categories[-1]:
+                    categories.append(category)
+
+            return f"{target_key.storage.allocation_id} ({','.join(categories)})"
+
+        out: List[str] = []
+        for name, inputs, outputs in record_ops.results:
+            if inputs or outputs:
+                # PyTorch ops
+                inputs_str = ", ".join(format_categories(i) for i in inputs)
+                outputs_str = ", ".join(format_categories(i) for i in outputs)
+                out.append(f"{name:<40} {inputs_str:<45} -> {outputs_str}")
+
+            else:
+                # Marked regions.
+                out.append(f"\n{name}")
+
+        return textwrap.indent("\n".join(out), " " * indent)
+
     def test_parameters_and_gradients(self):
         model = torch.nn.Sequential(
             torch.nn.Linear(2, 2), ScaleLayer(), torch.nn.Linear(2, 1), ScaleLayer()
@@ -1003,6 +1086,327 @@ class TestMemoryProfilerE2E(TestCase):
                     p.add_(grad, alpha=-0.1)
 
         self._run_and_check_parameters_and_gradients(inner_fn=inner_fn, model=model)
+
+    def test_categories_e2e_simple_fwd(self) -> None:
+        w0 = torch.ones((1,), requires_grad=True)
+        w1 = torch.ones((1,), requires_grad=True)
+
+        def step_fn(_):
+            x = torch.ones((2, 2))
+            y = torch.cat([x * w0, x * w1], dim=1)
+
+        # NOTE: We expect that all unknown categories. This is simply a sanity
+        #       check to ensure that we do not over-label.
+        self.assertExpectedInline(
+            self._run_and_format_categories(step_fn),
+            """\
+            aten::ones                                                                             -> 1 (???)
+            aten::mul.Tensor                         1 (???), 2 (???)                              -> 3 (???)
+            aten::mul.Tensor                         1 (???), 4 (???)                              -> 5 (???)
+            aten::cat                                3 (???), 5 (???)                              -> ???""",
+        )
+
+    def test_categories_e2e_simple_fwd_bwd(self) -> None:
+        w0 = torch.ones((1,), requires_grad=True)
+        w1 = torch.ones((1,), requires_grad=True)
+
+        def step_fn(mark_region):
+            x = torch.ones((2, 2))
+            targets = torch.ones((2, 4))
+
+            mark_region("Forward & loss")
+            y = torch.cat([x * w0, x * w1], dim=1)
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(y, targets)
+
+            mark_region("Backward")
+            loss.backward()
+
+        self.assertExpectedInline(
+            self._run_and_format_categories(step_fn),
+            """\
+            aten::ones                                                                             -> 1 (INPUT)
+            aten::ones                                                                             -> 2 (INPUT)
+
+            -- Forward & loss ---------------------------------------------------------------------------------------
+            aten::mul.Tensor                         1 (INPUT), 3 (INPUT)                          -> 4 (INPUT)
+            aten::mul.Tensor                         1 (INPUT), 5 (INPUT)                          -> 6 (INPUT)
+            aten::cat                                4 (INPUT), 6 (INPUT)                          -> 7 (INPUT)
+            aten::binary_cross_entropy_with_logits   7 (INPUT), 2 (INPUT)                          -> 13 (INPUT)
+
+            -- Backward ---------------------------------------------------------------------------------------------
+            aten::ones_like                          13 (INPUT)                                    -> 16 (INPUT,???)
+            aten::sigmoid                            7 (INPUT)                                     -> 17 (TEMPORARY)
+            aten::sub.Tensor                         17 (TEMPORARY), 2 (INPUT)                     -> 18 (TEMPORARY)
+            aten::mul.Tensor                         18 (TEMPORARY), 16 (INPUT,???)                -> 19 (???)
+            aten::div_.Scalar                        19 (???)                                      -> 19 (???)
+            aten::slice.Tensor                       19 (???)                                      -> 19 (???)
+            aten::slice.Tensor                       19 (???)                                      -> 19 (???)
+            aten::mul.Tensor                         19 (???), 1 (INPUT)                           -> 22 (???)
+            aten::sum.dim_IntList                    22 (???)                                      -> 23 (GRADIENT)
+            aten::view                               23 (GRADIENT)                                 -> 23 (GRADIENT)
+            aten::detach                             23 (GRADIENT)                                 -> 23 (GRADIENT)
+            aten::detach                             23 (GRADIENT)                                 -> ???
+            aten::mul.Tensor                         19 (???), 1 (INPUT)                           -> 24 (???)
+            aten::sum.dim_IntList                    24 (???)                                      -> 25 (GRADIENT)
+            aten::view                               25 (GRADIENT)                                 -> 25 (GRADIENT)
+            aten::detach                             25 (GRADIENT)                                 -> 25 (GRADIENT)
+            aten::detach                             25 (GRADIENT)                                 -> ???""",
+        )
+
+    def test_categories_e2e_simple_fwd_bwd_step(self) -> None:
+        w0 = torch.ones((1,), requires_grad=True)
+        w1 = torch.ones((1,), requires_grad=True)
+        optimizer = torch.optim.SGD([w0, w1], lr=0.1)
+
+        def step_fn(mark_region):
+            x = torch.ones((2, 2))
+            targets = torch.ones((2, 4))
+
+            mark_region("Forward & loss")
+            y = torch.cat([x * w0, x * w1], dim=1)
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(y, targets)
+
+            mark_region("Backward")
+            loss.backward()
+
+            mark_region("Optimizer")
+            optimizer.step()
+            optimizer.zero_grad()
+
+        self.assertExpectedInline(
+            self._run_and_format_categories(step_fn),
+            """\
+            aten::ones                                                                             -> 1 (INPUT)
+            aten::ones                                                                             -> 2 (INPUT)
+
+            -- Forward & loss ---------------------------------------------------------------------------------------
+            aten::mul.Tensor                         1 (INPUT), 3 (PARAMETER)                      -> 4 (???)
+            aten::mul.Tensor                         1 (INPUT), 5 (PARAMETER)                      -> 6 (???)
+            aten::cat                                4 (???), 6 (???)                              -> 7 (???)
+            aten::binary_cross_entropy_with_logits   7 (???), 2 (INPUT)                            -> 13 (???)
+
+            -- Backward ---------------------------------------------------------------------------------------------
+            aten::ones_like                          13 (???)                                      -> 16 (???)
+            aten::sigmoid                            7 (???)                                       -> 17 (TEMPORARY)
+            aten::sub.Tensor                         17 (TEMPORARY), 2 (INPUT)                     -> 18 (TEMPORARY)
+            aten::mul.Tensor                         18 (TEMPORARY), 16 (???)                      -> 19 (???)
+            aten::div_.Scalar                        19 (???)                                      -> 19 (???)
+            aten::slice.Tensor                       19 (???)                                      -> 19 (???)
+            aten::slice.Tensor                       19 (???)                                      -> 19 (???)
+            aten::mul.Tensor                         19 (???), 1 (INPUT)                           -> 22 (???)
+            aten::sum.dim_IntList                    22 (???)                                      -> 23 (GRADIENT)
+            aten::view                               23 (GRADIENT)                                 -> 23 (GRADIENT)
+            aten::detach                             23 (GRADIENT)                                 -> 23 (GRADIENT)
+            aten::detach                             23 (GRADIENT)                                 -> 23 (GRADIENT)
+            aten::mul.Tensor                         19 (???), 1 (INPUT)                           -> 24 (???)
+            aten::sum.dim_IntList                    24 (???)                                      -> 25 (GRADIENT)
+            aten::view                               25 (GRADIENT)                                 -> 25 (GRADIENT)
+            aten::detach                             25 (GRADIENT)                                 -> 25 (GRADIENT)
+            aten::detach                             25 (GRADIENT)                                 -> 25 (GRADIENT)
+
+            -- Optimizer --------------------------------------------------------------------------------------------
+            aten::zeros                                                                            -> 26 (???)
+            aten::add_.Tensor                        3 (PARAMETER), 25 (GRADIENT)                  -> 3 (PARAMETER)
+            aten::add_.Tensor                        5 (PARAMETER), 23 (GRADIENT)                  -> 5 (PARAMETER)
+            aten::zeros                                                                            -> 28 (???)
+            aten::zero_                              25 (GRADIENT)                                 -> 25 (GRADIENT)
+            aten::zero_                              23 (GRADIENT)                                 -> 23 (GRADIENT)""",
+        )
+
+    def test_categories_e2e_simple_module_fwd(self) -> None:
+        model = torch.nn.Linear(2, 4, bias=True)
+        self.assertExpectedInline(
+            self._run_and_format_categories(lambda _: model(torch.ones((2, 2)))),
+            """\
+            aten::ones                                                                             -> 1 (INPUT)
+            aten::t                                  2 (PARAMETER)                                 -> 2 (PARAMETER)
+            aten::addmm                              3 (PARAMETER), 1 (INPUT), 2 (PARAMETER)       -> 4 (???)""",
+        )
+
+    def test_categories_e2e_simple_module_fwd_bwd(self) -> None:
+        model = torch.nn.Linear(2, 1, bias=True)
+
+        def step_fn(mark_region):
+            mark_region("Forward & loss")
+            loss = model(torch.ones((2, 2))).sum()
+
+            mark_region("Backward")
+            loss.backward()
+
+        self.assertExpectedInline(
+            self._run_and_format_categories(step_fn),
+            """\
+
+            -- Forward & loss ---------------------------------------------------------------------------------------
+            aten::ones                                                                             -> 1 (INPUT)
+            aten::t                                  2 (PARAMETER)                                 -> 2 (PARAMETER)
+            aten::addmm                              3 (PARAMETER), 1 (INPUT), 2 (PARAMETER)       -> 4 (???)
+            aten::sum                                4 (???)                                       -> 5 (???)
+
+            -- Backward ---------------------------------------------------------------------------------------------
+            aten::ones_like                          5 (???)                                       -> 6 (???)
+            aten::expand                             6 (???)                                       -> 6 (???)
+            aten::t                                  6 (???)                                       -> 6 (???)
+            aten::mm                                 6 (???), 1 (INPUT)                            -> 7 (GRADIENT)
+            aten::t                                  7 (GRADIENT)                                  -> 7 (GRADIENT)
+            aten::sum.dim_IntList                    6 (???)                                       -> 9 (GRADIENT)
+            aten::view                               9 (GRADIENT)                                  -> 9 (GRADIENT)
+            aten::detach                             9 (GRADIENT)                                  -> 9 (GRADIENT)
+            aten::detach                             9 (GRADIENT)                                  -> ???
+            aten::t                                  7 (GRADIENT)                                  -> 7 (GRADIENT)
+            aten::detach                             7 (GRADIENT)                                  -> 7 (GRADIENT)
+            aten::detach                             7 (GRADIENT)                                  -> ???""",
+        )
+
+    def test_categories_e2e_simple_module_fwd_bwd_step(self) -> None:
+        model = torch.nn.Linear(2, 1, bias=True)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+
+        def step_fn(mark_region):
+            mark_region("Forward & loss")
+            loss = model(torch.ones((2, 2))).sum()
+
+            mark_region("Backward")
+            loss.backward()
+
+            mark_region("Optimizer")
+            optimizer.step()
+            optimizer.zero_grad()
+
+        self.assertExpectedInline(
+            self._run_and_format_categories(step_fn),
+            """\
+
+            -- Forward & loss ---------------------------------------------------------------------------------------
+            aten::ones                                                                             -> 1 (INPUT)
+            aten::t                                  2 (PARAMETER)                                 -> 2 (PARAMETER)
+            aten::addmm                              3 (PARAMETER), 1 (INPUT), 2 (PARAMETER)       -> 4 (???)
+            aten::sum                                4 (???)                                       -> 5 (???)
+
+            -- Backward ---------------------------------------------------------------------------------------------
+            aten::ones_like                          5 (???)                                       -> 6 (???)
+            aten::expand                             6 (???)                                       -> 6 (???)
+            aten::t                                  6 (???)                                       -> 6 (???)
+            aten::mm                                 6 (???), 1 (INPUT)                            -> 7 (GRADIENT)
+            aten::t                                  7 (GRADIENT)                                  -> 7 (GRADIENT)
+            aten::sum.dim_IntList                    6 (???)                                       -> 9 (GRADIENT)
+            aten::view                               9 (GRADIENT)                                  -> 9 (GRADIENT)
+            aten::detach                             9 (GRADIENT)                                  -> 9 (GRADIENT)
+            aten::detach                             9 (GRADIENT)                                  -> 9 (GRADIENT)
+            aten::t                                  7 (GRADIENT)                                  -> 7 (GRADIENT)
+            aten::detach                             7 (GRADIENT)                                  -> 7 (GRADIENT)
+            aten::detach                             7 (GRADIENT)                                  -> 7 (GRADIENT)
+
+            -- Optimizer --------------------------------------------------------------------------------------------
+            aten::zeros                                                                            -> 10 (???)
+            aten::clone                              7 (GRADIENT)                                  -> 12 (???)
+            aten::detach                             12 (???)                                      -> 12 (???)
+            aten::detach                             12 (???)                                      -> 12 (???)
+            aten::add_.Tensor                        2 (PARAMETER), 12 (???)                       -> 2 (PARAMETER)
+            aten::clone                              9 (GRADIENT)                                  -> 13 (???)
+            aten::detach                             13 (???)                                      -> 13 (???)
+            aten::detach                             13 (???)                                      -> 13 (???)
+            aten::add_.Tensor                        3 (PARAMETER), 13 (???)                       -> 3 (PARAMETER)
+            aten::zeros                                                                            -> 14 (???)
+            aten::zero_                              7 (GRADIENT)                                  -> 7 (GRADIENT)
+            aten::zero_                              9 (GRADIENT)                                  -> 9 (GRADIENT)""",
+        )
+
+    def test_categories_e2e_sequential_fwd(self) -> None:
+        model = torch.nn.Sequential(
+            torch.nn.Linear(2, 4, bias=True),
+            torch.nn.ReLU(),
+            torch.nn.Linear(4, 4, bias=False),
+            torch.nn.Softmax(dim=1),
+        )
+        self.assertExpectedInline(
+            self._run_and_format_categories(lambda _: model(torch.ones((2, 2)))),
+            """\
+            aten::ones                                                                             -> 1 (INPUT)
+            aten::t                                  2 (PARAMETER)                                 -> 2 (PARAMETER)
+            aten::addmm                              3 (PARAMETER), 1 (INPUT), 2 (PARAMETER)       -> 4 (???)
+            aten::relu                               4 (???)                                       -> 5 (???)
+            aten::detach                             5 (???)                                       -> ???
+            aten::t                                  6 (PARAMETER)                                 -> 6 (PARAMETER)
+            aten::mm                                 5 (???), 6 (PARAMETER)                        -> 7 (???)
+            aten::_softmax                           7 (???)                                       -> 8 (???)
+            aten::detach                             8 (???)                                       -> ???""",
+        )
+
+    def test_categories_e2e_sequential_fwd_bwd(self) -> None:
+        model = torch.nn.Sequential(
+            torch.nn.Linear(2, 4, bias=True),
+            torch.nn.ReLU(),
+            torch.nn.Linear(4, 4, bias=False),
+            torch.nn.Softmax(dim=1),
+        )
+
+        def step_fn(mark_region):
+            x = torch.ones((2, 2))
+            targets = torch.ones((2, 4))
+
+            mark_region("Forward")
+            y = model(x)
+
+            mark_region("Loss")
+            loss = torch.sum((y - targets) ** 2).mean()
+
+            mark_region("Backward")
+            loss.backward()
+
+        self.assertExpectedInline(
+            self._run_and_format_categories(step_fn),
+            """\
+            aten::ones                                                                             -> 1 (INPUT)
+            aten::ones                                                                             -> 2 (INPUT)
+
+            -- Forward ----------------------------------------------------------------------------------------------
+            aten::t                                  3 (PARAMETER)                                 -> 3 (PARAMETER)
+            aten::addmm                              4 (PARAMETER), 1 (INPUT), 3 (PARAMETER)       -> 5 (???)
+            aten::relu                               5 (???)                                       -> 6 (???)
+            aten::detach                             6 (???)                                       -> 6 (???)
+            aten::t                                  7 (PARAMETER)                                 -> 7 (PARAMETER)
+            aten::mm                                 6 (???), 7 (PARAMETER)                        -> 8 (???)
+            aten::_softmax                           8 (???)                                       -> 9 (???)
+            aten::detach                             9 (???)                                       -> 9 (???)
+
+            -- Loss -------------------------------------------------------------------------------------------------
+            aten::sub.Tensor                         9 (???), 2 (INPUT)                            -> 10 (???)
+            aten::pow.Tensor_Scalar                  10 (???)                                      -> 11 (???)
+            aten::sum                                11 (???)                                      -> 12 (???)
+            aten::mean                               12 (???)                                      -> 13 (???)
+
+            -- Backward ---------------------------------------------------------------------------------------------
+            aten::ones_like                          13 (???)                                      -> 16 (???)
+            aten::expand                             16 (???)                                      -> 16 (???)
+            aten::div.Scalar                         16 (???)                                      -> 19 (???)
+            aten::expand                             19 (???)                                      -> 19 (???)
+            aten::pow.Tensor_Scalar                  10 (???)                                      -> 20 (TEMPORARY)
+            aten::mul.Scalar                         20 (TEMPORARY)                                -> 23 (TEMPORARY)
+            aten::mul.Tensor                         19 (???), 23 (TEMPORARY)                      -> 24 (???)
+            aten::detach                             9 (???)                                       -> 9 (???)
+            aten::_softmax_backward_data             24 (???), 9 (???)                             -> 25 (???)
+            aten::t                                  25 (???)                                      -> 25 (???)
+            aten::mm                                 25 (???), 6 (???)                             -> 26 (GRADIENT)
+            aten::t                                  26 (GRADIENT)                                 -> 26 (GRADIENT)
+            aten::t                                  7 (PARAMETER)                                 -> 7 (PARAMETER)
+            aten::mm                                 25 (???), 7 (PARAMETER)                       -> 27 (???)
+            aten::t                                  26 (GRADIENT)                                 -> 26 (GRADIENT)
+            aten::detach                             26 (GRADIENT)                                 -> 26 (GRADIENT)
+            aten::detach                             26 (GRADIENT)                                 -> ???
+            aten::detach                             6 (???)                                       -> 6 (???)
+            aten::threshold_backward                 27 (???), 6 (???)                             -> 28 (???)
+            aten::t                                  28 (???)                                      -> 28 (???)
+            aten::mm                                 28 (???), 1 (INPUT)                           -> 29 (GRADIENT)
+            aten::t                                  29 (GRADIENT)                                 -> 29 (GRADIENT)
+            aten::sum.dim_IntList                    28 (???)                                      -> 30 (GRADIENT)
+            aten::view                               30 (GRADIENT)                                 -> 30 (GRADIENT)
+            aten::detach                             30 (GRADIENT)                                 -> 30 (GRADIENT)
+            aten::detach                             30 (GRADIENT)                                 -> ???
+            aten::t                                  29 (GRADIENT)                                 -> 29 (GRADIENT)
+            aten::detach                             29 (GRADIENT)                                 -> 29 (GRADIENT)
+            aten::detach                             29 (GRADIENT)                                 -> ???""",
+        )
 
 
 if __name__ == "__main__":
