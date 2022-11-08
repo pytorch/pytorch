@@ -858,9 +858,7 @@ def _prefetch_handles(
     """
     if not current_handles_key:
         return
-    handles_to_prefetch, current_training_state = _get_handles_to_prefetch(
-        state, current_handles_key
-    )
+    handles_to_prefetch = _get_handles_to_prefetch(state, current_handles_key)
     for handles_key in handles_to_prefetch:
         # Prefetch the next set of handles without synchronizing to allow
         # the sync to happen as late as possible to maximize overlap
@@ -877,11 +875,10 @@ def _prefetch_handles(
 def _get_handles_to_prefetch(
     state: _FSDPState,
     current_handles_key: _HandlesKey,
-) -> Tuple[List[_HandlesKey], HandleTrainingState]:
+) -> List[_HandlesKey]:
     """
     Returns a :class:`list` of the handles keys to prefetch for the next
-    module(s), where ``current_handles_key`` represents the current module, and
-    the current handle training state.
+    module(s), where ``current_handles_key`` represents the current module.
 
     "Prefetching" refers to running the unshard logic early (without
     synchronization), and the "next" modules depend on the recorded execution
@@ -924,7 +921,7 @@ def _get_handles_to_prefetch(
             if state._needs_pre_forward_unshard.get(target_handles_key, False)
             and not state._handles_prefetched.get(target_handles_key, False)
         ]
-    return target_handles_keys, training_state
+    return target_handles_keys
 
 
 def _get_training_state(
