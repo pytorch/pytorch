@@ -27,6 +27,22 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
+def supported_dtype_of_cpp_wrapper(dtype):
+    supported_dtype = {
+        torch.float32,
+        torch.float64,
+        torch.int64,
+        torch.int32,
+        torch.int16,
+        torch.int8,
+        torch.uint8,
+        torch.bool,
+        # torch.float16, # TODO: implement this
+        # torch.bfloat16, # TODO: implement this
+    }
+    return dtype in supported_dtype
+
+
 class GraphLowering(torch.fx.Interpreter):
     def symbolic_sizes_strides(self, ex: torch.Tensor):
         """
@@ -341,8 +357,8 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
-            if value.get_dtype() != torch.float32:
-                self.disable_cpp_wrapper("inputs not FP32")
+            if not supported_dtype_of_cpp_wrapper(value.get_dtype()):
+                self.disable_cpp_wrapper("unsupported inputs dtype")
 
     def check_constant_for_cpp_buffer(self):
         if self.constants:
