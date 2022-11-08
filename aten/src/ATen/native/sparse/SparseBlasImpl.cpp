@@ -4,6 +4,10 @@
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 
+// Required for checking whether Triton kernels are available
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -12,6 +16,7 @@
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/_triton_bsr_dense_mm.h>
 #endif
 
 namespace at {
@@ -68,6 +73,23 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
   Blocksize blocksize = {1, 1};
   if (compressed_layout == kSparseBsr) {
     blocksize = {values.size(-2), values.size(-1)};
+  }
+
+  // Triton works only with blocksizes which are powers of 2.
+  const auto is_power_of_2 = [](int64_t v) -> bool {
+    return !(v & (v - 1));
+  };
+
+  // Dtype and blocksize checks for potential Triton usage.
+  if ((strided.scalar_type() == ScalarType::Half
+    || strided.scalar_type() == ScalarType::BFloat16)
+   && is_power_of_2(blocksize[0]) && is_power_of_2(blocksize[1])) {
+    const auto triton_kernel = c10::Dispatcher::singleton()
+      .findOp(torch::jit::parseName("aten::_triton_bsr_dense_mm"));
+    // Call Triton only if dispatch key was overwritten.
+    if (triton_kernel->hasKernelForDispatchKey(c10::DispatchKey::SparseCsrCUDA)) {
+      return at::_triton_bsr_dense_mm_out(result, compressed, strided);
+    }
   }
 
   // (..., r, c) -> (..., r / b0, c / b1, b0, b1)

@@ -322,8 +322,8 @@ def bsr_dense_mm(
     bsr: torch.Tensor,
     dense: torch.Tensor,
     *,
-    out: torch.Tensor = None,
     is_sparse_rowspace_mode: Optional[bool] = None,
+    out: torch.Tensor = None,
 ):
     # TODO: insert checks
     m, kl = bsr.shape[-2:]
