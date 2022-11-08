@@ -30,6 +30,16 @@ except ImportError:
     HAS_REFS = False
 
 
+_orig_module_call = torch.nn.Module.__call__
+
+
+def is_fx_tracing_test() -> bool:
+    """
+    Copied from the hpc trainer codebase
+    """
+    return torch.nn.Module.__call__ is not _orig_module_call
+
+
 def ifdyn(count1, count2):
     if torch._dynamo.config.dynamic_shapes:
         return count1
@@ -1261,6 +1271,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    # https://github.com/pytorch/torchdynamo/issues/1446
+    def test_grad_mode_carrying_correct_state_after_graph_break(self):
+        def fn(x):
+            with torch.no_grad():
+                y = x * 3
+                print("Break")
+                z = x + 2
+            return y, z
+
+        x = torch.randn(3, requires_grad=True)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        y, z = opt_fn(x)
+        self.assertFalse(y.requires_grad)
+        self.assertFalse(z.requires_grad)
+
     def test_abc_setattr(self):
         # tests that we correctly bail out of __setattr__ calls
 
@@ -1753,6 +1778,19 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager", nopython=True)(mod)
         args = (torch.randn(3, 4),)
         self.assertTrue(same(mod(*args), opt_mod(*args)))
+
+    def test_is_symbolic_tracing(self):
+        # Ensure no graph break here
+        def fn(x):
+            if is_fx_tracing_test():
+                return x * 2
+            return x * 4
+
+        a = torch.randn(4)
+        ref = fn(a)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(a)
+        self.assertTrue(same(ref, res))
 
     @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_msg(self):
