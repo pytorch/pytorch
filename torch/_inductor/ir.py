@@ -2923,29 +2923,27 @@ class FallbackKernel(ExternKernelAlloc):
                     generate_output(output[i], f"{index}[{i}]")
                     for i in range(len(output))
                 )
-            else:
-                assert isinstance(output, torch.Tensor)
-                return (
-                    MultiOutput(
-                        FixedLayout(
-                            output.device,
-                            output.dtype,
-                            [sympy.Integer(s) for s in output.size()],
-                            [sympy.Integer(s) for s in output.stride()],
-                        ),
-                        FallbackKernel(
-                            MultiOutputLayout(output.device),
-                            kernel,
-                            tensor_args,
-                            non_tensor_args,
-                            unflatten_args,
-                            kwargs,
-                        ),
-                        index,
-                    )
-                    if output is not None
-                    else None
+            elif isinstance(output, torch.Tensor):
+                return MultiOutput(
+                    FixedLayout(
+                        output.device,
+                        output.dtype,
+                        [sympy.Integer(s) for s in output.size()],
+                        [sympy.Integer(s) for s in output.stride()],
+                    ),
+                    FallbackKernel(
+                        MultiOutputLayout(output.device),
+                        kernel,
+                        tensor_args,
+                        non_tensor_args,
+                        unflatten_args,
+                        kwargs,
+                    ),
+                    index,
                 )
+            else:
+                assert output is None, "FallbackKernel output type is not supported"
+                return None
 
         return generate_output(example_output)
 
