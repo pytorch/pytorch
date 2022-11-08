@@ -175,7 +175,7 @@ def main() -> None:
         for config in filtered_test_matrix.get("include", []):
             selected_mode = random.choices(
                 list(SUPPORTED_PERIODICAL_MODES.keys()),
-                weights=SUPPORTED_PERIODICAL_MODES.values(),
+                weights=list(SUPPORTED_PERIODICAL_MODES.values()),
                 k=1)
             config[selected_mode] = selected_mode[0]
 
