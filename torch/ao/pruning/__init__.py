@@ -4,7 +4,7 @@ from ._mappings import get_static_sparse_quantized_mapping
 
 # Sparsifier
 from .sparsifier.base_sparsifier import BaseSparsifier
-from .sparsifier.base_structured_pruner import BaseStructuredPruner
+from .sparsifier.base_structured_sparsifier import BaseStructuredSparsifier
 from .sparsifier.weight_norm_sparsifier import WeightNormSparsifier
 from .sparsifier.nearly_diagonal_sparsifier import NearlyDiagonalSparsifier
 

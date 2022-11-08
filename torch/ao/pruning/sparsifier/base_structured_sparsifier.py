@@ -6,14 +6,14 @@ from torch.nn.utils import parametrize
 from torch.ao.pruning import BaseSparsifier
 from .utils import FakeStructuredSparsity, BiasHook
 
-__all__ = ["BaseStructuredPruner"]
+__all__ = ["BaseStructuredSparsifier"]
 
 SUPPORTED_STRUCTURED_PRUNING_MODULES = {  # added to config if None given
     nn.Linear,
     nn.Conv2d,
 }
 
-class BaseStructuredPruner(BaseSparsifier):
+class BaseStructuredSparsifier(BaseSparsifier):
     r"""Base class for structured pruning.
 
     Abstract methods that need to be implemented:

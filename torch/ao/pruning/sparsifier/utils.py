@@ -91,8 +91,11 @@ class FakeStructuredSparsity(nn.Module):
 
     def forward(self, x):
         assert self.mask.shape[0] == x.shape[0]
+
         x.data[self.mask] = 0
-        return x
+        shape = [1] * len(x.shape)
+        shape[0] = -1
+        return self.mask.reshape(shape) * x
 
     def state_dict(self, *args, **kwargs):
         # avoid double saving masks
@@ -104,12 +107,11 @@ class BiasHook:
         self.prune_bias = prune_bias
 
     def __call__(self, module, input, output):
-        mask = self.param.mask
 
         if getattr(module, '_bias', None) is not None:
             bias = module._bias.data
             if self.prune_bias:
-                bias[mask] = 0
+                bias[~self.param.mask] = 0
 
             # reshape bias to broadcast over output dimensions
             idx = [1] * len(output.shape)
