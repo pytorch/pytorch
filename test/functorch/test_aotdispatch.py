@@ -967,7 +967,6 @@ aot_autograd_failures = {
     xfail('linalg.eig'),
     xfail('scatter_reduce', 'prod'),
 
-    # non-deterministic
     skip('as_strided_scatter'),
 
     # Too annoying to generate random inputs
@@ -1153,7 +1152,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.grid_sample', ''),  # prims::arange() Expected a value of type 'number' for argument...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.hinge_embedding_loss', ''),  # aten.zeros_like.default - couldn't find symbolic meta...
-    xfail('nn.functional.huber_loss', ''),  # Unable to cast Python instance to C++ type (#define PYBIND11_DE...
     xfail('nn.functional.interpolate', 'area'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'bicubic'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'bilinear'),  # Cannot call sizes() on tensor with symbolic sizes/str...
@@ -1183,7 +1181,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
     xfail('nn.functional.smooth_l1_loss', ''),  # could not find kernel
     xfail('nn.functional.unfold', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('unfold', ''),  # aten.squeeze_copy.dim - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.upsample_bilinear', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.upsample_nearest', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
