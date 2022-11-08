@@ -81,7 +81,7 @@ What we did in this example are:
 
 ```
 BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear))
-    .set_fuser_method(reverse_sequential_wrapper2(nni.LinearReLU))
+    .set_fuser_method(_reverse_sequential_wrapper2(nni.LinearReLU))
     ._set_root_node_getter(my_root_node_getter)
     ._set_extra_inputs_getter(my_extra_inputs_getter)
 ```
