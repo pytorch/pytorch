@@ -15,7 +15,7 @@ void LayoutPropagation(Node* n) {
   if (!n->hasAttribute(attr::output_layouts)) {
     const auto num_output = n->outputs().size();
     GRAPH_DEBUG("Initial output_layouts of size ", num_output);
-    std::vector<int64_t> layouts(num_output, 0);
+    std::vector<int64_t> layouts(num_output, STRIDED_LAYOUT);
     n->is_(attr::output_layouts, layouts);
   }
 
