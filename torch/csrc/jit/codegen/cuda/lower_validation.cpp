@@ -1183,7 +1183,7 @@ void validateAndConvertIterDomainGrouping(Fusion* fusion) {
 
       // Halo is not allowed
       TORCH_CHECK(
-          GpuLower::current()->haloInfo().getExtent(id) == nullptr,
+          GpuLower::current()->haloInfo()->getExtent(id) == nullptr,
           "Invalid use of ParallelType::Group.",
           " Grouping of halo-extended IterDomain, ",
           id->toString(),
