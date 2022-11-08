@@ -141,11 +141,7 @@ inductor_skips["cuda"] = {
     "linalg.pinv.singular": {f32, f64},
     "linalg.householder_product": {f32},
     # These might be passing now?
-    "T": {b8, f16, f32, f64, i32, i64},
-    "H": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "acos": {b8, f16, f32, f64, i32, i64},
-    "acosh": {b8, f16, f32, f64, i32, i64},
     "nn.functional.conv_transpose3d": {f16},
     "max.reduction_with_dim": {i32, i64},
     "min.reduction_with_dim": {i32, i64},
@@ -447,6 +443,7 @@ inductor_all_samples = {
     "select_scatter",
     "squeeze",
     "unsqueeze",
+    "sum",
 }
 
 
