@@ -506,6 +506,7 @@ parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
 parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
+parser.add_argument('--rerun-disabled-tests', action='store_true')
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
 def run_unittest_help(argv):
@@ -530,6 +531,7 @@ else:
 
 SLOW_TESTS_FILE = args.import_slow_tests
 DISABLED_TESTS_FILE = args.import_disabled_tests
+RERUN_DISABLED_TESTS = args.rerun_disabled_tests
 LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
@@ -1688,12 +1690,19 @@ def check_if_enable(test: unittest.TestCase):
                         # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
                         platforms = list(filter(lambda p: p in platform_to_conditional, platforms))
 
-                    if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
+                    should_skip = platforms == [] or any([platform_to_conditional[platform] for platform in platforms])
+
+                    if should_skip and not RERUN_DISABLED_TESTS:
                         skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
                             f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
                             "If you're seeing this on your local machine and would like to enable this test, " \
                             "please make sure CI is not set and you are not using the flag --import-disabled-tests."
                         raise unittest.SkipTest(skip_msg)
+                    elif not should_skip and RERUN_DISABLED_TESTS:
+                        skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
+                            " disabled tests are run"
+                        raise unittest.SkipTest(skip_msg)
+
     if TEST_SKIP_FAST:
         if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")

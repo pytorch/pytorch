@@ -32,6 +32,13 @@ VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}" for label in {
     "xla",
 }}
 
+# Supported mode when running periodically
+SUPPORTED_PERIODICAL_MODES = {
+    "mem_leak_check",
+    "rerun_disabled_tests",
+}
+
+
 def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Filter all test configurations and keep only requested ones")
@@ -160,9 +167,12 @@ def main() -> None:
         # No PR number, no tag, we can just return the test matrix as it is
         filtered_test_matrix = test_matrix
 
-    if args.event_name == "schedule":
+
+    # DEBUG: TO BE REMOVED
+    if args.event_name == "pull_request":
         for config in filtered_test_matrix.get("include", []):
-            config["mem_leak_check"] = "mem_leak_check"
+            for mode in SUPPORTED_PERIODICAL_MODES:
+                config[mode] = mode
 
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
