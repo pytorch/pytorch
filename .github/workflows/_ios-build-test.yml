@@ -106,7 +106,7 @@ jobs:
 
       - name: Build TestApp
         if: inputs.ios-platform == 'SIMULATOR'
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           # run the ruby build script
           if ! [ -x "$(command -v xcodebuild)" ]; then
