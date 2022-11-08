@@ -187,7 +187,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
 
       bool shrinking_sparse_dims = false;
       bool shrinking_dense_dim = false;
-      auto sparse_size_original = impl_sizes<T>().slice(0, sparse_dim);
+      auto sparse_size_original = generic_sizes<T>().slice(0, sparse_dim);
       auto sparse_size_new = size.slice(0, sparse_dim);
       for (const auto i : c10::irange(sparse_dim)) {
         if (sparse_size_new[i] < sparse_size_original[i]) {
@@ -195,7 +195,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
           break;
         }
       }
-      auto dense_size_original = impl_sizes<T>().slice(sparse_dim);
+      auto dense_size_original = generic_sizes<T>().slice(sparse_dim);
       auto dense_size_new = size.slice(sparse_dim);
       for (const auto i : c10::irange(dense_dim)) {
         if (dense_size_new[i] < dense_size_original[i]) {
@@ -223,7 +223,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
           alt_options_msg);
     }
 
-    auto sizes_and_strides = impl_sizes<T>();
+    auto sizes_and_strides = generic_sizes<T>();
     const bool size_equals_sizes = std::equal(
         size.begin(),
         size.end(),
