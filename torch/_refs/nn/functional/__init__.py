@@ -74,7 +74,12 @@ def _dropout_helper(
 
     """
 
-    return torch.distributions.Uniform(low=0.0, high=1.0).sample() < val
+    return (
+        refs.uniform(
+            self.shape, low=0.0, high=1.0, dtype=torch.float32, device=self.device
+        )
+        < val
+    )
 
 
 @register_decomposition(torch.ops.aten.alpha_dropout)
@@ -109,7 +114,7 @@ def alpha_dropout(
 
     a = 1.0 / math.sqrt((alpha * alpha * p + 1) * (1 - p))
     b = torch.logical_not(dropout_mask)
-    b = b * alpha * a + alpha * a * p
+    b = b * (alpha * a) + alpha * a * p
     dropout_mask = a * dropout_mask
 
     return self * dropout_mask + b
