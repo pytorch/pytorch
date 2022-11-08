@@ -109,7 +109,7 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
         qconfig_mapping.set_object_type(torch.nn.LeakyReLU, qconfig) \
                        .set_object_type(torch.nn.functional.leaky_relu, qconfig)
 
-    # Use special observers for ops with fixed qparams	    # Use special observers for ops with fixed qparams
+    # Use special observers for ops with fixed qparams
     fixed_qparams_observer_to_qconfig: Dict[Any, QConfigAny] = {}
     for fixed_qparams_op, observer in _FIXED_QPARAMS_OP_TO_OBSERVER.items():
         if observer in fixed_qparams_observer_to_qconfig:
