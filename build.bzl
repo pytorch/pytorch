@@ -98,16 +98,14 @@ def define_targets(rules):
             ":tags.yaml",
             ":ts_native_functions.cpp",
             ":ts_native_functions.yaml",
-            ":rules.yaml",
         ],
         tools = ["//tools/setup_helpers:generate_code"],
-        outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY + GENERATED_ONNX_EXPORTER_FILES,
+        outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
         cmd = "$(execpath //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
               "--tags-path=$(location :tags.yaml) " +
-              "--gen_lazy_ts_backend " +
-              "--gen_onnx_diagnostics",
+              "--gen_lazy_ts_backend",
     )
 
     rules.cc_library(
@@ -292,13 +290,3 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
     "torch/csrc/lazy/generated/RegisterLazy.cpp",
 ] + _GENERATED_AUTOGRAD_CPP_HEADERS + GENERATED_LAZY_H
-
-GENERATED_ONNX_EXPORTER_HEADERS = [
-    "torch/csrc/onnx/diagnostics/generated/rules.h",
-]
-
-GENERATED_ONNX_EXPORTER_PYTHON = [
-    "torch/onnx/_internal/diagnostics/generated/_rules.py",
-]
-
-GENERATED_ONNX_EXPORTER_FILES = GENERATED_ONNX_EXPORTER_HEADERS + GENERATED_ONNX_EXPORTER_PYTHON

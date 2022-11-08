@@ -1,3 +1,4 @@
+import abc
 import enum
 import functools
 import inspect
@@ -25,6 +26,8 @@ def wrap_bound_arg(val, options):
         return variables.ConstantVariable(val, **options)
     elif isinstance(val, enum.Enum):
         return variables.EnumVariable(val, **options)
+    elif isinstance(val, (type, abc.ABCMeta)):
+        return variables.UserDefinedClassVariable(val, **options)
     else:
         assert isinstance(val, VariableTracker), typestr(val)
         return val
