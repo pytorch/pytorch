@@ -23,9 +23,9 @@ from ..utils import (
     get_qconfig_dtypes,
 )
 from ..qconfig_mapping import (
-    OBJECT_TYPE_DICT_KEY,
-    MODULE_NAME_DICT_KEY,
-    MODULE_NAME_REGEX_DICT_KEY,
+    _OBJECT_TYPE_DICT_KEY,
+    _MODULE_NAME_DICT_KEY,
+    _MODULE_NAME_REGEX_DICT_KEY,
     QConfigMapping,
 )
 from ..qconfig_mapping_utils import (
@@ -223,7 +223,7 @@ def compare_prepare_convert_qconfig_mappings(
         convert_qconfig_mapping.module_name_qconfigs,
         convert_qconfig_mapping.module_name_regex_qconfigs,
     ]
-    dict_names = [OBJECT_TYPE_DICT_KEY, MODULE_NAME_DICT_KEY, MODULE_NAME_REGEX_DICT_KEY]
+    dict_names = [_OBJECT_TYPE_DICT_KEY, _MODULE_NAME_DICT_KEY, _MODULE_NAME_REGEX_DICT_KEY]
     for i in range(len(prepare_dicts)):
         for name, qconfig in prepare_dicts[i].items():
             assert name in convert_dicts[i], "Missing key {} {} in convert QConfigMapping \
