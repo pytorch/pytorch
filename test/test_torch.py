@@ -30,9 +30,9 @@ from functools import partial
 from torch import multiprocessing as mp
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, TEST_WITH_ROCM, run_tests,
+    TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, skipIfTorchInductor, slowTest,
     TEST_WITH_CROSSREF, skipIfTorchDynamo,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
@@ -1478,6 +1478,46 @@ else:
                 'put_',
                 torch.device(device).type == 'cuda')
 
+    @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_scatter(self, device):
+        a = torch.randn(10, device=device)
+        indices = torch.tensor([0, 0], device=device)
+        values = torch.tensor([0., 1.], device=device)
+        result = torch.empty_like(a)
+
+        error_msg = 'scatter with src tensor and reduce=None'
+
+        error_cases = [
+            lambda: torch.Tensor.scatter(a, 0, indices, values),
+            lambda: torch.Tensor.scatter_(a, 0, indices, values),
+            lambda: torch.scatter(a, 0, indices, values),
+            lambda: torch.scatter(a, 0, indices, values, out=result),
+        ]
+
+        no_error_cases = [
+            lambda: torch.Tensor.scatter(a, 0, indices, 0),
+            lambda: torch.Tensor.scatter_(a, 0, indices, 0),
+            lambda: torch.scatter(a, 0, indices, 0),
+            lambda: torch.scatter(a, 0, indices, 0, out=result),
+
+            lambda: torch.Tensor.scatter(a, 0, indices, values, reduce='add'),
+            lambda: torch.Tensor.scatter_(a, 0, indices, values, reduce='add'),
+            lambda: torch.scatter(a, 0, indices, values, reduce='add'),
+            lambda: torch.scatter(a, 0, indices, values, out=result, reduce='add'),
+        ]
+
+        for error_case in error_cases:
+            self.check_nondeterministic_alert(
+                error_case,
+                error_msg)
+
+        for no_error_case in no_error_cases:
+            self.check_nondeterministic_alert(
+                no_error_case,
+                error_msg,
+                False)
+
     @skipIfMps
     def test_nondeterministic_alert_histc(self, device):
         a = torch.tensor([], device=device)
@@ -2312,8 +2352,9 @@ else:
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumprod(x, 1)
         res2 = torch.tensor([]).to(device)
-        torch.cumprod(x, 1, out=res2)
-        self.assertEqual(res1, res2)
+        if not TEST_WITH_TORCHINDUCTOR:
+            torch.cumprod(x, 1, out=res2)
+            self.assertEqual(res1, res2)
         x.cumprod_(1)
         self.assertEqual(res1, x)
 
@@ -4648,6 +4689,7 @@ else:
 
     @onlyCUDA
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @skipIfTorchInductor("pin_memory isn't yet supported in TorchInductor")
     def test_pin_memory_from_constructor(self, device):
         def _get_like(t, **kwargs):
             return [
@@ -5672,36 +5714,6 @@ class TestTorch(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r"the unspecified dimension size -1 can be any value and is ambiguous"):
             torch.randn(2, 0).unflatten(1, (2, -1, 0))
-
-    def test_pytorch_library_disabled_env(self):
-        import subprocess
-        env = os.environ.copy()
-        env['PYTORCH_DISABLE_LIBRARY'] = '1'
-        try:
-            subprocess.check_output([sys.executable, '-c', 'import torch'], env=env)
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError("Could not 'import torch' with PYTORCH_DISABLE_LIBRARY=0") from e
-
-    # Test that warnings generated from C++ are translated to the correct type
-    def test_warn_types(self):
-        test_cases = [
-            # function, warning type, message
-            (torch._C._warn, UserWarning, r"Test message for TORCH_WARN"),
-            (torch._C._warn_deprecation, DeprecationWarning, r"Test message for TORCH_WARN_DEPRECATION"),
-        ]
-
-        for fn, warning_type, message in test_cases:
-            with warnings.catch_warnings(record=True) as w:
-                warnings.resetwarnings()
-                warnings.filterwarnings('always', category=warning_type)
-                fn()
-
-                self.assertEqual(len(w), 1, msg=f'{warning_type} not raised')
-                warning = w[0].message
-                self.assertTrue(isinstance(warning, warning_type), msg=f'{warning_type} not raised')
-                self.assertTrue(re.search(
-                    message,
-                    str(warning)))
 
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)
@@ -6823,6 +6835,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertRaises(RuntimeError, lambda: x.new(z.storage()))
 
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @skipIfTorchInductor("pin_memory isn't yet supported in TorchInductor")
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
