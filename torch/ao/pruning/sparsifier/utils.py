@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional
 
+import torch
 from torch import nn
 
 __all__ = [
@@ -95,9 +96,8 @@ class FakeStructuredSparsity(nn.Module):
         self.register_buffer("mask", mask)
 
     def forward(self, x):
+        assert isinstance(self.mask, torch.Tensor)
         assert self.mask.shape[0] == x.shape[0]
-
-        x.data[self.mask] = 0
         shape = [1] * len(x.shape)
         shape[0] = -1
         return self.mask.reshape(shape) * x
