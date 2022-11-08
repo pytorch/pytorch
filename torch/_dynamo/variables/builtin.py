@@ -578,7 +578,6 @@ class BuiltinVariable(VariableTracker):
         # - TensorVariable (handled by TensorVariable.create)
         if all(isinstance(x, variables.ConstantVariable) for x in args):
             return args[0].call_method(tx, f'__{op_name}__', args[1:], kwargs)
-
         out = TensorVariable.create(
             tx=tx,
             proxy=tx.output.create_proxy(
@@ -605,7 +604,7 @@ class BuiltinVariable(VariableTracker):
                 items=b.items * a.as_python_constant(), mutable_local=MutableLocal()
             ).add_options(self, a, b)
         else:
-            return self._call_operator_builtin(tx, "mul", a, b)
+            return a.call_method(tx, "__mul__", b, {})
 
     def call_len(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
