@@ -159,7 +159,7 @@ class _TorchDynamoContext:
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
                 else:
-                    return fn
+                    return fn(*args, **kwargs)
 
             on_enter()
             prior = set_eval_frame(callback)
