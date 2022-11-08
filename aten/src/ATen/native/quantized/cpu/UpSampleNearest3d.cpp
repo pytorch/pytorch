@@ -238,27 +238,5 @@ Tensor _upsample_nearest_exact3d_quantized_cpu(
       input, osize, scale_d, scale_h, scale_w);
 }
 
-Tensor upsample_nearest3d_quantized_cpu(
-    const Tensor& input,
-    at::OptionalIntArrayRef output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_d = get_scale_value(scale_factors, 0);
-  auto scale_h = get_scale_value(scale_factors, 1);
-  auto scale_w = get_scale_value(scale_factors, 2);
-  return upsample_nearest3d_quantized_cpu(input, osize, scale_d, scale_h, scale_w);
-}
-
-Tensor _upsample_nearest_exact3d_quantized_cpu(
-    const Tensor& input,
-    at::OptionalIntArrayRef output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_d = get_scale_value(scale_factors, 0);
-  auto scale_h = get_scale_value(scale_factors, 1);
-  auto scale_w = get_scale_value(scale_factors, 2);
-  return _upsample_nearest_exact3d_quantized_cpu(input, osize, scale_d, scale_h, scale_w);
-}
-
 } // namespace native
 } // namespace at
