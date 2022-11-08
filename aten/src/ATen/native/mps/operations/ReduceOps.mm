@@ -26,7 +26,8 @@ enum MPSReductionType {
   SUM,
   PROD,
   MEAN,
-  COUNT_NONZERO
+  COUNT_NONZERO,
+  TRACE
 };
 
 
@@ -238,6 +239,14 @@ void reduction_out_mps
             castOutputTensor = [mpsGraph reductionMinimumWithTensor:inputTensor
                                                                axes:axes
                                                                name:nil];
+          } else if(reduction_type == MPSReductionType::TRACE) {
+            MPSGraphTensor *bandPartWithTensor = [mpsGraph bandPartWithTensor:inputTensor
+                                                          numLower:0
+                                                          numUpper:0
+                                                             name:nil];
+            castOutputTensor = [mpsGraph reductionSumWithTensor:bandPartWithTensor
+                                                            axes:@[@0, @1]
+                                                            name:nil];
           }
 
           MPSGraphTensor* outputTensor = nil;
@@ -284,6 +293,26 @@ TORCH_IMPL_FUNC(sum_out_mps)
     const Tensor& output_t) {
 
     reduction_out_mps(input_t, opt_dim, keepdim, dtype, output_t, MPSReductionType::SUM, "sum_out_mps");
+}
+
+Tensor trace_mps_out(const Tensor& self) {
+
+    Tensor output_t = at::native::empty_mps(
+                      {},
+                      self.scalar_type(),
+                      c10::nullopt,
+                      kMPS,
+                      c10::nullopt,
+                      c10::nullopt);
+
+    std::vector<int64_t> dims(self.dim());
+    std::iota(dims.begin(), dims.end(), 0);
+
+    reduction_out_mps(self, IntArrayRef(dims), false, c10::nullopt, const_cast<Tensor&>(output_t), MPSReductionType::TRACE, "trace_mps_out");
+
+  return output_t;
+
+
 }
 
 TORCH_IMPL_FUNC(prod_out_mps)
