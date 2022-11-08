@@ -1,7 +1,28 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/PadNd.h>
+#include <ATen/core/Tensor.h>
 
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_pad_circular.h>
+#include <ATen/ops/_pad_circular_native.h>
+#include <ATen/ops/_pad_enum_native.h>
+#include <ATen/ops/constant_pad_nd.h>
+#include <ATen/ops/constant_pad_nd_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/pad_native.h>
+#include <ATen/ops/reflection_pad1d.h>
+#include <ATen/ops/reflection_pad2d.h>
+#include <ATen/ops/reflection_pad3d.h>
+#include <ATen/ops/replication_pad1d.h>
+#include <ATen/ops/replication_pad2d.h>
+#include <ATen/ops/replication_pad3d.h>
+#endif
 
 namespace at { namespace native {
 

@@ -103,7 +103,7 @@ def resolve_key(op: PyOperatorABC, k: DispatchKey):  # type: ignore[valid-type]
         # The dispatch key itself will implicitly route to backend fallback.
         # This is probably not great for the pure Python implementation.
         return k
-    raise RuntimeError("could not find kernel")
+    raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
 pyop_namespace = {}
@@ -296,6 +296,10 @@ class OpOverload(PyOperatorABC):
                 dispatch_key_or_mode != torch._C.DispatchKey.Python
             ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
 
+            if dispatch_key_or_mode in self.py_kernels:
+                raise RuntimeError(
+                    f"Trying to override a python impl for {dispatch_key_or_mode} on operator {self._name}"
+                )
             self.py_kernels[dispatch_key_or_mode] = fn
             return fn
 

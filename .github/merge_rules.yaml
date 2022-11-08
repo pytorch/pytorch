@@ -6,7 +6,6 @@
   - docs/source/onnx*
   - docs/source/scripts/onnx/**
   - scripts/onnx/**
-  - test/jit/test_export_modes.py
   - test/onnx/**
   - tools/onnx/**
   - torch/_C/__init__.pyi.in
@@ -36,6 +35,7 @@
   - csarofeen
   - ngimel
   - jjsjann123
+  - kevinstephano
   - ptrblck
   mandatory_checks_name:
   - EasyCLA
@@ -241,9 +241,12 @@
   - third_party/ideep
   - caffe2/ideep/**
   - caffe2/python/ideep/**
+  - cmake/Modules/FindMKLDNN.cmake
+  - third_party/mkl-dnn.BUILD
   approved_by:
   - XiaobingSuper
-  - yanbing-j
+  - jgong5
+  - mingfeima
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -256,6 +259,7 @@
   approved_by:
   - sanchitintel
   - chunyuan-w
+  - jgong5
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -268,9 +272,11 @@
   - aten/src/ATen/native/quantized/cpu/**
   - aten/src/ATen/native/Convolution*.cpp
   - aten/src/ATen/native/mkldnn/**
+  - test/test_mkldnn.py
   approved_by:
   - mingfeima
   - XiaobingSuper
+  - jgong5
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -283,7 +289,7 @@
   - test/test_mkldnn.py
   approved_by:
   - leslie-fang-intel
-  - CaoE
+  - jgong5
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -297,7 +303,18 @@
   - test/test_autocast.py
   approved_by:
   - leslie-fang-intel
-  - CaoE
+  - jgong5
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: NNC
+  patterns:
+  - torch/csrc/jit/tensorexpr/**
+  approved_by:
+  - EikanWang
+  - jgong5
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -308,10 +325,10 @@
   - torch/csrc/lazy/**
   - test/cpp/lazy/**
   - test/lazy/**
-  - codegen/api/lazy.py
-  - codegen/dest/lazy_ir.py
-  - codegen/dest/lazy_ts_lowering.py
-  - codegen/gen_lazy_tensor.py
+  - torchgen/api/lazy.py
+  - torchgen/dest/lazy_ir.py
+  - torchgen/dest/lazy_ts_lowering.py
+  - torchgen/gen_lazy_tensor.py
   - aten/src/ATen/native/ts_native_functions.yaml
   approved_by:
   - alanwaketan
