@@ -968,6 +968,7 @@ class FakeTensorMode(TorchDispatchMode):
             aten.empty_strided.default,
             aten.as_strided_scatter.default,
             aten.as_strided.default,
+            aten.as_strided_.default,
             aten.zeros.default,
             aten.detach.default,
             aten.set_.source_Storage_storage_offset,
