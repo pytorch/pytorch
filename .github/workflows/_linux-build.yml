@@ -154,30 +154,30 @@ jobs:
           )
           docker exec -t "${container_name}" sh -c '.jenkins/pytorch/build.sh'
 
-      - name: Archive artifacts into zip
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
-        run: |
-          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
-
-      - name: Store PyTorch Build Artifacts on S3
-        uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
-        with:
-          name: ${{ inputs.build-environment }}
-          retention-days: 14
-          if-no-files-found: error
-          path: artifacts.zip
-
-      - name: Upload sccache stats
-        if: steps.build.outcome != 'skipped'
-        uses: seemethere/upload-artifact-s3@v5
-        with:
-          s3-prefix: |
-            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
-          retention-days: 365
-          if-no-files-found: warn
-          path: sccache-stats-*.json
-
-      - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always()
+          #      - name: Archive artifacts into zip
+          #        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
+          #        run: |
+          #          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
+          #
+          #      - name: Store PyTorch Build Artifacts on S3
+          #        uses: seemethere/upload-artifact-s3@v5
+          #        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
+          #        with:
+          #          name: ${{ inputs.build-environment }}
+          #          retention-days: 14
+          #          if-no-files-found: error
+          #          path: artifacts.zip
+          #
+          #      - name: Upload sccache stats
+          #        if: steps.build.outcome != 'skipped'
+          #        uses: seemethere/upload-artifact-s3@v5
+          #        with:
+          #          s3-prefix: |
+          #            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+          #          retention-days: 365
+          #          if-no-files-found: warn
+          #          path: sccache-stats-*.json
+          #
+          #      - name: Teardown Linux
+          #        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+          #        if: always()
