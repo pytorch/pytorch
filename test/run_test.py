@@ -131,7 +131,6 @@ TESTS = discover_tests(
         "distributed/elastic/utils/util_test",
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
-        "mobile/test_lite_script_type.py",
     ]
 )
 
@@ -274,6 +273,7 @@ RUN_PARALLEL_BLOCKLIST = [
 ] + FSDP_TEST
 
 CI_SERIAL_LIST = [
+    'mobile/test_lite_script_type.py',
     'test_nn',
     'test_fake_tensor',
     'test_cpp_api_parity',
