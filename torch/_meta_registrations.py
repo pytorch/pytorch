@@ -272,7 +272,11 @@ def meta_pad2d(self, padding):
 @register_meta([aten.bernoulli.default, aten.bernoulli.out])
 @out_wrapper()
 def meta_bernoulli(self, *, generator=None):
-    return torch.empty_like(self)
+    if device_hint(self) == "cuda":
+        # https://github.com/pytorch/pytorch/issues/88612
+        return torch.empty_like(self).contiguous()
+    else:
+        return torch.empty_like(self)
 
 
 @register_meta(aten.bernoulli_.float)
@@ -282,7 +286,11 @@ def meta_bernoulli_(self, p=0.5, generator=None):
 
 @register_meta(aten.bernoulli.p)
 def meta_bernoulli_p(self, p=0.5, generator=None):
-    return torch.empty_like(self)
+    if device_hint(self) == "cuda":
+        # https://github.com/pytorch/pytorch/issues/88612
+        return torch.empty_like(self).contiguous()
+    else:
+        return torch.empty_like(self)
 
 
 @register_meta(aten._fused_moving_avg_obs_fq_helper.default)
@@ -1512,6 +1520,7 @@ def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
     return torch.empty_like(self)
 
 
+# TODO: Deduplicate this with canonicalize_dim
 def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     if dim_post_expr <= 0:
         assert wrap_scalar
@@ -1738,7 +1747,6 @@ def activate_meta():
             "aten::empty_strided",  # causing infinite recursion, test_meta.py
             "aten::clone",  # causing infinite recursion
             "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
-            "aten::randn",  # pin_memory parameter is not supported!, test_proxy_tensor.py -k test_make_fx_symbolic_exhaustive_randn_cpu_float32  # noqa: B950
             "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
             "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
             "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
