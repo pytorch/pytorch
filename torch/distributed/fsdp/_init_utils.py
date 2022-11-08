@@ -30,17 +30,15 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.distributed.fsdp._exec_order_utils import _ExecOrderData
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
-from torch.distributed.fsdp._state_dict_utils import (
-    FullStateDictConfig,
-    StateDictConfig,
-    StateDictType,
-)
 from torch.distributed.fsdp._wrap_utils import _get_submodule_to_states
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
+    FullStateDictConfig,
     MixedPrecision,
     ShardingStrategy,
+    StateDictConfig,
+    StateDictType,
 )
 from torch.distributed.fsdp.flat_param import (
     _HandlesKey,
