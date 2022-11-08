@@ -5,9 +5,9 @@ from torch.ao.quantization.fx.match_utils import (
 )
 from torch.fx import Node
 from torch.nn.utils import parametrize
-from typing import Any, Dict, List, Callable, Optional, Tuple, Type, Union, Set
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-def match(modules, node: Node, current: nn.Module) -> bool:
+def match(modules: Dict[str, nn.ModuleDict], node: Node, current: nn.Module) -> bool:
     if isinstance(current, type) and issubclass(current, MatchAllNode):
         return True
     if not isinstance(node, Node):
@@ -22,12 +22,11 @@ def match(modules, node: Node, current: nn.Module) -> bool:
         return node.op == "call_function" and node.target is current
     elif isinstance(current, str):
         return node.target == current
-    else:
-        return False
+    return False
 
 def apply_match(
-    modules,
-    pattern: Union[Tuple[nn.Module], nn.Module],
+    modules: Dict[str, nn.ModuleDict],
+    pattern: Union[Tuple[Any], Any],
     node: Node,
     matched_node_pattern: List[Node],
 ) -> Optional[List[Node]]:
@@ -36,16 +35,15 @@ def apply_match(
             if match(modules, node, pattern[0]):
                 return matched_node_pattern + [node]
 
-        s, *args = pattern
-        if match(modules, node, s):
-            if args is None:
+        first, *rest = pattern
+        if match(modules, node, first):
+            if rest is None:
                 return matched_node_pattern + [node]
 
             for user in node.users:
                 return apply_match(
-                    modules, tuple(args), user, matched_node_pattern + [node]
+                    modules, tuple(rest), user, matched_node_pattern + [node]
                 )
     elif match(modules, node, pattern):
         return [node]
-    else:
-        return None
+    return None

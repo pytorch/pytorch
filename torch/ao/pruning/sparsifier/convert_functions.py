@@ -1,14 +1,9 @@
-from typing import Callable, Union
-
 import torch
 from torch import nn
 from torch.nn.utils import parametrize
-from torch.fx import Node
-from torch.fx.graph import Graph
 
-def get_adjusted_next_layer_bias(
-    next_layer: nn.Module, pruned_biases: torch.Tensor, mask: torch.Tensor
-) -> nn.Parameter:
+
+def get_adjusted_next_layer_bias(next_layer, pruned_biases, mask):
     r"""Returns new adjusted bias for the second supported module"""
     if parametrize.is_parametrized(next_layer):
         # need to access original weight
@@ -52,7 +47,7 @@ def get_adjusted_next_layer_bias(
     return adjusted_bias
 
 
-def prune_module_bias(module: nn.Module, mask: torch.Tensor) -> None:
+def prune_module_bias(module, mask):
     # prune bias along with weights, discard pruned indices of bias
     original_bias = getattr(module, "_bias", module.bias)
     if original_bias is not None:
@@ -63,7 +58,7 @@ def prune_module_bias(module: nn.Module, mask: torch.Tensor) -> None:
         delattr(module, "_bias")
 
 
-def propogate_module_bias(module: nn.Module, mask: torch.Tensor) -> torch.Tensor:
+def propogate_module_bias(module, mask):
     # set current module bias
     if module.bias is not None:
         module.bias = nn.Parameter(module.bias[mask])
@@ -83,7 +78,7 @@ def propogate_module_bias(module: nn.Module, mask: torch.Tensor) -> torch.Tensor
 
 
 # LINEAR CONVERSION FUNCTIONS
-def convert_linear_helper(linear: nn.Linear) -> torch.Tensor:
+def convert_linear_helper(linear):
     mask = linear.parametrizations.weight[0].mask
     with torch.no_grad():
         parametrize.remove_parametrizations(linear, "weight", leave_parametrized=True)
@@ -92,19 +87,17 @@ def convert_linear_helper(linear: nn.Linear) -> torch.Tensor:
     return mask
 
 
-def convert_linear(linear: nn.Linear) -> None:
+def convert_linear(linear):
     mask = convert_linear_helper(linear)
     if getattr(linear, "prune_bias", False):
         prune_module_bias(linear, mask)
 
 
-def convert_linear_linear(linear1: nn.Linear, linear2: nn.Linear) -> None:
+def convert_linear_linear(linear1, linear2):
     convert_linear_activation_linear(linear1, None, linear2)
 
 
-def convert_linear_activation_linear(
-    linear1: nn.Linear, activation: Union[nn.Module, Callable], linear2: nn.Linear
-) -> None:
+def convert_linear_activation_linear(linear1, activation, linear2):
     mask = convert_linear_helper(linear1)
     if getattr(linear1, "prune_bias", False):
         prune_module_bias(linear1, mask)
@@ -127,7 +120,7 @@ def convert_linear_activation_linear(
 
 
 # CONV2d CONVERSION FUNCTIONS
-def convert_conv2d_helper(conv2d: nn.Conv2d) -> torch.Tensor:
+def convert_conv2d_helper(conv2d):
     mask = conv2d.parametrizations.weight[0].mask
     with torch.no_grad():
         parametrize.remove_parametrizations(conv2d, "weight", leave_parametrized=True)
@@ -136,7 +129,7 @@ def convert_conv2d_helper(conv2d: nn.Conv2d) -> torch.Tensor:
     return mask
 
 
-def convert_conv2d_padded(conv2d_1: nn.Conv2d) -> None:
+def convert_conv2d_padded(conv2d_1):
     # remove parameterization
     mask = conv2d_1.parametrizations.weight[0].mask
     with torch.no_grad():
@@ -166,19 +159,17 @@ def convert_conv2d_padded(conv2d_1: nn.Conv2d) -> None:
         delattr(conv2d_1, "_bias")
 
 
-def convert_conv2d(conv2d: nn.Conv2d) -> None:
+def convert_conv2d(conv2d):
     mask = convert_conv2d_helper(conv2d)
     if getattr(conv2d, "prune_bias", False):
         prune_module_bias(conv2d, mask)
 
 
-def convert_conv2d_conv2d(conv2d_1: nn.Conv2d, conv2d_2: nn.Conv2d) -> None:
+def convert_conv2d_conv2d(conv2d_1, conv2d_2):
     convert_conv2d_activation_conv2d(conv2d_1, None, conv2d_2)
 
 
-def convert_conv2d_activation_conv2d(
-    conv2d_1: nn.Conv2d, activation: Union[nn.Module, Callable], conv2d_2: nn.Conv2d
-) -> None:
+def convert_conv2d_activation_conv2d(conv2d_1, activation, conv2d_2):
     r"""
     Fusion Pattern for conv2d -> some activation module / function -> conv2d layers
     """

@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.fx import symbolic_trace
 from torch.nn.utils import parametrize
-from typing import Type, Union, Set
+from typing import Type, Set
 
 from torch.ao.pruning import BaseSparsifier
 from .match_utils import apply_match
@@ -32,11 +32,36 @@ SUPPORTED_STRUCTURED_PRUNING_PATTERNS = {
     (nn.Conv2d, nn.ReLU, nn.Conv2d): convert_conv2d_activation_conv2d,
     (nn.Conv2d, F.relu, nn.Conv2d): convert_conv2d_activation_conv2d,
     (nn.Conv2d, nn.Tanh, nn.Conv2d): convert_conv2d_activation_conv2d,
-    (nn.Conv2d, nn.Tanh, nn.AvgPool2d, nn.Conv2d): convert_conv2d_activation_pool_conv2d,
-    (nn.Conv2d, nn.MaxPool2d, nn.ReLU, nn.Conv2d): convert_conv2d_pool_activation_conv2d,
-    (nn.Conv2d, F.max_pool2d, nn.ReLU, nn.Conv2d): convert_conv2d_pool_activation_conv2d,
-    (nn.Conv2d, nn.AdaptiveAvgPool2d, nn.Flatten, nn.Linear): convert_conv2d_pool_flatten_linear,
-    (nn.Conv2d, nn.AdaptiveAvgPool2d, torch.flatten, nn.Linear): convert_conv2d_pool_flatten_linear,
+    (
+        nn.Conv2d,
+        nn.Tanh,
+        nn.AvgPool2d,
+        nn.Conv2d,
+    ): convert_conv2d_activation_pool_conv2d,
+    (
+        nn.Conv2d,
+        nn.MaxPool2d,
+        nn.ReLU,
+        nn.Conv2d,
+    ): convert_conv2d_pool_activation_conv2d,
+    (
+        nn.Conv2d,
+        F.max_pool2d,
+        nn.ReLU,
+        nn.Conv2d,
+    ): convert_conv2d_pool_activation_conv2d,
+    (
+        nn.Conv2d,
+        nn.AdaptiveAvgPool2d,
+        nn.Flatten,
+        nn.Linear,
+    ): convert_conv2d_pool_flatten_linear,
+    (
+        nn.Conv2d,
+        nn.AdaptiveAvgPool2d,
+        torch.flatten,
+        nn.Linear,
+    ): convert_conv2d_pool_flatten_linear,
     (nn.Linear, "output"): convert_linear,
     (nn.Linear, nn.Linear): convert_linear_linear,
     (nn.Linear, nn.ReLU, nn.Linear): convert_linear_activation_linear,
@@ -109,21 +134,24 @@ class BaseStructuredSparsifier(BaseSparsifier):
         for node in self.traced.graph.nodes:
             for pattern, convert_fn in self.patterns.items():
                 matched = apply_match(modules, pattern, node, [])
-                if (
-                    matched is not None
-                    and parametrize.is_parametrized(modules.get(node.target))
-                    and isinstance(
-                        modules.get(node.target).parametrizations["weight"][0],
-                        FakeStructuredSparsity,
-                    )
-                ):
-                    convert_block = []
-                    for node in matched:
-                        if node.op == "call_module":
-                            convert_block.append(modules.get(node.target))
-                        elif node.op == "call_function":
-                            convert_block.append(node.target)
-                    convert_fn(*convert_block)
+                if matched is not None:
+                    first_module = modules.get(node.target)
+                    if (
+                        first_module is not None
+                        and parametrize.is_parametrized(first_module)
+                        and isinstance(
+                            first_module.parametrizations["weight"][0],
+                            FakeStructuredSparsity,
+                        )
+                    ):
+
+                        convert_block = []
+                        for node in matched:
+                            if node.op == "call_module":
+                                convert_block.append(modules.get(node.target))
+                            elif node.op == "call_function":
+                                convert_block.append(node.target)
+                        convert_fn(*convert_block)
 
         # remove bias hooks
         for handle in self.bias_handles:
