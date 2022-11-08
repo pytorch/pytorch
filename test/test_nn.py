@@ -13285,7 +13285,7 @@ class TestNNDeviceType(NNTestCase):
         and key padding mask (mask type 1) are provided at the same time on CPU and CUDA
         """
         if device not in ['cpu', 'cuda']:
-            unittest.skip("Fastpath only runs on CPU and CUDA.")
+            self.skipTest("Fastpath only runs on CPU and CUDA.")
         with torch.autocast(device_type=device, enabled=False):
             embed_dim = 14
             num_heads = 7
