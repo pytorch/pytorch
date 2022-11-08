@@ -47,7 +47,7 @@ __all__ = [
     'is_deterministic_algorithms_warn_only_enabled',
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
-    'set_warn_always', 'is_warn_always_enabled',
+    'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
 ]
 
 ################################################################################
@@ -195,6 +195,67 @@ else:
 # torch._C module initialization code in C
 if TYPE_CHECKING:
     import torch._C as _C
+
+class SymInt:
+    """
+    Like an int (including magic methods), but redirects all operations on the
+    wrapped node. This is used in particular to symbolically record operations
+    in the symbolic shape workflow.
+    """
+
+    def __init__(self, node):
+        from torch.fx.experimental.symbolic_shapes import SymNode
+        assert isinstance(node, SymNode)
+        # This field MUST be named node; C++ binding code assumes that this
+        # class has a field named node that stores SymNode
+        self.node = node
+
+    def __bool__(self):
+        return self.node.bool_()
+
+    def __int__(self):
+        return self.node.int_()
+
+    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+
+    def __sym_float__(self):
+        ...
+
+    def __repr__(self):
+        return self.node.str()
+
+    # For BC; direct access of node is OK too
+    def get_pyobj(self):
+        return self.node
+
+class SymFloat:
+    """
+    Like an float (including magic methods), but redirects all operations on the
+    wrapped node. This is used in particular to symbolically record operations
+    in the symbolic shape workflow.
+    """
+
+    def __init__(self, node):
+        from torch.fx.experimental.symbolic_shapes import SymNode
+        assert isinstance(node, SymNode)
+        # This field MUST be named node; C++ binding code assumes that this
+        # class has a field named node that stores SymNode
+        self.node = node
+
+    def __bool__(self):
+        return self.node.bool_()
+
+    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+
+    def __sym_int__(self):
+        ...
+
+    def __repr__(self):
+        return self.node.str()
+
+    # For BC; direct access of node is OK too
+    def get_pyobj(self):
+        return self.node
 
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
@@ -439,6 +500,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
           ``mode='max'``
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
+        * :func:`torch.Tensor.scatter` when ``src`` is a tensor and ``reduce=None``
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor
@@ -647,7 +709,7 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage
+from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage, _warn_typed_storage_removal
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
 # dtype, use torch.storage.TypedStorage directly.
@@ -655,86 +717,171 @@ from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage
 class ByteStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.uint8
 
 class DoubleStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.double
 
 class FloatStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.float
 
 class HalfStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.half
 
 class LongStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.long
 
 class IntStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.int
 
 class ShortStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.short
 
 class CharStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.int8
 
 class BoolStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.bool
 
 class BFloat16Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.bfloat16
 
 class ComplexDoubleStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.cdouble
 
 class ComplexFloatStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.cfloat
 
 class QUInt8Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.quint8
 
 class QInt8Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.qint8
 
 class QInt32Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.qint32
 
 class QUInt4x2Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.quint4x2
 
 class QUInt2x4Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.quint2x4
 
 _storage_classes = {
@@ -941,7 +1088,6 @@ from ._linalg_utils import (  # type: ignore[misc]
     lstsq,
 )
 
-
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
     supported by torch.
@@ -961,13 +1107,15 @@ def _register_device_module(device_type, module):
 
 # expose return_types
 from . import return_types
-if sys.executable != 'torch_deploy' and os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "0":
-    from . import library
-    if not TYPE_CHECKING:
-        from . import _meta_registrations
+from . import library
+if not TYPE_CHECKING:
+    from . import _meta_registrations
 
 # Enable CUDA Sanitizer
 if 'TORCH_CUDA_SANITIZER' in os.environ:
     import torch.cuda._sanitizer as csan
 
     csan.enable_cuda_sanitizer()
+
+# Populate magic methods on SymInt and SymFloat
+import torch.fx.experimental.symbolic_shapes

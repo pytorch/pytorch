@@ -42,18 +42,18 @@ ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
-# TODO: Type[torch.SymIntNode], Type[torch.SymFloatNode]
+# TODO: Type[torch.SymInt], Type[torch.SymFloat]
 NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
 # TODO: This needs a lot more type annotations
-# NumberType = Union[bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode]
+# NumberType = Union[bool, int, float, complex, torch.SymInt, torch.SymFloat]
 NumberType = Union[bool, int, float, complex]
 
-Number = (bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode)
+Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat)
 # I don't call it Integral because numbers.Integral includes bool, but IntLike
 # does not
 Dim = int
-IntLike = (int, torch.SymIntNode)
-FloatLike = (float, torch.SymFloatNode)
+IntLike = (int, torch.SymInt)
+FloatLike = (float, torch.SymFloat)
 IntWithoutSymInt = int
 FloatWithoutSymFloat = float
 DeviceLikeType = Union[str, torch.device]
@@ -360,7 +360,7 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
 
     shape = tensors[0].shape
 
-    def _cmp(idx_a, idx_b):
+    def should_swap(idx_a, idx_b):
         for tensor in tensors:
             stride_a = tensor.stride()[idx_a]
             stride_b = tensor.stride()[idx_b]
@@ -378,24 +378,30 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
             if shape[idx_a] > shape[idx_b]:
                 return 1
 
-            # NOTE: this case is missing in the C++ impl
-            if shape[idx_a] < shape[idx_b]:
-                return -1
-
         # Note: this case is hit if all strides are zero,
         # or all strides are equal and all dimensions have the same length
         return 0
 
-    perm = tuple(range(ndim))
-    perm = tuple(sorted(perm, key=cmp_to_key(_cmp), reverse=True))
+    perm = list(reversed(range(ndim)))
+
+    # insertion sort with support for ambiguous comparisons
+    for i in range(1, ndim):
+        dim1 = i
+        for dim0 in reversed(range(i)):
+            comparison = should_swap(perm[dim0], perm[dim1])
+            if comparison > 0:
+                perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
+                dim1 = dim0
+            elif comparison < 0:
+                break
 
     permuted_shape = [-1] * ndim
-    for idx, x in enumerate(perm):
+    for idx, x in enumerate(reversed(perm)):
         permuted_shape[idx] = shape[x]
 
     new_strides = make_contiguous_strides_for(permuted_shape)
     permuted_strides = [-1] * ndim
-    for idx, x in enumerate(perm):
+    for idx, x in enumerate(reversed(perm)):
         permuted_strides[x] = new_strides[idx]
 
     return tuple(permuted_strides)
@@ -1113,10 +1119,10 @@ class RETURN_TYPE(Enum):
 
 
 # TODO: when NumberType contains the sym types, can simplify this
-def number_type(x: Union[NumberType, torch.SymIntNode, torch.SymFloatNode]) -> Type:
-    if isinstance(x, torch.SymIntNode):
+def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
+    if isinstance(x, torch.SymInt):
         return int
-    elif isinstance(x, torch.SymFloatNode):
+    elif isinstance(x, torch.SymFloat):
         return float
     else:
         return type(x)

@@ -1087,8 +1087,14 @@ at::Tensor conv_transpose3d(
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 3, "conv_transpose3d");
-  auto output = at::convolution(
+  Tensor output;
+  if (at::isComplexType(input_.scalar_type())) {
+    output = complex_convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  } else {
+    output = at::convolution(
+      input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  }
   return is_batched ? output : output.squeeze(0);
 }
 
@@ -1122,7 +1128,7 @@ at::Tensor convolution_overrideable(
 ConvBackend select_conv_backend(
     const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
-    bool transposed_, IntArrayRef output_padding_, int64_t groups_) {
+    bool transposed_, IntArrayRef output_padding_, int64_t groups_, const at::OptionalIntArrayRef bias_sizes_opt) {
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
@@ -1155,10 +1161,10 @@ ConvBackend select_conv_backend(
     weight = view4d(weight);
   }
 
-  auto bias_sizes_opt = bias.defined() ? c10::optional<IntArrayRef>(bias.sizes()) : c10::nullopt;
+  auto bias_sizes = bias.defined() ? c10::optional<IntArrayRef>(bias.sizes()) : bias_sizes_opt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
-  return _select_conv_backend(input, weight, bias, bias_sizes_opt, need_backward, params);
+  return _select_conv_backend(input, weight, bias, bias_sizes, need_backward, params);
 }
 
 ConvBackend select_conv_backend(
@@ -1363,6 +1369,13 @@ static inline at::MemoryFormat determine_backend_memory_format(
   }
 #endif
   return backend_memory_format;
+}
+
+at::MemoryFormat _determine_backend_memory_format(
+    const Tensor& input,
+    const Tensor& weight,
+    const ConvBackend backend)  {
+  return determine_backend_memory_format(input, weight, backend);
 }
 
 at::Tensor _convolution(
