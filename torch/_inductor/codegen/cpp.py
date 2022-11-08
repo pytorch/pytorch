@@ -705,7 +705,7 @@ class CppVecKernel(CppKernel):
 
     def __init__(self, args, num_threads):
         super(CppVecKernel, self).__init__(args, num_threads)
-        self.simd_len = codecache.SupportedVecIsa.vec_size()
+        self.simd_len = codecache.SupportedVecIsa.nelements()
         self.reduction_omp_dec: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
@@ -947,7 +947,7 @@ class CppKernelProxy(CppKernel):
         self.simd_omp_kernel: CppKernel = None
 
     def vectorize_most_inner_loop(self, loop_nest, dtype=torch.float):
-        nelements = codecache.SupportedVecIsa.vec_size(dtype)
+        nelements = codecache.SupportedVecIsa.nelements(dtype)
         loop_nest.split_most_inner_loop(nelements)
         loop_with_tail = loop_nest.loops[-1]
         assert isinstance(loop_with_tail, LoopLevelWithTail)
@@ -1348,7 +1348,7 @@ class LoopLevel:
     steps: sympy.Expr = sympy.Integer(1)
     parallel: int = 0
     simd_omp: bool = False
-    simd_len: int = codecache.SupportedVecIsa.vec_size()
+    simd_len: int = codecache.SupportedVecIsa.nelements()
     simd_vec: bool = False
     collapsed: bool = False
     reduction_vars: Dict[str, str] = None

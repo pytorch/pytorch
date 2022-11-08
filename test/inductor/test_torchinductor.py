@@ -4390,44 +4390,16 @@ if HAS_CPU:
             self.assertFalse(complex_memory_overlap(gathered.t()))
 
         @unittest.skipIf(
-            not codecache.filter_out_valid_isa(), "Does not support vectorization"
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
         def test_auto_simd(self):
             self.assertTrue(
-                codecache.SupportedVecIsa.isa_vec_size(
-                    codecache.SupportedVecIsa.AVX512, torch.float
-                )
-                == 16
-            )
-            self.assertTrue(
-                codecache.SupportedVecIsa.isa_vec_size(
-                    codecache.SupportedVecIsa.AVX512, torch.bfloat16
-                )
-                == 32
-            )
-            self.assertTrue(
-                codecache.SupportedVecIsa.isa_vec_size(
-                    codecache.SupportedVecIsa.AVX2, torch.float
-                )
-                == 8
-            )
-            self.assertTrue(
-                codecache.SupportedVecIsa.isa_vec_size(
-                    codecache.SupportedVecIsa.AVX2, torch.bfloat16
-                )
-                == 16
-            )
-            self.assertTrue(
-                codecache.SupportedVecIsa.isa_vec_bit_size(
-                    codecache.SupportedVecIsa.AVX512
-                )
+                codecache.SupportedVecIsa.bit_size(codecache.SupportedVecIsa.AVX512)
                 == 512
             )
             self.assertTrue(
-                codecache.SupportedVecIsa.isa_vec_bit_size(
-                    codecache.SupportedVecIsa.AVX2
-                )
+                codecache.SupportedVecIsa.bit_size(codecache.SupportedVecIsa.AVX2)
                 == 256
             )
 
@@ -4436,15 +4408,15 @@ if HAS_CPU:
                 self.assertTrue(isa)
 
                 if isa == codecache.SupportedVecIsa.AVX512:
-                    self.assertTrue(codecache.SupportedVecIsa.vec_size() == 16)
+                    self.assertTrue(codecache.SupportedVecIsa.nelements() == 16)
                     self.assertTrue(
-                        codecache.SupportedVecIsa.vec_size(torch.bfloat16) == 32
+                        codecache.SupportedVecIsa.nelements(torch.bfloat16) == 32
                     )
                 else:
                     self.assertTrue(isa == codecache.SupportedVecIsa.AVX2)
-                    self.assertTrue(codecache.SupportedVecIsa.vec_size() == 8)
+                    self.assertTrue(codecache.SupportedVecIsa.nelements() == 8)
                     self.assertTrue(
-                        codecache.SupportedVecIsa.vec_size(torch.bfloat16) == 16
+                        codecache.SupportedVecIsa.nelements(torch.bfloat16) == 16
                     )
 
             with patch.object(config.cpp, "simdlen", 0):
@@ -4460,24 +4432,24 @@ if HAS_CPU:
                 self.assertFalse(isa)
 
             with patch.object(config.cpp, "simdlen", 256):
-                isa_matrix = codecache.filter_out_valid_isa()
+                isa_matrix = codecache.valid_vec_isa_list()
                 if codecache.SupportedVecIsa.AVX2 in isa_matrix:
                     self.assertFalse(isa == codecache.SupportedVecIsa.AVX2)
 
             with patch.object(config.cpp, "simdlen", 512):
-                isa_matrix = codecache.filter_out_valid_isa()
+                isa_matrix = codecache.valid_vec_isa_list()
                 if codecache.SupportedVecIsa.AVX512 in isa_matrix:
                     isa = codecache.supported_vector_isa()
                     self.assertTrue(isa == codecache.SupportedVecIsa.AVX512)
 
             with patch.object(config.cpp, "simdlen", 256):
-                isa_matrix = codecache.filter_out_valid_isa()
+                isa_matrix = codecache.valid_vec_isa_list()
                 if codecache.SupportedVecIsa.AVX2 in isa_matrix:
                     isa = codecache.supported_vector_isa()
                     self.assertTrue(isa == codecache.SupportedVecIsa.AVX2)
 
         @unittest.skipIf(
-            not codecache.filter_out_valid_isa(), "Does not support vectorization"
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
         def test_sign_cpu_only(self):
@@ -4501,7 +4473,7 @@ if HAS_CPU:
         # other platforms support, we just need to add the ISA info to the supported_vector_isa
         # and include proper aten vectorization head file.
         @unittest.skipIf(
-            not codecache.filter_out_valid_isa(), "Does not support vectorization"
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
         def test_vec_kernel_cpu_only(self):
