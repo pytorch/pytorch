@@ -110,11 +110,12 @@ class Rule:
 
 @dataclasses.dataclass
 class Location:
-    uri: str
-    message: str
+    uri: Optional[str] = None
     line: Optional[int] = None
+    message: Optional[str] = None
     start_column: Optional[int] = None
     end_column: Optional[int] = None
+    snippet: Optional[str] = None
 
     def sarif(self) -> sarif.Location:
         """Returns the SARIF representation of this location."""
@@ -124,43 +125,37 @@ class Location:
                 region=sarif.Region(
                     start_line=self.line,
                     start_column=self.start_column,
-                    end_line=self.line,
                     end_column=self.end_column,
+                    snippet=sarif.ArtifactContent(text=self.snippet),
                 ),
             ),
-            message=sarif.Message(text=self.message),
+            message=sarif.Message(text=self.message)
+            if self.message is not None
+            else None,
         )
 
 
 @dataclasses.dataclass
+class StackFrame:
+    location: Location
+
+    def sarif(self) -> sarif.StackFrame:
+        """Returns the SARIF representation of this stack frame."""
+        return sarif.StackFrame(location=self.location.sarif())
+
+
+@dataclasses.dataclass
 class Stack:
-    frame_locations: List[Location] = dataclasses.field(default_factory=list)
+    frames: List[StackFrame] = dataclasses.field(default_factory=list)
+    message: Optional[str] = None
 
     def sarif(self) -> sarif.Stack:
         """Returns the SARIF representation of this stack."""
         return sarif.Stack(
-            frames=[
-                sarif.StackFrame(location=loc.sarif()) for loc in self.frame_locations
-            ]
-        )
-
-    def add_frame(
-        self,
-        uri: str,
-        message: str,
-        line: Optional[int] = None,
-        start_column: Optional[int] = None,
-        end_column: Optional[int] = None,
-    ) -> None:
-        """Adds a frame to the stack."""
-        self.frame_locations.append(
-            Location(
-                uri=uri,
-                message=message,
-                line=line,
-                start_column=start_column,
-                end_column=end_column,
-            )
+            frames=[frame.sarif() for frame in self.frames],
+            message=sarif.Message(text=self.message)
+            if self.message is not None
+            else None,
         )
 
 
