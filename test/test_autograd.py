@@ -6805,8 +6805,8 @@ for shape in [(1,), ()]:
         with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
             a = torch.ones(5, requires_grad=True)
 
-            warnings.simplefilter('always')
             with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter('always')
                 y = a * a
                 # should raise two warnings from a being saved twice
                 self.assertEqual(len(w), 2)
