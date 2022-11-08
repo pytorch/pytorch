@@ -273,6 +273,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.to_sparse_csc,
         Tensor.to_sparse_bsr,
         Tensor.to_sparse_bsc,
+        Tensor._typed_storage,
         Tensor._reduce_ex_internal,
         Tensor._fix_weakref,
         Tensor._make_wrapper_subclass,
@@ -1554,7 +1555,7 @@ has_torch_function = _add_docstr(
     Arguments
     ---------
     relevant_args : iterable
-        Iterable or aguments to check for __torch_function__ methods.
+        Iterable or arguments to check for __torch_function__ methods.
     Returns
     -------
     bool

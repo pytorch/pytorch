@@ -745,6 +745,14 @@ class InstructionTranslatorBase(object):
             self.push(right.call_method(self, "__contains__", [left], {}))
             if op == "not in":
                 self.UNARY_NOT(inst)
+        elif (
+            isinstance(left, UserFunctionVariable)
+            and isinstance(right, UserFunctionVariable)
+            and op in supported_is_const
+        ):
+            self.push(
+                ConstantVariable(supported_is_const[op](left.fn, right.fn), **options)
+            )
         else:
             unimplemented(f"COMPARE_OP {typestr(left)} {op} {typestr(right)}")
 
@@ -828,6 +836,14 @@ class InstructionTranslatorBase(object):
     def STORE_ATTR(self, inst):
         prior = self.copy_graphstate()
         val, obj = self.popn(2)
+
+        if isinstance(obj, NNModuleVariable):
+            # We don't allow side effects during export
+            # https://github.com/pytorch/torchdynamo/issues/1475
+            assert (
+                not self.export
+            ), f"Mutating module attribute {inst.argval} during export."
+
         try:
             self.output.guards.update(
                 BuiltinVariable(setattr)
@@ -1312,6 +1328,7 @@ class InstructionTranslatorBase(object):
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
         f_code: types.CodeType,
+        export: bool,
     ):
         super(InstructionTranslatorBase, self).__init__()
 
@@ -1341,6 +1358,8 @@ class InstructionTranslatorBase(object):
         self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
         # Stack of module being parsed, current nn.module is at the end of ordered dict
         self.nn_module_stack: Dict[str, str] = {}
+        # Flag to indicate whether tracing is used for export.
+        self.export = export
 
         if fake_tensors_available:
             with torch._subclasses.FakeTensorMode(
@@ -1391,6 +1410,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             # A global var is inserted only after a STORE_GLOBAL happens to it
             symbolic_globals=collections.OrderedDict(),
             f_code=f_code,
+            export=export,
         )
         self.one_graph: bool = one_graph
         self.export = export
@@ -1618,6 +1638,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             instructions=cleaned_instructions(code),
             code_options={k: getattr(code, k) for k in dir(code)},
             f_code=code,
+            export=parent.export,
         )
         self.parent = parent
         self.symbolic_result = None
