@@ -13341,13 +13341,13 @@
   variants: function
   dispatch:
     CUDA: _scaled_dot_product_attention_forward_cuda
-    CPU: _scaled_dot_product_attention_forward_math
+    CPU: _scaled_dot_product_attention_math
     NestedTensorCUDA: _scaled_dot_product_attention_forward_nested
     NestedTensorCPU: _scaled_dot_product_attention_forward_math
     Meta: _scaled_dot_product_attention_forward_math
   autogen: _scaled_dot_product_attention.out
 
-- func: _scaled_dot_product_attention_backward(Tensor grad, Tensor attn_mask, float dropout_p, bool need_attn_weights, bool is_causal) -> (Tensor, Tensor)
+- func: _scaled_dot_product_attention_backward(Tensor grad, Tensor attn_mask, float dropout_p, bool need_attn_weights, bool is_causal) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
     CUDA: _scaled_dot_product_attention_backward_math

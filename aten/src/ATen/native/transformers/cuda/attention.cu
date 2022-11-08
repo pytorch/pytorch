@@ -778,7 +778,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
       case sdp::SDPBackend::efficient_attention:
           return mem_eff_helper(query_, key , value);
       case sdp::SDPBackend::math:
-        return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+        return at::_scaled_dot_product_attention(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
       default:
         TORCH_CHECK(false, "No viable backend for scaled_dot_product_attention was found.");
         return std::make_tuple(Tensor(), Tensor());

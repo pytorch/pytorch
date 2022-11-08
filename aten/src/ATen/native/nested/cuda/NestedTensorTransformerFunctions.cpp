@@ -228,7 +228,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_nested(
       case sdp::SDPBackend::efficient_attention:
           return mem_efficient_helper_nested_unpacked(query_, key, value, dropout_p, need_attn_weights, is_causal);
       case sdp::SDPBackend::math:
-        return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+        return at::_scaled_dot_product_attention(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
       default:
         TORCH_CHECK(false, "Unsupported backend for scaled_dot_product_attention");
         return std::make_tuple(Tensor(), Tensor());
