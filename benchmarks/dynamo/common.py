@@ -1069,7 +1069,7 @@ class BenchmarkRunner:
         def deepcopy_and_maybe_ddp(model):
             model = copy.deepcopy(model)
             if self.args.ddp:
-                model = DDP(model)
+                model = DDP(model, find_unused_parameters=True)
             return model
 
         # Collect the fp64 reference outputs to be used later for accuracy checking.
