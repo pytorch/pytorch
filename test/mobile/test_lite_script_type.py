@@ -95,6 +95,7 @@ class TestLiteScriptModule(TestCase):
             script_module_result,
             mobile_module_result
         )
+        raise AssertionError('hmm')
 
     def test_typing_namedtuple_custom_classtype(self):
         class Foo(NamedTuple):

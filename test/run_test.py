@@ -131,6 +131,7 @@ TESTS = discover_tests(
         "distributed/elastic/utils/util_test",
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
+        "mobile/test_lite_script_type.py",
     ]
 )
 
