@@ -614,7 +614,7 @@ class CppKernel(Kernel):
         )
         reductions.mark_reduction(self.reduction_vars)
 
-        if codecache.supported_vector_isa():
+        if codecache.pick_vec_isa():
             # TODO(jansel): detect stride-1 dimension and vectorize that
             if reductions:
                 reductions.loops[-1].simd = True
@@ -705,7 +705,8 @@ class CppVecKernel(CppKernel):
 
     def __init__(self, args, num_threads):
         super(CppVecKernel, self).__init__(args, num_threads)
-        self.simd_len = codecache.SupportedVecIsa.nelements()
+        assert codecache.pick_vec_isa()
+        self.simd_len = codecache.pick_vec_isa().nelements()
         self.reduction_omp_dec: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
@@ -947,7 +948,8 @@ class CppKernelProxy(CppKernel):
         self.simd_omp_kernel: CppKernel = None
 
     def vectorize_most_inner_loop(self, loop_nest, dtype=torch.float):
-        nelements = codecache.SupportedVecIsa.nelements(dtype)
+        assert codecache.pick_vec_isa()
+        nelements = codecache.pick_vec_isa().nelements(dtype)
         loop_nest.split_most_inner_loop(nelements)
         loop_with_tail = loop_nest.loops[-1]
         assert isinstance(loop_with_tail, LoopLevelWithTail)
@@ -992,7 +994,7 @@ class CppKernelProxy(CppKernel):
         ), LoopNest(loops[reduction_depth:])
         loops_nest_reduce.mark_reduction(self.simd_vec_kernel.reduction_vars)
 
-        if codecache.supported_vector_isa():
+        if codecache.pick_vec_isa():
             # TODO(jansel): detect stride-1 dimension and vectorize that
             if loops_nest_reduce:
                 loops_nest_reduce.loops[-1].simd = True
@@ -1137,8 +1139,7 @@ class CppScheduling:
         return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
 
     def can_vec(self, nodes):
-        # TODO: Query cpu arch and vec length from aten
-        if not codecache.supported_vector_isa():
+        if not codecache.pick_vec_isa():
             return False
 
         _, (group, reduction_group) = max(
@@ -1348,7 +1349,9 @@ class LoopLevel:
     steps: sympy.Expr = sympy.Integer(1)
     parallel: int = 0
     simd_omp: bool = False
-    simd_len: int = codecache.SupportedVecIsa.nelements()
+    simd_len: int = (
+        codecache.pick_vec_isa().nelements() if codecache.pick_vec_isa() else 0
+    )
     simd_vec: bool = False
     collapsed: bool = False
     reduction_vars: Dict[str, str] = None
