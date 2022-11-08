@@ -784,10 +784,19 @@ class TestMemoryProfilerE2E(TestCase):
         if storage is None:
             raise ValueError("Cannot look up uninitialized Tensor.")
 
+        snapshot = memory_profile._category_snapshot()
+        ids = {
+            key.storage.allocation_id
+            for key, _ in snapshot
+            if key.storage.ptr == storage.data_ptr() and key.device == storage.device
+        }
+
         return {
             (key, version): category
             for (key, version), category in memory_profile._category_snapshot().items()
-            if key.storage.ptr == storage.data_ptr() and key.device == storage.device
+            #
+            # If a Tensor is live we want the most recent ID
+            if key.storage.allocation_id == max(ids | {-1})
         }
 
     def _run_and_check_gradients(self, inner_fn, model):
