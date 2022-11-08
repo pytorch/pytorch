@@ -5,7 +5,7 @@ from ._diagnostic import (
     engine,
     ExportDiagnostic,
 )
-from .generated._rules import rules
+from ._rules import rules
 from .infra import levels
 
 __all__ = [
