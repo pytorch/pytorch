@@ -525,6 +525,7 @@
     "Optional"
   ],
   "torch.nested": [
+    "nested_tensor",
     "to_padded_tensor"
   ],
   "torch.nn.common_types": [
