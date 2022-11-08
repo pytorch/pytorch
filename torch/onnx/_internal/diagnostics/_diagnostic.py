@@ -4,8 +4,7 @@ import contextlib
 from typing import Any, Optional, Tuple, TypeVar
 
 import torch
-from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.diagnostics.generated import _rules
+from torch.onnx._internal.diagnostics import _rules, infra
 
 # This is a workaround for mypy not supporting Self from typing_extensions.
 _ExportDiagnostic = TypeVar("_ExportDiagnostic", bound="ExportDiagnostic")
