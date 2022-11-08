@@ -4,7 +4,7 @@ set -eou pipefail
 
 
 DISTRIBUTION=$(. /etc/os-release;echo $ID$VERSION_ID)
-DRIVER_VERSION="515.57"
+DRIVER_VERSION="515.76"
 DRIVER_FN="NVIDIA-Linux-x86_64-${DRIVER_VERSION}.run"
 YUM_REPO_URL="https://nvidia.github.io/nvidia-docker/${DISTRIBUTION}/nvidia-docker.repo"
 
@@ -59,8 +59,29 @@ install_nvidia_driver_amzn2() {
             sudo yum install -y "kernel-devel-uname-r == $(uname -r)"
             sudo modprobe backlight
             sudo curl -fsL -o /tmp/nvidia_driver "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
-            sudo /bin/bash /tmp/nvidia_driver -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
+
+            set +e
+            sudo /bin/bash /tmp/nvidia_driver -s --no-drm
+            NVIDIA_INSTALLATION_STATUS=$?
+
+            if [ "$NVIDIA_INSTALLATION_STATUS" -ne 0 ]; then
+                sudo cat /var/log/nvidia-installer.log
+
+                NVIDIA_DEVICES=$(lspci -D | grep -i NVIDIA | cut -d' ' -f1)
+                # The GPU can get stuck in a failure state if somehow the test crashs the GPU microcode. When this
+                # happens, we'll try to reset all NVIDIA devices https://github.com/pytorch/pytorch/issues/88388
+                for PCI_ID in "$NVIDIA_DEVICES"; do
+                    DEVICE_ENABLED=$(cat /sys/bus/pci/devices/$PCI_ID/enable)
+
+                    echo "Reseting $PCI_ID (enabled state: $DEVICE_ENABLED)"
+                    # This requires sudo permission of course
+                    echo "1" | sudo tee /sys/bus/pci/devices/$PCI_ID/reset
+                    sleep 1
+                done
+            fi
+
             sudo rm -fv /tmp/nvidia_driver
+            set -e
         fi
 
         sudo modprobe nvidia || true
