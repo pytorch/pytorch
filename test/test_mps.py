@@ -2561,7 +2561,7 @@ class TestNLLLoss(TestCase):
         helper(2, 8, 4, 5, torch.float32)
         helper(2, 8, 4, 5, torch.int32)
         # helper(2, 8, 4, 5, torch.int64)
-        
+
     def test_median(self):
         def helper_dtype_int32(n1, n2, n3):
             cpu_x = torch.randint(50, (n1, n2, n3), device='cpu', dtype=torch.int32)
@@ -2571,6 +2571,14 @@ class TestNLLLoss(TestCase):
             result_mps = torch.median(mps_x)
 
             self.assertEqual(result_cpu, result_mps)
+
+            for dim in [0, 1, 2, 3]:
+                for keepdim in [True, False]:
+                    y, idx = torch.median(mps_x, dim=dim, keepdim=keepdim)
+                    refy, refidx = torch.median(cpu_x, dim=dim, keepdim=keepdim)
+                    self.assertEqual(y, refy)
+                    self.assertEqual(idx, refidx)
+
         def helper_dtype_float32(n1, n2, n3):
             cpu_x = torch.randn(n1, n2, n3, device='cpu', dtype=torch.float32)
             mps_x = cpu_x.detach().clone().to('mps')
@@ -2580,11 +2588,18 @@ class TestNLLLoss(TestCase):
 
             self.assertEqual(result_cpu, result_mps)
 
-        helper_dtype_int32(3, 3, 3)
-        helper_dtype_int32(2, 2, 2)
-        helper_dtype_float32(2, 2, 2)
-        helper_dtype_float32(3, 3, 3)
-        
+            for dim in [0, 1, 2, 3]:
+                for keepdim in [True, False]:
+                    y, idx = torch.median(mps_x, dim=dim, keepdim=keepdim)
+                    refy, refidx = torch.median(cpu_x, dim=dim, keepdim=keepdim)
+                    self.assertEqual(y, refy)
+                    self.assertEqual(idx, refidx)
+
+        helper_dtype_int32(10, 10, 10)
+        helper_dtype_int32(40, 40, 40)
+        helper_dtype_float32(40, 40, 40)
+        helper_dtype_float32(10, 10, 10)
+
     def test_any(self):
         def helper(shape):
             input_xs = []
