@@ -1429,6 +1429,7 @@ inplace_symbolic_tensor_failures = {
     xfail('neg', ''),  # aten.neg_.default - couldn't find symbolic meta function/decomposition
     xfail('nextafter', ''),  # aten.nextafter_.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.celu', ''),  # aten.celu_.default - couldn't find symbolic meta function/decomposition
+    xfail('nn.functional.dropout3d', ''),  # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.elu', ''),  # aten.elu_.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.hardsigmoid', ''),  # aten.hardsigmoid_.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.mish', ''),  # aten.mish_.default - couldn't find symbolic meta function/decomposition
