@@ -83,7 +83,8 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
   // Dtype and blocksize checks for potential Triton usage.
   if ((strided.scalar_type() == ScalarType::Half
     || strided.scalar_type() == ScalarType::BFloat16)
-   && is_power_of_2(blocksize[0]) && is_power_of_2(blocksize[1])) {
+   && is_power_of_2(blocksize[0]) && is_power_of_2(blocksize[1])
+   && (blocksize[0] >= 16) && (blocksize[1] >= 16)) {
     const auto triton_kernel = c10::Dispatcher::singleton()
       .findOp(torch::jit::parseName("aten::_triton_bsr_dense_mm"));
     // Call Triton only if dispatch key was overwritten.
