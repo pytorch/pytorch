@@ -36,10 +36,10 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, tensor1, tensor2}, false);
 
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if(!cachedGraph) {
-        MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+        cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
 
           CachedGraph* newCachedGraph = nil;
           @autoreleasepool {
@@ -72,7 +72,6 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
           }
           return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
     // Inputs as placeholders

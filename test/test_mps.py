@@ -7001,7 +7001,7 @@ class TestFallbackWarning(TestCase):
             # On Windows, opening the subprocess with the default CWD makes `import torch`
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
-        self.assertEquals(out, "")
+        self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
         # This can be changed once we actually implement `torch.bincount`
