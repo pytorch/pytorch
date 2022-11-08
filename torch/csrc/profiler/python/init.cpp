@@ -1,6 +1,7 @@
 #include <torch/csrc/profiler/python/init.h>
 
 #include <ATen/record_function.h>
+#include <c10/util/overloaded.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -136,25 +137,11 @@ void initPythonBindings(PyObject* module) {
       .value("PyCCall", EventType::PyCCall)
       .value("Kineto", EventType::Kineto);
 
-  py::class_<Inputs>(m, "_Inputs")
-      .def_readonly("shapes", &Inputs::shapes_)
-      .def_readonly("dtypes", &Inputs::dtypes_)
-      .def_readonly("strides", &Inputs::strides_)
-      .def_property_readonly(
-          "ivalues",
-          [](const Inputs& inputs) {
-            py::list list;
-            for (auto& v : inputs.ivalues_) {
-              list.append(torch::jit::toPyObject(v));
-            }
-            return list;
-          })
-      .def_readonly("tensor_metadata", &Inputs::tensor_metadata_);
-
   py::class_<TensorMetadata>(m, "_TensorMetadata")
       .def_property_readonly("impl_ptr", &TensorMetadata::impl)
       .def_readonly("storage_data_ptr", &TensorMetadata::data_)
       .def_readonly("id", &TensorMetadata::id_)
+      .def_readonly("allocation_id", &TensorMetadata::allocation_id_)
       .def_property_readonly(
           "layout",
           [](const TensorMetadata& metadata) {
@@ -162,7 +149,7 @@ void initPythonBindings(PyObject* module) {
                 torch::autograd::utils::wrap(metadata.layout_);
             return py::reinterpret_borrow<py::object>(layout_obj);
           })
-      .def_property_readonly("device", &TensorMetadata::device)
+      .def_readonly("device", &TensorMetadata::device_)
       .def_property_readonly(
           "dtype",
           [](const TensorMetadata& metadata) {
@@ -170,11 +157,28 @@ void initPythonBindings(PyObject* module) {
                 torch::autograd::utils::wrap(
                     torch::getTHPDtype(metadata.dtype_)));
           })
-      .def_readonly("dim", &TensorMetadata::dim_);
+      .def_readonly("dim", &TensorMetadata::dim_)
+      .def_readonly("sizes", &TensorMetadata::sizes_)
+      .def_readonly("strides", &TensorMetadata::strides_);
 
   using torch_op_t = ExtraFields<EventType::TorchOp>;
   py::class_<torch_op_t>(m, "_ExtraFields_TorchOp")
-      .def_readonly("inputs", &torch_op_t::inputs_)
+      .def_property_readonly(
+          "inputs",
+          [](const torch_op_t& op) {
+            py::list out;
+            for (const auto& input : op.inputs_) {
+              c10::visit(
+                  c10::overloaded(
+                      [&](const c10::IValue& v) {
+                        out.append(torch::jit::toPyObject(v));
+                      },
+                      [&](const c10::nullopt_t&) { out.append(py::none()); },
+                      [&](const auto& v) { out.append(py::cast(v)); }),
+                  input);
+            }
+            return out;
+          })
       .def_readonly("scope", &torch_op_t::scope_)
       .def_readonly("sequence_number", &torch_op_t::sequence_number_)
       .def_readonly("allow_tf32_cublas", &torch_op_t::allow_tf32_cublas_);
@@ -189,6 +193,7 @@ void initPythonBindings(PyObject* module) {
             return reinterpret_cast<intptr_t>(a.ptr_);
           })
       .def_readonly("id", &allocation_t::id_)
+      .def_readonly("allocation_id", &allocation_t::allocation_id_)
       .def_readonly("alloc_size", &allocation_t::alloc_size_)
       .def_readonly("total_allocated", &allocation_t::total_allocated_)
       .def_readonly("total_reserved", &allocation_t::total_reserved_)

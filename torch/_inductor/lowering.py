@@ -1907,22 +1907,12 @@ def scatter(x, dim: int, index, src, **kwargs):
 
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: str = None):
-
-    # TODO: Need to support more reduction type
-    # For reduction of "sum", tl.atomic_add doesn't support bool or int64
-    if reduce not in {None, "add"} or (
-        reduce == "add" and self.get_dtype() in {torch.bool, torch.int64}
-    ):
-        self.realize()
-        return fallback_scatter_(self, dim, index, src, reduce=reduce)
-
     if reduce == "add":
         reduce = "sum"
     elif reduce == "multiply":
         reduce = "prod"
     else:
         assert reduce is None
-
     return scatter_reduce_(self, dim, index, src, reduce)
 
 
@@ -1941,12 +1931,22 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
     return scatter_reduce_(clone(x), dim, index, src, reduction_type, **kwargs)
 
 
-fallback_scatter_ = fallback_handler(aten.scatter_)
+fallback_scatter_reduce_ = fallback_handler(aten.scatter_reduce_)
 
 
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
+
+    # TODO: Need to support more reduction type
+    # For reduction of "sum", tl.atomic_add doesn't support bool or int64
+    if reduce not in {None, "sum"} or (
+        reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
+    ):
+        self.realize()
+        return fallback_scatter_reduce_(
+            self, dim, index, src, reduce, include_self=include_self
+        )
 
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
@@ -3002,7 +3002,7 @@ def _validate_reduction_axis(x, axis):
     axis = list(axis)
     for i in range(len(axis)):
         if axis[i] < 0:
-            axis[i] += len(size)
+            axis[i] += len(size) if len(size) else 1
         assert 0 <= axis[i] < len(size) or (len(size) == 0 and axis[i] == 0)
     assert len(set(axis)) == len(axis), "reduction axis not unique"
     return axis
@@ -3299,6 +3299,23 @@ def div_prim(a, b):
         return div(a, b)
 
 
+@register_lowering([aten.fmod, prims.fmod])
+def fmod(a, b):
+    is_integral = is_boolean_type(a) or is_integer_type(a)
+
+    if is_integral:
+
+        def fn(a, b):
+            return ops.mod(a, b)
+
+    else:
+
+        def fn(a, b):
+            return ops.fmod(a, b)
+
+    return make_pointwise(fn)(a, b)
+
+
 # TODO - enable builtin and disable decomp to lower to ptx instruction
 # Causes compilation to not complete on timm_vision_transformers inference
 # @register_lowering(aten.rsqrt)
@@ -3391,7 +3408,6 @@ register_pointwise(
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
-register_pointwise(aten.fmod)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
 register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)
