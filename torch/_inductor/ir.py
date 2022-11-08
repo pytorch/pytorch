@@ -25,7 +25,7 @@ from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .cuda_properties import get_device_properties
 from .dependencies import extract_read_writes, var_builder
-from .utils import cache_on_self, sympy_dot, sympy_product, sympy_subs, sympy_symbol
+from .utils import cache_on_self, sympy_dot, sympy_product, sympy_subs, sympy_symbol, argsort
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -58,10 +58,6 @@ def fuse_reindexing(reindex1, reindex2):
     return reindex
 
 
-def sorted_indices(li):
-    return [b[0] for b in sorted(enumerate(li), key=lambda i: i[1])]
-
-
 def stride_order2fill_order(order):
     """
     Convert stride order to fill order
@@ -71,6 +67,17 @@ def stride_order2fill_order(order):
     lookup = {pos: idx for idx, pos in enumerate(order)}
     fill_order = [lookup[i] for i in range(len(order))]
     return fill_order
+
+
+def order_of_strides(seq):
+    """
+    Convert strides to stride order
+    """
+    sorted_idx = argsort(seq)
+    out = [None for _ in range(len(seq))]
+    for i, elem in enumerate(sorted_idx):
+        out[elem] = i
+    return out
 
 
 def reads_from_conv(buf, var_ranges):
@@ -3011,7 +3018,7 @@ class Convolution(ExternKernelAlloc):
         groups: int,
     ):
         weight = cls.require_stride1(cls.realize_input(weight))
-        x = cls.require_stride_order(x, sorted_indices(weight.get_stride()))
+        x = cls.require_stride_order(x, stride_order)
         stride = tuple(stride_)
         padding = tuple(padding_)
         dilation = tuple(dilation_)
