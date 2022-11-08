@@ -1,10 +1,10 @@
 """Diagnostic components for PyTorch ONNX export."""
 
 import contextlib
-from typing import Any, Optional, Tuple, TypeVar
+from typing import Optional, TypeVar
 
 import torch
-from torch.onnx._internal.diagnostics import _rules, infra
+from torch.onnx._internal.diagnostics import infra
 
 # This is a workaround for mypy not supporting Self from typing_extensions.
 _ExportDiagnostic = TypeVar("_ExportDiagnostic", bound="ExportDiagnostic")
@@ -20,12 +20,10 @@ class ExportDiagnostic(infra.Diagnostic):
 
     def __init__(
         self,
-        rule: infra.Rule,
-        level: infra.Level,
-        message_args: Optional[Tuple[Any, ...]],
+        *args,
         **kwargs,
     ) -> None:
-        super().__init__(rule, level, message_args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def with_cpp_stack(self: _ExportDiagnostic) -> _ExportDiagnostic:
         # TODO: Implement this.
@@ -56,22 +54,6 @@ class ExportDiagnostic(infra.Diagnostic):
         return self
 
 
-class ExportDiagnosticTool(infra.DiagnosticTool):
-    """Base class for all export diagnostic tools.
-
-    This class is used to represent all export diagnostic tools. It is a subclass
-    of infra.DiagnosticTool.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(
-            name="torch.onnx.export",
-            version=torch.__version__,
-            rules=_rules.rules,
-            diagnostic_type=ExportDiagnostic,
-        )
-
-
 class ExportDiagnosticEngine(infra.DiagnosticEngine):
     """PyTorch ONNX Export diagnostic engine.
 
@@ -93,7 +75,10 @@ class ExportDiagnosticEngine(infra.DiagnosticEngine):
     def __init__(self) -> None:
         super().__init__()
         self._background_context = infra.DiagnosticContext(
-            ExportDiagnosticTool(), options=None
+            name="torch.onnx",
+            version=torch.__version__,
+            diagnostic_type=ExportDiagnostic,
+            options=None,
         )
 
     @property
@@ -102,7 +87,7 @@ class ExportDiagnosticEngine(infra.DiagnosticEngine):
 
     def clear(self):
         super().clear()
-        self._background_context._diagnostics.clear()
+        self._background_context.diagnostics.clear()
 
     def sarif_log(self):
         log = super().sarif_log()
@@ -122,8 +107,26 @@ def create_export_diagnostic_context():
     export internals via global variable. See `ExportDiagnosticEngine` for more details.
     """
     global context
-    context = engine.create_diagnostic_context(ExportDiagnosticTool())
+    context = engine.create_diagnostic_context(
+        "torch.onnx.export", torch.__version__, diagnostic_type=ExportDiagnostic
+    )
     try:
         yield context
     finally:
         context = engine.background_context
+
+
+def diagnose(
+    rule: infra.Rule,
+    level: infra.Level,
+    message: Optional[str] = None,
+    **kwargs,
+) -> ExportDiagnostic:
+    """Creates a diagnostic and record it in the global diagnostic context.
+
+    This is a wrapper around `context.record` that uses the global diagnostic context.
+    """
+    global context
+    diagnostic = ExportDiagnostic(rule, level, message, **kwargs)
+    context.add_diagnostic(diagnostic)
+    return diagnostic
