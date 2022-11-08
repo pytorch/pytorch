@@ -1790,17 +1790,33 @@ view_of = _make_prim(
 # Functionalized view mutations
 #
 
+
 def _as_strided_scatter_meta(
-    input: TensorLikeType, src: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int
+    input: TensorLikeType,
+    src: TensorLikeType,
+    size: ShapeType,
+    stride: StrideType,
+    storage_offset: int,
 ) -> TensorLikeType:
     utils.validate_shape(size)
     utils.validate_strides(stride)
 
     required_size = utils.compute_required_storage_length(size, stride, storage_offset)
-    utils.check(input.numel() >= required_size, lambda: f"Can't view tensor of size {a.numel()} with an offset of {storage_offset_int}, shape of {size} and stride of {stride}, which requires a storage of size {required_size}")
-    utils.check(utils.is_same_shape(src.shape, size), lambda: f"expected src to have a size equal to the slice of self. src size = {src.shape}, slice size = {size}")
+    utils.check(
+        input.numel() >= required_size,
+        lambda: (
+            f"Can't view tensor of size {input.numel()} with an offset of {storage_offset},"
+            " shape of {size} and stride of {stride}, "
+            "which requires a storage of size {required_size}"
+        ),
+    )
+    utils.check(
+        utils.is_same_shape(src.shape, size),
+        lambda: f"expected src to have a size equal to the slice of self. src size = {src.shape}, slice size = {size}",
+    )
 
     return _clone_meta(input)
+
 
 _as_strided_scatter_doc = """
     Creates a new tensor equivalent to ``out = input.clone()`` after mutation by
