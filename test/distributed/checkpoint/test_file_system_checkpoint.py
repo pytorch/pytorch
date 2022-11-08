@@ -265,9 +265,9 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
-    @parametrize("thread_count", _THREAD_COUNTS)
-    def test_load_with_different_shard_plan(self, thread_count) -> None:
-    # def test_load_with_different_shard_plan(self) -> None:
+    # @parametrize("thread_count", _THREAD_COUNTS)
+    # def test_load_with_different_shard_plan(self, thread_count) -> None:
+    def test_load_with_different_shard_plan(self) -> None:
         path = self.get_file_path()
 
         # We hardcode the assumption of how many shards are around
@@ -353,10 +353,10 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 model_to_save._register_state_dict_hook(state_dict_hook)
                 state_dict_to_save = model_to_save.state_dict()
 
-                fs_writer = FileSystemWriter(
-                    path=path, thread_count=thread_count
-                )
-                # fs_writer = FileSystemWriter(path=path)
+                # fs_writer = FileSystemWriter(
+                #     path=path, thread_count=thread_count
+                # )
+                fs_writer = FileSystemWriter(path=path)
                 save_state_dict(
                     state_dict=state_dict_to_save, storage_writer=fs_writer
                 )
@@ -387,9 +387,9 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
-    @parametrize("thread_count", _THREAD_COUNTS)
-    def test_load_rowwise_to_colwise(self, thread_count) -> None:
-    # def test_load_rowwise_to_colwise(self) -> None:
+    # @parametrize("thread_count", _THREAD_COUNTS)
+    # def test_load_rowwise_to_colwise(self, thread_count) -> None:
+    def test_load_rowwise_to_colwise(self) -> None:
         path = self.get_file_path()
         self.assertEqual(self.world_size, dist.get_world_size())
 
@@ -419,8 +419,8 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
 
-        fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
-        # fs_writer = FileSystemWriter(path=path)
+        # fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+        fs_writer = FileSystemWriter(path=path)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
         model_to_load = MyShardedModel3(dst_spec).cuda(dist.get_rank())
@@ -443,15 +443,15 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
-    @parametrize("thread_count", _THREAD_COUNTS)
-    def test_save_load_bytes(self, thread_count) -> None:
-    # def test_save_load_bytes(self) -> None:
+    # @parametrize("thread_count", _THREAD_COUNTS)
+    # def test_save_load_bytes(self, thread_count) -> None:
+    def test_save_load_bytes(self) -> None:
         path = self.get_file_path()
 
         state_dict_to_save = {"bytes0": [1], "bytes1": "string"}
 
-        fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
-        # fs_writer = FileSystemWriter(path=path)
+        # fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+        fs_writer = FileSystemWriter(path=path)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
         state_dict_to_load = {"bytes0": [2], "bytes1": "other"}
@@ -560,7 +560,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoad)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
-instantiate_parametrized_tests(TestDistributedReshardOnLoad)
+# instantiate_parametrized_tests(TestDistributedReshardOnLoad)
 
 
 if __name__ == "__main__":
