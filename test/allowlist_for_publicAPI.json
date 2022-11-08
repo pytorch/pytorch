@@ -623,7 +623,7 @@
     "OrderedDict"
   ],
   "torch.nn.qat.dynamic.modules.linear": [
-    "activation_is_memoryless"
+    "_activation_is_memoryless"
   ],
   "torch.nn.qat.modules.conv": [
     "Tuple",
@@ -736,10 +736,10 @@
     "QuantType",
     "QuantWrapper",
     "RecordingObserver",
-    "add_module_to_qconfig_obs_ctr",
+    "_add_module_to_qconfig_obs_ctr",
     "add_observer_",
     "add_quant_dequant",
-    "assert_valid_qconfig",
+    "_assert_valid_qconfig",
     "convert",
     "convert_dynamic_jit",
     "convert_jit",
@@ -866,8 +866,8 @@
     "QConfig",
     "QConfigAny",
     "QConfigDynamic",
-    "add_module_to_qconfig_obs_ctr",
-    "assert_valid_qconfig",
+    "_add_module_to_qconfig_obs_ctr",
+    "_assert_valid_qconfig",
     "get_default_qat_qconfig",
     "get_default_qconfig",
     "qconfig_equals"

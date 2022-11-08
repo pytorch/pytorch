@@ -72,13 +72,8 @@ __all__ = [
     "get_default_qat_qconfig",
     "get_default_qconfig_dict",
     "get_default_qat_qconfig_dict",
-    "assert_valid_qconfig",
-    "add_module_to_qconfig_obs_ctr",
     "QConfigAny",
-    "obs_or_fq_ctr_equals",
     "qconfig_equals",
-    "activation_is_memoryless",
-    "is_reuse_input_qconfig",
 ]
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
@@ -419,8 +414,8 @@ def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
         "a future version. Please use torch.ao.quantization.get_default_qat_qconfig_mapping instead.")
     return torch.ao.quantization.get_default_qat_qconfig_mapping(backend, version).to_dict()
 
-def assert_valid_qconfig(qconfig: Optional[QConfig],
-                         mod: torch.nn.Module) -> None:
+def _assert_valid_qconfig(qconfig: Optional[QConfig],
+                          mod: torch.nn.Module) -> None:
     """
     Verifies that this `qconfig` is valid.
     """
@@ -442,11 +437,10 @@ def assert_valid_qconfig(qconfig: Optional[QConfig],
         assert not is_per_channel, \
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.'
 
-# TODO: remove QConfigAny and replace it with Optional[QConfig]
 QConfigAny = Optional[QConfig]
 QConfigAny.__module__ = "torch.ao.quantization.qconfig"
 
-def add_module_to_qconfig_obs_ctr(
+def _add_module_to_qconfig_obs_ctr(
         qconfig: QConfigAny,
         module: Optional[nn.Module]) -> Any:
     r"""This is a helper function for use in quantization prepare that updates a qconfig so that
@@ -490,7 +484,7 @@ def add_module_to_qconfig_obs_ctr(
 
 _ObserverOrFakeQuantizeConstructor = Union[_PartialWrapper, ObserverBase, FakeQuantizeBase]
 
-def obs_or_fq_ctr_equals(obs_or_fq1: _ObserverOrFakeQuantizeConstructor, obs_or_fq2: _ObserverOrFakeQuantizeConstructor):
+def _obs_or_fq_ctr_equals(obs_or_fq1: _ObserverOrFakeQuantizeConstructor, obs_or_fq2: _ObserverOrFakeQuantizeConstructor):
     if isinstance(obs_or_fq1, _PartialWrapper) and isinstance(obs_or_fq2, _PartialWrapper):
         return _partial_wrapper_equals(obs_or_fq1, obs_or_fq2)
     return obs_or_fq1 == obs_or_fq2
@@ -503,9 +497,9 @@ def _partial_wrapper_equals(obs_or_fq1: _PartialWrapper, obs_or_fq2: _PartialWra
     obs_or_fq1_keywords = copy.copy(obs_or_fq1.p.keywords)
     obs_or_fq2_keywords = copy.copy(obs_or_fq2.p.keywords)
     keywords_equal = True
-    # compare observer constructor with obs_or_fq_ctr_equals since direct compare would fail
+    # compare observer constructor with _obs_or_fq_ctr_equals since direct compare would fail
     if "observer" in obs_or_fq1_keywords and "observer" in obs_or_fq2_keywords:
-        keywords_equal = keywords_equal and obs_or_fq_ctr_equals(obs_or_fq1_keywords["observer"], obs_or_fq2_keywords["observer"])
+        keywords_equal = keywords_equal and _obs_or_fq_ctr_equals(obs_or_fq1_keywords["observer"], obs_or_fq2_keywords["observer"])
         obs_or_fq1_keywords.pop("observer")
         obs_or_fq2_keywords.pop("observer")
     keywords_equal = keywords_equal and obs_or_fq1_keywords == obs_or_fq2_keywords
@@ -523,13 +517,13 @@ def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
             # Qconfig weight and activation can be either a partial wrapper,
             # or an observer class. Special handling is required (above) for
             # comparing partial wrappers.
-            activation_same = obs_or_fq_ctr_equals(q1.activation, q2.activation)
-            weight_same = obs_or_fq_ctr_equals(q1.weight, q2.weight)
+            activation_same = _obs_or_fq_ctr_equals(q1.activation, q2.activation)
+            weight_same = _obs_or_fq_ctr_equals(q1.weight, q2.weight)
             return activation_same and weight_same
         except AttributeError:
             return q1 == q2
 
-def activation_is_memoryless(qconfig: QConfig):
+def _activation_is_memoryless(qconfig: QConfig):
     """
     Return whether the observer for activations defined in the given QConfig is memoryless.
     This means a MovingAverage observer with averaging constant equal to 1.
@@ -542,7 +536,7 @@ def activation_is_memoryless(qconfig: QConfig):
     else:
         return _is_memoryless(act)
 
-def is_reuse_input_qconfig(qconfig: Optional[QConfig]):
+def _is_reuse_input_qconfig(qconfig: Optional[QConfig]):
     return qconfig is not None and \
         isinstance(qconfig.activation(), ReuseInputObserver) and \
         isinstance(qconfig.weight(), NoopObserver)
