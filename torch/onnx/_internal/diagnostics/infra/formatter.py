@@ -57,3 +57,21 @@ def sarif_to_json(attr_cls_obj: _SarifClass) -> str:
     dict = dataclasses.asdict(attr_cls_obj)
     dict = _convert_key(dict, _camel_case_to_snake_case)
     return json.dumps(dict, indent=4)
+
+
+def pretty_print_title(title: str, width: int = 80, fill_char: str = "=") -> None:
+    """Pretty prints title in below format:
+
+    ==================== title ====================
+    """
+    print(f" {title} ".center(width, fill_char))
+
+
+def pretty_print_item_title(title: str, fill_char: str = "=") -> None:
+    """Pretty prints title in below format:
+
+    title
+    =====
+    """
+    print(title)
+    print(fill_char * len(title))
