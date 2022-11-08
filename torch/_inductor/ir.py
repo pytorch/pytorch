@@ -3017,8 +3017,9 @@ class Convolution(ExternKernelAlloc):
         output_padding_: List[int],
         groups: int,
     ):
+
         weight = cls.require_stride1(cls.realize_input(weight))
-        x = cls.require_stride_order(x, stride_order)
+        x = cls.require_stride_order(x, order_of_strides(weight.get_stride()))
         stride = tuple(stride_)
         padding = tuple(padding_)
         dilation = tuple(dilation_)
