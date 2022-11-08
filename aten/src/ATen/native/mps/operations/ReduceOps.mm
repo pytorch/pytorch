@@ -241,12 +241,12 @@ void reduction_out_mps
                                                                name:nil];
           } else if(reduction_type == MPSReductionType::TRACE) {
             MPSGraphTensor *bandPartWithTensor = [mpsGraph bandPartWithTensor:inputTensor
-                                                          numLower:0
-                                                          numUpper:0
-                                                             name:nil];
-            castOutputTensor = [mpsGraph reductionSumWithTensor:bandPartWithTensor
-                                                            axes:@[@0, @1]
-                                                            name:nil];
+                                                                     numLower:0
+                                                                     numUpper:0
+                                                                         name:nil];
+            castOutputTensor = [mpsGraph reductionSumWithTensor:bandPartWithTensor 
+                                                           axes:@[@0, @1]
+                                                           name:nil];
           }
 
           MPSGraphTensor* outputTensor = nil;
