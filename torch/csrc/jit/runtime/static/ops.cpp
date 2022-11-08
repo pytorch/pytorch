@@ -1236,7 +1236,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::narrow_copy, aten_narrow_copy, [](Node* n) -> SR
 
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) =
-          at::native::narrow_copy_dense(self, dim, start, length);
+          at::native::narrow_copy_dense_symint(self, dim, start, length);
       return;
     }
     auto& output = p_node->Output(0).toTensor();
