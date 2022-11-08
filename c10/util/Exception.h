@@ -562,17 +562,21 @@ namespace detail {
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
-#define TORCH_WARN_WITH(warning_t, ...)                      \
+#ifdef DISABLE_WARN
+#define _TORCH_WARN_WITH(...) ((void)0);
+#else
+#define _TORCH_WARN_WITH(warning_t, ...)                     \
   ::c10::warn(::c10::Warning(                                \
       warning_t(),                                           \
       {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
       WARNING_MESSAGE_STRING(__VA_ARGS__),                   \
       false));
+#endif
 
-#define TORCH_WARN(...) TORCH_WARN_WITH(::c10::UserWarning, __VA_ARGS__);
+#define TORCH_WARN(...) _TORCH_WARN_WITH(::c10::UserWarning, __VA_ARGS__);
 
 #define TORCH_WARN_DEPRECATION(...) \
-  TORCH_WARN_WITH(::c10::DeprecationWarning, __VA_ARGS__);
+  _TORCH_WARN_WITH(::c10::DeprecationWarning, __VA_ARGS__);
 
 // Report a warning to the user only once.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
@@ -584,12 +588,16 @@ namespace detail {
         return true;                                                      \
       }()
 
+#ifdef DISABLE_WARN
+#define TORCH_WARN_ONCE(...) ((void)0);
+#else
 #define TORCH_WARN_ONCE(...)                   \
   if (::c10::WarningUtils::get_warnAlways()) { \
     TORCH_WARN(__VA_ARGS__);                   \
   } else {                                     \
     _TORCH_WARN_ONCE(__VA_ARGS__);             \
   }
+#endif
 
 // Report an error with a specific argument
 // NOTE: using the argument name in TORCH_CHECK's message is preferred
