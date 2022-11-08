@@ -719,7 +719,6 @@ def xfail_inherited_tests(tests):
 
 @skipIfNoSympy
 @xfail_inherited_tests([
-    "test_inplace_metadata",
     "test_mode_tracing_factory_function",
     "test_make_fx_overloads",
     "test_resnet18_backward_trace",
@@ -1140,7 +1139,6 @@ symbolic_tensor_failures = {
     xfail('argsort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('argwhere', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
-    xfail('bernoulli', ''),  # aten.bernoulli.default - couldn't find symbolic meta function/decomposition
     xfail('bucketize', ''),  # aten.bucketize.Tensor - couldn't find symbolic meta function/decomposition
     xfail('cartesian_prod', ''),  # Tensors of type TensorImpl do not have numel
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1379,7 +1377,6 @@ inplace_symbolic_tensor_failures = {
     xfail('addcmul', ''),  # aten.addcmul_.default - couldn't find symbolic meta function/decomposition
     xfail('addmm', ''),  # aten.addmm_.default - couldn't find symbolic meta function/decomposition
     xfail('addmm', 'decomposed'),  # aten.addmm_.default - couldn't find symbolic meta function/decomposition
-    xfail('as_strided', ''),  # aten.as_strided_.default - couldn't find symbolic meta function/decomposition
     xfail('asin', ''),  # aten.asin_.default - couldn't find symbolic meta function/decomposition
     xfail('asinh', ''),  # aten.asinh_.default - couldn't find symbolic meta function/decomposition
     xfail('atan2', ''),  # aten.atan2_.default - couldn't find symbolic meta function/decomposition
@@ -1465,7 +1462,6 @@ inplace_symbolic_tensor_failures = {
     xfail('trunc', ''),  # aten.trunc_.default - couldn't find symbolic meta function/decomposition
     xfail('uniform', ''),  # aten.uniform_.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
-    xfail('unsqueeze', ''),  # aten.unsqueeze_.default - couldn't find symbolic meta function/decomposition
     xfail('xlogy', ''),  # aten.xlogy_.Tensor - couldn't find symbolic meta function/decomposition
 }
 
