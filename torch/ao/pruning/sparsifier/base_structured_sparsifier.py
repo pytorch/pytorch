@@ -3,10 +3,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.fx import symbolic_trace
 from torch.nn.utils import parametrize
-from torch.ao.quantization.fx.match_utils import (
-    MatchAllNode,
-)
-from typing import Any, Dict, List, Callable, Optional, Tuple, Type, Union, Set
+from typing import Type, Union, Set
 
 from torch.ao.pruning import BaseSparsifier
 from .match_utils import apply_match

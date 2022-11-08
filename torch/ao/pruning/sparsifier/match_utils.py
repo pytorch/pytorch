@@ -47,3 +47,5 @@ def apply_match(
                 )
     elif match(modules, node, pattern):
         return [node]
+    else:
+        return None

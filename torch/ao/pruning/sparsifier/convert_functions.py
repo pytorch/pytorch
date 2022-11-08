@@ -1,27 +1,10 @@
+from typing import Callable, Union
+
 import torch
 from torch import nn
 from torch.nn.utils import parametrize
 from torch.fx import Node
 from torch.fx.graph import Graph
-from torch.ao.quantization.fx.match_utils import (
-    MatchAllNode,
-)
-from torch.ao.quantization.fx.fusion_patterns import *
-
-from typing import Any, Callable, Dict, List, Tuple, Union, Type
-import warnings
-
-import sys
-import torch
-from torch.fx.graph import (
-    Graph,
-    Node,
-)
-from torch.nn.utils.parametrize import type_before_parametrizations
-
-from torch.ao.pruning import BaseSparsifier
-from .utils import FakeStructuredSparsity, BiasHook
-
 
 def get_adjusted_next_layer_bias(
     next_layer: nn.Module, pruned_biases: torch.Tensor, mask: torch.Tensor

@@ -1,5 +1,6 @@
+# -*- coding: utf-8 -*-
+# Owner(s): ["module: unknown"]
 
-import copy
 import logging
 import random
 
@@ -8,8 +9,9 @@ from torch import nn
 import torch.nn.functional as F
 from torch.ao.pruning import BaseStructuredSparsifier, FakeStructuredSparsity
 from torch.nn.utils import parametrize
-
 from torch.testing._internal.common_utils import TestCase
+
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 DEVICES = {
     torch.device("cpu"),
