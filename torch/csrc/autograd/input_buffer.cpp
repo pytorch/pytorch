@@ -4,6 +4,7 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
@@ -66,6 +67,18 @@ void record_stream_any_impl(Variable& var, c10::Stream& stream) {
     }
   }
 }
+
+bool can_accumulate_inplace(const Variable& v) {
+  return (
+      // `v` is a "vanilla" Tensor
+      !(at::isTensorSubclassLike(v) || v._is_zerotensor() || v.is_nested()) &&
+
+      // with a favorable memory layout
+      v.is_non_overlapping_and_dense() &&
+
+      // and we hold the last reference
+      v.use_count() == 1 && v.storage().use_count() == 1);
+}
 } // anonymous namespace
 
 static void accumulate(
@@ -74,25 +87,38 @@ static void accumulate(
     Variable&& var) {
   TORCH_INTERNAL_ASSERT(pos < buffer.size());
   auto& old_var = buffer[pos];
-  // ATen doesn't route sparse additions correctly...
-  // do dense + sparse in-place if possible
-  if (old_var.is_sparse()) {
-    // It is safe to change the Tensor inplace if the Tensor is only used in
-    // this buffer (this could be the gradient passed by the user) and that no
-    // other Tensor is using the same storage.
-    if (!var.is_sparse() && var.is_contiguous() && var.use_count() == 1 &&
-        var.storage().use_count() == 1) {
+  // If we hold the last reference to `old_var` AND its storage we will try to
+  // repurpose it to store the output. (Or, if `old_var` is sparse then `var`
+  // becomes the candidate output Tensor.) We only do this if:
+  //  1) GradMode is disabled since Autograd has special handling for inplace
+  //     mutation which we don't want to trigger.
+  //
+  //  2) We hold the last reference.
+  //     (Both `.use_count` and `.storage().use_count()` are one)
+  //
+  //  3) The candidate tensor is a contiguous, non-overlapping, dense, and
+  //     otherwise stock standard Tensor.
+  //
+  //  4) The candidate is mutable. Currently only ZeroTensors are immutable.
+  //
+  //  5) The other Tensor is not a Tensor subclass (except sparse), since
+  //     it's hard to predict the semantics of arbitrary subclass behavior.
+
+  if (at::GradMode::is_enabled()) {
+    buffer[pos] = old_var + var;
+  } else if (
+      // ATen doesn't route sparse additions correctly...
+      old_var.is_sparse() || old_var.is_sparse_csr()) {
+    if (can_accumulate_inplace(var)) {
       buffer[pos] = var.add_(old_var);
     } else {
       buffer[pos] = var + old_var;
     }
+  } else if (
+      can_accumulate_inplace(old_var) && !at::isTensorSubclassLike(var)) {
+    buffer[pos] = old_var.add_(var);
   } else {
-    if (var.is_sparse() && !old_var.is_sparse() && old_var.is_contiguous() &&
-        old_var.use_count() == 1 && old_var.storage().use_count() == 1) {
-      buffer[pos] = old_var.add_(var);
-    } else {
-      buffer[pos] = old_var + var;
-    }
+    buffer[pos] = old_var + var;
   }
 }
 
