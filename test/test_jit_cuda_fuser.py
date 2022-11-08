@@ -5206,6 +5206,7 @@ class TestEnableDisableCudaFuser(JitTestCase):
 class TestCudaFuserOpInfoParent(JitCommonTestCase):
     pass
 
+@skipIfRocm
 class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
     def setUp(self):
         super(TestCudaFuserOpInfoParent, self).setUp()
@@ -5249,7 +5250,6 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
         # if the CU is not cleared.
         torch.jit._state._python_cu.drop_all_functions()
 
-    @skipIfRocm
     @slowTest
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
