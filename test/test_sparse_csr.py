@@ -21,6 +21,7 @@ from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
     all_types_and_complex, floating_and_complex_types_and
 )
+from torch._inductor.utils import has_triton
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
 if TEST_SCIPY:
@@ -1497,6 +1498,51 @@ class TestSparseCSR(TestCase):
 
         self.assertEqual(actual, out)
         self.assertEqual(actual, expected)
+
+    @parametrize("block_size", [16, 32, 64])
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @unittest.skipIf(not has_triton(), "Triton is not available")
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16)
+    @dtypesIfCUDA(*[torch.half] if SM53OrLater else [],
+                  *[torch.bfloat16] if SM80OrLater else [])
+    def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
+        from functools import partial
+        from torch.sparse.triton_ops import bsr_dense_mm
+
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
+        # Tensor params
+        batches = [(), (2,)]
+        size = [128, 256]
+
+        kernel_run = [False]
+
+        def mm_kernel(*args, **kwargs):
+            kernel_run[0] = True
+            return bsr_dense_mm(*args, **kwargs)
+
+        # Kernel overwrite
+        lib = torch.library.Library("aten", "IMPL")
+        lib.impl("aten::_triton_bsr_dense_mm", mm_kernel, "SparseCsrCUDA")
+
+        for bd, bs, m, n, k in itertools.product(batches, batches, size, size, size):
+            bsr = tensor(bs + (m, k)).to_sparse_bsr(block_size)
+            dense = tensor(bd + (n, k))
+            if bsr.dim() == 2:
+                # Test against linear to check dispatch.
+                res_tri = torch.nn.functional.linear(dense, bsr)
+                res_dense = torch.nn.functional.linear(dense, bsr.to_dense())
+            else:
+                # Otherwise check correctness against bmm
+                # since nn.linear does not support bsr.dim() > 2.
+                res_tri = torch._triton_bsr_dense_mm(bsr, dense.transpose(-2, -1))
+                res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
+            self.assertTrue(kernel_run[0])
+            self.assertEqual(res_tri, res_dense)
+            kernel_run[0] = False
+
+        # clean-up
+        del lib
 
     # TODO: block_size 1 is broken
     @parametrize("block_size", [2, 3])
