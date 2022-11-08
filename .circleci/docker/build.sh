@@ -196,6 +196,7 @@ case "$image" in
     DB=yes
     VISION=yes
     ROCM_VERSION=5.1.1
+    NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     ;;
   pytorch-linux-focal-rocm5.2-py3.8)
@@ -205,6 +206,7 @@ case "$image" in
     DB=yes
     VISION=yes
     ROCM_VERSION=5.2
+    NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     ;;
   pytorch-linux-focal-py3.7-gcc7)
