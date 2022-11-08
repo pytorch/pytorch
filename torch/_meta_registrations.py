@@ -1635,6 +1635,7 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
         memory_format=mem_format
     )
 
+
 def zero_numel_check_dims(self, dim, fn_name):
     if self.ndim == 0:
         check(
@@ -1649,6 +1650,8 @@ def zero_numel_check_dims(self, dim, fn_name):
             IndexError,
         )
 
+
+# From aten/src/ATen/native/ReduceOps.cpp
 def check_argmax_argmin(name, self, dim):
     if dim is not None:
         dim = maybe_wrap_dim(dim, self.dim())
@@ -1659,6 +1662,7 @@ def check_argmax_argmin(name, self, dim):
             lambda: f"{name}: Expected reduction dim to be specified for input.numel() == 0.",
         )
 
+
 @register_meta(aten.argmax.default)
 def argmax_meta(self, dim=None, keepdim=False):
     check_argmax_argmin("argmax", self, dim)
@@ -1666,18 +1670,21 @@ def argmax_meta(self, dim=None, keepdim=False):
     shape = _compute_reduction_shape(self, dims, keepdim)
     return self.new_empty(shape, dtype=torch.int64)
 
+
 @register_meta(aten.argmin.default)
-def argmax_min(self, dim=None, keepdim=False):
+def argmin_min(self, dim=None, keepdim=False):
     check_argmax_argmin("argmin", self, dim)
     dims = utils.reduction_dims(self.shape, (dim,) if dim is not None else None)
     shape = _compute_reduction_shape(self, dims, keepdim)
     return self.new_empty(shape, dtype=torch.int64)
+
 
 @register_meta(aten.scalar_tensor.default)
 def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
     return torch.empty(
         (), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
+
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
