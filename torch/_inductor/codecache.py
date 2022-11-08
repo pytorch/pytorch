@@ -288,16 +288,16 @@ def valid_vec_isa():
 
 
 def pick_vec_isa():
-    valid_isa_vec: List[VecISA] = valid_vec_isa()
-    if not valid_isa_vec:
+    _valid_vec_isa: List[VecISA] = valid_vec_isa()
+    if not _valid_vec_isa:
         return invalid_vec_isa
 
     # If the simdlen is None, it indicates determin the vectroization length automatically
     if config.cpp.simdlen is None:
-        assert valid_isa_vec
-        return valid_isa_vec[0]
+        assert _valid_vec_isa
+        return _valid_vec_isa[0]
 
-    for isa in valid_isa_vec:
+    for isa in _valid_vec_isa:
         if config.cpp.simdlen == isa.bit_width():
             return isa
 
