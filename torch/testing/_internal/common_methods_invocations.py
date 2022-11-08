@@ -3321,13 +3321,6 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
 
     # Ordered as input shape, num groups, and kwargs for eps
     cases: Tuple[Tuple[int], int, float] = (  # type: ignore[assignment]
-        ((20, 6, 10, 10), 3, {'eps' : 1e-5}),
-        # equivalent with InstanceNorm
-        # GroupNorm(C, num_groups=C) == InstanceNorm(num_features=C)
-        ((20, 6, 10, 10), 6, {'eps' : 1e-5}),
-        # equivalent with LayerNorm
-        # GroupNorm(C, num_groups=1, affine=False) == LayerNorm(normalized_shape=[C, H, W], elementwise_affine=False)
-        ((20, 6, 10, 10), 1, {'eps' : 1e-5}),
         ((1, 6, 3), 2, {'eps' : 0.5}),
         ((2, 6, 3), 2, {'eps' : -0.5}),
         ((1, 3), 1, {'eps' : 1e-5}),
@@ -3335,30 +3328,66 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         ((S, S, S), 1, {'eps' : 0.5}),
     )
 
+    # Checking for permutations of weights and biases as `None`
+    weights = [weight_tensor, None]
+    biases = [bias_tensor, None]
+
     # num_channels is inferred to be input.shape[1] dimension
     for input_shape, num_groups, kwargs in cases:
         # Shape of weight and bias should be the same as num_channels
         channels = input_shape[1] if len(input_shape) > 1 else 0
         weight_tensor = make_arg(channels)
         bias_tensor = make_arg(channels)
-
-        # Checking for permutations of weights and biases as `None`
-        weights = [weight_tensor, None]
-        biases = [bias_tensor, None]
         for weight, bias in itertools.product(weights, biases):
             kwargs = {
                 'weight': weight,
                 'bias': bias,
                 **kwargs
             }
-            yield SampleInput(
-                make_arg(input_shape),
-                args=(num_groups,),
-                kwargs=kwargs
-            )
+            yield SampleInput(make_arg(input_shape), num_groups, **kwargs)
 
     # Without any optional args
     yield SampleInput(make_arg((1, 2)), args=(1,))
+
+def reference_inputs_group_norm(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_group_norm(
+        op_info, device, dtype, requires_grad, **kwargs)
+
+    make_arg = partial(make_tensor, device=device, requires_grad=requires_grad)
+
+    # type promotion
+    dtypes = op_info.supported_dtypes(device)
+
+    # Checking for permutations of weights and biases as `None`
+    weights = [weight_tensor, None]
+    biases = [bias_tensor, None]
+
+    # Ordered as input shape, num groups, and kwargs for eps
+    cases: Tuple[Tuple[int], int, float] = (  # type: ignore[assignment]
+        ((20, 6, 10, 10), 3, {'eps' : 1e-5}),
+        # equivalent with InstanceNorm
+        # GroupNorm(C, num_groups=C) == InstanceNorm(num_features=C)
+        ((20, 6, 10, 10), 6, {'eps' : 1e-5}),
+        # equivalent with LayerNorm
+        # GroupNorm(C, num_groups=1, affine=False) == LayerNorm(normalized_shape=[C, H, W], elementwise_affine=False)
+        ((20, 6, 10, 10), 1, {'eps' : 1e-5}),
+    )
+
+    # num_channels is inferred to be input.shape[1] dimension
+    for input_shape, num_groups, kwargs in cases:
+        # Shape of weight and bias should be the same as num_channels
+        channels = input_shape[1] if len(input_shape) > 1 else 0
+        for input_dtype, weight_dtype, bias_dtype in itertools.product(dtypes, dtypes, dtypes):
+            input_tensor = make_arg(input_shape, dtype=input_dtype)
+            weight_tensor = make_arg(channels, dtype=weight_dtype)
+            bias_tensor = make_arg(channels, dtype=bias_dtype)
+            for weight, bias in itertools.product(weights, biases):
+                kwargs = {
+                    'weight': weight,
+                    'bias': bias,
+                    **kwargs
+                }
+                yield SampleInput(input_tensor, num_groups, **kwargs)
 
 
 def sample_inputs_instance_norm(opinfo, device, dtype, requires_grad, **kwargs):
@@ -10935,6 +10964,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
            ],
            sample_inputs_func=sample_inputs_group_norm,
+           reference_inputs_func=reference_inputs_group_norm,
            supports_expanded_weight=True,),
     OpInfo('nn.functional.instance_norm',
            # no ref because instance_norm will often have numerical instability (large numbers or nan)

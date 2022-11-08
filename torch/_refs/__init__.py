@@ -2781,12 +2781,10 @@ def _normalize(
     return out, mean, rstd
 
 
-# remove all specified dimensions
-def _squeeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
-    for dim in sorted(
-        [utils.canonicalize_dim(x.ndim, dim) for dim in dimensions], reverse=True
-    ):
-        x = squeeze(x, dim)
+# add all specified dimensions
+def _unsqueeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
+    for dim in sorted(dimensions):
+        x = torch.unsqueeze(x, dim)
     return x
 
 
@@ -2811,7 +2809,8 @@ def native_group_norm(
         + f"but got input of shape {input.shape} and num_groups = {num_groups}",
     )
 
-    reduction_dims = [-2, -1]
+    reduction_dims = utils.canonicalize_dims(input.ndim, [-2, -1])
+    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
     input_reshaped = torch.reshape(
         input,
         [batch_size, num_groups, num_channels // num_groups, flattened_inner_size],
@@ -2819,29 +2818,25 @@ def native_group_norm(
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
     out = out.view(input.shape)
 
-    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
     unsqueeze_bias = None
     if bias is not None:
-        unsqueeze_bias = prims.expand_dims(bias, broadcast_dims, input.ndim)
+        unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
+
     unsqueeze_weight = None
     if weight is not None:
-        unsqueeze_weight = prims.expand_dims(weight, broadcast_dims, input.ndim)
+        unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
 
     if unsqueeze_weight is not None:
         out = out * unsqueeze_weight
     if unsqueeze_bias is not None:
         out = out + unsqueeze_bias
 
-    if out.dtype != input.dtype:
-        out = prims.convert_element_type(out, input.dtype)
-    if mean.dtype != input.dtype:
-        mean = prims.convert_element_type(mean, input.dtype)
-    if rstd.dtype != input.dtype:
-        rstd = prims.convert_element_type(rstd, input.dtype)
+    out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
+    mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
+    rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
 
-    mean = _squeeze_multiple(mean, reduction_dims)
-    rstd = _squeeze_multiple(rstd, reduction_dims)
-
+    mean = prims._squeeze_aten(mean, reduction_dims)
+    rstd = prims._squeeze_aten(rstd, reduction_dims)
     return (out, mean, rstd)
 
 
