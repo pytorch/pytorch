@@ -9217,6 +9217,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            # TODO: this is very questionable, because we do have
            # diag_embed.out but it's not bound to Python somehow
+           # https://github.com/pytorch/pytorch/issues/88598
            supports_out=False,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
