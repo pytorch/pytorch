@@ -109,14 +109,6 @@ if [[ "$TEST_CONFIG" == *inductor* ]]; then
   export PYTORCH_TEST_WITH_INDUCTOR=1
 fi
 
-# TODO: this condition is never true, need to fix this.
-if [[ -n "$PR_NUMBER" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
-  # skip expensive checks when on PR and CI_MASTER flag is not set
-  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
-else
-  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
@@ -125,7 +117,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
-  pip_install --user ninja
+  pip_install --user "ninja==1.10.2"
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
@@ -252,12 +244,12 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed
+  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed --verbose
   assert_git_not_dirty
 }
 
 test_inductor() {
-  python test/test_modules.py --verbose
+  python test/run_test.py --include test_modules --verbose
   # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
   # seen intest_ops_gradients.py
   # pytest test/test_ops_gradients.py --verbose -k "not _complex and not test_inplace_grad_acos_cuda_float64"
@@ -268,7 +260,10 @@ test_inductor_huggingface_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  TEST_REPORTS_DIR=/tmp/test-reports
+  # Use test-reports directory under test folder will allow the CI to automatically pick up
+  # the test reports and upload them to S3. Need to use full path here otherwise the script
+  # will bark about file not found later on
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
     --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
@@ -281,7 +276,10 @@ test_inductor_timm_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  TEST_REPORTS_DIR=/tmp/test-reports
+  # Use test-reports directory under test folder will allow the CI to automatically pick up
+  # the test reports and upload them to S3. Need to use full path here otherwise the script
+  # will bark about file not found later on
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
     --device cuda --inductor --float32 --total-partitions 5 --partition-id "$1" \
