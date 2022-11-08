@@ -726,10 +726,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     return std::make_tuple(output, attn);
 }
 
-std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_attention_backward(
+std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_attention_backward_math(
     const Tensor& grad,
     const Tensor& attn_mask,
-    float dropout_p,
+    double dropout_p,
     bool need_attn_weights,
     bool is_causal) {
   auto a = at::ones({0});
