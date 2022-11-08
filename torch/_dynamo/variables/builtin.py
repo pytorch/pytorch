@@ -355,14 +355,14 @@ class BuiltinVariable(VariableTracker):
 
     def _call_min_max(self, tx, a, b):
         if b is None:
-            assert(isinstance(a, (variables.ListVariable, variables.TupleVariable, variables.ConstantVariable))
-                and all(
-                    [
-                        isinstance(x, variables.ConstantVariable)
-                        for x in a.items
-                    ]
-                )
-            )
+            assert isinstance(
+                a,
+                (
+                    variables.ListVariable,
+                    variables.TupleVariable,
+                    variables.ConstantVariable,
+                ),
+            ) and all([isinstance(x, variables.ConstantVariable) for x in a.items])
             new_list = [x.value for x in a.items]
             if self.fn is max:
                 return variables.ConstantVariable(max(new_list))
