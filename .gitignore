@@ -341,7 +341,3 @@ venv/
 
 # Log files
 *.log
-
-# Generated onnx diagnostic files
-torch/csrc/onnx/diagnostics/generated/*.[!m]*
-torch/onnx/_internal/diagnostics/generated/*.[!m]*
