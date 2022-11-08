@@ -1,8 +1,7 @@
-# Owner(s): ["module: onnx"]
 import copy
 import itertools
 import operator
-from typing import Callable, Dict
+from typing import Callable, Dict, Tuple, Union
 
 import functorch
 import onnx
@@ -16,21 +15,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.nn.utils import stateless
 from torch.onnx._globals import GLOBALS as ONNX_GLOBALS
-from torch.onnx._internal import registration
-
-
-class GraphWrapper(torch._C.Graph):
-    """A graph replacement of torch.onnx.utils.jit_utils.GraphContext
-
-    Some symbolic_opset*.py functions requires extra information in
-    addition to torch._C.Graph itself. GraphContext contains those
-    information. GraphContext is not reused here because it introduces
-    extra TorchScript dependency and we want to move away from it.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.opset = ONNX_GLOBALS.export_onnx_opset_version
+from torch.onnx._internal import jit_utils, registration
 
 
 def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, str]:
@@ -40,6 +25,12 @@ def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, s
         op_overload_packet = getattr(torch.ops.aten, attr_name)
         if not isinstance(op_overload_packet, torch._ops.OpOverloadPacket):
             continue
+
+        exporter_look_up_key = op_overload_packet._qualified_op_name
+        if registration.registry.get_function_group(exporter_look_up_key) is None:
+            # This aten op doesn't have ONNX exporter.
+            continue
+
         for overload_name in op_overload_packet.overloads():
             op_overload = getattr(op_overload_packet, overload_name)
             # This line maps torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, torch.ops.aten.add.out, etc
@@ -49,12 +40,17 @@ def _create_op_overload_to_exporter_key_table() -> Dict[torch._ops.OpOverload, s
             # TODO(wechi): in the future, we might want to write individual exporter for each overload, if,
             # for example, they have different type promotion rules. If so, just map different overloads to
             # different exporter keys.
+
             table[op_overload] = op_overload_packet._qualified_op_name
 
     return table
 
 
-_op_overload_to_exporter_key_table = _create_op_overload_to_exporter_key_table()
+# Dictionary that maps torch.ops.aten.* to exporter look up key; e.g.,
+# _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[torch.add.Tensor] is "aten::add".
+# In subsequent code, torch.ops.aten.add.Tensor's exporter is found by
+# registration.registry.get_function_group("aten::add").
+_OP_OVERLOAD_TO_EXPORTER_KEY_TABLE = _create_op_overload_to_exporter_key_table()
 
 
 def _create_onnx_friendly_decomposition_table() -> Dict[
@@ -66,14 +62,17 @@ def _create_onnx_friendly_decomposition_table() -> Dict[
         # Skip decomposition for op_overload as long as that op_overload has a corresponding ONNX exporter.
         if (
             "torch._refs" in decomp_fn.__module__
-            or op_overload in _op_overload_to_exporter_key_table
+            or op_overload in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
         ):
             continue
         decomposition_table[op_overload] = decomp_fn
     return decomposition_table
 
 
-_onnx_friendly_decomposition_table = _create_onnx_friendly_decomposition_table()
+# This is a subset of PyTorch's built-in aten-to-aten decomposition. If an aten
+# op (e.g., torch.ops.aten.add.Tensor) has exporter, we exclude the op's decomposition
+# function in the _ONNX_FRIENDLY_DECOMPOSITION_TABLE.
+_ONNX_FRIENDLY_DECOMPOSITION_TABLE = _create_onnx_friendly_decomposition_table()
 
 
 def _retrieve_or_wrap_scalar_as_constant(
@@ -151,7 +150,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
     # TODO(wechi): To get rid of TorchScript dependency,
     # "g" should just be onnx.GraphProto or an equivalent
     # data structure in ONNXScript.
-    g = GraphWrapper()
+    g = torch._C.Graph()
     # In the following loop, a TorchScript graph is created to
     # represent the input FX graph with ONNX symbols (e.g., onnx::add).
     # To connect the values to nodes in the TorchScript graph, we maintian
@@ -159,11 +158,15 @@ def _export_fx_to_ts(fx_module_with_metadata):
     #   fx_tensor_x (type: torch.fx.Node) -> fx_node_1 -> fx_tensor_y (type: torch.fx.Node)
     # to
     #   fx_name_to_ts_value[fx_tensor_x.name] -> onnx_node_1 -> fx_name_to_ts_value[fx_tensor_y.name]
-    fx_name_to_ts_value: Dict[str, torch._C.Value] = {}
+    fx_name_to_ts_value: Dict[
+        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+    ] = {}
     # Similar to fx_name_to_ts_value, we need a mapping fo real tensors (usually tensor parameters
     # in nn.Module). Note that TorchScript's cannot store real tensors; TorchScript values are all
     # symbolic. This is passed into ONNX ModelProto as the initializers.
-    ts_name_to_real_tensor: Dict[str, torch.Tensor] = {}
+    ts_name_to_real_tensor: Dict[
+        str, Union[torch.Tensor, Tuple[torch._C.Value, ...]]
+    ] = {}
     for node in fx_module_with_metadata.graph.nodes:
         if node.op == "placeholder":
             # Input of graph.
@@ -174,33 +177,62 @@ def _export_fx_to_ts(fx_module_with_metadata):
             # aten ops and other statless functions.
             if (
                 isinstance(node.target, torch._ops.OpOverload)
-                and node.target in _op_overload_to_exporter_key_table
+                and node.target in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
             ):
-                exporter_key = _op_overload_to_exporter_key_table[node.target]
+                exporter_key = _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[node.target]
                 symbolic_function_group = registration.registry.get_function_group(
                     exporter_key
                 )
                 assert symbolic_function_group is not None
                 symbolic_fn = symbolic_function_group.get(14)
                 assert symbolic_fn is not None
-                ts_args = _wrap_fx_args_as_ts_args(
-                    g, fx_module_with_metadata, node, fx_name_to_ts_value
+                # TODO(wechi): current type checking throws when feeding torch._C.Graph
+                # to symbolic_opset*.py functions, so we need the following wrapper.
+                # After we get rid of TorchScript, we can remove this wrapper.
+                graph_context = jit_utils.GraphContext(
+                    graph=g,
+                    block=g.block(),  # Pointless. Just make linter happy.
+                    opset=ONNX_GLOBALS.export_onnx_opset_version,
+                    original_node=g.insertPoint(),  # Pointless. Just make linter happy.
+                    params_dict={},  # Pointless. Just make linter happy.
+                    env={},  # Pointless. Just make linter happy.
                 )
-                v = symbolic_fn(g, *ts_args)
+                # Map FX inputs to ONNX inputs and fill optional inputs with default values.
+                ts_args = _wrap_fx_args_as_ts_args(
+                    graph_context, fx_module_with_metadata, node, fx_name_to_ts_value
+                )
+                # The returned value could be a value of a tuple of values.
+                v = symbolic_fn(graph_context, *ts_args)
+                # One fx node could produce multiple outputs (e.g., tuple of tensors); in
+                # that case, v is a tuple of TorchScript values.
                 fx_name_to_ts_value[node.name] = v
             elif node.target == operator.getitem and isinstance(node.args, tuple):
-                v = fx_name_to_ts_value[node.args[0].name][node.args[1]]
+                ts_value_tuple = fx_name_to_ts_value[node.args[0].name]
+                assert isinstance(ts_value_tuple, tuple)
+                v = ts_value_tuple[node.args[1]]
                 fx_name_to_ts_value[node.name] = v
             else:
                 raise RuntimeError(
                     "Unknown call_function target: {}".format(node.target)
                 )
         elif node.op == "output":
+
+            def register_outputs(
+                ts_outputs: Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+            ):
+                if isinstance(ts_outputs, tuple):
+                    for ts_output in ts_outputs:
+                        g.registerOutput(ts_output)
+                else:
+                    g.registerOutput(ts_outputs)
+
             if isinstance(node.args[0], torch.fx.Node):
-                g.registerOutput(fx_name_to_ts_value[node.args[0].name])
+                ts_value_or_ts_value_tuple = fx_name_to_ts_value[node.args[0].name]
+                register_outputs(ts_value_or_ts_value_tuple)
             else:
                 for arg in node.args[0]:
-                    g.registerOutput(fx_name_to_ts_value[arg.name])
+                    ts_value_or_ts_value_tuple = fx_name_to_ts_value[arg.name]
+                    register_outputs(ts_value_or_ts_value_tuple)
         elif node.op == "call_method":
             # TODO(wechi): Support call_method.
             raise RuntimeError("call_method is not supported yet.")
@@ -308,7 +340,7 @@ def _export_function(fn: Callable, *args, use_binary_format: bool = True):
     return _export(
         graph_module,
         *args,
-        decomposition_table=_onnx_friendly_decomposition_table,
+        decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
     )
 
@@ -325,6 +357,6 @@ def _export_module(module: torch.nn.Module, *args, use_binary_format: bool = Tru
     return _export(
         graph_module,
         *args,
-        decomposition_table=_onnx_friendly_decomposition_table,
+        decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
     )
