@@ -1,47 +1,46 @@
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymInt.h>
-#include <c10/core/SymIntNodeImpl.h>
+#include <c10/core/SymNodeImpl.h>
 #include <array>
 
 namespace c10 {
 
-static std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
-  SymIntNode a, b;
+static std::array<SymNode, 2> normalize_symints(SymInt a_, SymInt b_) {
+  SymNode a, b;
   if (a_.is_symbolic())
-    a = a_.toSymIntNodeImpl();
+    a = a_.toSymNodeImpl();
   if (b_.is_symbolic())
-    b = b_.toSymIntNodeImpl();
+    b = b_.toSymNodeImpl();
 
-  SymIntNodeImpl* common = a ? a.get() : b.get();
+  SymNodeImpl* common = a ? a.get() : b.get();
   // TODO: technically we need to check that the classes match
   if (!a) {
-    a = common->wrap(a_.as_int_unchecked());
-    a_.toSymInt(a); //
+    a = common->wrap_int(a_.as_int_unchecked());
   }
   if (!b) {
-    b = common->wrap(b_.as_int_unchecked());
-    b_.toSymInt(b);
+    b = common->wrap_int(b_.as_int_unchecked());
   }
   return {a, b};
 }
 
-SymIntNode SymInt::toSymIntNodeImpl() const {
+SymNode SymInt::toSymNodeImpl() const {
   TORCH_CHECK(is_symbolic());
-  return SymIntNode::reclaim_copy(toSymIntNodeImplUnowned());
+  return SymNode::reclaim_copy(toSymNodeImplUnowned());
 }
 
-c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
+SymInt::SymInt(SymNode sin_sp) {
+  TORCH_CHECK(sin_sp->is_int());
   auto ptr = static_cast<uint64_t>(
       reinterpret_cast<uintptr_t>(static_cast<void*>(sin_sp.release())));
   auto rep = (ptr & ~MASK) | IS_SYM;
-  return c10::SymInt(UNCHECKED, static_cast<int64_t>(rep));
+  data_ = static_cast<int64_t>(rep);
 }
 
 int64_t SymInt::guard_int(const char* file, int64_t line) const {
   if (!is_symbolic()) {
     return data_;
   }
-  SymIntNode a = toSymIntNodeImpl();
+  SymNode a = toSymNodeImpl();
   return a->guard_int(file, line);
 }
 
@@ -49,7 +48,7 @@ SymInt::operator SymFloat() const {
   if (!is_symbolic()) {
     return SymFloat(double(data_));
   }
-  return SymFloat::toSymFloat(toSymIntNodeImpl()->sym_float());
+  return SymFloat(toSymNodeImpl()->sym_float());
 }
 
 SymInt SymInt::operator+(SymInt sci) const {
@@ -57,7 +56,7 @@ SymInt SymInt::operator+(SymInt sci) const {
     return SymInt(data_ + sci.data_);
   }
   auto res = normalize_symints(*this, sci);
-  return SymInt::toSymInt(res[0]->add(res[1]));
+  return SymInt(res[0]->add(res[1]));
 }
 
 SymInt SymInt::operator-(SymInt sci) const {
@@ -65,7 +64,7 @@ SymInt SymInt::operator-(SymInt sci) const {
     return SymInt(data_ - sci.data_);
   }
   auto res = normalize_symints(*this, sci);
-  return SymInt::toSymInt(res[0]->sub(res[1]));
+  return SymInt(res[0]->sub(res[1]));
 }
 
 SymInt SymInt::operator*(SymInt sci) const {
@@ -73,7 +72,7 @@ SymInt SymInt::operator*(SymInt sci) const {
     return SymInt(data_ * sci.data_);
   }
   auto res = normalize_symints(*this, sci);
-  return SymInt::toSymInt(res[0]->mul(res[1]));
+  return SymInt(res[0]->mul(res[1]));
 }
 
 SymInt SymInt::operator/(SymInt sci) const {
@@ -81,7 +80,7 @@ SymInt SymInt::operator/(SymInt sci) const {
     return SymInt(data_ / sci.data_);
   }
   auto res = normalize_symints(*this, sci);
-  return SymInt::toSymInt(res[0]->floordiv(res[1]));
+  return SymInt(res[0]->floordiv(res[1]));
 }
 
 SymInt SymInt::operator%(SymInt sci) const {
@@ -89,7 +88,7 @@ SymInt SymInt::operator%(SymInt sci) const {
     return SymInt(data_ % sci.data_);
   }
   auto res = normalize_symints(*this, sci);
-  return SymInt::toSymInt(res[0]->mod(res[1]));
+  return SymInt(res[0]->mod(res[1]));
 }
 
 bool SymInt::operator==(SymInt sci) const {
@@ -141,18 +140,22 @@ SymInt SymInt::min(SymInt sci) const {
     return std::min(data_, sci.data_);
   }
   auto res = normalize_symints(*this, sci);
-  return SymInt::toSymInt(res[0]->min(res[1]));
+  return SymInt(res[0]->min(res[1]));
 }
 SymInt SymInt::max(SymInt sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return std::max(data_, sci.data_);
   }
   auto res = normalize_symints(*this, sci);
-  return SymInt::toSymInt(res[0]->max(res[1]));
+  return SymInt(res[0]->max(res[1]));
 }
 
 void SymInt::operator*=(SymInt sci) {
   *this = *this * sci;
+}
+
+void SymInt::operator/=(SymInt sci) {
+  *this = *this / sci;
 }
 
 void SymInt::operator+=(SymInt sci) {
@@ -189,7 +192,7 @@ SymInt SymInt::operator*(int64_t sci) const {
 
 std::ostream& operator<<(std::ostream& os, SymInt s) {
   if (s.is_symbolic()) {
-    os << s.toSymIntNodeImpl()->str();
+    os << s.toSymNodeImpl()->str();
   } else {
     os << s.as_int_unchecked();
   }
@@ -198,7 +201,7 @@ std::ostream& operator<<(std::ostream& os, SymInt s) {
 
 SymInt operator-(SymInt s) {
   if (s.is_symbolic()) {
-    return SymInt::toSymInt(s.toSymIntNodeImpl()->neg());
+    return SymInt(s.toSymNodeImpl()->neg());
   } else {
     return SymInt(-s.as_int_unchecked());
   }

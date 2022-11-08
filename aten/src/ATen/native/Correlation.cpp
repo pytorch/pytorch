@@ -139,7 +139,7 @@ Tensor corrcoef(const Tensor& self) {
   }
 
   // normalize covariance
-  const auto d = c.diag();
+  const auto d = c.diagonal();
   const auto stddev = at::sqrt(d.is_complex() ? at::real(d) : d);
   c = c / stddev.view({-1, 1});
   c = c / stddev.view({1, -1});

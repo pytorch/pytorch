@@ -350,6 +350,10 @@ as they should never be created manually, but they are guaranteed to support two
 
 .. autofunction:: irecv
 
+.. autofunction:: batch_isend_irecv
+
+.. autoclass:: P2POp
+
 Synchronous and asynchronous collective operations
 --------------------------------------------------
 Every collective operation function supports the following two kinds of operations,

@@ -522,6 +522,15 @@ at::Tensor& LazyNativeFunctions::logsumexp_out(
   return out;
 }
 
+at::Tensor LazyNativeFunctions::diag_embed(
+    const at::Tensor& self,
+    int64_t offset,
+    int64_t dim1,
+    int64_t dim2) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      diag_embed)>::call(self, offset, dim1, dim2);
+}
+
 at::Tensor LazyNativeFunctions::diagonal_backward_symint(
     const at::Tensor& grad_output,
     at::SymIntArrayRef input_sizes,

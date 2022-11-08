@@ -49,6 +49,22 @@ except ImportError:
 
 from . import config
 
+"""
+A note on skipfiles:
+
+Dynamo consults this file to determine whether code should be compiled or skipped.
+
+A skip applies at the frame boundary, meaning dynamo either triggers a graph break
+at the beginning of the frame or attempts to trace the whole frame.  When skipping
+a frame, recursively called frames are still traced by dynamo unless also skipped.
+
+Skipfiles (skipped at the file level instead of function level) still apply on a
+frame-by-frame boundary as dynamo traces, but apply to all functions in that file.
+
+@skip is a helper decorator that can be applied to your function to cause it to be
+included here.
+"""
+
 
 def _strip_init_py(s):
     return re.sub(r"__init__.py$", "", s)
