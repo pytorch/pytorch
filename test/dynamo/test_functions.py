@@ -330,6 +330,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
 
     @make_test
+    def test_T(x):
+        return x.T
+
+    @make_test
     def test_is_sparse(x):
         if not x.is_sparse:
             return x + 1
