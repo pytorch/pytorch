@@ -157,15 +157,5 @@ torch::lazy::TSOpVector Scalar::Lower(
   return {loctx->graph()->insertConstant(at::scalar_tensor(value, options))};
 }
 
-// View Ops
-torch::lazy::TSOpVector View::Lower(
-    std::shared_ptr<torch::jit::GraphFunction> function,
-    torch::lazy::TSLoweringContext* loctx) const {
-  std::vector<torch::jit::NamedValue> arguments;
-  arguments.emplace_back(loctx->GetOutputOp(operand(0)));
-  arguments.emplace_back(output_size);
-  return LowerBuiltin(at::aten::reshape, function, arguments);
-}
-
 } // namespace lazy
 } // namespace torch
