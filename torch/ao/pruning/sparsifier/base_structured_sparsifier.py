@@ -22,7 +22,7 @@ from .convert_functions import (
     convert_conv2d_pool_flatten_linear,
 )
 
-__all__ = ["BaseStructuredPruner"]
+__all__ = ["BaseStructuredSparsifier"]
 
 SUPPORTED_STRUCTURED_PRUNING_MODULES = {  # added to config if None given
     nn.Linear,
@@ -30,7 +30,7 @@ SUPPORTED_STRUCTURED_PRUNING_MODULES = {  # added to config if None given
 }
 
 
-class BaseStructuredPruner(BaseSparsifier):
+class BaseStructuredSparsifier(BaseSparsifier):
     r"""Base class for structured pruning.
 
     Abstract methods that need to be implemented:
@@ -56,7 +56,9 @@ class BaseStructuredPruner(BaseSparsifier):
         )
 
     def _prepare(self, *args, **kwargs) -> None:
-        r"""Adds mask parametrization to the layer weight"""
+        r"""This function will attach the FakeStructuredSparsity parameterizations
+        and BiasHooks at the appropriate points in the model.
+        """
         self.bias_handles = []
         for config in self.groups:
             module = config["module"]

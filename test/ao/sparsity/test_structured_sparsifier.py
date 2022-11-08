@@ -9,8 +9,7 @@ import random
 
 import torch
 from torch import nn
-from torch.nn import functional as F
-from torch.ao.pruning import BaseStructuredPruner, FakeStructuredSparsity
+from torch.ao.pruning import BaseStructuredSparsifier, FakeStructuredSparsity
 from torch.nn.utils import parametrize
 
 from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
@@ -164,18 +163,23 @@ class Conv2dC(nn.Module):
         return x
 
 
+<<<<<<< HEAD:test/ao/sparsity/test_structured_sparsifier.py
+
+class SimplePruner(BaseStructuredSparsifier):
+=======
 class SimplePruner(BaseStructuredPruner):
+>>>>>>> 83eb036eb8 (Add fx mode structured pruning):test/ao/sparsity/test_pruner.py
     def update_mask(self, module, tensor_name, **kwargs):
         getattr(module.parametrizations, tensor_name)[0].mask[1] = False
 
 
-class MultiplePruner(BaseStructuredPruner):
+class MultiplePruner(BaseStructuredSparsifier):
     def update_mask(self, module, tensor_name, **kwargs):
         getattr(module.parametrizations, tensor_name)[0].mask[1] = False
         getattr(module.parametrizations, tensor_name)[0].mask[2] = False
 
 
-class TestBaseStructuredPruner(TestCase):
+class TestBaseStructuredSparsifier(TestCase):
     def _check_pruner_prepared(self, model, pruner, device):
         for config in pruner.groups:
             module = config["module"]
@@ -232,9 +236,8 @@ class TestBaseStructuredPruner(TestCase):
                 )
 
     def _test_constructor_on_device(self, model, device):
-        self.assertRaisesRegex(
-            TypeError, "BaseStructuredPruner .* update_mask", BaseStructuredPruner
-        )
+        self.assertRaisesRegex(TypeError, 'BaseStructuredSparsifier.* update_mask',
+                               BaseStructuredSparsifier)
         model1 = copy.deepcopy(model).to(device)
         pruner = SimplePruner(None)
         pruner.prepare(model1, None)

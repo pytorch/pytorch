@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional
 
+import torch
 from torch import nn
 
 __all__ = [
@@ -83,18 +84,22 @@ class FakeSparsity(nn.Module):
 
 # Structured Pruning Parameterizations
 class FakeStructuredSparsity(nn.Module):
-    r"""Zero out pruned channels for structured sparsity"""
+    r"""
+    Parametrization for Structured Pruning. Like FakeSparsity, this should be attached to
+    the  'weight' or any other parameter that requires a mask.
+
+    Instead of an element-wise bool mask, this parameterization uses a row-wise bool mask.
+    """
 
     def __init__(self, mask):
         super().__init__()
         self.register_buffer("mask", mask)
 
     def forward(self, x):
+        assert isinstance(self.mask, torch.Tensor)
         assert self.mask.shape[0] == x.shape[0]
-
         shape = [1] * len(x.shape)
         shape[0] = -1
-
         return self.mask.reshape(shape) * x
 
     def state_dict(self, *args, **kwargs):
@@ -102,6 +107,7 @@ class FakeStructuredSparsity(nn.Module):
         return {}
 
 class BiasHook:
+
     def __init__(self, parametrization, prune_bias):
         self.param = parametrization
         self.prune_bias = prune_bias
