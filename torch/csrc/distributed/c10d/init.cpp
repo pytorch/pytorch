@@ -640,10 +640,10 @@ This class does not support ``__members__`` property.)");
             const auto* preMulSupplement =
                 reinterpret_cast<::c10d::NCCLPreMulSumSupplement*>(
                     r.supplement_.get());
-            if (preMulSupplement->tensor_factors.empty()) {
+            if (!preMulSupplement->tensor_factor.defined()) {
               return py::make_tuple(r.op_, preMulSupplement->double_factor);
             } else {
-              return py::make_tuple(r.op_, preMulSupplement->tensor_factors);
+              return py::make_tuple(r.op_, preMulSupplement->tensor_factor);
             }
           },
           [](const py::tuple t) {
@@ -659,7 +659,7 @@ This class does not support ``__members__`` property.)");
               return ::c10d::makeNCCLPreMulSum(t[1].cast<double>());
             } else {
               return ::c10d::makeNCCLPreMulSum(
-                  t[1].cast<std::vector<at::Tensor>>());
+                  t[1].cast<at::Tensor>());
             }
           }));
 
@@ -695,7 +695,7 @@ This class does not support ``__members__`` property.)");
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_make_nccl_premul_sum",
-          &::c10d::makeNCCLPreMulSum<std::vector<at::Tensor>>,
+          &::c10d::makeNCCLPreMulSum<at::Tensor>,
           py::arg("factor").noconvert(),
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>());

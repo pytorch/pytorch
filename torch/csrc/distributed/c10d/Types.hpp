@@ -21,9 +21,9 @@ struct TORCH_API _SupplementBase : torch::CustomClassHolder {
 // The point of use in ProcessGroupNCCL knows how to unpack it.
 struct NCCLPreMulSumSupplement : _SupplementBase {
   double double_factor{0.0};
-  std::vector<at::Tensor> tensor_factors;
+  at::Tensor tensor_factor;
   NCCLPreMulSumSupplement(double f) : double_factor{f} {}
-  NCCLPreMulSumSupplement(std::vector<at::Tensor> f) : tensor_factors{std::move(f)} {}
+  NCCLPreMulSumSupplement(at::Tensor t) : tensor_factor{std::move(t)} {}
 };
 
 // Other ReduceOps that need different supplementary data can also

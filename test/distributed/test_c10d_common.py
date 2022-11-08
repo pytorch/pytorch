@@ -1665,7 +1665,7 @@ class ReduceOpTest(TestCase):
             c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
         ):
             self.assertTrue(isinstance(reduce_op, c10d.ReduceOp))
-        for scale in ([torch.tensor(1.0)], 2.0):
+        for scale in (torch.tensor(1.0), 2.0):
             self.assertTrue(isinstance(dist._make_nccl_premul_sum(scale), c10d.ReduceOp))
 
     # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
@@ -1679,7 +1679,7 @@ class ReduceOpTest(TestCase):
             self.assertEqual(copy.copy(c10d.ReduceOp(reduce_op)), reduce_op)
             self.assertEqual(copy.deepcopy(c10d.ReduceOp(reduce_op)), reduce_op)
 
-        for scale in ([torch.tensor(1.0)], 2.0):
+        for scale in (torch.tensor(1.0), 2.0):
             reduce_op = dist._make_nccl_premul_sum(scale)
             self.assertEqual(copy.copy(reduce_op), reduce_op)
             self.assertEqual(copy.deepcopy(reduce_op), reduce_op)
@@ -1692,7 +1692,7 @@ class ReduceOpTest(TestCase):
             pickle.loads(pickle.dumps(reduce_op))
             orig = c10d.ReduceOp(reduce_op)
             self.assertEqual(pickle.loads(pickle.dumps(orig)), orig)
-        for scale in ([torch.tensor(1.0)], 2.0):
+        for scale in (torch.tensor(1.0), 2.0):
             reduce_op = dist._make_nccl_premul_sum(scale)
             self.assertEqual(pickle.loads(pickle.dumps(reduce_op)), reduce_op)
 
