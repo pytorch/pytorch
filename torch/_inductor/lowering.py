@@ -24,9 +24,9 @@ from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
+    get_stride_order,
     IndexingConstant,
     IndexingDiv,
-    get_stride_order,
     PermuteView,
     Pointwise,
     Reduction,
