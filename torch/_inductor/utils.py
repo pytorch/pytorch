@@ -184,7 +184,8 @@ def get_fused_kernel_name(node_schedule):
         + [
             str(origin.name)
             for origin in functools.reduce(
-                operator.or_, [node.node.origins for node in node_schedule]
+                operator.or_,
+                [node.node.origins for node in node_schedule if hasattr(node, "node")],
             )
             if origin.op == "call_function"
         ][0 : config.kernel_name_max_ops]
