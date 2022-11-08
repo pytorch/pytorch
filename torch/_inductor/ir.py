@@ -2918,17 +2918,13 @@ class FallbackKernel(ExternKernelAlloc):
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
         def generate_output(output, index=""):
-            if isinstance(output, list):
-                return list(
-                    generate_output(output[i], f"{index}[{i}]")
-                    for i in range(len(output))
-                )
-            elif isinstance(output, tuple):
-                return tuple(
+            if isinstance(output, (list, tuple)):
+                return type(output)(
                     generate_output(output[i], f"{index}[{i}]")
                     for i in range(len(output))
                 )
             else:
+                assert isinstance(output, torch.Tensor)
                 return (
                     MultiOutput(
                         FixedLayout(
