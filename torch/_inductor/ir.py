@@ -1361,9 +1361,10 @@ class ReinterpretView(BaseView):
         size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
         stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
         offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
+        as_strided = V.graph.sizevars.as_strided
         if offset != "0":
-            return f"as_strided({self.get_name()}, {size}, {stride}, {offset})"
-        return f"as_strided({self.get_name()}, {size}, {stride})"
+            return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
+        return f"{as_strided}({self.get_name()}, {size}, {stride})"
 
     def cpp_wrapper_codegen_reference(self):
         return self.codegen_reference()
@@ -2420,6 +2421,17 @@ class ExternKernel(InputsKernel):
             kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
         return kwargs
 
+    def cpp_wrapper_codegen_kwargs(self):
+        kwargs = []
+        if self.kwargs:
+            for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                assert arg_name in self.kwargs, (
+                    "arg %s not found in self.kwargs" % arg_name
+                )
+                v = self.kwargs.get(arg_name)
+                kwargs.append(repr(v))
+        return kwargs
+
     def codegen_size_asserts(self, wrapper):
         if config.size_asserts:
             size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
@@ -2482,15 +2494,22 @@ class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper):
         args = self.codegen_args()
 
-        kwargs = self.codegen_kwargs()
+        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
+
+        if isinstance(wrapper, CppWrapperCodeGen):
+            kwargs = self.cpp_wrapper_codegen_kwargs()
+        else:
+            kwargs = self.codegen_kwargs()
         if kwargs:
             args.extend(kwargs)
 
-        if self.output_view:
-            args.append(f"out={self.output_view.codegen_reference()}")
-        else:
-            args.append(f"out={self.codegen_reference()}")
-        wrapper.writeline(f"{self.kernel}({', '.join(args)})")
+        wrapper.generate_extern_kernel_out(
+            self.output_view,
+            self.codegen_reference(),
+            args,
+            self.kernel,
+            self.cpp_kernel,
+        )
 
     def __init__(self, layout, inputs, constant_args=(), kwargs=None, output_view=None):
         super().__init__(
@@ -2590,6 +2609,7 @@ class IndexPutFallback(ExternKernel):
 
 class MatrixMultiply(ExternKernelOut):
     kernel = "aten.mm.out"
+    cpp_kernel = "at::mm_out"
 
     def __init__(
         self, layout, inputs, constant_args=(), output_view=None, kernel="aten.mm.out"
@@ -2705,6 +2725,8 @@ class MatrixMultiplyAdd(ExternKernelOut):
     def __init__(self, layout, inputs, constant_args=(), kwargs=None, output_view=None):
         super().__init__(layout, inputs, constant_args, kwargs or {}, output_view)
         self.kernel = "aten.addmm.out"
+        self.cpp_kernel = "at::addmm_out"
+        self.ordered_kwargs_for_cpp_kernel = ["beta", "alpha"]
 
     @classmethod
     def create(cls, inp, a, b, beta, alpha):
@@ -2729,6 +2751,7 @@ class MatrixMultiplyAdd(ExternKernelOut):
 
 class BatchMatrixMultiply(ExternKernelOut):
     kernel = "aten.bmm.out"
+    cpp_kernel = "at::bmm_out"
 
     def __init__(self, layout, inputs, constant_args=(), output_view=None):
         super().__init__(layout, inputs, constant_args, output_view)
