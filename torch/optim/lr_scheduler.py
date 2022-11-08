@@ -11,7 +11,7 @@ from .optimizer import Optimizer
 
 __all__ = ['LambdaLR', 'MultiplicativeLR', 'StepLR', 'MultiStepLR', 'ConstantLR', 'LinearLR',
            'ExponentialLR', 'SequentialLR', 'CosineAnnealingLR', 'ChainedScheduler', 'ReduceLROnPlateau',
-           'CyclicLR', 'CosineAnnealingWarmRestarts', 'OneCycleLR', 'PolynomialLR']
+           'CyclicLR', 'CosineAnnealingWarmRestarts', 'OneCycleLR', 'PolynomialLR', 'LRScheduler']
 
 EPOCH_DEPRECATION_WARNING = (
     "The epoch parameter in `scheduler.step()` was not necessary and is being "
@@ -22,7 +22,7 @@ EPOCH_DEPRECATION_WARNING = (
     "https://github.com/pytorch/pytorch/issues/new/choose."
 )
 
-class _LRScheduler(object):
+class LRScheduler(object):
 
     def __init__(self, optimizer, last_epoch=-1, verbose=False):
 
@@ -163,6 +163,12 @@ class _LRScheduler(object):
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
 
+# Including _LRScheduler for backwards compatibility
+# Subclass instead of assign because we want __name__ of _LRScheduler to be _LRScheduler (assigning would make it LRScheduler).
+class _LRScheduler(LRScheduler):
+    pass
+
+
 class _enable_get_lr_call:
 
     def __init__(self, o):
@@ -176,7 +182,7 @@ class _enable_get_lr_call:
         self.o._get_lr_called_within_step = False
 
 
-class LambdaLR(_LRScheduler):
+class LambdaLR(LRScheduler):
     """Sets the learning rate of each parameter group to the initial lr
     times a given function. When last_epoch=-1, sets initial lr as lr.
 
@@ -262,7 +268,7 @@ class LambdaLR(_LRScheduler):
                 for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs)]
 
 
-class MultiplicativeLR(_LRScheduler):
+class MultiplicativeLR(LRScheduler):
     """Multiply the learning rate of each parameter group by the factor given
     in the specified function. When last_epoch=-1, sets initial lr as lr.
 
@@ -343,7 +349,7 @@ class MultiplicativeLR(_LRScheduler):
             return [group['lr'] for group in self.optimizer.param_groups]
 
 
-class StepLR(_LRScheduler):
+class StepLR(LRScheduler):
     """Decays the learning rate of each parameter group by gamma every
     step_size epochs. Notice that such decay can happen simultaneously with
     other changes to the learning rate from outside this scheduler. When
@@ -392,7 +398,7 @@ class StepLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
 
-class MultiStepLR(_LRScheduler):
+class MultiStepLR(LRScheduler):
     """Decays the learning rate of each parameter group by gamma once the
     number of epoch reaches one of the milestones. Notice that such decay can
     happen simultaneously with other changes to the learning rate from outside
@@ -441,7 +447,7 @@ class MultiStepLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
 
-class ConstantLR(_LRScheduler):
+class ConstantLR(LRScheduler):
     """Decays the learning rate of each parameter group by a small constant factor until the
     number of epoch reaches a pre-defined milestone: total_iters. Notice that such decay can
     happen simultaneously with other changes to the learning rate from outside this scheduler.
@@ -499,7 +505,7 @@ class ConstantLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
 
-class LinearLR(_LRScheduler):
+class LinearLR(LRScheduler):
     """Decays the learning rate of each parameter group by linearly changing small
     multiplicative factor until the number of epoch reaches a pre-defined milestone: total_iters.
     Notice that such decay can happen simultaneously with other changes to the learning rate
@@ -567,7 +573,7 @@ class LinearLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
 
-class ExponentialLR(_LRScheduler):
+class ExponentialLR(LRScheduler):
     """Decays the learning rate of each parameter group by gamma every epoch.
     When last_epoch=-1, sets initial lr as lr.
 
@@ -598,7 +604,7 @@ class ExponentialLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
 
-class SequentialLR(_LRScheduler):
+class SequentialLR(LRScheduler):
     """Receives the list of schedulers that is expected to be called sequentially during
     optimization process and milestone points that provides exact intervals to reflect
     which scheduler is supposed to be called at a given epoch.
@@ -708,7 +714,7 @@ class SequentialLR(_LRScheduler):
             self._schedulers[idx].load_state_dict(s)
 
 
-class PolynomialLR(_LRScheduler):
+class PolynomialLR(LRScheduler):
     """Decays the learning rate of each parameter group using a polynomial function
     in the given total_iters. When last_epoch=-1, sets initial lr as lr.
 
@@ -758,7 +764,7 @@ class PolynomialLR(_LRScheduler):
         ]
 
 
-class CosineAnnealingLR(_LRScheduler):
+class CosineAnnealingLR(LRScheduler):
     r"""Set the learning rate of each parameter group using a cosine annealing
     schedule, where :math:`\eta_{max}` is set to the initial lr and
     :math:`T_{cur}` is the number of epochs since the last restart in SGDR:
@@ -831,7 +837,7 @@ class CosineAnnealingLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
 
-class ChainedScheduler(_LRScheduler):
+class ChainedScheduler(LRScheduler):
     """Chains list of learning rate schedulers. It takes a list of chainable learning
     rate schedulers and performs consecutive step() functions belonging to them by just
     one call.
@@ -1078,7 +1084,7 @@ class ReduceLROnPlateau(object):
         self._init_is_better(mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode)
 
 
-class CyclicLR(_LRScheduler):
+class CyclicLR(LRScheduler):
     r"""Sets the learning rate of each parameter group according to
     cyclical learning rate policy (CLR). The policy cycles the learning
     rate between two boundaries with a constant frequency, as detailed in
@@ -1314,7 +1320,7 @@ class CyclicLR(_LRScheduler):
         return lrs
 
 
-class CosineAnnealingWarmRestarts(_LRScheduler):
+class CosineAnnealingWarmRestarts(LRScheduler):
     r"""Set the learning rate of each parameter group using a cosine annealing
     schedule, where :math:`\eta_{max}` is set to the initial lr, :math:`T_{cur}`
     is the number of epochs since the last restart and :math:`T_{i}` is the number
@@ -1437,7 +1443,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
 
-class OneCycleLR(_LRScheduler):
+class OneCycleLR(LRScheduler):
     r"""Sets the learning rate of each parameter group according to the
     1cycle learning rate policy. The 1cycle policy anneals the learning
     rate from an initial learning rate to some maximum learning rate and then
