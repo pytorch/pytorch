@@ -6,7 +6,7 @@ from torch.onnx._internal.diagnostics.infra import _infra
 def python_frame(frame: inspect.FrameInfo) -> _infra.StackFrame:
     """Returns a StackFrame for the given inspect.FrameInfo."""
     snippet = (
-        frame.code_context[frame.index]
+        frame.code_context[frame.index].strip()
         if frame.code_context is not None and frame.index is not None
         else None
     )
