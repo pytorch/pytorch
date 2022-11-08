@@ -7,6 +7,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/Exception.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/util/Logging.h>
 
 #include <numeric>
 #include <functional>
@@ -172,6 +173,7 @@ NestedTensorImpl::NestedTensorImpl(
       nested_stride_tensor_(std::move(nested_stride_tensor)),
       storage_offsets_(std::move(offsets)),
       opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
+  C10_LOG_API_USAGE_ONCE("torch.NestedTensor");
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
       "in the near future.");

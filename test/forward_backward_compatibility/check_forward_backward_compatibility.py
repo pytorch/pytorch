@@ -95,6 +95,7 @@ ALLOW_LIST = [
     ("aten::_linalg_inv_out_helper", datetime.date(2022, 10, 1)),
     ("aten::col2im_backward", datetime.date(2022, 12, 1)),
     ("aten::im2col_backward", datetime.date(2022, 12, 1)),
+    ("aten::diag_backward", datetime.date(2022, 12, 1)),
     ("aten::solve", datetime.date(9999, 1, 1)),
     ("aten::solve.solution", datetime.date(9999, 1, 1)),
     ("aten::_solve_helper", datetime.date(9999, 1, 1)),

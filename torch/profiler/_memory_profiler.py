@@ -156,6 +156,15 @@ def extract_gradients(
                     yield TensorKey.from_tensor(p), p_grad_key
 
 
+def get_scopes(event: Optional[_ProfilerEvent]) -> Tuple[RecordScope, ...]:
+    scopes = []
+    while event:
+        if event.typed[0] == _EventType.TorchOp:
+            scopes.append(event.typed[1].scope)
+        event = event.parent
+    return tuple(scopes)
+
+
 class SchemaMatcher:
     """Lookup operator schema based on profiled name.
 
@@ -170,7 +179,7 @@ class SchemaMatcher:
     """
 
     @classmethod
-    def inputs_are_mutable(cls, t: _ExtraFields_TorchOp) -> Tuple[bool, ...]:
+    def inputs_are_mutable(cls, t: _ExtraFields_TorchOp) -> Tuple[Optional[bool], ...]:
         """Determine which inputs may have mutated based on function schema.
 
         Note that we don't need to resolve down to a single schema to perform
@@ -185,7 +194,7 @@ class SchemaMatcher:
             for i, arg in enumerate(schema.arguments):
                 mutable[i] |= getattr(arg.alias_info, "is_write", False)
 
-        return tuple(mutable or (True for _ in t.inputs))
+        return tuple(mutable or (None for _ in t.inputs))
 
     @classmethod
     def match_schemas(cls, t: _ExtraFields_TorchOp) -> Tuple[FunctionSchema, ...]:
@@ -307,24 +316,34 @@ class DataFlowNode:
     def _determine_edges(self) -> Dict[TensorKey, DataFlowEdge]:
         subtree = tuple(_utils.traverse_dfs([self._event]))
 
-        def zip_mutable(
-            t: _ExtraFields_TorchOp,
-        ) -> Iterator[Tuple[Optional[TensorKey], bool]]:
-            for i, mutable in zip(t.inputs, SchemaMatcher.inputs_are_mutable(t)):
-                if isinstance(i, _TensorMetadata):
-                    yield TensorKey.from_tensor(i), mutable
-                elif isinstance(i, list):
-                    for j in i:
-                        yield TensorKey.from_tensor(j), mutable
+        # Start by populating edges from op inputs and outputs.
+        mutable_by_key: Dict[Optional[TensorKey], Set[Optional[bool]]] = {}
+        for op in (i.typed[1] for i in subtree if i.typed[0] == _EventType.TorchOp):
+            for op_input, mutable in zip(
+                op.inputs, SchemaMatcher.inputs_are_mutable(op)
+            ):
+                # Tensor
+                if isinstance(op_input, _TensorMetadata):
+                    key = TensorKey.from_tensor(op_input)
+                    mutable_by_key.setdefault(key, set()).add(mutable)
+
+                # TensorList
+                elif isinstance(op_input, list):
+                    for op_input_i in op_input:
+                        key = TensorKey.from_tensor(op_input_i)
+                        mutable_by_key.setdefault(key, set()).add(mutable)
 
         edges: DefaultDict[Optional[TensorKey], DataFlowEdge]
         edges = collections.defaultdict(DataFlowEdge)
-
-        # Start by populating edges from op inputs and outputs.
-        for op in (i.typed[1] for i in subtree if i.typed[0] == _EventType.TorchOp):
-            for key, mutable in zip_mutable(op):
+        for key, mutable_set in mutable_by_key.items():
+            if key is not None:
                 edges[key].input_version = self._graph.lookup(key) if key else -1
-                edges[key].mutated = edges[key].mutated or mutable
+
+                # We consider an op to be mutated if we encounter a schema where it
+                # is a mutable argument OR if it is ambiguous. (We never explicitly
+                # see it in any schema.)
+                mutated = (True in mutable_set) or (tuple(mutable_set) == (None,))
+                edges[key].mutated = mutated
 
         # Then handle deletions. Note that deleting a Tensor implicitly adds
         # it as an input edge.
@@ -570,13 +589,13 @@ class MemoryProfile:
         """Mark inputs based on which Tensors are updated using gradients.
 
         The process for differentiating between inputs and activations is more
-        involved. Most Tensors in a training loop transitively depend on at
-        least one gradient: parameters depend on them through updates, and
-        activations and optimizer state depend on them transitively through
-        parameters. Critically, we do not need to know which Tensors are
-        parameters to apply this method; we can simply walk the data flow graph
-        to build the set of all values which depend on a gradient and then
-        obtain the set of inputs by taking the conjugate.
+        involved. Most Tensors in a training loop depend on at least one
+        gradient: parameters depend on them through updates, and activations
+        and optimizer state depend on them transitively through parameters.
+        Critically, we do not need to know which Tensors are parameters to
+        apply this method; we can simply walk the data flow graph to build the
+        set of all values which depend on a gradient and then obtain the set
+        of inputs from the conjugate set.
 
         There is, however, one hiccup. The first time we see a parameter is
         generally on the forward pass of the first step. We know from
@@ -619,19 +638,22 @@ class MemoryProfile:
             if len(depends_on_gradient) == start_size:
                 break
 
-        # Flood backwards to identify viable inputs.
+        # We only want to annotate Tensors which actually contribute to the
+        # model calculation.
         produces_gradient: Set[TensorAndID] = set()
         for node in reversed(self._data_flow_graph.flow_nodes):
-            inputs = {(key, version) for key, (_, version) in node.inputs.items()}
-            if any(
-                self._is_gradient(*i) or i in produces_gradient
-                for i in node.outputs.items()
-            ):
-                produces_gradient |= inputs
+            tensors = {(key, version) for key, (_, version) in node.inputs.items()}
+            tensors |= node.outputs.items()
+            if any(self._is_gradient(*i) or i in produces_gradient for i in tensors):
+                produces_gradient |= tensors
 
-        # A Tensor is an input if it does not have a logical dependence on a
-        # gradient (which filters out activations since parameter inputs will
-        # exclude the forward pass) but is provably an input to the model.
-        for key, version in produces_gradient:
+        # Don't include Tensors created in the backward pass, as these are
+        # generally Autograd implementation details rather than proper inputs.
+        input_candidates = produces_gradient.copy()
+        for node in self._data_flow_graph.flow_nodes:
+            if RecordScope.BACKWARD_FUNCTION in get_scopes(node._event):
+                input_candidates -= set(node.outputs.items())
+
+        for key, version in input_candidates:
             if key.id not in depends_on_gradient:
                 self._categories.setdefault_by_version(key, version, Category.INPUT)

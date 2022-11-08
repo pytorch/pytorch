@@ -3013,7 +3013,11 @@ class TestExamplesCorrectness(TestCase):
         self.assertEqual(result_loss, expected_loss)
         self.assertEqual(result_weights, expected_weights)
 
-    @parametrize("dropout_layer", [nn.Dropout, nn.AlphaDropout, nn.FeatureAlphaDropout])
+    @parametrize("dropout_layer", [
+        subtest(nn.Dropout, 'Dropout'),
+        subtest(nn.AlphaDropout, 'AlphaDropout'),
+        subtest(nn.FeatureAlphaDropout, 'FeatureAlphaDropout'),
+    ])
     def test_find_learning_rate_ensembling(self, device, dropout_layer):
         # This example mimics what a user might do when trying to find the optimal learning rate. They would
         # want to run a bunch of models with the same behavior (including the same dropout!) and have them
@@ -3089,8 +3093,10 @@ class TestExamplesCorrectness(TestCase):
         func_model, weights = make_functional(model)
 
         def compute_loss(weights, image, target):
-            output = func_model(weights, images)
-            loss = criterion(output, targets)
+            image = image.unsqueeze(0)
+            target = target.unsqueeze(0)
+            output = func_model(weights, image)
+            loss = criterion(output, target)
             return loss
 
         batch_size = 3
@@ -3100,7 +3106,7 @@ class TestExamplesCorrectness(TestCase):
         result_grads = vmap(grad(compute_loss), in_dims=(None, 0, 0))(weights, images, targets)
 
         expected_grads = [
-            torch.autograd.grad(compute_loss(weights, images[i].unsqueeze(0), targets[i].unsqueeze(0)), weights)
+            torch.autograd.grad(compute_loss(weights, images[i], targets[i]), weights)
             for i in range(batch_size)
         ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
@@ -3241,6 +3247,7 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
         self.assertEqual(out1, out2)
         self.assertEqual(inpt1, inpt2)
 
+    @unittest.skipIf(IS_FBCODE, 'fails in fbcode')
     def test_vmap_functionalize_jvp(self, device):
 
         def f(x: torch.Tensor) -> torch.Tensor:
@@ -3429,6 +3436,7 @@ def forward(self, a_1, b_1) -> torch.Tensor:
     return index
     """)
 
+    @unittest.skipIf(IS_FBCODE, 'fails in fbcode')
     def test_functionalize_optional_tensorlist2(self, device):
 
         def f(a, b) -> torch.Tensor:
