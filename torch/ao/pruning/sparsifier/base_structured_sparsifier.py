@@ -13,6 +13,7 @@ SUPPORTED_STRUCTURED_PRUNING_MODULES = {  # added to config if None given
     nn.Conv2d,
 }
 
+
 class BaseStructuredSparsifier(BaseSparsifier):
     r"""Base class for structured pruning.
 
@@ -25,6 +26,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
             configuration. Only the keys that don't exist in the `config` will
             be updated.
     """
+
     def __init__(self, defaults):
         super().__init__(defaults)
 
@@ -33,28 +35,39 @@ class BaseStructuredSparsifier(BaseSparsifier):
         model: nn.Module,
         SUPPORTED_MODULES: Set[Type] = SUPPORTED_STRUCTURED_PRUNING_MODULES,
     ) -> None:
-        super().make_config_from_model(model, SUPPORTED_MODULES=SUPPORTED_STRUCTURED_PRUNING_MODULES)
-
+        super().make_config_from_model(
+            model, SUPPORTED_MODULES=SUPPORTED_STRUCTURED_PRUNING_MODULES
+        )
 
     def _prepare(self, *args, **kwargs) -> None:
-        r"""Adds mask parametrization to the layer weight
+        r"""This function will attach the FakeStructuredSparsity parameterizations
+        and BiasHooks at the appropriate points in the model.
         """
         self.bias_handles = []
 
         for config in self.groups:
-            module = config['module']
-            tensor_name = config['tensor_name']
-            parametrization = config.get('parametrization', FakeStructuredSparsity)
+            module = config["module"]
+            tensor_name = config["tensor_name"]
+            parametrization = config.get("parametrization", FakeStructuredSparsity)
 
-            mask = config.get('mask', torch.ones(getattr(module, tensor_name).shape[0], dtype=torch.bool))
-            self.state[config['tensor_fqn']]['mask'] = mask
-            parametrize.register_parametrization(module, tensor_name, parametrization(mask), unsafe=True)
+            mask = config.get(
+                "mask",
+                torch.ones(getattr(module, tensor_name).shape[0], dtype=torch.bool),
+            )
+            self.state[config["tensor_fqn"]]["mask"] = mask
+            parametrize.register_parametrization(
+                module, tensor_name, parametrization(mask), unsafe=True
+            )
 
-            prune_bias = config.get('prune_bias', True)
+            prune_bias = config.get("prune_bias", True)
             if prune_bias and module.bias is not None:
-                module.register_parameter('_bias', nn.Parameter(module.bias.detach()))
+                module.register_parameter("_bias", nn.Parameter(module.bias.detach()))
                 module.bias = None
-            self.bias_handles.append(module.register_forward_hook(BiasHook(module.parametrizations.weight[0], prune_bias)))
+            self.bias_handles.append(
+                module.register_forward_hook(
+                    BiasHook(module.parametrizations.weight[0], prune_bias)
+                )
+            )
 
     def convert(self):
         pass
