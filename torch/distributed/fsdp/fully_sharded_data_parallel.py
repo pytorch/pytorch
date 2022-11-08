@@ -875,8 +875,11 @@ class FullyShardedDataParallel(nn.Module):
             offload_to_cpu=offload_to_cpu,
             with_grads=with_grads,
         ):
-            self.training_state = TrainingState.SUMMON_FULL_PARAMS
-            yield
+            try:
+                self.training_state = TrainingState.SUMMON_FULL_PARAMS
+                yield
+            finally:
+                self.training_state = TrainingState.IDLE
 
     @contextlib.contextmanager
     def _deregister_orig_params_ctx(self):
