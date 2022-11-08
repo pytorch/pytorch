@@ -557,8 +557,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 # tensor
                 all_fake_args = (
                     [n.meta['val'] for n in symint_outs]
-                    + [n.meta['val'] for n in non_symint_outs]
-                    + [n.meta['val'] for n in orig_fw_outs[:_num_outs]]
+                    + [n if isinstance(n, int) else n.meta['val'] for n in non_symint_outs]
+                    + [n if isinstance(n, int) else n.meta['val'] for n in orig_fw_outs[:_num_outs]]
                 )
                 context = disable_autocast_manager if disable_amp else nullcontext
                 with context(), track_graph_compiling("backward", True):
