@@ -1139,6 +1139,33 @@ def meta_zero_(self):
     return self
 
 
+@register_meta(
+    [
+        aten.mul_.Scalar,
+        aten.div_.Scalar,
+        aten.mul_.Tensor,
+        aten.div_.Tensor,
+        aten.logical_and_.default,
+        aten.logical_or_.default,
+        aten.logical_xor_.default,
+    ],
+)
+def meta_binop_inplace(self, other):
+    return self
+
+
+@register_meta(
+    [
+        aten.add_.Scalar,
+        aten.sub_.Scalar,
+        aten.add_.Tensor,
+        aten.sub_.Tensor,
+    ],
+)
+def meta_binop_inplace_alpha(self, other, alpha=1):
+    return self
+
+
 @register_meta(aten.zero.default)
 def meta_zero(self):
     return self.new_empty(self.shape)
