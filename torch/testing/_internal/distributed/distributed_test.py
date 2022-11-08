@@ -1147,7 +1147,6 @@ class DistributedTest:
         @require_world_size(4)
         @skip_if_lt_x_gpu(4)
         def test_3_level_hierarchical_model_averager(self):
-            from torch.distributed.distributed_c10d import _pg_group_ranks
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
@@ -1178,8 +1177,8 @@ class DistributedTest:
             subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
             subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
 
-            real_group_ranks_res1 = list(_pg_group_ranks[subgroup1].keys())
-            real_group_ranks_res2 = list(_pg_group_ranks[subgroup2].keys())
+            real_group_ranks_res1 = dist.get_process_group_ranks(subgroup1)
+            real_group_ranks_res2 = dist.get_process_group_ranks(subgroup2)
             expect_group_ranks_res1 = (rank // subgroup_size1 * subgroup_size1 + np.array(list(range(subgroup_size1)))).tolist()
             expect_group_ranks_res2 = (rank // subgroup_size2 * subgroup_size2 + np.array(list(range(subgroup_size2)))).tolist()
             self.assertEqual(real_group_ranks_res1, expect_group_ranks_res1)
@@ -4219,6 +4218,23 @@ class DistributedTest:
                 RuntimeError, lambda: nn.parallel.DistributedDataParallel(nn.Module())
             )
             self._barrier()
+
+
+        @sandcastle_skip_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel"
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        def test_ddp_zero_output_features(self):
+            class ToyModel(nn.Module):
+                def __init__(self):
+                    super(ToyModel, self).__init__()
+                    self.net1 = nn.Linear(10, 10)
+                    self.relu = nn.ReLU()
+                    self.net2 = nn.Linear(10, 0)
+
+            model = ToyModel().to(self.rank)
+            ddp_model = nn.parallel.DistributedDataParallel(model, device_ids=[self.rank])
 
         @sandcastle_skip_if(
             BACKEND == "nccl",
