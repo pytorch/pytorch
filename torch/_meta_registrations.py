@@ -76,13 +76,21 @@ def meta_randperm(n, *, generator=None, out):
 
 
 @register_meta(aten.randint.default)
-def meta_randint(high, size, *, dtype=torch.long, **kwargs):
-    return torch.empty(size, dtype=dtype, **kwargs)
+def meta_randint(
+    high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
+):
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 @register_meta(aten.randint.low)
-def meta_randint_low(low, high, size, *, dtype=torch.long, **kwargs):
-    return torch.empty(size, dtype=dtype, **kwargs)
+def meta_randint_low(
+    low, high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
+):
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
@@ -1455,13 +1463,14 @@ def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
     return torch.empty_like(self)
 
 
+# TODO: Deduplicate this with canonicalize_dim
 def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     if dim_post_expr <= 0:
         assert wrap_scalar
         dim_post_expr = 1
     min = -dim_post_expr
     max = dim_post_expr - 1
-    assert not (dim < min or dim > max)
+    assert not (dim < min or dim > max), f"dim {dim} out of bounds ({min}, {max})"
     if dim < 0:
         dim += dim_post_expr
     return dim
@@ -1495,7 +1504,7 @@ def meta_gather(self, dim, index, sparse_grad=False):
     if not is_index_empty:
         check(
             index.dtype == torch.long,
-            lambda: "gather(): Expected dtype int64 for index",
+            lambda: f"gather(): Expected dtype int64 for index, but got {index.dtype}",
         )
         gather_shape_check(self, wrapped_dim, index)
     return self.new_empty(index.shape)
