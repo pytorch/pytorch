@@ -246,6 +246,7 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
+    "test_jit_cuda_fuser", # Skipped until NVFuser enabled - https://ontrack-internal.amd.com/browse/SWDEV-361875
     "test_openmp",
 ]
 
