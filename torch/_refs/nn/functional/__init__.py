@@ -62,18 +62,19 @@ __all__ = [
 Tensor = torch.Tensor
 
 
-# TODO: should we allow the user to set a different dtype for the mask generation?
 def _dropout_helper(
     self: TensorLikeType,
     val: float,
 ) -> TensorLikeType:
+    """
+    Helper function for all dropout-type operators. During training,
+    some of the elements of the input tensor are randomly masked.
 
-    return refs.lt(
-        refs.uniform(
-            self.shape, low=0.0, high=1.0, dtype=torch.float32, device=self.device
-        ),
-        val,
-    )
+    Returns the masked tensor of the boolean values.
+
+    """
+
+    return torch.distributions.Uniform(low=0.0, high=1.0).sample() < val
 
 
 @register_decomposition(torch.ops.aten.alpha_dropout)
@@ -107,7 +108,8 @@ def alpha_dropout(
     alpha = -1.7580993408473766
 
     a = 1.0 / math.sqrt((alpha * alpha * p + 1) * (1 - p))
-    b = torch.logical_not(dropout_mask) * alpha * a + alpha * a * p
+    b = torch.logical_not(dropout_mask)
+    b = b * alpha * a + alpha * a * p
     dropout_mask = a * dropout_mask
 
     return self * dropout_mask + b
