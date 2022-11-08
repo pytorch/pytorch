@@ -1797,6 +1797,12 @@ class DistributedDataParallel(Module, Joinable):
         # during synchronization. It will be removed when the API is finalized
         # as part of addressing https://github.com/pytorch/pytorch/issues/43690.
         module._ddp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
+        for name, param in module.named_parameters():
+            if name in params_and_buffers_to_ignore:
+                param._ddp_ignored = True
+        for name, buffer in module.named_buffers():
+            if name in params_and_buffers_to_ignore:
+                buffer._ddp_ignored = True
 
     def _get_ddp_logging_data(self):
         r"""
