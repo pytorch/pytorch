@@ -4942,8 +4942,8 @@ def rrelu(g: jit_utils.GraphContext, input, lower, upper, training, generator):
 
 @_onnx_symbolic("aten::bernoulli")
 @_beartype.beartype
-def bernoulli(g: jit_utils.GraphContext, input, generator=None, out=None):
-    if out is not None:
+def bernoulli(g: jit_utils.GraphContext, input, tensor_or_prob=None, generator=None, out=None):
+    if out is not None and not symbolic_helper._is_none(out):
         symbolic_helper._unimplemented(
             "Bernoulli", "out parameter is not supported for bernoulli", input
         )
@@ -4967,7 +4967,10 @@ def bernoulli(g: jit_utils.GraphContext, input, generator=None, out=None):
         low_f=0.0,
         dtype_i=dtype.onnx_type(),
     )
-    output = g.op("Less", p, input)
+    if tensor_or_prob is not None and not symbolic_helper._is_none(tensor_or_prob):
+        output = g.op("Less", p, tensor_or_prob)
+    else:
+        output = g.op("Less", p, input)
     return g.op("Cast", output, to_i=dtype.onnx_type())
 
 
