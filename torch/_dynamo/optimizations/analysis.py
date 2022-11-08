@@ -27,7 +27,7 @@ class ShapeAliasingAndMutationProp(ShapeProp):
 
     def tensor_alias_group(self, value: torch.Tensor):
         """Assign a unique identifier to the storage of a given tensor"""
-        storage = StorageWeakRef(value.storage())
+        storage = StorageWeakRef(value._typed_storage())
         alias_group = self.storage_to_alias_group.get(storage)
         if alias_group is None:
             alias_group = next(self.make_alias_group)
