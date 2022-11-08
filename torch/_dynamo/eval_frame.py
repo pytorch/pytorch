@@ -2,7 +2,6 @@ import contextlib
 import copy
 import functools
 import inspect
-import itertools
 import logging
 import os
 import sys
