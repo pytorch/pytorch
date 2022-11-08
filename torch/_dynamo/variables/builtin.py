@@ -354,6 +354,21 @@ class BuiltinVariable(VariableTracker):
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, a, b):
+        if b is None:
+            assert(isinstance(a, (variables.ListVariable, variables.TupleVariable, variables.ConstantVariable))
+                and all(
+                    [
+                        isinstance(x, variables.ConstantVariable)
+                        for x in a.items
+                    ]
+                )
+            )
+            new_list = [x.value for x in a.items]
+            if self.fn is max:
+                return variables.ConstantVariable(max(new_list))
+            else:
+                return variables.ConstantVariable(min(new_list))
+
         if self.tensor_args(a, b):
             if not isinstance(a, variables.TensorVariable):
                 a, b = b, a
