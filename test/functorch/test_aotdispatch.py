@@ -1125,7 +1125,7 @@ symbolic_aot_autograd_failures = {
     xfail('mvlgamma', 'mvlgamma_p_3'),  # aten.digamma_.default - couldn't find symbolic meta function/decom...
     xfail('mvlgamma', 'mvlgamma_p_5'),  # aten.digamma_.default - couldn't find symbolic meta function/decom...
     xfail('nanmedian', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.alpha_dropout', ''), # aten.bernoulli.p - couldn't find symbolic meta function/decomposition
+    xfail('nn.functional.alpha_dropout', ''),  # aten.bernoulli.p - couldn't find symbolic meta function/decomposition
 
     # Deleting this in a followup
     xfail('nn.functional.feature_alpha_dropout', 'with_train'),
