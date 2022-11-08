@@ -227,10 +227,9 @@ non_native:
       - ShapeCompute
       - TreatScalarsAsConstants
       - CanBeReusedDeclOnly
+  # Even we have removed all the other view ops in favor of the *_copy version, expand
+  # is still kept because it's used in copy_.
   - func: expand(Tensor input, int[] size, bool is_scalar_expand) -> Tensor
-  - func: view(Tensor input, int[] output_size) -> Tensor
-    properties:
-      - ShapeCompute
   - func: cast(Tensor input, ScalarType dtype, ScalarType? stype) -> Tensor
     opkind: ltc_cast
     properties:
