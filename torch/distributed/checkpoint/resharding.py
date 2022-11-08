@@ -4,6 +4,9 @@ from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 
+__all__ = []
+
+
 def _shards_get_overlap_region_wrt_saved_tensor(
     saved_shard: ShardMetadata, current_shard: ShardMetadata
 ) -> List[Tuple[int, int, int, int]]:
@@ -38,7 +41,9 @@ def _shards_get_overlap_region_wrt_saved_tensor(
 
         if saved_shard_offset > current_shard_offset:
             offset_for_saved_tensor = 0
-            offset_for_current_tensor = saved_shard_offset - current_shard_offset
+            offset_for_current_tensor = (
+                saved_shard_offset - current_shard_offset
+            )
         else:
             offset_for_saved_tensor = current_shard_offset - saved_shard_offset
             offset_for_current_tensor = 0
