@@ -899,9 +899,9 @@ def _unpool_output_size(
                 )
             )
         for d in range(len(kernel_size)):
-            min_size = default_size[d] - stride[d]
+            min_size = default_size[d] - kernel_size[d] + 1
             max_size = default_size[d] + stride[d]
-            if not (min_size < output_size[d] < max_size):
+            if not (min_size <= output_size[d] < max_size):
                 raise ValueError(
                     'invalid output_size "{}" (dim {} must be between {} and {})'.format(
                         output_size, d, min_size, max_size

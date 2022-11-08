@@ -1192,21 +1192,37 @@ def div_rtn(x, y):
     return q
 
 
+def div_ceil(x, y):
+    q = x // y
+    r = x % y
+    # WARNING: explicit bool conversion here is necessary;
+    # would be fixed by SymBool
+    if r != 0 and (bool(r > 0) != bool(y < 0)):
+        q += 1
+    return q
+
+
 def pooling_output_shape_pad_lr(
     inputSize, kernelSize, pad_l, pad_r, stride, dilation, ceil_mode
 ):
-    outputSize = (
-        div_rtn(
-            inputSize
-            + pad_l
-            + pad_r
-            - dilation * (kernelSize - 1)
-            - 1
-            + (stride - 1 if ceil_mode else 0),
+    if ceil_mode:
+        outputSize = div_ceil(
+            inputSize + pad_l + pad_r,
             stride,
         )
-        + 1
-    )
+    else:
+        outputSize = (
+            div_rtn(
+                inputSize
+                + pad_l
+                + pad_r
+                - dilation * (kernelSize - 1)
+                - 1
+                + (stride - 1 if ceil_mode else 0),
+                stride,
+            )
+            + 1
+        )
     if ceil_mode:
         if (outputSize - 1) * stride >= inputSize + pad_l:
             outputSize -= 1
