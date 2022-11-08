@@ -37,22 +37,10 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
   // to participate in the functorch transforms.
   key_set_ = key_set_ - c10::functorch_transforms_ks - c10::python_ks;
-  // For better error handling,
-  // we also don't want our wrapper tensor to be able to dispatch directly
-  // to a backend kernel.
-  // Dispatching directly to e.g. a CPU kernel would always segfault,
-  // because wrapper tensors don't have any real data.
-  // (This should never happen because we should always hit a functionalization kernel,
-  // but can help make bugs less nasty).
-  // Here, we defensively remove any backend keys from the wrapper's keyset.
-  // We don't want to remove actual backend bits though (say we're redispatching to autograd;
-  // we need to know if we're dispatching to AutogradCPU or AutogradXLA).
-  // Instead, it's sufficient to remove the `Dense` dispatch key,
-  // which prevents us from accidentally trying to directly run a CPU/CUDA kernel.
-  key_set_ = key_set_.remove(c10::DispatchKey::Dense);
   // We override a bunch of _custom(), so make sure they get called
   // TODO: metadata copying may not actually be necessary then
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
+  set_custom_device(true);
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
@@ -64,6 +52,10 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
     value_(value)
 {
   set_constructor_metadata();
+}
+
+void FunctionalTensorWrapper::freeze_storage() const {
+  functional_storage_impl()->freeze();
 }
 
 // Note [Functionalization: Alias Removal]
@@ -302,12 +294,16 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_
       return r;
     }
   }
+
   auto impl = c10::make_intrusive<FunctionalTensorWrapper>(value_);
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  impl->level_ = level_;
+  impl->generation_ = generation_;
+  impl->view_metas_ = view_metas_;
   impl->refresh_numel();
   impl->refresh_contiguous();
   return impl;
@@ -327,6 +323,9 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
       std::move(version_counter), allow_tensor_metadata_change);
 }
 
+c10::Device FunctionalTensorWrapper::device_custom() const {
+  return value_.unsafeGetTensorImpl()->device();
+}
 at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sizes();
 }
@@ -531,6 +530,12 @@ bool isFunctionalTensorIListRef(c10::IListRef<T> list) {
 
 bool isFunctionalTensor(ITensorListRef list) {
   return isFunctionalTensorIListRef(list);
+}
+
+void freeze_functional_tensor(const Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(tensor));
+  auto functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+  functional_base_impl->freeze_storage();
 }
 
 Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {

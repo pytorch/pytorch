@@ -26,12 +26,14 @@ If you want to test float16
 
 import argparse
 import dataclasses
+import functools
 import glob
 import importlib
 import io
 import itertools
 import logging
 import os
+import re
 import shutil
 import subprocess
 from collections import defaultdict
@@ -40,6 +42,8 @@ from os.path import abspath, exists
 from random import randint
 
 import matplotlib.pyplot as plt
+
+import numpy as np
 import pandas as pd
 import torch
 
@@ -63,15 +67,17 @@ TABLE = {
         "eager": "--training --backend=eager ",
         "aot_eager": "--training --backend=aot_eager ",
         "aot_cudagraphs": "--training --backend=aot_cudagraphs ",
-        "aot_nvfuser": "--training --nvfuser --backend=aot_nvfuser ",
+        "aot_nvfuser": "--training --nvfuser --backend=aot_ts_nvfuser ",
+        "nvprims_nvfuser": "--training --backend=nvprims_nvfuser ",
         "inductor": "--training --inductor ",
+        "inductor_no_cudagraphs": "--training --inductor --disable-cudagraphs ",
     },
     "inference": {
         "ts_nnc": "--speedup-ts",
         "ts_nvfuser": "-n100 --speedup-ts --nvfuser",
         "trt": "-n100 --speedup-trt",
-        "ts_nvfuser_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs_ts",
-        "inductor": "--inductor-settings --float32 -n50 --inductor",
+        "ts_nvfuser_cudagraphs": "--backend=cudagraphs_ts",
+        "inductor": "-n50 --inductor",
     },
 }
 
@@ -83,10 +89,15 @@ DEFAULTS = {
         "eager",
         "aot_eager",
         "aot_cudagraphs",
-        "aot_nvfuser",
+        "nvprims_nvfuser",
         "inductor",
+        "inductor_no_cudagraphs",
     ],
     "inference": ["ts_nvfuser_cudagraphs", "inductor"],
+    "flag_compilers": {
+        "training": ["inductor", "inductor_no_cudagraphs"],
+        "inference": ["inductor"],
+    },
     "dtypes": [
         "float32",
     ],
@@ -109,6 +120,25 @@ DASHBOARD_DEFAULTS = {
 }
 
 
+def flag_speedup(x):
+    return pd.isna(x) or x < 0.95
+
+
+def flag_compilation_latency(x):
+    return pd.isna(x) or x == 0 or x > 120
+
+
+def flag_compression_ratio(x):
+    return pd.isna(x) or x < 0.9
+
+
+FLAG_FNS = {
+    "speedup": flag_speedup,
+    "compilation_latency": flag_compilation_latency,
+    "compression_ratio": flag_compression_ratio,
+}
+
+
 def percentage(part, whole, decimals=2):
     if whole == 0:
         return 0
@@ -124,6 +154,12 @@ def parse_args():
         "--compilers",
         action="append",
         help=f"For --inference, options are {INFERENCE_COMPILERS}. For --training, options are {TRAINING_COMPILERS}",
+    )
+
+    parser.add_argument(
+        "--flag-compilers",
+        action="append",
+        help="List of compilers to flag issues. Same format as --compilers.",
     )
     parser.add_argument(
         "--quick", action="store_true", help="Just runs one model. Helps in debugging"
@@ -190,6 +226,11 @@ def parse_args():
         help="Archived directory path",
     )
     parser.add_argument(
+        "--archive-name",
+        help="Directory name under dashboard-archive-path to copy output-dir to. "
+        "If not provided, a generated name is used.",
+    )
+    parser.add_argument(
         "--dashboard-gh-cli-path",
         default=DASHBOARD_DEFAULTS["dashboard_gh_cli_path"],
         help="Github CLI path",
@@ -223,6 +264,11 @@ def get_skip_tests(suite):
     return skip_str
 
 
+def generate_csv_name(args, dtype, suite, device, compiler, testing):
+    mode = get_mode(args)
+    return f"{compiler}_{suite}_{dtype}_{mode}_{device}_{testing}.csv"
+
+
 def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
     mode = get_mode(args)
     with open("run.sh", "w") as runfile:
@@ -242,7 +288,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                 info = TABLE[mode]
                 for compiler in compilers:
                     base_cmd = info[compiler]
-                    output_filename = f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}_{testing}.csv"
+                    output_filename = f"{output_dir}/{generate_csv_name(args, dtype, suite, device, compiler, testing)}"
                     cmd = f"python benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
                     cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
 
@@ -256,7 +302,10 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         filters = DEFAULTS["quick"][suite]
                         cmd = f"{cmd} {filters}"
 
-                    if testing == "performance" and compiler == "inductor":
+                    if testing == "performance" and compiler in (
+                        "inductor",
+                        "inductor_no_cudagraphs",
+                    ):
                         cmd = f"{cmd} --cold_start_latency"
                     lines.append(cmd)
                 lines.append("")
@@ -328,12 +377,49 @@ def build_summary():
         gh_fh.write(comment)
 
 
+@functools.lru_cache(None)
+def archive_data(archive_name):
+    if archive_name is not None:
+        prefix_match = re.search(r"\w+(?=_performance)", archive_name)
+        if prefix_match is not None:
+            prefix = prefix_match.group(0)
+        else:
+            prefix = ""
+        day_match = re.search(r"day_(\d+)_", archive_name)
+        if day_match is not None:
+            day = day_match.group(1)
+        else:
+            day = "000"
+    else:
+        day = datetime.today().strftime("%j")
+        prefix = datetime.today().strftime(f"day_{day}_%d_%m_%y")
+    return day, prefix
+
+
+@functools.lru_cache(None)
+def default_archive_name(dtype):
+    _, prefix = archive_data(None)
+    return f"{prefix}_performance_{dtype}_{randint(100, 999)}"
+
+
+def archive(src_dir, dest_dir_prefix, archive_name, dtype):
+    if archive_name is None:
+        archive_name = default_archive_name(dtype)
+    # Copy the folder to archived location
+    dest = os.path.join(dest_dir_prefix, archive_name)
+    shutil.copytree(src_dir, dest, dirs_exist_ok=True)
+    print(f"copied contents of {src_dir} to {dest}")
+
+
 class Parser:
-    def __init__(self, suites, devices, dtypes, compilers, mode, output_dir):
+    def __init__(
+        self, suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+    ):
         self.suites = suites
         self.devices = devices
         self.dtypes = dtypes
         self.compilers = compilers
+        self.flag_compilers = flag_compilers
         self.output_dir = output_dir
         self.mode = mode
 
@@ -347,8 +433,12 @@ class Parser:
 
 
 class ParsePerformanceLogs(Parser):
-    def __init__(self, suites, devices, dtypes, compilers, mode, output_dir):
-        super().__init__(suites, devices, dtypes, compilers, mode, output_dir)
+    def __init__(
+        self, suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+    ):
+        super().__init__(
+            suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+        )
         self.parsed_frames = defaultdict(lambda: defaultdict(None))
         self.untouched_parsed_frames = defaultdict(lambda: defaultdict(None))
         self.metrics = ["speedup", "compilation_latency", "compression_ratio"]
@@ -395,12 +485,6 @@ class ParsePerformanceLogs(Parser):
         self.extract_df("accuracy", "accuracy")
         for metric in self.metrics:
             self.extract_df(metric, "performance")
-        self.generate_executive_summary()
-        for suite in self.suites:
-            self.plot_graph(
-                self.untouched_parsed_frames[suite]["speedup"],
-                f"{suite}_{self.dtypes[0]}",
-            )
 
     def clean_batch_sizes(self, frames):
         # Clean up batch sizes when its 0
@@ -446,26 +530,31 @@ class ParsePerformanceLogs(Parser):
             df_copy = df_copy.sort_values(
                 by=list(reversed(self.compilers)), ascending=False
             )
+            if "inductor" in self.compilers:
+                df_copy = df_copy.sort_values(by="inductor", ascending=False)
             self.untouched_parsed_frames[suite][metric] = df_copy
 
             if testing == "performance":
                 df_accuracy = self.parsed_frames[suite]["accuracy"]
                 perf_rows = []
                 for model_name in df["name"]:
-                    perf_row = df[df["name"] == model_name]
+                    perf_row = df[df["name"] == model_name].copy()
                     acc_row = df_accuracy[df_accuracy["name"] == model_name]
                     for compiler in self.compilers:
                         if not perf_row.empty:
                             if acc_row.empty:
-                                perf_row[compiler].iloc[0] = 0.0
+                                perf_row.loc[0, compiler] = 0.0
                             elif acc_row[compiler].iloc[0] not in (
                                 "pass",
                                 "pass_due_to_skip",
                             ):
-                                perf_row[compiler].iloc[0] = 0.0
+                                perf_row.loc[0, compiler] = 0.0
                     perf_rows.append(perf_row)
                 df = pd.concat(perf_rows)
             df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
+
+            if "inductor" in self.compilers:
+                df = df.sort_values(by="inductor", ascending=False)
             self.parsed_frames[suite][metric] = df
 
     def get_passing_entries(self, compiler, df):
@@ -581,6 +670,57 @@ class ParsePerformanceLogs(Parser):
         str_io.write(peak_memory_summary)
         self.executive_summary = str_io.getvalue()
 
+    def flag_bad_entries(self, suite, metric, flag_fn):
+        df = self.untouched_parsed_frames[suite][metric]
+        df = df.drop("dev", axis=1)
+        df = df.rename(columns={"batch_size": "bs"})
+        # apply flag_fn elementwise to flag_compilers columns,
+        # if one element fails, the entire row is flagged
+        flag = np.logical_or.reduce(
+            df[self.flag_compilers].applymap(flag_fn),
+            axis=1,
+        )
+        df = df[flag]
+        df = df.assign(suite=suite)
+        return df.reindex(columns=["suite", "name"] + self.flag_compilers)
+
+    def get_metric_title(self, metric):
+        if metric == "speedup":
+            return "Performance speedup"
+        elif metric == "accuracy":
+            return "Accuracy"
+        elif metric == "compilation_latency":
+            return "Compilation latency (sec)"
+        elif metric == "compression_ratio":
+            return "Peak Memory Compression Ratio"
+        raise RuntimeError("unknown metric")
+
+    def generate_warnings(self):
+        title = "## Warnings ##"
+        body = ""
+        for metric in [
+            "speedup",
+            "compilation_latency",
+            "compression_ratio",
+        ]:
+            dfs = []
+            for suite in self.suites:
+                dfs.append(self.flag_bad_entries(suite, metric, FLAG_FNS[metric]))
+            df = pd.concat(dfs, axis=0)
+            if df.empty:
+                continue
+            tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
+            str_io = io.StringIO()
+            str_io.write("\n")
+            str_io.write(self.get_metric_title(metric) + " warnings\n")
+            str_io.write("~~~\n")
+            str_io.write(f"{tabform}\n")
+            str_io.write("~~~\n")
+            body += str_io.getvalue()
+
+        comment = generate_dropdown_comment(title, body)
+        return comment
+
     def prepare_message(self, suite):
         title = f"## {suite} suite with {self.dtypes[0]} precision ##"
         body = ""
@@ -596,14 +736,7 @@ class ParsePerformanceLogs(Parser):
             tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
             str_io = io.StringIO()
             str_io.write("\n")
-            if metric == "speedup":
-                str_io.write("Performance speedup\n")
-            elif metric == "accuracy":
-                str_io.write("Accuracy\n")
-            elif metric == "compilation_latency":
-                str_io.write("Compilation latency (sec)\n")
-            elif metric == "compression_ratio":
-                str_io.write("Peak Memory Compression Ratio\n")
+            str_io.write(self.get_metric_title(metric) + "\n")
             str_io.write("~~~\n")
             str_io.write(f"{tabform}\n")
             str_io.write("~~~\n")
@@ -613,6 +746,13 @@ class ParsePerformanceLogs(Parser):
         return comment
 
     def gen_summary_files(self):
+        self.generate_executive_summary()
+        for suite in self.suites:
+            self.plot_graph(
+                self.untouched_parsed_frames[suite]["speedup"],
+                f"{suite}_{self.dtypes[0]}",
+            )
+
         with open(f"{self.output_dir}/gh_title.txt", "w") as gh_fh:
             str_io = io.StringIO()
             str_io.write("\n")
@@ -624,6 +764,11 @@ class ParsePerformanceLogs(Parser):
             gh_fh.write(self.executive_summary)
         print(self.executive_summary)
 
+        with open(f"{self.output_dir}/gh_warnings.txt", "w") as gh_fh:
+            warnings_body = self.generate_warnings()
+            gh_fh.write(warnings_body)
+            print(warnings_body)
+
         str_io = io.StringIO()
         for suite in self.suites:
             str_io.write(self.prepare_message(suite))
@@ -633,12 +778,14 @@ class ParsePerformanceLogs(Parser):
             gh_fh.write(str_io.getvalue())
 
 
-def parse_logs(args, dtypes, suites, devices, compilers, output_dir):
+def parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir):
     mode = get_mode(args)
     build_summary()
 
     parser_class = ParsePerformanceLogs
-    parser = parser_class(suites, devices, dtypes, compilers, mode, output_dir)
+    parser = parser_class(
+        suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+    )
     parser.gen_summary_files()
     return
 
@@ -654,6 +801,101 @@ class LogInfo:
 
 def get_date(log_info):
     return datetime.strptime(f"{log_info.day}", "%j").strftime("%m-%d")
+
+
+class AccuracyRegressionTracker:
+    """
+    Compares the most recent 2 accuracy benchmarks to find previously
+    passing models that now fail.
+    """
+
+    def __init__(self, args):
+        self.args = args
+        self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
+        assert os.path.exists(self.lookup_file)
+
+    def find_last_2(self, suite, device, dtype, compiler):
+        df = pd.read_csv(self.lookup_file, names=("day", "mode", "prec", "path"))
+        df = df[df["mode"] == "performance"]
+        df = df[df["prec"] == dtype]
+        df = df[::-1]
+        parsers = []
+        for path in df["path"]:
+            output_dir = os.path.join(self.args.dashboard_archive_path, path)
+            if os.path.exists(
+                os.path.join(
+                    output_dir,
+                    generate_csv_name(
+                        self.args, dtype, suite, device, compiler, "accuracy"
+                    ),
+                )
+            ):
+                parsers.append(
+                    ParsePerformanceLogs(
+                        [suite],
+                        [device],
+                        [dtype],
+                        [compiler],
+                        [compiler],
+                        get_mode(self.args),
+                        output_dir,
+                    )
+                )
+            if len(parsers) >= 2:
+                return parsers
+        return None
+
+    def generate_comment(self):
+        title = "## Accuracy Regressions ##\n"
+        body = ""
+        dtype = self.args.dtypes[0]
+        device = self.args.devices[0]
+        for suite in self.args.suites:
+            dfs = []
+            for compiler in self.args.flag_compilers:
+                last2 = self.find_last_2(suite, device, dtype, compiler)
+                if last2 is None:
+                    continue
+
+                df_cur, df_prev = [
+                    last2[i].untouched_parsed_frames[suite]["accuracy"] for i in (0, 1)
+                ]
+                df_merge = df_cur.merge(df_prev, on="name", suffixes=("_cur", "_prev"))
+                flag = np.logical_and(
+                    df_merge[compiler + "_prev"].apply(lambda x: "pass" in x),
+                    df_merge[compiler + "_cur"].apply(lambda x: "pass" not in x),
+                )
+                df_bad = df_merge[flag]
+                dfs.append(
+                    pd.DataFrame(
+                        data={
+                            "compiler": compiler,
+                            "name": df_bad["name"],
+                            "prev_status": df_bad[compiler + "_prev"],
+                            "cur_status": df_bad[compiler + "_cur"],
+                        }
+                    )
+                )
+
+            if not dfs:
+                continue
+            df = pd.concat(dfs, axis=0)
+            if df.empty:
+                continue
+            tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
+            str_io = io.StringIO()
+            str_io.write("\n")
+            str_io.write(f"Accuracy regressions for {suite}\n")
+            str_io.write("~~~\n")
+            str_io.write(f"{tabform}\n")
+            str_io.write("~~~\n")
+            body += str_io.getvalue()
+
+        comment = generate_dropdown_comment(title, body)
+
+        with open(f"{self.args.output_dir}/gh_accuracy_regression.txt", "w") as gh_fh:
+            gh_fh.write(comment)
+            print(comment)
 
 
 class RegressionTracker:
@@ -715,6 +957,8 @@ class RegressionTracker:
                     if not os.path.exists(gmean_filename):
                         continue
                     df = pd.read_csv(gmean_filename)
+                    if suite not in df:
+                        continue
                     if metric == "geomean":
                         df[suite] = df[suite].str.replace("x", "").astype(float)
                     elif metric == "passrate":
@@ -730,6 +974,7 @@ class RegressionTracker:
                     dfs.append(df)
 
                 df = pd.concat(dfs)
+                df = df.interpolate(method="linear")
                 ax = df.plot(
                     ax=axes[idx],
                     kind="line",
@@ -760,19 +1005,24 @@ class DashboardUpdater:
         self.output_dir = args.output_dir
         self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
         assert os.path.exists(self.lookup_file)
-        self.archive()
 
     def archive(self):
+        dtype = self.args.dtypes[0]
         # Copy the folder to archived location
-        src = self.output_dir
-        day = datetime.today().strftime("%j")
-        prefix = datetime.today().strftime(f"day_{day}_%d_%m_%y")
-        target_dir = f"{prefix}_performance_{self.args.dtypes[0]}_{randint(100, 999)}"
-        target = os.path.join(self.args.dashboard_archive_path, target_dir)
-        shutil.copytree(src, target)
+        archive(
+            self.output_dir,
+            self.args.dashboard_archive_path,
+            self.args.archive_name,
+            dtype,
+        )
+        day, _ = archive_data(self.args.archive_name)
+        target_dir = (
+            default_archive_name(dtype)
+            if self.args.archive_name is None
+            else self.args.archive_name
+        )
 
         # Update lookup csv the folder to arhived logs
-        dtype = self.args.dtypes[0]
         subprocess.check_call(
             f'echo "{day},performance,{dtype},{target_dir}" >> {self.lookup_file}',
             shell=True,
@@ -798,14 +1048,19 @@ class DashboardUpdater:
         files = [
             "gh_title.txt",
             "gh_executive_summary.txt",
+            "gh_warnings.txt",
             "gh_regression.txt",
+            "gh_accuracy_regression.txt",
             "gh_training.txt",
             "gh_graphs.txt",
         ]
         all_lines = []
         for f in files:
-            with open(os.path.join(self.output_dir, f), "r") as fh:
-                all_lines.extend(fh.readlines())
+            try:
+                with open(os.path.join(self.output_dir, f), "r") as fh:
+                    all_lines.extend(fh.readlines())
+            except FileNotFoundError:
+                pass
 
         return "\n".join([x.rstrip() for x in all_lines])
 
@@ -827,14 +1082,18 @@ class DashboardUpdater:
 
     def update(self):
         self.upload_graphs()
+        AccuracyRegressionTracker(self.args).generate_comment()
         try:
             RegressionTracker(self.args).diff()
-        except Exception:
+        except Exception as e:
+            logging.exception(e)
             with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
                 gh_fh.write("")
 
         comment = self.gen_comment()
         self.comment_on_gh(comment)
+
+        self.archive()
 
 
 if __name__ == "__main__":
@@ -849,18 +1108,31 @@ if __name__ == "__main__":
 
     if args.inference:
         compilers = DEFAULTS["inference"] if args.compilers is None else args.compilers
+        flag_compilers = (
+            DEFAULTS["flag_compilers"]["inference"]
+            if args.flag_compilers is None
+            else args.flag_compilers
+        )
     else:
         assert args.training
         compilers = DEFAULTS["training"] if args.compilers is None else args.compilers
+        flag_compilers = (
+            DEFAULTS["flag_compilers"]["training"]
+            if args.flag_compilers is None
+            else args.flag_compilers
+        )
 
     output_dir = args.output_dir
     args.compilers = compilers
+    args.devices = devices
+    args.dtypes = dtypes
+    args.flag_compilers = flag_compilers
     args.suites = suites
 
     if args.print_run_commands:
         generate_commands(args, dtypes, suites, devices, compilers, output_dir)
     elif args.visualize_logs:
-        parse_logs(args, dtypes, suites, devices, compilers, output_dir)
+        parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir)
     elif args.run:
         generate_commands(args, dtypes, suites, devices, compilers, output_dir)
         # TODO - Do we need to worry about segfaults
@@ -872,7 +1144,12 @@ if __name__ == "__main__":
             )
             raise e
         if not args.log_operator_inputs:
-            parse_logs(args, dtypes, suites, devices, compilers, output_dir)
+            archive(
+                output_dir, args.dashboard_archive_path, args.archive_name, dtypes[0]
+            )
+            parse_logs(
+                args, dtypes, suites, devices, compilers, flag_compilers, output_dir
+            )
 
     if args.update_dashboard:
         DashboardUpdater(args).update()

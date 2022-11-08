@@ -242,7 +242,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(where, ScalarSelf);
   OP_DECOMPOSE(orgqr);
   OP_DECOMPOSE2(unflatten, int);
-  OP_DECOMPOSE(_convolution_double_backward);
+  m.impl("_convolution_double_backward", native::_convolution_double_backward);
   OP_DECOMPOSE(conv_transpose1d);
   OP_DECOMPOSE2(conv_transpose2d, input);
   OP_DECOMPOSE2(conv_transpose3d, input);
