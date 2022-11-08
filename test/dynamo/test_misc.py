@@ -1385,6 +1385,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_autograd_profiler_enabled(self):
+        def fn(x):
+            if torch.autograd._profiler_enabled():
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.randn((2, 2), requires_grad=True)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        if torch.autograd._profiler_enabled():
+            torch.autograd._disable_profiler()
+        assert not torch.autograd._profiler_enabled()
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+        with torch.autograd.profiler.profile():
+            assert torch.autograd._profiler_enabled()
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+
     def test_python_slice(self):
         def f1(input):
             y = 0
@@ -2774,6 +2798,21 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Detected that you are using FX"):
             gm = torch.fx.symbolic_trace(optimized)
+
+    def test_inference_mode(self):
+        @torch.inference_mode()
+        def func(x, y):
+            return x.add(1.0) + y
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=True)
+        ref = func(x, y)
+        opt_func = torch._dynamo.optimize("eager")(func)
+
+        x1 = torch.ones(4, requires_grad=True)
+        res = opt_func(x1, y)
+        self.assertTrue(same(ref, res))
+        self.assertTrue(same(x, x1))
 
 
 class CustomFunc(torch.autograd.Function):
