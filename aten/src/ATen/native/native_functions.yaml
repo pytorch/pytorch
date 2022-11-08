@@ -3768,14 +3768,14 @@
 - func: narrow_copy(Tensor self, int dim, SymInt start, SymInt length) -> Tensor
   variants: function, method
   dispatch:
-    CPU: narrow_copy_dense_cpu
     SparseCPU, SparseCUDA: narrow_copy_sparse
     CompositeExplicitAutogradNonFunctional: narrow_copy_dense_symint
   tags: view_copy
 
 - func: narrow_copy.out(Tensor self, int dim, SymInt start, SymInt length, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
   dispatch:
-    CPU: narrow_copy_dense_cpu_out
+    CompositeExplicitAutogradNonFunctional: narrow_copy_out
 
 - func: narrow(Tensor(a) self, int dim, SymInt start, SymInt length) -> Tensor(a)
   variants: function, method
