@@ -2596,8 +2596,6 @@ class TestNLLLoss(TestCase):
                     self.assertEqual(idx, refidx)
 
         helper_dtype_int32(10, 10, 10)
-        helper_dtype_int32(40, 40, 40)
-        helper_dtype_float32(40, 40, 40)
         helper_dtype_float32(10, 10, 10)
 
     def test_any(self):
