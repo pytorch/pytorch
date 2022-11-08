@@ -4083,6 +4083,15 @@ class CommonTemplate:
                 else:
                     self.assertEqual(len(inps), 0)
 
+    def test_dtype_mismatch_issue(self):
+        def fn(x):
+            attn = torch.nn.functional.pad(x, [0, 1])
+            return attn.softmax(dim=-1)
+
+        x = torch.rand(128, 32, 63)
+        res_ref = fn(x)
+        res = torch._dynamo.optimize("inductor")(fn)(x)
+        self.assertEqual(res, res_ref)
 
 if HAS_CPU:
 
