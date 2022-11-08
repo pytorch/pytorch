@@ -83,7 +83,12 @@ class FakeSparsity(nn.Module):
 
 # Structured Pruning Parameterizations
 class FakeStructuredSparsity(nn.Module):
-    r"""Zero out pruned channels for structured sparsity"""
+    r"""
+    Parametrization for Structured Pruning. Like FakeSparsity, this should be attached to
+    the  'weight' or any other parameter that requires a mask.
+
+    Instead of an element-wise bool mask, this parameterization uses a row-wise bool mask.
+    """
 
     def __init__(self, mask):
         super().__init__()
@@ -102,6 +107,7 @@ class FakeStructuredSparsity(nn.Module):
         return {}
 
 class BiasHook:
+
     def __init__(self, parametrization, prune_bias):
         self.param = parametrization
         self.prune_bias = prune_bias
