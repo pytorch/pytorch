@@ -275,6 +275,12 @@ class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
+// Used for collective communication library errors from the distributed module.
+// These turn into DistBackendError when they cross into Python.
+class C10_API DistBackendError : public Error {
+  using Error::Error;
+};
+
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
 C10_API std::string GetExceptionString(const std::exception& e);
