@@ -25,7 +25,14 @@ from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .cuda_properties import get_device_properties
 from .dependencies import extract_read_writes, var_builder
-from .utils import cache_on_self, sympy_dot, sympy_product, sympy_subs, sympy_symbol, argsort
+from .utils import (
+    argsort,
+    cache_on_self,
+    sympy_dot,
+    sympy_product,
+    sympy_subs,
+    sympy_symbol,
+)
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -69,7 +76,7 @@ def stride_order2fill_order(order):
     return fill_order
 
 
-def order_of_strides(seq):
+def get_stride_order(seq):
     """
     Convert strides to stride order
     """
@@ -3019,7 +3026,7 @@ class Convolution(ExternKernelAlloc):
     ):
 
         weight = cls.require_stride1(cls.realize_input(weight))
-        x = cls.require_stride_order(x, order_of_strides(weight.get_stride()))
+        x = cls.require_stride_order(x, get_stride_order(weight.get_stride()))
         stride = tuple(stride_)
         padding = tuple(padding_)
         dilation = tuple(dilation_)

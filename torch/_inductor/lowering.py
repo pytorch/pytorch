@@ -26,13 +26,13 @@ from .ir import (
     ExpandView,
     IndexingConstant,
     IndexingDiv,
+    get_stride_order,
     PermuteView,
     Pointwise,
     Reduction,
     SqueezeView,
     TensorBox,
     View,
-    order_of_strides,
 )
 from .utils import ceildiv, has_torchvision_roi_align, sympy_product
 from .virtualized import ops, V
@@ -1174,7 +1174,7 @@ def conv_backward(*args, **kwargs):
             else output[2]
         )
         if out is not None:
-            stride_order = order_of_strides(out.stride())
+            stride_order = get_stride_order(out.stride())
             grad_output = ir.ExternKernel.require_stride_order(
                 grad_output, stride_order
             )
