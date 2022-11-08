@@ -3195,6 +3195,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     vmap_fail = {
         # -------------------- ALLOWED FAILURES --------------------------------
         # These are things that we either cannot fix or are not actually problems
+        xfail('scalar_tensor')
         xfail('resize_'),
         xfail('resize_as_'),
         xfail('to_sparse'),

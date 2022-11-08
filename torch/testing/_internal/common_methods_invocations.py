@@ -1359,7 +1359,7 @@ def sample_inputs_empty(op, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_scalar_tensor(op, device, dtype, requires_grad, **kwargs):
     # only ints >= 0 are allowed for both arguments, unless m is omitted
-    vals = (-5, 0, 1, L, M, S)
+    vals = (-5, 0, 1, torch.tensor(2))
 
     for item in vals:
         _kwargs = {'device': device, 'dtype': dtype, 'requires_grad': requires_grad}
