@@ -3195,7 +3195,6 @@ class TestVmapOperatorsOpInfo(TestCase):
     vmap_fail = {
         # -------------------- ALLOWED FAILURES --------------------------------
         # These are things that we either cannot fix or are not actually problems
-        xfail('scalar_tensor')
         xfail('resize_'),
         xfail('resize_as_'),
         xfail('to_sparse'),
@@ -3230,6 +3229,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linspace', ''),  # test runner can't handle factory functions
         xfail('arange', ''),  # test runner can't handle factory functions
         xfail('logspace', ''),  # test runner can't handle factory functions
+        xfail('scalar_tensor') # test runner can't handle factory functions
         xfail('empty', ''),  # test runner can't handle factory functions
         xfail('ones', ''),  # test runner can't handle factory functions
         xfail('zeros', ''),  # test runner can't handle factory functions
