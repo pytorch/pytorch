@@ -24,7 +24,6 @@ from torch.distributed.fsdp._common_utils import (
     clean_tensor_name,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
-    TrainingState,
 )
 from torch.distributed.fsdp._runtime_utils import (
     _cast_buffers_to_dtype_and_device,
@@ -39,6 +38,11 @@ from ._fsdp_extensions import (
     _ext_chunk_tensor,
     _ext_pre_load_state_dict_transform,
     _extensions as _user_extensions,
+)
+from ._unshard_param_utils import (
+    _deregister_orig_params,
+    _register_orig_params,
+    FLAT_PARAM,
 )
 from .flat_param import FlatParamHandle
 
@@ -91,10 +95,6 @@ def _enter_full_param_ctx(
         "Entering the ``summon_full_params`` context but fsdp_state._full_param_ctx "
         "is not None."
     )
-    assert fsdp_state.training_state != TrainingState.SUMMON_FULL_PARAMS, (
-        "Entering the summon_full_params context but the state is already "
-        "SUMMON_FULL_PARAMS."
-    )
     fsdp_state._full_param_ctx = fsdp_state._summon_full_params(
         recurse=recurse,
         writeback=writeback,
@@ -108,10 +108,6 @@ def _enter_full_param_ctx(
 @no_type_check
 def _exit_full_param_ctx(fsdp_state: _FSDPState) -> None:
     """A helper function to exit ``summon_full_params`` context."""
-    assert fsdp_state.training_state == TrainingState.SUMMON_FULL_PARAMS, (
-        "Exiting the summon_full_params context but the state is not "
-        "SUMMON_FULL_PARAMS."
-    )
     assert fsdp_state._full_param_ctx is not None
     fsdp_state._full_param_ctx.__exit__(None, None, None)
     fsdp_state._full_param_ctx = None
@@ -168,9 +164,6 @@ def _common_summon_post_state_dict_hook(
     hook.
     """
     _replace_by_prefix(state_dict, prefix + f"{FSDP_PREFIX}", prefix)
-    assert (
-        fsdp_state.training_state == TrainingState.SUMMON_FULL_PARAMS
-    ), "Inside the post_state_dict_hook but the state is not SUMMON_FULL_PARAMS."
     # Return early for trivial cases
     if not state_dict or not _has_fsdp_params(module, fsdp_state):
         _exit_full_param_ctx(fsdp_state)
@@ -180,7 +173,7 @@ def _common_summon_post_state_dict_hook(
     # For `use_orig_params=True`, the `FlatParameter` is not registered, so
     # there is no entry in the state dict for it to pop.
     if not fsdp_state._use_orig_params:
-        state_dict.pop(f"{prefix}{fsdp_file.FLAT_PARAM}")
+        state_dict.pop(f"{prefix}{FLAT_PARAM}")
 
     # If a rank does not have unsharded parameters(when `rank0_only=True`
     # and `rank != 0`), then the rank only needed to participate in the
@@ -338,6 +331,7 @@ def _full_pre_load_state_dict_hook(
     state_dict: Dict[str, Any],
     prefix: str,
 ) -> None:
+    _lazy_init(module, module)
     _enter_full_param_ctx(fsdp_state, recurse=False, writeback=True)
     _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
 
@@ -409,7 +403,7 @@ def _local_post_state_dict_hook(
     )  # type: ignore[assignment]
     if fsdp_state._state_dict_config.offload_to_cpu:
         sharded_tensor = sharded_tensor.cpu()
-    state_dict[f"{prefix}{fsdp_file.FLAT_PARAM}"] = sharded_tensor
+    state_dict[f"{prefix}{FLAT_PARAM}"] = sharded_tensor
     return state_dict
 
 
@@ -430,8 +424,9 @@ def _local_pre_load_state_dict_hook(
     state_dict. The flat_param should be a ShardedTensor. This hook converts
     the ShardedTensor to a tensor. No copy happen unless padding is required.
     """
+    _lazy_init(module, module)
     _replace_by_prefix(state_dict, prefix, f"{prefix}{FSDP_PREFIX}")
-    fqn = f"{prefix}{FSDP_PREFIX}{fsdp_file.FLAT_PARAM}"
+    fqn = f"{prefix}{FSDP_PREFIX}{FLAT_PARAM}"
     if fqn not in state_dict:
         assert not _has_fsdp_params(module, fsdp_state), (
             "No `FlatParameter` in `state_dict` for this FSDP instance "
@@ -527,7 +522,7 @@ def _sharded_post_load_state_dict_hook(
     module, fsdp_state: _FSDPState, *args, **kwargs
 ) -> None:
     if fsdp_state._use_orig_params:
-        fsdp_state._register_orig_params()
+        _register_orig_params(module, fsdp_state)
 
 
 @no_type_check
@@ -541,6 +536,7 @@ def _sharded_pre_load_state_dict_hook(
     The hook combines the unflattened, sharded parameters (ShardedTensor) to
     a new FlatParameter and shards the new FlatParameter to the local chunk.
     """
+    _lazy_init(module, module)
     _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
     if not _has_fsdp_params(module, fsdp_state):
         return
@@ -605,7 +601,7 @@ def _sharded_pre_load_state_dict_hook(
     assert all(s1 == s2 for s1, s2 in zip(loaded_shapes, flat_param._shapes)), (
         f"The original shapes in FSDP are {flat_param._shapes}. "
         f"The loaded shapes are {loaded_shapes}. "
-        f"FSDP extension is {'NOT' if _user_extensions is None else ''} None."
+        f"FSDP extension is {'NOT' if _user_extensions is not None else ''} None."
     )
     assert flat_param.numel() == loaded_flat_tensor.numel(), (
         f"The loaded local chunk has different numel({loaded_flat_tensor.numel()}) "
@@ -615,9 +611,9 @@ def _sharded_pre_load_state_dict_hook(
         f"The loaded local chunk has different padding({num_to_pad}) "
         f"from the local chunk {flat_param._shard_numel_padded}."
     )
-    state_dict[f"{prefix}{FSDP_PREFIX}{fsdp_file.FLAT_PARAM}"] = loaded_flat_tensor
+    state_dict[f"{prefix}{FSDP_PREFIX}{FLAT_PARAM}"] = loaded_flat_tensor
     if fsdp_state._use_orig_params:
-        fsdp_state._deregister_orig_params()
+        _deregister_orig_params(module, fsdp_state)
 
 
 @no_type_check
