@@ -176,8 +176,6 @@ void memcpy_to_buffer(const VulkanBuffer& src, VulkanBuffer& dst) {
 
 UniformParamsBuffer::UniformParamsBuffer(const UniformParamsBuffer& other)
     : context_p_(other.context_p_), vulkan_buffer_{} {
-  context_p_ = other.context_p_;
-
   if (other.vulkan_buffer_) {
     vulkan_buffer_ = context_p_->adapter_ptr()->vma().create_uniform_buffer(
         other.vulkan_buffer_.mem_size());

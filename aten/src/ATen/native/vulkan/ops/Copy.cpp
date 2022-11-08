@@ -136,6 +136,9 @@ void transfer_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
 void pack_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
   api::Context* const context = api::context();
 
+  // Ensure that src is contiguous in its memory format
+  Tensor src_contig = src.contiguous(src.suggest_memory_format());
+
   // Note that the float data type has been enforced for the storage buffer
   // below. The reason for this is that the nchw_to_image and image_to_nchw
   // shaders which perform the transfer to/from an image texture expect a buffer
@@ -151,9 +154,9 @@ void pack_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
     // buffer as input (note that at::kFloat is used to create the StorageBuffer
     // above).
     if (src.dtype() == at::kHalf) {
-      memcpy_to_mapping(src.to(at::kFloat), mapping);
+      memcpy_to_mapping(src_contig.to(at::kFloat), mapping);
     } else {
-      memcpy_to_mapping(src, mapping);
+      memcpy_to_mapping(src_contig, mapping);
     }
   }
   utils::pack_staging_to_vtensor(staging.buffer(), dst);
@@ -223,7 +226,7 @@ Tensor& copy_(Tensor& dst, const Tensor& src) {
     }
     // CPU -> Vulkan
     else {
-      pack_cpu_to_vulkan(src.contiguous(src.suggest_memory_format()), v_self);
+      pack_cpu_to_vulkan(src, v_self);
     }
   }
   // Vulkan -> X
