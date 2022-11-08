@@ -1657,6 +1657,9 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
     if not IS_SANDCASTLE:
+        should_skip = False
+        skip_msg = ""
+
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
             if len(disable_test_parts) > 1:
@@ -1690,18 +1693,22 @@ def check_if_enable(test: unittest.TestCase):
                         # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
                         platforms = list(filter(lambda p: p in platform_to_conditional, platforms))
 
-                    should_skip = platforms == [] or any([platform_to_conditional[platform] for platform in platforms])
-
-                    if should_skip and not RERUN_DISABLED_TESTS:
+                    if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
+                        should_skip = True
                         skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
                             f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
                             "If you're seeing this on your local machine and would like to enable this test, " \
                             "please make sure CI is not set and you are not using the flag --import-disabled-tests."
-                        raise unittest.SkipTest(skip_msg)
-                    elif not should_skip and RERUN_DISABLED_TESTS:
-                        skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
-                            " disabled tests are run"
-                        raise unittest.SkipTest(skip_msg)
+                        break
+
+        if should_skip and not RERUN_DISABLED_TESTS:
+            # Skip the disabled test when not running under --rerun-disabled-tests verification mode
+            raise unittest.SkipTest(skip_msg)
+
+        if not should_skip and RERUN_DISABLED_TESTS:
+            skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
+                " disabled tests are run"
+            raise unittest.SkipTest(skip_msg)
 
     if TEST_SKIP_FAST:
         if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
