@@ -1,7 +1,6 @@
 #pragma once
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/NumericUtils.h>
-
 namespace at {
 namespace native {
 
@@ -50,12 +49,16 @@ void topk_impl_loop(
       if (largest) {
         std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
           [](const elem_t& x, const elem_t& y) -> bool {
-            return (((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first)) || (x.second < y.second));
+            if ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first)) return true;
+            if ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first)) return false;
+            return x.second < y.second;
           });
       } else {
         std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
           [](const elem_t& x, const elem_t& y) -> bool {
-            return (((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first)) || (x.second < y.second));
+            if ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first)) return true;
+            if ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first)) return false;
+            return x.second < y.second;
           });
       }
     } else {
@@ -63,7 +66,9 @@ void topk_impl_loop(
         if (stable) {
           std::sort(queue.begin(), queue.end(),
           [](const elem_t& x, const elem_t& y) -> bool {
-            return (((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first)) || (x.second < y.second));
+            if ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first)) return true;
+            if ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first)) return false;
+            return x.second < y.second;
           });
         }
         else {
@@ -82,7 +87,9 @@ void topk_impl_loop(
         if (stable) {
           std::sort(queue.begin(), queue.end(),
           [](const elem_t& x, const elem_t& y) -> bool {
-            return (((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first)) || (x.second < y.second));
+            if ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first)) return true;
+            if ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first)) return false;
+            return x.second < y.second;
           });
         }
         else {
