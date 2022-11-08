@@ -169,7 +169,7 @@ def main() -> None:
 
 
     # DEBUG: TO BE REMOVED
-    if args.event_name == "pull_request":
+    if args.event_name != "schedule":
         for config in filtered_test_matrix.get("include", []):
             for mode in SUPPORTED_PERIODICAL_MODES:
                 config[mode] = mode
