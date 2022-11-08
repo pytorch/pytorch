@@ -522,6 +522,21 @@ def replace_and_fuse_for_binary(
     node.replace_all_uses_with(node.args[index_node])
 
 
+def binary_inputs_meta_is_same(binary_node):
+    tensor0_meta = binary_node.args[0].meta.get("tensor_meta")
+    tensor1_meta = binary_node.args[1].meta.get("tensor_meta")
+    if not tensor0_meta or not tensor1_meta:
+        return False
+    if (
+        tensor0_meta.shape != tensor1_meta.shape
+        or tensor0_meta.stride != tensor1_meta.stride
+        or tensor0_meta.dtype != tensor1_meta.dtype
+    ):
+        return False
+
+    return True
+
+
 def fuse_binary(gm: torch.fx.GraphModule):
     modules = dict(gm.named_modules())
     for node in gm.graph.nodes:
@@ -533,15 +548,7 @@ def fuse_binary(gm: torch.fx.GraphModule):
                     node.args[1], torch.fx.Node
                 ):
                     continue
-                tensor0_meta = node.args[0].meta.get("tensor_meta")
-                tensor1_meta = node.args[1].meta.get("tensor_meta")
-                if not tensor0_meta or not tensor1_meta:
-                    continue
-                if (
-                    tensor0_meta.shape != tensor1_meta.shape
-                    or tensor0_meta.stride != tensor1_meta.stride
-                    or tensor0_meta.dtype != tensor1_meta.dtype
-                ):
+                if not binary_inputs_meta_is_same(node):
                     continue
                 attr = binary_attr[node.target]
                 index_list = supported_index_list[attr]
@@ -590,15 +597,7 @@ def fuse_binary_inplace(gm: torch.fx.GraphModule):
                     node.args[1], torch.fx.Node
                 ):
                     continue
-                tensor0_meta = node.args[0].meta.get("tensor_meta")
-                tensor1_meta = node.args[1].meta.get("tensor_meta")
-                if not tensor0_meta or not tensor1_meta:
-                    continue
-                if (
-                    tensor0_meta.shape != tensor1_meta.shape
-                    or tensor0_meta.stride != tensor1_meta.stride
-                    or tensor0_meta.dtype != tensor1_meta.dtype
-                ):
+                if not binary_inputs_meta_is_same(node):
                     continue
                 if check_node_kind(node.args[1], modules, node_kind):
                     if len(node.args[1].users) > 1:
