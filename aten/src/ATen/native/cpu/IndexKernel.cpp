@@ -487,16 +487,13 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
       auto stride0 = (sizeof(scalar_t) == -strides[0]) ? sizeof(scalar_t) : -strides[0];
 
       for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
-
         auto out1 = Vec::loadu(data[1] + i * strides[1]);
-        auto out2 = Vec::loadu(data[1] + (i + Vec::size()) * sizeof(scalar_t));
-
+        auto out2 = Vec::loadu(data[1] + (i + Vec::size()) * strides[1]);
         // permute data: 1234 -> 4321
         out1 = permute_mirror(out1);
         out2 = permute_mirror(out2);
-
         out1.store(data[0] - (i + Vec::size() - 1) * stride0);
-        out2.store(data[0] - (i + 2 * Vec::size() - 1) * sizeof(scalar_t));
+        out2.store(data[0] - (i + 2 * Vec::size() - 1) * stride0);
       }
       if (i < n) {
         for (; i < n; i++) {
@@ -527,7 +524,7 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
         });
     });
   } else {
-    // Special case: horizontal flip with vectorization
+    // Special case: horizontal flip with vectorization and input is contiguous
     // Context: horizontal flip leads to strides[0] < 0 and
     // thus is_contiguous condition is not satisfied and non-vectorized code path is taken
     auto output_strides = iter.strides(0);
