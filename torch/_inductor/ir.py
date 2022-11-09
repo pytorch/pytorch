@@ -2932,7 +2932,11 @@ class FallbackKernel(ExternKernelAlloc):
                         [sympy.Integer(s) for s in output.stride()],
                     ),
                     FallbackKernel(
-                        MultiOutputLayout(output.device),
+                        MultiOutputLayout(
+                            tensor_args[0].get_device()
+                            if tensor_args
+                            else output.device
+                        ),
                         kernel,
                         tensor_args,
                         non_tensor_args,
