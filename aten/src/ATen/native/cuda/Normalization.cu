@@ -468,10 +468,29 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
       save_mean,
       save_invstd);
 
-  // Replace save_mean and save_instd to match cpu behavior
+  c10::MaybeOwned<Tensor> weight = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> running_mean = at::borrow_from_optional_tensor(running_mean_opt);
+  c10::MaybeOwned<Tensor> running_var = at::borrow_from_optional_tensor(running_var_opt);
+  c10::MaybeOwned<Tensor> bias = at::borrow_from_optional_tensor(bias_opt);
+  const bool mixed_type = is_mixed_type(self, *weight, *bias, *running_mean, *running_var);
   if (!train) {
-    save_mean = at::empty({0}, self.options());
-    save_invstd = at::empty({0}, self.options());
+    // Replace save_mean and save_instd to match cpu behavior
+    if (mixed_type) {
+        save_mean = at::empty({0}, self.options().dtype(kFloat));
+        save_invstd = at::empty({0}, self.options().dtype(kFloat));
+    } else {
+        save_mean = at::empty({0}, self.options());
+        save_invstd = at::empty({0}, self.options());
+    }
+  } else {
+    // Update save_mean and save_instd dtype to match cpu behavior
+    if (mixed_type) {
+        save_mean = save_mean.to(at::kFloat);
+        save_invstd = save_invstd.to(at::kFloat);
+    } else {
+        save_mean = save_mean.to(self.scalar_type());
+        save_invstd = save_invstd.to(self.scalar_type());
+    }
   }
   return std::make_tuple(output, save_mean, save_invstd);
 }

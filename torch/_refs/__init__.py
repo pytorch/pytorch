@@ -2936,10 +2936,9 @@ def native_batch_norm(
         unsqueeze_bias = prims.expand_dims(bias, reduction_dims, input.ndim)
         out = out * unsqueeze_weight + unsqueeze_bias
 
-    out = prims.convert_element_type(out, input.dtype)
-    if input.device.type == "cpu":
-        save_mean = prims.convert_element_type(save_mean, input.dtype)
-        save_rstd = prims.convert_element_type(save_rstd, input.dtype)
+    out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
+    save_mean = _maybe_convert_to_dtype(save_mean, input.dtype)  # type: ignore[assignment]
+    save_rstd = _maybe_convert_to_dtype(save_rstd, input.dtype)  # type: ignore[assignment]
     return (out, save_mean, save_rstd)
 
 
