@@ -61,7 +61,12 @@ binary_ops_with_dense_output = list(filter(lambda op: op.name in binary_function
 UNARY_EWISE_CSR_ALLOW_AUTOGRAD = [
     'abs',
     'conj_physical',
+    'deg2rad',
     'neg',
+    'positive',
+    'frac',
+    'nn.functional.relu',
+    'log1p'
 ]
 
 # This should be just an import from test_linalg instead of code duplication
@@ -586,9 +591,6 @@ class TestSparseCompressed(TestCase):
         require_mask = isinstance(op, ReductionOpInfo) and 'masked.' in op.name
         if require_mask and layout in {torch.sparse_bsr, torch.sparse_bsc}:
             self.skipTest(f"{op.name} does not support input with {layout} layout")
-
-        if layout is torch.sparse_bsc:
-            self.skipTest(f"test requires conversion from Strided layout to {layout} layout")
 
         samples = list(op.sample_inputs(device, dtype))
 
@@ -1576,7 +1578,7 @@ class TestSparseCSR(TestCase):
                 return res
 
         def ref_half_bfloat16(c, a, b, alpha=None, beta=None, out=None):
-            res = alpha * (a.to_dense() @ b.to_dense()) + beta * c
+            res = alpha * (a.to_dense().to(torch.float32) @ b.to_dense().to(torch.float32)).to(a.dtype) + beta * c
             if out is not None:
                 out.copy_(res)
                 return out
@@ -2477,6 +2479,9 @@ class TestSparseCSR(TestCase):
             raise ValueError("Expected at least one 2D tensor in samples.")
 
         for sample in samples:
+            # We must skip samples of low dimensionality, we can't covert them to sparsed compressed layouts
+            if sample.input.ndim < 2:
+                continue
             sparse_input = sample.input.to_sparse_csr().requires_grad_(True)
 
             def fn(input):

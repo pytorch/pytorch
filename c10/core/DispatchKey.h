@@ -350,6 +350,7 @@ enum class DispatchKey : uint16_t {
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
   AutocastXPU,
+  AutocastHPU,
   // Naughtily, AutocastCUDA is also being used for XLA.  In the terminal state,
   // it probably should get its own Autocast key
   AutocastCUDA,

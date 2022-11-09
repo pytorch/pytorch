@@ -5,7 +5,6 @@ from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
 import weakref
-
 import torch
 
 # nvFuser imports are conditional on being compiled with CUDA
@@ -43,12 +42,20 @@ ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
-# TODO: Type[torch.SymIntNode], Type[torch.SymFloatNode]
+# TODO: Type[torch.SymInt], Type[torch.SymFloat]
 NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
 # TODO: This needs a lot more type annotations
-# NumberType = Union[bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode]
+# NumberType = Union[bool, int, float, complex, torch.SymInt, torch.SymFloat]
 NumberType = Union[bool, int, float, complex]
-Number = (bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode)
+
+Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat)
+# I don't call it Integral because numbers.Integral includes bool, but IntLike
+# does not
+Dim = int
+IntLike = (int, torch.SymInt)
+FloatLike = (float, torch.SymFloat)
+IntWithoutSymInt = int
+FloatWithoutSymFloat = float
 DeviceLikeType = Union[str, torch.device]
 Tensor = torch.Tensor
 
@@ -129,6 +136,14 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
             msg = (
                 "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
                     a.stride(), b.stride(), idx
+                )
+            )
+            raise RuntimeError(msg)
+
+        if a.storage_offset() != b.storage_offset():
+            msg = (
+                "Storage offset mismatch! Storage offsets are {0} and {1}!".format(
+                    a.storage_offset(), b.storage_offset()
                 )
             )
             raise RuntimeError(msg)
@@ -345,7 +360,7 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
 
     shape = tensors[0].shape
 
-    def _cmp(idx_a, idx_b):
+    def should_swap(idx_a, idx_b):
         for tensor in tensors:
             stride_a = tensor.stride()[idx_a]
             stride_b = tensor.stride()[idx_b]
@@ -363,24 +378,30 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
             if shape[idx_a] > shape[idx_b]:
                 return 1
 
-            # NOTE: this case is missing in the C++ impl
-            if shape[idx_a] < shape[idx_b]:
-                return -1
-
         # Note: this case is hit if all strides are zero,
         # or all strides are equal and all dimensions have the same length
         return 0
 
-    perm = tuple(range(ndim))
-    perm = tuple(sorted(perm, key=cmp_to_key(_cmp), reverse=True))
+    perm = list(reversed(range(ndim)))
+
+    # insertion sort with support for ambiguous comparisons
+    for i in range(1, ndim):
+        dim1 = i
+        for dim0 in reversed(range(i)):
+            comparison = should_swap(perm[dim0], perm[dim1])
+            if comparison > 0:
+                perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
+                dim1 = dim0
+            elif comparison < 0:
+                break
 
     permuted_shape = [-1] * ndim
-    for idx, x in enumerate(perm):
+    for idx, x in enumerate(reversed(perm)):
         permuted_shape[idx] = shape[x]
 
     new_strides = make_contiguous_strides_for(permuted_shape)
     permuted_strides = [-1] * ndim
-    for idx, x in enumerate(perm):
+    for idx, x in enumerate(reversed(perm)):
         permuted_strides[x] = new_strides[idx]
 
     return tuple(permuted_strides)
@@ -426,8 +447,8 @@ def validate_idx(rank: int, idx: int):
     Assumes the index is already canonicalized.
     """
 
-    assert isinstance(idx, int)
-    assert isinstance(rank, int)
+    assert isinstance(idx, Dim)
+    assert isinstance(rank, Dim)
 
     assert idx >= 0 and idx < rank or idx == 0
 
@@ -443,8 +464,8 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
     for the given shape.
     """
 
-    assert isinstance(ex_idx, int)
-    assert isinstance(rank, int)
+    assert isinstance(ex_idx, Dim)
+    assert isinstance(rank, Dim)
     assert ex_idx > 0 and ex_idx <= rank
 
 
@@ -493,7 +514,7 @@ def canonicalize_dims(rank: int, indices: int) -> int:
 
 
 def canonicalize_dims(rank, indices):
-    if isinstance(indices, int):
+    if isinstance(indices, Dim):
         return canonicalize_dim(rank, indices)
 
     return tuple(canonicalize_dim(rank, x) for x in indices)
@@ -790,15 +811,14 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     Computes the corresponding Python type constructor for the
     given dtype.
     """
-    from torch.fx.experimental.symbolic_shapes import sym_float
+    from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
 
     assert isinstance(dtype, torch.dtype)
 
     if dtype is torch.bool:
         return lambda x: bool(x)
     if dtype in _integer_dtypes:
-        # TODO: type error here is real, replace with sym_int
-        return lambda x: int(x)  # type: ignore[arg-type]
+        return sym_int
     if dtype in _float_dtypes:
         return sym_float
     if dtype in _complex_dtypes:
@@ -1099,10 +1119,10 @@ class RETURN_TYPE(Enum):
 
 
 # TODO: when NumberType contains the sym types, can simplify this
-def number_type(x: Union[NumberType, torch.SymIntNode, torch.SymFloatNode]) -> Type:
-    if isinstance(x, torch.SymIntNode):
+def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
+    if isinstance(x, torch.SymInt):
         return int
-    elif isinstance(x, torch.SymFloatNode):
+    elif isinstance(x, torch.SymFloat):
         return float
     else:
         return type(x)
@@ -1433,7 +1453,8 @@ def set_correction(
         correction = 1
     elif correction is None and unbiased is not None:
         correction = 0 if unbiased is False else 1
-    if not isinstance(correction, int):
+    # NB: we don't actually support symint here, but it's harmless to accept
+    if not isinstance(correction, IntLike):
         raise ValueError("correction argument should be integer")
     if correction < 0:
         raise ValueError("correction argument should be non-negative")

@@ -187,6 +187,30 @@ struct type_caster<c10::DispatchKey>
   }
 };
 
+template <>
+struct type_caster<c10::SymInt> {
+ public:
+  PYBIND11_TYPE_CASTER(c10::SymInt, _("SymInt"));
+  bool load(py::handle src, bool);
+
+  static py::handle cast(
+      c10::SymInt si,
+      return_value_policy /* policy */,
+      handle /* parent */);
+};
+
+template <>
+struct type_caster<c10::SymFloat> {
+ public:
+  PYBIND11_TYPE_CASTER(c10::SymFloat, _("SymFloat"));
+  bool load(py::handle src, bool);
+
+  static py::handle cast(
+      c10::SymFloat si,
+      return_value_policy /* policy */,
+      handle /* parent */);
+};
+
 // Pybind11 bindings for our optional and variant types.
 // http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
 template <typename T>

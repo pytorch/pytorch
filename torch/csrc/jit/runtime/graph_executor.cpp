@@ -133,7 +133,7 @@ struct CaptureList {
       auto tensors = val.toTensorList();
       sizes_.push_back(tensors.size());
 
-      for (const at::Tensor tensor : tensors) {
+      for (const auto& tensor : tensors) {
         captureTensor(tensor, is_output);
       }
     } else {
@@ -326,7 +326,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
       input_tensor_lists_.insert({index_, value.toTensorList().size()});
-      for (const at::Tensor tensor : value.toTensorList()) {
+      for (const at::Tensor& tensor : value.toTensorList()) {
         addOutputForTensor(tensor);
         index_++;
       }
@@ -357,7 +357,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     if (v.isTensorList()) {
       auto tensors = v.toTensorList();
       input_instructions_.pushTensorList(tensors.size());
-      for (const at::Tensor tensor : tensors) {
+      for (const at::Tensor& tensor : tensors) {
         addInputVariable(tensor);
       }
     } else if (v.isTensor()) {
