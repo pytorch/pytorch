@@ -21,20 +21,18 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: '3.8'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/.github/requirements-gha-cache.txt
 
-      - name: Install lintrunner
-        uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          command: pip install lintrunner==0.9.2
+      - name: Install requirements
+        run: |
+          pip install -r .github/requirements-gha-cache.txt --user
 
       - name: Initialize lint dependencies
         run: lintrunner init

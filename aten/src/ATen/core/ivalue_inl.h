@@ -219,7 +219,7 @@ inline at::Generator IValue::toGenerator() const& {
 inline c10::SymInt IValue::toSymInt() const {
   AT_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
   if (isSymInt()) {
-    return c10::SymInt::toSymInt(toIntrusivePtr<c10::SymIntNodeImpl>());
+    return c10::SymInt(toIntrusivePtr<c10::SymNodeImpl>());
   } else {
     return c10::SymInt(payload.u.as_int);
   }
@@ -228,7 +228,7 @@ inline c10::SymInt IValue::toSymInt() const {
 inline c10::SymFloat IValue::toSymFloat() const {
   AT_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
   if (isSymFloat()) {
-    return c10::SymFloat::toSymFloat(toIntrusivePtr<c10::SymFloatNodeImpl>());
+    return c10::SymFloat(toIntrusivePtr<c10::SymNodeImpl>());
   } else {
     return c10::SymFloat(payload.u.as_double);
   }
@@ -2002,11 +2002,11 @@ inline IValue::IValue(c10::impl::GenericList v)
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.impl_.release());
 }
 
-template <class T, IValue::enable_if_ivalue_constructible<T>>
+template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(c10::List<T>&& v) : IValue(impl::toList<T>(std::move(v))) {}
-template <class T, IValue::enable_if_ivalue_constructible<T>>
+template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(const c10::List<T>& v) : IValue(impl::toList<T>(v)) {}
-template <class T, IValue::enable_if_ivalue_constructible<T>>
+template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
@@ -2014,7 +2014,33 @@ inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
-template <class T, IValue::enable_if_ivalue_constructible<T>>
+template <class T, IValue::enable_if_symint<T>>
+inline IValue::IValue(at::ArrayRef<T> v) : IValue() {
+  auto vi = c10::asIntArrayRefSlowOpt(v);
+  if (vi.has_value()) {
+    // This list is entirely integers; ensure it is typed as
+    // an IntList so toIntList works
+    *this = IValue(*vi);
+  } else {
+    // This list has SymInts; type it as a SymInt
+    *this = IValue(impl::toList<c10::SymInt>(c10::List<c10::SymInt>()));
+    auto list = to<c10::List<c10::SymInt>>();
+    list.reserve(v.size());
+    for (const auto& e : v) {
+      list.push_back(e);
+    }
+  }
+}
+template <class T, IValue::enable_if_symint<T>>
+inline IValue::IValue(at::OptionalArrayRef<T> mb_v) : IValue() {
+  if (!mb_v.has_value()) return;
+  *this = IValue(*mb_v);
+}
+template <class T, IValue::enable_if_symint<T>>
+inline IValue::IValue(const std::vector<T>& v) : IValue() {
+  *this = IValue(at::ArrayRef<T>(v));
+}
+template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
@@ -2022,7 +2048,7 @@ inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
-template <class T, IValue::enable_if_ivalue_constructible<T>>
+template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(c10::OptionalArrayRef<T> v) : IValue() {
   if (v.has_value()) {
     *this = IValue(std::move(*v));

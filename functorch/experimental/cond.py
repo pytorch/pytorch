@@ -4,7 +4,7 @@ from torch._ops import PyOperator
 from torch.utils._pytree import tree_flatten
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, get_proxy_slot
 import torch.utils._pytree as pytree
-from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode
+from torch.utils._python_dispatch import _get_current_dispatch_mode, _pop_mode_temporarily
 from torch.fx.experimental.proxy_tensor import track_tensor_tree
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
@@ -13,25 +13,13 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 We're going to define a `cond` operation.
 In order to do this, we need implementations for each of the dispatch keys.
 """
-from contextlib import contextmanager
-
 cond = PyOperator('cond')
-
-
-# TODO(voz): Move out somewhere else once other py dispatched ops need it
-@contextmanager
-def suspend_mode(mode):
-    assert(mode is not None), "Cannot suspend None mode"
-    assert(isinstance(mode, TorchDispatchMode)), f"Unexpected mode type {mode.__class__}"
-    torch._C._set_torch_dispatch_mode(None)
-    try:
-        yield
-    finally:
-        torch._C._set_torch_dispatch_mode(mode)
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     def _unwrap_proxy(e):
+        if not isinstance(e, (torch.Tensor, torch.SymInt, torch.SymFloat)):
+            return e
         return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
 
     assert isinstance(operands, list), "Cond operands must be a list of tensors"
@@ -57,7 +45,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     for i in range(0, len(flat_true_outs)):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
-        assert true_out.meta == false_out.meta
+        assert true_out.meta['tensor_meta'] == false_out.meta['tensor_meta']
 
     # There are probably better ways - I know that create_arg has some self incrementing name
     # magic to it, but since we explicitly have to get the name for register_module,
@@ -85,10 +73,14 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
                                                name="conditional")
 
-    if pred:
-        out = true_fn(*operands)
-    else:
-        out = false_fn(*operands)
+    # At this point, we're *guaranteed* that whether an output came from the
+    # true or false branch is indistinguishable. So, as this is just for tracing
+    # purposes, choose the true branch.
+
+    # TODO: Uhh.... it shouldn't matter, but changing this to true_fn results in
+    # a FakeTensorMode error :
+    # `Current active mode <class 'torch._subclasses.fake_tensor.FakeTensorMode'> not registered`
+    out = false_fn(*operands)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
@@ -118,7 +110,7 @@ def cond_autograd(pred, true_fn, false_fn, *operands):
 def inner(pred, true_fn, false_fn, operands):
     mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
-    with suspend_mode(mode):
+    with _pop_mode_temporarily() as mode:
         res = trace_cond(mode, cond, pred, true_fn, false_fn, operands)
     return res
 

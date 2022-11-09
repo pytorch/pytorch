@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/ivalue.h>
 
 struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {

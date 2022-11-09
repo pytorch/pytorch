@@ -21,10 +21,11 @@ import operator
 
 from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporarily, _get_current_dispatch_mode
 from torch._subclasses import FakeTensor
-from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt, PySymFloat
+from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
+from torch import SymInt, SymFloat
 
-__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "get_proxy", "has_proxy"]
+__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "get_proxy", "has_proxy", "py_sym_types"]
 aten = torch.ops.aten
 prim = torch.ops.prim
 
@@ -32,6 +33,9 @@ CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
 
 CONSTANT_NUMEL_LIMIT = 1
 
+# We currently convert all SymInt to proxies before we use them.
+# This could plausibly be handled at the Dynamo level.
+pytree._register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
 
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""
@@ -52,19 +56,27 @@ def decompose(decomposition_table):
 proxy_slot = object()
 no_default = object()
 
+py_sym_types = (SymInt, SymFloat)
+def is_sym_node(node):
+    assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
+    return "val" in node.meta and isinstance(node.meta['val'], py_sym_types)
+
 def set_proxy_slot(obj, tracer, proxy):
-    d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())
+    assert isinstance(obj, (torch.Tensor, SymNode)), type(obj)
+    d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())  # type: ignore[call-overload]
     assert isinstance(d, weakref.WeakKeyDictionary)
     d[tracer] = proxy
 
 def has_proxy_slot(obj, tracer):
+    assert isinstance(obj, (torch.Tensor, SymNode)), type(obj)
     return get_proxy_slot(obj, tracer, False, lambda _: True)
 
 # the default argument is what to return if the slot is not set.
 # the transform argument is handy if you need to extract a subfield from
 # the successfully looked up result (but NOT the default.)
 def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
-    d = obj.__dict__.get(proxy_slot)
+    assert isinstance(obj, (torch.Tensor, SymNode)), type(obj)
+    d = obj.__dict__.get(proxy_slot)  # type: ignore[call-overload]
     if not d:
         if default is no_default:
             raise KeyError(f"{obj} is not tracked with proxy for {tracer}")
@@ -98,8 +110,11 @@ def set_meta(proxy, val):
     if isinstance(val, FakeTensor):
         proxy.node.meta['val'] = val
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
-    elif isinstance(val, PySymInt):
+    elif isinstance(val, py_sym_types):
         proxy.node.meta['val'] = val
+    elif isinstance(val, list) or isinstance(val, tuple):
+        if all(isinstance(x, FakeTensor) for x in val):
+            proxy.node.meta['val'] = val
     elif isinstance(val, torch.Tensor):
         if not val.is_sparse:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
@@ -116,10 +131,8 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     def try_set_proxy_slot(outer_s, proxy_callable, *args):
         assert callable(proxy_callable)
         if isinstance(outer_s, SymInt):
-            inner_s = outer_s.get_pyobj()
-            assert isinstance(inner_s, PySymInt)
-
-            set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, inner_s, *args))
+            inner_s = outer_s.node
+            set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, outer_s, *args))
 
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
@@ -156,6 +169,8 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
     # object may be a proxy that represents a tuple, we may need to
     # explicitly unwrap the proxy by simulating the flattening operations.
     if isinstance(inner_res, tuple) or isinstance(inner_res, list):
+        if isinstance(proxy_res, fx.Proxy):
+            set_meta(proxy_res, inner_res)
         for idx, e in enumerate(inner_res):
             wrap_with_proxy(e, proxy_res[idx], get_constant(idx))
     elif isinstance(inner_res, torch.Tensor):
@@ -182,7 +197,7 @@ class _ProxyTensor:
 
 def fetch_sym_proxy(tracer):
     def inner(e):
-        n = e.get_pyobj()
+        n = e.node
         if n.constant is not None:
             return n.constant
         else:
@@ -238,7 +253,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
             with maybe_disable_fake_tensor_mode():
                 return func(*const_args, **const_kwargs)
         raise RuntimeError(
-            "It appears that you're trying to get value out of a tracing tensor - erroring out! "
+            f"It appears that you're trying to get value out of a tracing tensor with {func} - erroring out! "
             "It's likely that this is caused by data-dependent control flow or similar."
         )
     proxy_args, proxy_kwargs = pytree.tree_map_only(
@@ -384,8 +399,8 @@ class PythonKeyTracer(Tracer):
 
             return self.create_node('get_attr', qualname, (), {})
         elif isinstance(a, (SymInt, SymFloat)):
-            assert a.get_pyobj().constant is not None
-            return a.get_pyobj().constant
+            assert a.node.constant is not None
+            return a.node.constant
         return super().create_arg(a)
 
 
@@ -409,11 +424,17 @@ def wrap_key(f, tensors, tracer):
         track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
         out = f(*tensors)
-        return pytree.tree_map_only(
+        out = pytree.tree_map_only(
             torch.Tensor,
             lambda t: get_proxy_slot(t, tracer, t, lambda x: x.proxy),
             out
         )
+        out = pytree.tree_map_only(
+            (SymInt, SymFloat),
+            lambda t: get_proxy_slot(t.node, tracer)(),
+            out
+        )
+        return out
 
     return wrapped
 
@@ -457,10 +478,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         return out
 
 
-SymInt = torch.SymIntNode
-SymFloat = torch.SymFloatNode
-
-
 class ProxySymDispatchMode(SymDispatchMode):
     def __init__(self, tracer):
         super().__init__()
@@ -479,10 +496,9 @@ class ProxySymDispatchMode(SymDispatchMode):
         finally:
             self.enable_tracing = old
 
-    def _compute_proxy(self, func, args, out):
+    def _compute_proxy(self, func, args, out: Union[SymInt, SymFloat]):
         n_args = tuple(
-            get_proxy_slot(a, self.tracer)().node if a.constant is None else a.constant
-            if isinstance(a, (PySymInt, PySymFloat)) else a
+            get_proxy_slot(a.node, self.tracer)().node if isinstance(a, py_sym_types) else a
             for a in args
         )
 
@@ -498,10 +514,11 @@ class ProxySymDispatchMode(SymDispatchMode):
             return func(*args, **kwargs)
 
         # Peephole optimize multiply by one
+        # NB: be careful not to trigger guards here!
         if func == operator.mul:
-            if isinstance(args[1], PySymInt) and args[1].constant == 1:
+            if isinstance(args[1], int) and args[1] == 1:
                 return args[0]
-            elif isinstance(args[0], PySymInt) and args[0].constant == 1:
+            elif isinstance(args[0], int) and args[0] == 1:
                 return args[1]
 
         # For speed, we assume there are no nested data structures
@@ -509,11 +526,11 @@ class ProxySymDispatchMode(SymDispatchMode):
         # We also assume there are no keyword arguments.
         assert not kwargs
         out = func(*args, **kwargs)
-        assert isinstance(out, (PySymInt, PySymFloat)), f"{func}(*{args}, **{kwargs}) = {out}"
+        assert isinstance(out, py_sym_types), f"{func}(*{args}, **{kwargs}) = {out}"
 
         # Delays tracing out the proxies on this op until we actually need it
         p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)
-        set_proxy_slot(out, self.tracer, p_out_thunk)
+        set_proxy_slot(out.node, self.tracer, p_out_thunk)
         return out
 
 
@@ -595,7 +612,8 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         elif tracing_mode == "fake":
             fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
         elif tracing_mode == "symbolic":
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            shape_env = ShapeEnv()
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env)
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
@@ -605,25 +623,18 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
         proxy_mode = ProxyTorchDispatchMode(fx_tracer)
 
-        def wrap_fake_concrete(x):
+        def wrap_fake(x):
             if isinstance(x, torch.Tensor):
                 return fake_tensor_mode.from_tensor(x)  # type: ignore[attr-defined]
 
             return x
 
-        shape_env = ShapeEnv()
         sym_mode = proxy_mode.sym_mode
-
-        # todo: Figure out a more informative name for symints
-        def wrap_fake_symbolic(x):
-            if isinstance(x, torch.Tensor):
-                return fake_tensor_mode.from_tensor(x, shape_env=shape_env)
-            return x
 
         wrap_fn_map = {
             "real": lambda x: x,
-            "fake": wrap_fake_concrete,
-            "symbolic": wrap_fake_symbolic,
+            "fake": wrap_fake,
+            "symbolic": wrap_fake,
         }
         args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
@@ -641,7 +652,8 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
-        t.shape_env = shape_env  # type: ignore[assignment]
+        if tracing_mode == "symbolic":
+            t.shape_env = shape_env  # type: ignore[assignment]
         return t
 
     return wrapped

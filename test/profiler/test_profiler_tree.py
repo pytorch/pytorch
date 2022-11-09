@@ -109,7 +109,7 @@ class ProfilerTree:
 
             for node in nodes:
                 cls.validate_node(node)
-                name = cls.fmt_name(node.name())
+                name = cls.fmt_name(node.name)
                 prune_level = PRUNE_FUNCTIONS.get(name.strip(), None)
                 if prune_level is None:
                     out.append((depth, name))
@@ -138,11 +138,6 @@ class ProfilerTree:
 
     @staticmethod
     def fmt_name(name: str) -> str:
-        # torch::autograd::Node relies on c10::demangle to generate names, and
-        # Windows demangles to include `struct` in the name.
-        if IS_WINDOWS:
-            name = name.replace('struct torch::autograd::AccumulateGrad', 'torch::autograd::AccumulateGrad')
-
         match = re.match(r"^(.*)\.py\(([0-9]+)\): (.*)$", name)
         if match:
             filename, _, fn = match.groups()
@@ -317,34 +312,18 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            aten::zeros
-              aten::empty
-              aten::zero_
             Top level Annotation
-              aten::empty
-              aten::zeros
-                aten::empty
-                aten::zero_
               First Annotation
-                aten::empty
                 aten::ones
                   aten::empty
                   aten::fill_
-              aten::zeros
-                aten::empty
-                aten::zero_
               Second Annotation
-                aten::empty
                 aten::add
                   aten::to
                     aten::_to_copy
                       aten::empty_strided
                       aten::copy_
-                aten::zeros
-                  aten::empty
-                  aten::zero_
                 Third Annotation
-                  aten::empty
                   aten::ones_like
                     aten::empty_like
                       aten::empty_strided
