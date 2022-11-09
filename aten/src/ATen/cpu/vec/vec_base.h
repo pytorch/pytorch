@@ -988,4 +988,16 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
   }
 }
 
+template <typename T>
+inline Vectorized<T> permute_mirror(const Vectorized<T> & data) {
+  static constexpr int size = Vectorized<T>::size();
+  T output[size];
+  T buffer[size];
+  data.store(static_cast<void*>(buffer));
+  for (const auto i : c10::irange(size)) {
+    output[i] = buffer[size - i - 1];
+  }
+  return Vectorized<T>::loadu(static_cast<void*>(output));
+}
+
 }}}

@@ -457,6 +457,67 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
     });
 }
 
+
+template <typename scalar_t>
+void cpu_hflip_vec(at::TensorIterator& iter) {
+
+  auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
+
+    static constexpr int ntensors = 3;
+    std::array<char*, ntensors> data_arr;
+    std::copy_n(base, ntensors, data_arr.data());
+    const int64_t *outer_strides = &strides[ntensors];
+
+    using Vec = Vectorized<scalar_t>;
+
+    for (const auto j C10_UNUSED : c10::irange(size1)) {
+
+      // vectorized loop with negative stride for output
+      char** C10_RESTRICT data_ = data_arr.data();
+      int64_t n = size0;
+
+      char* C10_RESTRICT data[ntensors];
+      for (const auto arg : c10::irange(ntensors)) {
+        data[arg] = data_[arg];
+      }
+
+      int64_t i = 0;
+
+      // stride[0] is negative
+      auto stride0 = (sizeof(scalar_t) == -strides[0]) ? sizeof(scalar_t) : -strides[0];
+
+      for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
+
+        auto out1 = Vec::loadu(data[1] + i * strides[1]);
+        auto out2 = Vec::loadu(data[1] + (i + Vec::size()) * sizeof(scalar_t));
+
+        // permute data: 1234 -> 4321
+        out1 = permute_mirror(out1);
+        out2 = permute_mirror(out2);
+
+        out1.store(data[0] - (i + Vec::size() - 1) * stride0);
+        out2.store(data[0] - (i + 2 * Vec::size() - 1) * sizeof(scalar_t));
+      }
+      if (i < n) {
+        for (; i < n; i++) {
+          scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride0);
+          *out_ptr = *(scalar_t *)(data[1] + i * strides[1]);
+        }
+      }
+
+      // advance:
+      for (const auto arg : c10::irange(data_arr.size())) {
+        data_arr[arg] += outer_strides[arg];
+      }
+    }
+  };
+
+  int64_t grain_size = at::internal::GRAIN_SIZE;
+  iter.for_each(loop2d, grain_size);
+  iter.cast_outputs();
+}
+
+
 void flip_kernel(TensorIterator& iter, const bool quantized) {
   if (quantized) {
     AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "flip_quantized_cpu",
@@ -466,15 +527,29 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
         });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
-        [&iter] { cpu_kernel_vec(iter,
-          [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {
-            return a;
-        },
-          [](Vectorized<scalar_t> a, Vectorized<scalar_t> /*dummy input*/) -> Vectorized<scalar_t> {
-            return a;
-        });
-    });
+    // Special case: horizontal flip with vectorization
+    // Context: horizontal flip leads to strides[0] < 0 and
+    // thus is_contiguous condition is not satisfied and non-vectorized code path is taken
+    auto output_strides = iter.strides(0);
+    auto input_strides = iter.strides(1);
+    if (iter.ndim() > 1 && output_strides[0] < 0 && input_strides[0] == iter.element_size(1)) {
+
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
+        [&iter] {
+          cpu_hflip_vec<scalar_t>(iter);
+      });
+
+    } else {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
+          [&iter] { cpu_kernel_vec(iter,
+            [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {
+              return a;
+          },
+            [](Vectorized<scalar_t> a, Vectorized<scalar_t> /*dummy input*/) -> Vectorized<scalar_t> {
+              return a;
+          });
+      });
+    }
   }
 }
 
