@@ -4,7 +4,7 @@ from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 
-__all__ = []
+__all__: List[str] = []
 
 
 def _shards_get_overlap_region_wrt_saved_tensor(

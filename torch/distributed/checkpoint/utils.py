@@ -20,7 +20,7 @@ from .metadata import (
     MetadataIndex,
 )
 
-__all__ = []
+__all__: List[str]  = []
 
 T = TypeVar("T")
 R = TypeVar("R")
