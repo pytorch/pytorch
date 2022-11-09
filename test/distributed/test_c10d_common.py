@@ -1466,7 +1466,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         # multi tensor collectives
         if collective == dist.barrier:
             collective()
-        elif collective == dist.all_gather:
+        elif collective in (dist.all_gather, dist.gather):
             collective([tensor], tensor, *args)
         elif collective == dist.scatter:
             collective(tensor, [tensor], *args)
