@@ -32,7 +32,7 @@ import os
 
 @lru_cache(None)
 def get_nvprim_dump_nvtx():
-  return os.getenv("PYTORCH_NVFUSER_DUMP_NVTX")
+    return os.getenv("PYTORCH_NVFUSER_DUMP_NVTX")
 
 DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
     {
