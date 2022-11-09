@@ -321,7 +321,7 @@ def _broadcast_shapes(*_shapes):
     common_shape = [
         1,
     ] * reduce(max, (len(shape) for shape in shapes))
-    for shape in shapes:
+    for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
             if common_shape[idx] == 1:
                 if shape[idx] < 0:
@@ -332,9 +332,9 @@ def _broadcast_shapes(*_shapes):
             elif shape[idx] != 1:
                 if common_shape[idx] != shape[idx]:
                     raise RuntimeError(
-                        "Attempting to broadcast a dimension of length ",
-                        str(shape[idx]),
-                        "!",
+                        f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
+                        f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
+                        f"should be broadcastable to {common_shape}"
                     )
 
     return common_shape
@@ -4453,6 +4453,7 @@ def eye(
     # result.requires_grad_(requires_grad)
 
 
+@register_decomposition(torch.ops.aten.full)
 @out_wrapper()
 def full(
     shape: ShapeType,
