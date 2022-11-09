@@ -444,6 +444,8 @@ enum class DispatchKey : uint16_t {
   Autograd,
   CompositeImplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
+  CompositeImplicitBatched, // registered at
+  // build/aten/src/ATen/RegisterCompositeImplicitBatched.cpp
   CompositeImplicitAutogradNestedTensor, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutogradNestedTensor.cpp
   CompositeExplicitAutograd, // registered at
