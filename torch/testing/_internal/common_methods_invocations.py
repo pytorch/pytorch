@@ -1358,8 +1358,7 @@ def sample_inputs_empty(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(case, device=device, dtype=dtype, requires_grad=requires_grad)
 
 def sample_inputs_scalar_tensor(op, device, dtype, requires_grad, **kwargs):
-    # only ints >= 0 are allowed for both arguments, unless m is omitted
-    vals = (-5, 0, 1, torch.tensor(2))
+    vals = (-5, 0, 1, torch.tensor(2, device=device))
 
     for item in vals:
         _kwargs = {'device': device, 'dtype': dtype, 'requires_grad': requires_grad}
@@ -14455,9 +14454,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-               # TODO: same as this?
-               # https://github.com/pytorch/pytorch/issues/81774
-               # also see: arange, new_full
                # fails to match any schemas despite working in the interpreter
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
                # fails to match any schemas despite working in the interpreter
@@ -14468,6 +14464,12 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # RuntimeError: It appears that you're trying to get value out of a tracing tensor with aten._local_scalar_dense.default -
+               # erroring out! It's likely that this is caused by data-dependent control flow or similar.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_exhaustive'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+               # Issue: https://github.com/pytorch/pytorch/issues/88738
+               DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
            )),
     OpInfo('new_full',
            op=lambda x, *args, **kwargs: x.new_full(*args, **kwargs),
@@ -17899,6 +17901,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.diag_embed",
         torch_opinfo_name="diag_embed",
+        supports_out=True,
         supports_nvfuser=False,
     ),
     PythonRefInfo(
