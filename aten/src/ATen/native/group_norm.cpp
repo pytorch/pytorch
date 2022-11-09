@@ -130,7 +130,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
         c10::nullopt /* layout */,
         c10::nullopt /* device */,
         c10::nullopt /* pin_memory */,
-        at::MemoryFormat::Contiguous);
+        X.suggest_memory_format());
   }
   if (grad_input_mask[1]) {
     dgamma = at::native::empty_like(
