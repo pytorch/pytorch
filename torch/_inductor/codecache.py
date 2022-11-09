@@ -154,7 +154,7 @@ class VecISA(object):
     _dtype_nelements: Dict[torch.dtype, int]
 
     # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
-    # Hence, TorchInductor would depend on Slee* to accelerate mathematical functions
+    # Hence, TorchInductor would depend on Sleef* to accelerate mathematical functions
     # like exp, pow, sin, cos and etc.
     # But PyTorch and TorchInductor might use different compilers to build code. If
     # PyTorch uses gcc-7/g++-7 to build the release package, the libtorch_cpu.so
@@ -204,21 +204,15 @@ int main() {
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
-            output_path = input_path[:-3] + "isa_chk"
+            output_path = input_path[:-3] + "so"
             build_cmd = cpp_compile_command(
-                input_path, output_path, warning_all=False, shared=False, vec_isa=self
+                input_path, output_path, warning_all=False, vec_isa=self
             ).split(" ")
             try:
                 # Check build result
                 subprocess.check_output(build_cmd, stderr=subprocess.STDOUT)
-
-                env = dict(os.environ)
-                lpaths = cpp_extension.library_paths() + [
-                    sysconfig.get_config_var("LIBDIR")
-                ]
-                env["LD_LIBRARY_PATH"] = ":".join(lpaths)
-                # Check dry run result
-                subprocess.check_call(build_cmd, stderr=subprocess.STDOUT, env=env)
+                so_handle = cdll.LoadLibrary(output_path)
+                del so_handle
             except Exception as e:
                 return False
 

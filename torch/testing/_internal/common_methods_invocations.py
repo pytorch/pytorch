@@ -4296,29 +4296,109 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), rep_dim)
 
 
-def sample_inputs_narrow_copy(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, *, is_narrow, **kwargs):
     shapes_and_args = (
-        ((S, S, S), (1, 2, 2)),
-        ((S, S, S), (-1, 2, 2)),
-        ((S, S, S), (1, 0, 0)),
-        ((S, S, S), (-1, 0, 0)),
-        ((S, S, S), (2, 1, 2)),
+        ((S, S, S), 1, 2, 2),
+        ((S, S, S), -1, 2, 2),
+        ((S, S, S), 1, 0, 0),
+        ((S, S, S), -1, 0, 0),
+        ((S, S, S), 2, 1, 2),
     )
 
-    for shape, args in shapes_and_args:
+    for shape, dim, start, length in shapes_and_args:
         tensor = make_tensor(shape, dtype=dtype, device=device, low=None, high=None,
                              requires_grad=requires_grad)
-        yield SampleInput(tensor, args=args)
+        yield SampleInput(tensor, dim, start, length)
+        # narrow also accepts the start argument being a Tensor
+        if is_narrow:
+            yield SampleInput(tensor, dim, torch.tensor(start), length)
 
+def reference_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, *, is_narrow, **kwargs):
+    yield from sample_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, is_narrow=is_narrow, **kwargs)
 
-def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
-    '''
-    sample_inputs_narrow accepts the same inputs as narrow_copy, in addition
-    narrow also accepts `start` argument to be a Tensor.
-    '''
-    for sample in sample_inputs_narrow_copy(op_info, device, dtype, requires_grad, **kwargs):
-        yield sample
-        yield SampleInput(sample.input, args=(sample.args[0], torch.tensor(sample.args[1]), sample.args[2]))
+    shapes_and_args = (
+        # 1-dim
+        ((M,), 0, 0, 0),    # 0 elems from the left
+        ((M,), -1, -1, 0),  # 0 elems from the right
+        ((M,), 0, 5, 3),    # 3 elems from the left
+        ((M,), 0, -5, 2),   # 2 elems from the right
+        ((M,), -1, 0, M),   # M elems from the left
+        ((M,), 0, -M, M),   # M elems from the right
+
+        # 2-dim
+        ((M, S), 1, 0, 0),    # dim 1, 0 elems from the left
+        ((S, M), -2, -1, 0),  # dim 0, 0 elems from the right
+        ((L, S), 1, 2, 3),    # dim 1, 3 elems from the left
+        ((L, S), -1, 3, 2),   # dim 1, 2 elems from the left
+        ((M, L), 0, 0, M),    # dim 0, M elems from the left
+        ((M, L), -1, -L, L),  # dim 1, L elems from the right
+
+        # 3-dim
+        ((L, M, S), 2, 0, 0),    # dim 2, 0 elems from the left
+        ((M, S, L), -1, -1, 0),  # dim 2, 0 elems from the right
+        ((S, L, M), 2, 0, M),    # dim 2, M elems from the left
+        ((L, S, M), -1, -M, M),  # dim 2, M elems from the right
+        ((S, L, M), 1, 0, 0),    # dim 1, 0 elems from the left
+        ((S, L, M), 0, 2, 1),    # dim 0, 1 elem from the left
+        ((M, S, M), -1, -5, 4),  # dim 2, 4 elems from the right
+    )
+
+    for shape, dim, start, length in shapes_and_args:
+        tensor = make_tensor(shape, dtype=dtype, device=device, low=None, high=None,
+                             requires_grad=requires_grad)
+        yield SampleInput(tensor, dim, start, length)
+        # narrow also accepts the start argument being a Tensor
+        if is_narrow:
+            yield SampleInput(tensor, dim, torch.tensor(start), length)
+
+def error_inputs_narrow_narrow_copy(op_info, device, *, is_narrow):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # 0-dim
+    yield ErrorInput(SampleInput(make_arg(()), 0, 0, 1),
+                     error_type=RuntimeError,
+                     error_regex=r"narrow\(\) cannot be applied to a 0-dim tensor\.")
+
+    # out of bounds dim
+    yield ErrorInput(SampleInput(make_arg((M, S, L)), 3, 0, 0),
+                     error_type=IndexError,
+                     error_regex=r"Dimension out of range \(expected to be in range of \[-3, 2\], but got 3\)")
+    # out of bounds dim (negative)
+    yield ErrorInput(SampleInput(make_arg((L, S, M)), -4, 0, 0),
+                     error_type=IndexError,
+                     error_regex=r"Dimension out of range \(expected to be in range of \[-3, 2\], but got -4\)")
+
+    # out of bounds start
+    yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, M + 1, 0),
+                     error_type=IndexError,
+                     error_regex=r"Dimension out of range \(expected to be in range of \[-10, 9\], but got 11\)")
+    # out of bounds start (negative)
+    yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, -M - 1, 0),
+                     error_type=IndexError,
+                     error_regex=r"Dimension out of range \(expected to be in range of \[-10, 9\], but got -11\)")
+
+    # out of bounds length
+    yield ErrorInput(SampleInput(make_arg((S, L, M)), 2, 0, M + 1),
+                     error_type=RuntimeError,
+                     error_regex=r"start \(0\) \+ length \(11\) exceeds dimension size \(10\)\.")
+    # out of bounds length (negative)
+    yield ErrorInput(SampleInput(make_arg((M,)), 0, 0, -1),
+                     error_type=RuntimeError,
+                     error_regex=r"narrow\(\): length must be non-negative\.")
+
+    # Test Tensor overload that was added for XLA. Start must be an 0-dim
+    # integral Tensor. narrow_copy doesn't have this overload.
+    # https://github.com/pytorch/pytorch/issues/31558
+    if is_narrow:
+        # *1-dim* integral Tensor
+        yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, make_arg(S, dtype=torch.int), 2),
+                         error_type=RuntimeError,
+                         error_regex=r"start must be an 0-dim integral Tensor\.")
+
+        # 0-dim *bool* Tensor (bools are not allowed)
+        yield ErrorInput(SampleInput(make_arg((L, M, S)), -3, make_arg((), dtype=torch.bool), 3),
+                         error_type=RuntimeError,
+                         error_regex=r"start must be an 0-dim integral Tensor\.")
 
 
 def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
@@ -6890,6 +6970,23 @@ def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwa
     for input, target, var, kwargs in gen_shape_kwargs():
         yield SampleInput(input, args=(target, var, ), kwargs=kwargs)
 
+def error_inputs_gaussian_nll_loss(op_info, device, **kwargs):
+    _make = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # invalid reduction value
+    yield ErrorInput(SampleInput(_make(10, 2, 3), _make(10, 2, 3), _make((10, 2, 3), low=0), reduction="abc"),
+                     error_type=ValueError, error_regex="abc is not valid")
+
+    # var is of incorrect shape
+    yield ErrorInput(SampleInput(_make(10, 2, 3), _make(10, 2, 3), _make((10, 2, 2), low=0)),
+                     error_type=ValueError, error_regex="var is of incorrect size")
+
+    # target is of incorrect shape
+    yield ErrorInput(SampleInput(_make(10, 2, 3), _make(10, 2, 2), _make((10, 2, 3), low=0)),
+                     error_type=RuntimeError,
+                     error_regex=(r"The size of tensor a \(3\) must match the size of tensor b \(2\) "
+                                  r"at non-singleton dimension 2"))
+
 def _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -9055,6 +9152,11 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
+                   supports_sparse=True,
+                   supports_sparse_csr=True,
+                   supports_sparse_csc=True,
+                   supports_sparse_bsr=True,
+                   supports_sparse_bsc=True,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/51283#issuecomment-770614273
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
@@ -9193,6 +9295,9 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_diag),
     OpInfo('diag_embed',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           # TODO: this is very questionable, because we do have
+           # diag_embed.out but it's not bound to Python somehow
+           # https://github.com/pytorch/pytorch/issues/88598
            supports_out=False,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -9319,6 +9424,11 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
+                   supports_sparse=True,
+                   supports_sparse_csr=True,
+                   supports_sparse_csc=True,
+                   supports_sparse_bsr=True,
+                   supports_sparse_bsc=True,
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=(torch.bfloat16, torch.float16, torch.float32, torch.float64)),
@@ -9528,10 +9638,6 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
-                   skips=(
-                       DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
-                                    'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                   ),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -10408,12 +10514,8 @@ op_db: List[OpInfo] = [
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_as_strided_scatter,
            skips=(
-               DecorateInfo(unittest.skip('Works only for CPU complex64'), 'TestMathBits', 'test_conj_view'),
-               DecorateInfo(unittest.skip('Works for float64, fails for everything else'), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip('Works for int64, fails for everything else'), 'TestCommon', 'test_noncontiguous_samples'),  # noqa: B950
                DecorateInfo(unittest.skip('Fails in most cases, passes on LAZY for some reason'), 'TestCommon', 'test_variant_consistency_eager'),  # noqa: B950
-               DecorateInfo(unittest.skip('Only fails for LAZY, passes on everything else'), 'TestCompositeCompliance', 'test_backward'),  # noqa: B950
-               DecorateInfo(unittest.skip('Passes on complex64 and float32 only'), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip('Fails on cuda + rocm'), 'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_gradgrad'),
@@ -10455,9 +10557,6 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_native_batch_norm,
            skips=(
-               # NotImplementedError: Could not run
-               # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cpu"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
                # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
@@ -12295,7 +12394,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_narrow,
+           sample_inputs_func=partial(sample_inputs_narrow_narrow_copy, is_narrow=True),
+           reference_inputs_func=partial(reference_inputs_narrow_narrow_copy, is_narrow=True),
+           error_inputs_func=partial(error_inputs_narrow_narrow_copy, is_narrow=True),
            skips=(
                # Use of .item()
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
@@ -12311,15 +12412,18 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=False,
            supports_autograd=False,
            # https://github.com/pytorch/pytorch/issues/86931
-           sample_inputs_func=sample_inputs_narrow_copy,
+           sample_inputs_func=partial(sample_inputs_narrow_narrow_copy, is_narrow=False),
+           reference_inputs_func=partial(reference_inputs_narrow_narrow_copy, is_narrow=False),
+           error_inputs_func=partial(error_inputs_narrow_narrow_copy, is_narrow=False),
            skips=(
                # https://github.com/pytorch/pytorch/issues/84577
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # Not implemented
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace', device_type='cuda'),
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace', device_type='cuda'),
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta', device_type='cuda'),
+               # Lazy tensor failures: mutating and aliasing ops should all have codegen'd kernels
+               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
+               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
+               # TypeError: must be real number, not SymFloat
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
            )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
@@ -16187,6 +16291,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_gaussian_nll_loss,
+        error_inputs_func=error_inputs_gaussian_nll_loss,
         skips=(
             # Pre-existing condition (calls .item); needs to be fixed
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
@@ -17850,6 +17955,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.diag_embed",
         torch_opinfo_name="diag_embed",
+        supports_out=True,
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -17903,10 +18009,6 @@ python_ref_db = [
         "_refs.narrow",
         torch_opinfo_name="narrow",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
     ),
     PythonRefInfo(
         "_refs.narrow_copy",
