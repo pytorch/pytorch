@@ -8116,17 +8116,14 @@ TEST_F(LazyOpsTest, TestMaxUnpool2D) {
               /*ceil_mode=*/ceil_mode);
 
           std::vector<int64_t> output_size({input.size(2), input.size(3)});
-          at::Tensor utensor = torch::max_unpool2d(
-              output,
-              ndices,
-
-              tput_size,
- 
-              kernel_size=*/{kernel_size, kernel_size},
- 
-              stride=*/{stride, stride},
- 
-              padding=*/{padding, padding});
+          at::Tensor utensor =
+              torch::max_unpool2d(
+                output, 
+                indices, 
+                output_size,
+                /*kernel_size=*/{kernel_size, kernel_size},
+                /*stride=*/{stride, stride},
+                /*padding=*/{padding, padding});
 
           ForEachDevice([&](const torch::Device& device) {
             torch::Tensor lazy_output = CopyToDevice(output, device);
@@ -10588,11 +10585,9 @@ TEST_F(LazyOpsTest, TestMaxUnpool2DBackward) {
           auto testfn =
               [&](const std::vector<torch::Tensor>& inputs) -> torch::Tensor {
             return torch::max_unpool2d(
-                inputs[0],
- 
-                uts[1],
-  
-                ut_size,
+                inputs[0], 
+                inputs[1], 
+                output_size,
                 /*kernel_size=*/{kernel_size, kernel_size, kernel_size},
                 /*stride=*/{stride, stride, stride},
                 /*padding=*/{padding, padding, padding});
@@ -11661,4 +11656,3 @@ TEST_F(LazyOpsTest, IsAliasOf) {
 
 } // namespace lazy
 } // namespace torch
-    
