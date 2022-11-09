@@ -105,7 +105,6 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
         self._test_around_aot(True)
 
     # Minifier might be busted on this branch
-    @unittest.expectedFailure
     def test_after_aot(self):
         self._test_around_aot(False)
 
