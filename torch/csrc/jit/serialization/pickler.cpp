@@ -482,12 +482,12 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
 
   if (!quantized) {
     // Only push it for regular tensor if the dictionary is not empty.
-    auto math_bits = torch::jit::getTensorMathBits(tensor);
-    if (!math_bits.empty()) {
+    auto metadata = torch::jit::getTensorMetadata(tensor);
+    if (!metadata.empty()) {
       // IValues based on std::unordered_map<K, V> are slow and deprecated.
       // Thus, pass a c10::Dict to pushDict.
       c10::Dict<std::string, bool> math_bits_;
-      for (const auto& pair : math_bits) {
+      for (const auto& pair : metadata) {
         math_bits_.insert(pair.first, pair.second);
       }
       pushDict(math_bits_);

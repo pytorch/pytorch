@@ -842,7 +842,7 @@ void Unpickler::rebuildTensor(bool quantized) {
     //       which also has 7 args serialized.
     if (!quantized && elements.size() == 7) {
       auto math_bits = elements.at(idx++).toGenericDict();
-      torch::jit::setTensorMathBits(result, math_bits);
+      torch::jit::setTensorMetadata(result, math_bits);
     }
 
     stack_.emplace_back(std::move(result));

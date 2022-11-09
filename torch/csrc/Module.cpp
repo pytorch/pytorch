@@ -1545,12 +1545,12 @@ Call this whenever a new thread is created in order to propagate values from
       "_set_conj", [](const at::Tensor& x, bool conj) { x._set_conj(conj); });
   py_module.def(
       "_set_neg", [](const at::Tensor& x, bool neg) { x._set_neg(neg); });
-  py_module.def("_get_tensor_mathbits", &torch::jit::getTensorMathBits);
+  py_module.def("_get_tensor_metadata", &torch::jit::getTensorMetadata);
   py_module.def(
-      "_set_tensor_mathbits",
+      "_set_tensor_metadata",
       static_cast<void (*)(
           const at::Tensor&, std::unordered_map<std::string, bool>)>(
-          torch::jit::setTensorMathBits));
+          torch::jit::setTensorMetadata));
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());
   });

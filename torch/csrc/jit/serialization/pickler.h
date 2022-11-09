@@ -296,28 +296,28 @@ uint64_t getStorageKey(const at::Tensor& tensor);
 // otherwise return false
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 
-// Return a map of Tensor Mathbits for serialization.
+// Return a map of Tensor Metadata for serialization.
 // For now, it only takes care of `conj` and `neg` bit.
-inline std::unordered_map<std::string, bool> getTensorMathBits(
+inline std::unordered_map<std::string, bool> getTensorMetadata(
     const at::Tensor& t) {
-  std::unordered_map<std::string, bool> math_bits{};
+  std::unordered_map<std::string, bool> metadata{};
 
   // Only add meta-data if the value is not default.
   if (t.is_conj()) {
-    math_bits["conj"] = true;
+    metadata["conj"] = true;
   }
   if (t.is_neg()) {
-    math_bits["neg"] = true;
+    metadata["neg"] = true;
   }
-  return math_bits;
+  return metadata;
 }
 
-// set Tensor mathbits based on the map.
-// Refer: getTensorMathbits
-inline void setTensorMathBits(
+// set Tensor Metadata based on the map.
+// Refer: getTensorMathdata
+inline void setTensorMetadata(
     const at::Tensor& t,
-    std::unordered_map<std::string, bool> math_bits) {
-  for (auto& key_value_pair : math_bits) {
+    std::unordered_map<std::string, bool> metadata) {
+  for (auto& key_value_pair : metadata) {
     if (key_value_pair.first == "conj") {
       t._set_conj(true);
     } else if (key_value_pair.first == "neg") {
@@ -327,21 +327,22 @@ inline void setTensorMathBits(
           false,
           "Unexpected key `",
           key_value_pair.first,
-          "` passed to setTensorMathBits.");
+          "` passed to setTensorMetadata.");
     }
   }
 }
 
 // set Tensor metadata based on the map.
-inline void setTensorMathBits(
+// NOTE: This overload is required by unpickler.cpp
+inline void setTensorMetadata(
     const at::Tensor& t,
-    c10::Dict<c10::IValue, c10::IValue> math_bits_idict) {
-  std::unordered_map<std::string, bool> math_bits;
-  for (auto& pair : math_bits_idict) {
+    c10::Dict<c10::IValue, c10::IValue> metadata_idict) {
+  std::unordered_map<std::string, bool> metadata;
+  for (auto& pair : metadata_idict) {
     auto key = *pair.key().toString();
-    math_bits[key] = pair.value().toBool();
+    metadata[key] = pair.value().toBool();
   }
-  setTensorMathBits(t, math_bits);
+  setTensorMetadata(t, metadata);
 }
 
 } // namespace jit
