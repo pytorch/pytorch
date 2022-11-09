@@ -103,7 +103,6 @@ if HAS_REFS_PRIMS:
         torch._refs,
         torch._prims,
         torch._decomp,
-        # torch._prims_common,
     }
 
 # If a string representing a PyTorch module is in this ignorelist,
