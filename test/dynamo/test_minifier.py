@@ -157,6 +157,8 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
     def _run_test_code(self, code):
         proc = subprocess.run(["python3", "-c", code], capture_output=True)
 
+        print(proc.stderr.decode("utf-8"))
+
         repro_dir_match = re.search(
             r"(\S+)minifier_launcher.py", proc.stderr.decode("utf-8")
         )
@@ -187,6 +189,7 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
             capture_output=True,
             cwd=repro_dir,
         )
+        print(launch_proc.stderr.decode("utf-8"))
         return launch_proc, launch_code
 
     # Runs the repro script in `repro_dir`, patched with `patch_code`
@@ -197,6 +200,7 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
         repro_code = self._inject_code(patch_code, repro_file)
 
         repro_proc = subprocess.run(["python3", repro_file], capture_output=True)
+        print(repro_proc.stderr.decode("utf-8"))
 
         return repro_proc, repro_code
 
