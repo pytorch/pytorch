@@ -1474,11 +1474,23 @@ class IndexingConstant(BaseConstant):
 
 @dataclasses.dataclass
 class Layout(IRNode):
-    device: torch.device
-    dtype: torch.dtype
-    size: List[Expr]
-    stride: List[Expr]
-    offset: Expr = Integer(0)
+    def __init__(
+        self,
+        device: torch.device,
+        dtype: torch.dtype,
+        size: List[Expr],
+        stride: List[Expr],
+        offset: Expr = Integer(0),
+    ):
+        self.device = device
+        self.dtype = dtype
+        self.size = size
+        self._stride = stride
+        self.offset = offset
+
+    @property
+    def stride(self):
+        return self._stride
 
     def __str__(self):
         offset = ""
@@ -1690,9 +1702,19 @@ class MutationLayout(Layout):
             target.get_device(),
             target.get_dtype(),
             target.get_size(),
-            target.get_stride(),
+            None,  # type: ignore[arg-type]
         )
         self.target = target
+
+    @Layout.stride.getter
+    def stride(self):
+        return self.real_layout.stride
+
+    @property
+    def real_layout(self):
+        if isinstance(self.target, MutationLayout):
+            return self.target.real_layout
+        return self.target.data.layout
 
     @classmethod
     def realize_into(cls, src, dst):
