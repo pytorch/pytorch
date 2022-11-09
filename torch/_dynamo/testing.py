@@ -36,10 +36,12 @@ def collect_results(model, prediction, loss, example_inputs):
     results = []
     results.append(prediction)
     results.append(loss)
+    """
     if isinstance(loss, torch.Tensor) and loss.item() > 1:
         log.warning(
             f"High loss value alert - {loss:.2f}. Can result in unstable gradients."
         )
+    """
 
     grads = dict()
     params = dict()
@@ -71,6 +73,8 @@ def requires_bwd_pass(out):
         return any([requires_bwd_pass(x) for x in out])
     elif out is None:
         return False
+    elif isinstance(out, int):
+        return False
     raise NotImplementedError("Don't know how to reduce", type(out))
 
 
@@ -93,6 +97,8 @@ def reduce_to_scalar_loss(out):
         return sum([reduce_to_scalar_loss(value) for value in out.values()]) / len(
             out.keys()
         )
+    elif isinstance(out, (int, bool)):
+        return int(out)
     raise NotImplementedError("Don't know how to reduce", type(out))
 
 

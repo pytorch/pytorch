@@ -6,7 +6,7 @@ import inspect
 import re
 import types
 from abc import ABCMeta
-from typing import Any, List
+from typing import Any, List, Union
 
 import numpy as np
 from functorch.experimental.ops import PyOperator
@@ -42,7 +42,7 @@ from ..utils import (
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
-from .base import MutableLocal
+from .base import MutableLocal, wrap_fx_proxy, wrap_fx_proxy_cls
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .dicts import (
@@ -72,7 +72,6 @@ from .misc import (
 )
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import (
-    TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
@@ -187,6 +186,8 @@ class VariableBuilder:
 
     def _wrap(self, value):
         make_guards = self.make_guards
+        if istype(value, (torch.SymInt, torch.SymFloat)):
+            return self.wrap_sym(value)
         if istensor(value):
             return self.wrap_tensor(value)
         elif istype(value, (tuple, list, odict_values)) or is_namedtuple(value):
@@ -490,6 +491,26 @@ class VariableBuilder:
             )
         )
 
+    def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
+        if not is_constant_source(self.get_source()):
+            self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
+        if is_constant_source(self.get_source()):
+            return self.tx.output.register_attr_or_module(
+                value,
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                source=None,
+                dyn_shape=value
+                # shape Guards live their own rich life via shape_env
+            )
+        return DynamicShapeVariable.create(
+            tx=self.tx,
+            proxy=self.tx.output.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+            ),
+            dyn_shape=value
+            # shape Guards live their own rich life via shape_env
+        )
+
     def wrap_tensor(self, value: torch.Tensor):
         if self.get_source().guard_source().is_nn_module():
             return self.tx.output.register_attr_or_module(
@@ -514,7 +535,7 @@ class VariableBuilder:
                         source=None,
                         # Guards are added inside register_attr_or_module
                     )
-                tensor_variable = TensorVariable.create(
+                tensor_variable = wrap_fx_proxy(
                     tx=self.tx,
                     proxy=self.tx.output.create_graph_input(
                         re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
@@ -556,14 +577,16 @@ class VariableBuilder:
             )
 
             if isinstance(value, np.number):
-                unspec_var = UnspecializedNumpyVariable.create(
+                unspec_var = wrap_fx_proxy_cls(
+                    UnspecializedNumpyVariable,
                     tx=self.tx,
                     proxy=proxy,
                     example_value=wrapped_value,
                     **options,
                 )
             else:
-                unspec_var = UnspecializedPythonVariable.create(
+                unspec_var = wrap_fx_proxy_cls(
+                    UnspecializedPythonVariable,
                     tx=self.tx,
                     proxy=proxy,
                     example_value=wrapped_value,

@@ -54,7 +54,7 @@ from .utils import (
     graph_break_dup_warning_checker,
     istype,
 )
-from .variables.base import MutableLocal, typestr, VariableTracker
+from .variables.base import MutableLocal, typestr, VariableTracker, wrap_fx_proxy
 from .variables.builder import VariableBuilder
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
@@ -81,7 +81,7 @@ from .variables.misc import (
     WithExitFunctionVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import TensorVariable
+from .variables.tensor import DynamicShapeVariable, TensorVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
 
@@ -129,7 +129,9 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
             if truth_fn(value.as_python_constant()):
                 push and self.push(value)
                 self.jump(inst)
-        elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
+        elif (
+            isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
+        ):
             # compile a partial subgraph prefix then jump into user code
             self.push(value)
             self.output.compile_subgraph(
@@ -153,6 +155,11 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
             self
         ):
             if truth_fn(len(value.unpack_var_sequence(self))):
+                push and self.push(value)
+                self.jump(inst)
+        elif isinstance(value, DynamicShapeVariable):
+            eval_result = value.evaluate_expr(self.output)
+            if truth_fn(eval_result):
                 push and self.push(value)
                 self.jump(inst)
         else:
@@ -700,6 +707,7 @@ class InstructionTranslatorBase(object):
                 left,
                 (
                     TensorVariable,
+                    DynamicShapeVariable,
                     NNModuleVariable,
                     BaseListVariable,
                     UserDefinedVariable,
@@ -718,16 +726,6 @@ class InstructionTranslatorBase(object):
                 )
             )
         elif (
-            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
-        ) and op in supported_tensors:
-            self.push(
-                TensorVariable.create(
-                    self,
-                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
-                    **options,
-                )
-            )
-        elif (
             left.is_python_constant()
             and right.is_python_constant()
             and op in supported_any
@@ -738,6 +736,28 @@ class InstructionTranslatorBase(object):
                     supported_any[op](
                         left.as_python_constant(), right.as_python_constant()
                     ),
+                    **options,
+                )
+            )
+        elif (
+            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
+        ) and op in supported_tensors:
+            self.push(
+                wrap_fx_proxy(
+                    self,
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    **options,
+                )
+            )
+        elif (
+            isinstance(left, DynamicShapeVariable)
+            or isinstance(right, DynamicShapeVariable)
+        ) and op in supported_tensors:
+            self.push(
+                DynamicShapeVariable.create(
+                    self,
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    dyn_shape=None,
                     **options,
                 )
             )
@@ -1017,7 +1037,8 @@ class InstructionTranslatorBase(object):
         seq = self.pop()
         options = VariableTracker.propagate([seq])
         if isinstance(seq, BaseListVariable):
-            assert len(seq.items) == inst.argval
+            if len(seq.items) != inst.argval:
+                unimplemented(f"UNPACK_SEQUENCE {seq}")
             self.output.guards.update(seq.guards)
             for i in reversed(seq.items):
                 self.push(i)
@@ -1029,12 +1050,12 @@ class InstructionTranslatorBase(object):
         elif isinstance(seq, TensorVariable):
             proxy = seq.as_proxy()
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable.create(self, proxy[i], **options))
+                self.push(wrap_fx_proxy(self, proxy[i], **options))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable.create(self, proxy[i], **options))
+                self.push(wrap_fx_proxy(self, proxy[i], **options))
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
 
@@ -1109,7 +1130,8 @@ class InstructionTranslatorBase(object):
             fmt_spec = ConstantVariable("")
 
         value = self.pop()
-
+        if isinstance(value, DynamicShapeVariable):
+            value = ConstantVariable(str(value.dyn_shape))
         if (flags & 0x03) == 0x01:
             value = BuiltinVariable(str).call_function(self, [value], {})
         elif (flags & 0x03) == 0x02:

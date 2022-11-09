@@ -92,7 +92,7 @@ class Guard:
 
     def sort_key(self):
         return (
-            self.source.value,
+            self.source.value if self.source else -1,
             len(self.name),
             self.name,
             self.create_fn.__code__.co_firstlineno,
@@ -103,7 +103,7 @@ class Guard:
 
     def __str__(self):
         s = f"""
-            {self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__}
+            {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
             {{
                 'guard_types': {self.guard_types},
                 'code': {self.code_list},
@@ -413,6 +413,10 @@ class GuardBuilder:
             code = "not ___is_grad_enabled()"
         self._produce_guard_code(guard, [code])
 
+    @staticmethod
+    def SYMBOL_MATCH():
+        pass
+
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
@@ -512,10 +516,14 @@ class DynamoGuardPrinter(StrPrinter):
             return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()[{tensor_ref.idx}]"
         return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()"
 
-    def __init__(self, expr_to_tensor_ref, id_to_name_map):
+    def __init__(
+        self, expr_to_tensor_ref, id_to_name_map, shape_env, intermediary_symbols
+    ):
         super().__init__()
         self.expr_to_tensor_ref = expr_to_tensor_ref
         self.id_to_name_map = id_to_name_map
+        self.shape_env = shape_env
+        self.intermediary_symbols = intermediary_symbols
 
     def _print_Symbol(self, expr) -> str:
         assert isinstance(expr, sympy.core.symbol.Symbol)
@@ -523,7 +531,18 @@ class DynamoGuardPrinter(StrPrinter):
             return "0"
         if expr == 1:
             return "1"
-        assert expr in self.expr_to_tensor_ref, f"Unknown expression {expr}"
+        if expr not in self.expr_to_tensor_ref:
+            # Please keep these 2 lines here for debugging
+            # if expr not in self.intermediary_symbols:
+            # log.warning(f"DROPPING GUARD SYMBOL: {expr}")
+            # This is an intermediary symbol with no tensor association, skip it
+            # If we did not make the symbol, it came from something dynamo does not know about
+            # So either: (A) skipping the guard is safe because something else (like module id check)
+            # Cover it. This happens for things like channel in/out on conv2d,
+            # Where changing those will break
+            # other guards - or (B) it is not and we made a mistake, hence the warning above.
+            return f"{self.shape_env.var_to_val[expr]}"
+        # f"Unknown expression {expr}"
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
@@ -574,7 +593,7 @@ class CheckFunctionManager:
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
             guard.create(local_builder, global_builder)
-        self.check_fn = self.compile_check_fn(local_builder, global_builder)
+        self.check_fn = self.compile_check_fn(local_builder, global_builder, guards)
         self._seen_ids.clear()
 
     """
@@ -607,7 +626,12 @@ class CheckFunctionManager:
             return None
 
         expr_to_tensor_ref = {}
-        guard_printer = DynamoGuardPrinter(expr_to_tensor_ref, id_to_name_map)
+        guard_printer = DynamoGuardPrinter(
+            expr_to_tensor_ref,
+            id_to_name_map,
+            self.output_graph.shape_env,
+            self.output_graph.intermediary_symbols,
+        )
 
         # tensor_check_names is the primary tensor association mechanism in dynamo.
         # All other guards installations are driven off of it, so these ones will too.
@@ -624,7 +648,6 @@ class CheckFunctionManager:
                     if obj_expr not in expr_to_tensor_ref:
                         expr_to_tensor_ref[obj_expr] = {}
                     expr_to_tensor_ref[obj_expr][tensor_ref] = ""
-            finished_expressions.append(f"isinstance({name}, torch.Tensor)")
 
         guard_expression = self.output_graph.shape_env.get_guard_expr()
         expr_as_str = guard_printer.doprint(guard_expression)
@@ -643,7 +666,6 @@ class CheckFunctionManager:
 
             if len(equality_candidates) > 1:
                 equality_expr = " == ".join(equality_candidates)
-                # breakpoint()
                 finished_expressions.append(equality_expr)
 
         # Redundant with code_parts, but allows us to wrap it with parens nicely.
@@ -653,7 +675,7 @@ class CheckFunctionManager:
         expression = " and ".join(finished_expressions)
         return f"({expression})"
 
-    def compile_check_fn(self, local_builder, global_builder):
+    def compile_check_fn(self, local_builder, global_builder, guards_out):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         args = [a for a in local_builder.scope.keys() if a == "___implicit0"]
@@ -682,10 +704,6 @@ class CheckFunctionManager:
             symbolic_shape_expression = self._parse_symbolic_shape_expressions(
                 tensor_check_names, tensor_check_ids
             )
-            if symbolic_shape_expression:
-                code_parts.append(symbolic_shape_expression)
-                verbose_code_parts.append(symbolic_shape_expression)
-
             tensor_check_examples = (
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
@@ -700,6 +718,17 @@ class CheckFunctionManager:
                 tensor_check_names + ["tensor_check_names=tensor_check_names"]
             )
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
+            if symbolic_shape_expression:
+                code_parts.append(symbolic_shape_expression)
+                verbose_code_parts.append(symbolic_shape_expression)
+                guards_out.add(
+                    Guard(
+                        name="symbolic_shape_expression",
+                        source=None,
+                        create_fn=GuardBuilder.SYMBOL_MATCH,
+                        code_list=symbolic_shape_expression,
+                    )
+                )
 
         def direct_equality(a, b):
             return a == b
@@ -714,6 +743,8 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
+                ("floor", math.floor),
+                ("ceiling", math.ceil),
                 ("Eq", direct_equality),
                 ("Ne", direct_negation),
                 ("Mod", sympy.Mod),

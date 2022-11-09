@@ -56,7 +56,9 @@ N_ITERS = 5
 
 @unittest.skipIf(not torch.cuda.is_available(), "these tests require cuda")
 class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
+    # The underlying op of 'aten.sym_size' has no overload name '_schema'
     @patch_all()
+    @unittest.expectedFailure
     def test_basic(self):
         def model(x, y):
             return (x + y) * y
@@ -73,6 +75,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
 
     @patch("torch._dynamo.config.suppress_errors", True)
     @patch_all()
+    @unittest.expectedFailure
     def test_dtoh(self):
         def model(x, y):
             a = x + y
@@ -90,6 +93,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         fn(x, y)
 
     @patch_all()
+    @unittest.expectedFailure
     def test_htod(self):
         def model(x, y):
             a = x + y
