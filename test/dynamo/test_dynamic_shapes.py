@@ -117,6 +117,22 @@ unittest.expectedFailure(
     DynamicShapesUnspecTests.test_unspec_float_precision_dynamic_shapes
 )
 
+# DynamicShapesReproTests
+unittest.expectedFailure(
+    DynamicShapesReproTests.test_reformer_eval_dynamic_shapes
+    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
+)
+
+unittest.expectedFailure(
+    DynamicShapesReproTests.test_reformer_sorting_dynamic_shapes
+    # Unable to cast Python instance to C++ type
+)
+
+unittest.expectedFailure(
+    DynamicShapesReproTests.test_reformer_train_dynamic_shapes
+    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
+)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
