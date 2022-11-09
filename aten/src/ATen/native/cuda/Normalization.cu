@@ -467,6 +467,12 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
       output,
       save_mean,
       save_invstd);
+
+  // Replace save_mean and save_instd to match cpu behavior
+  if (!train) {
+    save_mean = at::empty({0}, self.options());
+    save_invstd = at::empty({0}, self.options());
+  }
   return std::make_tuple(output, save_mean, save_invstd);
 }
 

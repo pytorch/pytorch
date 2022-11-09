@@ -10454,8 +10454,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # https://github.com/pytorch/pytorch/issues/85960
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
                # AssertionError: Booleans mismatch: True is not False
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
