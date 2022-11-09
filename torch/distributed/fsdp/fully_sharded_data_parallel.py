@@ -1689,6 +1689,9 @@ class FullyShardedDataParallel(nn.Module):
         """
         FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(model)
         FullyShardedDataParallel._warn_optim_input(optim_input)
+        if len(optim.param_groups) > 1:
+            # TODO: only do this for use_orig_params=False once optim state checkpointing is built out.
+            raise ValueError("FSDP currently does not support optimizer state checkpointing with multiple param groups")
         using_optim_input = FullyShardedDataParallel._is_using_optim_input(
             optim_input,
             optim,
@@ -1728,6 +1731,9 @@ class FullyShardedDataParallel(nn.Module):
         """
         FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(model)
         FullyShardedDataParallel._warn_optim_input(optim_input)
+        if len(optim.param_groups) > 1:
+            # TODO: only do this for use_orig_params=False once optim state checkpointing is built out.
+            raise ValueError("FSDP does not support optimizer state checkpointing with multiple parameter groups.")
         using_optim_input = FullyShardedDataParallel._is_using_optim_input(
             optim_input,
             optim,
