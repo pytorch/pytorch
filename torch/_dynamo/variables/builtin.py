@@ -604,7 +604,7 @@ class BuiltinVariable(VariableTracker):
                 items=b.items * a.as_python_constant(), mutable_local=MutableLocal()
             ).add_options(self, a, b)
         else:
-            return a.call_method(tx, "__mul__", b, {})
+            return a.call_method(tx, "__mul__", (b, ), {})
 
     def call_len(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
@@ -613,16 +613,16 @@ class BuiltinVariable(VariableTracker):
         # Important: we want to trace operator.add(x, y) into the graph,
         # not x.__add__(y).
         # operator.add will automatically handle NotImplemented argument swizzling.
-        return self._call_operator_builtin(tx, "add", *args, *kwargs)
+        return args[0].call_method(tx, "__add__", args[1:], kwargs)
 
     def call_sub(self, tx, *args, **kwargs):
-        return self._call_operator_builtin(tx, "sub", *args, *kwargs)
+        return args[0].call_method(tx, "__sub__", args[1:], kwargs)
 
     def call_truediv(self, tx, *args, **kwargs):
-        return self._call_operator_builtin(tx, "truediv", *args, *kwargs)
+        return args[0].call_method(tx, "__truediv__", args[1:], kwargs)
 
     def call_floordiv(self, tx, *args, **kwargs):
-        return self._call_operator_builtin(tx, "floordiv", *args, *kwargs)
+        return args[0].call_method(tx, "__floordiv__", args[1:], kwargs)
 
     def call_iadd(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__iadd__", args[1:], kwargs)
