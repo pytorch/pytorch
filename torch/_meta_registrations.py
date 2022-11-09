@@ -282,8 +282,9 @@ def meta_bernoulli_(self, p=0.5, generator=None):
 
 
 @register_meta(aten.bernoulli.p)
-def meta_bernoulli(self, p=0.5, generator=None):
-    return torch.empty_like(self)
+def meta_bernoulli_p(self, p=0.5, generator=None):
+    # https://github.com/pytorch/pytorch/issues/88612
+    return torch.empty_like(self).contiguous()
 
 
 @register_meta(aten._fused_moving_avg_obs_fq_helper.default)
@@ -1744,40 +1745,6 @@ def meta_scatter_add(self, dim, index, src):
     return self.new_empty(self.shape)
 
 
-@register_meta(aten.upsample_nearest2d.vec)
-def upsample_nearest2d_vec(input, output_size, scale_factors):
-    mem_format = utils.suggest_memory_format(input)
-    spatial_dimensions = input.dim() - 2
-
-    input_shape = input.shape
-    if output_size is not None:
-        assert scale_factors is None
-        out_size = output_size
-    elif scale_factors is not None:
-        assert output_size is None
-        out_size = []
-        for i in range(spatial_dimensions):
-            sym_float = (input_shape[i + 2] / 1) * scale_factors[i]
-            assert sym_float >= 0
-            out_size.append(math.floor(sym_float))
-
-    output_height = out_size[0]
-    output_width = out_size[1]
-    nbatch = input_shape[0]
-    channels = input_shape[1]
-    return input.new_empty((nbatch, channels, output_height, output_width)).to(
-        memory_format=mem_format
-    )
-
-
-@register_meta(aten.upsample_nearest2d_backward.vec)
-def upsample_nearest2d_backward_vec_meta(
-    grad_output, output_size, input_size, scale_factors
-):
-    mem_format = utils.suggest_memory_format(grad_output)
-    return grad_output.new_empty(input_size).to(memory_format=mem_format)
-
-
 def rnn_cell_checkSizes(
     input_gates, hidden_gates, input_bias, hidden_bias, factor, prev_hidden
 ):
@@ -1935,14 +1902,6 @@ def grid_sample_2d_backward_meta(
         grad_input = None
     grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
     return (grad_input, grad_grid)
-
-
-@register_meta(aten.upsample_bilinear2d_backward.vec)
-def upsample_bilinear2d_backward_vec_meta(
-    grad_output, output_size, input_size, align_corners, scale_factors
-):
-    mem_format = utils.suggest_memory_format(grad_output)
-    return grad_output.new_empty(input_size).to(memory_format=mem_format)
 
 
 @register_meta(aten.topk.default)
