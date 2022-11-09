@@ -3328,7 +3328,6 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         ((S, S, S), 1, {'eps' : 0.5}),
     )
 
-
     # num_channels is inferred to be input.shape[1] dimension
     for input_shape, num_groups, kwargs in cases:
         # Shape of weight and bias should be the same as num_channels
@@ -3354,11 +3353,7 @@ def reference_inputs_group_norm(op_info, device, dtype, requires_grad, **kwargs)
     yield from sample_inputs_group_norm(
         op_info, device, dtype, requires_grad, **kwargs)
 
-    make_arg = partial(make_tensor, device=device, requires_grad=requires_grad)
-
-    # type promotion
-    dtypes = op_info.supported_dtypes(device)
-
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Ordered as input shape, num groups, and kwargs for eps
     cases: Tuple[Tuple[int], int, float] = (  # type: ignore[assignment]
@@ -3375,21 +3370,20 @@ def reference_inputs_group_norm(op_info, device, dtype, requires_grad, **kwargs)
     for input_shape, num_groups, kwargs in cases:
         # Shape of weight and bias should be the same as num_channels
         channels = input_shape[1] if len(input_shape) > 1 else 0
-        for input_dtype, weight_dtype, bias_dtype in itertools.product(dtypes, dtypes, dtypes):
-            input_tensor = make_arg(input_shape, dtype=input_dtype)
-            weight_tensor = make_arg(channels, dtype=weight_dtype)
-            bias_tensor = make_arg(channels, dtype=bias_dtype)
+        input_tensor = make_arg(input_shape)
+        weight_tensor = make_arg(channels)
+        bias_tensor = make_arg(channels)
 
-            # Checking for permutations of weights and biases as `None`
-            weights = [weight_tensor, None]
-            biases = [bias_tensor, None]
-            for weight, bias in itertools.product(weights, biases):
-                kwargs = {
-                    'weight': weight,
-                    'bias': bias,
-                    **kwargs
-                }
-                yield SampleInput(input_tensor, num_groups, **kwargs)
+        # Checking for permutations of weights and biases as `None`
+        weights = [weight_tensor, None]
+        biases = [bias_tensor, None]
+        for weight, bias in itertools.product(weights, biases):
+            kwargs = {
+                'weight': weight,
+                'bias': bias,
+                **kwargs
+            }
+            yield SampleInput(input_tensor, num_groups, **kwargs)
 
 
 def sample_inputs_instance_norm(opinfo, device, dtype, requires_grad, **kwargs):
@@ -10535,8 +10529,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
                # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # https://github.com/pytorch/pytorch/issues/85960
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
                # AssertionError: Booleans mismatch: True is not False
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
@@ -18236,10 +18228,6 @@ python_ref_db = [
             # There's a discrepancy in returned shape between CPU and other devices
             # AssertionError: Shapes torch.Size([0]) and torch.Size([2]) are not equal!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type="cpu"),
-        ),
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/85960
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
         ),
     ),
     PythonRefInfo(
