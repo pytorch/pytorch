@@ -179,6 +179,13 @@ void CUDAGraph::capture_end() {
               "when capture began");
   wholegraph_increment_ = gen->capture_epilogue();
 
+  size_t numCUDAGraphNodes = 0;
+  AT_CUDA_CHECK(cudaGraphGetNodes(graph_, NULL, &numCUDAGraphNodes));
+  if (numCUDAGraphNodes == 0) {
+      TORCH_WARN("The CUDA Graph is empty. This ususally means that the graph was ",
+                 "attempted to be captured on wrong device or stream.");
+  }
+
   // Now that we've instantiated graph_ into graph_exec_,
   // we don't need graph_ anymore.
   AT_CUDA_CHECK(cudaGraphDestroy(graph_));

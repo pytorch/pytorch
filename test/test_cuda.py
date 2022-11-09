@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import warnings
 from random import randint
 
 import torch
@@ -3258,6 +3259,16 @@ torch.cuda.synchronize()
         g.replay()
 
         self.assertTrue(b.sum().item() == 11000.)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_warn_if_has_zero_nodes(self):
+        with warnings.catch_warnings(record=True) as caught:
+            g = torch.cuda.CUDAGraph()
+            g.capture_begin()
+            g.capture_end()
+        self.assertTrue(any("The CUDA Graph is empty" in str(w.message) for w in caught))
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
