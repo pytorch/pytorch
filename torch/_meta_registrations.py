@@ -1683,6 +1683,14 @@ def meta_sort(self, stable=None, dim=-1, descending=False):
     return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
 
 
+@register_meta(aten.upsample_nearest2d_backward.vec)
+def meta_upsample_nearest2d_backward_vec(
+    grad_output, output_size, input_size, scale_factors
+):
+    mem_format = utils.suggest_memory_format(grad_output)
+    return grad_output.new_empty(input_size).to(memory_format=mem_format)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
@@ -1716,10 +1724,7 @@ def activate_meta():
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
             pass
-        elif any(
-            a.alias_info is not None and not a.alias_info.is_write
-            for a in op_overload._schema.arguments
-        ):
+        elif op_overload.is_view:
             # Attempting to register a python meta kernel for a view operator.
             # We shouldn't do this, because the output will report as not having aliased storages.
             # All view ops have meta kernels in C++ today, so we should use those instead.
