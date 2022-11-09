@@ -1445,6 +1445,22 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result_2 = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
 
+    def test_export_meta_val(self):
+        def f(x, y, z):
+            return x * y + z
+
+        gm, _ = torch._dynamo.export(
+            f,
+            torch.ones(3, 2),
+            torch.zeros(3, 2),
+            torch.ones(3, 2),
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                self.assertIn("val", node.meta)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -3229,7 +3229,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linspace', ''),  # test runner can't handle factory functions
         xfail('arange', ''),  # test runner can't handle factory functions
         xfail('logspace', ''),  # test runner can't handle factory functions
-        xfail('scalar_tensor') # test runner can't handle factory functions
+        xfail('scalar_tensor'),  # test runner can't handle factory functions
         xfail('empty', ''),  # test runner can't handle factory functions
         xfail('ones', ''),  # test runner can't handle factory functions
         xfail('zeros', ''),  # test runner can't handle factory functions
