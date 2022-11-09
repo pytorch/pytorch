@@ -1617,7 +1617,11 @@ def run(runner, args, original_dir=None):
         else:
             # TODO(whc) after enabling DDPOptimizer by default this could be removed or assert
             torch._dynamo.config.optimize_ddp = True
-
+        if args.only == "dlrm":
+            log.error(
+                "DLRM+DDP is unsupported as it requires sharding the embedding layer separately from DDP"
+            )
+            return sys.exit(-1)
     if args.accuracy:
         # Use small batch size. We use >1 batch size to ensure we test
         # batch_norm type of operators that work on batch dims.
