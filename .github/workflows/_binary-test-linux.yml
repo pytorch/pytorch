@@ -172,7 +172,7 @@ jobs:
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         uses: huydhn/test-infra/.github/actions/setup-nvidia@setup-nvidia-action
-        if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
+        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' }}
 
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
