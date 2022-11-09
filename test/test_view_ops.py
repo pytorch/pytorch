@@ -908,6 +908,26 @@ class TestViewOps(TestCase):
             op = partial(fn, source=0, destination=1)
             run_test(device, op)
 
+    def test_diagonal_copy_out(self, device):
+        a = torch.randn(2, 2, device=device)
+        out = torch.empty(2, device=device)
+
+        torch.diagonal_copy(a, out=out)
+
+        expected = torch.diagonal_copy(a)
+
+        self.assertEqual(expected, out)
+
+        a = torch.randn(4, device=device)
+        out1 = torch.empty(2, device=device)
+        out2 = torch.empty(2, device=device)
+
+        torch.split_copy(a, 2, out=(out1, out2))
+        expected1, expected2 = torch.split_copy(a, 2)
+
+        self.assertEqual(expected1, out1)
+        self.assertEqual(expected2, out2)
+
 
 class TestOldViewOps(TestCase):
     def test_ravel(self, device):
