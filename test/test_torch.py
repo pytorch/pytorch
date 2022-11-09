@@ -5678,7 +5678,7 @@ class TestTorch(TestCase):
         for dtype in all_types_and_complex_and(torch.half, torch.bfloat16):
             if torch.cuda.is_available():
                 size = [20, 20]
-                index = torch.randint(0, 20, size, dtype=torch.long).cuda()
+                index = torch.randint(0, 20, (20,), dtype=torch.long).cuda()
                 if dtype.is_floating_point or dtype.is_complex:
                     tensor = torch.rand(size, dtype=dtype).cuda()
                     source = torch.rand(size, dtype=dtype).cuda()
@@ -5691,8 +5691,8 @@ class TestTorch(TestCase):
 
                 ref_out = tensor.index_add(-1, index, source)
 
-                ref_tensor = tensor.cpu()
-                ref_source = source.cpu()
+                tensor = tensor.cpu()
+                source = source.cpu()
                 index = index.cpu()
                 out = tensor.index_add(-1, index, source)
                 self.assertEqual(out, ref_out)
