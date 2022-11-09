@@ -1716,10 +1716,10 @@ def _find_onnxscript_op_recursively(
     custom_opsets: Mapping[str, int],
     onnx_function_list: List,
 ):
-    """Recursively iterate ModelProto to find ONNXFunction op"""
+    """Recursively iterate ModelProto to find ONNXFunction op as it may contain control flow Op."""
     for node in graph_proto.node:
         node_kind = node.domain + "::" + node.op_type
-        # For control flow node: IF/Loop which has inner graph_proto
+        # Recursive needed for control flow nodes: IF/Loop which has inner graph_proto
         for attr in node.attribute:
             if attr.g is not None:
                 (
@@ -1728,29 +1728,29 @@ def _find_onnxscript_op_recursively(
                 ) = _find_onnxscript_op_recursively(
                     attr.g, included_node_func, custom_opsets, onnx_function_list
                 )
+        # Only custom Op with ONNX function and aten with symbolic_fn should be found in registry
+        onnx_function_group = registration.registry.get_function_group(node_kind)
         if (
             node.domain
-            and jit_utils.is_custom_domain(node.domain)
+            and not jit_utils.is_aten(node.domain)
+            and onnx_function_group is not None
             and node_kind not in included_node_func
         ):
             specified_version = custom_opsets.get(node.domain, 1)
-            onnx_function_group = registration.registry.get_function_group(node_kind)
-            # Only the custom Op with ONNX function should be found in registry
-            if onnx_function_group is not None:
-                onnx_fn = onnx_function_group.get(specified_version)
-                if onnx_fn is not None:
-                    # TODO(titaiwang): to_function_proto is onnx-script API and can be annotated
-                    # after onnx-script is dependency
-                    onnx_function_list.append(onnx_fn.to_function_proto())  # type: ignore[attr-defined]
-                    included_node_func.add(node_kind)
-                    continue
-                raise errors.UnsupportedOperatorError(
-                    node_kind,
-                    specified_version,
-                    onnx_function_group.get_min_supported()
-                    if onnx_function_group
-                    else None,
-                )
+            onnx_fn = onnx_function_group.get(specified_version)
+            if onnx_fn is not None:
+                # TODO(titaiwang): to_function_proto is onnx-script API and can be annotated
+                # after onnx-script is dependency
+                onnx_function_list.append(onnx_fn.to_function_proto())  # type: ignore[attr-defined]
+                included_node_func.add(node_kind)
+                continue
+            raise errors.UnsupportedOperatorError(
+                node_kind,
+                specified_version,
+                onnx_function_group.get_min_supported()
+                if onnx_function_group
+                else None,
+            )
     return onnx_function_list, included_node_func
 
 
