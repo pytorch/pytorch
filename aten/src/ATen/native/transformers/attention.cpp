@@ -140,15 +140,6 @@ Tensor masked_softmax(
         "negatively affect performance. Prefer to use a boolean mask directly.");
     attn_mask = attn_mask->to(at::kBool);
   }
-  if (attn_scores.is_cpu() && attn_mask && attn_mask->dim() == 2) {
-    // TODO: CPU path does not support transformer mask yet.
-    const auto batch_size = attn_scores.sizes()[0];
-    const auto seq_len = attn_scores.sizes()[3];
-    TORCH_CHECK(attn_mask->sizes()[0] == batch_size);
-    TORCH_CHECK(attn_mask->sizes()[1] == seq_len);
-    attn_mask = attn_mask->view({batch_size, 1, 1, seq_len});
-    attn_mask = at::expand_inplace(attn_scores, *attn_mask)->contiguous();
-  }
   if (attn_mask) {
     return _masked_softmax(attn_scores, *attn_mask, attn_scores.dim() - 1, mask_type);
   } else {
