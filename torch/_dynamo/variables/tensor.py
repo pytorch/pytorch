@@ -180,7 +180,7 @@ class TensorVariable(VariableTracker):
         from . import ConstantVariable, TupleVariable
 
         kwargs = dict(kwargs)
-        print("CALLING TENSOR OP", name)
+        # print("CALLING TENSOR OP", name)
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)

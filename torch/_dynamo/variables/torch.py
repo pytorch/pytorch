@@ -172,7 +172,7 @@ class TorchVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        print("CALLING ON TORCH", self.value)
+        # print("CALLING ON TORCH", self.value)
         from . import (
             ConstantVariable,
             DynamicShapeVariable,

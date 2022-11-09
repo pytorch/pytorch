@@ -196,7 +196,7 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
     self.assertTrue(same(val1b, correct1))
     self.assertTrue(same(val2a, correct2))
     self.assertTrue(same(val2b, correct2))
-    assert(actual.frame_count, 1)
+    self.assertEqual(actual.frame_count, 1)
     if expected_ops is not None:
         self.assertEqual(actual.op_count, expected_ops)
 
