@@ -61,7 +61,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   std::unique_ptr<torch::lazy::LoweringContext> CreateLoweringContext(
       const std::string& name,
       torch::lazy::BackendDevice device,
-      c10::ArrayRef<torch::lazy::Node*> post_order,
+      c10::ArrayRef<const torch::lazy::Node*> post_order,
       torch::lazy::Util::EmissionMap emit_status) const override {
     return std::make_unique<torch::lazy::TSLoweringContext>(
         name, device, post_order, emit_status);
@@ -113,8 +113,8 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
     return std::make_shared<TSData>(scalar, device);
   }
 
-  torch::lazy::BackendDataPtr GetComputationDataFromNode(Node* node) const {
-    auto* device_data_node = dynamic_cast<DeviceData*>(node);
+  torch::lazy::BackendDataPtr GetComputationDataFromNode(const Node* node) const {
+    auto* device_data_node = DeviceData::Cast(node);
     if (!device_data_node) {
       return nullptr;
     }
