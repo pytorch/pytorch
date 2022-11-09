@@ -3677,7 +3677,7 @@ class CommonTemplate:
 
         @torch._dynamo.optimize("inductor")
         def fn(a):
-            return torch.nn.functional.dropout(a, 0.5, True)
+            return torch.nn.functional.dropout(a)
 
         x = torch.ones(1000, device=self.device, dtype=torch.float32)
         result = fn(x)
