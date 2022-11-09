@@ -697,6 +697,7 @@ void GroupNormInputBackward(
       const T_ACC c2 =
           (db_val * T_ACC(mean[i]) - ds_val) * T_ACC(rstd[i]) * T_ACC(rstd[i]) * T_ACC(rstd[i]) * s;
       const T_ACC c3 = -c2 * T_ACC(mean[i]) - db_val * T_ACC(rstd[i]) * s;
+
       for (const auto j : c10::irange(D)) {
         const int64_t c = g * D + j;
         const T* dY_ptr = dY + (i * D + j) * HxW;
@@ -868,6 +869,7 @@ void GroupNormBackwardKernelImplInternal(
   T_ACC* ds_data = ds.data_ptr<T_ACC>();
   T_ACC* db_data = db.data_ptr<T_ACC>();
   ComputeInternalGradients<T, T_ACC>(N, C, HxW, dY_data, X_data, ds_data, db_data);
+
   if (dX_data != nullptr) {
     GroupNormInputBackward<T, PT, T_ACC>(
         N,
@@ -1445,8 +1447,18 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
   T_ACC* db_data = db.data_ptr<T_ACC>();
   const T_ACC s = T_ACC(1) / static_cast<T_ACC>(D * HxW);
 
-  constexpr int64_t feature_map_threshold = 1024;
+  // Similar to channels last forward, channels last backward has also 2 impls.
+  // impl-1: parallel on N * G. Only need one omp session for input gradients
+  //   but memory access per thread is non-contiguous.
+  //
+  // impl-2: parallel on N * HxW. Memory access per thread is contiguous,
+  //   but requires help of extra temp buffer of size {T, N, 2C}.
+
+  // Generally impl-2 has better performance when HxW is large enough, so that
+  //   data per thread {NHWC / T} is much larger then temp buffer per thread {2NC}
+  constexpr int64_t feature_map_threshold = 2048;
   if (HxW < feature_map_threshold) {
+    // impl-1: parallel on N * G.
     at::parallel_for(0, N * G, 1, [=](int64_t begin, int64_t end) {
       int64_t n{0}, g{0};
       data_index_init(begin, n, N, g, G);
@@ -1480,7 +1492,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
     });
 
   } else {
-    // parallel on N * HxW.
+    // impl-2: parallel on N * HxW.
     int num_threads = at::get_num_threads();
     Tensor buffer = at::empty({num_threads, N, 2 * C},
       X.options().dtype(c10::CppTypeToScalarType<T_ACC>::value)).zero_();
