@@ -2417,6 +2417,15 @@ class ExternKernel(InputsKernel):
             order
         ):
             return x
+        elif isinstance(x.get_layout(), MutationLayout):
+            if isinstance(x.layout.real_layout, FlexibleLayout):
+                # if MutationLayout's real layout is FlexibleLayout, do we need fix it as a FixedLayout?
+                # as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
+                return x
+            elif isinstance(
+                x.layout.real_layout, FixedLayout
+            ) and x.layout.real_layout.is_stride_ordered(order):
+                return x
         x = cls.copy_input(x)
         as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
         assert is_stride_order_storage_and_layout(x, order)
