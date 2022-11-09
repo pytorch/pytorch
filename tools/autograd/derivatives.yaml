@@ -2196,12 +2196,12 @@
   result0: gather(self_t.flatten(-3), -1, result1.flatten(-3)).view_as(result1)
   output_differentiability: [True, False]
 
-- name: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
+- name: max_unpool2d(Tensor self, Tensor indices, int[2] output_size, int[2] kernel_size, int[2] stride, int[2] padding) -> Tensor
   self: max_pool_double_backward(grad, indices, 2)
   indices: non_differentiable
   result: auto_linear
 
-- name: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
+- name: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] kernel_size, int[3] stride, int[3] padding) -> Tensor
   self: max_pool_double_backward(grad, indices, 3)
   indices: non_differentiable
   result: auto_linear

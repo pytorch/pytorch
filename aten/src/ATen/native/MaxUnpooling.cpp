@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/cpu/MaxUnpoolKernel.h>
 #include <c10/util/irange.h>
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -19,6 +18,9 @@ Tensor& max_unpooling2d_forward_out_cpu(
     const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
     Tensor& output) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic with duplicate indices
@@ -30,11 +32,20 @@ Tensor& max_unpooling2d_forward_out_cpu(
       indices_.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64 but got: ", indices_.scalar_type());
   TORCH_CHECK(
+      (self_.ndimension() == 3 || self_.ndimension() == 4),
+      "Input to max_unpooling2d should be a 3d or 4d Tensor, but got a tensor with ", self_.ndimension(), " dimensions.");
+  TORCH_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (height, width) in output_size, but got ", output_size.size(), " elements.");
   TORCH_CHECK(
-      (self_.ndimension() == 3 || self_.ndimension() == 4),
-      "Input to max_unpooling2d should be a 3d or 4d Tensor, but got a tensor with ", self_.ndimension(), " dimensions.");
+      kernel_size.size() == 2,
+      "There should be exactly two elements (height, width) in kernel_size, but got: ", kernel_size.size(), " elements.");
+  TORCH_CHECK(
+      stride.size() == 2,
+      "There should be exactly two elements (height, width) in stride, but got: ", stride.size(), " elements.");
+  TORCH_CHECK(
+      padding.size() == 2,
+      "There should be exactly two elements (height, width) in padding, but got: ", padding.size(), " elements.");
   TORCH_CHECK(
       self_.sizes() == indices_.sizes(),
       "Expected shape of indices to be same as that of the input tensor (", self_.sizes(),
@@ -45,6 +56,15 @@ Tensor& max_unpooling2d_forward_out_cpu(
                 "Expected input to have non-zero size for non-batch dimensions, but got ",
                 self_.sizes(), " with dimension ", i , " being empty.");
   }
+
+  TORCH_CHECK(
+      stride[0] > 0 && stride[1] > 0,
+      "strides should be greater than zero, but got stride: ",
+      stride);
+  TORCH_CHECK(
+      0 <= padding[0] <= kernel_size[0]/2 && 0 <= padding[1] <= kernel_size[1]/2,
+      "pad must be non-negative, and at most at most half of kernel size, but got pad= ",
+      padding, " and kernel_size= ", kernel_size);
 
   auto memory_format = self_.suggest_memory_format();
   auto self = self_.contiguous(memory_format);
@@ -70,9 +90,12 @@ Tensor& max_unpooling2d_forward_out_cpu(
 Tensor max_unpooling2d_forward_cpu(
     const Tensor& self,
     const Tensor& indices,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   auto output = at::empty({0}, self.options());
-  at::native::max_unpooling2d_forward_out_cpu(self, indices, output_size, output);
+  at::native::max_unpooling2d_forward_out_cpu(self, indices, output_size, kernel_size, stride, padding, output);
   return output;
 }
 
@@ -81,6 +104,7 @@ static void max_unpooling3d_shape_check(
     const Tensor& gradOutput,
     const Tensor& indices,
     IntArrayRef output_size,
+    IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
     const char *fn_name) {
@@ -96,6 +120,9 @@ static void max_unpooling3d_shape_check(
   TORCH_CHECK(
       output_size.size() == 3,
       "There should be exactly three elements (depth, height, width) in output_size, but got ", output_size.size(), " elements.");
+  TORCH_CHECK(
+      kernel_size.size() == 3,
+      "There should be exactly three elements (depth, height, width) in kernel_size, but got: ", kernel_size.size(), " elements.");
   TORCH_CHECK(
       stride.size() == 3,
       "There should be exactly three elements (depth, height, width) in stride, but got: ", stride.size(), " elements.");
@@ -117,6 +144,10 @@ static void max_unpooling3d_shape_check(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
       "strides should be greater than zero, but got stride: ",
       stride);
+  TORCH_CHECK(
+      0 <= padding[0] <= kernel_size[0]/2 && 0 <= padding[1] <= kernel_size[1]/2 && 0 <= padding[2] <= kernel_size[2]/2,
+      "pad must be non-negative, and at most at most half of kernel size, but got pad= ",
+      padding, " and kernel_size= ", kernel_size);
 
   int dimw = 3;
   int dimh = 2;
@@ -159,6 +190,7 @@ static void max_unpooling3d_shape_check(
 Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
     const Tensor& indices_,
     IntArrayRef output_size,
+    IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
     Tensor& output) {
@@ -175,7 +207,7 @@ Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
   auto indices = indices_.contiguous();
 
   max_unpooling3d_shape_check(
-    self_, Tensor(), indices_, output_size, stride, padding, "max_unpooling3d_forward_out_cpu()");
+    self_, Tensor(), indices_, output_size, kernel_size, stride, padding, "max_unpooling3d_forward_out_cpu()");
 
   if (self_.ndimension() == 5) {
     output.resize_({self.size(0), self.size(1), oT, oH, oW});
@@ -194,11 +226,12 @@ Tensor max_unpooling3d_forward_cpu(
     const Tensor& self,
     const Tensor& indices,
     IntArrayRef output_size,
+    IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding) {
   auto output = at::empty({0}, self.options());
   at::native::max_unpooling3d_forward_out_cpu(
-      self, indices, output_size, stride, padding, output);
+      self, indices, output_size, kernel_size, stride, padding, output);
   return output;
 }
 
