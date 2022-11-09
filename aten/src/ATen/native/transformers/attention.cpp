@@ -732,10 +732,8 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_attention_backward_math(
     double dropout_p,
     bool need_attn_weights,
     bool is_causal) {
-  auto a = at::ones({0});
-  auto b = at::ones({0});
-  auto c = at::ones({0});
-  return std::make_tuple(a, b, c);
+  auto a = at::zeros_like(grad);
+  return std::make_tuple(a, a, a);
 }
 
 Tensor triton_multi_head_attention(
