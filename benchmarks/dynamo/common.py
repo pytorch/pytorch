@@ -22,7 +22,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
-from microbenchmarks.operator_inp_utils import OperatorInputsMode
+from functorch._src.aot_autograd import set_model_name
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.optimizations import backends
 from torch._dynamo.optimizations.log_args import conv_args_analysis
@@ -36,11 +36,9 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map
 
 try:
-    from functorch._src.aot_autograd import set_model_name
+    from .microbenchmarks.operator_inp_utils import OperatorInputsMode
 except ImportError:
-
-    def set_model_name(name):
-        pass
+    from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
 
 log = logging.getLogger(__name__)
@@ -1309,8 +1307,7 @@ def help(fn):
     return fn.__doc__
 
 
-def parse_args():
-
+def parse_args(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--filter", "-k", action="append", help="filter benchmarks with regexp"
@@ -1331,7 +1328,10 @@ def parse_args():
         default=0,
         help="ID of the benchmark suite partition to be run. Used to divide CI tasks",
     )
-    parser.add_argument("--devices", "-d", action="append", help="cpu or cuda")
+    parser.add_argument(
+        "--devices", "--device", "-d", action="append", help="cpu or cuda"
+    )
+    parser.add_argument("--device-index", help="CUDA device index")
     parser.add_argument(
         "--repeat", "-n", type=int, default=30, help="number of timing runs"
     )
@@ -1568,8 +1568,7 @@ def parse_args():
     mode_group.add_argument(
         "--performance", action="store_true", help="Measures performance speedup"
     )
-    args = parser.parse_args()
-    return args
+    return parser.parse_args(args)
 
 
 def main(runner, original_dir=None):
@@ -1641,10 +1640,13 @@ def run(runner, args, original_dir=None):
 
         # Some models e.g. yolov3 assert batch size on n_gpus
         if "CUDA_VISIBLE_DEVICES" not in os.environ:
-            os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+            args.device_index = "0"
 
         # Stricter check to disable fallbacks
         args.suppress_errors = False
+
+    if args.device_index is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.device_index
 
     elif args.performance:
         # Ensure that we test on real scenarios
