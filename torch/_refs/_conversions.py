@@ -73,7 +73,9 @@ short = _make_conversion_method("short", torch.short)
 
 
 @register_decomposition(torch.ops.aten.complex)
-@out_wrapper()
+# Note: complex has type promotion tests disabled due to different semantics.
+# exact_dtype is for compat with complex_check_dtype from core.
+@out_wrapper(exact_dtype=True)
 def complex(real: TensorLikeType, imag: TensorLikeType) -> TensorLikeType:
     def _allowed_dtypes():
         return {torch.float32, torch.float64, torch.float16}
@@ -85,14 +87,31 @@ def complex(real: TensorLikeType, imag: TensorLikeType) -> TensorLikeType:
             f"{real.dtype} and {imag.dtype}"
         ),
     )
-    higher_dtype = utils.get_higher_dtype(real.dtype, imag.dtype)
     check(
-        higher_dtype is not None,
-        lambda: f"Cannot get higher dtype: got {real.dtype} and {imag.dtype}",
+        real.dtype == imag.dtype,
+        lambda: (
+            f"Expected object of scalar type {real.dtype} but got "
+            f"scalar type {imag.dtype} for second argument"
+        ),
     )
-    result_dtype = utils.corresponding_complex_dtype(higher_dtype)  # type: ignore[arg-type]
+    result_dtype = utils.corresponding_complex_dtype(real.dtype)  # type: ignore[arg-type]
     common_shape = _broadcast_shapes(real.shape, imag.shape)
-    a = torch.empty(common_shape, dtype=result_dtype)
-    a.real = real
-    a.imag = imag
-    return a
+    memory_format = utils.suggest_memory_format(real)
+    # Note: cannot use torch.empty here because this results in non-FakeTensor
+    # inputs being used in FakeTensorMode, which is not yet supported.
+    result = (
+        torch.empty_like(
+            real,
+            dtype=result_dtype,
+            layout=real.layout,
+            device=real.device,
+            # pin_memory=real.is_pinned(),  # NYI
+            requires_grad=real.requires_grad,
+            memory_format=memory_format,
+        )
+        .expand(common_shape)
+        .clone()
+    )
+    result.real = real
+    result.imag = imag
+    return result
