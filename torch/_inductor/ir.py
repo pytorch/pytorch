@@ -3372,6 +3372,8 @@ class ConvolutionUnary(ExternKernelAlloc):
         wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
         )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
 
     @classmethod
     def create(
