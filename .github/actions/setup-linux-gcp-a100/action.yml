@@ -1,0 +1,47 @@
+name: Setup GCP A100 host
+
+description: Set up GCP A100 host for CI
+
+runs:
+  using: composite
+  steps:
+    - name: Set DOCKER_HOST
+      shell: bash
+      run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
+
+    - name: Runner health check system info
+      if: always()
+      shell: bash
+      run: |
+        cat /etc/os-release || true
+        whoami
+
+    - name: Runner health check nvidia-smi
+      if: always()
+      shell: bash
+      run: |
+        nvidia-smi
+
+        #    - name: Runner health check disconnect on failure
+        #      if: ${{ failure() }}
+        #      shell: bash
+        #      run: |
+        #        killall runsvc.sh
+
+    - name: Preserve github env variables for use in docker
+      shell: bash
+      run: |
+        env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+        env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+
+        #    - name: ROCm set GPU_FLAG
+        #      shell: bash
+        #      run: |
+        #        # Examine the runner name. If it ends with "-2", this is the second runner on the host.
+        #        if [[ ${{ runner.name }} == *-2 ]]; then
+        #            # select the last two GPUs on the host
+        #            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri/renderD130 --device=/dev/dri/renderD131 --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        #        else
+        #            # select the first two GPUs on the host
+        #            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri/renderD128 --device=/dev/dri/renderD129 --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        #        fi
