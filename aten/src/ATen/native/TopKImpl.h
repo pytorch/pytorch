@@ -50,14 +50,14 @@ void topk_impl_loop(
         std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
           [](const elem_t& x, const elem_t& y) -> bool {
             if ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first)) return true;
-            if ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first)) return false;
+            else if (!(x.first >= y.first)) return false;
             return x.second < y.second;
           });
       } else {
         std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
           [](const elem_t& x, const elem_t& y) -> bool {
             if ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first)) return true;
-            if ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first)) return false;
+            else if (!(x.first <= y.first)) return false;
             return x.second < y.second;
           });
       }
@@ -67,7 +67,7 @@ void topk_impl_loop(
           std::sort(queue.begin(), queue.end(),
           [](const elem_t& x, const elem_t& y) -> bool {
             if ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first)) return true;
-            if ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first)) return false;
+            else if (!(x.first >= y.first)) return false;
             return x.second < y.second;
           });
         }
@@ -88,7 +88,7 @@ void topk_impl_loop(
           std::sort(queue.begin(), queue.end(),
           [](const elem_t& x, const elem_t& y) -> bool {
             if ((!_isnan<accscalar_t>(x.first) && _isnan<accscalar_t>(y.first)) || (x.first < y.first)) return true;
-            if ((_isnan<accscalar_t>(x.first) && !_isnan<accscalar_t>(y.first)) || (x.first > y.first)) return false;
+            else if (!(x.first <= y.first)) return false;
             return x.second < y.second;
           });
         }
