@@ -111,6 +111,8 @@ def is_copy_node(node, modules):
         torch.flatten,
         torch.mean,
         operator.floordiv,
+        # F.channel_shuffle and torch.channel_shuffle are essentially the same thing
+        # so we only need to put one of them here
         torch.channel_shuffle,
     ]
     method_list = [
