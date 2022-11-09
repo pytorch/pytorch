@@ -375,7 +375,7 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
-        if all([isinstance(x, DynamicShapeVariable) for x in args]):
+        elif all([isinstance(x, DynamicShapeVariable) for x in args]):
             if self.value == math.sqrt:
                 from torch.fx.experimental.symbolic_shapes import sym_sqrt
 
