@@ -272,11 +272,8 @@ def meta_pad2d(self, padding):
 @register_meta([aten.bernoulli.default, aten.bernoulli.out])
 @out_wrapper()
 def meta_bernoulli(self, *, generator=None):
-    if device_hint(self) == "cuda":
-        # https://github.com/pytorch/pytorch/issues/88612
-        return torch.empty_like(self).contiguous()
-    else:
-        return torch.empty_like(self)
+    # https://github.com/pytorch/pytorch/issues/88612
+    return torch.empty_like(self).contiguous()
 
 
 @register_meta(aten.bernoulli_.float)
@@ -286,11 +283,8 @@ def meta_bernoulli_(self, p=0.5, generator=None):
 
 @register_meta(aten.bernoulli.p)
 def meta_bernoulli_p(self, p=0.5, generator=None):
-    if device_hint(self) == "cuda":
-        # https://github.com/pytorch/pytorch/issues/88612
-        return torch.empty_like(self).contiguous()
-    else:
-        return torch.empty_like(self)
+    # https://github.com/pytorch/pytorch/issues/88612
+    return torch.empty_like(self).contiguous()
 
 
 @register_meta(aten._fused_moving_avg_obs_fq_helper.default)
@@ -1168,7 +1162,7 @@ def meta_binop_inplace(self, other):
         aten.sub_.Tensor,
     ],
 )
-def meta_binop_inplace_alph(self, other, alpha=1):
+def meta_binop_inplace_alpha(self, other, alpha=1):
     return self
 
 
@@ -1674,32 +1668,6 @@ def scatter_meta_impl(self, dim, index, src=None, reduce_=None, use_new_options=
 def meta_scatter_add(self, dim, index, src):
     scatter_meta_impl(self, dim, index, src, "add")
     return self.new_empty(self.shape)
-
-
-@register_meta(aten.upsample_nearest2d.vec)
-def upsample_nearest2d_vec(input, output_size, scale_factors):
-    mem_format = utils.suggest_memory_format(input)
-    spatial_dimensions = input.dim() - 2
-
-    input_shape = input.shape
-    if output_size is not None:
-        assert scale_factors is None
-        out_size = output_size
-    elif scale_factors is not None:
-        assert output_size is None
-        out_size = []
-        for i in range(spatial_dimensions):
-            sym_float = (input_shape[i + 2] / 1) * scale_factors[i]
-            assert sym_float >= 0
-            out_size.append(math.floor(sym_float))
-
-    output_height = out_size[0]
-    output_width = out_size[1]
-    nbatch = input_shape[0]
-    channels = input_shape[1]
-    return input.new_empty((nbatch, channels, output_height, output_width)).to(
-        memory_format=mem_format
-    )
 
 
 # We must also trigger meta registrations from PrimTorch ref
