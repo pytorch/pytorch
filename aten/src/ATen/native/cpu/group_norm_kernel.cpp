@@ -733,7 +733,7 @@ void GammaBackward(
       const T_ACC* ds_ptr = ds + i * D;
       const T_ACC* db_ptr = db + i * D;
       const int64_t g = i % G;
-      
+
       for (const auto j : c10::irange(start, end)) {
         const int64_t c = g * D + j;
         dgamma[c] += (ds_ptr[j] - db_ptr[j] * T_ACC(mean[i])) * T_ACC(rstd[i]);
