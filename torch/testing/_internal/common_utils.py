@@ -2030,9 +2030,30 @@ class TestCase(expecttest.TestCase):
     def _run_with_retry(self, result=None, num_runs_left=0, report_only=True, num_red=0, num_green=0):
         using_unittest = isinstance(result, unittest.TestResult)
         if num_runs_left == 0:
+            # The logic when RERUN_DISABLED_TESTS is set to true is as follows:
+            # |-if the disabled test passes:
+            # |-- if it's flaky:
+            # |---  Do nothing because it's still flaky
+            # |-- elif it isn't flaky anymore:
+            # |---  Close the disabled ticket (later)
+            # |
+            # |- elif the disabled test fails after n retries:
+            # |--  This is expected, report this but don't fail the job
+            skipped_msg = {
+                "num_red": num_red,
+                "num_green": num_green,
+                "max_num_retries": MAX_NUM_RETRIES,
+                "rerun_disabled_test": RERUN_DISABLED_TESTS,
+            }
+
             if num_green > 0 and num_red > 0 and using_unittest:
-                result.addSkip(self, f'{{"flaky": {True}, "num_red": {num_red}, "num_green": {num_green},' +
-                                     f'"max_num_retries": {MAX_NUM_RETRIES}}}')
+                skipped_msg["flaky"] = True
+                # Still flaky, do nothing
+                result.addSkip(self, json.dumps(skipped_msg))
+            elif RERUN_DISABLED_TESTS and num_green == 0 and using_unittest:
+                # Disabled test fails, report as skipped but don't fail the job
+                result.addSkip(self, json.dumps(skipped_msg))
+
             return
 
         if using_unittest:
