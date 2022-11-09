@@ -18,14 +18,14 @@ namespace at { namespace functorch {
 #define OP_DECOMPOSE(op)  m.impl(#op, static_cast<decltype(&ATEN_FN(op))>(native::op));
 #define OP_DECOMPOSE2(op, overload)  m.impl(#op"."#overload, static_cast<decltype(&ATEN_FN2(op, overload))>(native::op));
 
-TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
+TORCH_LIBRARY_IMPL(aten, CompositeImplicitBatched, m) {
   OP_DECOMPOSE(alpha_dropout_);
   OP_DECOMPOSE(dropout_);
   OP_DECOMPOSE(feature_alpha_dropout_);
   OP_DECOMPOSE(feature_dropout_);
 }
 
-TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
+TORCH_LIBRARY_IMPL(aten, CompositeImplicitBatched, m) {
   OP_DECOMPOSE2(__and__, Scalar);
   OP_DECOMPOSE2(__and__, Tensor);
   OP_DECOMPOSE2(__iand__, Tensor);

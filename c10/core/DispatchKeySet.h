@@ -757,6 +757,10 @@ constexpr auto functorch_transforms_ks = DispatchKeySet(
      DispatchKey::VmapMode,
      DispatchKey::FuncTorchGradWrapper});
 
+constexpr auto functorch_batched_ks = DispatchKeySet(
+    {DispatchKey::FuncTorchBatched,
+    DispatchKey::CompositeImplicitBatched});
+
 // This keyset has:
 // (1) the functionality bits corresponding to backends (dense, sparse,
 // quantized) (2) all of the backend bits set
