@@ -2614,7 +2614,7 @@
 
 # Transformers
 - name: _scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> (Tensor, Tensor)
-  query, key, value: _scaled_dot_product_attention_backward(grad, attn_mask, dropout_p, need_attn_weights, is_causal)
+  query, key, value: _scaled_dot_product_attention_backward(grad, query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
   attn_mask: non_differentiable
 
 # fft

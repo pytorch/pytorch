@@ -13241,7 +13241,7 @@
     Meta: _scaled_dot_product_attention_math
   autogen: _scaled_dot_product_attention.out
 
-- func: _scaled_dot_product_attention_backward(Tensor grad, Tensor attn_mask, float dropout_p, bool need_attn_weights, bool is_causal) -> (Tensor, Tensor, Tensor)
+- func: _scaled_dot_product_attention_backward(Tensor grad, Tensor query, Tensor key, Tensor value, Tensor attn_mask, float dropout_p, bool need_attn_weights, bool is_causal) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
     CUDA: _scaled_dot_product_attention_backward_math
