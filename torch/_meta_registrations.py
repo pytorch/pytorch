@@ -1694,6 +1694,7 @@ def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
         (), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
 
+
 @register_meta(aten.topk.default)
 def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     # From aten/src/ATen/native/Sorting.cpp
@@ -1709,6 +1710,7 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     if len(topKSize) > 0:
         topKSize[dim] = k
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
+
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
