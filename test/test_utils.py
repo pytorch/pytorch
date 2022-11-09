@@ -19,7 +19,7 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, IS_SANDCASTLE, IS_WINDOWS
+from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -610,6 +610,7 @@ class TestBottleneck(TestCase):
 from torch.utils.collect_env import get_pretty_env_info
 
 
+@unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
 class TestCollectEnv(TestCase):
     def test_smoke(self):
         info_output = get_pretty_env_info()
