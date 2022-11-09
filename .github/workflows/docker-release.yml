@@ -82,10 +82,11 @@ jobs:
       - name: Setup nightly specific variables
         if: ${{ github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/ciflow/nightly/') }}
         run: |
-          # Use nightly image if building for nightly
-          echo "DOCKER_IMAGE=pytorch-nightly" >> "${GITHUB_ENV}"
-          echo "INSTALL_CHANNEL=pytorch-nightly" >> "${GITHUB_ENV}"
-          echo "TRITON_VERSION=2.0.0+$(cut -c -10 .github/ci_commit_pins/triton.txt)" >> "${GITHUB_ENV}"
+          {
+            echo "DOCKER_IMAGE=pytorch-nightly";
+            echo "INSTALL_CHANNEL=pytorch-nightly";
+            echo "TRITON_VERSION=2.0.0+$(cut -c -10 .github/ci_commit_pins/triton.txt)";
+          } >> "${GITHUB_ENV}"
       - name: Run docker build / push
         # WITH_PUSH is used here to determine whether or not to add the --push flag
         run: |
