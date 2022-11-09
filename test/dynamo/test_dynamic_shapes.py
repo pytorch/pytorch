@@ -112,6 +112,11 @@ unittest.expectedFailure(
     test_no_fake_tensors.NoFakeTensorsMiscTests.test_onnx_shape_as_tensor_no_fake_tensors
 )
 
+# SymIntArrayRef expected to contain only concrete integers
+unittest.expectedFailure(
+    DynamicShapesUnspecTests.test_unspec_float_precision_dynamic_shapes
+)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
