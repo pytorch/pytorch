@@ -358,8 +358,7 @@ class DynamicShapeVariable(VariableTracker):
         return self.proxy
 
     def evaluate_expr(self, output_graph):
-        if isinstance(self.dyn_shape, bool):
-            # Bool and 0/1 case fallthrough
+        if not isinstance(self.dyn_shape, torch.SymInt):
             return self.dyn_shape
         return output_graph.shape_env.evaluate_expr(self.dyn_shape.get_pyobj().expr)
 

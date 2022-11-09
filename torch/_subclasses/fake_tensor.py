@@ -958,7 +958,7 @@ class FakeTensorMode(TorchDispatchMode):
         return wrap
 
     def cpp_meta_supports_symint(self, func):
-        if torch.Tag.view_copy in func.tags:
+        if torch.Tag.view_copy in func.tags:  # type: ignore[attr-defined]
             return True
         return func in [
             aten.empty_strided.default,
@@ -973,6 +973,7 @@ class FakeTensorMode(TorchDispatchMode):
             aten._fused_moving_avg_obs_fq_helper_functional.default,
             aten._sparse_coo_tensor_with_dims_and_tensors.default,
             aten.set_.source_Storage_storage_offset,
+            aten._sparse_coo_tensor_with_dims_and_tensors.default,
         ]
 
     @property
