@@ -36,6 +36,9 @@ def get_tag() -> str:
     # Strip trailing rc pattern
     # ie: 1.7.1-rc1 -> 1.7.1
     tag = re.sub(TRAILING_RC_PATTERN, "", tag)
+    # Ignore ciflow tags
+    if tag.startswith("ciflow/"):
+        return ""
     return tag
 
 def get_base_version() -> str:
