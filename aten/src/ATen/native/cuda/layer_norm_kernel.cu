@@ -283,7 +283,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
 
 //to avoid windows SFINAE errors
 template <typename T, typename T_ACC>
-__global__ __inline__ void vectorized_layer_norm_kernel(
+__global__ void vectorized_layer_norm_kernel(
   const int N,
   T_ACC eps,
   const  T* __restrict__ X,
