@@ -775,6 +775,7 @@ class TestEnableDisableLlgaFuser(JitTestCase):
 
 
 @unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
+@unittest.skip("Enable when integration with dynamo aot_autograd is more stable")
 class TestDynamoAOT(JitTestCase):
     def test_dynamo_aot_ts_onednn(self):
         class Seq(nn.Module):
