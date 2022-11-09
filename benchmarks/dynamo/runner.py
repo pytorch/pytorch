@@ -575,7 +575,6 @@ class ParsePerformanceLogs(Parser):
         return f"{gmean(cleaned_df):.2f}x"
 
     def passrate(self, compiler, df):
-        # import pdb; pdb.set_trace()
         total = len(df.index)
         passing = df[df[compiler] > 0.0][compiler].count()
         perc = int(percentage(passing, total, decimals=0))
