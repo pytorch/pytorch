@@ -312,6 +312,10 @@ class CppVecOverrides(OpOverrides):
         return f"{a}.pow(2)"
 
     @staticmethod
+    def where(a, b, c):
+        return f"decltype({b})::blendv({c}, {b}, {a})"
+
+    @staticmethod
     def sign(x):
         code = BracesBuffer()
         # auto tmp5 = tmp4 < 0 ? -1 : 1;
@@ -329,6 +333,11 @@ class CppVecOverrides(OpOverrides):
         code.writeline(f"auto {result} = {left} - {right};")
         V.kernel.compute.splice(code)
         return result
+
+    @staticmethod
+    def to_dtype(x, dtype):
+        assert dtype in [torch.bool], f"{__name__} does not support {dtype}"
+        return f"({x})"
 
 
 class CppOverrides(OpOverrides):
@@ -739,7 +748,16 @@ class CppVecKernel(CppKernel):
         if expanded_index == new_index:
             line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
         else:
-            line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(new_index)})"
+            if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
+                g_tmp_buf = f"g_tmp_buffer_{var}"
+                nelements = codecache.pick_vec_isa().nelements()
+                self.loads.writeline(f"float {g_tmp_buf}[{nelements}] = {{0}};")
+                self.loads.writeline(
+                    f"flag_to_float({var} + {cexpr(new_index)}, {g_tmp_buf}, {nelements});"
+                )
+                line = f"at::vec::Vectorized<float>::loadu({g_tmp_buf})"
+            else:
+                line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(new_index)})"
 
         return self.cse.generate(self.loads, line)
 
@@ -836,9 +854,6 @@ class CppVecKernelChecker(CppVecKernel):
         return self.is_var_irrevelant(var, index) or self.is_single_step_var(var, index)
 
     def could_vec(self, name: str, index: sympy.Expr):
-        if V.graph.get_dtype(name) is not torch.float:
-            return False
-
         assert self.itervars is not None
         # Not a loop
         if len(self.itervars) == 0:
@@ -848,12 +863,24 @@ class CppVecKernelChecker(CppVecKernel):
         return self.is_legal_data_access(most_inner_var, index)
 
     def load(self, name: str, index: sympy.Expr):
-        index = self.rename_indexing(index)
+        if not V.graph.get_dtype(name) in [
+            torch.float,
+            torch.float32,
+            torch.bool,
+            torch.uint8,
+        ]:
+            self.simd_vec = False
+            return self.simd_vec
 
+        index = self.rename_indexing(index)
         self.simd_vec = self.simd_vec and self.could_vec(name, index)
         return self.simd_vec
 
     def store(self, name, index, value, mode=None):
+        if not V.graph.get_dtype(name) in [torch.float, torch.float32]:
+            self.simd_vec = False
+            return self.simd_vec
+
         assert "buf" in name
         index = self.rename_indexing(index)
 
@@ -926,15 +953,24 @@ class CppVecKernelChecker(CppVecKernel):
             @staticmethod
             def index_expr(expr, dtype):
                 self.simd_vec = False
-                return self.cse.newvar()
+                tmp_var = self.cse.newvar()
+                return tmp_var
 
             @staticmethod
             def indirect_indexing(index_var):
+                self.simd_vec = False
                 return sympy.Symbol(str(index_var))
 
             @staticmethod
             def masked(mask, body, other):
-                return V.kernel.cse.newvar()
+                tmp_var = self.cse.newvar()
+                return tmp_var
+
+            @staticmethod
+            def to_dtype(x, dtype):
+                if dtype != torch.bool:
+                    self.simd_vec = False
+                return x
 
         self.exit_stack.enter_context(V.set_ops_handler(VecCheckerProxy()))
         self.exit_stack.enter_context(V.set_kernel_handler(self))

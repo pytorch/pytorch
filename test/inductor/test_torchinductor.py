@@ -4443,6 +4443,29 @@ if HAS_CPU:
             not codecache.valid_vec_isa(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
+        def test_masked_fill_softmax(self):
+            def fn(value, mask):
+                mask = mask.to(torch.bool)
+                x = torch.masked_fill(value, mask, -33.0)
+                return torch.softmax(x, -1)
+
+            value = torch.randn((2, 9))
+            mask = torch.randint(0, 1, size=(2, 9), dtype=torch.uint8)
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(value, mask)
+
+                real_out = fn(value, mask)
+                compiled_out = opt_fn(value, mask)
+                assert same(real_out, compiled_out, equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count > 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
         def test_sign_cpu_only(self):
             def fn(x):
                 return (torch.sign(x),)
