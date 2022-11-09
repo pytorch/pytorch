@@ -186,6 +186,8 @@ def group_norm(
         lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
     )
 
+    batch_size = input.shape[0]
+    num_channels = input.shape[1]
     utils.check(
         num_channels % num_groups == 0,
         lambda: "Expected number of channels in input to be divisible by num_groups, "
@@ -193,8 +195,6 @@ def group_norm(
     )
 
     # input shape is (N, C, *), so we flatten all inner dimensions except (N, C)
-    batch_size = input.shape[0]
-    num_channels = input.shape[1]
     flattened_inner_size = 1
     for dim_length in input.shape[2:]:
         flattened_inner_size *= dim_length
