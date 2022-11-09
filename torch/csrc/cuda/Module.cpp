@@ -11,7 +11,6 @@
 #include <ATen/cuda/Sleep.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/cuda/jiterator.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #ifdef USE_NCCL
@@ -357,21 +356,7 @@ PyObject* THCPModule_cudaCachingAllocator_set_allocator_settings(
 
 PyObject* THCPModule_getAllocatorBackend(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  using c10::cuda::CUDACachingAllocator::AllocatorBackend;
-  AllocatorBackend backend =
-      c10::cuda::CUDACachingAllocator::allocatorBackend();
-  // this call should be uncommon, don't bother interning strings
-  switch (backend) {
-    case AllocatorBackend::NATIVE:
-      return THPUtils_packString("native");
-#ifndef USE_ROCM
-    case AllocatorBackend::CUDAMALLOCASYNC:
-      return THPUtils_packString("cudaMallocAsync");
-#endif
-    default:
-      THPUtils_assert(false, "Unexpected value for backend");
-      return nullptr;
-  }
+  return THPUtils_packString(c10::cuda::CUDACachingAllocator::name());
   END_HANDLE_TH_ERRORS
 }
 
@@ -407,7 +392,7 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
 static PyGILState_STATE cudaMutexGILState;
 
 PyObject* THCPModule_cudaLockMutex(PyObject* module, PyObject* noargs) {
-  auto mutex = c10::cuda::CUDACachingAllocator::getFreeMutex();
+  auto mutex = c10::cuda::getFreeMutex();
   // This has to be a busy loop because we **absolutely need to** hold the GIL
   // or it's a recipe for a deadlock otherwise (if we let other Python threads
   // run while we have the cudaMutex, but not the GIL, they might try to e.g.
@@ -427,7 +412,7 @@ PyObject* THCPModule_cudaLockMutex(PyObject* module, PyObject* noargs) {
 }
 
 PyObject* THCPModule_cudaUnlockMutex(PyObject* module, PyObject* noargs) {
-  auto mutex = c10::cuda::CUDACachingAllocator::getFreeMutex();
+  auto mutex = c10::cuda::getFreeMutex();
   PyGILState_Release(cudaMutexGILState);
   mutex->unlock();
   Py_RETURN_NONE;

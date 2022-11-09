@@ -288,6 +288,8 @@ class TorchVariable(VariableTracker):
         ):
             log.warning("Profiler will be ignored")
             return ProfilerContextWrapperVariable(**options)
+        elif self.value is torch.autograd._profiler_enabled:
+            unimplemented("torch.autograd._profiler_enabled not supported yet")
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
@@ -306,6 +308,7 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     get_state_from_generator,
                     *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
                 ),
                 example_value=self.value(),
                 **options,
@@ -319,6 +322,9 @@ class TorchVariable(VariableTracker):
             assert isinstance(args[0], TensorVariable)
 
             if config.fake_tensor_propagation:
+                unimplemented(
+                    "TODO: make torch.random.set_rng_state work with FakeTensor/aot_autograd"
+                )
                 # In fake tensor case, this state doesn't matter, but
                 # it needs to be valid to not segfault. Pull a real tensor out.
                 # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
@@ -338,8 +344,27 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     self.value,
                     *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
                 ),
                 example_value=example_value,
+                **options,
+            )
+        elif (
+            self.value == torch.numel
+            and len(args) == 1
+            and isinstance(args[0], TensorVariable)
+            and len(kwargs) == 0
+        ):
+            # TODO(voz): This is rewritten as a call_method because
+            # torch.numel(x) w/ sym shapes raises a RuntimeError and x.numel() does not
+            return TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    "numel",
+                    *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
+                ),
                 **options,
             )
         else:
@@ -361,6 +386,7 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     self.value,
                     *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
                 ),
                 **options,
             )
@@ -430,6 +456,7 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     torch.nn.functional.softmax,
                     *proxy_args_kwargs([input, dim], {}),
+                    current_tx=tx,
                 ),
                 **VariableTracker.propagate([self, dim, input]),
             )
@@ -493,6 +520,7 @@ class TorchVariable(VariableTracker):
                         ],
                         {},
                     ),
+                    current_tx=tx,
                 ),
                 **VariableTracker.propagate(
                     [
@@ -667,6 +695,7 @@ class TorchPyOperator(VariableTracker):
                 self.value,
                 args=tuple(p_args),
                 kwargs={},
+                current_tx=tx,
             ),
             example_value=self.value(*u_args),
         )

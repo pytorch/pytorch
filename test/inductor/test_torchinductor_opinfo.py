@@ -140,6 +140,19 @@ inductor_skips["cuda"] = {
     # Disabled on migration to core
     "linalg.pinv.singular": {f32, f64},
     "linalg.householder_product": {f32},
+    # These might be passing now?
+    "__getitem__": {b8, f16, f32, f64, i32, i64},
+    "nn.functional.conv_transpose3d": {f16},
+    "max.reduction_with_dim": {i32, i64},
+    "min.reduction_with_dim": {i32, i64},
+    "linalg.lu": {f32, f64},
+    "lu_unpack": {f32, f64},
+    "native_batch_norm": {f16, f32, f64},
+    "native_layer_norm": {f16, f32, f64},
+    # Issues on sm86 periodic job (complex numbers)
+    "cdouble": {b8, f16, f32, f64, i32, i64},
+    "cfloat": {b8, f16, f32, f64, i32, i64},
+    "randint": {b8, f16, f32, f64, i32, i64},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -172,10 +185,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.hfft": {b8, f32, f64, i32, i64},
     "fft.hfft2": {b8, f32, f64, i32, i64},
     "fft.hfftn": {b8, f32, f64, i32, i64},
-    "fft.ifft": {b8, f16, f32, f64, i32, i64},
+    "fft.ifft": {f16, f32, f64},
     "fft.ifft2": {b8, f32, f64, i32, i64},
     "fft.ifftn": {b8, f32, f64, i32, i64},
-    "fft.ihfft": {b8, f16, f32, f64, i32, i64},
+    "fft.ihfft": {f16, f32, f64},
     "fft.ihfft2": {f32, f64},
     "fft.ihfftn": {f32, f64},
     "fft.irfft": {b8, f32, f64, i32, i64},
@@ -188,13 +201,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
-    "linalg.cholesky": {f32, f64},
-    "linalg.cholesky_ex": {f32, f64},
     "linalg.eig": {f32, f64},
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
     "linalg.eigvalsh": {f32, f64},
-    "linalg.ldl_factor": {f32, f64},
     "linalg.lstsq": {f32, f64},
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
@@ -208,9 +218,9 @@ inductor_expected_failures_single_sample["cpu"] = {
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
     "max.reduction_no_dim": {f16},
-    "max.reduction_with_dim": {b8, f16},
+    "max.reduction_with_dim": {b8},
     "min.reduction_no_dim": {f16},
-    "min.reduction_with_dim": {b8, f16},
+    "min.reduction_with_dim": {b8},
     "multinomial": {f32, f64},
     "nan_to_num": {f16},
     "nanquantile": {f32, f64},
@@ -229,7 +239,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "normal": {f16, f32, f64},
     "normal.number_mean": {f16, f32, f64},
     "pca_lowrank": {f32, f64},
-    "pinverse": {f32, f64},
     "polar": {f32, f64},
     "quantile": {f32, f64},
     "rand_like": {f16, f32, f64},
@@ -240,7 +249,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "scatter_reduce.sum": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64},
-    "segment_reduce.offsets": {f16, f32, f64},
     "sgn": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "stft": {f32, f64},
@@ -284,10 +292,10 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.hfft": {b8, f16, f32, f64, i32, i64},
     "fft.hfft2": {b8, f16, f32, f64, i32, i64},
     "fft.hfftn": {b8, f16, f32, f64, i32, i64},
-    "fft.ifft": {b8, f16, f32, f64, i32, i64},
+    "fft.ifft": {f16, f32, f64},
     "fft.ifft2": {b8, f16, f32, f64, i32, i64},
     "fft.ifftn": {b8, f16, f32, f64, i32, i64},
-    "fft.ihfft": {b8, f16, f32, f64, i32, i64},
+    "fft.ihfft": {f16, f32, f64},
     "fft.ihfft2": {f16, f32, f64},
     "fft.ihfftn": {f16, f32, f64},
     "fft.irfft": {b8, f16, f32, f64, i32, i64},
@@ -299,18 +307,14 @@ inductor_expected_failures_single_sample["cuda"] = {
     "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
-    "linalg.cholesky": {f32, f64},
-    "linalg.cholesky_ex": {f32, f64},
     "linalg.eig": {f32, f64},
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
     "linalg.eigvalsh": {f32, f64},
-    "linalg.ldl_factor": {f32, f64},
     "linalg.lstsq": {f32, f64},
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
-    "linalg.pinv.hermitian": {f32, f64},
     "lu_unpack": {f32, f64},
     "masked.argmax": {f16, f32, f64, i32},
     "masked.argmin": {f16, f32, f64, i32},
@@ -330,7 +334,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "normal": {f16, f32, f64},
     "normal.number_mean": {f16, f32, f64},
     "pca_lowrank": {f32, f64},
-    "pinverse": {f32, f64},
     "polar": {f32, f64},
     "pow": {i32, i64},
     "rand_like": {f16, f32, f64},
@@ -340,7 +343,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "round.decimals_3": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64},
-    "segment_reduce.offsets": {f16, f32, f64},
     "sgn": {f16, f32, f64},
     "stft": {f32, f64},
     "svd_lowrank": {f32, f64},
@@ -354,7 +356,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     # AssertionError: Tensor-likes are not close!
     "erf": {b8, f64},
     "nn.functional.gelu": {f64},
-    "nn.functional.conv_transpose3d": {f16},
     "nn.functional.triplet_margin_loss": {f16},
 }
 
@@ -365,7 +366,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "cumprod": {f16},
     "linalg.vector_norm": {f64, f64},
     "linalg.householder_product": {f32},
-    "linalg.lu": {f32, f64},
     "kron": {f16},
     "nanquantile": {f32, f64},
     "native_batch_norm": {f16, f32, f64},
@@ -441,6 +441,7 @@ inductor_all_samples = {
     "select_scatter",
     "squeeze",
     "unsqueeze",
+    "sum",
 }
 
 
@@ -597,6 +598,5 @@ class TestInductorOpInfo(TestCase):
 instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
-    torch._dynamo.config.raise_on_assertion_error = True
     if has_triton() and not TEST_WITH_ROCM:
         run_tests()

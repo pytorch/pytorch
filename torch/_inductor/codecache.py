@@ -1,18 +1,23 @@
 import base64
+import enum
 import functools
 import getpass
 import hashlib
 import logging
+import multiprocessing
 import os
 import re
 import shutil
+import signal
 import subprocess
+import sys
 import sysconfig
 import tempfile
 import types
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
-from time import time
+from threading import Thread
+from time import sleep, time
 from typing import Any, Dict
 
 import torch
@@ -46,8 +51,11 @@ log = logging.getLogger(__name__)
 logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else logging.INFO)
 
 
+@functools.lru_cache(None)
 def cache_dir():
-    return f"/tmp/torchinductor_{getpass.getuser()}"
+    return os.environ.get(
+        "TORCHINDUCTOR_CACHE_DIR", f"/tmp/torchinductor_{getpass.getuser()}"
+    )
 
 
 def get_lock_dir():
@@ -139,11 +147,81 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
+class _SupportedVecIsa(enum.Enum):
+    AVX512 = 1
+    AVX2 = 2
+    INVALID = -1
+
+    def __bool__(self):
+        return self != _SupportedVecIsa.INVALID
+
+    @staticmethod
+    def isa_str(supported_isa: enum.Enum):
+        if supported_isa == _SupportedVecIsa.AVX512:
+            return "avx512"
+        elif supported_isa == _SupportedVecIsa.AVX2:
+            return "avx2"
+        else:
+            return ""
+
+    @staticmethod
+    def vec_macro(supported_isa: enum.Enum):
+        if supported_isa == _SupportedVecIsa.AVX512:
+            return "CPU_CAPABILITY_AVX512"
+        elif supported_isa == _SupportedVecIsa.AVX2:
+            return "CPU_CAPABILITY_AVX2"
+        else:
+            return ""
+
+
+# Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
+# might have too much redundant content that is useless for ISA check. Hence,
+# we only cache some key isa information.
+@functools.lru_cache(1)
+def get_cpu_proc_info():
+    if sys.platform != "linux":
+        return []
+
+    isa_info = []
+    with open("/proc/cpuinfo") as _cpu_info:
+        _cpu_info_content = _cpu_info.read()
+        if _SupportedVecIsa.isa_str(_SupportedVecIsa.AVX512) in _cpu_info_content:
+            isa_info.append(_SupportedVecIsa.AVX512)
+
+        if _SupportedVecIsa.isa_str(_SupportedVecIsa.AVX2) in _cpu_info_content:
+            isa_info.append(_SupportedVecIsa.AVX2)
+
+        return isa_info
+
+
+def supported_vector_isa():
+    # TODO: Add ARM Vec here.
+    # Dict(k: isa, v: number of float element)
+    vec_isa_info = {
+        _SupportedVecIsa.AVX512: 16,
+        _SupportedVecIsa.AVX2: 8,
+    }
+
+    if config.cpp.simdlen is None or config.cpp.simdlen <= 1:
+        return _SupportedVecIsa.INVALID
+
+    cpu_info_content = get_cpu_proc_info()
+    for isa in vec_isa_info.keys():
+        if isa in cpu_info_content and config.cpp.simdlen == vec_isa_info[isa]:
+            return isa
+
+    return _SupportedVecIsa.INVALID
+
+
 def cpp_compile_command(input, output, include_pytorch=False):
-    if include_pytorch:
+    valid_isa = supported_vector_isa()
+    if include_pytorch or valid_isa:
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
+        macros = _SupportedVecIsa.vec_macro(valid_isa)
+        if macros:
+            macros = f"-D{macros}"
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -152,17 +230,19 @@ def cpp_compile_command(input, output, include_pytorch=False):
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = []
         libs = ["gomp"]
+        macros = ""
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
+
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
-            {ipaths} {lpaths} {libs}
+            {cpp_compiler()} {input} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
+            {ipaths} {lpaths} {libs} {macros}
             -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
-            -o{output} {input}
+            -o{output}
         """,
     ).strip()
 
@@ -279,7 +359,37 @@ class AsyncCompile:
         # are forked
         cuda_properties._properties()
         assert config.compile_threads > 1
-        return ProcessPoolExecutor(config.compile_threads)
+        orig_ppid = os.getpid()
+
+        # if this process dies abnormally (e.g. segfault)
+        # it will not shut down the workers. Instead
+        # the workers will have their parent reassigned to the
+        # init process. This launches a separate thread to
+        # watch for the worker getting reassigned,
+        # and cleans it up in this case.
+        def init():
+            def run():
+                while True:
+                    sleep(1)
+                    if orig_ppid != os.getppid():
+                        os.kill(os.getpid(), signal.SIGKILL)
+
+            global _watchdog_thread
+            _watchdog_thread = Thread(target=run, daemon=True)
+            _watchdog_thread.start()
+
+        # we rely on 'fork' because we cannot control whether users
+        # have an `if __name__ == '__main__'` in their main process.
+        fork_context = multiprocessing.get_context("fork")
+        pool = ProcessPoolExecutor(
+            config.compile_threads, mp_context=fork_context, initializer=init
+        )
+        # when this pool is created in a subprocess object, the normal exit handler
+        # doesn't run, and we need to register our own handler.
+        # exitpriority has to be high, because another one of the finalizers will
+        # kill the worker thread that sends the shutdown message to the workers...
+        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+        return pool
 
     @classmethod
     def warm_pool(cls):

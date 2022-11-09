@@ -226,6 +226,7 @@ class BuiltinVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+
         constant_args = check_constant_args(args, kwargs)
         tensor_args = self.tensor_args(*args, **kwargs)
         unspec_python_args = self.unspec_python_args(*args, **kwargs)
@@ -270,9 +271,7 @@ class BuiltinVariable(VariableTracker):
                     fn, args = operator.add, [args[1], args[0]]
 
                 proxy = tx.output.create_proxy(
-                    "call_function",
-                    fn,
-                    *proxy_args_kwargs(args, kwargs),
+                    "call_function", fn, *proxy_args_kwargs(args, kwargs), current_tx=tx
                 )
                 if any([isinstance(arg, FakeItemVariable) for arg in args]):
                     return variables.FakeItemVariable.create(
@@ -327,7 +326,10 @@ class BuiltinVariable(VariableTracker):
             try:
                 inspect.signature(handler).bind(tx, *args, **kwargs)
             except TypeError as exc:
-                log.warning(f"incorrect arg count {handler} {exc}")
+                if not has_constant_handler:
+                    log.warning(
+                        f"incorrect arg count {handler} {exc} and no constant handler"
+                    )
                 handler = None
 
         if handler:
@@ -360,10 +362,22 @@ class BuiltinVariable(VariableTracker):
                 a, b = b, a
             assert isinstance(a, variables.TensorVariable)
 
-            # 1. result of an item call is a scalar convert to a tensor
-            # 2. dynamic shape should be resolved to tensor
-            if isinstance(a, (FakeItemVariable, DynamicShapeVariable)):
+            # result of an item call is a scalar convert to a tensor
+            if isinstance(a, FakeItemVariable):
                 a = variables.TorchVariable(torch.tensor).call_function(tx, [a], {})
+
+            # Dynamic input does not get resolved, rather, gets stored as call_function
+            if isinstance(a, DynamicShapeVariable):
+                return variables.TensorVariable.create(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        self.fn,
+                        *proxy_args_kwargs([a, b], {}),
+                        current_tx=tx,
+                    ),
+                    **VariableTracker.propagate(self, [a, b]),
+                )
 
             # convert min/max to torch ops
             if b.is_python_constant():

@@ -1,4 +1,5 @@
 import os
+import sys
 
 # add some debug printouts
 debug = False
@@ -27,8 +28,13 @@ inplace_buffers = True
 benchmark_harness = True
 
 # control store vs recompute heuristic
+# For fanouts, rematearialization can lead to exponential blowup. So, have
+# smaller threashold
 realize_reads_threshold = 4
 realize_bytes_threshold = 2000
+
+# Threshold to prevent excessive accumulation of ops in one buffer during lowering
+realize_acc_reads_threshold = 8
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
@@ -53,7 +59,7 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
-compile_threads = min(32, os.cpu_count())
+compile_threads = min(32, os.cpu_count()) if sys.platform != "win32" else 1
 
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = __name__.replace(".config", "")

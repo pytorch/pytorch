@@ -283,7 +283,7 @@ class GradModeVariable(ContextWrappingVariable):
         return "_C._set_grad_enabled"
 
     def fn_name(self):
-        if self.target_values:
+        if self.target_values[0]:
             return "enable_grad"
         else:
             return "no_grad"
@@ -546,6 +546,7 @@ class GetAttrVariable(VariableTracker):
                             "call_function",
                             original_torch_or_getattr_variable.value,
                             *proxy_args_kwargs(new_args, new_kwargs),
+                            current_tx=tx,
                         ),
                         **options,
                     )
@@ -556,6 +557,7 @@ class GetAttrVariable(VariableTracker):
                             "call_method",
                             original_torch_or_getattr_variable.name,
                             *proxy_args_kwargs(new_args, new_kwargs),
+                            current_tx=tx,
                         ),
                         **options,
                     )

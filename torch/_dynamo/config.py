@@ -6,6 +6,9 @@ from types import ModuleType
 
 import torch
 
+# needed so that CODE is registered as a level in logging
+from . import logging as torchdynamo_logging  # noqa: F401
+
 try:
     import torch._prims
     import torch._refs
@@ -17,7 +20,7 @@ except ImportError:
 
 # log level (levels print what it says + all levels listed below it)
 # logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# torchdynamo.logging.CODE print compiled functions + graphs
+# logging.CODE print compiled functions + graphs (NOTE: can only be used after importing torch._dynamo.logging)
 # logging.INFO print the steps that dynamo is running
 # logging.WARN print warnings (including graph breaks)
 # logging.ERROR print exceptions (and what user code was being processed when it occurred)
@@ -29,10 +32,6 @@ log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
 verbose = False
-
-# If true, traced graph outputs will be outputted as Python GraphModule code.
-# If false, traced graph outputs will be outputted in tabular form.
-output_graph_code = False
 
 # verify the correctness of optimized backend
 verify_correctness = False
@@ -78,16 +77,15 @@ normalize_ir = False
 # __torch_function__ logic of the subclass.
 traceable_tensor_subclasses = set()
 
-# Raise torchdynamo internal assertions
-raise_on_assertion_error = False
-
-# Propagate backend exceptions up to torchdynamo.optimize
-raise_on_backend_error = True
+# Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
+# This is a good way to get your model to work one way or another, but you may
+# lose optimization opportunities this way.  Devs, if your benchmark model is failing
+# this way, you should figure out why instead of suppressing it.
+suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
 replay_record_enabled = False
-replay_record_dir_name = "./torchdynamo_error_records"
 
 # Show a warning on every graph break
 print_graph_breaks = False
@@ -98,6 +96,7 @@ skipfiles_inline_module_allowlist = {
     torch.nn,
     torch.distributions,
     torch.testing,
+    torch.ao.nn,
 }
 if HAS_REFS_PRIMS:
     skipfiles_inline_module_allowlist |= {
@@ -130,9 +129,6 @@ repro_after = os.environ.get("TORCHDYNAMO_REPRO_AFTER", None)
 # 4: Dumps a minifier_launcher.py if the accuracy fails.
 repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
 
-# Specify the directory where to save the repro artifacts
-repro_dir = os.environ.get("TORCHDYNAMO_REPRO_DIR", None)
-
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
 capture_scalar_outputs = False
@@ -151,17 +147,23 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
-# How to import torchdynamo, either torchdynamo or torch.dynamo
+# How to import torchdynamo, either torchdynamo or torch._dynamo
 dynamo_import = __name__.replace(".config", "")
 
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = dynamo_import.replace("dynamo", "inductor")
+
+# If true, error with a better message if we symbolically trace over a
+# dynamo-optimized function. If false, silently suppress dynamo.
+error_on_nested_fx_trace = True
 
 # root folder of the project
 if "torch." in dynamo_import:
     base_dir = dirname(dirname(dirname(abspath(__file__))))
 else:
     base_dir = dirname(dirname(abspath(__file__)))
+
+debug_dir_root = os.path.join(os.getcwd(), "torchdynamo_debug")
 
 
 class _AccessLimitingConfig(ModuleType):

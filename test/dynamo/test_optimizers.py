@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import inspect
+import sys
 import unittest
 
 import torch
@@ -54,11 +55,6 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.config, "fake_tensor_propagation", False
             )
         )
-        cls._exit_stack.enter_context(
-            unittest.mock.patch.object(
-                torch._dynamo.config, "raise_on_assertion_error", True
-            )
-        )
 
     test_sgd = make_test(torch.optim.SGD, lr=0.01)
     # lgbfs has data-dependent control and internally iterates
@@ -96,6 +92,42 @@ optimizers = [
 
 for opt in optimizers:
     setattr(OptimizerTests, "test_" + opt.__name__.lower(), make_test(opt))
+
+
+class End2EndTests(torch._dynamo.test_case.TestCase):
+
+    # https://github.com/pytorch/torchdynamo/issues/1604
+    def test_optimizing_over_tensor_with_requires_grad(self):
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                z = torch.bmm(x, y)
+                z = torch.flatten(z, 1)
+                return z
+
+        def training_iter_fn(batch, model, optimizer):
+            optimizer.zero_grad()
+            out = model(**batch)
+            target = torch.tensor([0, 7])
+            loss = torch.nn.CrossEntropyLoss()(out, target)
+            loss.backward()
+            optimizer.step()
+            return loss
+
+        net = Net()
+        input1 = torch.randn(2, 1, 4)
+        input2 = torch.randn(2, 4, 8, requires_grad=True)
+        optimizer = torch.optim.Adam([input2], lr=0.1)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_training_iter_fn = torch._dynamo.optimize(cnts)(training_iter_fn)
+        batch = {"x": input1, "y": input2}
+        for _ in range(2):
+            opt_training_iter_fn(batch, net, optimizer)
+        self.assertEqual(cnts.frame_count, (2 if sys.version_info < (3, 8) else 6))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

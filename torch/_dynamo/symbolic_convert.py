@@ -36,7 +36,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
-from .exc import unimplemented, Unsupported
+from .exc import BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph
 from .replay_record import DummyModule, ExecutionRecorder
@@ -53,7 +53,6 @@ from .utils import (
     fake_tensors_available,
     graph_break_dup_warning_checker,
     istype,
-    proxy_args_kwargs,
 )
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder
@@ -179,7 +178,7 @@ def break_graph_if_unsupported(*, push):
                 user_stack = [self.frame_summary()] + list(reversed(exc.real_stack))
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-                # torchdynamo.explain() formats this a little nicer, and presents a slightly
+                # torch._dynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if (
                     config.print_graph_breaks
@@ -308,7 +307,7 @@ class InstructionTranslatorBase(object):
         else:
             self.instruction_pointer = None
             self.next_instruction = None
-        if inst.starts_line:
+        if inst.starts_line and self.lineno != inst.starts_line:
             self.lineno = inst.starts_line
             log.debug(f"TRACE starts_line {self.f_code.co_filename}:{self.lineno}")
 
@@ -321,7 +320,10 @@ class InstructionTranslatorBase(object):
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
             getattr(self, inst.opname)(inst)
+
             return inst.opname != "RETURN_VALUE"
+        except BackendCompilerFailed:
+            raise
         except Unsupported as exc:
             exc.real_stack.append(self.frame_summary())
             if self.empty_checkpoint():
@@ -344,20 +346,19 @@ class InstructionTranslatorBase(object):
 
     def run(self):
         try:
-            self.output.push_tx(self)
             while (
                 self.instruction_pointer is not None
                 and not self.output.should_exit
                 and self.step()
             ):
                 pass
+        except BackendCompilerFailed:
+            raise
         except Exception as e:
             if config.replay_record_enabled:
                 e.exec_record = self.exec_recorder.get_record()
-
             raise
         finally:
-            self.output.pop_tx()
             # Cleanup the outputGraph to delete the held tensors. We perform the
             # cleanup only for InstructionTranslator and not
             # InliningInstructionTranslator. The InliningInstructionTranslator
@@ -722,11 +723,7 @@ class InstructionTranslatorBase(object):
             self.push(
                 TensorVariable.create(
                     self,
-                    proxy=self.output.create_proxy(
-                        "call_function",
-                        supported_tensors[op],
-                        *proxy_args_kwargs([left, right], {}),
-                    ),
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
                     **options,
                 )
             )
@@ -748,6 +745,14 @@ class InstructionTranslatorBase(object):
             self.push(right.call_method(self, "__contains__", [left], {}))
             if op == "not in":
                 self.UNARY_NOT(inst)
+        elif (
+            isinstance(left, UserFunctionVariable)
+            and isinstance(right, UserFunctionVariable)
+            and op in supported_is_const
+        ):
+            self.push(
+                ConstantVariable(supported_is_const[op](left.fn, right.fn), **options)
+            )
         else:
             unimplemented(f"COMPARE_OP {typestr(left)} {op} {typestr(right)}")
 
@@ -831,6 +836,14 @@ class InstructionTranslatorBase(object):
     def STORE_ATTR(self, inst):
         prior = self.copy_graphstate()
         val, obj = self.popn(2)
+
+        if isinstance(obj, NNModuleVariable):
+            # We don't allow side effects during export
+            # https://github.com/pytorch/torchdynamo/issues/1475
+            assert (
+                not self.export
+            ), f"Mutating module attribute {inst.argval} during export."
+
         try:
             self.output.guards.update(
                 BuiltinVariable(setattr)
@@ -904,7 +917,7 @@ class InstructionTranslatorBase(object):
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
             assert isinstance(k, ConstantVariable) or (
-                isinstance(k, TensorVariable) and k.parameter_value is not None
+                isinstance(k, TensorVariable) and k.specialized_value is not None
             )
 
             result[ConstDictVariable.get_key(k)] = v
@@ -1000,22 +1013,30 @@ class InstructionTranslatorBase(object):
         )
 
     def UNPACK_SEQUENCE(self, inst):
+        # TODO(jansel): rewrite this using unpack_var_sequence
         seq = self.pop()
+        options = VariableTracker.propagate([seq])
         if isinstance(seq, BaseListVariable):
+            assert len(seq.items) == inst.argval
             self.output.guards.update(seq.guards)
-            val = seq.unpack_var_sequence(self)
+            for i in reversed(seq.items):
+                self.push(i)
         elif seq.is_python_constant() and isinstance(seq, ConstantVariable):
-            val = seq.unpack_var_sequence(self)
+            val = seq.as_python_constant()
+            assert len(val) == inst.argval
+            for i in reversed(val):
+                self.push(ConstantVariable(i, **options))
         elif isinstance(seq, TensorVariable):
-            val = seq.unpack_var_sequence(self, idxes=range(inst.argval))
+            proxy = seq.as_proxy()
+            for i in reversed(range(inst.argval)):
+                self.push(TensorVariable.create(self, proxy[i], **options))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
-            val = seq.obj.unpack_var_sequence(self, idxes=range(inst.argval))
+            proxy = getattr(seq.obj.as_proxy(), seq.name)
+            for i in reversed(range(inst.argval)):
+                self.push(TensorVariable.create(self, proxy[i], **options))
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
-        assert len(val) == inst.argval
-        for i in reversed(val):
-            self.push(i)
 
     def UNPACK_EX(self, inst):
         assert 0 <= inst.argval <= 0xFFFF
@@ -1307,6 +1328,7 @@ class InstructionTranslatorBase(object):
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
         f_code: types.CodeType,
+        export: bool,
     ):
         super(InstructionTranslatorBase, self).__init__()
 
@@ -1336,10 +1358,13 @@ class InstructionTranslatorBase(object):
         self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
         # Stack of module being parsed, current nn.module is at the end of ordered dict
         self.nn_module_stack: Dict[str, str] = {}
+        # Flag to indicate whether tracing is used for export.
+        self.export = export
 
         if fake_tensors_available:
             with torch._subclasses.FakeTensorMode(
-                throw_on_data_dependent_ops=True
+                throw_on_data_dependent_ops=True,
+                shape_env=output.shape_env,
             ) as fake_mode:
                 pass
             self._fake_mode = fake_mode
@@ -1385,6 +1410,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             # A global var is inserted only after a STORE_GLOBAL happens to it
             symbolic_globals=collections.OrderedDict(),
             f_code=f_code,
+            export=export,
         )
         self.one_graph: bool = one_graph
         self.export = export
@@ -1612,6 +1638,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             instructions=cleaned_instructions(code),
             code_options={k: getattr(code, k) for k in dir(code)},
             f_code=code,
+            export=parent.export,
         )
         self.parent = parent
         self.symbolic_result = None

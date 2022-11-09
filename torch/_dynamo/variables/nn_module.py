@@ -14,7 +14,13 @@ from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
 from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource
-from ..utils import is_lazy_module, istype, proxy_args_kwargs
+from ..utils import (
+    is_lazy_module,
+    is_safe_constant,
+    istensor,
+    istype,
+    proxy_args_kwargs,
+)
 from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lists import SliceVariable
@@ -139,6 +145,9 @@ class NNModuleVariable(VariableTracker):
                 return variables.UserFunctionVariable(subobj.__get__(base), **options)
             elif istype(subobj, types.FunctionType):
                 return variables.UserMethodVariable(subobj, self, **options)
+            elif is_safe_constant(subobj) or istensor(subobj):
+                # Support possibly common cases of class members
+                return VariableBuilder(tx, NNModuleSource(source))(subobj)
             else:
                 unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
 
@@ -195,6 +204,7 @@ class NNModuleVariable(VariableTracker):
                         "call_module",
                         self.module_key,
                         *proxy_args_kwargs(args, kwargs),
+                        current_tx=tx,
                     ),
                     **options,
                 )
@@ -313,6 +323,13 @@ class NNModuleVariable(VariableTracker):
             ):
                 result.append(named_embed(name, param))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+        elif name == "named_buffers":
+            result = []
+            for name, buffer in module.named_buffers(
+                **get_kwargs("prefix", "recurse", "remove_duplicate")
+            ):
+                result.append(named_embed(name, buffer))
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "named_modules":
             result = []
             for name, submod in module.named_modules(
@@ -356,6 +373,7 @@ class NNModuleVariable(VariableTracker):
             if isinstance(args[0], SliceVariable):
                 # Build a TupleVariable of NNModules
                 result = []
+                submods = []
 
                 # Turn the slice into the list of integers
                 keys = list(range(len(module)))[args[0].as_python_constant()]
@@ -370,7 +388,18 @@ class NNModuleVariable(VariableTracker):
                             **options,
                         )
                     )
-                return TupleVariable(result, **options)
+                    submods.append(submod)
+
+                new_module = torch.nn.Sequential(*submods)
+                new_module_variable = tx.output.register_attr_or_module(
+                    new_module,
+                    f"{self}.__getitem__(slice)",
+                    source=NNModuleSource(
+                        GetItemSource(self.source, args[0].as_python_constant())
+                    ),
+                    **options,
+                )
+                return new_module_variable
 
             key = args[0].as_python_constant()
             submod = module[key]
