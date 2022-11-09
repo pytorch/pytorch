@@ -3139,7 +3139,7 @@ class Convolution(ExternKernelAlloc):
         else:
             stride_order = list(reversed(range(len(output_size))))
 
-        output_layout = FlexibleLayout(
+        output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,

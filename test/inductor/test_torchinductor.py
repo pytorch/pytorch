@@ -2824,10 +2824,10 @@ class CommonTemplate:
     def test_upsample_nearest2d(self):
         def fn(a):
             return (
-                aten.upsample_nearest2d(a, [74, 76], None),
-                aten.upsample_nearest2d(a, [70, 75], None),
-                aten.upsample_nearest2d(a, [45, 74], None),
-                aten.upsample_nearest2d(a, [36, 39], None),
+                aten.upsample_nearest2d(a, [74, 76]),
+                aten.upsample_nearest2d(a, [70, 75]),
+                aten.upsample_nearest2d(a, [45, 74]),
+                aten.upsample_nearest2d(a, [36, 39]),
                 aten.upsample_nearest2d(a, None, [2.0, 2.0]),
             )
 
@@ -2846,25 +2846,15 @@ class CommonTemplate:
         self.common(fn, (torch.randn([2, 4, 37, 38, 39]),))
 
     def test_upsample_nearest2d_backward(self):
-        func = torch.ops.aten.upsample_nearest2d_backward.vec
+        func = torch.ops.aten.upsample_nearest2d_backward
 
         def fn(a):
             return (
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 3, 6], scale_factors=None
-                ),
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 4, 5], scale_factors=None
-                ),
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 2, 8], scale_factors=None
-                ),
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 2, 8], scale_factors=None
-                ),
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 4, 7], scale_factors=None
-                ),
+                func(a, output_size=[6, 12], input_size=[3, 3, 3, 6]),
+                func(a, output_size=[6, 12], input_size=[3, 3, 4, 5]),
+                func(a, output_size=[6, 12], input_size=[3, 3, 2, 8]),
+                func(a, output_size=[6, 12], input_size=[3, 3, 2, 8]),
+                func(a, output_size=[6, 12], input_size=[3, 3, 4, 7]),
             )
 
         self.common(fn, (torch.randn([3, 3, 6, 12]),))
@@ -4303,6 +4293,16 @@ class CommonTemplate:
                     self.assertTrue(matmul_seen)
                 else:
                     self.assertEqual(len(inps), 0)
+
+    def test_dtype_mismatch_issue(self):
+        def fn(x):
+            attn = torch.nn.functional.pad(x, [0, 1])
+            return attn.softmax(dim=-1)
+
+        x = torch.rand(128, 32, 63)
+        res_ref = fn(x)
+        res = torch._dynamo.optimize("inductor")(fn)(x)
+        self.assertEqual(res, res_ref)
 
     @unittest.skipIf(HAS_CUDA, "histogramdd only supports cpu")
     def test_kwargs(self):
