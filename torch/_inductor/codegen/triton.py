@@ -112,10 +112,10 @@ class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton"""
 
     @staticmethod
-    def to_dtype(x, dtype: torch.dtype):
+    def to_dtype(x, dtype: torch.dtype, bitcast=False):
         if dtype == torch.bool:
             return f"({x} != 0)"
-        return f"{x}.to({triton_compute_type(dtype)})"
+        return f"{x}.to({triton_compute_type(dtype)}, bitcast={bitcast})"
 
     @staticmethod
     def constant(value, dtype):
@@ -240,7 +240,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def fmod(a, b):
-        return f"tl.libdevice.fmod({a}, ({b}).to(tl.float32))"
+        return f"tl.libdevice.fmod({a}, {b})"
 
     @staticmethod
     def pow(a, b):

@@ -28,6 +28,21 @@ dynamo_optimizations = import_module(f"{config.dynamo_import}.optimizations")
 dynamo_testing = import_module(f"{config.dynamo_import}.testing")
 dynamo_utils = import_module(f"{config.dynamo_import}.utils")
 
+DTYPE_TO_BYTES = {
+    torch.bool: 1,
+    torch.int8: 1,
+    torch.uint8: 1,
+    torch.int16: 2,
+    torch.bfloat16: 2,
+    torch.float16: 2,
+    torch.int32: 4,
+    torch.float32: 4,
+    torch.complex32: 4,
+    torch.int64: 8,
+    torch.float64: 8,
+    torch.complex64: 8,
+}
+
 
 @functools.lru_cache(None)
 def has_triton():
