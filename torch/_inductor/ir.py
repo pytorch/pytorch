@@ -2917,6 +2917,20 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
+        assert tensor_args or isinstance(
+            example_output, torch.Tensor
+        ), "Not sure where to find device info"
+        packed = FallbackKernel(
+            MultiOutputLayout(
+                tensor_args[0].get_device() if tensor_args else example_output.device
+            ),
+            kernel,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+            kwargs,
+        )
+
         def generate_output(output, index=""):
             if isinstance(output, (list, tuple)):
                 return type(output)(
@@ -2931,18 +2945,7 @@ class FallbackKernel(ExternKernelAlloc):
                         [sympy.Integer(s) for s in output.size()],
                         [sympy.Integer(s) for s in output.stride()],
                     ),
-                    FallbackKernel(
-                        MultiOutputLayout(
-                            tensor_args[0].get_device()
-                            if tensor_args
-                            else output.device
-                        ),
-                        kernel,
-                        tensor_args,
-                        non_tensor_args,
-                        unflatten_args,
-                        kwargs,
-                    ),
+                    packed,
                     index,
                 )
             else:
