@@ -1,6 +1,6 @@
-from .._src.python_key import pythonkey_decompose
-from .._src.fx_minifier import minifier
-from .._src.aot_autograd import (
+from torch._functorch.python_key import pythonkey_decompose
+from torch._functorch.fx_minifier import minifier
+from torch._functorch.aot_autograd import (
     aot_function,
     aot_module,
     compiled_function,
@@ -12,7 +12,7 @@ from .._src.aot_autograd import (
     make_boxed_func,
     make_boxed_compiler
 )
-from .._src.compilers import (
+from torch._functorch.compilers import (
     ts_compile,
     draw_graph_compile,
     nop,
@@ -22,10 +22,10 @@ from .._src.compilers import (
     print_compile,
     default_decompositions
 )
-from .._src.partitioners import (
+from torch._functorch.partitioners import (
     min_cut_rematerialization_partition,
     default_partition,
     draw_graph,
     draw_joint_graph,
 )
-from .._src import config
+from torch._functorch import config

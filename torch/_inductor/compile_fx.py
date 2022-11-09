@@ -6,10 +6,10 @@ import sys
 from typing import List
 
 import functorch
-from torch._functorch.aot_autograd import make_boxed_func
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch.fx
+from torch._functorch.aot_autograd import make_boxed_func
 from torch._subclasses.fake_tensor import FakeTensor
 
 from . import config, overrides
