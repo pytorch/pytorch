@@ -413,8 +413,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             timings,
         )
 
-    headers = ("dev", "name", "batch_size", "speedup")
-    row = [current_device, current_name, current_batch_size, float(speedup)]
+    headers = ("dev", "name", "batch_size", "speedup", "abs_latency")
+    row = [current_device, current_name, current_batch_size, float(speedup), median[1]]
     if "compilation_latency" in kwargs:
         headers = headers + ("compilation_latency", "compression_ratio")
         row.append(kwargs["compilation_latency"])
