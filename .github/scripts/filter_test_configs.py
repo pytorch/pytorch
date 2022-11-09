@@ -37,8 +37,7 @@ VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}" for label in {
 # Supported mode when running periodically. For simplicity, a random weight
 # will be assigned to each mode so that they can be chosen at random
 SUPPORTED_PERIODICAL_MODES = {
-    # DEBUG: TO BE UNCOMMENTED
-    # "mem_leak_check",
+    "mem_leak_check",
     "rerun_disabled_tests",
 }
 
