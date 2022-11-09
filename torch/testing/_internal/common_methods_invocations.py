@@ -9215,6 +9215,9 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_diag),
     OpInfo('diag_embed',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           # TODO: this is very questionable, because we do have
+           # diag_embed.out but it's not bound to Python somehow
+           # https://github.com/pytorch/pytorch/issues/88598
            supports_out=False,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -10474,9 +10477,6 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_native_batch_norm,
            skips=(
-               # NotImplementedError: Could not run
-               # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cpu"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
                # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
@@ -17870,6 +17870,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.diag_embed",
         torch_opinfo_name="diag_embed",
+        supports_out=True,
         supports_nvfuser=False,
     ),
     PythonRefInfo(
