@@ -1463,7 +1463,20 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         device = "cuda" if backend == "nccl" else "cpu"
         # ensure supported devices (cpu, cuda) succeeds during dispatch call
         tensor = torch.zeros(2, 2, device=torch.device(device))
-        collective(tensor, *args)
+        # multi tensor collectives
+        if collective == dist.barrier:
+            collective()
+        elif collective == dist.all_gather:
+            collective([tensor], tensor, *args)
+        elif collective == dist.reduce_scatter or collective == dist.all_to_all:
+            # gloo does not support reduce_scatter or all_to_all
+            if backend != "gloo":
+                if collective == dist.reduce_scatter:
+                    collective(tensor, [tensor], *args)
+                else:
+                    collective([tensor], [tensor], *args)
+        else:
+            collective(tensor, *args)
 
     # TODO: backend will be replaced with a non specified backend
     def _test_collectives(self, backend):
@@ -1477,7 +1490,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         collectives_and_args = [
             (dist.reduce, self.rank),
             (dist.broadcast, self.rank),
-            (dist.all_reduce,)
+            (dist.all_reduce,),
+            (dist.all_gather,),
+            (dist.reduce_scatter,),
+            (dist.barrier,),
+            (dist.all_to_all,),
         ]
         for collective, *args in collectives_and_args:
             with self.subTest(collective=collective, args=args):
@@ -1615,6 +1632,18 @@ class CompilerTest(MultiProcessTestCase):
             return work2, tensor
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
+
+
+class ReduceOpTest(TestCase):
+
+    def test_op_isinstance_of_reduceop(self):
+        for reduce_op in (
+            c10d.ReduceOp.SUM, c10d.ReduceOp.AVG, c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX,
+            c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
+        ):
+            self.assertTrue(isinstance(reduce_op, c10d.ReduceOp))
+        for scale in ([torch.tensor(1.0)], 2.0):
+            self.assertTrue(isinstance(dist._make_nccl_premul_sum(scale), c10d.ReduceOp))
 
 
 if __name__ == "__main__":

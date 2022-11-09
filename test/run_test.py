@@ -26,9 +26,10 @@ from torch.testing._internal.common_utils import (
     shell,
     set_cwd,
     parser as common_parser,
+    is_slow_gradcheck_env,
 )
 import torch.distributed as dist
-from torch.multiprocessing import Pool, get_context
+from torch.multiprocessing import get_context
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -66,8 +67,7 @@ def discover_tests(
             rc |= name in blocklisted_tests
         return rc
     cwd = pathlib.Path(__file__).resolve().parent if base_dir is None else base_dir
-    # This supports symlinks, so we can link domain library tests like functorch
-    # to PyTorch test directory
+    # This supports symlinks, so we can link domain library tests to PyTorch test directory
     all_py_files = [pathlib.Path(p) for p in glob.glob(f"{cwd}/**/test_*.py", recursive=True)]
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
     # Invert slashes on Windows
@@ -171,6 +171,7 @@ USE_PYTEST_LIST = [
     "distributed/elastic/events/lib_test",
     "distributed/elastic/agent/server/test/api_test",
     "test_deploy",
+    "distributed/test_c10d_error_logger.py"
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -252,6 +253,7 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
+    "test_cuda_nvml_based_avail",
 ]
 
 RUN_PARALLEL_BLOCKLIST = [
@@ -267,6 +269,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_tensorexpr",
     "test_cuda_primary_ctx",
     "test_cuda_trace",
+    "test_cuda_nvml_based_avail",
 ] + FSDP_TEST
 
 CI_SERIAL_LIST = [
@@ -300,9 +303,24 @@ CORE_TEST_LIST = [
     "test_nn",
     "test_ops",
     "test_ops_gradients",
+    "test_ops_fwd_gradients",
     "test_ops_jit",
     "test_torch"
 ]
+
+# A list of distributed tests that run on multiple backends, i.e. gloo, nccl. These backends are spread out
+# among all available shards to speed up the test. The list of backends are copied from the tests themselves
+DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS = {
+    "distributed/test_distributed_spawn": [
+        "gloo",
+        "nccl",
+        "ucc",
+    ],
+    "distributed/algorithms/quantization/test_quantization": [
+        "gloo",
+        "nccl",
+    ],
+}
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
@@ -364,6 +382,23 @@ TESTS_REQUIRING_LAPACK = [
     "distributions/test_distributions",
 ]
 
+# These are just the slowest ones, this isn't an exhaustive list.
+TESTS_NOT_USING_GRADCHECK = [
+    # Note that you should use skipIfSlowGradcheckEnv if you do not wish to
+    # skip all the tests in that file, e.g. test_mps
+    "doctests",
+    "test_meta",
+    "test_hub",
+    "test_fx",
+    "test_decomp",
+    "test_cpp_extensions_jit",
+    "test_jit",
+    "test_ops",
+    "test_ops_jit",
+    "dynamo/test_recompile_ux",
+    "inductor/test_smoke",
+    "test_quantization",
+]
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
@@ -519,31 +554,36 @@ def test_distributed(test_module, test_directory, options):
     ) == 0 and sys.version_info < (3, 9)
     if options.verbose and not mpi_available:
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
+
+    if options.shard:
+        which_shard, num_shards = options.shard
+    else:
+        which_shard = num_shards = 1
+    # Round-robin all backends to different shards
+    backend_to_shard = {backend: i % num_shards + 1
+                        for i, backend in enumerate(DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS[test_module])}
+    print_to_stderr(f"Map different backends to different shards for {test_module}: {backend_to_shard}")
+
     config = DISTRIBUTED_TESTS_CONFIG
-
-    for with_init_file in {True, False}:
-        # Run all distributed backends in parallel, trying to run env/file init
-        # methods in parallel too ends in failures in which the subprocesses
-        # timeout
-        pool = Pool(processes=len(config))
-        return_codes = []
-        tmp_dirs = []
-
-        for backend, env_vars in config.items():
-            if sys.platform == "win32" and backend != "gloo":
-                continue
-            if backend == "mpi" and not mpi_available:
-                continue
+    for backend, env_vars in config.items():
+        if sys.platform == "win32" and backend != "gloo":
+            continue
+        if backend == "mpi" and not mpi_available:
+            continue
+        # Default to the first shard if seeing an unrecognized backend
+        if which_shard != backend_to_shard.get(backend, 1):
+            print_to_stderr(f"Shard {which_shard}: {backend} should be run in {backend_to_shard.get(backend, 1)}")
+            continue
+        for with_init_file in {True, False}:
             if sys.platform == "win32" and not with_init_file:
                 continue
             tmp_dir = tempfile.mkdtemp()
-            tmp_dirs.append(tmp_dir)
             if options.verbose:
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
                 print_to_stderr(
-                    "Running distributed tests for the {} backend {}".format(
-                        backend, with_init
+                    "Running distributed tests for the {} backend {} in shard {} of {}".format(
+                        backend, with_init, which_shard, num_shards
                     )
                 )
             old_environ = dict(os.environ)
@@ -557,7 +597,6 @@ def test_distributed(test_module, test_directory, options):
                 else:
                     init_method = f"{FILE_SCHEMA}{tmp_dir}/shared_init_file"
                 os.environ["INIT_METHOD"] = init_method
-
             try:
                 os.mkdir(os.path.join(tmp_dir, "barrier"))
                 os.mkdir(os.path.join(tmp_dir, "test_dir"))
@@ -588,41 +627,18 @@ def test_distributed(test_module, test_directory, options):
                         )
 
                     mpiexec = ["mpiexec", "-n", "3", noprefix_opt, allowrunasroot_opt]
-                    return_code = pool.apply_async(
-                        run_test,
-                        args=(test_module, test_directory, options),
-                        kwds={
-                            "launcher_cmd": mpiexec,
-                            "env": os.environ.copy(),
-                        }
+
+                    return_code = run_test(
+                        test_module, test_directory, options, launcher_cmd=mpiexec
                     )
                 else:
-                    return_code = pool.apply_async(
-                        run_test,
-                        args=(test_module, test_directory, options),
-                        kwds={
-                            "extra_unittest_args": ["--subprocess"],
-                            "env": os.environ.copy(),
-                        }
-                    )
-
-                return_codes.append(return_code)
-
+                    return_code = run_test(test_module, test_directory, options, extra_unittest_args=["--subprocess"])
+                if return_code != 0:
+                    return return_code
             finally:
+                shutil.rmtree(tmp_dir)
                 os.environ.clear()
                 os.environ.update(old_environ)
-
-        pool.close()
-        # Close the pool and wait for all the processes to finish
-        pool.join()
-
-        for tmp_dir in tmp_dirs:
-            shutil.rmtree(tmp_dir)
-
-        for return_code in return_codes:
-            if return_code.get() != 0:
-                return return_code
-
     return 0
 
 
@@ -702,11 +718,19 @@ def run_doctests(test_module, test_directory, options):
 
 
 def print_log_file(test: str, file_path: str, failed: bool) -> None:
+    num_lines = sum(1 for _ in open(file_path, 'rb'))
+    n = 100
     with open(file_path, "r") as f:
         print_to_stderr("")
         if failed:
-            print_to_stderr(f"PRINTING LOG FILE of {test} ({file_path})")
-            print_to_stderr(f.read())
+            if n < num_lines:
+                print_to_stderr(f"Expand the folded group to see the beginning of the log file of {test}")
+                print_to_stderr(f"##[group]PRINTING BEGINNING OF LOG FILE of {test} ({file_path})")
+                for _ in range(num_lines - n):
+                    print_to_stderr(next(f).rstrip())
+                print_to_stderr("##[endgroup]")
+            for _ in range(min(n, num_lines)):
+                print_to_stderr(next(f).rstrip())
             print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
         else:
             print_to_stderr(f"Expand the folded group to see the log file of {test}")
@@ -750,6 +774,7 @@ def run_test_ops(test_module, test_directory, options):
 
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": test_cuda_primary_ctx,
+    "test_cuda_nvml_based_avail": get_run_test_with_subprocess_fn(),
     "test_cuda_trace": get_run_test_with_subprocess_fn(),
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
@@ -769,6 +794,7 @@ CUSTOM_HANDLERS = {
     "doctests": run_doctests,
     "test_ops": run_test_ops,
     "test_ops_gradients": run_test_ops,
+    "test_ops_fwd_gradients": run_test_ops,
     "test_ops_jit": run_test_ops,
     "functorch/test_ops": run_test_ops,
 }
@@ -976,11 +1002,11 @@ def find_test_index(test, selected_tests, find_last_index=False):
     return found_idx
 
 
-def exclude_tests(exclude_list, selected_tests, exclude_message=None):
+def exclude_tests(exclude_list, selected_tests, exclude_message=None, exact_match=False):
     for exclude_test in exclude_list:
         tests_copy = selected_tests[:]
         for test in tests_copy:
-            if test.startswith(exclude_test):
+            if (not exact_match and test.startswith(exclude_test)) or test == exclude_test:
                 if exclude_message is not None:
                     print_to_stderr("Excluding {} {}".format(test, exclude_message))
                 selected_tests.remove(test)
@@ -1009,7 +1035,9 @@ def get_selected_tests(options):
 
     if options.distributed_tests:
         selected_tests = list(
-            filter(lambda test_name: test_name in DISTRIBUTED_TESTS, selected_tests)
+            filter(lambda test_name: (test_name in DISTRIBUTED_TESTS and
+                                      test_name not in DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS),
+                   selected_tests)
         )
 
     # Filter to only run core tests when --core option is specified
@@ -1019,7 +1047,7 @@ def get_selected_tests(options):
         )
 
     if options.functorch:
-        selected_tests = FUNCTORCH_TESTS
+        selected_tests = [tname for tname in selected_tests if tname in FUNCTORCH_TESTS]
     else:
         # Exclude all functorch tests otherwise
         options.exclude.extend(FUNCTORCH_TESTS)
@@ -1063,7 +1091,11 @@ def get_selected_tests(options):
 
         # This is exception that's caused by this issue https://github.com/pytorch/pytorch/issues/69460
         # This below code should be removed once this issue is solved
-        if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.5":
+        if (
+            torch.version.cuda is not None and
+            LooseVersion(torch.version.cuda) >= "11.5" and
+            LooseVersion(torch.version.cuda) <= "11.6"
+        ):
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_no_ninja")
@@ -1104,6 +1136,11 @@ def get_selected_tests(options):
         else:
             print("Found test time stats from artifacts")
             test_file_times_config = test_file_times[test_config]
+            if is_slow_gradcheck_env():
+                # HACK: hardcode approx test times, so these two don't get put in the same shard
+                #       we can remove this when their actual runtimes are recorded
+                test_file_times_config["test_ops_fwd_gradients"] = 3600 * 2 + 600  # 2:10
+                test_file_times_config["test_ops_gradients"] = 3600 * 2 + 600  # 2:10
             shards = calculate_shards(num_shards, selected_tests, test_file_times_config,
                                       must_serial=must_serial)
             _, tests_from_shard = shards[which_shard - 1]
@@ -1118,6 +1155,16 @@ def get_selected_tests(options):
     if not torch._C.has_lapack:
         selected_tests = exclude_tests(TESTS_REQUIRING_LAPACK, selected_tests,
                                        "PyTorch is built without LAPACK support.")
+
+    if is_slow_gradcheck_env():
+        selected_tests = exclude_tests(TESTS_NOT_USING_GRADCHECK, selected_tests,
+                                       "Running in slow gradcheck mode, skipping tests "
+                                       "that don't use gradcheck.", exact_match=True)
+
+    if options.distributed_tests:
+        # Run distributed tests with multiple backends across all shards, one per backend
+        selected_tests.extend(DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS.keys())
+        selected_tests.reverse()
 
     return selected_tests
 

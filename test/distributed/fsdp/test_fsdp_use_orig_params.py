@@ -1,8 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import functools
+import itertools
 import sys
-from typing import Callable, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 import torch
 import torch.nn as nn
@@ -13,7 +14,7 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.fully_sharded_data_parallel import clean_tensor_name
+from torch.distributed.fsdp._common_utils import clean_tensor_name
 from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
@@ -46,16 +47,14 @@ if TEST_WITH_DEV_DBG_ASAN:
 class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
     """Tests multiple parameter groups."""
 
-    def _get_optim(
-        self,
-        model: nn.Module,
-        optim_class: Type[torch.optim.Optimizer],
-        multi_tensor: bool,
-    ) -> torch.optim.Optimizer:
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _get_param_groups(self, model: nn.Module) -> List[Dict[str, Any]]:
         """
-        Constructs an Adam optimizer with three parameter groups, one for
-        weights, one for biases, and one for everything else, each with
-        different weight decay and learning rates.
+        Constructs separate parameter groups for weights, biases, and other
+        parameters.
         """
         param_groups = [
             {"params": [], "weight_decay": 0.1, "lr": 1e-2},
@@ -69,18 +68,24 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                 param_groups[1]["params"].append(param)
             else:
                 param_groups[2]["params"].append(param)
-        return optim_class(param_groups, lr=5e-3, foreach=multi_tensor)
+        return param_groups
 
-    def _get_ddp_transformer_and_optim(
+    def _get_optim(
         self,
+        model: nn.Module,
         optim_class: Type[torch.optim.Optimizer],
         multi_tensor: bool,
-        find_unused_params: bool,
-    ) -> Tuple[DDP, torch.optim.Optimizer]:
+    ) -> torch.optim.Optimizer:
         """
-        Returns a transformer with shared parameters wrapped with DDP and a
-        corresponding optimizer.
+        Constructs an Adam optimizer with three parameter groups, one for
+        weights, one for biases, and one for everything else, each with
+        different weight decay and learning rates.
         """
+        param_groups = self._get_param_groups(model)
+        return optim_class(param_groups, lr=5e-3, foreach=multi_tensor)
+
+    def _get_ddp_transformer(self, find_unused_params: bool) -> DDP:
+        """Returns a transformer with shared parameters wrapped with DDP."""
         model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
@@ -92,8 +97,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             device_ids=[self.rank],
             find_unused_parameters=find_unused_params,
         )
-        ddp_optim = self._get_optim(ddp_model, optim_class, multi_tensor)
-        return ddp_model, ddp_optim
+        return ddp_model
 
     def _get_fsdp_transformer_and_optim(
         self,
@@ -174,11 +178,17 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                     model.to(torch.device("cpu"))
                 optim.step()
                 if model is ddp_model and fsdp_model.cpu_offload.offload_params:
-                    model.to(torch.device("cuda"))
+                    model.to(device)
             torch.testing.assert_close(iter_losses[0], iter_losses[1])
             iter_losses.clear()
+        self._check_ddp_fsdp_param_parity(ddp_model, fsdp_model)
+
+    def _check_ddp_fsdp_param_parity(self, ddp_model: DDP, fsdp_model: FSDP):
         with FSDP.summon_full_params(fsdp_model):
-            for p1, p2 in zip(ddp_model.parameters(), fsdp_model.parameters()):
+            for (n1, p1), (n2, p2) in zip(
+                ddp_model.module.named_parameters(), fsdp_model.named_parameters()
+            ):
+                self.assertEqual(n1, n2)
                 torch.testing.assert_close(p1, p2)
 
     def _get_sharding_strategy_from_str(
@@ -226,11 +236,12 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             sharding_strategy=sharding_strategy,
         )
 
+    @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy_str",
         ["no_shard", "shard_grad_op", "full_shard"],
     )
-    def _test_diff_hyperparams_cpu_offload(self, sharding_strategy_str: str):
+    def test_diff_hyperparams_cpu_offload(self, sharding_strategy_str: str):
         """
         Tests FSDP parity with DDP when using multiple parameter groups with
         different hyperparameter settings with CPU offloading enabled. This is
@@ -271,11 +282,8 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         """
         if cuda_init_mode == CUDAInitMode.CUDA_AFTER and cpu_offload.offload_params:
             return  # not supported
-        ddp_model, ddp_optim = self._get_ddp_transformer_and_optim(
-            optim_class=optim_class,
-            multi_tensor=multi_tensor,
-            find_unused_params=False,
-        )
+        ddp_model = self._get_ddp_transformer(find_unused_params=False)
+        ddp_optim = self._get_optim(ddp_model, optim_class, multi_tensor)
         fsdp_model, fsdp_optim = self._get_fsdp_transformer_and_optim(
             cuda_init_mode=cuda_init_mode,
             init_optim_before_wrap=init_optim_before_wrap,
@@ -313,11 +321,8 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         sharding_strategy: ShardingStrategy,
     ):
         optim_class = torch.optim.Adam
-        ddp_model, ddp_optim = self._get_ddp_transformer_and_optim(
-            optim_class=optim_class,
-            multi_tensor=multi_tensor,
-            find_unused_params=True,
-        )
+        ddp_model = self._get_ddp_transformer(find_unused_params=True)
+        ddp_optim = self._get_optim(ddp_model, optim_class, multi_tensor)
         fsdp_model, fsdp_optim = self._get_fsdp_transformer_and_optim(
             cuda_init_mode=CUDAInitMode.CUDA_BEFORE,
             init_optim_before_wrap=False,
@@ -336,9 +341,144 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                 param.requires_grad_(False)
         self._check_train_parity(ddp_model, ddp_optim, fsdp_model, fsdp_optim, False)
 
+    @skip_if_lt_x_gpu(2)
+    def test_multiple_optimizers(self):
+        """
+        Tests using two optimizers where only one sets gradients to ``None``.
+        """
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    # ShardingStrategy.SHARD_GRAD_OP,
+                ]
+            },
+            self._test_multiple_optimizers,
+        )
+
+    def _test_multiple_optimizers(self, sharding_strategy: ShardingStrategy):
+        ddp_model = self._get_ddp_transformer(find_unused_params=True)
+        ddp_param_groups = self._get_param_groups(ddp_model)
+        assert len(ddp_param_groups) == 3, f"{len(ddp_param_groups)}"
+        (
+            fsdp_model,
+            _,
+        ) = self._get_fsdp_transformer_and_optim(  # ignore returned optimizer
+            cuda_init_mode=CUDAInitMode.CUDA_BEFORE,
+            init_optim_before_wrap=False,
+            optim_class=torch.optim.Adam,  # ignored
+            multi_tensor=False,  # ignored
+            sharding_strategy=sharding_strategy,
+            backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+            cpu_offload=None,
+        )
+        fsdp_param_groups = self._get_param_groups(fsdp_model)
+        assert len(fsdp_param_groups) == 3, f"{len(fsdp_param_groups)}"
+        ddp_optims = []
+        fsdp_optims = []
+        # For the transformer model, every parameter is either a weight or a
+        # bias, so we only use the first two parameter groups. Moreover, we use
+        # Adam and AdamW in particular since they both use bias correction
+        # dependent on the step, which is incremented even if a parameter has a
+        # zero gradient but not if the gradient is `None`. This is to test that
+        # we are differentiating between a zero and `None` gradient correctly.
+        optim_ctors = [
+            functools.partial(torch.optim.Adam, lr=5e-3),
+            functools.partial(torch.optim.AdamW, lr=1e-2),
+        ]
+
+        for optim_ctor, ddp_param_group, fsdp_param_group in zip(
+            optim_ctors,
+            ddp_param_groups[:2],
+            fsdp_param_groups[:2],
+        ):
+            ddp_optims.append(optim_ctor(ddp_param_group["params"]))
+            fsdp_optims.append(optim_ctor(fsdp_param_group["params"]))
+        device = torch.device("cuda")
+
+        # Check that there exists a `FlatParameter` that has both a weight and
+        # a bias in this rank's shard
+        has_both = False
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model):
+            for handle in fsdp_module._handles:
+                flat_param = handle.flat_param
+                assert flat_param._params is not None
+                has_weight = False
+                has_bias = False
+                for param, fqn in zip(flat_param._params, flat_param._fqns):
+                    if "weight" in fqn and param.numel() > 0:
+                        has_weight = True
+                    elif "bias" in fqn and param.numel() > 0:
+                        has_bias = True
+                has_both |= has_weight and has_bias
+        assert has_both, (
+            f"Rank {self.rank} does not have a `FlatParameter` with both a "
+            "weight and a bias in its shard, meaning that this test is vacuous"
+        )
+
+        # Run one iteration to generate gradients
+        def run_iter():
+            iter_losses = []
+            for model, optims in ((ddp_model, ddp_optims), (fsdp_model, fsdp_optims)):
+                module = model.module
+                inp = module.get_input(device)
+                output = model(*inp)
+                loss = module.get_loss(inp, output).to(device)
+                iter_losses.append(loss)
+                module.run_backward(loss)
+                for optim in optims:
+                    optim.step()
+            torch.testing.assert_close(iter_losses[0], iter_losses[1])
+            iter_losses.clear()
+            self._check_ddp_fsdp_param_parity(ddp_model, fsdp_model)
+
+        run_iter()
+
+        # Only set the weights' gradients to None
+        ddp_optims[0].zero_grad(set_to_none=True)
+        fsdp_optims[0].zero_grad(set_to_none=True)
+        inp = ddp_model.module.get_input(device)
+        ddp_output = ddp_model(*inp)
+        fsdp_output = fsdp_model(*inp)
+
+        # Check that FSDP correctly exposes gradients even after forward
+        # (namely, `None` for weights and non-`None` for biases)
+        for (ddp_n, ddp_p), (fsdp_n, fsdp_p) in zip(
+            ddp_model.module.named_parameters(),
+            fsdp_model.named_parameters(),
+        ):
+            self.assertEqual(ddp_n, fsdp_n)
+            if fsdp_p.numel() == 0:
+                # Not in this rank's shard
+                self.assertTrue(fsdp_p.grad is None)
+                continue
+            if ddp_p.grad is None:
+                self.assertTrue(fsdp_p.grad is None)
+            else:
+                self.assertEqual(ddp_p.flatten(), fsdp_p.flatten())
+                self.assertEqual(ddp_p.grad.flatten(), fsdp_p.grad.flatten())
+        self._check_ddp_fsdp_param_parity(ddp_model, fsdp_model)
+
+        # Finish the iteration (backward pass and optimizer step)
+        ddp_loss = ddp_model.module.get_loss(inp, ddp_output).to(device)
+        fsdp_loss = fsdp_model.module.get_loss(inp, fsdp_output).to(device)
+        ddp_model.module.run_backward(ddp_loss)
+        fsdp_model.module.run_backward(fsdp_loss)
+        for optim in itertools.chain(ddp_optims, fsdp_optims):
+            optim.step()
+        self._check_ddp_fsdp_param_parity(ddp_model, fsdp_model)
+
+        # Run one more iteration to confirm bias corrections are correct
+        run_iter()
+        self._check_ddp_fsdp_param_parity(ddp_model, fsdp_model)
+
 
 class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
     """Tests the unshard/reshard flow."""
+
+    @property
+    def world_size(self) -> int:
+        return 2
 
     def _get_fsdp_models_and_optims(
         self,

@@ -518,7 +518,7 @@ Tensor mkldnn_adaptive_avg_pool2d(
       /*padding*/ {0, 0},
       /*dilation*/ {1, 1},
       /*ceil_mode*/ false,
-      /*algo*/ ideep::algorithm::pooling_avg);
+      /*algo*/ ideep::algorithm::pooling_avg_exclude_padding);
 }
 
 Tensor& mkldnn_adaptive_avg_pool2d_out_stub(const Tensor& input,
