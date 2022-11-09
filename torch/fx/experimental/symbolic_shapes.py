@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Set, Dict, List, Type, Optional, cast
+from typing import Set, Dict, List, Type, Optional, cast, Union
 import sys
 import operator
 import builtins
@@ -24,7 +24,8 @@ aten = torch.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "sym_float", "FloorDiv", "guard_int", "wrap_node"
+    "SymDispatchMode", "sym_float", "FloorDiv", "guard_int", "wrap_node",
+    "sym_sqrt",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -103,6 +104,12 @@ def sym_float(a):
         return a.__sym_float__()
     return float(a)
 
+# Drop in replacement for math.sqrt
+def sym_sqrt(a):
+    if hasattr(a, '__sym_sqrt__'):
+        return a.__sym_sqrt__()
+    return math.sqrt(a)
+
 def sym_int(a):
     if isinstance(a, SymInt):
         return a
@@ -159,7 +166,7 @@ class SymNode:
         return SymNode(sympy.Float(num), self.shape_env, float, constant=num)
 
     def clone(self):
-        return SymNode(self.expr, self.shape_env, self.pytype, constant=self.constant)
+        return self
 
     def str(self):
         return f"{self.expr}"
@@ -255,19 +262,23 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
+    'floor': lambda a: sympy.floor(a),
     'sym_float': lambda a: a,  # TODO: why can't I wrap with sympy.Float?
-    'sym_int': lambda a: _nyi(),
+    'sym_int': lambda a: sympy.floor(a),
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
     'max': lambda a, b: sympy.Max(a, b),
+    'sym_sqrt': lambda a: sympy.sqrt(a),
 }
 
 unary_magic_methods = {
     'sym_float',
     'sym_int',
     'ceil',
+    'floor',
     'neg',
+    'sym_sqrt',
 }
 
 # TODO: sym_int should also work on floats
@@ -275,9 +286,9 @@ magic_methods_not_on_float = {"sym_int"}
 
 magic_methods_on_builtins = {"min", "max"}
 magic_methods_on_math = {"ceil", "floor"}
-magic_methods_on_submodule = {"sym_float", "sym_int"}
+magic_methods_on_submodule = {"sym_float", "sym_int", "sym_sqrt"}
 
-always_float_magic_methods = {"truediv", "sym_float"}
+always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
 always_int_magic_methods = {"ceil", "floor"}
 always_bool_magic_methods = {"eq", "gt", "lt", "le", "ge"}
 
@@ -342,6 +353,8 @@ def _make_node_magic(method, func):
             pytype = int
         elif method in always_float_magic_methods:
             pytype = float
+        elif method in ["sym_int"]:
+            pytype = int
         else:
             pytype = self.pytype
 
@@ -479,7 +492,7 @@ class ShapeEnv(object):
         assert all(x is not None for x in stride)
         return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
 
-    def create_symintnode(self, expr: "sympy.Expr"):
+    def create_symintnode(self, expr: Union["sympy.Expr", int]):
         return SymInt(SymNode(expr, self, int))
 
     def create_symbol(self, val: int) -> "sympy.Expr":
