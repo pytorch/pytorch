@@ -543,12 +543,12 @@ class ParsePerformanceLogs(Parser):
                     for compiler in self.compilers:
                         if not perf_row.empty:
                             if acc_row.empty:
-                                perf_row.loc[0, compiler] = 0.0
+                                perf_row[compiler] = 0.0
                             elif acc_row[compiler].iloc[0] not in (
                                 "pass",
                                 "pass_due_to_skip",
                             ):
-                                perf_row.loc[0, compiler] = 0.0
+                                perf_row[compiler] = 0.0
                     perf_rows.append(perf_row)
                 df = pd.concat(perf_rows)
             df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
@@ -575,6 +575,7 @@ class ParsePerformanceLogs(Parser):
         return f"{gmean(cleaned_df):.2f}x"
 
     def passrate(self, compiler, df):
+        # import pdb; pdb.set_trace()
         total = len(df.index)
         passing = df[df[compiler] > 0.0][compiler].count()
         perc = int(percentage(passing, total, decimals=0))
