@@ -452,7 +452,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
     """
-    from functorch._src.aot_autograd import make_boxed_func
+    from torch._functorch.aot_autograd import make_boxed_func
 
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 

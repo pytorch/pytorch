@@ -4822,7 +4822,7 @@ if HAS_CUDA:
                 Instead, it transforms the fx graph so that its functions are
                 aten operations. It then saves this graph.
                 """
-                from functorch._src.aot_autograd import Interpreter
+                from torch._functorch.aot_autograd import Interpreter
                 from torch._inductor.decomposition import select_decomp_table
                 from torch._subclasses import FakeTensorMode
 

@@ -36,7 +36,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map
 
 try:
-    from functorch._src.aot_autograd import set_model_name
+    from torch._functorch.aot_autograd import set_model_name
 except ImportError:
 
     def set_model_name(name):

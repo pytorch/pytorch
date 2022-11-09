@@ -106,7 +106,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         fn(x, y)
 
     @patch("torch._dynamo.config.suppress_errors", True)
-    @patch("functorch._src.config.use_functionalize", True)
+    @patch("torch._functorch.config.use_functionalize", True)
     @patch_all(ok=False)  # input mutation not supported yet
     def test_mutate_input(self):
         def model(x, y):
@@ -163,7 +163,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         y = torch.randn(3, device="cuda:0", requires_grad=True)
         fn(y)
 
-    @patch("functorch._src.config.use_functionalize", True)
+    @patch("torch._functorch.config.use_functionalize", True)
     @patch_all()
     def test_mutated_metadata(self):
         # more tortured example at
@@ -184,7 +184,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         x = torch.empty(0, device="cuda:0")
         fn(x)
 
-    @patch("functorch._src.config.use_functionalize", True)
+    @patch("torch._functorch.config.use_functionalize", True)
     @patch_all()
     def test_dead_fill(self):
         def model(x):

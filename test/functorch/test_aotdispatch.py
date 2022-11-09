@@ -21,7 +21,7 @@ from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
 )
-from functorch._src.aot_autograd import aot_module_simplified
+from torch._functorch.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
