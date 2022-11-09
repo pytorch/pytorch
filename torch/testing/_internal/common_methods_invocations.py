@@ -18116,13 +18116,6 @@ python_ref_db = [
         decorators=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
         ),
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/85960
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
-            # There's a discrepancy in returned shape between CPU and other devices
-            # AssertionError: Shapes torch.Size([0]) and torch.Size([2]) are not equal!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type="cpu"),
-        ),
     ),
     PythonRefInfo(
         "ops.nvprims.view",
