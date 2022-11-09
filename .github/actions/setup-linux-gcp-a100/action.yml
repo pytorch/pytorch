@@ -22,12 +22,6 @@ runs:
       run: |
         nvidia-smi
 
-        #    - name: Runner health check disconnect on failure
-        #      if: ${{ failure() }}
-        #      shell: bash
-        #      run: |
-        #        killall runsvc.sh
-
     - name: Preserve github env variables for use in docker
       shell: bash
       run: |
