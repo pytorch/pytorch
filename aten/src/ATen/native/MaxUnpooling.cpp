@@ -25,9 +25,11 @@ Tensor& max_unpooling2d_forward_out_cpu(
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic with duplicate indices
   at::globalContext().alertNotDeterministic("max_unpooling2d_forward_out");
-
   auto oheight = output_size[0];
   auto owidth = output_size[1];
+
+  auto unpoolDim = kernel_size.size();
+
   TORCH_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64 but got: ", indices_.scalar_type());
@@ -37,15 +39,58 @@ Tensor& max_unpooling2d_forward_out_cpu(
   TORCH_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (height, width) in output_size, but got ", output_size.size(), " elements.");
-  TORCH_CHECK(
+  if (unpoolDim == 1){
+    TORCH_CHECK(
+      kernel_size.size() == 1,
+      "There should be exactly one element (height) in kernel_size, but got: ", kernel_size.size(), " elements.");
+    TORCH_CHECK(
+        stride.size() == 1,
+        "There should be exactly one element (height) in stride, but got: ", stride.size(), " elements.");
+    TORCH_CHECK(
+        padding.size() == 1,
+        "There should be exactly one element (height) in padding, but got: ", padding.size(), " elements.");
+    TORCH_CHECK(
+      stride[0] > 0,
+      "strides should be greater than zero, but got stride ",
+      "sH: ", stride[0]);
+    TORCH_CHECK(kernel_size[0] > 0,
+                "kernel size should be greater than zero, but got ",
+                "kH: ", kernel_size[0]);
+    TORCH_CHECK(padding[0] >= 0,
+        "pad must be non-negative, but got pad: ", padding);
+    TORCH_CHECK(padding[0] <= kernel_size[0]/2,
+                  "pad should be at most half of kernel size, but got pad=",
+                  padding, " and kernel_size=", kernel_size);
+    TORCH_CHECK(oheight >= 1,
+                "output size should be greater than zero, but got ",
+                "H: ", oheight);
+  }
+  else {
+    TORCH_CHECK(
       kernel_size.size() == 2,
       "There should be exactly two elements (height, width) in kernel_size, but got: ", kernel_size.size(), " elements.");
-  TORCH_CHECK(
-      stride.size() == 2,
-      "There should be exactly two elements (height, width) in stride, but got: ", stride.size(), " elements.");
-  TORCH_CHECK(
-      padding.size() == 2,
-      "There should be exactly two elements (height, width) in padding, but got: ", padding.size(), " elements.");
+    TORCH_CHECK(
+        stride.size() == 2,
+        "There should be exactly two elements (height, width) in stride, but got: ", stride.size(), " elements.");
+    TORCH_CHECK(
+        padding.size() == 2,
+        "There should be exactly two elements (height, width) in padding, but got: ", padding.size(), " elements.");
+    TORCH_CHECK(
+      stride[0] > 0 && stride[1] > 0,
+      "strides should be greater than zero, but got stride ",
+      "sH: ", stride[0], " sW: ", stride[1]);
+    TORCH_CHECK(kernel_size[0] > 0 && kernel_size[1] > 0,
+                "kernel size should be greater than zero, but got ",
+                "kH: ", kernel_size[0], " kW: ", kernel_size[1]);
+    TORCH_CHECK(padding[0] >= 0 && padding[1] >= 0,
+        "pad must be non-negative, but got pad: ", padding);
+    TORCH_CHECK(padding[0] <= kernel_size[0]/2 && padding[1] <= kernel_size[1]/2,
+                  "pad should be at most half of kernel size, but got pad=",
+                  padding, " and kernel_size=", kernel_size);
+    TORCH_CHECK(oheight >= 1 && owidth >= 1,
+                "output size should be greater than zero, but got ",
+                "H: ", oheight, " W: ", owidth);
+  }
   TORCH_CHECK(
       self_.sizes() == indices_.sizes(),
       "Expected shape of indices to be same as that of the input tensor (", self_.sizes(),
@@ -56,15 +101,6 @@ Tensor& max_unpooling2d_forward_out_cpu(
                 "Expected input to have non-zero size for non-batch dimensions, but got ",
                 self_.sizes(), " with dimension ", i , " being empty.");
   }
-
-  TORCH_CHECK(
-      stride[0] > 0 && stride[1] > 0,
-      "strides should be greater than zero, but got stride: ",
-      stride);
-  TORCH_CHECK(
-      0 <= padding[0] <= kernel_size[0]/2 && 0 <= padding[1] <= kernel_size[1]/2,
-      "pad must be non-negative, and at most at most half of kernel size, but got pad= ",
-      padding, " and kernel_size= ", kernel_size);
 
   auto memory_format = self_.suggest_memory_format();
   auto self = self_.contiguous(memory_format);
@@ -142,12 +178,19 @@ static void max_unpooling3d_shape_check(
 
   TORCH_CHECK(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
-      "strides should be greater than zero, but got stride: ",
-      stride);
-  TORCH_CHECK(
-      0 <= padding[0] <= kernel_size[0]/2 && 0 <= padding[1] <= kernel_size[1]/2 && 0 <= padding[2] <= kernel_size[2]/2,
-      "pad must be non-negative, and at most at most half of kernel size, but got pad= ",
-      padding, " and kernel_size= ", kernel_size);
+      "strides should be greater than zero, but got stride ",
+      "sD: ", stride[0], " sH: ", stride[1], " sW: ", stride[2]);
+  TORCH_CHECK(kernel_size[0] > 0 && kernel_size[1] > 0 && kernel_size[2] > 0,
+              "kernel size should be greater than zero, but got ",
+              "kD: ", kernel_size[0], " kH: ", kernel_size[1], " kW: ", kernel_size[2]);
+  TORCH_CHECK(padding[0] >= 0 && padding[1] >= 0 && padding[2] >= 0,
+      "pad must be non-negative, but got pad: ", padding);
+  TORCH_CHECK(padding[0] <= kernel_size[0]/2 && padding[1] <= kernel_size[1]/2 && padding[2] <= kernel_size[2]/2,
+                "pad should be at most half of kernel size, but got pad=",
+                padding, " and kernel_size=", kernel_size);
+  TORCH_CHECK(oT >= 1 && oH >= 1 && oW >= 1,
+              "output size should be greater than zero, but got ",
+              "D: ", oT, " H: ", oH, " W: ", oW);
 
   int dimw = 3;
   int dimh = 2;
