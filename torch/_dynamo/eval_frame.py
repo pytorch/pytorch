@@ -554,7 +554,10 @@ def export(
             )
 
         def placeholder(self, target, args, kwargs):
-            return next(self.old_args_gen)
+            arg = next(self.old_args_gen)
+            if "val" in self.current_node.meta:
+                arg.node.meta["val"] = self.current_node.meta["val"]
+            return arg
 
         def output(self, target, args, kwargs):
             dynamo_result_flat = args[0]
@@ -563,6 +566,10 @@ def export(
             new_result = pytree.tree_unflatten(new_result_flat, out_spec_traced)
 
             return super().output(target, (new_result,), {})
+
+        def run_node(self, n):
+            self.current_node = n
+            return super().run_node(n)
 
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
