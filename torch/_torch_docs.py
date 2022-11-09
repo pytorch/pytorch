@@ -7980,10 +7980,8 @@ returned tensor and :attr:`input` tensor share the same underlying storage.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int or Tensor): index of the element to start the narrowed dimension
-        from. Can be negative, which means indexing from the end of `dim`. If
-        `Tensor`, it must be an 0-dim integral `Tensor` (bools not allowed)
-    length (int): length of the narrowed dimension, must be weakly positive
+    start (Tensor or int): the starting dimension
+    length (int): the distance to the ending dimension
 
 Example::
 
@@ -7995,10 +7993,6 @@ Example::
     tensor([[ 2,  3],
             [ 5,  6],
             [ 8,  9]])
-    >>> torch.narrow(x, -1, torch.tensor(-1), 1)
-    tensor([[3],
-            [6],
-            [9]])
 """,
 )
 
@@ -8014,9 +8008,8 @@ do not have a shared-storage narrow method.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int): index of the element to start the narrowed dimension from. Can
-        be negative, which means indexing from the end of `dim`
-    length (int): length of the narrowed dimension, must be weakly positive
+    start (int): the starting offset
+    length (int): the distance to the ending dimension
 
 Keyword args:
     {out}
@@ -8034,13 +8027,13 @@ Example::
     >>> s = torch.arange(16).reshape(2, 2, 2, 2).to_sparse(2)
     >>> torch.narrow_copy(s, 0, 0, 1)
     tensor(indices=tensor([[0, 0],
-                           [0, 1]]),
-           values=tensor([[[0, 1],
-                           [2, 3]],
+                        [0, 1]]),
+        values=tensor([[[0, 1],
+                        [2, 3]],
 
-                          [[4, 5],
-                           [6, 7]]]),
-           size=(1, 2, 2, 2), nnz=2, layout=torch.sparse_coo)
+                        [[4, 5],
+                        [6, 7]]]),
+        size=(1, 2, 2, 2), nnz=2, layout=torch.sparse_coo)
 
 .. seealso::
 
