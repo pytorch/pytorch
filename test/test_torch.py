@@ -5671,6 +5671,40 @@ class TestTorch(TestCase):
                     added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor, alpha=-1)
                     self.assertEqual(added, -tensor)
 
+    def test_index_add_correctness(self):
+        # Check whether index_add can get correct result when
+        # dim is -1, alpha is 1, and dtype of index is torch.long,
+        # i.e., using scatter_add
+        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16):
+            if torch.cuda.is_available():
+                size = [20, 20]
+                index = torch.randint(0, 20, size, dtype=torch.long).cuda()
+                if dtype.is_floating_point or dtype.is_complex:
+                    tensor = torch.rand(size, dtype=dtype).cuda()
+                    source = torch.rand(size, dtype=dtype).cuda()
+                elif dtype.is_signed:
+                    tensor = torch.randint(-5, 15, size, dtype=dtype).cuda()
+                    source = torch.randint(-5, 15, size, dtype=dtype).cuda()
+                else:
+                    tensor = torch.randint(0, 10, size, dtype=dtype).cuda()
+                    source = torch.randint(0, 10, size, dtype=dtype).cuda()
+
+                ref_out = tensor.index_add(-1, index, source)
+
+                ref_tensor = tensor.cpu()
+                ref_source = source.cpu()
+                index = index.cpu()
+                out = tensor.index_add(-1, index, source)
+                self.assertEqual(out, ref_out)
+
+            # Check bound
+            result = torch.ones(3, 3)
+            source = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=dtype)
+            index = torch.tensor([0, 2, 2, 1])
+            self.assertRaises(RuntimeError, lambda: result.index_add_(-1, index, source))
+            index = torch.tensor([0, 2, 3])
+            self.assertRaises(RuntimeError, lambda: result.index_add_(-1, index, source))
+
     # FIXME: move to shape ops test suite
     def test_unflatten(self):
         # test args: tensor, int, sizes
