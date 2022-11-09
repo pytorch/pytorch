@@ -558,6 +558,29 @@ class TensorVariable(VariableTracker):
                 current_tx=tx,
             )
             return ConstantVariable(None, **options)
+        elif name == "resize_as_":
+            assert isinstance(args[0], TensorVariable)
+            if self.size and args[0].size:
+                if "memory_format" in kwargs:
+                    memory_format = kwargs.pop("memory_format").as_python_constant()
+                else:
+                    memory_format = torch.contiguous_format
+
+                if self.size == args[0].size or memory_format is torch.preserve_format:
+                    self.is_contiguous = args[0].is_contiguous
+                else:
+                    self.is_contiguous = (memory_format,)
+
+            return self.__class__.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    "resize_as_",
+                    *proxy_args_kwargs([self] + args, kwargs),
+                    current_tx=tx,
+                ),
+                **options,
+            )
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
