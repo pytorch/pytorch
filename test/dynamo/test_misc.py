@@ -1997,7 +1997,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return a + b / (a - b)
 
         self.assertRaises(
-            torch._dynamo.exc.InternalTorchDynamoError,
+            torch._dynamo.exc.BackendCompilerFailed,
             lambda: fn(torch.randn(10), torch.randn(10)),
         )
 
