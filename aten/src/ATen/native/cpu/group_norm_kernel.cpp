@@ -881,7 +881,7 @@ void GroupNormBackwardKernelImplInternal(
         gamma_data,
         ds_data,
         db_data,
-        dX_data);\
+        dX_data);
   }
   if (dgamma_data != nullptr) {
     GammaBackward<PT, T_ACC>(
