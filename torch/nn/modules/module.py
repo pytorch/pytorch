@@ -87,30 +87,28 @@ class _WrappedHook:
             self.module = weakref.ref(state["module"])
 
 
-class _PreForwardWrappedHook:
+class _PreForwardWrappedHook(_WrappedHook):
 
-    def __init__(self, hook: Callable, with_kwargs: bool = False):
-        self.hook = hook
-        functools.update_wrapper(self, hook)
+    def __init__(self, hook: Callable, module: Optional["Module"] = None, with_kwargs: bool = False):
+        super().__init__(hook, module)
         self.with_kwargs = with_kwargs
 
     def __call__(self, module, inp, kwargs):
         if self.with_kwargs:
-            return self.hook(module, inp, kwargs)
-        return self.hook(module, inp), kwargs
+            return super().__call__(module, inp, kwargs)
+        return super().__call__(module, inp), kwargs
 
 
-class _ForwardWrappedHook:
+class _ForwardWrappedHook(_WrappedHook):
 
     def __init__(self, hook: Callable, module: Optional["Module"] = None, with_kwargs: bool = False):
-        self.hook = hook
-        functools.update_wrapper(self, hook)
+        super().__init__(hook, module)
         self.with_kwargs = with_kwargs
 
     def __call__(self, module, inp, out, kwargs):
         if self.with_kwargs:
-            return self.hook(module, inp, out, kwargs)
-        return self.hook(module, inp, out)
+            return super().__call__(module, inp, out, kwargs)
+        return super().__call__(module, inp, out)
 
 
 r"""This tracks hooks common to all modules that are executed before/after
