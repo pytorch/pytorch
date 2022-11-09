@@ -170,6 +170,7 @@ def has_tensor_in_frame(frame):
             return seen_ids[obj_id]
         elif (
             not is_allowed(obj)
+            and not hasattr(obj, "__get__")  # overridden get can mutate the object
             and hasattr(obj, "__dict__")
             and istype(obj.__dict__, dict)
         ):
