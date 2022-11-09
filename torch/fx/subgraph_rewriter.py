@@ -257,7 +257,10 @@ def _replace_pattern(
         assert len(match.placeholder_nodes) == len(replacement_placeholders)
         val_map: Dict[Node, Node] = {}
         for rn, gn in zip(replacement_placeholders, match.placeholder_nodes):
-            val_map[rn] = match_changed_node.get(gn, gn)
+            if isinstance(gn, Node):
+                val_map[rn] = match_changed_node.get(gn, gn)
+            else:
+                val_map[rn] = gn
 
         # Copy the replacement graph over
         user_nodes: Set[Node] = set()
