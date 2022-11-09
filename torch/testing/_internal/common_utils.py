@@ -2051,7 +2051,17 @@ class TestCase(expecttest.TestCase):
                 # Still flaky, do nothing
                 result.addSkip(self, json.dumps(skipped_msg))
             elif RERUN_DISABLED_TESTS and num_green == 0 and using_unittest:
-                # Disabled test fails, report as skipped but don't fail the job
+                traceback_str = ""
+                # Hide all failures and errors when RERUN_DISABLED_TESTS is enabled. This is
+                # a verification check, we don't want more red signals coming from it
+                if result.failures:
+                    _, traceback_str = result.failures.pop(-1)
+
+                if result.errors:
+                    _, traceback_str = result.errors.pop(-1)
+
+                skipped_msg["traceback_str"] = traceback_str
+                # The disabled test fails, report as skipped but don't fail the job
                 result.addSkip(self, json.dumps(skipped_msg))
 
             return

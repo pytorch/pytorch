@@ -8,7 +8,6 @@ import requests
 from typing import Any, Dict, Set, List
 import yaml
 import warnings
-import random
 
 PREFIX = "test-config/"
 
@@ -38,9 +37,9 @@ VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}" for label in {
 # Supported mode when running periodically. For simplicity, a random weight
 # will be assigned to each mode so that they can be chosen at random
 SUPPORTED_PERIODICAL_MODES = {
-    # TODO: DEBUG TO BE RESET TO 0.5 before committing
-    "mem_leak_check": 0.0,
-    "rerun_disabled_tests": 1.0,
+    # DEBUG: TO BE UNCOMMENTED
+    # "mem_leak_check",
+    "rerun_disabled_tests",
 }
 
 
@@ -119,6 +118,23 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
         return filtered_test_matrix
 
 
+def set_periodic_modes(test_matrix: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
+    """
+    Apply all periodic modse when running under a schedule
+    """
+    scheduled_test_matrix: Dict[str, List[Any]] = {
+        "include": [],
+    }
+
+    for config in test_matrix.get("include", []):
+        for mode in SUPPORTED_PERIODICAL_MODES:
+            cfg = config.copy()
+            cfg[mode] = mode
+            scheduled_test_matrix["include"].append(cfg)
+
+    return scheduled_test_matrix
+
+
 def set_output(name: str, val: Any) -> None:
     if os.getenv("GITHUB_OUTPUT"):
         with open(str(os.getenv("GITHUB_OUTPUT")), "a") as env:
@@ -175,13 +191,7 @@ def main() -> None:
 
     # TODO: DEBUG, to be removed back to == "schedule"
     if args.event_name != "schedule":
-        selected_mode = random.choices(
-            list(SUPPORTED_PERIODICAL_MODES.keys()),
-            weights=list(SUPPORTED_PERIODICAL_MODES.values()),
-            k=1)[0]
-
-        for config in filtered_test_matrix.get("include", []):
-            config[selected_mode] = selected_mode
+        filtered_test_matrix = set_periodic_modes(filtered_test_matrix)
 
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
