@@ -23,14 +23,14 @@ namespace native {
 
 namespace {
 
-template <typename T>
+template <typename T, typename T_ACC>
 void LayerNormKernelImplInternal(
     const Tensor& X,
     const Tensor& gamma,
     const Tensor& beta,
     int64_t M,
     int64_t N,
-    double eps,
+    T_ACC eps,
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
@@ -90,7 +90,7 @@ void layer_norm_kernel_mixed_type(
     const Tensor& beta,
     int64_t M,
     int64_t N,
-    double eps,
+    float eps,
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
@@ -153,13 +153,13 @@ void layer_norm_kernel_mixed_type(
 }
 
 template <>
-void LayerNormKernelImplInternal<BFloat16>(
+void LayerNormKernelImplInternal<BFloat16, float>(
     const Tensor& X,
     const Tensor& gamma,
     const Tensor& beta,
     int64_t M,
     int64_t N,
-    double eps,
+    float eps,
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
@@ -186,8 +186,9 @@ void LayerNormKernelImpl(
   DCHECK(!beta.defined() || beta.numel() == N);
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, X.scalar_type(),
       "LayerNormKernelImpl", [&]() {
-    LayerNormKernelImplInternal<scalar_t>(
-        X, gamma, beta, M, N, eps, Y, mean, rstd);
+    using acc_t = vec::vec_scalar_t<scalar_t>;
+    LayerNormKernelImplInternal<scalar_t, acc_t>(
+        X, gamma, beta, M, N, static_cast<acc_t>(eps), Y, mean, rstd);
   });
 }
 
