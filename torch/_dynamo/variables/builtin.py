@@ -10,10 +10,7 @@ from typing import Dict, List
 import numpy as np
 
 import torch
-from torch._prims_common import (
-    Number,
-)
-from torch.fx.experimental.symbolic_shapes import sym_int, sym_float
+from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
@@ -28,9 +25,9 @@ from ..utils import (
     proxy_args_kwargs,
     specialize_args_kwargs,
 )
-from .base import MutableLocal, VariableTracker
+from .base import MutableLocal, VariableTracker, wrap_fx_proxy, wrap_fx_proxy_cls
 from .dicts import ConstDictVariable
-from .tensor import DynamicShapeVariable, FakeItemVariable, TensorVariable
+from .tensor import DynamicShapeVariable, FakeItemVariable
 
 log = logging.getLogger(__name__)
 
@@ -257,16 +254,6 @@ class BuiltinVariable(VariableTracker):
             tensor_args = False
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
 
-        # if (
-        #     self.can_insert_in_graph()
-        #     and tensor_args
-        #     and not (
-        #         self.fn is operator.getitem
-        #         and isinstance(args[0], ConstDictVariable)
-        #         and isinstance(args[1], variables.TupleVariable)
-        #     )
-        # ):
-
         if (
             self.can_insert_in_graph()
             and tensor_args
@@ -288,7 +275,8 @@ class BuiltinVariable(VariableTracker):
                     "call_function", fn, *proxy_args_kwargs(args, kwargs), current_tx=tx
                 )
                 if any([isinstance(arg, FakeItemVariable) for arg in args]):
-                    return variables.FakeItemVariable.create(
+                    return wrap_fx_proxy_cls(
+                        FakeItemVariable,
                         tx,
                         proxy,
                         **options,
@@ -296,7 +284,8 @@ class BuiltinVariable(VariableTracker):
                 elif self.unspec_numpy_args(*args, **kwargs):
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
                     raw_value = self.fn(*_args, **_kwargs)
-                    return variables.UnspecializedNumpyVariable.create(
+                    return wrap_fx_proxy_cls(
+                        variables.UnspecializedNumpyVariable,
                         tx,
                         proxy,
                         raw_value=raw_value,
@@ -312,7 +301,8 @@ class BuiltinVariable(VariableTracker):
                         if isinstance(x, variables.UnspecializedPythonVariable)
                     )
 
-                    return variables.UnspecializedPythonVariable.create(
+                    return wrap_fx_proxy_cls(
+                        UnspecializedPythonVariable,
                         tx,
                         proxy,
                         raw_value=raw_value,
@@ -326,7 +316,7 @@ class BuiltinVariable(VariableTracker):
                         args[0], variables.UnspecializedPythonVariable
                     ):
                         args[0] = args[0].convert_to_constant(tx)
-                    return variables.TensorVariable.create(tx, proxy, **options)
+                    return wrap_fx_proxy(tx, proxy, **options)
 
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
@@ -335,7 +325,7 @@ class BuiltinVariable(VariableTracker):
         # Also handle sym_float to sym_int cases
         if self.fn in (int, float) and isinstance(args[0], DynamicShapeVariable):
             fn_ = sym_int if self.fn is int else sym_float
-            out = TensorVariable.create(
+            out = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -347,7 +337,6 @@ class BuiltinVariable(VariableTracker):
                 **options,
             )
             return out
-
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
         if handler:
@@ -414,7 +403,7 @@ class BuiltinVariable(VariableTracker):
 
             # Dynamic input does not get resolved, rather, gets stored as call_function
             if isinstance(a, DynamicShapeVariable):
-                return variables.TensorVariable.create(
+                return wrap_fx_proxy(
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_function",
@@ -562,34 +551,6 @@ class BuiltinVariable(VariableTracker):
             ]
             return variables.TupleVariable(items, **options)
 
-    def _call_operator_builtin(self, tx, op_name: str, *args, **kwargs):
-        options = VariableTracker.propagate(self, args)
-        fn_ = getattr(operator, op_name)
-
-        # This should really be refactored.
-        # builtins like + and - can return a ton of different types,
-        # depending on the types of the inputs.
-        # Right now, TensorVariable.create() handles a subset of these cases,
-        # but not all of them.
-        # For example, different cases that we care about include
-        # when the output type is a:
-        # - ConstantVariable (handled by ConstantVariable.call_method)
-        # - DynamicShapesVariable (handled by TensorVariable.create)
-        # - TensorVariable (handled by TensorVariable.create)
-        if all(isinstance(x, variables.ConstantVariable) for x in args):
-            return args[0].call_method(tx, f'__{op_name}__', args[1:], kwargs)
-        out = TensorVariable.create(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                fn_,
-                *proxy_args_kwargs(args, kwargs),
-                current_tx=tx,
-            ),
-            **options,
-        )
-        return out
-
     def call_mul(self, tx, a, b):
         if isinstance(
             a, (variables.ListVariable, variables.TupleVariable)
@@ -604,15 +565,12 @@ class BuiltinVariable(VariableTracker):
                 items=b.items * a.as_python_constant(), mutable_local=MutableLocal()
             ).add_options(self, a, b)
         else:
-            return a.call_method(tx, "__mul__", (b, ), {})
+            return a.call_method(tx, "__mul__", [b], {})
 
     def call_len(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
 
     def call_add(self, tx, *args, **kwargs):
-        # Important: we want to trace operator.add(x, y) into the graph,
-        # not x.__add__(y).
-        # operator.add will automatically handle NotImplemented argument swizzling.
         return args[0].call_method(tx, "__add__", args[1:], kwargs)
 
     def call_sub(self, tx, *args, **kwargs):
@@ -634,7 +592,15 @@ class BuiltinVariable(VariableTracker):
 
     def call_isinstance(self, tx, arg, isinstance_type):
         arg_type = arg.python_type()
-        isinstance_type = isinstance_type.as_python_constant()
+        try:
+            isinstance_type = isinstance_type.as_python_constant()
+        except NotImplementedError:
+            try:
+                isinstance_type = isinstance_type.python_type()
+            except NotImplementedError:
+                unimplemented(
+                    f"isinstance called with unknown instance type {isinstance_type}"
+                )
 
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
             return variables.ConstantVariable(arg.call_isinstance(isinstance_type))

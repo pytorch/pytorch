@@ -413,6 +413,10 @@ class GuardBuilder:
             code = "not ___is_grad_enabled()"
         self._produce_guard_code(guard, [code])
 
+    @staticmethod
+    def SYMBOL_MATCH():
+        pass
+
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
@@ -717,8 +721,14 @@ class CheckFunctionManager:
             if symbolic_shape_expression:
                 code_parts.append(symbolic_shape_expression)
                 verbose_code_parts.append(symbolic_shape_expression)
-                guards_out.add(Guard(name='symbolic_shape_expression', source=None, create_fn=self._parse_symbolic_shape_expressions, code_list=symbolic_shape_expression))
-
+                guards_out.add(
+                    Guard(
+                        name="symbolic_shape_expression",
+                        source=None,
+                        create_fn=GuardBuilder.SYMBOL_MATCH,
+                        code_list=symbolic_shape_expression,
+                    )
+                )
 
         def direct_equality(a, b):
             return a == b

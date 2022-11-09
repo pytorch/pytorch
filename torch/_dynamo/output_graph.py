@@ -26,6 +26,7 @@ from .utils import (
     fake_tensors_available,
     format_graph_tabular,
 )
+from .variables.base import wrap_fx_proxy
 from .variables.builder import VariableBuilder
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
@@ -34,8 +35,10 @@ from .variables.tensor import (
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
+from .exc import BackendCompilerFailed
 
 log = logging.getLogger(__name__)
+
 
 @functools.lru_cache(None)
 def _step_logger():
@@ -92,7 +95,7 @@ class OutputGraph(fx.Tracer):
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions = []
-        # Node => computed real value (see TensorVariable.get_real_value)
+        # Node => computed real value (see utils.get_real_value)
         self.real_value_cache = {}
 
         # Not checkpointed
@@ -208,7 +211,7 @@ class OutputGraph(fx.Tracer):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
-                return TensorVariable.create(
+                return wrap_fx_proxy(
                     self,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
                     example_value=target,
@@ -449,7 +452,7 @@ class OutputGraph(fx.Tracer):
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
             compiled_fn = gm.forward
-            raise
+            raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
     def example_inputs(self):

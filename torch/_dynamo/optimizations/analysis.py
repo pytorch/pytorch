@@ -126,7 +126,9 @@ def has_mutation(gm, example_inputs, inputs_only=False):
         def _wrap_to_fake_tensor(t, *, f_mode):
             if type(t) in (torch.Tensor, torch.nn.Parameter):
                 static_shapes_ = config.dynamic_shapes is False
-                return fake_mode.from_tensor(t, static_shapes=config.dynamic_shapes is not False)
+                return fake_mode.from_tensor(
+                    t, static_shapes=config.dynamic_shapes is not False
+                )
             else:
                 return t
 
@@ -135,7 +137,10 @@ def has_mutation(gm, example_inputs, inputs_only=False):
         # We don't actually care about the guards that are created
         # on those shapes though, so just create a fresh ShapeEnv here.
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
-        with FakeTensorMode(shape_env=ShapeEnv() if config.dynamic_shapes else None) as fake_mode:
+
+        with FakeTensorMode(
+            shape_env=ShapeEnv() if config.dynamic_shapes else None
+        ) as fake_mode:
             pass
         fake_wrapper = functools.partial(_wrap_to_fake_tensor, f_mode=fake_mode)
         example_inputs = tree_map(fake_wrapper, example_inputs)

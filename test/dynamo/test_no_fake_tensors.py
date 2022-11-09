@@ -25,9 +25,6 @@ NoFakeTensorsReproTests = make_no_fake_cls(test_repros.ReproTests)
 NoFakeTensorsNNModuleTests = make_no_fake_cls(test_modules.NNModuleTests)
 NoFakeTensorsUnspecTests = make_no_fake_cls(test_unspec.UnspecTests)
 
-unittest.expectedFailure(
-    NoFakeTensorsReproTests.test_guard_fail_tensor_bool_no_fake_tensors
-)
 NoFakeTensorsReproTests.test_numpy_list_no_fake_tensors.__unittest_expecting_failure__ = (
     False
 )

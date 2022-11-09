@@ -11,7 +11,7 @@ from ..exc import unimplemented
 from ..guards import Guard, GuardBuilder, GuardSource
 from ..source import AttrSource
 from ..utils import identity, proxy_args_kwargs
-from .base import VariableTracker
+from .base import VariableTracker, wrap_fx_proxy
 from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
@@ -540,7 +540,7 @@ class GetAttrVariable(VariableTracker):
             # example tensor from going into the override.
             with torch._C.DisableTorchFunction():
                 if isinstance(args[0], TorchVariable):
-                    return TensorVariable.create(
+                    return wrap_fx_proxy(
                         tx=tx,
                         proxy=tx.output.create_proxy(
                             "call_function",
@@ -551,7 +551,7 @@ class GetAttrVariable(VariableTracker):
                         **options,
                     )
                 elif isinstance(args[0], GetAttrVariable):
-                    return TensorVariable.create(
+                    return wrap_fx_proxy(
                         tx=tx,
                         proxy=tx.output.create_proxy(
                             "call_method",

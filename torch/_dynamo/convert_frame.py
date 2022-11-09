@@ -21,7 +21,7 @@ from .eval_frame import (
     TorchPatcher,
     WrapperBackend,
 )
-from .exc import unimplemented, Unsupported
+from .exc import BackendCompilerFailed, InternalTorchDynamoError, TorchRuntimeError, unimplemented, Unsupported
 from .guards import CheckFunctionManager, GuardedCode
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
@@ -445,8 +445,17 @@ def _compile(
             guard_export_fn(output.guards)
 
         return guarded_code
-    except Exception:
+    except (
+        Unsupported,
+        TorchRuntimeError,
+        BackendCompilerFailed,
+        AssertionError,
+    ) as e:
+        exception_handler(e, code, frame)
         raise
+    except Exception as e:
+        exception_handler(e, code, frame)
+        raise InternalTorchDynamoError() from e
 
 
 def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):

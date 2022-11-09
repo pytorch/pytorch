@@ -396,9 +396,7 @@ def _elementwise_meta(
     seen_float = False
     if isinstance(number, (torch.SymInt, torch.SymFloat)):
         for a in args:
-            assert isinstance(
-                a, (int, float, torch.SymInt, torch.SymFloat)
-            ), "NYI"
+            assert isinstance(a, (int, float, torch.SymInt, torch.SymFloat)), "NYI"
             seen_float = seen_float or isinstance(a, (float, torch.SymFloat))
         if seen_float:
             number = sym_float(number)
@@ -2325,9 +2323,7 @@ def _arange_meta(
         lambda: "step must be nonzero",
     )
     # SymInts can't represent inf
-    if not isinstance(start, torch.SymInt) and not isinstance(
-        end, torch.SymInt
-    ):
+    if not isinstance(start, torch.SymInt) and not isinstance(end, torch.SymInt):
         utils.check(
             math.isfinite(start) and math.isfinite(end),
             lambda: f"unsupported range: {start} -> {end}",
