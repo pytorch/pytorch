@@ -7,6 +7,7 @@ from typing import Any, TypeVar, Type, Union, cast
 import copy
 import collections
 from functools import lru_cache
+import warnings
 try:
     import numpy as np
     HAS_NUMPY = True
@@ -131,7 +132,7 @@ class _StorageBase(object):
     def _to(self, dtype):
         if not isinstance(dtype, torch.dtype):
             raise TypeError(f"Argument 'dtype' must be torch.dtype, not {type(dtype)}")
-        storage = torch.tensor([], dtype=torch.uint8, device=self.device).set_(cast(Storage, self)).to(dtype).storage()
+        storage = torch.tensor([], dtype=torch.uint8, device=self.device).set_(cast(Storage, self)).to(dtype)._typed_storage()
         if storage.data_ptr() == self.data_ptr():
             storage = storage.clone()
         return storage
@@ -297,7 +298,7 @@ def _get_storage_from_sequence(sequence, dtype, device):
             dtype=dtype,
             device=device)
 
-    return tmp_tensor.storage().untyped()
+    return tmp_tensor._typed_storage()._untyped_storage
 
 def _isint(x):
     if HAS_NUMPY:
@@ -305,16 +306,32 @@ def _isint(x):
     else:
         return isinstance(x, int)
 
+def _warn_typed_storage_removal():
+    message = (
+        "TypedStorage is deprecated. It will be removed in the future and "
+        "UntypedStorage will be the only storage class. This should only matter "
+        "to you if you are using storages directly."
+    )
+    warnings.warn(message, UserWarning)
+
 class TypedStorage:
     is_sparse = False
 
     dtype: torch.dtype
 
+    @property
+    def _dtype(self):
+        return self.dtype
+
     def fill_(self, value):
-        self[0:len(self)] = value
+        _warn_typed_storage_removal()
+        self._setitem(slice(0, self._size()), value)
         return self
 
-    def __new__(cls, *args, wrap_storage=None, dtype=None, device=None):
+    def __new__(cls, *args, wrap_storage=None, dtype=None, device=None, _internal=False):
+        if not _internal:
+            _warn_typed_storage_removal()
+
         if cls == torch.storage._LegacyStorage:
             raise RuntimeError("Only child classes of _LegacyStorage can be instantiated")
 
@@ -353,8 +370,9 @@ class TypedStorage:
 
                 return TypedStorage(
                     *args,
-                    dtype=cls.dtype,
-                    device='cuda' if cls.__module__ == 'torch.cuda' else 'cpu')
+                    dtype=cls._dtype,
+                    device='cuda' if cls.__module__ == 'torch.cuda' else 'cpu',
+                    _internal=True)
 
             else:
                 if len(args) != 0:
@@ -379,9 +397,12 @@ class TypedStorage:
                 return TypedStorage(
                     *args,
                     wrap_storage=wrap_storage,
-                    dtype=cls.dtype)
+                    dtype=cls.dtype,
+                    _internal=True)
 
-    def __init__(self, *args, device=None, dtype=None, wrap_storage=None):
+    def __init__(self, *args, device=None, dtype=None, wrap_storage=None, _internal=False):
+        if not _internal:
+            _warn_typed_storage_removal()
         arg_error_msg = (
             'TypedStorage.__init__ received an invalid combination '
             'of arguments. Expected one of:\n'
@@ -419,7 +440,7 @@ class TypedStorage:
                     arg_error_msg +
                     f"\nArgument 'wrap_storage' must be UntypedStorage, but got {type(wrap_storage)}")
 
-            self._storage = wrap_storage
+            self._untyped_storage = wrap_storage
 
         else:
             self.dtype = torch.get_default_dtype() if dtype is None else dtype
@@ -430,13 +451,13 @@ class TypedStorage:
                     raise RuntimeError("Cannot create CUDA storage with quantized dtype")
 
             if len(args) == 0:
-                self._storage = torch.UntypedStorage(device=device)
+                self._untyped_storage = torch.UntypedStorage(device=device)
 
             elif len(args) == 1:
                 if _isint(args[0]):
-                    self._storage = torch.UntypedStorage(int(args[0]) * self.element_size(), device=device)
+                    self._untyped_storage = torch.UntypedStorage(int(args[0]) * self._element_size(), device=device)
                 elif isinstance(args[0], collections.abc.Sequence):
-                    self._storage = _get_storage_from_sequence(args[0], self.dtype, device)
+                    self._untyped_storage = _get_storage_from_sequence(args[0], self.dtype, device)
                 else:
                     raise TypeError(
                         arg_error_msg +
@@ -447,30 +468,35 @@ class TypedStorage:
                     arg_error_msg +
                     "\nToo many positional arguments")
 
-
     @property
     def is_cuda(self):
+        _warn_typed_storage_removal()
         return self.device.type == 'cuda'
 
     def untyped(self):
         """Returns the internal :class:`torch.UntypedStorage`"""
-        return self._storage
+        _warn_typed_storage_removal()
+        return self._untyped_storage
 
     def _new_wrapped_storage(self, untyped_storage):
         assert type(untyped_storage) == torch.UntypedStorage
 
         if type(self) == TypedStorage:
-            return TypedStorage(wrap_storage=untyped_storage, dtype=self.dtype)
+            return TypedStorage(
+                wrap_storage=untyped_storage,
+                dtype=self.dtype,
+                _internal=True)
         else:
             return type(self)(wrap_storage=untyped_storage)
 
     def __len__(self):
-        return self._storage.nbytes() // self.element_size()
+        _warn_typed_storage_removal()
+        return self._size()
 
     def _maybe_wrap_index(self, idx, is_stop=False):
         if idx is None:
             if is_stop:
-                return self.size()
+                return self._size()
             else:
                 return 0
 
@@ -479,20 +505,24 @@ class TypedStorage:
                 raise TypeError(
                     f"can't index a {type(self)} with {type(idx)}")
             if is_stop:
-                if (idx > self.size()) or (idx < -self.size()):
+                if (idx > self._size()) or (idx < -self._size()):
                     raise IndexError(
                         f'index {idx} out of range for storage of size {self.size()}')
                 if idx > 0:
                     return idx
                 else:
-                    return idx % self.size()
+                    return idx % self._size()
             else:
-                if (idx >= self.size()) or (idx < -self.size()):
+                if (idx >= self._size()) or (idx < -self._size()):
                     raise IndexError(
                         f'index {idx} out of range for storage of size {self.size()}')
-                return idx % self.size()
+                return idx % self._size()
 
     def __setitem__(self, idx, value):
+        _warn_typed_storage_removal()
+        return self._setitem(idx, value)
+
+    def _setitem(self, idx, value):
         if not isinstance(idx, (int, slice)):
             raise RuntimeError(f"can't index a {type(self)} with {type(idx)}")
         if torch.is_storage(value):
@@ -506,16 +536,22 @@ class TypedStorage:
                 torch.qint8: torch.int8
             }
             tmp_dtype = interpret_dtypes[self.dtype]
-            tmp_tensor = torch.tensor([], dtype=tmp_dtype, device=self.device).set_(TypedStorage(
-                wrap_storage=self._storage,
-                dtype=tmp_dtype))
+            tmp_tensor = torch.tensor([], dtype=tmp_dtype, device=self._untyped_storage.device)
+            tmp_tensor.set_(TypedStorage(
+                wrap_storage=self._untyped_storage,
+                dtype=tmp_dtype,
+                _internal=True))
         else:
-            tmp_tensor = torch.tensor([], dtype=self.dtype, device=self.device).set_(self)
+            tmp_tensor = torch.tensor([], dtype=self.dtype, device=self._untyped_storage.device).set_(self)
 
         tmp_tensor[idx] = value
 
     def __getitem__(self, idx):
-        if self.device.type == 'meta':
+        _warn_typed_storage_removal()
+        return self._getitem(idx)
+
+    def _getitem(self, idx):
+        if self._untyped_storage.device.type == 'meta':
             raise NotImplementedError("Not available for 'meta' device type")
 
         # NOTE: Before TypedStorage existed, indexing with a slice used to be
@@ -536,21 +572,32 @@ class TypedStorage:
                 torch.qint8: torch.int8
             }
             return TypedStorage(
-                wrap_storage=self._storage,
-                dtype=interpret_dtypes[self.dtype])[idx]
+                wrap_storage=self._untyped_storage,
+                dtype=interpret_dtypes[self.dtype],
+                _internal=True)._getitem(idx)
 
         idx_wrapped = self._maybe_wrap_index(idx)
-        tmp_tensor = torch.tensor([], dtype=self.dtype, device=self.device).set_(self)
+        tmp_tensor = torch.tensor([], dtype=self.dtype, device=self._untyped_storage.device).set_(self)
         return tmp_tensor[idx_wrapped].item()
 
     def copy_(self, source: T, non_blocking: bool = None):
-        self._storage.copy_(source.untyped(), non_blocking)
+        _warn_typed_storage_removal()
+        if isinstance(source, TypedStorage):
+            self._untyped_storage.copy_(source._untyped_storage, non_blocking)
+        else:
+            self._untyped_storage.copy_(source, non_blocking)
         return self
 
     def nbytes(self):
-        return self._storage.nbytes()
+        _warn_typed_storage_removal()
+        return self._nbytes()
+
+    # For internal use only, to avoid deprecation warning
+    def _nbytes(self):
+        return self._untyped_storage.nbytes()
 
     def type(self, dtype: str = None, non_blocking: bool = False) -> Union[T, str]:
+        _warn_typed_storage_removal()
         if dtype is None:
             legacy_class = self._get_legacy_storage_class()
 
@@ -560,21 +607,29 @@ class TypedStorage:
             return '.'.join([self.__module__, type(self).__name__])
 
         else:
-            return self._storage.type(dtype, non_blocking)
+            return self._untyped_storage.type(dtype, non_blocking)
 
     def cuda(self, device=None, non_blocking=False, **kwargs) -> T:
+        _warn_typed_storage_removal()
         if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
             raise RuntimeError("Cannot create CUDA storage with quantized dtype")
-        cuda_storage: torch.UntypedStorage = self._storage.cuda(device, non_blocking, **kwargs)
+        cuda_storage: torch.UntypedStorage = self._untyped_storage.cuda(device, non_blocking, **kwargs)
         return self._new_wrapped_storage(cuda_storage)
 
     def element_size(self):
+        _warn_typed_storage_removal()
+        return self._element_size()
+
+    # For internal use only, to avoid deprecation warning
+    def _element_size(self):
         return torch._utils._element_size(self.dtype)
 
     def get_device(self) -> int:
-        return self._storage.get_device()
+        _warn_typed_storage_removal()
+        return self._untyped_storage.get_device()
 
     def __str__(self):
+        _warn_typed_storage_removal()
         info_str = (
             f'[{torch.typename(self)}(dtype={self.dtype}, '
             f'device={self.device}) of size {len(self)}]')
@@ -585,35 +640,48 @@ class TypedStorage:
             return data_str + '\n' + info_str
 
     def __repr__(self):
+        _warn_typed_storage_removal()
         return str(self)
 
     def __iter__(self):
+        _warn_typed_storage_removal()
         return iter(map(lambda i: self[i], range(self.size())))
 
     def __copy__(self):
-        return self._new_wrapped_storage(copy.copy(self._storage))
+        _warn_typed_storage_removal()
+        return self._new_wrapped_storage(copy.copy(self._untyped_storage))
 
     def __deepcopy__(self, memo):
-        return self._new_wrapped_storage(copy.deepcopy(self._storage, memo))
+        _warn_typed_storage_removal()
+        return self._deepcopy(memo)
+
+    # For internal use only, to avoid deprecation warning
+    def _deepcopy(self, memo):
+        return self._new_wrapped_storage(copy.deepcopy(self._untyped_storage, memo))
 
     def __sizeof__(self):
+        _warn_typed_storage_removal()
         return super(TypedStorage, self).__sizeof__() + self.nbytes()
 
     def clone(self):
         """Returns a copy of this storage"""
-        return self._new_wrapped_storage(self._storage.clone())
+        _warn_typed_storage_removal()
+        return self._new_wrapped_storage(self._untyped_storage.clone())
 
     def tolist(self):
         """Returns a list containing the elements of this storage"""
+        _warn_typed_storage_removal()
         return list(self)
 
     def cpu(self):
         """Returns a CPU copy of this storage if it's not already on the CPU"""
-        return self._new_wrapped_storage(self._storage.cpu())
+        _warn_typed_storage_removal()
+        return self._new_wrapped_storage(self._untyped_storage.cpu())
 
     def pin_memory(self):
         """Coppies the  storage to pinned memory, if it's not already pinned."""
-        return self._new_wrapped_storage(self._storage.pin_memory())
+        _warn_typed_storage_removal()
+        return self._new_wrapped_storage(self._untyped_storage.pin_memory())
 
     def share_memory_(self):
         """Moves the storage to shared memory.
@@ -624,7 +692,12 @@ class TypedStorage:
 
         Returns: self
         """
-        self._storage.share_memory_()
+        _warn_typed_storage_removal()
+        return self._share_memory_()
+
+    # For internal use only, to avoid deprecation warning
+    def _share_memory_(self):
+        self._untyped_storage.share_memory_()
         return self
 
     def _new_shared(self, size, *, device=None):
@@ -632,25 +705,37 @@ class TypedStorage:
         if device is None:
             device = 'cpu'
         device = torch.device(device)
-        untyped_storage = torch.UntypedStorage._new_shared(size * self.element_size(), device=device)
+        untyped_storage = torch.UntypedStorage._new_shared(size * self._element_size(), device=device)
         return TypedStorage(
             wrap_storage=untyped_storage,
-            dtype=self.dtype)
+            dtype=self.dtype,
+            _internal=True)
 
     @property
     def _cdata(self):
-        return self._storage._cdata
+        return self._untyped_storage._cdata
 
     @property
     def device(self):
-        return self._storage.device
+        _warn_typed_storage_removal()
+        return self._untyped_storage.device
 
     def size(self):
+        _warn_typed_storage_removal()
+        return self._size()
+
+    # For internal use only, to avoid deprecation warning
+    def _size(self):
         # NB: don't indirect through __len__, as that requires
         # an int to be returned
-        return self.nbytes() // self.element_size()
+        return self._untyped_storage.nbytes() // self._element_size()
 
     def pickle_storage_type(self):
+        _warn_typed_storage_removal()
+        return self._pickle_storage_type()
+
+    # For internal use only, to avoid deprecation warning
+    def _pickle_storage_type(self):
         try:
             return _dtype_to_storage_type_map()[self.dtype]
         except KeyError:
@@ -662,20 +747,35 @@ class TypedStorage:
         return (_load_from_bytes, (b.getvalue(),))
 
     def data_ptr(self):
-        return self._storage.data_ptr()
+        _warn_typed_storage_removal()
+        return self._data_ptr()
+
+    # For internal use only, to avoid deprecation warning
+    def _data_ptr(self):
+        return self._untyped_storage.data_ptr()
 
     def resize_(self, size):
-        self._storage.resize_(size * self.element_size())
+        _warn_typed_storage_removal()
+        self._resize_(size)
+
+    # For internal use only, to avoid deprecation warning
+    def _resize_(self, size):
+        self._untyped_storage.resize_(size * self._element_size())
 
     @classmethod
     def _free_weak_ref(cls, *args, **kwargs):
         return UntypedStorage._free_weak_ref(*args, **kwargs)
 
     def _weak_ref(self, *args, **kwargs):
-        return self._storage._weak_ref(*args, **kwargs)
+        return self._untyped_storage._weak_ref(*args, **kwargs)
 
     @classmethod
-    def from_buffer(cls, *args, dtype=None, device=None, **kwargs):
+    def from_buffer(cls, *args, **kwargs):
+        _warn_typed_storage_removal()
+        return cls._from_buffer(*args, **kwargs)
+
+    @classmethod
+    def _from_buffer(cls, *args, dtype=None, device=None, **kwargs):
         if cls == TypedStorage:
             dtype = torch.get_default_dtype() if dtype is None else dtype
             device = torch.device('cpu' if device is None else device)
@@ -693,65 +793,80 @@ class TypedStorage:
                     "from_buffer: 'device' can only be specified in "
                     "UntypedStorage.from_buffer and TypedStorage.from_buffer"))
 
-            dtype = cls.dtype
+            dtype = cls._dtype
             untyped_storage = torch.UntypedStorage.from_buffer(*args, dtype=dtype, **kwargs)
 
-        return TypedStorage(wrap_storage=untyped_storage, dtype=dtype)
+        return TypedStorage(
+            wrap_storage=untyped_storage,
+            dtype=dtype,
+            _internal=True)
 
     def _to(self, dtype):
         if not isinstance(dtype, torch.dtype):
             raise TypeError(f"Argument 'dtype' must be torch.dtype, not {type(dtype)}")
-        storage = torch.tensor([], dtype=self.dtype, device=self.device).set_(self).to(dtype).storage()
+        storage = torch.tensor([], dtype=self.dtype, device=self.device).set_(self).to(dtype)._typed_storage()
         if storage.data_ptr() == self.data_ptr():
             storage = storage.clone()
         return storage
 
     def double(self):
         """Casts this storage to double type"""
+        _warn_typed_storage_removal()
         return self._to(torch.double)
 
     def float(self):
         """Casts this storage to float type"""
+        _warn_typed_storage_removal()
         return self._to(torch.float)
 
     def half(self):
         """Casts this storage to half type"""
+        _warn_typed_storage_removal()
         return self._to(torch.half)
 
     def long(self):
         """Casts this storage to long type"""
+        _warn_typed_storage_removal()
         return self._to(torch.long)
 
     def int(self):
         """Casts this storage to int type"""
+        _warn_typed_storage_removal()
         return self._to(torch.int)
 
     def short(self):
         """Casts this storage to short type"""
+        _warn_typed_storage_removal()
         return self._to(torch.short)
 
     def char(self):
         """Casts this storage to char type"""
+        _warn_typed_storage_removal()
         return self._to(torch.int8)
 
     def byte(self):
         """Casts this storage to byte type"""
+        _warn_typed_storage_removal()
         return self._to(torch.uint8)
 
     def bool(self):
         """Casts this storage to bool type"""
+        _warn_typed_storage_removal()
         return self._to(torch.bool)
 
     def bfloat16(self):
         """Casts this storage to bfloat16 type"""
+        _warn_typed_storage_removal()
         return self._to(torch.bfloat16)
 
     def complex_double(self):
         """Casts this storage to complex double type"""
+        _warn_typed_storage_removal()
         return self._to(torch.cdouble)
 
     def complex_float(self):
         """Casts this storage to complex float type"""
+        _warn_typed_storage_removal()
         return self._to(torch.cfloat)
 
     @classmethod
@@ -773,6 +888,7 @@ class TypedStorage:
             shared (bool): whether to share memory
             size (int): number of elements in the storage
         """
+        _warn_typed_storage_removal()
         if cls == TypedStorage:
             raise RuntimeError('from_file can only be called on derived classes')
         untyped_storage: UntypedStorage = UntypedStorage.from_file(
@@ -787,33 +903,39 @@ class TypedStorage:
         return UntypedStorage._expired(*args, **kwargs)
 
     def is_pinned(self):
-        return self._storage.is_pinned()
+        _warn_typed_storage_removal()
+        return self._untyped_storage.is_pinned()
 
     def _write_file(self, *args, **kwargs):
-        return self._storage._write_file(*args, **kwargs)
+        return self._untyped_storage._write_file(*args, **kwargs)
 
     def _set_from_file(self, *args, **kwargs):
-        return self._storage._set_from_file(*args, **kwargs)
+        return self._untyped_storage._set_from_file(*args, **kwargs)
 
     def _set_cdata(self, *args, **kwargs):
-        return self._storage._set_cdata(*args, **kwargs)
+        return self._untyped_storage._set_cdata(*args, **kwargs)
 
     def _share_cuda_(self, *args, **kwargs):
-        return self._storage._share_cuda_(*args, **kwargs)
+        return self._untyped_storage._share_cuda_(*args, **kwargs)
 
     def is_shared(self):
-        return self._storage.is_shared()
+        _warn_typed_storage_removal()
+        return self._is_shared()
+
+    # For internal use only, to avoid deprecation warning
+    def _is_shared(self):
+        return self._untyped_storage.is_shared()
 
     @classmethod
     def _new_shared_cuda(cls, *args, **kwargs):
         return torch.UntypedStorage._new_shared_cuda(*args, **kwargs)
 
     def _share_filename_cpu_(self, *args, **kwargs):
-        manager_handle, storage_handle, size = self._storage._share_filename_cpu_(*args, **kwargs)
-        return manager_handle, storage_handle, size // self.element_size()
+        manager_handle, storage_handle, size = self._untyped_storage._share_filename_cpu_(*args, **kwargs)
+        return manager_handle, storage_handle, size // self._element_size()
 
     def _shared_decref(self):
-        self._storage._shared_decref()
+        self._untyped_storage._shared_decref()
         return self
 
     @classmethod
@@ -821,11 +943,11 @@ class TypedStorage:
         return torch.UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
 
     def _shared_incref(self, *args, **kwargs):
-        return self._storage._shared_incref(*args, **kwargs)
+        return self._untyped_storage._shared_incref(*args, **kwargs)
 
     def _share_fd_cpu_(self, *args, **kwargs):
-        fd, size = self._storage._share_fd_cpu_(*args, **kwargs)
-        return fd, size // self.element_size()
+        fd, size = self._untyped_storage._share_fd_cpu_(*args, **kwargs)
+        return fd, size // self._element_size()
 
     def _get_legacy_storage_class(self):
         if self.dtype not in _dtype_to_storage_type_map():
@@ -859,7 +981,7 @@ class _LegacyStorage(TypedStorage, metaclass=_LegacyStorageMeta):
     @classmethod
     def _new_shared(cls, size):
         """Creates a new storage in shared memory with the same data type"""
-        untyped_storage = torch.UntypedStorage._new_shared(size * cls().element_size())
+        untyped_storage = torch.UntypedStorage._new_shared(size * cls()._element_size())
         return cls(wrap_storage=untyped_storage)
 
     @classmethod
