@@ -12598,8 +12598,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_autograd=True,
-           sample_inputs_func=sample_inputs_view_copy,
-           error_inputs_func=error_inputs_view_copy,
+           sample_inputs_func=sample_inputs_view_reshape,
+           error_inputs_func=error_inputs_view_reshape,
            skips=(
                # view_copy does not support automatic differentiation for outputs with complex dtype
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
