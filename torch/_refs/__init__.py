@@ -2922,13 +2922,8 @@ def native_batch_norm(
         rstd = torch.rsqrt(var + eps)
         out = (input - mean) * rstd
 
-        if input.device.type == "cpu" or input.device.type == "meta":
-            save_mean = torch.empty([0], device=running_mean.device)
-            save_rstd = torch.empty([0], device=rstd.device)
-        else:
-            squeeze_rstd = prims.squeeze(rstd, reduction_dims)
-            save_mean = prims.convert_element_type(running_mean, compute_dtype)
-            save_rstd = prims.convert_element_type(squeeze_rstd, compute_dtype)
+        save_mean = torch.empty([0], device=running_mean.device)
+        save_rstd = torch.empty([0], device=rstd.device)
 
     if weight is None and bias is not None:
         unsqueeze_bias = prims.expand_dims(bias, reduction_dims, input.ndim)
