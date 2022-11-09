@@ -75,7 +75,7 @@ RUN case ${TARGETPLATFORM} in \
     esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic
-RUN if test -n "${TRITION_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then pip install "torchtriton=${TRITON_VERSION}" --extra-index-url https://download.pytorch.org/whl/nightly/cpu ; fi;
+RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then pip install "torchtriton=${TRITON_VERSION}" --extra-index-url https://download.pytorch.org/whl/nightly/cpu ; fi;
 
 FROM ${BASE_IMAGE} as official
 ARG PYTORCH_VERSION
