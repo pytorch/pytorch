@@ -120,6 +120,7 @@ TESTS = discover_tests(
         'distributions/test_utils',
     ],
     extra_tests=[
+        "mobile/test_lite_script_type.py",
         "test_cpp_extensions_aot_ninja",
         "test_cpp_extensions_aot_no_ninja",
         "distributed/elastic/timer/api_test",
