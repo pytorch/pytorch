@@ -97,7 +97,7 @@ def profile_sizes(
     sizes: List[int] = []
 
     tensor_idx = batch.find_tensor_idx()
-    latent_scale = batch[tensor_idx].size(0) / chunks
+    latent_scale = batch[tensor_idx].size(0) // chunks
     for i, x in enumerate(batch):
         if not torch.is_tensor(x):
             continue
