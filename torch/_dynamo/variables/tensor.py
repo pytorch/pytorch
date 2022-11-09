@@ -569,6 +569,9 @@ class TensorVariable(VariableTracker):
                 if self.size == args[0].size or memory_format is torch.preserve_format:
                     self.is_contiguous = args[0].is_contiguous
                 else:
+                    self.size = args[0].size
+                    self.stride = args[0].stride
+                    self.ndim = args[0].ndim
                     self.is_contiguous = (memory_format,)
 
             return self.__class__.create(
