@@ -2028,20 +2028,20 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     return self
 
 
-def upsample_nearestnd(x, output_size=None, scale_factors=None, n=2):
+def upsample_nearestnd(x, output_size, scales_x: Tuple[float] = None, n: int = 2):
     x.realize_hint()  # elements are reused
     x_loader = x.make_loader()
     i_sizes = x.get_size()[-n:]
     batch = x.get_size()[:-n]
     i_sizes = [V.graph.sizevars.guard_static_shape(i) for i in i_sizes]
 
-    if scale_factors:
-        assert not output_size
-        o_sizes = [int(i * s) for i, s in zip(i_sizes, scale_factors)]
-    else:
-        o_sizes = output_size
+    assert len(scales_x) == n
+    o_sizes = output_size
 
     scales = [i / o for i, o in zip(i_sizes, o_sizes)]
+    for i, scale in enumerate(scales):
+        if scale:
+            scales[i] = scale
 
     def scale(x, scale):
         x = ops.index_expr(x, torch.float32)
@@ -2062,9 +2062,27 @@ def upsample_nearestnd(x, output_size=None, scale_factors=None, n=2):
     )
 
 
-register_lowering(aten.upsample_nearest1d)(functools.partial(upsample_nearestnd, n=1))
-register_lowering(aten.upsample_nearest2d)(functools.partial(upsample_nearestnd, n=2))
-register_lowering(aten.upsample_nearest3d)(functools.partial(upsample_nearestnd, n=3))
+@register_lowering(aten.upsample_nearest1d.default)
+def upsample_nearest1d(x, output_size, scales: Optional[float] = None):
+    return upsample_nearestnd(x, output_size, (scales,), n=1)
+
+
+@register_lowering(aten.upsample_nearest2d.default)
+def upsample_nearest2d(
+    x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
+):
+    return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2)
+
+
+@register_lowering(aten.upsample_nearest3d.default)
+def upsample_nearest3d(
+    x,
+    output_size,
+    scales_d: Optional[float] = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+):
+    return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
 
 
 @register_lowering(aten.upsample_bicubic2d.default)
@@ -2180,26 +2198,6 @@ def upsample_bicubic2d_default(
         inner_fn=fn,
         ranges=[N, C, sympy.Integer(oH), sympy.Integer(oW)],
     )
-
-
-@register_lowering(aten.upsample_bicubic2d.vec)
-def upsample_bicubic2d_vec(
-    a,
-    output_size,
-    align_corners: bool,
-    scale_factors: Optional[Tuple[float, float]] = None,
-):
-    _, _, iH, iW = a.get_size()
-    iH = V.graph.sizevars.guard_static_shape(iH)
-    iW = V.graph.sizevars.guard_static_shape(iW)
-
-    if bool(output_size) + bool(scale_factors) != 1:
-        raise RuntimeError("Must specify exactly one of output_size and scale_factor.")
-    if output_size is None:
-        assert scale_factors is not None
-        output_size = (int(iH * scale_factors[0]), int(iW * scale_factors[1]))
-    scale_h, scale_w = scale_factors if scale_factors else (None, None)
-    return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
 @register_lowering(aten.reflection_pad2d)
@@ -2719,9 +2717,9 @@ def _adaptive_avg_pool2d(x, output_size):
     return rv
 
 
-@register_lowering(aten.upsample_nearest2d_backward.vec)
+@register_lowering(aten.upsample_nearest2d_backward.default)
 def upsample_nearest2d_backward(
-    x, output_size=None, input_size=None, scale_factors=None
+    x, output_size=None, input_size=None, scales_h=None, scales_w=None
 ):
     x.realize_hint()
 
@@ -3299,6 +3297,23 @@ def div_prim(a, b):
         return div(a, b)
 
 
+@register_lowering([aten.fmod, prims.fmod])
+def fmod(a, b):
+    is_integral = is_boolean_type(a) or is_integer_type(a)
+
+    if is_integral:
+
+        def fn(a, b):
+            return ops.mod(a, b)
+
+    else:
+
+        def fn(a, b):
+            return ops.fmod(a, b)
+
+    return make_pointwise(fn)(a, b)
+
+
 # TODO - enable builtin and disable decomp to lower to ptx instruction
 # Causes compilation to not complete on timm_vision_transformers inference
 # @register_lowering(aten.rsqrt)
@@ -3391,7 +3406,6 @@ register_pointwise(
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
-register_pointwise(aten.fmod)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
 register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)
