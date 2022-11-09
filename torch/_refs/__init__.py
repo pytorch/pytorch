@@ -2922,8 +2922,8 @@ def native_batch_norm(
         rstd = torch.rsqrt(var + eps)
         out = (input - mean) * rstd
 
-        save_mean = torch.empty([0], device=running_mean.device)
-        save_rstd = torch.empty([0], device=rstd.device)
+        save_mean = torch.empty([0], device=running_mean.device, dtype=input.dtype)
+        save_rstd = torch.empty([0], device=rstd.device, dtype=input.dtype)
 
     if weight is None and bias is not None:
         unsqueeze_bias = prims.expand_dims(bias, reduction_dims, input.ndim)
