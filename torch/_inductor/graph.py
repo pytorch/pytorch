@@ -1,4 +1,3 @@
-import itertools
 import logging
 import operator
 import os
@@ -19,6 +18,7 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
+
 from .ir import Constant, FixedLayout, InputBuffer, TensorBox
 from .lowering import lowerings, make_fallback, needs_realized_inputs
 from .sizevars import SizeVarAllocator
