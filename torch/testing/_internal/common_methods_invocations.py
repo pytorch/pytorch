@@ -3328,9 +3328,6 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         ((S, S, S), 1, {'eps' : 0.5}),
     )
 
-    # Checking for permutations of weights and biases as `None`
-    weights = [weight_tensor, None]
-    biases = [bias_tensor, None]
 
     # num_channels is inferred to be input.shape[1] dimension
     for input_shape, num_groups, kwargs in cases:
@@ -3338,6 +3335,10 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         channels = input_shape[1] if len(input_shape) > 1 else 0
         weight_tensor = make_arg(channels)
         bias_tensor = make_arg(channels)
+
+        # Checking for permutations of weights and biases as `None`
+        weights = [weight_tensor, None]
+        biases = [bias_tensor, None]
         for weight, bias in itertools.product(weights, biases):
             kwargs = {
                 'weight': weight,
@@ -3358,9 +3359,6 @@ def reference_inputs_group_norm(op_info, device, dtype, requires_grad, **kwargs)
     # type promotion
     dtypes = op_info.supported_dtypes(device)
 
-    # Checking for permutations of weights and biases as `None`
-    weights = [weight_tensor, None]
-    biases = [bias_tensor, None]
 
     # Ordered as input shape, num groups, and kwargs for eps
     cases: Tuple[Tuple[int], int, float] = (  # type: ignore[assignment]
@@ -3381,6 +3379,10 @@ def reference_inputs_group_norm(op_info, device, dtype, requires_grad, **kwargs)
             input_tensor = make_arg(input_shape, dtype=input_dtype)
             weight_tensor = make_arg(channels, dtype=weight_dtype)
             bias_tensor = make_arg(channels, dtype=bias_dtype)
+
+            # Checking for permutations of weights and biases as `None`
+            weights = [weight_tensor, None]
+            biases = [bias_tensor, None]
             for weight, bias in itertools.product(weights, biases):
                 kwargs = {
                     'weight': weight,
