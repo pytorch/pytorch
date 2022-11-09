@@ -12,6 +12,8 @@ from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorR
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
+from torch._ops import PyOperator
+from functorch import vmap, grad
 
 import logging
 
@@ -1681,6 +1683,100 @@ class TestPythonDispatcher(TestCase):
         r = torch._C._EnablePythonDispatcher()
         python_disp_shape = torch.linalg.lstsq(a, b).solution.shape
         self.assertEqual(expected_shape, python_disp_shape)
+
+class TestPyOperator(TestCase):
+    def construct_sum_op(self):
+        mysum = PyOperator("mysum")
+
+        @mysum.py_impl(torch._C._functorch.TransformType.Vmap)
+        def mysum_batch_rule(interpreter, x, dim):
+            if not torch._C._functorch.is_batchedtensor(x):
+                with interpreter.lower():
+                    return mysum(x, dim)
+
+            bdim = torch._C._functorch.maybe_get_bdim(x)
+            value = torch._C._functorch.get_unwrapped(x)
+
+            with interpreter.lower():
+                value = value.movedim(bdim, 0)
+                result = mysum(value, dim + 1)
+
+            return torch._C._functorch._add_batch_dim(result, 0, interpreter.level())
+
+        @mysum.py_impl(torch._C._functorch.TransformType.Grad)
+        def mysum_grad_rule(interpreter, x, dim):
+            level = interpreter.level()
+
+            class MySum(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x, dim):
+                    ctx.x_shape = x.shape
+                    ctx.dim = dim
+                    x = torch._C._functorch._unwrap_for_grad(x, level)
+                    with torch.enable_grad(), interpreter.lower():
+                        y = mysum(x, dim)
+
+                    y = torch._C._functorch._wrap_for_grad(y, level)
+                    return y
+
+                @staticmethod
+                def backward(ctx, gy):
+                    return gy.unsqueeze(ctx.dim).expand(ctx.x_shape), None
+
+            try:
+                # TODO: toss this into a context manager somewhere
+                torch._C._functorch.set_autograd_function_allowed(True)
+                return MySum.apply(x, dim)
+            finally:
+                torch._C._functorch.set_autograd_function_allowed(False)
+
+        @mysum.py_impl(torch._C.DispatchKey.AutogradCPU)
+        def mysum_autograd(x, dim):
+            return torch.sum(x, dim)
+
+        return mysum
+
+    def test_basic_sum(self):
+        mysum = self.construct_sum_op()
+        x = torch.randn(2, 3, 4)
+        result = mysum(x, 1)
+        self.assertEqual(result, torch.sum(x, 1))
+
+    def test_vmap_sum(self):
+        mysum = self.construct_sum_op()
+        x = torch.randn(2, 3, 4)
+        result = vmap(mysum, (0, None))(x, 0)
+        self.assertEqual(result, torch.sum(x, 1))
+
+        result = vmap(vmap(mysum, (0, None)), (0, None))(x, 0)
+        self.assertEqual(result, torch.sum(x, 2))
+
+    def test_grad_sum(self):
+        mysum = self.construct_sum_op()
+        x = torch.randn(3)
+        gx = grad(mysum)(x, 0)
+        self.assertEqual(gx, torch.ones_like(x))
+
+    def test_grad_grad_sum(self):
+        mysum = self.construct_sum_op()
+        x = torch.randn(3, requires_grad=True)
+
+        def f(x):
+            # higher order grad. Requires a non-linearity
+            return mysum(x.sin(), 0)
+
+        def grad_f_sum(x):
+            return grad(f)(x).sum()
+
+        ggx = grad(grad_f_sum)(x) 
+        self.assertEqual(ggx, -x.sin())
+
+    def test_vmap_grad_sum(self):
+        mysum = self.construct_sum_op()
+        x = torch.randn(2, 3)
+        gx = vmap(grad(mysum), (0, None))(x, 0)
+        self.assertEqual(gx, torch.ones_like(x))
+
 
 if __name__ == '__main__':
     run_tests()

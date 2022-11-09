@@ -16,6 +16,7 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
+#include <ATen/functorch/Interpreter.h>
 
 // This file contains functorch's Python bindings.
 
@@ -387,6 +388,18 @@ static void dump_local_tls() {
   std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
 }
 
+static std::tuple<Tensor, optional<int64_t>> unwrapTensorAtCurrentLevel(const Tensor& tensor) {
+  auto level = currentLevel();
+  auto* batched = maybeGetBatchedImpl(tensor);
+  if (!batched) {
+    return std::make_tuple(tensor, nullopt);
+  }
+  if (batched->level() == level) {
+    return std::make_tuple(batched->value(), batched->bdim());
+  }
+  return std::make_tuple(tensor, nullopt);
+}
+
 void initFuncTorchBindings(PyObject* module) {
   auto _C = py::handle(module).cast<py::module>();
   auto m = _C.def_submodule("_functorch");
@@ -449,6 +462,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("reshape_dim_into", &at::functorch::reshape_dim_into);
   m.def("reshape_dim_outof", &at::functorch::reshape_dim_outof);
   m.def("are_transforms_active", &at::functorch::areTransformsActive);
+  m.def("unwrap_batchedtensor", unwrapTensorAtCurrentLevel);
   // various debugging things. Maybe we should offer these as first-class APIs
   // on Tensors?
   m.def("is_batchedtensor", &is_batchedtensor);
@@ -467,6 +481,34 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("is_functorch_wrapped_tensor", [](const Tensor& tensor) {
     return maybe_get_level(tensor) != -1;
   });
+  m.def("peek_interpreter_stack", []() -> c10::optional<Interpreter> {
+    const auto& stack = getDynamicLayerStack();
+    if (stack.size() == 0) {
+      return c10::nullopt;
+    }
+    auto result = stack.back().interpreter();
+    return result;
+  });
+  py::class_<at::functorch::WithoutTop>(m, "WithoutTop")
+    .def(py::init<>());
+
+  py::enum_<TransformType>(m, "TransformType")
+    .value("Grad", TransformType::Grad)
+    .value("Vmap", TransformType::Vmap);
+  py::class_<Interpreter>(m, "CInterpreter")
+    .def("key", &Interpreter::key)
+    .def("level", &Interpreter::level);
+  py::class_<GradInterpreterPtr>(m, "CGradInterpreterPtr")
+    .def(py::init<const Interpreter*>())
+    .def("key", &GradInterpreterPtr::key)
+    .def("level", &GradInterpreterPtr::level)
+    .def("lift", &GradInterpreterPtr::lift)
+    .def("prevGradMode", &GradInterpreterPtr::prevGradMode);
+  py::class_<VmapInterpreterPtr>(m, "CVmapInterpreterPtr")
+    .def(py::init<const Interpreter*>())
+    .def("key", &VmapInterpreterPtr::key)
+    .def("level", &VmapInterpreterPtr::level)
+    .def("batchSize", &VmapInterpreterPtr::batchSize);
 }
 
 } // namespace impl

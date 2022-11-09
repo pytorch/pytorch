@@ -265,7 +265,7 @@ int64_t initAndPushDynamicLayer(
 
   auto& data = getGlobalDynmetaData();
 
-  TORCH_INTERNAL_ASSERT(data.find(layerId) == data.end());
+  /// TORCH_INTERNAL_ASSERT(data.find(layerId) == data.end());
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
   }
@@ -407,12 +407,6 @@ static void dump_local_tls() {
   std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
 }
 #endif
-
-struct WithoutTop {
-  WithoutTop();
-  ~WithoutTop();
-  DynamicLayer layer_;
-};
 
 WithoutTop::WithoutTop(): layer_(popDynamicLayer()) {}
 WithoutTop::~WithoutTop() {
