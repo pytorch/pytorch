@@ -242,6 +242,7 @@ def cpp_compile_command(input, output, include_pytorch=False):
             {cpp_compiler()} {input} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
             {ipaths} {lpaths} {libs} {macros}
             -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
+            -D C10_USING_CUSTOM_GENERATED_MACROS
             -o{output}
         """,
     ).strip()
@@ -250,6 +251,18 @@ def cpp_compile_command(input, output, include_pytorch=False):
 class CppCodeCache:
     cache = dict()
     clear = staticmethod(cache.clear)
+
+    @staticmethod
+    def _load_library(path):
+        try:
+            return cdll.LoadLibrary(path)
+        except OSError as e:
+            if "gomp" in str(e) and os.path.exists("/usr/lib64/libgomp.so.1"):
+                # hacky workaround for fbcode/buck
+                global _libgomp
+                _libgomp = cdll.LoadLibrary("/usr/lib64/libgomp.so.1")
+                return cdll.LoadLibrary(path)
+            raise
 
     @classmethod
     def load(cls, source_code):
@@ -270,7 +283,7 @@ class CppCodeCache:
                     except subprocess.CalledProcessError as e:
                         raise exc.CppCompileError(cmd, e.output)
 
-                cls.cache[key] = cdll.LoadLibrary(output_path)
+                cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
 
         return cls.cache[key]
