@@ -13,6 +13,7 @@ from torch import Tensor
 from torch._decomp import register_decomposition
 from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
+from torch.fx.experimental.symbolic_shapes import guard_int, sym_float, sym_int
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -696,7 +697,7 @@ def _softmax_backward_data(
     grad_input = new_grad_output - output * torch.sum(
         new_grad_output, dim=dim, keepdim=True
     )
-    return _cast_grad_to_input_dtype(grad_output, grad_input, input_dtype)
+    return _cast_grad_to_input_dtype(grad_output, grad_input, input_dtype).contiguous()
 
 
 @register_decomposition(aten._log_softmax_backward_data)
@@ -914,7 +915,13 @@ def col2im(
 @register_decomposition(aten.native_dropout_backward)
 @pw_cast_for_opmath
 def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
-    return grad_output * (mask.type_as(grad_output) * scale)
+    # According to the CUDA kernel implementation we should have this test;
+    # but it seems to fail tests!
+    # utils.check(mask.dtype == torch.bool, lambda: f"Mask should be Bool Scalar Type {mask.dtype}")
+    r = (grad_output * (mask.type_as(grad_output) * scale)).clone(
+        memory_format=utils.suggest_memory_format(grad_output)
+    )
+    return r
 
 
 @register_decomposition(aten.unfold_backward)
@@ -1095,8 +1102,9 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
         assert dim_size == 0
         return [self]
     chunks = (dim_size + split_size - 1) // split_size
+    chunks = guard_int(chunks)
     split_sizes = [split_size for i in range(chunks)]
-    split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size)
+    split_sizes[-1] = split_size - (split_size * chunks - dim_size)
     return torch.split(self, split_sizes, dim)
 
 
@@ -1830,8 +1838,8 @@ def upsample_bilinear2d_vec(
     n_batch, n_channels, in_h, in_w = input.shape
 
     if output_size is not None:
-        out_h = float(output_size[0])
-        out_w = float(output_size[1])
+        out_h = sym_float(output_size[0])
+        out_w = sym_float(output_size[1])
     elif scale_factors is not None:
         out_h = in_h * scale_factors[0]
         out_w = in_w * scale_factors[1]
@@ -1839,7 +1847,7 @@ def upsample_bilinear2d_vec(
     # Calculate horizontal and vertical scaling factor
     if out_h > 1:
         if align_corners:
-            h_scale_factor = (in_h - 1) / (int(out_h) - 1)
+            h_scale_factor = (in_h - 1) / (sym_int(out_h) - 1)
         else:
             h_scale_factor = in_h / out_h
     else:
@@ -1847,14 +1855,14 @@ def upsample_bilinear2d_vec(
 
     if out_w > 1:
         if align_corners:
-            w_scale_factor = (in_w - 1) / (int(out_w) - 1)
+            w_scale_factor = (in_w - 1) / (sym_int(out_w) - 1)
         else:
             w_scale_factor = in_w / out_w
     else:
         w_scale_factor = 0.0
 
-    i = torch.arange(int(out_h), dtype=input.dtype, device=input.device)
-    j = torch.arange(int(out_w), dtype=input.dtype, device=input.device)
+    i = torch.arange(sym_int(out_h), dtype=input.dtype, device=input.device)
+    j = torch.arange(sym_int(out_w), dtype=input.dtype, device=input.device)
 
     if align_corners:
         x = h_scale_factor * i
