@@ -3585,6 +3585,7 @@ diagonal_copy = _make_copy_from_view(diagonal)
 
 
 @register_decomposition(torch.ops.aten.diag_embed)
+@out_wrapper()
 def diag_embed(
     t: TensorLikeType,
     offset: int = 0,
