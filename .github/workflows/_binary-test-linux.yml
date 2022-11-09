@@ -171,17 +171,8 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
-        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' }}
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+        uses: huydhn/test-infra/.github/actions/setup-nvidia@setup-nvidia-action
+        if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
 
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
