@@ -1036,6 +1036,20 @@ def get_fake_value(node, tx):
 
 
 def run_node(output_graph, node, args, kwargs, nnmodule):
+    """
+    Runs a given node, with the given args and kwargs.
+
+    Behavior is dicatated by a node's op.
+
+    run_node is useful for extracting real values out of nodes.
+    See get_real_value for more info on common usage.
+
+    Note: The output_graph arg is only used for 'get_attr' ops
+    Note: The nnmodule arg is only used for 'call_module' ops
+
+    Nodes that are not call_function, call_method, call_module, or get_attr will
+    raise an AssertionError.
+    """
     op = node.op
     try:
         if op == "call_function":

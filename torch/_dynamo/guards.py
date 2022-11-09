@@ -413,6 +413,9 @@ class GuardBuilder:
             code = "not ___is_grad_enabled()"
         self._produce_guard_code(guard, [code])
 
+    # This is a bit of a crutch for export case for symbolic shape guards.
+    # SYMBOL_MATCH is only ever, and must only ever, be used for setting this value on
+    # the create_fn field for tracking guards in export.
     @staticmethod
     def SYMBOL_MATCH():
         pass
