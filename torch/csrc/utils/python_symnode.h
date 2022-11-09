@@ -27,6 +27,7 @@ namespace impl {
 // this is just an adapter so C++ calls can get to the object.
 class PythonSymNodeImpl : public c10::SymNodeImpl {
  public:
+  PythonSymNodeImpl() = default;
   PythonSymNodeImpl(py::object pyobj) : c10::SymNodeImpl() {
     pyobj_ = std::make_shared<c10::SafePyObject>(
         pyobj.release().ptr(), getPyInterpreter());
