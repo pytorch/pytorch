@@ -11,7 +11,7 @@ from typing import List
 import torch
 
 from .. import config
-from ..ir import ReductionHint
+from ..ir import ReductionHint, TileHint
 from ..triton_ops.mm_perf_model import estimate_matmul_time
 from ..utils import conditional_product, dynamo_utils, has_triton
 from .conv_perf_model import (
@@ -132,9 +132,14 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
+        import inspect
+
         from triton.testing import do_bench
 
-        return do_bench(kernel_call)
+        if "fast_flush" in inspect.signature(do_bench).parameters.keys():
+            return do_bench(kernel_call, rep=40, fast_flush=True)
+        else:
+            return do_bench(kernel_call, rep=40)
 
     @dynamo_utils.dynamo_timed
     def autotune_to_one_config(self, *args, **kwargs):
@@ -208,7 +213,8 @@ def load_cached_autotuning(
     if not os.path.exists(cache_filename):
         return None
 
-    best_config = json.loads(open(cache_filename).read())
+    with open(cache_filename, "r") as fd:
+        best_config = json.loads(fd.read())
     if best_config.get("configs_hash") != configs_hash:
         return None
 
@@ -377,15 +383,15 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=2):
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def pointwise(size_hints, meta, filename=None):
+def pointwise(size_hints, meta, tile_hint=None, filename=None):
     """
     Construct @triton.heuristics() based on size_hints.
     """
     if len(size_hints) == 1:
         return cached_autotune([triton_config(size_hints, 1024)], meta=meta)
     if len(size_hints) == 2:
-        if not config.triton.autotune:
-            return cached_autotune([triton_config(size_hints, 64, 64)], meta=meta)
+        if not config.triton.autotune or tile_hint == TileHint.SQUARE:
+            return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta)
         return cached_autotune(
             [
                 triton_config(size_hints, 32, 32),

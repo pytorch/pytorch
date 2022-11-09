@@ -312,34 +312,18 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            aten::zeros
-              aten::empty
-              aten::zero_
             Top level Annotation
-              aten::empty
-              aten::zeros
-                aten::empty
-                aten::zero_
               First Annotation
-                aten::empty
                 aten::ones
                   aten::empty
                   aten::fill_
-              aten::zeros
-                aten::empty
-                aten::zero_
               Second Annotation
-                aten::empty
                 aten::add
                   aten::to
                     aten::_to_copy
                       aten::empty_strided
                       aten::copy_
-                aten::zeros
-                  aten::empty
-                  aten::zero_
                 Third Annotation
-                  aten::empty
                   aten::ones_like
                     aten::empty_like
                       aten::empty_strided
