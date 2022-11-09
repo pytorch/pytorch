@@ -731,14 +731,56 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_attention_backward_math(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
-    const Tensor& attn_mask,
-    double dropout_p,
+    const c10::optional<Tensor>& attn_mask,
+    double dropout_p=0.0,
     bool need_attn_weights,
     bool is_causal) {
-  auto a = at::zeros_like(query);
-  auto b = at::zeros_like(key);
-  auto c = at::zeros_like(value);
-  return std::make_tuple(a, b, c);
+  TORCH_CHECK(!attn_mask, "Currently do not support attn_mask.");
+  TORCH_CHECK(!is_causal, "Expected is_causal to be False, but got ", is_causal, ".");
+  TORCH_CHECK(
+      (query.dim() == 3 && key.dim() == 3 && value.dim() == 3) ||
+          (query.dim() == 4 && key.dim() == 4 && value.dim() == 4),
+      "Expected query, key and value to be all 3 or all 4 dimensional, but got ",
+      query.dim(),
+      ", ",
+      key.dim(),
+      ", and ",
+      value.dim(),
+      " instead.");
+  TORCH_CHECK(
+      !need_attn_weights,
+      "Expected need_attn_weights to be false, but got ",
+      need_attn_weights,
+      ".");
+
+  const auto embed_size = query.size(-1);
+  const double scaling = ::sqrt(::sqrt(static_cast<double>(embed_size)));
+  const auto bsz = query.size(0);
+  const auto seq_len = query.size(1);
+
+  return std::make_tuple(at::zeros_like(query), at::zeros_like(key), at::zeros_like(value));
+
+  // auto grad_mha_output = grad.view(seq_len, -1, head_dim).transpose(0, 1)
+  // auto grad_attn_probs_out = torch.bmm(grad_mha_output, v.transpose(1, 2))
+
+  // grad_v = torch.bmm(attn_probs.transpose(1,2), grad_mha_output).transpose(0, 1).contiguous().view(seq_len, bsz, -1)
+
+
+  // grad_attn_probs_in = scaled_upper_triang_masked_softmax_cuda.backward(
+  //     grad_attn_probs_out, attn_probs, 1.0
+  // )
+  // grad_q = torch.bmm(
+  //     math.sqrt(scaling) * grad_attn_probs_in,
+  //     math.sqrt(scaling) * k.transpose(0,1)
+  // )
+  // grad_q = grad_q.transpose(0, 1).contiguous().view(seq_len, bsz, -1)
+  // grad_k = torch.bmm(
+  //     math.sqrt(scaling) * grad_attn_probs_in.transpose(1,2),
+  //     math.sqrt(scaling) * q.transpose(0,1)
+  // )
+  // grad_k = grad_k.transpose(0, 1).contiguous().view(seq_len, bsz, -1)
+  // grad_kvq_proj_output = torch.cat([grad_k, grad_v, grad_q], dim=-1)
+  // return grad_kvq_proj_output
 }
 
 Tensor triton_multi_head_attention(
