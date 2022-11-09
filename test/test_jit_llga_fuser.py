@@ -800,6 +800,8 @@ class TestDynamoAOT(JitTestCase):
                 loss = aot_mod(torch.rand([10, 10])).sum()
                 loss.backward()
 
+        torch._dynamo.reset()
+
 
 @unittest.skipIf(IS_AVX512_UNSUPPORTED, "This test fails for BF16 on machines without AVX512.")
 @unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
