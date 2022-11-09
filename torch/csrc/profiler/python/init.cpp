@@ -131,6 +131,7 @@ void initPythonBindings(PyObject* module) {
   py::enum_<EventType>(m, "_EventType")
       .value("TorchOp", EventType::TorchOp)
       .value("Backend", EventType::Backend)
+      .value("Vulkan", EventType::Vulkan)
       .value("Allocation", EventType::Allocation)
       .value("PyCall", EventType::PyCall)
       .value("PyCCall", EventType::PyCCall)
@@ -180,6 +181,7 @@ void initPythonBindings(PyObject* module) {
       .def_readonly("allow_tf32_cublas", &torch_op_t::allow_tf32_cublas_);
 
   py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
+  py::class_<ExtraFields<EventType::Vulkan>>(m, "_ExtraFields_Vulkan");
 
   using allocation_t = ExtraFields<EventType::Allocation>;
   py::class_<allocation_t>(m, "_ExtraFields_Allocation")

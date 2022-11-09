@@ -37,6 +37,7 @@ modernize-*,
 performance-*,
 -performance-noexcept-move-constructor,
 -performance-unnecessary-value-param,
+-facebook-hte-BadMemberName,
 '
 HeaderFilterRegex: 'torch/csrc/(?!deploy/interpreter/cpython).*'
 AnalyzeTemporaryDtors: false

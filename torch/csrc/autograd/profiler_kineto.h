@@ -169,4 +169,15 @@ TORCH_API void prepareProfiler(
 
 } // namespace profiler
 } // namespace autograd
+
+// TODO: move to torch/csrc/profiler
+namespace profiler {
+namespace impl {
+
+// Experimental.
+TORCH_API void _reportVulkanEventToProfiler(vulkan_id_t id);
+
+} // namespace impl
+} // namespace profiler
+
 } // namespace torch

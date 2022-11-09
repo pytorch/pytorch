@@ -30,6 +30,7 @@ namespace impl {
 enum class EventType : uint8_t {
   TorchOp = 0,
   Backend,
+  Vulkan,
   Allocation,
   OutOfMemory,
   PyCall,
@@ -168,6 +169,12 @@ struct ExtraFields<EventType::Backend> {
   std::string backend_;
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
+};
+
+template <>
+struct ExtraFields<EventType::Vulkan> {
+  using raw_event_t = std::pair<approx_time_t, vulkan_id_t>;
+  int64_t duration_ns_{0};
 };
 
 struct RawAllocation {
@@ -371,6 +378,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   c10::variant<
       ExtraFields<EventType::TorchOp>,
       ExtraFields<EventType::Backend>,
+      ExtraFields<EventType::Vulkan>,
       ExtraFields<EventType::Allocation>,
       ExtraFields<EventType::OutOfMemory>,
       ExtraFields<EventType::PyCall>,
@@ -468,6 +476,11 @@ class TORCH_API ThreadLocalSubqueue {
   }
 
   template <class... Args>
+  void emplace_vulkan_event(Args&&... args) {
+    vulkan_events_.emplace_back(std::forward<Args>(args)...);
+  }
+
+  template <class... Args>
   void emplace_allocation_event(Args&&... args) {
     allocations_.emplace_back(std::forward<Args>(args)...);
   }
@@ -548,6 +561,10 @@ class TORCH_API ThreadLocalSubqueue {
 
   // reportBackendEventToActiveKinetoProfiler
   AppendOnlyList<ExtraFields<EventType::Backend>, BlockSize> backend_events_;
+
+  // _reportVulkanEventToProfiler
+  AppendOnlyList<ExtraFields<EventType::Vulkan>::raw_event_t, BlockSize>
+      vulkan_events_;
 
   // reportMemoryUsage
   AppendOnlyList<RawAllocation, BlockSize> allocations_;

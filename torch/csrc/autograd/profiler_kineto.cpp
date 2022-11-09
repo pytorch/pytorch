@@ -244,6 +244,13 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     return ActiveProfilerType::KINETO;
   }
 
+  void reportVulkanEventToProfiler(torch::profiler::impl::vulkan_id_t id) {
+    if (!config_.disabled()) {
+      record_queue_.getSubqueue()->emplace_vulkan_event(
+          torch::profiler::impl::getApproximateTime(), id);
+    }
+  }
+
   void reportMemoryUsage(
       void* ptr,
       int64_t alloc_size,
@@ -851,4 +858,18 @@ void ProfilerResult::save(const std::string& path) {
 
 } // namespace profiler
 } // namespace autograd
+
+// TODO: move to torch/csrc/profiler
+namespace profiler {
+namespace impl {
+void _reportVulkanEventToProfiler(vulkan_id_t id) {
+  auto state_ptr = ::torch::autograd::profiler::KinetoThreadLocalState::get(
+      /*global=*/false);
+  if (state_ptr) {
+    state_ptr->reportVulkanEventToProfiler(id);
+  }
+}
+} // namespace impl
+} // namespace profiler
+
 } // namespace torch
