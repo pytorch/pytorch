@@ -79,14 +79,18 @@ def meta_randperm(n, *, generator=None, out):
 def meta_randint(
     high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
 ):
-    return torch.empty(size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 @register_meta(aten.randint.low)
 def meta_randint_low(
     low, high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
 ):
-    return torch.empty(size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
@@ -265,6 +269,13 @@ def meta_pad2d(self, padding):
         return self.new_empty((nbatch, nplane, output_h, output_w))
 
 
+@register_meta([aten.bernoulli.default, aten.bernoulli.out])
+@out_wrapper()
+def meta_bernoulli(self, *, generator=None):
+    # https://github.com/pytorch/pytorch/issues/88612
+    return torch.empty_like(self).contiguous()
+
+
 @register_meta(aten.bernoulli_.float)
 def meta_bernoulli_(self, p=0.5, generator=None):
     return self
@@ -273,12 +284,6 @@ def meta_bernoulli_(self, p=0.5, generator=None):
 @register_meta(aten.bernoulli.p)
 def meta_bernoulli(self, p=0.5, generator=None):
     return torch.empty_like(self)
-
-
-@register_meta(aten.bernoulli.out)
-def meta_bernoulli_out(self, *, generator=None, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out
 
 
 @register_meta(aten._fused_moving_avg_obs_fq_helper.default)
@@ -1177,7 +1182,7 @@ def meta_binop_inplace(self, other):
         aten.sub_.Tensor,
     ],
 )
-def meta_binop_inplace_alph(self, other, alpha=1):
+def meta_binop_inplace_alpha(self, other, alpha=1):
     return self
 
 
@@ -1575,13 +1580,14 @@ def _to_copy(
     )
 
 
+# TODO: Deduplicate this with canonicalize_dim
 def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     if dim_post_expr <= 0:
         assert wrap_scalar
         dim_post_expr = 1
     min = -dim_post_expr
     max = dim_post_expr - 1
-    assert not (dim < min or dim > max)
+    assert not (dim < min or dim > max), f"dim {dim} out of bounds ({min}, {max})"
     if dim < 0:
         dim += dim_post_expr
     return dim
