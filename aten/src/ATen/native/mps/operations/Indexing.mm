@@ -459,7 +459,10 @@ Tensor& index_select_out_mps(const Tensor & self,
   };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
+  auto inputType = getMPSDataType(self.scalar_type());
+  if (inputType ==  MPSDataTypeUInt8) {
+      inputType =  MPSDataTypeInt8;
+  }
   @autoreleasepool {
 
     string key = "index_select_out_mps" + getTensorsStringKey({self, index}) + ":" + std::to_string(dim);
@@ -473,7 +476,7 @@ Tensor& index_select_out_mps(const Tensor & self,
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self));
           MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
 
           MPSGraphTensor* outputTensor = [mpsGraph gatherWithUpdatesTensor:inputTensor
@@ -490,9 +493,11 @@ Tensor& index_select_out_mps(const Tensor & self,
       });
     }
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self,
+                                  /*mpsShape=*/nullptr, /*gatherTensorData=*/true, /*dataType=*/&inputType);
     Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output,
+                                  /*mpsShape=*/nullptr, /*gatherTensorData=*/false, /*dataType=*/&inputType);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
