@@ -9,6 +9,7 @@ import sympy
 
 import torch
 import torch.fx
+import torch.utils._pytree as pytree
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -965,11 +966,9 @@ def fallback_handler(kernel):
     fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
-        result = ir.FallbackKernel.create(kernel, *args, **kwargs)
-        if isinstance(result, (list, tuple)):
-            return list(map(TensorBox.create, result))
-        else:
-            return TensorBox.create(result)
+        return pytree.tree_map(
+            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
+        )
 
     return handler
 
@@ -993,12 +992,10 @@ def native_dropout(x, p, train):
         config.fallback_random
     ), "this should be handled in decomps unless config.fallback_random"
     if train:
-        return list(
-            map(
-                TensorBox.create,
-                ir.FallbackKernel.create(aten.native_dropout, x, p, train),
-            )
+        return pytree.tree_map(
+            TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
         )
+
     return x, ones_like(x, dtype=torch.bool)
 
 
