@@ -35,6 +35,7 @@ from .variables.tensor import (
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
+from .exc import BackendCompilerFailed
 
 log = logging.getLogger(__name__)
 
