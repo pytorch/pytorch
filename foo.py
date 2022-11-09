@@ -11,7 +11,7 @@ from torch._C import (
 
 mysum = PyOperator("mysum")
 
-@mysum.py_functorch_impl(TransformType.Vmap)
+@mysum.py_impl(TransformType.Vmap)
 def mysum_batch_rule(interpreter, x, dim):
     print("invoked")
 

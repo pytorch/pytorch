@@ -98,7 +98,7 @@ def custom_vjp_call_grad_generic(maybe_interpreter, f_fwd, f_bwd, *operands):
     return pytree.tree_unflatten(flat_outs, out_spec), saved
 
 
-@custom_vjp_call.py_functorch_impl(TransformType.Grad)
+@custom_vjp_call.py_impl(TransformType.Grad)
 def custom_vjp_call_grad(interpreter, f_fwd, f_bwd, *operands):
     return custom_vjp_call_grad_generic(interpreter, f_fwd, f_bwd, *operands)
 
@@ -151,7 +151,7 @@ def batchify(f_fwd, f_bwd, in_dims, batch_size):
     return new_f_fwd, new_f_bwd, get_out_dims
 
 
-@custom_vjp_call.py_functorch_impl(TransformType.Vmap)
+@custom_vjp_call.py_impl(TransformType.Vmap)
 def custom_vjp_call_vmap(interpreter, f_fwd, f_bwd, *operands):
     current_level = interpreter.level()
     unwrapped_operands, in_dims = unwrap_batched(operands)
@@ -278,7 +278,7 @@ def custom_function_call_autograd(f_fwd, f_bwd, f_vmap, *operands):
     return OutputAndCtx.unflatten(flat_out)
 
 
-@custom_function_call.py_functorch_impl(TransformType.Grad)
+@custom_function_call.py_impl(TransformType.Grad)
 def custom_function_call_grad(interpreter, f_fwd, f_bwd, f_vmap, *operands):
     print(f'grad {interpreter.level()}')
     maybe_interpreter = interpreter
@@ -317,7 +317,7 @@ def custom_function_call_grad(interpreter, f_fwd, f_bwd, f_vmap, *operands):
     return OutputAndCtx.unflatten(flat_out)
 
 
-@custom_function_call.py_functorch_impl(TransformType.Vmap)
+@custom_function_call.py_impl(TransformType.Vmap)
 def custom_function_call_vmap(interpreter, f_fwd, f_bwd, f_vmap, *operands):
     print(f'vmap {interpreter.level()}')
     current_level = interpreter.level()
