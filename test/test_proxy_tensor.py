@@ -975,6 +975,11 @@ def forward(self, a_1):
             return x.shape
         self._test_dynamic(f, [(5, 3)], [[(4, 6)]])
 
+    def test_rmethod(self):
+        def f(x):
+            return x.size(0) + x
+        self._test_dynamic(f, [(5,)], [[(4,)], [(12,)]])
+
     def test_mega_guard(self):
         def f(a, b):
             assert a.shape[0] == b.shape[0] * 2
@@ -1188,7 +1193,6 @@ symbolic_tensor_failures = {
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
-    xfail('lerp', ''),  # aten.lerp.Scalar - couldn't find symbolic meta function/decomposition
     xfail('linalg.cholesky', ''),  # aten.linalg_cholesky_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.cholesky_ex', ''),  # aten.linalg_cholesky_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.cond', ''),  # Tensors of type TensorImpl do not have numel
@@ -1238,7 +1242,6 @@ symbolic_tensor_failures = {
     xfail('masked_scatter', ''),  # aten.masked_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decomposition
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decomposition
-    xfail('max', 'reduction_with_dim'),  # aten.max.dim - couldn't find symbolic meta function/decomposition
     xfail('median', ''),  # Could not run 'aten::median' with arguments from the 'Meta' backend. This could be becau...
     xfail('meshgrid', 'list_of_tensors'),  # Tensors of type TensorImpl do not have numel
     xfail('meshgrid', 'variadic_tensors'),  # Tensors of type TensorImpl do not have numel
@@ -1376,7 +1379,6 @@ inplace_symbolic_tensor_failures = {
     xfail('addcmul', ''),  # aten.addcmul_.default - couldn't find symbolic meta function/decomposition
     xfail('addmm', ''),  # aten.addmm_.default - couldn't find symbolic meta function/decomposition
     xfail('addmm', 'decomposed'),  # aten.addmm_.default - couldn't find symbolic meta function/decomposition
-    xfail('as_strided', ''),  # aten.as_strided_.default - couldn't find symbolic meta function/decomposition
     xfail('asin', ''),  # aten.asin_.default - couldn't find symbolic meta function/decomposition
     xfail('asinh', ''),  # aten.asinh_.default - couldn't find symbolic meta function/decomposition
     xfail('atan2', ''),  # aten.atan2_.default - couldn't find symbolic meta function/decomposition
@@ -1414,6 +1416,7 @@ inplace_symbolic_tensor_failures = {
     xfail('igamma', ''),  # aten.igamma_.default - couldn't find symbolic meta function/decomposition
     xfail('igammac', ''),  # aten.igammac_.default - couldn't find symbolic meta function/decomposition
     xfail('le', ''),  # aten.le_.Tensor - couldn't find symbolic meta function/decomposition
+    xfail('lerp', ''),  # aten.lerp_.default - couldn't find symbolic meta function/decomposition
     xfail('lgamma', ''),  # aten.lgamma_.default - couldn't find symbolic meta function/decomposition
     xfail('log10', ''),  # aten.log10_.default - couldn't find symbolic meta function/decomposition
     xfail('log1p', ''),  # aten.log1p_.default - couldn't find symbolic meta function/decomposition

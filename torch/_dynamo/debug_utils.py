@@ -137,7 +137,7 @@ def _cuda_system_info_comment():
         )
         model_str += f"{cuda_version_out}\n"
     except FileNotFoundError:
-        model_str += "nvcc not found\n"
+        model_str += "# nvcc not found\n"
 
     gpu_names = subprocess.run(
         ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
@@ -193,11 +193,6 @@ from {config.inductor_import}.compile_fx import compile_fx_inner
 from {config.dynamo_import}.debug_utils import same_two_models
 """
 
-NVFUSER_IMPORT = """
-from torch.fx.passes.backends.nvfuser import NvFuserBackend
-nvfuser = NvFuserBackend()
-"""
-
 COMPILER_REPRO_OPTIONS = {
     "inductor": (INDUCTOR_IMPORT, "compile_fx_inner", "inductor_fails"),
     "inductor_accuracy": (
@@ -205,7 +200,6 @@ COMPILER_REPRO_OPTIONS = {
         "compile_fx_inner",
         "inductor_accuracy_fails",
     ),
-    "nvfuser": (NVFUSER_IMPORT, "nvfuser", "nvfuser_fails"),
 }
 
 
@@ -322,22 +316,6 @@ def inductor_fails(fx_g, args, check_str=None):
     try:
         compile_mod = compile_fx_inner(fx_g, args)
         compile_mod(args)
-    except Exception as e:
-        if check_str is not None and check_str not in repr(e):
-            return False
-        print(repr(e))
-        return True
-    return False
-
-
-def nvfuser_fails(fx_g, args, check_str=None):
-    from torch.fx.passes.backends.nvfuser import NvFuserBackend
-
-    nvfuser = NvFuserBackend()
-
-    try:
-        compile_mod = nvfuser(fx_g, args)
-        compile_mod = compile_mod(*args)
     except Exception as e:
         if check_str is not None and check_str not in repr(e):
             return False
@@ -836,13 +814,19 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                 # Check Accuracy
                 compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
-                    log.warning("Accuracy failed for the TorchDyanmo produced graph")
+                    log.warning(
+                        "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
+                    )
                     dump_to_minify_after_dynamo(
                         fx.GraphModule(gm, copy.deepcopy(gm.graph)),
                         example_inputs,
                         compiler_name,
                     )
-                    raise AccuracyError("Bad accuracy detected")
+                    exc = AccuracyError("Bad accuracy detected.")
+                    exc.minifier_path = os.path.join(
+                        minifier_dir(), "minifier_launcher.py"
+                    )
+                    raise exc
             else:
                 try:
                     compiled_gm = compiler_fn(gm, example_inputs, **kwargs)

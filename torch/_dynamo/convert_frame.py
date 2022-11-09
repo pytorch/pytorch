@@ -130,7 +130,7 @@ def wrap_convert_context(fn):
 @TorchPatcher.suppress_torch_distributed_warnings
 def has_tensor_in_frame(frame):
     """Check if the frame has torch.* related bits"""
-    # Check if the function was decorated using torchdynamo.optimize
+    # Check if the function was decorated using torch._dynamo.optimize
     if frame.f_code in always_optimize_code_objects:
         return True
 
@@ -213,6 +213,8 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
                     stack_above_dynamo + list(reversed(exc.real_stack))
                 )
             )
+            msg += "\n"
+            msg += "=" * 10
 
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
@@ -222,20 +224,27 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
 
 
 def augment_exc_message(exc, msg="\n"):
-    if hasattr(exc, "real_stack") and len(exc.real_stack) > 0 and not config.verbose:
-        msg += f"\nfrom user code:\n {''.join(traceback.format_list([exc.real_stack[-1]]))}"
+    if (
+        hasattr(exc, "real_stack")
+        and len(exc.real_stack) > 0
+        and not (config.verbose and config.suppress_errors)
+    ):
+        msg += f"\nfrom user code:\n {''.join(traceback.format_list(reversed(exc.real_stack[0:2])))}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
  {config.dynamo_import}.replay('{exc.record_filename}').\n"
 
-    msg += f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
+    if not config.verbose:
+        msg += (
+            f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
+        )
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"
     ):
         msg += (
-            f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run"
+            f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
             "this script to find the smallest traced graph which reproduces this error.\n"
         )
 
@@ -243,10 +252,9 @@ def augment_exc_message(exc, msg="\n"):
         msg += (
             "\n\n"
             "You can suppress this exception and fall back to eager by setting:\n"
-            "    torchdynamo.config.suppress_errors = True\n"
+            "    torch._dynamo.config.suppress_errors = True\n"
         )
 
-    msg += "=" * 10
     old_msg = "" if len(exc.args) == 0 else exc.args[0]
     new_msg = old_msg + msg
     exc.args = (new_msg,) + exc.args[1:]
