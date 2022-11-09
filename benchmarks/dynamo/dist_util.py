@@ -140,7 +140,7 @@ def apply_fsdp(model, use_checkpointing=False, use_wrap_policy=True):
             transformer_auto_wrap_policy, transformer_layer_cls=blocks
         )
 
-    model = FSDP(model, auto_wrap_policy=wrap_policy)
+    model = FSDP(model, auto_wrap_policy=wrap_policy, use_orig_params=True)
     if use_checkpointing:
         fsdp_checkpointing_base(model, blocks)
 
