@@ -18,8 +18,7 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-
-from .ir import Constant, FixedLayout, InputBuffer, TensorBox
+from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import lowerings, make_fallback, needs_realized_inputs
 from .sizevars import SizeVarAllocator
 from .utils import dynamo_utils, gather_origins
@@ -305,8 +304,11 @@ class GraphLowering(torch.fx.Interpreter):
             num_users = len(set(n.users))
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
-                    if user.target in needs_realized_inputs or user.op == "output":
+                    if user.target in needs_realized_inputs:
                         result.realize_hint()
+                    elif user.op == "output":
+                        if isinstance(result.data.data, (Pointwise, Reduction)):
+                            result.realize()
 
                 # TODO(jansel): introduce a store vs inline choice
                 result.mark_reuse(len(n.users))

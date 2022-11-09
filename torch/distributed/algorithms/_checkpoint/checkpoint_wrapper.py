@@ -8,9 +8,8 @@ from torch.autograd.graph import save_on_cpu
 from torch.distributed.utils import _pack_kwargs, _replace_by_prefix, _unpack_kwargs
 from torch.utils.checkpoint import checkpoint as torch_utils_checkpoint
 
-# TODO: Refactor `_CHECKPOINT_PREFIX` to include the trailing '.' like FSDP
 _CHECKPOINT_WRAPPED_MODULE = "_checkpoint_wrapped_module"
-_CHECKPOINT_PREFIX = "_checkpoint_wrapped_module"
+_CHECKPOINT_PREFIX = _CHECKPOINT_WRAPPED_MODULE + "."
 
 class CheckpointImpl(Enum):
     REENTRANT = auto()
@@ -55,10 +54,10 @@ class ActivationWrapper(torch.nn.Module):
     ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
         """
         Overrides :meth:`named_parameters()` to intercept parameter names and
-        remove all occurrences of _CHECKPOINT_PREFIX.
+        remove all occurrences of ``_CHECKPOINT_PREFIX``.
         """
         for param_name, param in super().named_parameters(*args, **kwargs):
-            yield param_name.replace(f"{_CHECKPOINT_PREFIX}.", ""), param
+            yield param_name.replace(_CHECKPOINT_PREFIX, ""), param
 
     @staticmethod
     def _post_state_dict_hook(
@@ -75,7 +74,7 @@ class ActivationWrapper(torch.nn.Module):
         checkpoint-wrapped modules as this class adds the prefix back before
         loading the state_dict.
         """
-        _replace_by_prefix(state_dict, f"{prefix}{_CHECKPOINT_PREFIX}.", prefix)
+        _replace_by_prefix(state_dict, f"{prefix}{_CHECKPOINT_PREFIX}", prefix)
         return state_dict
 
     @staticmethod
@@ -91,7 +90,7 @@ class ActivationWrapper(torch.nn.Module):
         prefix so that non-checkpointed modules can be loaded into
         checkpoint_wrapper modules properly.
         """
-        _replace_by_prefix(state_dict, prefix, prefix + f"{_CHECKPOINT_PREFIX}.")
+        _replace_by_prefix(state_dict, prefix, prefix + f"{_CHECKPOINT_PREFIX}")
 
 
 class OffloadWrapper(ActivationWrapper):

@@ -10,9 +10,11 @@ on:
     tags:
       - ciflow/trunk/*
   workflow_dispatch:
+  schedule:
+    - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 jobs:
@@ -226,6 +228,10 @@ jobs:
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
       python_version: 3.9.12
+      # We need to set the environment file here instead of trying to detect it automatically because
+      # MacOS arm64 is cross-compiled from x86-64. Specifically, it means that arm64 conda environment
+      # is needed when building PyTorch MacOS arm64 from x86-64
+      environment-file: .github/requirements/conda-env-macOS-ARM64
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "macos-m1-12" },
