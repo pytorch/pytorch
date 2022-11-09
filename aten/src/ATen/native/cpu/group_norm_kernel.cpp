@@ -157,7 +157,7 @@ std::tuple<float, float> ColumnwiseMoments(
 }
 
 template <typename scalar_t, typename param_t>
-inline void calc_mean_var(
+inline void CalcMeanVar(
   const scalar_t* X_ptr,
   param_t* mean_ptr,
   param_t* rstd_ptr,
@@ -178,7 +178,7 @@ inline void calc_mean_var(
 }
 
 template <>
-inline void calc_mean_var(
+inline void CalcMeanVar(
   const BFloat16* X_ptr,
   float* mean_ptr,
   float* rstd_ptr,
@@ -223,7 +223,7 @@ inline void calc_mean_var(
 }
 
 template <typename scalar_t, typename param_t>
-inline void apply_scale_bias(
+inline void ApplyScaleBias(
   scalar_t* Y_ptr,
   const scalar_t* X_ptr,
   const param_t* scale_ptr,
@@ -240,7 +240,7 @@ inline void apply_scale_bias(
 }
 
 template <>
-inline void apply_scale_bias(
+inline void ApplyScaleBias(
   BFloat16* Y_ptr,
   const BFloat16* X_ptr,
   const float* scale_ptr,
@@ -366,7 +366,7 @@ void GroupNormKernelImplChannelsLastInternal(
         for (const auto m : c10::irange(HxW)) {
           const T* X_ptr = X_data + n * HxW * C + m * C + g * D;
           T* Y_ptr = Y_data + n * HxW * C + m * C + g * D;
-          apply_scale_bias<T, T_ACC>(Y_ptr, X_ptr, scale_ptr, bias_ptr, D);
+          ApplyScaleBias<T, T_ACC>(Y_ptr, X_ptr, scale_ptr, bias_ptr, D);
         }
 
         data_index_step(n, N, g, G);
@@ -406,7 +406,7 @@ void GroupNormKernelImplChannelsLastInternal(
         T_ACC* mean_ptr = buffer_ptr + n * 2 * C;
         T_ACC* rstd_ptr = mean_ptr + C;
         const T* X_ptr = X_data + i * C;
-        calc_mean_var<T, T_ACC>(X_ptr, mean_ptr, rstd_ptr, C);
+        CalcMeanVar<T, T_ACC>(X_ptr, mean_ptr, rstd_ptr, C);
         data_index_step(n, N, m, HxW);
       }
     });
@@ -470,7 +470,7 @@ void GroupNormKernelImplChannelsLastInternal(
         T* Y_ptr = Y_data + i * C;
         T_ACC* scale_ptr = buffer_data + n * 2 * C;
         T_ACC* bias_ptr = scale_ptr + C;
-        apply_scale_bias<T, T_ACC>(Y_ptr, X_ptr, scale_ptr, bias_ptr, C);
+        ApplyScaleBias<T, T_ACC>(Y_ptr, X_ptr, scale_ptr, bias_ptr, C);
         data_index_step(n, N, m, HxW);
       }
     });
@@ -606,7 +606,7 @@ void ComputeInternalGradients(
 }
 
 template <typename PT, typename T_ACC>
-inline void calc_db_ds(
+inline void CalcDsDb(
     const T_ACC* ds_ptr,
     const T_ACC* db_ptr,
     bool gamma_null,
@@ -629,7 +629,7 @@ inline void calc_db_ds(
 }
 
 template <>
-inline void calc_db_ds(
+inline void CalcDsDb(
     const float* ds_ptr,
     const float* db_ptr,
     bool gamma_null,
@@ -686,7 +686,7 @@ void GroupNormInputBackward(
       const T_ACC* ds_ptr = ds + i * D;
       const T_ACC* db_ptr = db + i * D;
       const PT* gamma_ptr = gamma + g * D;
-      calc_db_ds(ds_ptr, db_ptr, gamma_null, gamma_ptr, d, K, ds_arr.data(), db_arr.data());
+      CalcDsDb(ds_ptr, db_ptr, gamma_null, gamma_ptr, d, K, ds_arr.data(), db_arr.data());
       T_ACC ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T_ACC(0));
       T_ACC db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), T_ACC(0));
       for (const auto j : c10::irange(d, D)) {
