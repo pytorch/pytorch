@@ -6,7 +6,32 @@
 
 #include <c10/util/intrusive_ptr.h>
 
+#include <mutex>
+
 namespace c10 {
+
+namespace detail {
+
+// Safety condition for this is that the mutex must be GUARANTEED not to
+// be held when a move occurs.  Storages are moved very rarely (only by
+// static runtime
+struct UnsafeMovableMutexForStorage {
+  std::mutex mutex_;
+  // The move constructors just don't actually move the mutex.  Invariant
+  // is that moving out of a storage cannot happen concurrently with mutex
+  // operations (this is only copy_on_write at the moment).  This would be
+  // a read-write race anyway, and NOT ALLOWED.
+  //
+  // This also means you do NOT need to take out the mutex when moving;
+  // there is already a precondition that you're not racing with reads anyway.
+  UnsafeMovableMutexForStorage() {}
+  UnsafeMovableMutexForStorage(UnsafeMovableMutexForStorage&& a) {}
+  UnsafeMovableMutexForStorage& operator=(UnsafeMovableMutexForStorage&&) {
+    return *this;
+  }
+};
+
+} // detail
 
 // A storage represents the underlying backing data buffer for a
 // tensor.  This concept was inherited from the original Torch7
@@ -213,6 +238,11 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return received_cuda_;
   }
 
+  // virtual to deal with FunctionalStorageImpl, sigh
+  // NB: This is morally const but we're not const correct and I will
+  // need to monkey around data_ptr_ so it was easier to not declare it const
+  virtual c10::intrusive_ptr<StorageImpl> copy_on_write();
+
  private:
   DataPtr data_ptr_;
   SymInt size_bytes_;
@@ -222,5 +252,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // local to process cuda memory allocation
   bool received_cuda_;
   Allocator* allocator_;
+  detail::UnsafeMovableMutexForStorage copy_on_write_mutex_;
 };
 } // namespace c10

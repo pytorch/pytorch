@@ -63,6 +63,9 @@ class UniqueVoidPtr {
   void* release_context() {
     return ctx_.release();
   }
+  void swap_context(std::unique_ptr<void, DeleterFnPtr>& ctx) {
+    std::swap(ctx, ctx_);
+  }
   std::unique_ptr<void, DeleterFnPtr>&& move_context() {
     return std::move(ctx_);
   }

@@ -44,6 +44,9 @@ class C10_API DataPtr {
   void* release_context() {
     return ptr_.release_context();
   }
+  void swap_context(std::unique_ptr<void, DeleterFnPtr>& context) {
+    ptr_.swap_context(context);
+  }
   std::unique_ptr<void, DeleterFnPtr>&& move_context() {
     return ptr_.move_context();
   }

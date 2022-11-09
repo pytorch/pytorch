@@ -1476,17 +1476,30 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   //     `_reshape_alias` that essentially does the same thing as `view` and
   //     `as_strided` without any of the extra overhead.
   if (stride.has_value()) {
-    // Temporary check to revert to the old behavior/view in cases where the
-    // device is not supported (e.g. for XLA the operation is not supported
-    // so we use `view` instead).
-    //
-    // We need to do the checks here instead of in `native_functions.yaml`
-    // to preserve backwards compatibility.
-    if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
-      return self._reshape_alias_symint(shape, stride.value());
-    } else {
-      return self.view_symint(shape);
+    // old behavior case
+    if (self.is_quantized()) {
+      // Temporary check to revert to the old behavior/view in cases where the
+      // device is not supported (e.g. for XLA the operation is not supported
+      // so we use `view` instead).
+      //
+      // We need to do the checks here instead of in `native_functions.yaml`
+      // to preserve backwards compatibility.
+      if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
+        return self._reshape_alias_symint(shape, stride.value());
+      } else {
+        return self.view_symint(shape);
+      }
     }
+    auto maybe_cow_storage_impl = self.storage().unsafeGetStorageImpl()->copy_on_write();
+    if (!maybe_cow_storage_impl) {
+      // Immediately do the copy
+      TORCH_INTERNAL_ASSERT(0, "NYI");
+    }
+    auto self_ = at::detail::make_tensor<TensorImpl>(
+      Storage(std::move(maybe_cow_storage_impl)), self.key_set(), self.dtype());
+    auto* self_tmp_ = self_.unsafeGetTensorImpl();
+    self_tmp_->set_sizes_and_strides(self.sym_sizes(), stride.value(), self.sym_storage_offset());
+    return self_;
   }
   return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
 }
