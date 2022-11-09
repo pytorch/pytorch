@@ -2915,45 +2915,42 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        if isinstance(example_output, (list, tuple)):
-            packed = FallbackKernel(
-                MultiOutputLayout(tensor_args[0].get_device()),
-                kernel,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-            )
-            return [
-                (
-                    MultiOutput(
-                        FixedLayout(
-                            example_output[i].device,
-                            example_output[i].dtype,
-                            [sympy.Integer(s) for s in example_output[i].size()],
-                            [sympy.Integer(s) for s in example_output[i].stride()],
-                        ),
-                        packed,
-                        i,
-                    )
-                    if example_output[i] is not None
-                    else None
+        assert tensor_args or isinstance(
+            example_output, torch.Tensor
+        ), "Not sure where to find device info"
+        packed = FallbackKernel(
+            MultiOutputLayout(
+                tensor_args[0].get_device() if tensor_args else example_output.device
+            ),
+            kernel,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+            kwargs,
+        )
+
+        def generate_output(output, index=""):
+            if isinstance(output, (list, tuple)):
+                return type(output)(
+                    generate_output(output[i], f"{index}[{i}]")
+                    for i in range(len(output))
                 )
-                for i in range(len(example_output))
-            ]
-        else:
-            return FallbackKernel(
-                FixedLayout(
-                    example_output.device,
-                    example_output.dtype,
-                    [sympy.Integer(s) for s in example_output.size()],
-                    [sympy.Integer(s) for s in example_output.stride()],
-                ),
-                kernel,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                kwargs,
-            )
+            elif isinstance(output, torch.Tensor):
+                return MultiOutput(
+                    FixedLayout(
+                        output.device,
+                        output.dtype,
+                        [sympy.Integer(s) for s in output.size()],
+                        [sympy.Integer(s) for s in output.stride()],
+                    ),
+                    packed,
+                    index,
+                )
+            else:
+                assert output is None, "FallbackKernel output type is not supported"
+                return None
+
+        return generate_output(example_output)
 
     def apply_constraint(self):
         return super().apply_constraint()
@@ -2967,11 +2964,11 @@ class MultiOutputLayout(IRNode):
 class MultiOutput(ExternKernel):
     def codegen(self, wrapper):
         wrapper.writeline(
-            f"{self.get_name()} = {self.inputs[0].get_name()}[{self.index}]"
+            f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
         )
         self.codegen_size_asserts(wrapper)
 
-    def __init__(self, layout, input, index):
+    def __init__(self, layout, input, index: str):
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
         self.index = index
