@@ -3,6 +3,7 @@ import itertools
 import warnings
 import functools
 import weakref
+import types
 
 import torch
 from ..parameter import Parameter
@@ -84,6 +85,32 @@ class _WrappedHook:
             if state["module"] is None:
                 raise RuntimeError("You are trying to revive the hook of a dead Module!")
             self.module = weakref.ref(state["module"])
+
+
+class _PreForwardWrappedHook:
+
+    def __init__(self, hook: Callable, with_kwargs: bool = False):
+        self.hook = hook
+        functools.update_wrapper(self, hook)
+        self.with_kwargs = with_kwargs
+
+    def __call__(self, module, inp, kwargs):
+        if self.with_kwargs:
+            return self.hook(module, inp, kwargs)
+        return self.hook(module, inp), kwargs
+
+
+class _ForwardWrappedHook:
+
+    def __init__(self, hook: Callable, module: Optional["Module"] = None, with_kwargs: bool = False):
+        self.hook = hook
+        functools.update_wrapper(self, hook)
+        self.with_kwargs = with_kwargs
+
+    def __call__(self, module, inp, out, kwargs):
+        if self.with_kwargs:
+            return self.hook(module, inp, out, kwargs)
+        return self.hook(module, inp, out)
 
 
 r"""This tracks hooks common to all modules that are executed before/after
@@ -1355,11 +1382,7 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
-        @functools.wraps(hook)
-        def hook_wrapper(m, inp, kwargs):
-            return hook(m, inp), kwargs
-
-        self._forward_pre_hooks[handle.id] = hook if with_kwargs else hook_wrapper
+        self._forward_pre_hooks[handle.id] = _PreForwardWrappedHook(hook, with_kwargs=with_kwargs)
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
@@ -1403,11 +1426,8 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
-        @functools.wraps(hook)
-        def hook_wrapper(m, inp, out, kwargs):
-            return hook(m, inp, out)
 
-        self._forward_hooks[handle.id] = hook if with_kwargs else hook_wrapper
+        self._forward_hooks[handle.id] = _ForwardWrappedHook(hook, with_kwargs=with_kwargs)
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
@@ -1448,8 +1468,17 @@ class Module:
 
         if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
-        if _global_forward_pre_hooks or self._forward_pre_hooks:
-            for hook in (*_global_forward_pre_hooks.values(), *self._forward_pre_hooks.values()):
+
+        if _global_forward_pre_hooks:
+            for hook in _global_forward_pre_hooks.values():
+                result = hook(self, input)
+                if result is not None:
+                    if not isinstance(result, tuple):
+                        result = (result,)
+                    input = result
+
+        if self._forward_pre_hooks:
+            for hook in self._forward_pre_hooks.values():
                 result, kwargs = hook(self, input, kwargs)
                 if result is not None:
                     if not isinstance(result, tuple):
@@ -1462,8 +1491,14 @@ class Module:
             input = bw_hook.setup_input_hook(input)
 
         result = forward_call(*input, **kwargs)
-        if _global_forward_hooks or self._forward_hooks:
-            for hook in (*_global_forward_hooks.values(), *self._forward_hooks.values()):
+        if _global_forward_hooks:
+            for hook in _global_forward_hooks.values():
+                hook_result = hook(self, input, result)
+                if hook_result is not None:
+                    result = hook_result
+
+        if self._forward_hooks:
+            for hook in self._forward_hooks.values():
                 hook_result = hook(self, input, result, kwargs)
                 if hook_result is not None:
                     result = hook_result
