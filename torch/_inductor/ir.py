@@ -3083,7 +3083,7 @@ class Convolution(ExternKernelAlloc):
             sympy.Integer(V.graph.sizevars.guard_static_shape(s))
             for s in weight.get_size()
         ]
-        _, _, *kernel_size = weight.get_size()
+        _, _, *kernel_size = weight_shape
 
         # choose runtime kernel
         config_conv = config.triton.convolution
@@ -3327,7 +3327,7 @@ def _prepare_convolution_fusion_create(
     weight_shape = [
         sympy.Integer(V.graph.sizevars.guard_static_shape(s)) for s in weight.get_size()
     ]
-    _, _, *kernel_size = weight.get_size()
+    _, _, *kernel_size = weight_shape
     output_layout_str = (
         "torch.contiguous_format" if output.is_contiguous() else "torch.channels_last"
     )
