@@ -2809,15 +2809,15 @@ def native_group_norm(
         + f"but got input of shape {input.shape} and num_groups = {num_groups}",
     )
 
-    reduction_dims = utils.canonicalize_dims(input.ndim, [-2, -1])
-    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
     input_reshaped = torch.reshape(
         input,
         [batch_size, num_groups, num_channels // num_groups, flattened_inner_size],
     )
+    reduction_dims = utils.canonicalize_dims(input_reshaped.ndim, [-2, -1])
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
     out = out.view(input.shape)
 
+    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
     unsqueeze_bias = None
     if bias is not None:
         unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
