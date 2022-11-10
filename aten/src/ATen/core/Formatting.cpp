@@ -14,7 +14,7 @@ std::ostream& operator<<(std::ostream & out, Backend b) {
   return out << toString(b);
 }
 
-std::ostream& operator<<(std::ostream & out, Scalar s) {
+std::ostream& operator<<(std::ostream & out, const Scalar& s) {
   if (s.isFloatingPoint()) {
     return out << s.toDouble();
   }
@@ -36,9 +36,9 @@ std::ostream& operator<<(std::ostream & out, Scalar s) {
   throw std::logic_error("Unknown type in Scalar");
 }
 
-std::string toString(Scalar s) {
+std::string toString(const Scalar& s) {
   std::stringstream out;
-  out << std::move(s);
+  out << s;
   return out.str();
 }
 }
