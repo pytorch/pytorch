@@ -542,7 +542,15 @@ def _post_backward_hook(
                     if numel_to_pad > 0
                     else unsharded_grad
                 )
-                new_sharded_grad = torch.empty_like(chunks[0])  # padded
+                # TODO: Zero the padding for `use_orig_params=False` since that
+                # padding is exposed to the user and may affect gradient norm
+                # calculations. We may optimize this to only zero the padding
+                # after reduce-scatter.
+                new_sharded_grad = (
+                    torch.empty_like(chunks[0])
+                    if handle._use_orig_params
+                    else torch.zeros_like(chunks[0])
+                )
                 state._communication_hook(
                     state._communication_hook_state,
                     padded_unsharded_grad,
