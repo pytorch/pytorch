@@ -2912,6 +2912,7 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         'nn.functional.max_pool1d': _TestParamsMaxPool1d,
         'nn.functional.max_pool2d': _TestParamsMaxPool2d,
         'nn.functional.max_pool3d': _TestParamsMaxPool3d,
+        'max_pool2d_with_indices_backward': _TestParamsMaxPool2d,
     }
 
     params_generator = params_generator_type_dict[op_info.name]()
@@ -2919,6 +2920,15 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
         yield SampleInput(arg, kwargs=kwargs)
 
+def max_pool2d_backward(*args, kernel_size=(), stride=(), padding=(0,), dilation=(1,), ceil_mode=False, **kwargs):
+    out, indices = torch.nn.functional.max_pool2d_with_indices(
+        *args, kernel_size=kernel_size, stride=stride, padding=padding, dilation=dilation, ceil_mode=ceil_mode, return_indices=True)
+    grad_out = torch.ones_like(out)
+    if stride is None:
+        stride = kernel_size
+    out_b = torch.ops.aten.max_pool2d_with_indices_backward.default(
+        grad_out, *args, kernel_size, stride, padding, dilation, ceil_mode, indices)
+    return out_b
 
 def error_inputs_max_pool1d(op_info, device, **kwargs):
     # Toggle requires_grad because `max_pool1d` has different path
@@ -7347,9 +7357,9 @@ def sample_inputs_diagflat(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
     unpool_name_to_pool_method_dict = {
-        'nn.functional.max_unpool1d': torch.nn.functional.max_pool1d,
-        'nn.functional.max_unpool2d': torch.nn.functional.max_pool2d,
-        'nn.functional.max_unpool3d': torch.nn.functional.max_pool3d
+        'nn.functional.max_unpool1d': torch.nn.functional.max_unpool1d,
+        'nn.functional.max_unpool2d': torch.nn.functional.max_unpool2d,
+        'nn.functional.max_unpool3d': torch.nn.functional.max_unpool3d
     }
 
     unpool_name_to_dim = {
@@ -11398,6 +11408,30 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_max_pool2d,
            sample_inputs_func=sample_inputs_max_pool),
+    OpInfo('max_pool2d_with_indices_backward',
+           aten_name=None,
+           op=max_pool2d_backward,
+           method_variant=None,
+           inplace_variant=None,
+           operator_variant=None,
+           inplace_operator_variant=None,
+           check_batched_gradgrad=False,
+           supports_forward_ad=False,
+           supports_fwgrad_bwgrad=False,
+           check_batched_forward_grad=False,
+           assert_jit_shape_analysis=False,
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_max_pool,
+           skips=(
+               # RuntimeError: Stride mismatch! Strides are (36, 18, 6, 1) and (36, 1, 12, 2) (mismatched at 1)!
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_amp'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_no_amp'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', device_type='cuda'),
+               DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )),
     OpInfo('nn.functional.max_pool3d',
            aten_name='max_pool3d',
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
