@@ -1070,6 +1070,7 @@ class TestCommon(TestCase):
     # Reference testing for operations in complex32 against complex64.
     # NOTE: We test against complex64 as NumPy doesn't have a complex32 equivalent dtype.
     @ops(op_db, allowed_dtypes=(torch.complex32,))
+    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_complex_half_reference_testing(self, device, dtype, op):
         if not op.supports_dtype(torch.complex32, device):
             unittest.skip("Does not support complex32")
@@ -1539,6 +1540,7 @@ class TestMathBits(TestCase):
         )
 
     @ops(ops_and_refs, allowed_dtypes=(torch.cdouble,))
+    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_neg_conj_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
