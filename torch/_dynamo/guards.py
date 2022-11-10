@@ -529,7 +529,7 @@ class DynamoGuardPrinter(StrPrinter):
         self.intermediary_symbols = intermediary_symbols
 
     def _print_Symbol(self, expr) -> str:
-        assert isinstance(expr, sympy.core.symbol.Symbol)
+        assert isinstance(expr, sympy.Symbol)
         if expr == 0:
             return "0"
         if expr == 1:
