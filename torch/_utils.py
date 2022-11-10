@@ -326,7 +326,6 @@ def _rebuild_qtensor(
     return tensor
 
 
-# Should not be used, this is kept only for BC of loading old serialized parameters
 def _rebuild_parameter(data, requires_grad, backward_hooks):
     param = torch.nn.Parameter(data, requires_grad)
     # NB: This line exists only for backwards compatibility; the
@@ -337,7 +336,10 @@ def _rebuild_parameter(data, requires_grad, backward_hooks):
     return param
 
 
-def _rebuild_parameter_v2(data, requires_grad, backward_hooks, state):
+# Unused for now, but should be used very soon!
+def _rebuild_parameter_v2(data, requires_grad, backward_hooks, state=None):
+    if not state:
+        state = {}
     param = torch.nn.Parameter(data, requires_grad)
     # NB: This line exists only for backwards compatibility; the
     # general expectation is that backward_hooks is an empty
