@@ -558,27 +558,29 @@ class TensorVariable(VariableTracker):
                 current_tx=tx,
             )
             return ConstantVariable(None, **options)
-        elif name == "resize_as_":
-            assert isinstance(args[0], TensorVariable)
-            if self.size and args[0].size:
+        elif name in ("resize_", "resize_as_"):
+            if name == "resize_":
+                new_size = args[0].as_python_constant()
+            else:
+                assert isinstance(args[0], TensorVariable)
+                new_size = args[0].size
+            if self.size and new_size:
                 if "memory_format" in kwargs:
                     memory_format = kwargs.pop("memory_format").as_python_constant()
                 else:
                     memory_format = torch.contiguous_format
 
-                if self.size == args[0].size or memory_format is torch.preserve_format:
+                if self.size == new_size or memory_format is torch.preserve_format:
                     self.is_contiguous = args[0].is_contiguous
                 else:
-                    self.size = args[0].size
-                    self.stride = args[0].stride
-                    self.ndim = args[0].ndim
+                    self.size = new_size
                     self.is_contiguous = (memory_format,)
 
             return self.__class__.create(
                 tx,
                 tx.output.create_proxy(
                     "call_method",
-                    "resize_as_",
+                    name,
                     *proxy_args_kwargs([self] + args, kwargs),
                     current_tx=tx,
                 ),
