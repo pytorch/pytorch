@@ -4479,7 +4479,7 @@ def full(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return torch.fill(e, fill_value)
+    return torch.fill(e, fill_value)  # type: ignore[arg-type]
 
 
 def full_like(
