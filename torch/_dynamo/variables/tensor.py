@@ -566,7 +566,7 @@ class TensorVariable(VariableTracker):
                 new_size = args[0].size
             if self.size and new_size:
                 if "memory_format" in kwargs:
-                    memory_format = kwargs.pop("memory_format").as_python_constant()
+                    memory_format = kwargs["memory_format"].as_python_constant()
                 else:
                     memory_format = torch.contiguous_format
 
