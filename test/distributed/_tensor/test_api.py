@@ -120,7 +120,7 @@ class DTensorAPITest(DTensorTestBase):
         )
         shard_spec = [Shard(0)]
 
-        def shard_fn(name, module):
+        def shard_fn(name, module, device_mesh):
             if isinstance(module, nn.Linear):
                 for name, param in module.named_parameters():
                     dist_param = torch.nn.Parameter(
@@ -144,7 +144,7 @@ class DTensorAPITest(DTensorTestBase):
             self.assertEqual(param.placements, replica_spec)
 
         # fully replicate all modules by passing in partition_fn
-        def replicate_fn(name, module):
+        def replicate_fn(name, module, device_mesh):
             if isinstance(module, nn.Linear):
                 for name, param in module.named_parameters():
                     dist_param = torch.nn.Parameter(
@@ -161,7 +161,7 @@ class DTensorAPITest(DTensorTestBase):
             self.assertEqual(param.placements, replica_spec)
 
         # only shard part of module, and rest of module should be replicate
-        def shard_fn(name, module):
+        def shard_fn(name, module, device_mesh):
             if isinstance(module, nn.Linear) and (
                 name == "seq.0" or name == "seq.8"
             ):
@@ -192,10 +192,10 @@ class DTensorAPITest(DTensorTestBase):
         module_to_replicate = MyModel(20, 1, device=self.device_type)
 
         # mark input sharding on dim 0
-        def input_fn(inputs):
+        def input_fn(inputs, device_mesh):
             return DTensor.from_local(inputs[0], device_mesh, [Shard(0)])
 
-        def output_fn(outputs):
+        def output_fn(outputs, device_mesh):
             assert isinstance(outputs, DTensor)
             return outputs.to_local()
 
@@ -214,7 +214,7 @@ class DTensorAPITest(DTensorTestBase):
         # full replicate (even on inputs)
         model = MyModel(10, 10, device=self.device_type)
 
-        def replicate_input_fn(inputs):
+        def replicate_input_fn(inputs, device_mesh):
             return DTensor.from_local(inputs[0], device_mesh, [Replicate()])
 
         replica_model = distribute_module(

@@ -89,7 +89,7 @@ def find_input_mutations(g):
     mutated_inputs = set()
     for n in g.nodes:
         if n.op == 'placeholder':
-            inputs[StorageWeakRef(n.meta[FK].storage())].add(input_idx)
+            inputs[StorageWeakRef(n.meta[FK]._typed_storage())].add(input_idx)
             input_idx += 1
         elif n.op == 'call_function':
             if n.target is operator.getitem:
@@ -109,7 +109,7 @@ def find_input_mutations(g):
                 if mut_arg:
                     # TODO: not correct for args that contain tensors in a struct
                     # like list
-                    mutated_inputs |= inputs[StorageWeakRef(argument.meta[FK].storage())]
+                    mutated_inputs |= inputs[StorageWeakRef(argument.meta[FK]._typed_storage())]
         # TODO: error on unrecognized nodes
     return mutated_inputs
 
