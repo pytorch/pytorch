@@ -800,6 +800,10 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt[1, ...], x1)
         self.assertRaises(IndexError, lambda: nt[1, 4, 2])
         self.assertRaises(NotImplementedError, lambda: nt[:, 1, 1])
+        # test select on the irregular dimension only
+        self.assertEqual(nt.select(1, 0)[0], x0.select(0, 0))
+        self.assertEqual(nt.select(1, 0)[1], x1.select(0, 0))
+        self.assertRaises(IndexError, lambda: nt.select(1, 3))
         # make sure indexing returns a view
         nt[0].fill_(100.0)
         answer = torch.tensor(100.0, device=device, dtype=dtype).expand((2, 5))
