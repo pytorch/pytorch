@@ -861,7 +861,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     if (dim == (result.dim() - 1) && alpha.equal(1.0) && index_contig.scalar_type() == ScalarType::Long) {
       // Check whether result and source are matched apart from the dimension dim.
       // Note that broadcast case is not applicable for scatter_add
-      auto check_sizes = [numel](IntArrayRef a, IntArrayRef b, int64_t dim) -> bool {
+      auto check_sizes = [](IntArrayRef a, IntArrayRef b, int64_t dim) -> bool {
         if (a.size() != b.size())
           return false;
         int64_t ndim = a.size();
