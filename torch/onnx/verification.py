@@ -7,13 +7,28 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import dataclasses
 import difflib
+import functools
 import io
 import itertools
 import os
 import tempfile
 import warnings
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Dict,
+    FrozenSet,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import numpy as np
 
@@ -731,3 +746,567 @@ def verify(
             check_dtype=check_dtype,
             acceptable_error_percentage=acceptable_error_percentage,
         )
+
+
+@_beartype.beartype
+def _remove_none_inputs(graph: torch.Graph, input_args):
+    """Remove None inputs from the graph.
+
+    Args:
+        graph (torch.Graph): The graph to remove None inputs.
+        input_args (tuple): The input arguments to the model.
+    """
+    idx_to_erase = []
+    for i, arg in enumerate(input_args):
+        if arg is None:
+            idx_to_erase.append(i)
+    for i in reversed(idx_to_erase):
+        graph.eraseInput(i)
+        input_args.erase(i)
+
+    return graph, input_args
+
+
+@_beartype.beartype
+def verify_aten_graph(
+    graph: torch.Graph,
+    input_args: Tuple[Any, ...],
+    export_options: _experimental.ExportOptions,
+    params_dict: Optional[Dict[str, Any]] = None,
+    flatten: bool = True,
+    ignore_none: bool = True,
+    check_shape: bool = True,
+    check_dtype: bool = True,
+    ort_providers: Sequence[str] = _ORT_PROVIDERS,
+    rtol: float = 0.001,
+    atol: float = 1e-7,
+    acceptable_error_percentage: Optional[float] = None,
+    **_,
+) -> Tuple[bool, Union[_NumericType, Sequence[_NumericType]]]:
+    operator_export_type = export_options.operator_export_type
+    dynamic_axes = {}
+    input_names = []
+    training = export_options.training
+    do_constant_folding = export_options.do_constant_folding
+    opset_version = export_options.opset_version
+    if params_dict is None:
+        params_dict = {}
+
+    graph_inputs = [v for v in graph.inputs()]
+    jit_inputs = tuple([arg for arg in input_args if arg is not None])
+    weights = [params_dict[v.debugName()] for v in graph_inputs[len(jit_inputs) :]]
+    assert all([w is not None for w in weights])
+
+    jit_input_and_parameters = jit_inputs + tuple(weights)
+    jit_outs = torch._C._jit_interpret_graph(graph, jit_input_and_parameters)
+    jit_graph = graph
+    graph = utils._optimize_graph(
+        graph,
+        operator_export_type,
+        params_dict=params_dict,
+        dynamic_axes=dynamic_axes,
+        input_names=input_names,
+    )
+
+    if training is None or training == _C_onnx.TrainingMode.EVAL:
+        params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
+
+    if (
+        do_constant_folding
+        and GLOBALS.export_onnx_opset_version
+        >= _constants.ONNX_CONSTANT_FOLDING_MIN_OPSET
+    ):
+        params_dict = _C._jit_pass_onnx_constant_fold(
+            graph, params_dict, GLOBALS.export_onnx_opset_version
+        )
+        _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
+
+    if GLOBALS.onnx_shape_inference:
+        _C._jit_pass_onnx_graph_shape_type_inference(
+            graph, params_dict, GLOBALS.export_onnx_opset_version
+        )
+
+    params_dict = _C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
+
+    # For ONNX opset < 9, constants only have three data types: float16, float, double.
+    # In this pass transform constants of other data types to float/double + cast operator.
+    if GLOBALS.export_onnx_opset_version < 9:
+        _C._jit_pass_onnx_cast_all_constant_to_floating(graph)
+
+    params_dict = _C._jit_pass_filter_non_tensor_arguments(params_dict)
+    _C._jit_decay_packed_param_input_types(graph)
+
+    _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
+
+    model_f: Union[str, io.BytesIO] = io.BytesIO()
+    proto, _, _, _ = graph._export_onnx(
+        params_dict,
+        opset_version,
+        dynamic_axes,
+        False,
+        operator_export_type,
+        True,
+        True,
+        {},
+        False,
+        "",
+        {},
+    )
+
+    # NOTE: Input might be dce'ed, so we need to remove those from the input args.
+    new_input_names = set(v.debugName() for v in graph.inputs())
+    new_input_args = []
+    for v, arg in zip(jit_graph.inputs(), input_args):
+        if v.debugName() in new_input_names:
+            new_input_args.append(arg)
+    input_args = tuple(new_input_args)
+
+    with torch.serialization._open_file_like(model_f, "wb") as opened_file:
+        opened_file.write(proto)
+    ort_session = _ort_session(model_f, ort_providers)
+    ort_inputs = _prepare_input_for_ort(
+        input_args, {}, flatten=flatten, remained_onnx_input_idx=None
+    )
+    ort_outs = _run_ort(ort_session, ort_inputs)
+
+    has_mismatch = False
+    try:
+        _compare_ort_pytorch_outputs(
+            ort_outs=ort_outs,
+            pt_outs=jit_outs,
+            rtol=rtol,
+            atol=atol,
+            check_shape=check_shape,
+            check_dtype=check_dtype,
+            ignore_none=ignore_none,
+            acceptable_error_percentage=acceptable_error_percentage,
+        )
+    except AssertionError as e:
+        print("Has mismatch: ", e)
+        has_mismatch = True
+
+    return has_mismatch, jit_outs
+
+
+@dataclasses.dataclass
+class GraphInfo:
+    graph: torch.Graph
+    input_args: Tuple[Any, ...]
+    params_dict: Dict[str, Any]
+    export_options: _experimental.ExportOptions = dataclasses.field(
+        default_factory=_experimental.ExportOptions
+    )
+    has_mismatch: Optional[bool] = None
+    pt_outs: Optional[Union[_NumericType, Sequence[_NumericType]]] = None
+    upper_graph_info: Optional[GraphInfo] = None
+    lower_graph_info: Optional[GraphInfo] = None
+    tree_tag: str = dataclasses.field(default="")
+    _excluded_node_kinds: FrozenSet[str] = dataclasses.field(
+        default_factory=lambda: frozenset({"prim::Constant", "prim::ListConstruct"}),
+    )
+
+    def clear(self):
+        self.has_mismatch = None
+        self.pt_outs = None
+        self.upper_graph_info = None
+        self.lower_graph_info = None
+
+    def essential_node_count(self) -> int:
+        return sum(
+            1 for n in self.graph.nodes() if n.kind() not in self._excluded_node_kinds
+        )
+
+    def mismatch_partition(self) -> Optional[GraphInfo]:
+        if not self.has_mismatch:
+            return None
+        if self.upper_graph_info is not None and self.upper_graph_info.has_mismatch:
+            return self.upper_graph_info.mismatch_partition()
+        if self.lower_graph_info is not None and self.lower_graph_info.has_mismatch:
+            return self.lower_graph_info.mismatch_partition()
+        if self.upper_graph_info is None and self.lower_graph_info is None:
+            return self
+        raise RuntimeError("Mismatch detected, but cannot locate the mismatching op.")
+
+    def _graph_partition_pivot(self) -> int:
+        """Find the pivot to partition the graph.
+
+        The pivot is the node that splits the graph into two parts. Each part should
+        have the same amount of nodes, excluding primitive ops, such as `prim::Constant`.
+        If the graph has an odd number of nodes, the upper part will have one more node.
+        If the graph does not have any node that can be partitioned, return -1.
+
+        Returns:
+            The index of the pivot node.
+        """
+        non_const_indices = [
+            i
+            for i, n in enumerate(self.graph.nodes())
+            if n.kind() not in self._excluded_node_kinds
+        ]
+        half_idx = len(non_const_indices) // 2 - 1
+        if half_idx >= 0 and len(non_const_indices) > half_idx:
+            return non_const_indices[half_idx] + 1
+        return -1
+
+    def _partition_upper_graph(self) -> torch.Graph:
+        pivot = self._graph_partition_pivot()
+        if pivot == -1:
+            return torch.Graph()
+        graph = self.graph.copy()
+        original_outputs = list(graph.outputs())
+
+        def _process_node_output_for_upper(
+            new_outputs: List[torch.Value], output: torch.Value
+        ) -> torch.Value:
+            new_outputs.append(output)
+            return output
+
+        new_outputs = []
+        process_value_for_upper = functools.partial(
+            _process_node_output_for_upper, new_outputs
+        )
+        upper_nodes, lower_nodes, _ = self._partition_nodes(
+            graph, pivot, process_value_for_upper
+        )
+
+        for _ in enumerate(original_outputs):
+            graph.eraseOutput(0)
+        for output in new_outputs:
+            graph.registerOutput(output)
+
+        for node in reversed(lower_nodes):
+            node.destroy()
+
+        for i, input in reversed(list(enumerate(list(graph.inputs())))):
+            if not _has_uses_by(input, upper_nodes):
+                graph.eraseInput(i)
+
+        return graph
+
+    def _partition_lower_graph(self) -> torch.Graph:
+        pivot = self._graph_partition_pivot()
+        if pivot == -1:
+            return torch.Graph()
+        graph = self.graph.copy()
+        original_outputs = list(graph.outputs())
+        original_inputs = list(graph.inputs())
+
+        new_outputs = []
+
+        def _process_node_output_for_lower(
+            graph: torch.Graph, output: torch.Value
+        ) -> torch.Value:
+            new_input = graph.addInput()
+            output.replaceAllUsesWith(new_input)
+            new_input.copyMetadata(output)
+            return new_input
+
+        process_value_for_lower = functools.partial(
+            _process_node_output_for_lower, graph
+        )
+
+        upper_nodes, lower_nodes, keep_nodes = self._partition_nodes(
+            graph, pivot, process_value_for_lower
+        )
+
+        for output in original_outputs:
+            if _produced_by(output, lower_nodes):
+                new_outputs.append(output)
+        for _ in enumerate(original_outputs):
+            graph.eraseOutput(0)
+        for output in new_outputs:
+            graph.registerOutput(output)
+
+        for input in original_inputs:
+            if _has_uses_by(input, lower_nodes):
+                new_input = graph.addInput()
+                input.replaceAllUsesWith(new_input)
+                new_input.copyMetadata(input)
+
+        for node in reversed(upper_nodes):
+            if not node in keep_nodes:
+                node.destroy()
+
+        for _ in original_inputs:
+            graph.eraseInput(0)
+
+        return graph
+
+    def _partition_node(
+        self,
+        node: torch.Node,
+        upper_nodes_set: Set[torch.Node],
+        lower_nodes_set: Set[torch.Node],
+        original_graph_outputs: Set[torch.Value],
+        nodes_to_duplicate: Set[torch.Node],
+        covered_bridge_values: Set[torch.Value],
+        process_bridge_value: Callable[[torch.Value], torch.Value],
+    ):
+        if node in lower_nodes_set:
+            return
+
+        if (
+            _node_has_uses_by(node, lower_nodes_set)
+            and node.kind() in self._excluded_node_kinds
+        ):
+            lower_nodes_set.add(node)
+            nodes_to_duplicate.add(node)
+            for input in node.inputs():
+                if input in covered_bridge_values:
+                    continue
+                self._partition_node(
+                    input.node(),
+                    upper_nodes_set,
+                    lower_nodes_set,
+                    original_graph_outputs,
+                    nodes_to_duplicate,
+                    covered_bridge_values,
+                    process_bridge_value,
+                )
+        else:
+            for output in node.outputs():
+                if output in covered_bridge_values:
+                    continue
+                if (
+                    _has_uses_by(output, lower_nodes_set)
+                    or output in original_graph_outputs
+                ):
+                    covered_bridge_values.add(process_bridge_value(output))
+
+    def _partition_nodes(
+        self,
+        graph: torch.Graph,
+        pivot: int,
+        process_bridge_value: Callable[[torch.Value], torch.Value],
+    ) -> Tuple[List[torch.Node], List[torch.Node], Set[torch.Node]]:
+        nodes = list(graph.nodes())
+        upper_nodes = nodes[:pivot]
+        lower_nodes = nodes[pivot:]
+        upper_nodes_set = set(upper_nodes)
+        lower_nodes_set = set(lower_nodes)
+        original_graph_outputs = set(graph.outputs())
+        nodes_to_duplicate = set()
+        covered_bridge_values = set()
+        for node in upper_nodes:
+            self._partition_node(
+                node,
+                upper_nodes_set,
+                lower_nodes_set,
+                original_graph_outputs,
+                nodes_to_duplicate,
+                covered_bridge_values,
+                process_bridge_value,
+            )
+        return upper_nodes, lower_nodes, nodes_to_duplicate
+
+    def _bridge_kwargs(self):
+        pt_outs = self.pt_outs
+        if pt_outs is None:
+            raise RuntimeError("pt_outs is not set")
+        if not isinstance(pt_outs, (list, tuple)):
+            pt_outs = [pt_outs]
+        graph_outputs = list(self.graph.outputs())
+        # TODO: Handle diff caused by prim::TupleConstruct
+        assert len(graph_outputs) == len(
+            pt_outs
+        ), f"{len(graph_outputs)} vs {len(pt_outs)}"
+        return {v.debugName(): o for v, o in zip(graph_outputs, pt_outs)}
+
+    def _args_and_params_for_partition_graph(
+        self,
+        graph: torch.Graph,
+        bridge_kwargs: Mapping[str, Union[_NumericType, Sequence[_NumericType]]],
+        full_kwargs: Mapping[str, torch.Tensor],
+        full_params: Mapping[str, torch.Tensor],
+    ):
+        input_names = [input.debugName() for input in graph.inputs()]
+        args = tuple(bridge_kwargs[k] for k in input_names if k in bridge_kwargs)
+        args += tuple(full_kwargs[k] for k in input_names if k in full_kwargs)
+        params = {k: full_params[k] for k in input_names if k in full_params}
+        assert len(args) + len(params) == len(input_names)
+        return args, params
+
+    def find_first_mismatch(
+        self,
+        flatten: bool = True,
+        ignore_none: bool = True,
+        check_shape: bool = True,
+        check_dtype: bool = True,
+        ort_providers: Sequence[str] = _ORT_PROVIDERS,
+        rtol: float = 0.001,
+        atol: float = 1e-7,
+        acceptable_error_percentage: Optional[float] = None,
+    ):
+        verification_kwargs = {
+            "flatten": flatten,
+            "ignore_none": ignore_none,
+            "check_shape": check_shape,
+            "check_dtype": check_dtype,
+            "ort_providers": ort_providers,
+            "rtol": rtol,
+            "atol": atol,
+            "acceptable_error_percentage": acceptable_error_percentage,
+        }
+        if self.export_options.verbose:
+            print(self.graph)
+
+        if len(list(self.graph.outputs())) == 0:
+            return
+
+        assert len(self.input_args) + len(self.params_dict) == len(
+            list(self.graph.inputs())
+        ), (
+            f"Number of graph inputs({len(list(self.graph.inputs()))}) does not match "
+            f"the provided tensor arguments({len(self.input_args)} + {len(self.params_dict)})."
+        )
+
+        # make copy because altered by export process.
+        jit_graph = self.graph.copy()
+        self.has_mismatch, self.pt_outs = verify_aten_graph(
+            jit_graph,
+            input_args=self.input_args,
+            params_dict=self.params_dict,
+            export_options=self.export_options,
+            **verification_kwargs,
+        )
+
+        if not self.has_mismatch:
+            print(f"No mismatch found in graph {self.tree_tag}".center(80, "-"))
+            return
+        print(f"Has mismatch in graph {self.tree_tag}".center(80, "-"))
+
+        if self.essential_node_count() <= 1:
+            # No nodes to partition.
+            print(self.graph)
+            print(f"Found mismatch in graph {self.tree_tag}".center(80, "-"))
+            return
+
+        full_kwargs = {
+            k.debugName(): v for k, v in zip(self.graph.inputs(), self.input_args)
+        }
+        full_params = self.params_dict
+
+        upper_graph = self._partition_upper_graph()
+        upper_args, upper_params = self._args_and_params_for_partition_graph(
+            upper_graph, {}, full_kwargs, full_params
+        )
+        self.upper_graph_info = GraphInfo(
+            upper_graph,
+            upper_args,
+            upper_params,
+            self.export_options,
+            tree_tag=self.tree_tag + "0",
+        )
+
+        print(f"Check upper graph {self.upper_graph_info.tree_tag}".center(80, "-"))
+        self.upper_graph_info.find_first_mismatch(**verification_kwargs)
+
+        if self.upper_graph_info.has_mismatch:
+            return
+
+        bridge_kwargs = self.upper_graph_info._bridge_kwargs()
+        lower_graph = self._partition_lower_graph()
+        lower_args, lower_params = self._args_and_params_for_partition_graph(
+            lower_graph, bridge_kwargs, full_kwargs, full_params
+        )
+        self.lower_graph_info = GraphInfo(
+            lower_graph,
+            lower_args,
+            lower_params,
+            self.export_options,
+            tree_tag=self.tree_tag + "1",
+        )
+
+        print(f"Check lower graph {self.lower_graph_info.tree_tag}".center(80, "-"))
+        self.lower_graph_info.find_first_mismatch(**verification_kwargs)
+
+        assert self.lower_graph_info.has_mismatch, (
+            "Mismatch found in graph, but not found in neither partition."
+            "Please try tightening the tolerance."
+        )
+
+
+def _has_uses_by(value: torch.Value, nodes: Collection[torch.Node]):
+    if any(use.user in nodes for use in value.uses()):
+        return True
+    return False
+
+
+def _node_has_uses_by(node: torch.Node, nodes: Collection[torch.Node]):
+    for output in node.outputs():
+        if _has_uses_by(output, nodes):
+            return True
+    return False
+
+
+def _produced_by(value: torch.Value, nodes: Collection[torch.Node]):
+    return value.node() in nodes
+
+
+# TODO:
+# * Find all op level mismatches.
+# * kwargs, default values.
+# * unify argument preprocessing (flatten, ignore_none, etc.)
+# * Clean ups for util.py.
+@_beartype.beartype
+def verify_ops(
+    model: Union[torch.nn.Module, torch.jit.ScriptModule],
+    input_args: Tuple[Any, ...],
+    do_constant_folding: bool = True,
+    training: torch.onnx.TrainingMode = torch.onnx.TrainingMode.EVAL,
+    opset_version: Optional[int] = None,
+    keep_initializers_as_inputs: bool = True,
+    verbose: bool = False,
+    flatten: bool = True,
+    ignore_none: bool = True,
+    check_shape: bool = True,
+    check_dtype: bool = True,
+    ort_providers: Sequence[str] = _ORT_PROVIDERS,
+    rtol: float = 0.001,
+    atol: float = 1e-7,
+    acceptable_error_percentage: Optional[float] = None,
+    **_,
+) -> Optional[GraphInfo]:
+    if opset_version is None:
+        opset_version = _constants.ONNX_DEFAULT_OPSET
+    """From aten graph, do binary search on graph partition to find operator export discrepancy."""
+    # TODO: Copied from utils.py `export` until `_optimize_graph`.
+    if training == torch.onnx.TrainingMode.TRAINING:
+        model.train()
+    elif training == torch.onnx.TrainingMode.EVAL:
+        model.eval()
+    with torch.no_grad():
+        inputs_for_export = _prepare_input_for_export(input_args, {})
+        args = utils._decide_input_format(model, inputs_for_export)
+
+        model = utils._pre_trace_quant_model(model, args)
+        graph, params, torch_out, module = utils._create_jit_graph(model, args)
+        params_dict = utils._get_named_param_dict(graph, params)
+
+        utils._apply_friendly_debug_names(graph, params_dict)
+        jit_graph = graph.copy()
+
+        graph_info = GraphInfo(
+            jit_graph,
+            input_args,
+            params_dict,
+            _experimental.ExportOptions(
+                do_constant_folding=do_constant_folding,
+                training=training,
+                opset_version=opset_version,
+                keep_initializers_as_inputs=keep_initializers_as_inputs,
+                verbose=verbose,
+            ),
+        )
+        graph_info.find_first_mismatch(
+            flatten=flatten,
+            ignore_none=ignore_none,
+            check_shape=check_shape,
+            check_dtype=check_dtype,
+            ort_providers=ort_providers,
+            rtol=rtol,
+            atol=atol,
+            acceptable_error_percentage=acceptable_error_percentage,
+        )
+
+        return graph_info.mismatch_partition()
