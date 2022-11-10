@@ -527,7 +527,6 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
           ``mode='max'``
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
-        * :func:`torch.Tensor.scatter` when ``src`` is a tensor and ``reduce=None``
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor
