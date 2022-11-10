@@ -446,6 +446,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
       irb_(getContext()),
       kernel_func_name_(std::move(kernel_func_name)),
       bufsExtAlloc_(ExternalAllocBufFinder::find(stmt)) {
+  context_->setOpaquePointers(false);
   if (!triple) {
     triple = LLVMTargetTriple();
   }
