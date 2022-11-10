@@ -10421,8 +10421,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Numerous errors"), 'TestFwdGradients'),
                DecorateInfo(unittest.skip("Numerous errors"), 'TestBwdGradients'))),
     OpInfo('as_strided_scatter',
-           op=lambda x, src, size, stride, storage_offset=0:
-               torch.as_strided_scatter(x, src, size, stride, storage_offset=storage_offset),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
            supports_forward_ad=True,

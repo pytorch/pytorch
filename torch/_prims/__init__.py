@@ -1806,8 +1806,8 @@ def _as_strided_scatter_meta(
         input.numel() >= required_size,
         lambda: (
             f"Can't view tensor of size {input.numel()} with an offset of {storage_offset},"
-            " shape of {size} and stride of {stride}, "
-            "which requires a storage of size {required_size}"
+            f" shape of {size} and stride of {stride}, "
+            f"which requires a storage of size {required_size}"
         ),
     )
     utils.check(

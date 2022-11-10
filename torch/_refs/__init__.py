@@ -2477,7 +2477,7 @@ def as_strided_scatter(
     storage_offset: Optional[int] = None,
 ) -> TensorLikeType:
     storage_offset_int = 0 if storage_offset is None else storage_offset
-    return prims.as_strided_scatter(input, src, size, stride, storage_offset)
+    return prims.as_strided_scatter(input, src, size, stride, storage_offset_int)
 
 
 def broadcast_shapes(*shapes) -> ShapeType:
