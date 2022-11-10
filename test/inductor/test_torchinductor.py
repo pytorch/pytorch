@@ -10,6 +10,7 @@ import sys
 import typing
 import unittest
 import weakref
+from typing import Any, Callable
 from unittest.mock import patch
 
 import torch
@@ -18,6 +19,7 @@ import torch._dynamo
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -40,6 +42,14 @@ try:
     from torch._inductor import codecache, config, metrics
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
+    from torch._inductor.overrides import (
+        linear_permute_fusion,
+        linear_transpose,
+        permute_linear_fusion,
+        permute_matmul_fusion,
+        transpose_linear,
+        transpose_matmul,
+    )
     from torch._inductor.sizevars import SizeVarAllocator
     from torch._inductor.utils import has_torchvision_roi_align, has_triton, timed
 
@@ -127,6 +137,29 @@ def requires_decomp(fn):
         return maybe_test
 
     return wrap_test
+
+
+PassFunc = Callable[[torch.fx.GraphModule, Any], torch.fx.GraphModule]
+
+
+def chain_passes(*passes: PassFunc) -> PassFunc:
+    def parent_pass(module: torch.fx.GraphModule, input: Any) -> torch.fx.GraphModule:
+        for pass_ in passes:
+            if isinstance(module, torch.fx.GraphModule):
+                ShapeProp(module).propagate(*input)
+            module = pass_(module)
+        return module
+
+    return parent_pass
+
+
+def count_call_function(module: torch.fx.GraphModule, target_op: Any) -> int:
+    return sum(
+        [
+            1 if (n.op == "call_function" and n.target == target_op) else 0
+            for n in module.graph.nodes
+        ]
+    )
 
 
 class TestCase(TorchTestCase):
@@ -1581,6 +1614,79 @@ class CommonTemplate:
         x = torch.tensor(123)
         y = torch.tensor(0)
         self.assertEqual(fn(x, y), x + x)
+
+    def test_linear_permute_fusion(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self, k: int, n: int):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(n, k))
+                self.bias = torch.nn.Parameter(torch.randn(n))
+
+            def forward(self, input: torch.Tensor):
+                a0 = torch.nn.functional.linear(input, self.weight, self.bias)
+                b0 = a0.permute(0, 2, 1)
+                return b0
+
+        m, k, n = 16, 8, 4
+        trace_func = chain_passes(torch.fx.symbolic_trace, linear_permute_fusion)
+        module = TestModule(k, n).eval()
+        input = torch.randn(6, m, k)
+        traced = trace_func(module, [input])
+        num_linear = count_call_function(traced, torch.nn.functional.linear)
+        num_linear_transpose = count_call_function(traced, linear_transpose)
+        self.assertEqual(num_linear, 0)
+        self.assertEqual(num_linear_transpose, 1)
+
+        self.assertTrue(torch.allclose(module(input), traced(input)))
+
+    def test_permute_linear_fusion(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self, k: int, n: int):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(n, k))
+                self.bias = torch.nn.Parameter(torch.randn(n))
+
+            def forward(self, input: torch.Tensor):
+                input1 = input.permute(0, 2, 1)
+                output = torch.nn.functional.linear(input1, self.weight, self.bias)
+                return output
+
+        m, k, n = 16, 8, 4
+
+        trace_func = chain_passes(torch.fx.symbolic_trace, permute_linear_fusion)
+        module = TestModule(k, n).eval()
+        input = torch.randn(6, k, m)
+        traced = trace_func(module, [input])
+        num_linear = count_call_function(traced, torch.nn.functional.linear)
+        num_transpose_linear = count_call_function(traced, transpose_linear)
+        self.assertEqual(num_linear, 0)
+        self.assertEqual(num_transpose_linear, 1)
+
+        self.assertTrue(torch.allclose(module(input), traced(input)))
+
+    def test_permute_bmm_fusion(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self, batch: int, k: int, n: int):
+                super().__init__()
+                self.other = torch.randn(batch, k, n)
+
+            def forward(self, input: torch.Tensor):
+                input1 = input.permute(0, 2, 1)
+                output = torch.bmm(input1, self.other)
+                return output
+
+        batch, m, k, n = 6, 16, 8, 4
+
+        trace_func = chain_passes(torch.fx.symbolic_trace, permute_matmul_fusion)
+        module = TestModule(batch, k, n).eval()
+        input = torch.randn(batch, k, m)
+        traced = trace_func(module, [input])
+        num_bmm = count_call_function(traced, torch.bmm)
+        num_transpose_matmul = count_call_function(traced, transpose_matmul)
+        self.assertEqual(num_bmm, 0)
+        self.assertEqual(num_transpose_matmul, 1)
+
+        self.assertTrue(torch.allclose(module(input), traced(input)))
 
     def test_slice1(self):
         def fn(a):

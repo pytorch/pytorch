@@ -203,7 +203,7 @@ def tensor_requires_grad_set(types, args=(), kwargs=None, pg=None):
         local_shard.tensor.requires_grad_(requires_grad)
 
         # update the wrapper class property
-    with torch._C.DisableTorchFunction():
+    with torch._C.DisableTorchFunctionSubclass():
         self_st.requires_grad_(requires_grad)
     # update the metadata in the meanwhile
     self_st._metadata.tensor_properties.requires_grad = requires_grad
