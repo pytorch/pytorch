@@ -39,7 +39,9 @@ using AttrFunction = std::function<ideep::attr_t(
     torch::List<c10::optional<at::Scalar>>,
     c10::optional<c10::string_view>)>;
 
-const std::map<c10::string_view, AttrFunction>& fx_fusion_attr_map();
+const std::map<c10::string_view, AttrFunction>& fusion_unary_attr_map();
+
+const std::map<c10::string_view, ideep::algorithm>& fusion_unary_alg_map();
 
 const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
 

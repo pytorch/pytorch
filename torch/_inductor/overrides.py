@@ -151,7 +151,11 @@ class ConvBinary2d(nn.Conv2d):
 
     def _update_module_params(self, conv, binary_op_name):
         self.__dict__ = copy.deepcopy(conv.__dict__)
-        self.attr = binary_op_name
+        self.binary_attr = binary_op_name
+        self.binary_alpha = None
+        self.unary_attr = None
+        self.unary_scalars = []
+        self.unary_algorithm = None
 
     def _conv_forward(self, input, other, weight, bias):
         if self.padding_mode != "zeros":
@@ -166,7 +170,11 @@ class ConvBinary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                self.attr,
+                self.binary_attr,
+                self.binary_alpha,
+                self.unary_attr,
+                self.unary_scalars,
+                self.unary_algorithm,
             )
         return torch.ops.mkldnn._convolution_pointwise(
             input,
@@ -177,7 +185,11 @@ class ConvBinary2d(nn.Conv2d):
             self.stride,
             self.dilation,
             self.groups,
-            self.attr,
+            self.binary_attr,
+            self.binary_alpha,
+            self.unary_attr,
+            self.unary_scalars,
+            self.unary_algorithm,
         )
 
     def forward(self, input, other):
