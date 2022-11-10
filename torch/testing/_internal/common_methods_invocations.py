@@ -14429,7 +14429,7 @@ op_db: List[OpInfo] = [
                             'test_nvfuser_correctness',
                             dtypes=(torch.bool,)),
                # RuntimeError: UNSUPPORTED DTYPE: bool
-               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bool)),
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bool,)),
            )),
     OpInfo('new_empty',
            op=lambda x, *args, **kwargs: x.new_empty(*args, **kwargs),
