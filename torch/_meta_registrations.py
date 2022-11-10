@@ -1349,98 +1349,8 @@ def pool2d_shape_check(
     )
 
 
-@register_meta(aten.max_pool2d_with_indices_backward.default)
-def meta_max_pool2d_with_indices_backward(
-    grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices
-):
-    # Reference: aten/src/ATen/native/DilatedMaxPool2d.cpp
-    check(
-        len(kernel_size) == 1 or len(kernel_size) == 2,
-        lambda: "max_pool2d: kernel_size must either be a single int, or a tuple of two ints",
-    )
-    kH = kernel_size[0]
-    kW = len(kernel_size) == 1 if kH else kernel_size[1]
-    check(
-        len(stride) == 0 or len(stride) == 1 or len(stride) == 2,
-        lambda: "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints",
-    )
-    dH = len(stride) == 0 if kH else stride[0]
-    dW = len(stride) == 0 if kW else dH if len(stride) == 1 else stride[1]
-
-    check(
-        len(padding) == 1 or len(padding) == 2,
-        lambda: "max_pool2d: padding must be either be a single int, or a tuple of two ints",
-    )
-    padH = padding[0]
-    padW = len(padding) == 1 if padH else padding[1]
-
-    check(
-        len(dilation) == 1 or len(dilation) == 2,
-        lambda: "max_pool2d: dilation must be either a single int, or a tuple of two ints",
-    )
-    dilationH = dilation[0]
-    dilationW = len(dilation) == 1 if dilationH else dilation[1]
-
-    check(
-        self.dtype == grad_output.dtype,
-        lambda: f"expected dtype {self.dtype} for `gradOutput` but got dtype {grad_output.dtype}",
-    )
-
-    inputWidth, inputHeight, nInputPlane = self.shape[-3:]
-    outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, dilationH, ceil_mode)
-    outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, dilationW, ceil_mode)
-
-    memory_format = utils.suggest_memory_format(self)
-    if memory_format == torch.channels_last:
-        check(
-            self.ndim == 4,
-            lambda: "non-empty 4D (batch mode) tensor expected for input with channels_last layout",
-        )
-    elif memory_format == torch.contiguous_format:
-        check(
-            self.ndim == 3 or self.ndim == 4,
-            lambda: "max pooling backward with channels last format supports tensors with 4 dims.",
-        )
-    else:
-        check(
-            False,
-            lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
-        )
-
-    pool2d_shape_check(
-        self,
-        kH,
-        kW,
-        dH,
-        dW,
-        padH,
-        padW,
-        dilationH,
-        dilationW,
-        nInputPlane,
-        inputHeight,
-        inputWidth,
-        outputHeight,
-        outputWidth,
-        memory_format,
-    )
-    ndim = self.ndim
-    nOutputPlane = nInputPlane
-
-    def _check_dim_size(t):
-        check_dim_size(t, ndim, ndim - 3, nOutputPlane)
-        check_dim_size(t, ndim, ndim - 2, outputHeight)
-        check_dim_size(t, ndim, ndim - 1, outputWidth)
-
-    _check_dim_size(grad_output)
-    _check_dim_size(indices)
-
-    return self.new_empty(self.shape)
-
-
-@register_meta(aten.max_pool2d_with_indices.default)
-def meta_max_pool2d_with_indices(
-    input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
+def max_pool2d_checks_and_compute_shape(
+    input, kernel_size, stride, padding, dilation, ceil_mode
 ):
     # Reference: aten/src/ATen/native/DilatedMaxPool2d.cpp
     def unpack(name, val):
@@ -1465,6 +1375,9 @@ def meta_max_pool2d_with_indices(
 
     padH, padW = unpack("padding", padding)
     dilationH, dilationW = unpack("dilation", dilation)
+    nInputPlane = input.size(-3)
+    inputHeight = input.size(-2)
+    inputWidth = input.size(-1)
 
     memory_format = utils.suggest_memory_format(input)
     if memory_format == torch.channels_last:
@@ -1482,9 +1395,6 @@ def meta_max_pool2d_with_indices(
             False,
             lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
         )
-
-    nbatch = input.shape[-4] if input.dim() == 4 else 1
-    inputWidth, inputHeight, nInputPlane = input.shape[-3:]
 
     outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, dilationH, ceil_mode)
     outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, dilationW, ceil_mode)
@@ -1507,6 +1417,41 @@ def meta_max_pool2d_with_indices(
         memory_format,
     )
 
+    return nInputPlane, outputHeight, outputWidth
+
+
+@register_meta(aten.max_pool2d_with_indices_backward.default)
+def meta_max_pool2d_with_indices_backward(
+    grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices
+):
+    nInputPlane, outputHeight, outputWidth = max_pool2d_checks_and_compute_shape(
+        self, kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+    nOutputPlane = nInputPlane
+    ndim = self.ndim
+
+    def _check_dim_size(t):
+        check_dim_size(t, ndim, ndim - 3, nOutputPlane)
+        check_dim_size(t, ndim, ndim - 2, outputHeight)
+        check_dim_size(t, ndim, ndim - 1, outputWidth)
+
+    _check_dim_size(grad_output)
+    _check_dim_size(indices)
+
+    return self.new_empty(self.shape)
+
+
+@register_meta(aten.max_pool2d_with_indices.default)
+def meta_max_pool2d_with_indices(
+    input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
+):
+    nInputPlane, outputHeight, outputWidth = max_pool2d_checks_and_compute_shape(
+        input, kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+    nbatch = input.size(-4) if input.dim() == 4 else 1
+    memory_format = utils.suggest_memory_format(input)
     if input.dim() == 3:
         size = [nInputPlane, outputHeight, outputWidth]
     else:
