@@ -74,5 +74,4 @@ jobs:
           set -ex
           # TODO(https://github.com/pytorch/pytorch/issues/79293)
 
-          ${CONDA_RUN} --cwd test python3 test_mps.py -v
-          ${CONDA_RUN} --cwd test python3 test_metal.py -v
+          ${CONDA_RUN} python3 test/run_test.py --mps --verbose
