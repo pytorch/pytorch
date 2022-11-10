@@ -309,7 +309,7 @@ try:
         _set_fsdp_extensions,
         FSDPExtensions,
     )
-    from torch.distributed.fsdp._utils import _set_fsdp_flattened
+    from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 
     class DTensorExtensions(FSDPExtensions):
         def pre_flatten_transform(
