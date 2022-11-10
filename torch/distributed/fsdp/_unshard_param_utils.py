@@ -68,7 +68,7 @@ def _writeback_to_local_shard(
                 existing_grad[: grad_shard.numel()].copy_(grad_shard)
 
 
-def _deregister_flat_param(module, state: _FSDPState):
+def _deregister_flat_param(state: _FSDPState, module: nn.Module) -> None:
     """
     De-registers the flattened parameter from the wrapped module, hiding it
     from ``nn.Module`` methods.
@@ -77,12 +77,12 @@ def _deregister_flat_param(module, state: _FSDPState):
     attribute but dynamically change whether it is visible to ``nn.Module``
     methods.
     """
-    if _has_fsdp_params(module, state):
+    if _has_fsdp_params(state, module):
         # TODO: figure out the case for the composable APIs.
         module.module._parameters.pop(FLAT_PARAM, None)
 
 
-def _register_flat_param(module, state: _FSDPState):
+def _register_flat_param(state: _FSDPState, module: nn.Module) -> None:
     """
     Registers the flattened parameter to the wrapped module, making it
     visible to ``nn.Module`` methods.
@@ -91,14 +91,14 @@ def _register_flat_param(module, state: _FSDPState):
     ``FLAT_PARAM`` to always be an attribute but dynamically change whether
     it is visible to ``nn.Module`` methods.
     """
-    handles = _module_handles(module, state)
-    if _has_fsdp_params(module, state):
+    handles = _module_handles(state, module)
+    if _has_fsdp_params(state, module):
         # TODO: figure out the case for the composable APIs.
         module.module._parameters[FLAT_PARAM] = handles[0].flat_param
 
 
 @contextlib.contextmanager
-def _unflatten_as_params(module: nn.Module, state: _FSDPState) -> Generator:
+def _unflatten_as_params(state: _FSDPState, module: nn.Module) -> Generator:
     """
     Assumes that the flattened parameter is unsharded. When in the context,
     de-registers the flattened parameter and unflattens the original
@@ -107,17 +107,17 @@ def _unflatten_as_params(module: nn.Module, state: _FSDPState) -> Generator:
     the original parameters as ``Tensor`` views into the flattened
     parameter.
     """
-    handles = _module_handles(module, state)
+    handles = _module_handles(state, module)
     if not handles:
         yield
     else:
-        _deregister_flat_param(module, state)
+        _deregister_flat_param(state, module)
         try:
             with handles[0].unflatten_as_params():
                 yield
         finally:
             if not handles[0]._use_orig_params:
-                _register_flat_param(module, state)
+                _register_flat_param(state, module)
 
 
 @contextlib.contextmanager
@@ -156,7 +156,7 @@ def _unshard_params(
     # If handles are shared by other module(s), the handle may be already unsharded.
     handles = [
         handle
-        for handle in _module_handles(module, state)
+        for handle in _module_handles(state, module)
         if handle._training_state != HandleTrainingState.SUMMON_FULL_PARAMS
     ]
     if not handles:
@@ -202,7 +202,7 @@ def _unshard_params(
                     # move parameters.
             # TODO (awgu): This FPW call assumes 1 `FlatParameter`
             if not state._use_orig_params:
-                stack.enter_context(_unflatten_as_params(module, state))
+                stack.enter_context(_unflatten_as_params(state, module))
             try:
                 yield
             finally:
@@ -216,11 +216,11 @@ def _unshard_params(
                     handle._training_state = HandleTrainingState.IDLE
 
 
-def _deregister_orig_params(module, state: _FSDPState):
+def _deregister_orig_params(state: _FSDPState, module: nn.Module) -> None:
     """
     Deregisters the original parameters; registers the ``FlatParameter``.
     """
-    handles = _module_handles(module, state)
+    handles = _module_handles(state, module)
     p_assert(
         len(handles) <= 1,
         "Expects <=1 handle per FSDP instance; needs to be refactored "
@@ -235,18 +235,18 @@ def _deregister_orig_params(module, state: _FSDPState):
         f"handle: {handle._use_orig_params}",
     )
     handle._deregister_orig_params()
-    _register_flat_param(module, state)
+    _register_flat_param(state, module)
 
 
-def _register_orig_params(module, state: _FSDPState):
+def _register_orig_params(state: _FSDPState, module: nn.Module) -> None:
     """
     Deregisters the ``FlatParameter``; registers the original parameters.
     """
-    handles = _module_handles(module, state)
+    handles = _module_handles(state, module)
     if not handles:
         return
     handle = handles[0]
-    _deregister_flat_param(module, state)
+    _deregister_flat_param(state, module)
     if handle.is_sharded(handle.flat_param):
         handle._use_sharded_views()
         handle._use_sharded_grad_views()
