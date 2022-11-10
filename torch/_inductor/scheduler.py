@@ -16,7 +16,7 @@ import torch
 from . import config, dependencies, ir
 from .dependencies import MemoryDep, StarDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, dynamo_utils
+from .utils import cache_on_self, cmp, dynamo_utils, has_triton
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -1078,6 +1078,7 @@ class Scheduler:
 
             return CppScheduling(self)
         else:
+            assert has_triton(), f"Found {device.type}, but triton is not installed. Please install triton."
             from .codegen.triton import TritonScheduling
 
             return TritonScheduling(self)
