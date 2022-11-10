@@ -1,8 +1,8 @@
 # Owner(s): ["module: fx.passes"]
 
-from dataclasses import dataclass
-import operator
 import logging
+import operator
+from dataclasses import dataclass
 
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
@@ -12,7 +12,11 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 
-from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 
 logging.basicConfig(level=logging.WARNING)
@@ -42,6 +46,22 @@ class TestModule(torch.nn.Module):
         relu = add_6.relu()
 
         return add_4, add_6, relu
+
+class TestPartitionModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.rand(4, 4))
+        self.linear1 = torch.nn.Linear(4, 4)
+        self.linear2 = torch.nn.Linear(4, 4)
+        self.conv1 = torch.nn.Conv2d(4, 4, 1)
+        self.conv2 = torch.nn.Conv2d(4, 4, 1)
+        self.gelu = torch.nn.GELU()
+
+    def forward(self, x, y, z):
+        out1 = torch.topk(torch.sum(
+            self.linear1(x + self.linear1.weight).relu(), dim=-1), 3)
+        out2 = self.gelu(self.conv1(y) + self.linear2.weight + self.conv2(z))
+        return out1, out2
 
 class TestPartitionFunctions:
     @staticmethod
@@ -310,8 +330,42 @@ class TestFXGraphPasses(JitTestCase):
         fused_graph = fuse_by_partitions(gm, partitions)
 
         a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
-
         expected = m(a, b, c)
+        result = fused_graph(a, b, c)
+
+        torch.testing.assert_close(expected, result)
+
+    @parametrize("partition", [
+        [['add_1', 'conv1', 'conv2', 'add_2', 'gelu']],
+    ])
+    def test_fuser_util_subgraph_with_attrs(self, partition):
+        m = TestPartitionModule() # noqa
+        m.eval()
+        gm = symbolic_trace(m)
+
+        a, b, c = torch.rand(1, 4, 4, 4), torch.rand(1, 4, 4, 4), torch.rand(1, 4, 4, 4)
+
+        nodes_by_name = {node.name : node for node in gm.graph.nodes}
+
+        partitions = []
+        for node_names in partition:
+            partitions.append([nodes_by_name[name] for name in node_names])
+
+        fused_graph = fuse_by_partitions(gm, partitions)
+
+        fused_graph_node_names = [node.name for node in fused_graph.graph.nodes]
+        fused_submodule_node_names = [node.name for node in fused_graph.get_submodule("fused_0").graph.nodes]
+        fused_submodule_node_types = [node.op for node in fused_graph.get_submodule("fused_0").graph.nodes]
+
+        assert "get_attr" in fused_submodule_node_types, "submodule should have get_attr nodes"
+        assert "conv1" in fused_submodule_node_names and "conv1" not in fused_graph_node_names, \
+            "conv node present only in submodule"
+        assert "conv2" in fused_submodule_node_names and "conv2" not in fused_graph_node_names, \
+            "conv node present only in submodule"
+        assert "linear2_weight" in fused_submodule_node_names and "linear1_weight" not in \
+            fused_submodule_node_names, "Only attributes used in submodule copied to submodule"
+
+        expected = gm(a, b, c)
         result = fused_graph(a, b, c)
 
         torch.testing.assert_close(expected, result)
