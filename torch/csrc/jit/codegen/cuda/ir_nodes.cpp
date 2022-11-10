@@ -182,14 +182,54 @@ bool ComplexDouble::sameAs(const Statement* other) const {
   return false;
 }
 
+FullOp::FullOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* fill_value,
+    DataType dtype)
+    : Expr(passkey, ExprType::FullOp), dtype_(dtype), fill_value_(fill_value) {
+  if (out->isA<TensorView>()) {
+    addInput(out->as<TensorView>()->getRootDomain()[0]->extent());
+  }
+  addInput(fill_value);
+  addOutput(out);
+}
+
+FullOp::FullOp(const FullOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      dtype_(src->dtype()),
+      fill_value_(ir_cloner->clone(src->fill_value_)) {}
+
+Expr* FullOp::shallowCopy() const {
+  auto result = IrBuilder::create<FullOp>(output(0), fill_value_, dtype_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+bool FullOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<FullOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<FullOp>();
+  if (dtype_ != other_op->dtype_) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
 ARangeOp::ARangeOp(
     IrBuilderPasskey passkey,
     Val* out,
     Val* start,
     Val* end,
     Val* step,
+    DataType dtype,
     Val* linear_index)
     : Expr(passkey, ExprType::ARangeOp),
+      dtype_(dtype),
       start_(start),
       end_(end),
       step_(step),
@@ -202,10 +242,18 @@ ARangeOp::ARangeOp(
 
 ARangeOp::ARangeOp(const ARangeOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
+      dtype_(src->dtype()),
       start_(ir_cloner->clone(src->start_)),
       end_(ir_cloner->clone(src->end_)),
       step_(ir_cloner->clone(src->step_)),
       linear_index_(ir_cloner->clone(src->linear_index_)) {}
+
+Expr* ARangeOp::shallowCopy() const {
+  auto result = IrBuilder::create<ARangeOp>(
+      output(0), start_, end_, step_, dtype_, linear_index_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
 
 bool ARangeOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -215,6 +263,9 @@ bool ARangeOp::sameAs(const Statement* other) const {
     return false;
   }
   const auto other_op = other->as<ARangeOp>();
+  if (dtype_ != other_op->dtype_) {
+    return false;
+  }
   if (!start_->sameAs(other_op->start_)) {
     return false;
   }
@@ -229,6 +280,64 @@ bool ARangeOp::sameAs(const Statement* other) const {
   }
   if ((linear_index_ != nullptr) &&
       !linear_index_->sameAs(other_op->linear_index_)) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
+EyeOp::EyeOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    DataType dtype,
+    Val* index1,
+    Val* index2)
+    : Expr(passkey, ExprType::EyeOp),
+      dtype_(dtype),
+      index1_(index1),
+      index2_(index2) {
+  if (out->isA<TensorView>()) {
+    addInput(out->as<TensorView>()->getRootDomain()[0]->extent());
+    if (out->as<TensorView>()->getRootDomain()[1] !=
+        out->as<TensorView>()->getRootDomain()[0]) {
+      addInput(out->as<TensorView>()->getRootDomain()[1]->extent());
+    }
+  }
+  addOutput(out);
+}
+
+EyeOp::EyeOp(const EyeOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      dtype_(src->dtype_),
+      index1_(ir_cloner->clone(src->index1_)),
+      index2_(ir_cloner->clone(src->index2_)) {}
+
+Expr* EyeOp::shallowCopy() const {
+  auto result = IrBuilder::create<EyeOp>(output(0), dtype_, index1_, index2_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+bool EyeOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<EyeOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<EyeOp>();
+  if (dtype_ != other_op->dtype_) {
+    return false;
+  }
+  if ((index1_ == nullptr) != (other_op->index1_ == nullptr)) {
+    return false;
+  }
+  if ((index2_ == nullptr) != (other_op->index2_ == nullptr)) {
+    return false;
+  }
+  if ((index1_ != nullptr) && !index1_->sameAs(other_op->index1_)) {
+    return false;
+  }
+  if ((index2_ != nullptr) && !index2_->sameAs(other_op->index2_)) {
     return false;
   }
   return Expr::sameAs(other);
@@ -254,6 +363,12 @@ UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)) {}
 
+Expr* UnaryOp::shallowCopy() const {
+  auto result = IrBuilder::create<UnaryOp>(unary_op_type_, out_, in_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool UnaryOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -262,8 +377,9 @@ bool UnaryOp::sameAs(const Statement* other) const {
     return false;
   }
   const auto other_op = other->as<UnaryOp>();
-  if (getUnaryOpType() != other_op->getUnaryOpType())
+  if (getUnaryOpType() != other_op->getUnaryOpType()) {
     return false;
+  }
   return Expr::sameAs(other);
 }
 
@@ -290,6 +406,12 @@ BinaryOp::BinaryOp(const BinaryOp* src, IrCloner* ir_cloner)
       lhs_(ir_cloner->clone(src->lhs_)),
       rhs_(ir_cloner->clone(src->rhs_)) {}
 
+Expr* BinaryOp::shallowCopy() const {
+  auto result = IrBuilder::create<BinaryOp>(binary_op_type_, out_, lhs_, rhs_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool BinaryOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -298,8 +420,9 @@ bool BinaryOp::sameAs(const Statement* other) const {
     return false;
   }
   const auto other_op = other->as<BinaryOp>();
-  if (getBinaryOpType() != other_op->getBinaryOpType())
+  if (getBinaryOpType() != other_op->getBinaryOpType()) {
     return false;
+  }
   return Expr::sameAs(other);
 }
 
@@ -330,6 +453,13 @@ TernaryOp::TernaryOp(const TernaryOp* src, IrCloner* ir_cloner)
       in2_(ir_cloner->clone(src->in2_)),
       in3_(ir_cloner->clone(src->in3_)) {}
 
+Expr* TernaryOp::shallowCopy() const {
+  auto result =
+      IrBuilder::create<TernaryOp>(ternary_op_type_, out_, in1_, in2_, in3_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool TernaryOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -338,8 +468,9 @@ bool TernaryOp::sameAs(const Statement* other) const {
     return false;
   }
   const auto other_op = other->as<TernaryOp>();
-  if (getTernaryOpType() != other_op->getTernaryOpType())
+  if (getTernaryOpType() != other_op->getTernaryOpType()) {
     return false;
+  }
   return Expr::sameAs(other);
 }
 
@@ -347,16 +478,26 @@ RNGOp::RNGOp(
     IrBuilderPasskey passkey,
     RNGOpType type,
     Val* out,
+    DataType dtype,
+    std::vector<Val*> parameters,
     int rng_offset,
     Val* philox_index)
     : Expr(passkey, ExprType::RNGOp),
       rng_op_type_(type),
+      dtype_(dtype),
+      parameters_(std::move(parameters)),
       rng_offset_(rng_offset),
       philox_index_(philox_index) {
   if (out->isA<TensorView>()) {
     for (auto id : out->as<TensorView>()->getRootDomain()) {
-      addInput(id->extent());
+      shape_.emplace_back(id->extent());
     }
+  }
+  for (auto v : shape_) {
+    addInput(v);
+  }
+  for (auto v : parameters_) {
+    addInput(v);
   }
   addOutput(out);
 }
@@ -364,8 +505,17 @@ RNGOp::RNGOp(
 RNGOp::RNGOp(const RNGOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       rng_op_type_(src->rng_op_type_),
+      dtype_(src->dtype()),
+      parameters_(ir_cloner->clone(src->parameters_)),
       rng_offset_(src->rng_offset_),
       philox_index_(ir_cloner->clone(src->philox_index_)) {}
+
+Expr* RNGOp::shallowCopy() const {
+  auto result = IrBuilder::create<RNGOp>(
+      rng_op_type_, output(0), dtype_, parameters_, rng_offset_, philox_index_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
 
 bool RNGOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -377,6 +527,17 @@ bool RNGOp::sameAs(const Statement* other) const {
   const auto other_op = other->as<RNGOp>();
   if (getRNGOpType() != other_op->getRNGOpType()) {
     return false;
+  }
+  if (dtype_ != other_op->dtype_) {
+    return false;
+  }
+  if (parameters_.size() != other_op->parameters_.size()) {
+    return false;
+  }
+  for (auto i : c10::irange(parameters_.size())) {
+    if (!parameters_[i]->sameAs(other_op->parameters_[i])) {
+      return false;
+    }
   }
   if (getRNGOffset() != other_op->getRNGOffset()) {
     return false;
@@ -467,6 +628,12 @@ BroadcastOp::BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner)
       in_(ir_cloner->clone(src->in_)),
       is_broadcast_dims_(src->is_broadcast_dims_) {}
 
+Expr* BroadcastOp::shallowCopy() const {
+  auto result = IrBuilder::create<BroadcastOp>(out_, in_, is_broadcast_dims_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool BroadcastOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -521,6 +688,36 @@ ReductionOp::ReductionOp(
   addInput(in);
 }
 
+ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      reduction_op_type_(src->reduction_op_type_),
+      init_(ir_cloner->clone(src->init_)),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)),
+      is_allreduce_(src->is_allreduce_) {}
+
+Expr* ReductionOp::shallowCopy() const {
+  auto result = IrBuilder::create<ReductionOp>(
+      reduction_op_type_, init_, out_, in_, is_allreduce_, etype());
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+bool ReductionOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<ReductionOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<ReductionOp>();
+  // Note that init is not part of input vals, so it must be checked separately.
+  return (
+      Expr::sameAs(other) &&
+      getReductionOpType() == other_op->getReductionOpType() &&
+      init()->sameAs(other_op->init()));
+}
+
 GroupedReductionOp::GroupedReductionOp(
     IrBuilderPasskey passkey,
     std::vector<BinaryOpType> reduction_op_types,
@@ -549,6 +746,18 @@ GroupedReductionOp::GroupedReductionOp(
       reduction_op_types_(src->reduction_op_types_),
       init_vals_(ir_cloner->clone(src->init_vals_)),
       is_allreduce_(src->is_allreduce_) {}
+
+Expr* GroupedReductionOp::shallowCopy() const {
+  auto result = IrBuilder::create<GroupedReductionOp>(
+      reduction_op_types_,
+      init_vals_,
+      outputs(),
+      inputs(),
+      is_allreduce_,
+      etype());
+  result->copyPredicatesFrom(this);
+  return result;
+}
 
 int GroupedReductionOp::getExprIndexOfOutput(Val* output_val) const {
   auto it = std::find(outputs().begin(), outputs().end(), output_val);
@@ -724,6 +933,13 @@ WelfordOp::WelfordOp(const WelfordOp* src, IrCloner* ir_cloner)
       init_(src->init_.clone(ir_cloner)),
       is_allreduce_(src->is_allreduce_) {}
 
+Expr* WelfordOp::shallowCopy() const {
+  auto result =
+      IrBuilder::create<WelfordOp>(output_, input_, init_, is_allreduce_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 Val* WelfordOp::getInitValOfOutput(Val* output_val) const {
   auto val_name = output().getNameOf(output_val);
 
@@ -873,6 +1089,13 @@ GroupedWelfordOp::GroupedWelfordOp(
       init_vals_(WelfordTriplet::clone(src->init_vals_, ir_cloner)),
       is_allreduce_(src->is_allreduce_) {}
 
+Expr* GroupedWelfordOp::shallowCopy() const {
+  auto result = IrBuilder::create<GroupedWelfordOp>(
+      output_vals_, input_vals_, init_vals_, is_allreduce_, etype());
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool GroupedWelfordOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -967,6 +1190,13 @@ MmaOp::MmaOp(const MmaOp* src, IrCloner* ir_cloner)
       init_(ir_cloner->clone(src->init_)),
       options_(src->options_) {}
 
+Expr* MmaOp::shallowCopy() const {
+  auto result = IrBuilder::create<MmaOp>(out_, in_a_, in_b_, init_);
+  result->options_ = options_;
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool MmaOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -977,29 +1207,6 @@ bool MmaOp::sameAs(const Statement* other) const {
         options_ == other_mma->options_;
   }
   return false;
-}
-
-ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      reduction_op_type_(src->reduction_op_type_),
-      init_(ir_cloner->clone(src->init_)),
-      out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)),
-      is_allreduce_(src->is_allreduce_) {}
-
-bool ReductionOp::sameAs(const Statement* other) const {
-  if (this == other) {
-    return true;
-  }
-  if (!other->isA<ReductionOp>()) {
-    return false;
-  }
-  const auto other_op = other->as<ReductionOp>();
-  // Note that init is not part of input vals, so it must be checked separately.
-  return (
-      Expr::sameAs(other) &&
-      getReductionOpType() == other_op->getReductionOpType() &&
-      init()->sameAs(other_op->init()));
 }
 
 TransposeOp::TransposeOp(
@@ -1046,6 +1253,12 @@ TransposeOp::TransposeOp(const TransposeOp* src, IrCloner* ir_cloner)
       in_(ir_cloner->clone(src->in_)),
       new2old_(src->new2old_) {}
 
+Expr* TransposeOp::shallowCopy() const {
+  auto result = IrBuilder::create<TransposeOp>(out_, in_, new2old_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 std::vector<int64_t> TransposeOp::old2new() const {
   std::vector<int64_t> old2new(new2old_.size());
   for (auto new_axis : c10::irange(new2old_.size())) {
@@ -1083,6 +1296,12 @@ ExpandOp::ExpandOp(const ExpandOp* src, IrCloner* ir_cloner)
   for (const auto expanded_extent : src->expanded_extents_) {
     expanded_extents_.push_back(ir_cloner->clone(expanded_extent));
   }
+}
+
+Expr* ExpandOp::shallowCopy() const {
+  auto result = IrBuilder::create<ExpandOp>(out_, in_, expanded_extents_);
+  result->copyPredicatesFrom(this);
+  return result;
 }
 
 ShiftOp::ShiftOp(
@@ -1131,6 +1350,12 @@ ShiftOp::ShiftOp(const ShiftOp* src, IrCloner* ir_cloner)
       in_(ir_cloner->clone(src->in_)),
       offsets_(src->offsets_),
       pad_width_(src->pad_width_) {}
+
+Expr* ShiftOp::shallowCopy() const {
+  auto result = IrBuilder::create<ShiftOp>(out_, in_, offsets_, pad_width_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
 
 bool ShiftOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -1194,6 +1419,13 @@ GatherOp::GatherOp(const GatherOp* src, IrCloner* ir_cloner)
       window_shape_(src->window_shape_),
       pad_width_(src->pad_width_) {}
 
+Expr* GatherOp::shallowCopy() const {
+  auto result =
+      IrBuilder::create<GatherOp>(out_, in_, window_shape_, pad_width_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool GatherOp::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -1240,6 +1472,12 @@ ViewAsScalar::ViewAsScalar(const ViewAsScalar* src, IrCloner* ir_cloner)
       vector_id_(ir_cloner->clone(src->vector_id_)),
       index_(ir_cloner->clone(src->index_)) {}
 
+Expr* ViewAsScalar::shallowCopy() const {
+  auto result = IrBuilder::create<ViewAsScalar>(out_, in_, vector_id_, index_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 ViewOp::ViewOp(IrBuilderPasskey passkey, TensorView* out, TensorView* in)
     : Expr(passkey, ExprType::ViewOp), out_(out), in_(in) {
   addOutput(out);
@@ -1250,6 +1488,12 @@ ViewOp::ViewOp(const ViewOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)) {}
+
+Expr* ViewOp::shallowCopy() const {
+  auto result = IrBuilder::create<ViewOp>(out_, in_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
 
 LoadStoreOp::LoadStoreOp(
     IrBuilderPasskey passkey,
@@ -1269,6 +1513,12 @@ LoadStoreOp::LoadStoreOp(const LoadStoreOp* src, IrCloner* ir_cloner)
       load_store_type_(src->load_store_type_),
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)) {}
+
+Expr* LoadStoreOp::shallowCopy() const {
+  auto result = IrBuilder::create<LoadStoreOp>(load_store_type_, out_, in_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
 
 IterDomainBuilder::IterDomainBuilder(Val* _start, Val* _extent)
     : start_(_start), extent_(_extent) {
@@ -1470,6 +1720,37 @@ IterDomain* IterDomain::cloneWithoutRFactor() const {
   return cloned;
 }
 
+bool IterDomain::isTrivialReduction() const {
+  if (!isReduction()) {
+    return false;
+  }
+
+  if (extent()->isOneInt()) {
+    return true;
+  }
+
+  // If this domain is an output of an expression, i.e., not a root
+  // domain, check if all root domains are trivial reductions. This is
+  // almost the same as the analysis done in TrivialReductionInfo, but
+  // is limited within a single tensor, whereas TrivialReductionInfo
+  // does more expensive analysis potentially traversing through
+  // rfactor domains
+  if (definition()) {
+    // Note: There's no const version of IterVisitor.
+    auto id_inputs = InputsOf::output(fusion(), const_cast<IterDomain*>(this));
+    if (std::all_of(
+            ir_utils::filterByType<IterDomain>(id_inputs).begin(),
+            ir_utils::filterByType<IterDomain>(id_inputs).end(),
+            [](IterDomain* root_id) {
+              return root_id->isReduction() && root_id->extent()->isOneInt();
+            })) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 std::vector<IterDomain*> IterDomain::clone(
     const std::vector<IterDomain*>& domains) {
   std::vector<IterDomain*> cloned_domains;
@@ -1494,7 +1775,11 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       outer->isReduction() == inner->isReduction() ||
           (!outer->isReduction() && inner->isTrivialReduction()) ||
           (outer->isTrivialReduction() && !inner->isReduction()),
-      "Merging IterDomains requires that their iteration types match.");
+      "Merging IterDomains requires that their iteration types match. ",
+      "Outer: ",
+      outer->toString(),
+      ", Inner: ",
+      inner->toString());
   TORCH_CHECK(
       (outer->isGather() && inner->isGather()) ||
           (!outer->isGather() && !inner->isGather()),
@@ -2380,6 +2665,13 @@ Split::Split(const Split* src, IrCloner* ir_cloner)
       start_offset_(ir_cloner->clone(src->start_offset_)),
       stop_offset_(ir_cloner->clone(src->stop_offset_)) {}
 
+Expr* Split::shallowCopy() const {
+  auto result = IrBuilder::create<Split>(
+      outer_, inner_, in_, factor_, inner_split_, start_offset_, stop_offset_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 Val* Split::extent(Val* in_extent, Val* start_offset, Val* stop_offset) {
   TORCH_INTERNAL_ASSERT(in_extent != nullptr);
 
@@ -2425,6 +2717,12 @@ Merge::Merge(const Merge* src, IrCloner* ir_cloner)
       outer_(ir_cloner->clone(src->outer_)),
       inner_(ir_cloner->clone(src->inner_)) {}
 
+Expr* Merge::shallowCopy() const {
+  auto result = IrBuilder::create<Merge>(out_, outer_, inner_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
 bool Merge::sameAs(const Statement* other) const {
   if (this == other) {
     return true;
@@ -2454,6 +2752,13 @@ Swizzle2D::Swizzle2D(
   addOutput(out_y);
   addInput(in_x);
   addInput(in_y);
+}
+
+Expr* Swizzle2D::shallowCopy() const {
+  auto result = IrBuilder::create<Swizzle2D>(
+      out_x_, out_y_, in_x_, in_y_, swizzle_type_, swizzle_mode_);
+  result->copyPredicatesFrom(this);
+  return result;
 }
 
 bool Swizzle2D::sameAs(const Statement* other) const {
