@@ -1133,10 +1133,10 @@ Arguments:
 
           .def(
               "allreduce_coalesced",
-              [](::c10d::ProcessGroup& self,
-                 std::vector<at::Tensor>& xs,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& xs,
                  ::c10d::AllreduceCoalescedOptions opts) {
-                return self.allreduce_coalesced(xs, opts);
+                return ::c10d::ops::allreduce_coalesced(self, xs, opts);
               },
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceCoalescedOptions(),
