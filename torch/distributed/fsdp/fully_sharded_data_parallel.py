@@ -48,18 +48,14 @@ from torch.distributed.fsdp._init_utils import (
     _init_state_dict_state,
 )
 from torch.distributed.fsdp._runtime_utils import (
-    _clear_grads_if_needed,
     _lazy_init,
     _post_forward,
     _post_forward_reshard,
     _pre_forward,
     _pre_forward_unshard,
     _reshard,
-    _reshard_grads,
     _root_pre_forward,
     _should_free_in_backward,
-    _unshard,
-    _unshard_grads,
     _wait_for_computation_stream,
 )
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
@@ -91,6 +87,12 @@ from ._state_dict_utils import (
     _post_load_state_dict_hook,
     _post_state_dict_hook,
     _pre_load_state_dict_hook,
+)
+from ._unshard_param_utils import (
+    _deregister_orig_params,
+    _register_flat_param,
+    _register_orig_params,
+    _unshard_params,
 )
 from ._utils import p_assert
 from .flat_param import FlatParameter, FlatParamHandle
@@ -409,7 +411,7 @@ class FullyShardedDataParallel(nn.Module):
         self._fsdp_wrapped_module = module
         if not use_orig_params:
             _check_orig_params_flattened(self, self._ignored_params)
-            self._register_flat_param()
+            _register_flat_param(self, self)
 
         # Delete to avoid keeping references after the constructor
         delattr(self, "_ignored_params")
@@ -864,153 +866,20 @@ class FullyShardedDataParallel(nn.Module):
                 yield
             return
 
-        torch.cuda.synchronize()
         _lazy_init(self, self)
-        self._assert_state([TrainingState.IDLE])
-        for handle in self._handles:
-            assert handle._training_state == HandleTrainingState.IDLE
-        self.training_state = TrainingState.SUMMON_FULL_PARAMS
-        for handle in self._handles:
-            handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
-
-        if self._is_root:
-            _clear_grads_if_needed(self._fsdp_handles(self))
-        free_unsharded_flat_params = [
-            handle.needs_unshard() for handle in self._handles
-        ]
-        # No need to call `wait_stream()` since we unshard in the computation
-        # stream directly
-        computation_stream = torch.cuda.current_stream()
-        _unshard(self, self._handles, computation_stream, computation_stream)
-        if with_grads:
-            _unshard_grads(self._handles)
-
-        if rank0_only and self.rank != 0:
-            # Free the unsharded flattened parameter early
-            _reshard(self, self._handles, free_unsharded_flat_params)
-            if with_grads:
-                _reshard_grads(self._handles)
+        with _unshard_params(
+            module=self,
+            state=self,
+            writeback=writeback,
+            rank0_only=rank0_only,
+            offload_to_cpu=offload_to_cpu,
+            with_grads=with_grads,
+        ):
             try:
+                self.training_state = TrainingState.SUMMON_FULL_PARAMS
                 yield
             finally:
                 self.training_state = TrainingState.IDLE
-                for handle in self._handles:
-                    handle._training_state = HandleTrainingState.IDLE
-        else:
-            # Unflatten the unsharded flattened parameters
-            with contextlib.ExitStack() as stack:
-                # Invariant: rank == 0 or !rank0_only
-                for handle in self._handles:
-                    if offload_to_cpu and handle.uses_sharded_strategy:
-                        stack.enter_context(handle.to_cpu())
-                        # TODO (awgu): Since PyTorch enforces that a parameter
-                        # and its gradients need to match metadata (e.g.
-                        # device), we must move gradients to CPU *after* we
-                        # move parameters.
-                # TODO (awgu): This FPW call assumes 1 `FlatParameter`
-                if not self._use_orig_params:
-                    stack.enter_context(self._unflatten_as_params())
-                try:
-                    yield
-                finally:
-                    stack.close()
-                    if writeback:
-                        self._writeback_to_local_shard(self._handles, with_grads)
-                    _reshard(self, self._handles, free_unsharded_flat_params)
-                    if with_grads:
-                        _reshard_grads(self._handles)
-                    self.training_state = TrainingState.IDLE
-                    for handle in self._handles:
-                        handle._training_state = HandleTrainingState.IDLE
-
-    @torch.no_grad()
-    def _writeback_to_local_shard(
-        self,
-        handles: List[FlatParamHandle],
-        writeback_grad: bool,
-    ):
-        """
-        For each handle, writes back the this rank's shard of the unsharded
-        flattened parameter to the sharded flattened parameter. If
-        ``writeback_grad=True``, then writes back to the sharded gradient as
-        well.
-
-        Precondition: Each handle's ``FlatParameter`` 's data points to the
-        padded unsharded flattened parameter.
-        """
-        for handle in handles:
-            # For `NO_SHARD`, `_local_shard` is the unsharded flattened
-            # parameter and `grad` is the unsharded gradient, so there is no
-            # need to writeback for either
-            if not handle.uses_sharded_strategy:
-                continue
-            assert (
-                handle.flat_param.ndim == 1
-            ), f"Expects `flat_param` to be flattened but got {handle.flat_param.shape}"
-
-            # Get the unpadded shard instead of the padded shard to persist
-            # user changes to the padding (though FSDP does not explicitly
-            # support this)
-            param_shard, _ = FlatParamHandle._get_unpadded_shard(
-                handle.flat_param,
-                handle.rank,
-                handle.world_size,
-            )
-            handle.flat_param._local_shard[: param_shard.numel()].copy_(param_shard)
-            if writeback_grad:
-                existing_grad = handle.sharded_grad
-                if existing_grad is not None:
-                    grad_shard, _ = FlatParamHandle._get_unpadded_shard(
-                        handle.flat_param.grad,
-                        handle.rank,
-                        handle.world_size,
-                    )
-                    existing_grad[: grad_shard.numel()].copy_(grad_shard)
-
-    @contextlib.contextmanager
-    def _unflatten_as_params(self) -> Generator:
-        """
-        Assumes that the flattened parameter is unsharded. When in the context,
-        de-registers the flattened parameter and unflattens the original
-        parameters as ``nn.Parameter`` views into the flattened parameter.
-        After the context, re-registers the flattened parameter and restores
-        the original parameters as ``Tensor`` views into the flattened
-        parameter.
-        """
-        if not self._handles:
-            yield
-        else:
-            self._deregister_flat_param()
-            try:
-                with self._handles[0].unflatten_as_params():
-                    yield
-            finally:
-                if not self._handles[0]._use_orig_params:
-                    self._register_flat_param()
-
-    def _register_flat_param(self):
-        """
-        Registers the flattened parameter to the wrapped module, making it
-        visible to ``nn.Module`` methods.
-
-        We do not use :meth:`nn.Module.register_parameter` because we want
-        ``FLAT_PARAM`` to always be an attribute but dynamically change whether
-        it is visible to ``nn.Module`` methods.
-        """
-        if self._has_params:
-            self.module._parameters[FLAT_PARAM] = self._handles[0].flat_param
-
-    def _deregister_flat_param(self):
-        """
-        De-registers the flattened parameter from the wrapped module, hiding it
-        from ``nn.Module`` methods.
-
-        We do not use ``del`` because we want ``FLAT_PARAM`` to always be an
-        attribute but dynamically change whether it is visible to ``nn.Module``
-        methods.
-        """
-        if self._has_params:
-            self.module._parameters.pop(FLAT_PARAM, None)
 
     @contextlib.contextmanager
     def _deregister_orig_params_ctx(self):
@@ -1026,46 +895,12 @@ class FullyShardedDataParallel(nn.Module):
             "`_use_orig_params=True`",
         )
         for fsdp_module in self.fsdp_modules(self):
-            fsdp_module._deregister_orig_params()
+            _deregister_orig_params(fsdp_module, fsdp_module)
         try:
             yield
         finally:
             for fsdp_module in self.fsdp_modules(self):
-                fsdp_module._register_orig_params()
-
-    def _deregister_orig_params(self):
-        """
-        Deregisters the original parameters; registers the ``FlatParameter``.
-        """
-        p_assert(
-            len(self._handles) <= 1,
-            "Expects <=1 handle per FSDP instance; needs to be refactored "
-            "for >1 handle (e.g. non-recursive wrapping)",
-        )
-        if not self._handles:
-            return
-        handle = self._handles[0]
-        p_assert(
-            handle._use_orig_params,
-            f"Inconsistent `_use_orig_params` -- FSDP: {self._use_orig_params} "
-            f"handle: {handle._use_orig_params}",
-        )
-        handle._deregister_orig_params()
-        self._register_flat_param()
-
-    def _register_orig_params(self):
-        """
-        Deregisters the ``FlatParameter``; registers the original parameters.
-        """
-        if not self._handles:
-            return
-        handle = self._handles[0]
-        self._deregister_flat_param()
-        if handle.is_sharded(handle.flat_param):
-            handle._use_sharded_views()
-            handle._use_sharded_grad_views()
-        else:
-            handle._use_unsharded_views(as_params=True)
+                _register_orig_params(fsdp_module, fsdp_module)
 
     def _apply(self, *args, **kwargs):
         """
