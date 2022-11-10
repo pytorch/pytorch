@@ -107,7 +107,6 @@ IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 RETRY_TEST_CASES = os.getenv('PYTORCH_RETRY_TEST_CASES') == '1'
 OVERRIDE_FLAKY_SIGNAL = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') == '1'
 DISABLE_RUNNING_SCRIPT_CHK = os.getenv('PYTORCH_DISABLE_RUNNING_SCRIPT_CHK') == '1'
-MAX_NUM_RETRIES = 3
 
 DEFAULT_DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 DEFAULT_SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
@@ -528,10 +527,12 @@ else:
     # infer flags based on the default settings
     GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
 
+RERUN_DISABLED_TESTS = args.rerun_disabled_tests
+# Rerun disabled tests many more times to make sure that they are not flaky anymore
+MAX_NUM_RETRIES = 3 if RERUN_DISABLED_TESTS else 50
 
 SLOW_TESTS_FILE = args.import_slow_tests
 DISABLED_TESTS_FILE = args.import_disabled_tests
-RERUN_DISABLED_TESTS = args.rerun_disabled_tests
 LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
@@ -2122,7 +2123,8 @@ class TestCase(expecttest.TestCase):
                 result.addExpectedFailure(self, err)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red + 1, num_green=num_green)
-        elif report_only and num_retries_left < MAX_NUM_RETRIES:
+        elif (RERUN_DISABLED_TESTS or report_only) and num_retries_left < MAX_NUM_RETRIES:
+            # Always re-run up to MAX_NUM_RETRIES when running under report only or rerun disabled tests modes
             print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
             result.addUnexpectedSuccess(self)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
