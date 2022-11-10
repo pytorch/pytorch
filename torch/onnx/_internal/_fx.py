@@ -220,11 +220,11 @@ def _export_fx_to_ts(fx_module_with_metadata):
             def register_outputs(
                 ts_outputs: Union[torch._C.Value, Tuple[torch._C.Value, ...]]
             ):
-                if isinstance(ts_outputs, tuple):
+                if isinstance(ts_outputs, torch._C.Value):
+                    g.registerOutput(ts_outputs)
+                else:
                     for ts_output in ts_outputs:
                         g.registerOutput(ts_output)
-                else:
-                    g.registerOutput(ts_outputs)
 
             if isinstance(node.args[0], torch.fx.Node):
                 ts_value_or_ts_value_tuple = fx_name_to_ts_value[node.args[0].name]
@@ -293,8 +293,10 @@ def _export(
         decomposition_table = torch._decomp.decomposition_table
     # Apply decomposition table to the input graph.
     decomposed_module = functorch.make_fx(module, decomposition_table)(*args)
-    decomposed_module.print_readable()
 
+    # Use this mode to
+    # 1. convert nn.Parameter's in nn.Module to FakeTensor
+    # 2. run FakeTensorProp
     fake_tensor_mode = FakeTensorMode()
 
     def to_fake_tensor(x):
@@ -302,12 +304,14 @@ def _export(
             return fake_tensor_mode.from_tensor(x)
         return x
 
+    # "args" are FakeTensor in FakeTensorProp so the parameters and buffers
+    # in model must be converted to FakeTensor as well.
     fake_parameters_and_buffers = {
         k: to_fake_tensor(v)
         for k, v in itertools.chain(module.named_parameters(), module.named_buffers())
     }
-    decomposed_module.print_readable()
 
+    # Shape inference via FakeTensorProp
     with stateless._reparametrize_module(
         decomposed_module, fake_parameters_and_buffers
     ):
@@ -315,10 +319,7 @@ def _export(
         # TODO(wechi): It's possible to get symbolic types (and shapes)
         # for each node's output. Consider to set "tracing_mode=symbolic"
         # when calling make_fx and then remove FakeTensorProp below.
-        if isinstance(args, tuple):
-            FakeTensorProp(decomposed_module).propagate(*args)
-        else:
-            FakeTensorProp(decomposed_module).propagate(*args)
+        FakeTensorProp(decomposed_module, fake_tensor_mode).propagate(*args)
 
     ts_graph, ts_initializers = _export_fx_to_ts(decomposed_module)
     # Export TorchScript graph to ONNX ModelProto.
