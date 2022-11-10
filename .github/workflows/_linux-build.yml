@@ -67,7 +67,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
-      - name: Setup Linux
+      - name: Setup Linux GCP A100
         uses: ./.github/actions/setup-linux-gcp-a100
 
       - name: Setup SSH (Click me for login details)

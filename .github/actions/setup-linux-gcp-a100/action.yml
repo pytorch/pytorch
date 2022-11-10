@@ -7,7 +7,7 @@ runs:
   steps:
     - name: Set DOCKER_HOST
       shell: bash
-      run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
+      run: echo "DOCKER_HOST=unix:///run/docker.sock" >> "${GITHUB_ENV}"
 
     - name: Runner health check system info
       if: always()
