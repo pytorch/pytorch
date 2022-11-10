@@ -3425,7 +3425,11 @@ class ConvolutionBinary(ExternKernelAlloc):
         stride_: List[int],
         dilation_: List[int],
         groups: int,
-        attr,
+        binary_attr: str,
+        binary_alpha: Optional[float],
+        unary_attr: Optional[str],
+        unary_scalars: Optional[List],
+        unary_algorithm: Optional[str],
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
         (inputs, constant_args, kernel_layout,) = _prepare_convolution_fusion_create(
@@ -3433,7 +3437,13 @@ class ConvolutionBinary(ExternKernelAlloc):
         )
         other = cls.require_stride1(cls.realize_input(other))
         inputs.insert(1, other)
-        constant_args = constant_args + [attr]
+        constant_args = constant_args + [
+            binary_attr,
+            binary_alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ]
         return ConvolutionBinary(
             layout=kernel_layout,
             inputs=inputs,
