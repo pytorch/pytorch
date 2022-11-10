@@ -67,9 +67,6 @@ inductor_import = __name__.replace(".config", "")
 # How to import torchdynamo, either torchdynamo or torch.dynamo
 dynamo_import = inductor_import.replace("inductor", "dynamo")
 
-# Fx-based linear/matmul/bmm + permute/transpose vertical fusion
-permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
-
 
 # config specific to codegen/cpp.pp
 class cpp:
