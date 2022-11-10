@@ -486,6 +486,7 @@ dtensor_fails = {
     xfail("signal.windows.cosine"),
     xfail("signal.windows.exponential"),
     xfail("signal.windows.gaussian"),
+    xfail("signal.windows.kaiser"),
     xfail("squeeze"),
     xfail("stack"),
     xfail("std"),
