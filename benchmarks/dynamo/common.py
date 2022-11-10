@@ -1079,12 +1079,12 @@ class BenchmarkRunner:
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
         try:
-            fp64_outputs = self.run_n_iterations(
-                *cast_to_fp64(
-                    deepcopy_and_maybe_ddp(model),
-                    clone_inputs(example_inputs),
-                )
+            model_fp64, inputs_fp64 = cast_to_fp64(
+                deepcopy_and_maybe_ddp(model),
+                clone_inputs(example_inputs),
             )
+            self.init_optimizer(current_device, model_fp64.parameters())
+            fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
         except Exception:
             log.warning(f"fp64 golden ref were not generated for {name}")
             fp64_outputs = None
@@ -1098,18 +1098,18 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             # Get results of native pytorch
             reset_rng_state()
-            model_copy = copy.deepcopy(model)
+            model_copy = deepcopy_and_maybe_ddp(model)
             self.init_optimizer(current_device, model_copy.parameters())
             correct_result = self.run_n_iterations(
-                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
+                model_copy, clone_inputs(example_inputs)
             )
 
             # Rerun native pytorch
             reset_rng_state()
-            model_copy = copy.deepcopy(model)
+            model_copy = deepcopy_and_maybe_ddp(model)
             self.init_optimizer(current_device, model_copy.parameters())
             correct_rerun_result = self.run_n_iterations(
-                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
+                model_copy, clone_inputs(example_inputs)
             )
             if not same(
                 correct_result,
@@ -1125,12 +1125,11 @@ class BenchmarkRunner:
             reset_rng_state()
             torch._dynamo.reset()
             try:
-                self.init_optimizer(current_device, model.parameters())
+                model_copy = deepcopy_and_maybe_ddp(model)
+                self.init_optimizer(current_device, model_copy.parameters())
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
 
-                new_result = optimized_model_iter_fn(
-                    deepcopy_and_maybe_ddp(model), example_inputs
-                )
+                new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 accuracy_status = "fail_to_run"
                 print(
