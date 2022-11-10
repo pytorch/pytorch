@@ -10,10 +10,10 @@ from torch.distributed.fsdp._utils import (
     _override_batchnorm_mixed_precision,
 )
 from torch.distributed.fsdp.wrap import (
+    _FSDPPolicy,
     _or_policy,
     _recursive_wrap,
     _wrap_batchnorm_individually,
-    FSDPPolicy,
 )
 
 
@@ -75,7 +75,7 @@ def _auto_wrap(
 
 def _get_submodule_to_states(
     root_module: nn.Module,
-    auto_wrap_policy: FSDPPolicy,
+    auto_wrap_policy: _FSDPPolicy,
     ignored_modules: Set[nn.Module],
     ignored_params: Set[nn.Parameter],
 ) -> Dict[nn.Module, SubmoduleState]:

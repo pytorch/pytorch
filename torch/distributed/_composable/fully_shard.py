@@ -24,7 +24,7 @@ from torch.distributed.fsdp.api import (
     MixedPrecision,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import FSDPPolicy
+from torch.distributed.fsdp.wrap import _FSDPPolicy
 
 
 @contract
@@ -33,7 +33,7 @@ def fully_shard(
     process_group: Optional[dist.ProcessGroup] = None,
     mixed_precision: Optional[MixedPrecision] = None,
     cpu_offload: Optional[CPUOffload] = None,
-    policy: Optional[FSDPPolicy] = None,
+    policy: Optional[_FSDPPolicy] = None,
     ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
     device_id: Optional[Union[int, torch.device]] = None,
     param_init_fn: Optional[Callable[[nn.Module], None]] = None,
@@ -43,8 +43,8 @@ def fully_shard(
     Applies ``FullyShardedDataParallel` (FSDP) semantics to ``module``.
     """
     # Enforce the new auto wrap policy
-    if policy is not None and not isinstance(policy, FSDPPolicy):
-        raise ValueError(f"Expects an `FSDPPolicy` but got {policy}")
+    if policy is not None and not isinstance(policy, _FSDPPolicy):
+        raise ValueError(f"Expects an `_FSDPPolicy` but got {policy}")
     state = fully_shard.state(module)
     state = _init_ignored_module_states(state, module, ignored_modules)
     state = _init_process_group_state(state, process_group)
