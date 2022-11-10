@@ -1743,7 +1743,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.unflatten',
         '_refs.sum_to_size',
         # ref implementation missing kwargs
-        '_refs.full',  # missing "layout"
         '_refs.full_like',  # missing "layout"
         '_refs.ones_like',  # missing "layout"
         '_refs.round',  # missing "decimals"
