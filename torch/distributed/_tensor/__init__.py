@@ -103,7 +103,7 @@ def distribute_tensor(
 def distribute_module(
     module: nn.Module,
     device_mesh: Optional[DeviceMesh] = None,
-    partition_fn: Optional[Callable[[str, nn.Module], None]] = None,
+    partition_fn: Optional[Callable[[str, nn.Module, DeviceMesh], None]] = None,
     input_fn: Optional[Callable[..., None]] = None,
     output_fn: Optional[Callable[..., None]] = None,
 ) -> nn.Module:
@@ -163,16 +163,16 @@ def distribute_module(
     else:
         # apply partition_fun to submodules
         for name, submod in module.named_modules():
-            partition_fn(name, submod)
+            partition_fn(name, submod, device_mesh)
             replicate_module_params_buffers(submod, device_mesh)
 
     # register input_fn as module forward pre hook
     if input_fn is not None:
-        module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs))  # type: ignore[misc]
+        module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs, device_mesh))  # type: ignore[misc]
     # register input_fn as module forward hook
     if output_fn is not None:
         module.register_forward_hook(
-            lambda mod, inputs, outputs: output_fn(outputs)  # type: ignore[misc]
+            lambda mod, inputs, outputs: output_fn(outputs, device_mesh)  # type: ignore[misc]
         )
 
     return module
