@@ -859,65 +859,47 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
       return;
     }
     if (dim == (result.dim() - 1) && alpha.equal(1.0) && index_contig.scalar_type() == ScalarType::Long) {
-      // Check whether result and source are matched.
-      // Similar to infer_size_impl
-      auto check_sizes = [numel](IntArrayRef a, IntArrayRef b, int64_t dim) {
-        size_t dimsA = a.size();
-        size_t dimsB = b.size();
-        size_t ndim = dimsA > dimsB ? dimsA : dimsB;
-        // Use ptrdiff_t to ensure signed comparison.
-        ptrdiff_t offset_a = 0;
-        ptrdiff_t offset_b = 0;
-        for (ptrdiff_t i = (ptrdiff_t)ndim - 1; i >= 0; --i) {
-          ptrdiff_t dimA = dimsA - 1 - offset_a;
-          ptrdiff_t dimB = dimsB - 1 - offset_b;
-          if (dimB == dim || dimA == dim) {
-            if (dimA == dim) {
-              offset_a += 1;
-            }
-            if (dimB == dim) {
-              TORCH_CHECK_INDEX(b[dimB] == numel, "source[", dim, "] must have the same size as the length of index");
-              offset_b += 1;
-            }
-          } else {
-            int64_t sizeA = (dimA >= 0) ? a[dimA] : 1;
-            int64_t sizeB = (dimB >= 0) ? b[dimB] : 1;
-
-            TORCH_CHECK(
-                sizeA == sizeB || sizeA == 1 || sizeB == 1,
-                "The size of tensor a (", sizeA,
-                ") must match the size of tensor b (", sizeB,
-                ") at non-singleton dimension ", i);
-            offset_a += 1;
-            offset_b += 1;
-          }
+      // Check whether result and source are matched apart from the dimension dim.
+      // Note that broadcast case is not applicable for scatter_add
+      auto check_sizes = [numel](IntArrayRef a, IntArrayRef b, int64_t dim) -> bool {
+        if (a.size() != b.size())
+          return false;
+        int64_t ndim = a.size();
+        for (int64_t i = ndim - 1; i >= 0; --i) {
+          if (i != dim && a[i] != b[i] )
+            return false;
         }
+        return true;
       };
-      check_sizes(result.sizes(), source.sizes(), dim);
-      auto ep_index = index_contig.expand(source.sizes());
-      result.scatter_add_(dim, ep_index, source);
-    } else {
-      auto selfSlice = result.select(dim, 0);
-      auto sourceSlice = source.select(dim, 0);
-      auto self_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
-      auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
-      auto self_dim_size = result.size(dim);
-      auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
 
-      AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
-        auto index_data = index_contig.data_ptr<index_t>();
-        for (const auto i : c10::irange(numel)) {
-            auto self_i = index_data[i];
-            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-            auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
-            auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
-            iter.unsafe_replace_operand(0, self_data);
-            iter.unsafe_replace_operand(1, self_data);
-            iter.unsafe_replace_operand(2, source_data);
-            add_stub(iter.device_type(), iter, alpha);
-        }
-      });
+      if (check_sizes(result.sizes(), source.sizes(), dim)) {
+        auto ep_index = index_contig.expand(source.sizes());
+        result.scatter_add_(dim, ep_index, source);
+        return;
+      };
+
     }
+
+    auto selfSlice = result.select(dim, 0);
+    auto sourceSlice = source.select(dim, 0);
+    auto self_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
+    auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
+    auto self_dim_size = result.size(dim);
+    auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
+
+    AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
+      auto index_data = index_contig.data_ptr<index_t>();
+      for (const auto i : c10::irange(numel)) {
+          auto self_i = index_data[i];
+          TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
+          auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
+          auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
+          iter.unsafe_replace_operand(0, self_data);
+          iter.unsafe_replace_operand(1, self_data);
+          iter.unsafe_replace_operand(2, source_data);
+          add_stub(iter.device_type(), iter, alpha);
+      }
+    });
   }
   else {
     TORCH_CHECK(source.dim() <= 1, "source.dim() (", source.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");

@@ -5677,25 +5677,25 @@ class TestTorch(TestCase):
         # i.e., using scatter_add
         for dtype in all_types_and_complex_and(torch.half, torch.bfloat16):
             if torch.cuda.is_available():
-                size = [20, 20]
-                index = torch.randint(0, 20, (20,), dtype=torch.long).cuda()
-                if dtype.is_floating_point or dtype.is_complex:
-                    tensor = torch.rand(size, dtype=dtype).cuda()
-                    source = torch.rand(size, dtype=dtype).cuda()
-                elif dtype.is_signed:
-                    tensor = torch.randint(-5, 15, size, dtype=dtype).cuda()
-                    source = torch.randint(-5, 15, size, dtype=dtype).cuda()
-                else:
-                    tensor = torch.randint(0, 10, size, dtype=dtype).cuda()
-                    source = torch.randint(0, 10, size, dtype=dtype).cuda()
+                for size in [(20, 20), (5, 20, 20)]:
+                    index = torch.randint(0, 20, (20,), dtype=torch.long).cuda()
+                    if dtype.is_floating_point or dtype.is_complex:
+                        tensor = torch.rand(size, dtype=dtype).cuda()
+                        source = torch.rand(size, dtype=dtype).cuda()
+                    elif dtype.is_signed:
+                        tensor = torch.randint(-5, 15, size, dtype=dtype).cuda()
+                        source = torch.randint(-5, 15, size, dtype=dtype).cuda()
+                    else:
+                        tensor = torch.randint(0, 10, size, dtype=dtype).cuda()
+                        source = torch.randint(0, 10, size, dtype=dtype).cuda()
 
-                ref_out = tensor.index_add(-1, index, source)
+                    ref_out = tensor.index_add(-1, index, source)
 
-                tensor = tensor.cpu()
-                source = source.cpu()
-                index = index.cpu()
-                out = tensor.index_add(-1, index, source)
-                self.assertEqual(out, ref_out)
+                    tensor = tensor.cpu()
+                    source = source.cpu()
+                    index = index.cpu()
+                    out = tensor.index_add(-1, index, source)
+                    self.assertEqual(out, ref_out)
 
             # Check bound
             result = torch.ones(3, 3)
