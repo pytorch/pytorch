@@ -28,7 +28,8 @@ https://github.com/bamos/HowToTrainYourMAMLPytorch
 """
 
 from support.omniglot_loaders import OmniglotNShot
-from functorch import make_functional_with_buffers, vmap, grad
+from functorch import vmap, grad
+from torch.nn.utils.stateless import functional_call
 import functorch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -104,42 +105,38 @@ def main():
 
     net.train()
 
-    # Given this module we've created, rip out the parameters and buffers
-    # and return a functional version of the module. `fnet` is stateless
-    # and can be called with `fnet(params, buffers, args, kwargs)`
-    fnet, params, buffers = make_functional_with_buffers(net)
-
     # We will use Adam to (meta-)optimize the initial parameters
     # to be adapted.
-    meta_opt = optim.Adam(params, lr=1e-3)
+    meta_opt = optim.Adam(net.parameters(), lr=1e-3)
 
     log = []
     for epoch in range(100):
-        train(db, [params, buffers, fnet], device, meta_opt, epoch, log)
-        test(db, [params, buffers, fnet], device, epoch, log)
+        train(db, net, device, meta_opt, epoch, log)
+        test(db, net, device, epoch, log)
         plot(log)
 
 
 # Trains a model for n_inner_iter using the support and returns a loss
 # using the query.
 def loss_for_task(net, n_inner_iter, x_spt, y_spt, x_qry, y_qry):
-    params, buffers, fnet = net
+    params = {k: v for k, v in net.named_parameters()}
+    buffers = {k: v for k, v in net.named_buffers()}
     querysz = x_qry.size(0)
 
     def compute_loss(new_params, buffers, x, y):
-        logits = fnet(new_params, buffers, x)
+        logits = functional_call(net, {**new_params, **buffers}, (x,))
         loss = F.cross_entropy(logits, y)
         return loss
 
     new_params = params
     for _ in range(n_inner_iter):
         grads = grad(compute_loss)(new_params, buffers, x_spt, y_spt)
-        new_params = [p - g * 1e-1 for p, g, in zip(new_params, grads)]
+        new_params = {k: new_params[k] - g * 1e-1 for k, g, in grads.items()}
 
     # The final set of adapted parameters will induce some
     # final loss and accuracy on the query dataset.
     # These will be used to update the model's meta-parameters.
-    qry_logits = fnet(new_params, buffers, x_qry)
+    qry_logits = functional_call(net, {**new_params, **buffers}, (x_qry,))
     qry_loss = F.cross_entropy(qry_logits, y_qry)
     qry_acc = (qry_logits.argmax(
         dim=1) == y_qry).sum() / querysz
@@ -148,7 +145,8 @@ def loss_for_task(net, n_inner_iter, x_spt, y_spt, x_qry, y_qry):
 
 
 def train(db, net, device, meta_opt, epoch, log):
-    params, buffers, fnet = net
+    params = {k: v for k, v in net.named_parameters()}
+    buffers = {k: v for k, v in net.named_buffers()}
     n_train_iter = db.x_train.shape[0] // db.batchsz
 
     for batch_idx in range(n_train_iter):
@@ -194,7 +192,8 @@ def test(db, net, device, epoch, log):
     # Most research papers using MAML for this task do an extra
     # stage of fine-tuning here that should be added if you are
     # adapting this code for research.
-    [params, buffers, fnet] = net
+    params = {k: v for k, v in net.named_parameters()}
+    buffers = {k: v for k, v in net.named_buffers()}
     n_test_iter = db.x_test.shape[0] // db.batchsz
 
     qry_losses = []
@@ -211,13 +210,13 @@ def test(db, net, device, epoch, log):
         for i in range(task_num):
             new_params = params
             for _ in range(n_inner_iter):
-                spt_logits = fnet(new_params, buffers, x_spt[i])
+                spt_logits = functional_call(net, {**new_params, **buffers}, (x_spt[i],))
                 spt_loss = F.cross_entropy(spt_logits, y_spt[i])
-                grads = torch.autograd.grad(spt_loss, new_params)
-                new_params = [p - g * 1e-1 for p, g, in zip(new_params, grads)]
+                grads = torch.autograd.grad(spt_loss, new_params.values())
+                new_params = {k: new_params[k] - g * 1e-1 for k, g, in zip(new_params, grads)}
 
             # The query loss and acc induced by these parameters.
-            qry_logits = fnet(new_params, buffers, x_qry[i]).detach()
+            qry_logits = functional_call(net, {**new_params, **buffers}, (x_qry[i],)).detach()
             qry_loss = F.cross_entropy(
                 qry_logits, y_qry[i], reduction='none')
             qry_losses.append(qry_loss.detach())

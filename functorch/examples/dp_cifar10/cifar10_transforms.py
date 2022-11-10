@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 import functorch
 from functorch import vmap, grad_and_value
-from functorch import make_functional
+from torch.nn.utils.stateless import functional_call
 
 # disable warning spam
 torch._C._functorch._set_vmap_fallback_warning_enabled(False)
@@ -95,10 +95,6 @@ def train(args, model, train_loader, optimizer, epoch, device):
 
         # Step 1: compute per-sample-grads
 
-        # In order to use functional vmap+grad, we need to be able to
-        # pass the weights to a model.
-        func_model, weights = make_functional(model)
-
         # To use vmap+grad to compute per-sample-grads, the forward pass
         # must be re-formulated on a single example.
         # We use the `grad` operator to compute forward+backward on a single example,
@@ -106,7 +102,7 @@ def train(args, model, train_loader, optimizer, epoch, device):
         def compute_loss_and_output(weights, image, target):
             images = image.unsqueeze(0)
             targets = target.unsqueeze(0)
-            output = func_model(weights, images)
+            output = functional_call(model, weights, (images,))
             loss = criterion(output, targets)
             return loss, output.squeeze(0)
 
@@ -124,12 +120,14 @@ def train(args, model, train_loader, optimizer, epoch, device):
         # is not to be differentiated. `f'` returns the gradient w.r.t. the loss,
         # the loss, and the auxiliary value.
         grads_loss_output = grad_and_value(compute_loss_and_output, has_aux=True)
+        weights = model.named_parameters()
+        weights = {k: v for k, v in weights}
         sample_grads, (sample_loss, output) = \
             vmap(grads_loss_output, (None, 0, 0))(weights, images, target)
         loss = sample_loss.mean()
 
-        for grad_sample, weight in zip(sample_grads, model.parameters()):
-            weight.grad_sample = grad_sample.detach()
+        for name, grad_sample in sample_grads.items():
+            weights[name].grad_sample = grad_sample
 
         # Step 2: Clip the per-sample-grads, sum them to form grads, and add noise
         clip_and_accumulate_and_add_noise(
