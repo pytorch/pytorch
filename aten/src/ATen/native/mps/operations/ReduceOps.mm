@@ -9,17 +9,7 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Pool.h>
 #include <torch/library.h>
-
-// TODO: Remove me when moved to MacOS 13
-@interface MPSGraph (VenturaOps)
-- (MPSGraphTensor *)sortWithTensor:(MPSGraphTensor *)tensor
-                                       axis:(NSInteger)axis
-                                       name:(NSString *)name;
-
-- (MPSGraphTensor *)argSortWithTensor:(MPSGraphTensor *)tensor
-                                       axis:(NSInteger)axis
-                                       name:(NSString *)name;
-@end
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 
 namespace at {
 namespace native {
@@ -1649,15 +1639,10 @@ std::tuple<Tensor, Tensor> min_mps
     return min_max_mps(input_t, dim, keepdim, MPSReductionType::MIN, "min_mps");
 }
 
-static bool mpsSupportsSort() {
-  id mpsCD = NSClassFromString(@"MPSGraph");
-  return [mpsCD instancesRespondToSelector:@selector(sortWithTensor:axis:name:)] == YES;
-}
-
 // Median of entire tensor into scalar result
 Tensor median_mps(const Tensor& input_t) {
 
-  if(!mpsSupportsSort()){
+  if(!is_macos_13_or_newer()){
         TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
                     "Falling back on CPU. This may have performace implications.");
         return at::median(input_t.to("cpu"));
@@ -1957,7 +1942,7 @@ TORCH_API ::std::tuple<at::Tensor &,at::Tensor &> median_out_mps
         return std::tuple<Tensor&, Tensor&>{values, indices};
     }
 
-    if(!mpsSupportsSort()){
+    if(!is_macos_13_or_newer()){
       TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
                     "Falling back on CPU. This may have performace implications.");
     return median_from_cpu(input_t.to("cpu"), dim, keepdim, values, indices, IntArrayRef(vec_out_shape),IntArrayRef(vec_apparent_out_shape) );
