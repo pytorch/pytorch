@@ -40,7 +40,9 @@ class DTensorTest(DTensorTestBase):
             size=dist_tensor_shape,
             requires_grad=True,
         )
-        self.assertEqual(dist_tensor.size(), torch.Size((self.world_size * 3, 3)))
+        self.assertEqual(
+            dist_tensor.size(), torch.Size((self.world_size * 3, 3))
+        )
 
         with self.assertWarnsRegex(UserWarning, "To construct"):
             DTensor(
@@ -97,7 +99,9 @@ class DTensorTest(DTensorTestBase):
         sharded_tensor = DTensor.from_local(
             local_tensor, device_mesh, shard_spec
         )
-        self.assertEqual(sharded_tensor.size(), torch.Size([self.world_size * 3, 3]))
+        self.assertEqual(
+            sharded_tensor.size(), torch.Size([self.world_size * 3, 3])
+        )
 
         replica_spec = [Replicate()]
         ddp_tensor = DTensor.from_local(local_tensor, device_mesh, replica_spec)
