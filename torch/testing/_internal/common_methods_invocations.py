@@ -772,6 +772,20 @@ def sample_inputs_ones_zeros(op, device, dtype, requires_grad, **kwargs):
     for size in sizes:
         yield SampleInput(size, kwargs={'dtype': dtype, 'device': device})
 
+def sample_inputs_full(op, device, dtype, requires_grad, **kwargs):
+    def get_val(dtype):
+        return make_tensor([], dtype=dtype, device="cpu").item()
+
+    sizes = (
+        (M,),
+        (S, S),
+    )
+    fill_values = [get_val(dtype), get_val(torch.int)]
+
+    for size, fill_value in product(sizes, fill_values):
+        yield SampleInput(size, args=(fill_value,), kwargs={'dtype': dtype, 'device': device})
+
+
 def error_inputs_uniform(op, device, **kwargs):
     t = torch.zeros([10], device=device)
     yield ErrorInput(
@@ -14377,6 +14391,27 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=True,
            sample_inputs_func=sample_inputs_ones_zeros,
+           skips=(
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+
+               # Same failure as arange: cannot find linspace in captured graph
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )),
+    OpInfo('full',
+           op=torch.full,
+           supports_autograd=False,
+           is_factory_function=True,
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+           supports_out=True,
+           sample_inputs_func=sample_inputs_full,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
                DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),

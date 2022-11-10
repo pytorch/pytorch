@@ -4465,6 +4465,12 @@ def full(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
+    utils.check_layout(layout)
+    utils.check_pin_memory(pin_memory)
+
+    dtype = dtype if dtype is not None else utils.type_to_dtype(type(fill_value))
+    device = device if device is not None else torch.device("cpu")
+
     e = empty(
         shape,
         dtype=dtype,
@@ -4473,7 +4479,7 @@ def full(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return fill(e, fill_value)
+    return torch.fill(e, fill_value)
 
 
 def full_like(
