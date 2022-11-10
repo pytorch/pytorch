@@ -2799,6 +2799,22 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Detected that you are using FX"):
             gm = torch.fx.symbolic_trace(optimized)
 
+    @patch.object(torch._dynamo.config, "error_on_nested_fx_trace", False)
+    def test_no_error_on_nested_fx_trace(self):
+        input = torch.rand(2, 3)
+
+        def f(x):
+            x + x
+
+        real = f(input)
+
+        optimized = torch._dynamo.optimize("eager")(f)
+        self.assertTrue(same(optimized(input), real))
+
+        # should not error
+        gm = torch.fx.symbolic_trace(optimized)
+        self.assertTrue(same(gm(input), real))
+
     def test_inference_mode(self):
         @torch.inference_mode()
         def func(x, y):
