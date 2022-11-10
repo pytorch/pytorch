@@ -5339,6 +5339,49 @@ class TestQuantizeFx(QuantizationTestCase):
             backend_config=backend_config
         )
 
+    def test_channel_shuffle_lowering(self):
+        # Three versions of channel shuffle
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.op = torch.nn.ChannelShuffle(2)
+
+            def forward(self, x):
+                return self.op(x + x) + x
+
+        class M2(torch.nn.Module):
+            def forward(self, x):
+                return torch.channel_shuffle(x + x, 2) + x
+
+        class M3(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.channel_shuffle(x + x, 2) + x
+
+        x = torch.randn(4, 4, 4, 4)
+        # torch.channel_shuffle is equivalent to torch.nn.functional.channel_shuffle
+        model_node_pairs = [
+            (M1().eval(), ns.call_module(torch.nn.ChannelShuffle)),
+            (M2().eval(), ns.call_function(torch.channel_shuffle)),
+            (M3().eval(), ns.call_function(torch.channel_shuffle))
+        ]
+        for m, node in model_node_pairs:
+            m = prepare_fx(m, {"": default_qconfig}, example_inputs=(x,))
+            m_copy = copy.deepcopy(m)
+            m = convert_fx(m)
+            m_ref = convert_to_reference_fx(m_copy)
+            node_occurrence = {
+                node: 1,
+                ns.call_function(torch.quantize_per_tensor): 1,
+                ns.call_method("dequantize"): 1
+            }
+            node_occurrence_ref = {
+                node: 1,
+                ns.call_function(torch.quantize_per_tensor): 4,
+                ns.call_method("dequantize"): 4
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+            self.checkGraphModuleNodes(m_ref, expected_node_occurrence=node_occurrence_ref)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):
