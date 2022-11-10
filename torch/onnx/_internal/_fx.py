@@ -172,6 +172,9 @@ def _export_fx_to_ts(fx_module_with_metadata):
             # Input of graph.
             v = g.addInput(node.name)
             v.setType(torch._C.TensorType.create_from_tensor(node.meta["val"]))
+            assert (
+                v is not None
+            ), f"Node creates None with target={node.target} and name={node.name}"
             fx_name_to_ts_value[node.name] = v
         elif node.op == "call_function":
             # aten ops and other statless functions.
@@ -203,6 +206,9 @@ def _export_fx_to_ts(fx_module_with_metadata):
                 )
                 # The returned value could be a value of a tuple of values.
                 v = symbolic_fn(graph_context, *ts_args)
+                assert (
+                    v is not None
+                ), f"Node creates None with target={node.target} and name={node.name}"
                 # One fx node could produce multiple outputs (e.g., tuple of tensors); in
                 # that case, v is a tuple of TorchScript values.
                 fx_name_to_ts_value[node.name] = v
@@ -210,6 +216,9 @@ def _export_fx_to_ts(fx_module_with_metadata):
                 ts_value_tuple = fx_name_to_ts_value[node.args[0].name]
                 assert isinstance(ts_value_tuple, tuple)
                 v = ts_value_tuple[node.args[1]]
+                assert (
+                    v is not None
+                ), f"Node creates None with target={node.target} and name={node.name}"
                 fx_name_to_ts_value[node.name] = v
             else:
                 raise RuntimeError(
@@ -224,6 +233,9 @@ def _export_fx_to_ts(fx_module_with_metadata):
                     g.registerOutput(ts_outputs)
                 else:
                     for ts_output in ts_outputs:
+                        assert isinstance(
+                            ts_output, torch._C.Value
+                        ), f"ts_output must be a torch._C.Value, not {type(ts_output)}"
                         g.registerOutput(ts_output)
 
             if isinstance(node.args[0], torch.fx.Node):
@@ -231,6 +243,9 @@ def _export_fx_to_ts(fx_module_with_metadata):
                 register_outputs(ts_value_or_ts_value_tuple)
             else:
                 for arg in node.args[0]:
+                    assert isinstance(
+                        arg, torch.fx.Node
+                    ), f"ts_output must be a torch.fx.Node, not {type(arg)}"
                     ts_value_or_ts_value_tuple = fx_name_to_ts_value[arg.name]
                     register_outputs(ts_value_or_ts_value_tuple)
         elif node.op == "call_method":
@@ -255,6 +270,9 @@ def _export_fx_to_ts(fx_module_with_metadata):
 
             v = g.addInput(node.name)
             v.setType(torch._C.TensorType.create_from_tensor(current_attr))
+            assert (
+                v is not None
+            ), f"Node creates None with target={node.target} and name={node.name}"
             fx_name_to_ts_value[node.name] = v
             ts_name_to_real_tensor[v.debugName()] = current_attr
         else:
