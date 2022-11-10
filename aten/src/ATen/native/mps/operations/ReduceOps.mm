@@ -196,7 +196,7 @@ void reduction_out_mps
     auto cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if(!cachedGraph) {
-      native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ native_mps::MPSCachedGraph * () {
 
         CachedGraph *newCachedGraph = nil;
 
@@ -265,15 +265,15 @@ void reduction_out_mps
         }
         return newCachedGraph;
       });
-      cachedGraph = tmpCachedGraph->as<CachedGraph>();
     }
 
     auto inputPlaceholder = native_mps::Placeholder();
 
-    if(apparent_input_shape)
+    if (apparent_input_shape) {
       inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t, apparent_input_shape);
-    else
+    } else {
       inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);
+    }
     auto outputPlaceholder = native_mps::Placeholder(cachedGraph->outputTensor_, output_t, apparent_output_shape);
     NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{
       inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
@@ -462,7 +462,7 @@ TORCH_IMPL_FUNC(norm_out_mps)
     auto cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if(!cachedGraph) {
-      native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ native_mps::MPSCachedGraph * () {
 
         CachedGraph *newCachedGraph = nil;
 
@@ -532,7 +532,6 @@ TORCH_IMPL_FUNC(norm_out_mps)
         }
         return newCachedGraph;
       });
-      cachedGraph = tmpCachedGraph->as<CachedGraph>();
     }
 
     auto inputPlaceholder = native_mps::Placeholder();
@@ -739,7 +738,7 @@ Tensor std_var_common_impl_mps(
     auto cachedGraph = cache_->LookUpAs<CachedGraph>(key);
     // Initialize once if configuration not found in cache
   if(!cachedGraph) {
-      native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ native_mps::MPSCachedGraph * () {
 
       CachedGraph *newCachedGraph = nil;
 
@@ -774,7 +773,6 @@ Tensor std_var_common_impl_mps(
       }
       return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
   }
   auto inputPlaceholder = native_mps::Placeholder();
 
@@ -857,7 +855,7 @@ TORCH_IMPL_FUNC(any_out_mps)
         CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
         if(!cachedGraph) {
-          native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+          cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ native_mps::MPSCachedGraph * () {
 
             CachedGraph *newCachedGraph = nil;
             @autoreleasepool {
@@ -897,7 +895,6 @@ TORCH_IMPL_FUNC(any_out_mps)
             }
             return newCachedGraph;
           });
-          cachedGraph = tmpCachedGraph->as<CachedGraph>();
         }
 
         auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);
@@ -932,7 +929,7 @@ TORCH_IMPL_FUNC(any_all_out_mps)(const Tensor& input_t, const Tensor& output_t)
         CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
         if(!cachedGraph) {
-          native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+          cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ native_mps::MPSCachedGraph * () {
 
             CachedGraph *newCachedGraph = nil;
 
@@ -973,7 +970,6 @@ TORCH_IMPL_FUNC(any_all_out_mps)(const Tensor& input_t, const Tensor& output_t)
             }
             return newCachedGraph;
           });
-          cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
         }
 
         auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);
@@ -1028,7 +1024,7 @@ TORCH_IMPL_FUNC(all_out_mps)
         CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
         if(!cachedGraph) {
-          native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+          cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ native_mps::MPSCachedGraph * () {
 
             CachedGraph *newCachedGraph = nil;
             @autoreleasepool {
@@ -1068,7 +1064,6 @@ TORCH_IMPL_FUNC(all_out_mps)
             }
             return newCachedGraph;
           });
-          cachedGraph = tmpCachedGraph->as<CachedGraph>();
         }
 
         auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);
@@ -1103,7 +1098,7 @@ TORCH_IMPL_FUNC(all_all_out_mps)(const Tensor& input_t, const Tensor& output_t)
         CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
         if(!cachedGraph) {
-          native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+          cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ native_mps::MPSCachedGraph * () {
 
             CachedGraph *newCachedGraph = nil;
 
@@ -1144,7 +1139,6 @@ TORCH_IMPL_FUNC(all_all_out_mps)(const Tensor& input_t, const Tensor& output_t)
             }
             return newCachedGraph;
           });
-          cachedGraph = tmpCachedGraph->as<CachedGraph>();
         }
 
         auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);
@@ -1196,7 +1190,7 @@ Tensor min_max_mps
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
     // Initialize once if configuration not found in cache
     if(!cachedGraph) {
-      native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ native_mps::MPSCachedGraph * () {
 
         CachedGraph *newCachedGraph = nil;
 
@@ -1223,7 +1217,6 @@ Tensor min_max_mps
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
     auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t, apparent_input_shape);
@@ -1307,10 +1300,10 @@ void min_max_out_mps
 
     @autoreleasepool {
         string key = func_name + ":" + to_string(dim_) + ":" + native_mps::getMPSTypeString(input_t.scalar_type());
-        CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+        CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
         if(!cachedGraph) {
-          native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+          cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ native_mps::MPSCachedGraph * () {
 
             CachedGraph *newCachedGraph = nil;
 
@@ -1360,7 +1353,6 @@ void min_max_out_mps
             }
             return newCachedGraph;
           });
-          cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
         }
 
         auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);
@@ -1474,7 +1466,7 @@ void argmax_argmin_out_mps
         CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
         if(!cachedGraph) {
-          native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+          cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ native_mps::MPSCachedGraph * () {
 
             CachedGraph *newCachedGraph = nil;
 
@@ -1515,7 +1507,6 @@ void argmax_argmin_out_mps
             }
             return newCachedGraph;
           });
-          cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
         }
 
         native_mps::Placeholder inputPlaceholder = native_mps::Placeholder();
