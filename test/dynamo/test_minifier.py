@@ -11,13 +11,11 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-import torch._inductor.config
 import torch._inductor.utils
 from torch._dynamo.debug_utils import TEST_REPLACEABLE_COMMENT
 
 _HAS_TRITON = torch._inductor.utils.has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not _HAS_TRITON, "requires cuda")
-torch._inductor.config.triton.autotune = False
 
 RELU_COMPILE_ERROR_BACKEND = """\
 from torch._dynamo.optimizations.backends import register_backend
