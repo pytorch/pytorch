@@ -1828,18 +1828,16 @@ class TensorOrArrayPair(TensorLikePair):
             self.actual, self.expected = self._handle_hybrid_sparse_csr(self.actual, self.expected)
 
     def _handle_hybrid_sparse_csr(self, actual, expected):
-        if not ((actual.layout is torch.sparse_csr) ^ (expected.layout is torch.sparse_csr)):
+        compressed_sparse_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
+        if not ((actual.layout in compressed_sparse_layouts) ^ (expected.layout in compressed_sparse_layouts)):
             return actual, expected
         def to_dense(tensor):
-            if tensor.layout is not torch.sparse_csr:
+            if tensor.layout not in compressed_sparse_layouts:
                 return tensor
 
-            csr_dims = tensor.values().ndim
-
             def partial_to_dense(tensor):
-                if tensor.ndim == csr_dims:
+                if tensor.layout not in compressed_sparse_layouts or tensor.values().ndim == 1:
                     return tensor.to_dense()
-
                 return torch.stack([partial_to_dense(sub_tensor) for sub_tensor in tensor])
 
             return partial_to_dense(tensor)
