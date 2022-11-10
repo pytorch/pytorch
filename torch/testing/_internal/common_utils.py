@@ -529,7 +529,7 @@ else:
 
 RERUN_DISABLED_TESTS = args.rerun_disabled_tests
 # Rerun disabled tests many more times to make sure that they are not flaky anymore
-MAX_NUM_RETRIES = 3 if RERUN_DISABLED_TESTS else 50
+MAX_NUM_RETRIES = 3 if not RERUN_DISABLED_TESTS else 50
 
 SLOW_TESTS_FILE = args.import_slow_tests
 DISABLED_TESTS_FILE = args.import_disabled_tests
