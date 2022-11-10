@@ -682,7 +682,7 @@ class FakeTensorPropTest(TestCase):
         model = ToyNnModuleWithParameters()
         value = torch.randn(5, 4)
         # Convert nn.Module to GraphModule so that FakeTensorProp runs.
-        graph_model, _ = torch._dynamo.export(model, value, aten_graph=True)
+        graph_model = torch.fx.symbolic_trace(model, (value,))
         # The following block runs FakeTensorProp on graph_module w/to the same FakeTensorMode
         #
         # TODO(wschin): there should be an API to run FakeTensorProp for GraphModule
