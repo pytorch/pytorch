@@ -83,6 +83,18 @@ static DynmetaData& getGlobalDynmetaData() {
   return kDynMetaDataSingleton;
 }
 
+namespace {
+thread_local bool kIsAutogradFunctionAllowed = false;
+}
+
+void setAutogradFunctionAllowed(bool allowed) {
+  kIsAutogradFunctionAllowed = allowed;
+}
+
+bool getAutogradFunctionAllowed() {
+  return kIsAutogradFunctionAllowed;
+}
+
 // functorch stores some TLS. Inside the TLS is the stack of transforms.
 // Unfortunately, since functorch isn't a part of libtorch, we have
 // a level of indirection. FuncTorchTLSBase is the interface that lives in libtorch,
@@ -101,7 +113,7 @@ class FuncTorchTLS : public FuncTorchTLSBase {
   }
 
   int64_t checkSupportsAutogradFunction() const override {
-    TORCH_CHECK(dynamicLayerStack.size() == 0,
+    TORCH_CHECK(dynamicLayerStack.size() == 0 || getAutogradFunctionAllowed(),
         "functorch functions (vmap, grad, vjp, etc.) currently do not support the use of autograd.Function. ",
         "Please rewrite your function to not use autograd.Function while we work on fixing this");
     return 0;
