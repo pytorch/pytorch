@@ -1943,7 +1943,7 @@ TORCH_API ::std::tuple<at::Tensor &,at::Tensor &> median_out_mps
     }
 
     if(!is_macos_13_or_newer()){
-      TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
+      TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0.",
                     "Falling back on CPU. This may have performace implications.");
     return median_from_cpu(input_t.to("cpu"), dim, keepdim, values, indices, IntArrayRef(vec_out_shape),IntArrayRef(vec_apparent_out_shape) );
   }
