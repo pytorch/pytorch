@@ -2375,9 +2375,7 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     )
 
     if ceil_mode:
-        x_alt = ir.IndexingDiv(
-            x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
-        )
+        x_alt = ir.IndexingDiv(x + 2 * padding[i] + (stride[i] - 1), stride[i])
 
         if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
             # ceil mode is actually a no-op, lets guard on that
