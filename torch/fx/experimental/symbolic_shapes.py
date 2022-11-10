@@ -113,8 +113,8 @@ def sym_sqrt(a):
 def sym_int(a):
     if isinstance(a, SymInt):
         return a
-    elif hasattr(a, '__sym_int__'):
-        return a.__sym_int__()
+    elif isinstance(a, SymFloat):
+        return math.floor(a) if a > 0 else math.ceil(a)
     return int(a)
 
 # TODO: An incomplete list
@@ -263,8 +263,7 @@ magic_methods = {
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
     'floor': lambda a: sympy.floor(a),
-    'sym_float': lambda a: a,  # TODO: why can't I wrap with sympy.Float?
-    'sym_int': lambda a: sympy.floor(a) if a > 0 else sympy.ceiling(a),
+    'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
@@ -274,7 +273,6 @@ magic_methods = {
 
 unary_magic_methods = {
     'sym_float',
-    'sym_int',
     'ceil',
     'floor',
     'neg',
@@ -283,10 +281,10 @@ unary_magic_methods = {
 
 magic_methods_on_builtins = {"min", "max"}
 magic_methods_on_math = {"ceil", "floor"}
-magic_methods_on_submodule = {"sym_float", "sym_int", "sym_sqrt"}
+magic_methods_on_submodule = {"sym_float", "sym_sqrt"}
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
-always_int_magic_methods = {"ceil", "floor", "sym_int"}
+always_int_magic_methods = {"ceil", "floor"}
 always_bool_magic_methods = {"eq", "gt", "lt", "le", "ge"}
 
 def wrap_node(x):

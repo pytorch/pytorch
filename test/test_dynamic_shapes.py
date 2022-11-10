@@ -346,13 +346,13 @@ class TestPySymInt(TestCase):
 
         a1 = create_symint(shape_env, 7)
         r = sym_int(a1 / 2)
-        self.assertEqual(r, 3)
+        self.assertEqual(guard_int(r), 3)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertEqual(str(shape_env.guards[1][0]), "Eq(floor(s1/2), 3)")
 
         a2 = create_symint(shape_env, -3)
         r = sym_int(a2 / 2)
-        self.assertEqual(r, -1)
+        self.assertEqual(guard_int(r), -1)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertEqual(str(shape_env.guards[2][0]), "Eq(ceiling(-s2/2), -1)")
 
@@ -565,7 +565,7 @@ class TestSymNumberMagicMethods(TestCase):
     @parametrize("first_type", ["int", "float"])
     @parametrize("second_type", ["int", "float"])
     def test_method(self, fn, first_type, second_type):
-        if first_type == "float" and fn in symbolic_shapes.magic_methods_not_on_float:
+        if first_type == "float":
             self.skipTest(f"{fn} is not a float magic method")
 
         is_unary_fn = fn in symbolic_shapes.unary_magic_methods
