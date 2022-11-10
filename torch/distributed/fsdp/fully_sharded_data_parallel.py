@@ -1581,9 +1581,12 @@ class FullyShardedDataParallel(nn.Module):
                 total_norm, op=torch.distributed.ReduceOp.MAX, group=self.process_group
             )
         else:
+            predivide_factor = _get_gradient_predivide_factor(self.world_size)
+            local_norm.div_(predivide_factor)
             total_norm = local_norm**norm_type
             dist.all_reduce(total_norm, group=self.process_group)
             total_norm = total_norm ** (1.0 / norm_type)
+            total_norm.mul_(predivide_factor)
         if self.cpu_offload.offload_params:
             total_norm = total_norm.cpu()
 
@@ -2346,3 +2349,10 @@ def _get_fqn_to_param(
     """Constructs the inverse mapping of :meth:`_get_param_to_fqn`."""
     param_to_param_name = _get_param_to_fqn(model)
     return dict(zip(param_to_param_name.values(), param_to_param_name.keys()))
+
+
+def _get_gradient_predivide_factor(world_size: int) -> float:
+    factor: int = 1
+    while world_size % factor == 0 and world_size / factor > factor:
+        factor *= 2
+    return float(factor)
