@@ -160,36 +160,115 @@ class TestPartitionFunctions:
         out = torch.stack([add_1, add_2, add_3])
         return out
 
+    @staticmethod
+    def forward12(a, b, c):
+        b0 = a + 1.0
+        c0 = a + 1.5
+        x0 = b0.relu()
+        x1 = c0.relu()
+        b1 = b0 + x1
+        c1 = c0 + 1.2
+        # c2 has dependency on x0 & b0, when we merge {c0, c1, c2}
+        # this dependency should be updated to the fusion group and reflected
+        # on the decision to not fuse b0 & b1, which forms a cyclic dependency in
+        # the new graph
+        c2 = x0 + c0
+        return b1, c2
+
+    @staticmethod
+    def forward13(a, b, c):
+        a0, a1, a2, a3 = a.split(1, 0)
+        b1 = a0 + b
+        c1 = a1 + c
+        return b1 + c1
+
+    @staticmethod
+    def forward14(a, b, c):
+        a0, a1 = torch.ops.aten.std_mean(a)
+        out = a0 + 1.0
+        return out
+
+    @staticmethod
+    def forward15(a, b, c):
+        a0 = torch.ops.aten.view(a, [2, 2])
+        a1 = torch.ops.aten.permute(a0, [1, 0])
+        a2 = a1 + 1.0
+        a3 = torch.ops.aten.permute(a2, [1, 0])
+        a4 = a3 + 1.0
+        a5 = torch.ops.aten.permute(a4, [1, 0])
+        return torch.ops.aten.permute(a5, [1, 0])
+
+    @staticmethod
+    def forward16(a, b, c):
+        a0 = a - 1.0
+        a1 = torch.ops.aten.view(a0, [2, 2])
+        a2 = torch.ops.aten.permute(a1, [1, 0])
+        a3 = a2 + 1.0
+        a4 = torch.ops.aten.permute(a3, [1, 0])
+        a5 = a4 + 1.0
+        a6 = torch.ops.aten.permute(a5, [1, 0])
+        a7 = torch.ops.aten.permute(a6, [1, 0])
+        return a7 - 1.0
+
 # A mock OperatorSupport class, where only operator.add is supported
 class MockOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {operator.add}
-
+        return (node.op == "call_function" and
+                node.target in {operator.add, operator.getitem,
+                                torch.ops.aten.view,
+                                torch.ops.aten.permute,
+                                torch.ops.aten.std_mean})
 
 @instantiate_parametrized_tests
 class TestFXGraphPasses(JitTestCase):
 
-    @parametrize("fn, expected_partition", [
-        (TestPartitionFunctions.forward1, [["add_7", "add_6"], ["add_5", "add_4", "add_3"], ["add_2", "add_1", "add"]]),
-        (TestPartitionFunctions.forward2, [["add_3", "add_2"], ["add_1", "add"]]),
+    @parametrize("fn, expected_partition, bookend_non_compute_pass", [
+        (TestPartitionFunctions.forward1, [["add_7", "add_6"], ["add_5", "add_4", "add_3"], ["add_2", "add_1", "add"]], False),
+        (TestPartitionFunctions.forward2, [["add_3", "add_2"], ["add_1", "add"]], False),
+
+        # 1 horizontal fusion with common producer
+        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]], False),
+        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]], False),
 
         # 2 branches cases
-        (TestPartitionFunctions.forward5, [["add_1", "add"]]),
-        (TestPartitionFunctions.forward6, [["add"]]),
-        (TestPartitionFunctions.forward7, [["add_3", "add_2", "add", "add_1"]]),
-        (TestPartitionFunctions.forward8, [["add_3", "add_2", "add", "add_1"]]),
+        (TestPartitionFunctions.forward5, [["add_1", "add"]], False),
+        (TestPartitionFunctions.forward6, [["add"]], False),
+        (TestPartitionFunctions.forward7, [["add_3", "add_2", "add", "add_1"]], False),
+        (TestPartitionFunctions.forward8, [["add_3", "add_2", "add", "add_1"]], False),
 
         # 3 branch cases
-        (TestPartitionFunctions.forward9, [['add_3', 'add_2', 'add_1', 'add']]),
-        (TestPartitionFunctions.forward10, [['add_3', 'add_2', 'add', 'add_1']]),
-        (TestPartitionFunctions.forward11, [['add_1'], ['add']]),
+        (TestPartitionFunctions.forward9, [['add_3', 'add_2', 'add_1', 'add']], False),
+        (TestPartitionFunctions.forward10, [['add_3', 'add_2', 'add', 'add_1']], False),
+        (TestPartitionFunctions.forward11, [['add_1'], ['add']], False),
+
+        # 4 not necessarily the only partition, just to verify that there's no cyclic dependency after partition
+        (TestPartitionFunctions.forward12, [["add_2"], ["add_3", "add_4", "add_1"], ["add"]], False),
+
+        # 5 getitem special case
+        (TestPartitionFunctions.forward13, [["add_2", "add_1", "add"]], False),
+        (TestPartitionFunctions.forward14, [["add", "std_mean", "getitem", "getitem_1"]], False),
+
+        # 6 bookend non_compute pass
+        (TestPartitionFunctions.forward15, [["permute_1", "add_1", "add"]], True),
+        (TestPartitionFunctions.forward15, [['add_1', 'add', 'permute_1', 'view', 'permute_2', 'permute_3', 'permute']], False),
+        (TestPartitionFunctions.forward16, [["permute_1", "add_1", "add"]], True),
+        (TestPartitionFunctions.forward16, [['add_1', 'add', 'permute_1', 'view', 'permute_2', 'permute_3', 'permute']], False),
     ])
-    def test_partitioner(self, fn, expected_partition):
+    def test_partitioner(self, fn, expected_partition, bookend_non_compute_pass):
         traced = symbolic_trace(fn)
 
+        non_compute_ops = []
+        if bookend_non_compute_pass:
+            non_compute_ops = ["torch.ops.aten.view", "torch.ops.aten.permute"]
+
         supported_ops = MockOperatorSupport()
-        partitioner = CapabilityBasedPartitioner(traced, supported_ops, allows_single_node_partition=True)
+        partitioner = CapabilityBasedPartitioner(traced,
+                                                 supported_ops,
+                                                 allows_single_node_partition=True,
+                                                 non_compute_ops=non_compute_ops)
         partitions = partitioner.propose_partitions()
+        if bookend_non_compute_pass:
+            partitioner.remove_bookend_non_compute_ops(partitions)
 
         partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
         assert len(partitions_name) == len(expected_partition)
@@ -203,24 +282,6 @@ class TestFXGraphPasses(JitTestCase):
         expected = fn(a, b, c)
         result = fused_graph(a, b, c)
         torch.testing.assert_close(expected, result)
-
-
-    @parametrize("fn, expected_partition", [
-        # horizontal fusion without a common downstream node, not supported yet
-        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),
-        # horizontal fusion with a common downstream node, not supported yet
-        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),
-    ])
-    def test_partitioner_xfail(self, fn, expected_partition):
-        traced = symbolic_trace(fn)
-
-        supported_ops = MockOperatorSupport()
-        partitioner = CapabilityBasedPartitioner(traced, supported_ops, allows_single_node_partition=True)
-        partitions = partitioner.propose_partitions()
-
-        partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
-        with self.assertRaises(Exception):
-            assert len(partitions_name) == len(expected_partition)
 
     @parametrize("partition", [
         [['add', 'add_1'], ['add_5', 'add_6']],
@@ -664,6 +725,27 @@ class QuantizationFp8Pattern:
         TestCase(False, False, 1),
     ]
 
+class NoAnchorFound:
+    # This test case is for pattern where no matching anchor is found in the target graph
+    # `anchor` is the starting point of the pattern matching, it's usually the boundary returning nodes
+    @staticmethod
+    def forward(x):
+        x = x + 1
+        return x
+
+    @staticmethod
+    def pattern(a):
+        b1 = a.relu()
+        return b1
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 0),
+        TestCase(True, False, 0),
+        TestCase(False, True, 0),
+        TestCase(True, True, 0)
+    ]
+
 @instantiate_parametrized_tests
 class TestFXMatcherUtils(JitTestCase):
 
@@ -683,6 +765,7 @@ class TestFXMatcherUtils(JitTestCase):
         MultipleOutputsHorizontalPattern,
         MultiOutputWithWithInvalidMatches,
         QuantizationFp8Pattern,
+        NoAnchorFound,
     ])
     def test_subgraph_matcher(self, test_model):
 

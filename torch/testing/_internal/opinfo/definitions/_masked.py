@@ -50,41 +50,28 @@ def sample_inputs_softmax_variant(
     if torch.device(device).type != "xla":
         cases.append(((), (0,)))
 
-    return [
+    return (
         SampleInput(make_arg(shape), args=dim, kwargs=kwargs) for shape, dim in cases
-    ]
+    )
 
 
 def _generate_masked_op_mask(input_shape, device, **kwargs):
+    make_arg = partial(
+        make_tensor, dtype=torch.bool, device=device, requires_grad=False
+    )
     yield None
-    yield make_tensor(input_shape, dtype=torch.bool, device=device, requires_grad=False)
+    yield make_arg(input_shape)
     if len(input_shape) > 2:
         # broadcast last mask dimension:
-        yield make_tensor(
-            input_shape[:-1] + (1,),
-            dtype=torch.bool,
-            device=device,
-            requires_grad=False,
-        )
+        yield make_arg(input_shape[:-1] + (1,))
         # broadcast middle mask dimension:
-        yield make_tensor(
-            input_shape[:1] + (1,) + input_shape[2:],
-            dtype=torch.bool,
-            device=device,
-            requires_grad=False,
-        )
+        yield make_arg(input_shape[:1] + (1,) + input_shape[2:])
         # broadcast first mask dimension:
-        yield make_tensor(
-            (1,) + input_shape[1:], dtype=torch.bool, device=device, requires_grad=False
-        )
+        yield make_arg((1,) + input_shape[1:])
         # mask.ndim < input.ndim
-        yield make_tensor(
-            input_shape[1:], dtype=torch.bool, device=device, requires_grad=False
-        )
+        yield make_arg(input_shape[1:])
         # mask.ndim == 1
-        yield make_tensor(
-            input_shape[-1:], dtype=torch.bool, device=device, requires_grad=False
-        )
+        yield make_arg(input_shape[-1:])
         # masks that require broadcasting of inputs (mask.ndim >
         # input.ndim) will not be supported, however, we may
         # reconsider this if there will be demand on this kind of
@@ -138,7 +125,7 @@ def sample_inputs_sparse_coo_masked_reduction(
     with sparse coo layouts.
     """
     if op_info.supports_sparse:
-        op_name = op_info.name.replace("_masked.", "")
+        op_name = op_info.name.replace("masked.", "")
         for sample_input in sample_inputs_masked_reduction(
             op_info, device, dtype, requires_grad, **kwargs
         ):
@@ -155,7 +142,7 @@ def sample_inputs_sparse_coo_masked_reduction(
                 if op_name in {"prod", "amax", "amin"}:
                     # FIXME: for now reductions with non-zero reduction identity and
                     # unspecified mask are not supported for sparse COO
-                    # tensors, see torch._masked.prod implementation
+                    # tensors, see torch.masked.prod implementation
                     # for details.
                     continue
                 yield SampleInput(
@@ -172,7 +159,7 @@ def sample_inputs_sparse_csr_masked_reduction(
     with sparse csr layouts.
     """
     if op_info.supports_sparse_csr:
-        op_name = op_info.name.replace("_masked.", "")
+        op_name = op_info.name.replace("masked.", "")
         for sample_input in sample_inputs_masked_reduction(
             op_info, device, dtype, requires_grad, **kwargs
         ):
@@ -195,7 +182,7 @@ def sample_inputs_sparse_csr_masked_reduction(
                 if op_name in ["prod", "amax", "amin", "mean"]:
                     # reductions with non-zero reduction identity and
                     # unspecified mask is not supported for sparse CSR
-                    # tensors, see torch._masked.prod implementation
+                    # tensors, see torch.masked.prod implementation
                     # for details.
                     continue
                 new_sample = SampleInput(
@@ -255,16 +242,16 @@ def sample_inputs_masked_std_var(op_info, device, dtype, requires_grad, **kwargs
                 sample_input_kwargs = dict(sample_input.kwargs, unbiased=unbiased)
             if requires_grad:
                 if sample_input_kwargs.get("mask") is None:
-                    orig_count = torch._masked.sum(
+                    orig_count = torch.masked.sum(
                         torch.ones(sample_input.input.shape, dtype=torch.int64),
                         dim,
                         keepdim=True,
                     )
                 else:
-                    inmask = torch._masked._input_mask(
+                    inmask = torch.masked._input_mask(
                         sample_input.input, *sample_input_args, **sample_input_kwargs
                     )
-                    orig_count = torch._masked.sum(
+                    orig_count = torch.masked.sum(
                         inmask.new_ones(sample_input.input.shape, dtype=torch.int64),
                         dim,
                         keepdim=True,
@@ -294,24 +281,18 @@ def sample_inputs_masked_softmax(
     same shape as input or a shape that is broadcastable to input
     shape.
     """
-    inputs: List[SampleInput] = []
     for sample_input in sample_inputs_softmax_variant(
         op_info, device, dtype, requires_grad, with_dtype=with_dtype, **kwargs
     ):
         for mask in _generate_masked_op_mask(
             sample_input.input.shape, device, **kwargs
         ):
-            sample_input_args, sample_input_kwargs = sample_input.args, dict(
-                mask=mask, **sample_input.kwargs
+            yield SampleInput(
+                sample_input.input.clone().requires_grad_(requires_grad),
+                *sample_input.args,
+                mask=mask,
+                **sample_input.kwargs,
             )
-            inputs.append(
-                SampleInput(
-                    sample_input.input.clone().requires_grad_(requires_grad),
-                    args=sample_input_args,
-                    kwargs=sample_input_kwargs,
-                )
-            )
-    return inputs
 
 
 def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs):
@@ -338,20 +319,15 @@ def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs)
                     continue
                 dim = sample_input_kwargs.pop("dim")
                 sample_input_args = (dim,)
-            inputs.append(
-                SampleInput(
-                    sample_input.input.clone().requires_grad_(requires_grad),
-                    args=sample_input_args,
-                    kwargs=sample_input_kwargs,
-                )
+            yield SampleInput(
+                sample_input.input.clone().requires_grad_(requires_grad),
+                *sample_input_args,
+                **sample_input_kwargs,
             )
-
-    return inputs
 
 
 def sample_inputs_masked_logaddexp(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked logaddexp."""
-    inputs: List[SampleInput] = []
     shapes = [(S,), (S, S), (S, M, S)]
     input_mask_lists = [
         list(_generate_masked_op_mask(shape, device, **kwargs)) for shape in shapes
@@ -360,49 +336,38 @@ def sample_inputs_masked_logaddexp(op_info, device, dtype, requires_grad, **kwar
         list(_generate_masked_op_mask(shape, device, **kwargs)) for shape in shapes
     ]
 
+    make_arg = partial(
+        make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
+    )
     for shape, input_masks, other_masks in zip(
         shapes, input_mask_lists, other_mask_lists
     ):
         for input_mask, other_mask in zip(input_masks, other_masks):
-            input = make_tensor(
-                shape, dtype=dtype, device=device, requires_grad=requires_grad
+            yield SampleInput(
+                make_arg(shape),
+                make_arg(shape),
+                input_mask=input_mask,
+                other_mask=other_mask,
             )
-            other = make_tensor(
-                shape, dtype=dtype, device=device, requires_grad=requires_grad
-            )
-            inputs.append(
-                SampleInput(
-                    input.clone().requires_grad_(requires_grad),
-                    args=(other.clone().requires_grad_(requires_grad),),
-                    kwargs=dict(input_mask=input_mask, other_mask=other_mask),
-                )
-            )
-    return inputs
 
 
 def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked normalize."""
-    inputs: List[SampleInput] = []
     for ord in [2.0, 1, float("inf"), float("-inf"), 0]:
         for sample_input in sample_inputs_softmax_variant(
             op_info, device, dtype, requires_grad, **kwargs
         ):
-            sample_input_args, sample_input_kwargs = (
+            yield SampleInput(
+                sample_input.input.clone().requires_grad_(requires_grad),
                 ord,
-            ) + sample_input.args, sample_input.kwargs.copy()
-            inputs.append(
-                SampleInput(
-                    sample_input.input.clone().requires_grad_(requires_grad),
-                    args=sample_input_args,
-                    kwargs=sample_input_kwargs,
-                )
+                *sample_input.args,
+                **sample_input.kwargs,
             )
-    return inputs
 
 
 op_db: List[OpInfo] = [
     ReductionOpInfo(
-        "_masked.sum",
+        "masked.sum",
         ref=reference_reduction_numpy(np.sum),
         method_variant=None,
         identity=0,
@@ -438,12 +403,12 @@ op_db: List[OpInfo] = [
         ),
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=1e-03, rtol=1e-03)}),
-                "TestReductions",
-                "test_reference_masked",
-            ),
-            DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}),
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=1e-03, rtol=5e-2),
+                        torch.float16: tol(atol=1e-03, rtol=5e-3),
+                    }
+                ),
                 "TestReductions",
                 "test_reference_masked",
             ),
@@ -452,13 +417,23 @@ op_db: List[OpInfo] = [
                 "TestReductions",
                 "test_ref_small_input",
             ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=0.1, rtol=0.1),
+                        torch.float16: tol(atol=5e-3, rtol=5e-3),
+                    }
+                ),
+                "TestMasked",
+                "test_mask_layout",
+            ),
         ],
         sample_inputs_func=sample_inputs_masked_reduction,
         sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
         sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction,
     ),
     ReductionOpInfo(
-        "_masked.prod",
+        "masked.prod",
         ref=reference_reduction_numpy(np.prod),
         method_variant=None,
         identity=1,
@@ -491,6 +466,13 @@ op_db: List[OpInfo] = [
                 "test_reference_masked",
                 dtypes=(torch.bool, torch.int8, torch.int16, torch.int32),
             ),
+            # integer overflow
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_ref_small_input",
+                dtypes=(torch.int8, torch.int16, torch.int32),
+            ),
             # FIXME: "cuda_scatter_gather_base_kernel_func" not implemented for ... (used for sparse_coo inputs)
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -511,13 +493,18 @@ op_db: List[OpInfo] = [
                 "TestReductions",
                 "test_ref_duplicate_values",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}),
+                "TestReductions",
+                "test_ref_small_input",
+            ),
         ],
         sample_inputs_func=sample_inputs_masked_reduction,
         sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
         sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction,
     ),
     OpInfo(
-        "_masked.cumsum",
+        "masked.cumsum",
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         method_variant=None,
@@ -542,7 +529,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     OpInfo(
-        "_masked.cumprod",
+        "masked.cumprod",
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         method_variant=None,
@@ -570,13 +557,25 @@ op_db: List[OpInfo] = [
                 dtypes=(torch.bfloat16,),
                 device_type="cpu",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
+                "TestCompositeCompliance",
+                "test_backward",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=2e-3, rtol=2e-3)}),
+                "TestInductorOpInfo",
+                "test_comprehensive",
+                device_type="cuda",
+            ),
         ),
         # Can reuse the same inputs; dim is required in both
         sample_inputs_func=sample_inputs_masked_cumops,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "_masked.amax",
+        "masked.amax",
         nan_policy="propagate",
         supports_out=False,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
@@ -615,7 +614,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "_masked.amin",
+        "masked.amin",
         nan_policy="propagate",
         supports_out=False,
         supports_forward_ad=True,
@@ -654,7 +653,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "_masked.argmax",
+        "masked.argmax",
         supports_out=False,
         supports_multiple_dims=False,
         supports_autograd=False,
@@ -679,7 +678,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "_masked.argmin",
+        "masked.argmin",
         supports_out=False,
         supports_multiple_dims=False,
         supports_autograd=False,
@@ -704,7 +703,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "_masked.mean",
+        "masked.mean",
         ref=reference_reduction_numpy(np.mean)
         if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
         else None,
@@ -759,9 +758,25 @@ op_db: List[OpInfo] = [
         ),
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}),
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=1e-03, rtol=0.05),
+                        torch.float16: tol(atol=1e-03, rtol=1e-03),
+                    }
+                ),
                 "TestReductions",
                 "test_reference_masked",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}),
+                "TestReductions",
+                "test_ref_small_input",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=2e-03)}),
+                "TestSparseCompressed",
+                "test_consistency",
+                device_type="cuda",
             ),
         ],
         sample_inputs_func=sample_inputs_masked_reduction,
@@ -769,7 +784,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     OpInfo(
-        "_masked.median",
+        "masked.median",
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16),
         method_variant=None,
@@ -791,7 +806,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "_masked.norm",
+        "masked.norm",
         identity=0,
         method_variant=None,
         nan_policy="propagate",
@@ -822,7 +837,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "_masked.var",
+        "masked.var",
         ref=reference_reduction_numpy(np.var)
         if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
         else None,
@@ -884,13 +899,23 @@ op_db: List[OpInfo] = [
                 "TestCudaFuserOpInfo",
                 "test_nvfuser_correctness",
             ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float16: tol(atol=1e-02, rtol=1e-02),
+                        torch.bfloat16: tol(atol=1e-03, rtol=1e-03),
+                    }
+                ),
+                "TestMasked",
+                "test_reference_masked",
+            ),
         ],
         sample_inputs_func=sample_inputs_masked_std_var,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         check_batched_grad=True,
     ),
     ReductionOpInfo(
-        "_masked.std",
+        "masked.std",
         ref=reference_reduction_numpy(np.std)
         if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
         else None,
@@ -937,7 +962,12 @@ op_db: List[OpInfo] = [
         ),
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=1e-02, rtol=1e-02),
+                        torch.float16: tol(atol=1e-02, rtol=1e-02),
+                    }
+                ),
                 "TestReductions",
                 "test_reference_masked",
             ),
@@ -947,7 +977,12 @@ op_db: List[OpInfo] = [
                 "test_ref_small_input",
             ),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                toleranceOverride(
+                    {
+                        torch.float16: tol(atol=1e-02, rtol=1e-02),
+                        torch.bfloat16: tol(atol=5e-03, rtol=5e-04),
+                    }
+                ),
                 "TestMasked",
                 "test_reference_masked",
             ),
@@ -957,7 +992,7 @@ op_db: List[OpInfo] = [
         check_batched_grad=True,
     ),
     OpInfo(
-        "_masked.softmax",
+        "masked.softmax",
         method_variant=None,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -978,7 +1013,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
     ),
     OpInfo(
-        "_masked.log_softmax",
+        "masked.log_softmax",
         method_variant=None,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -1006,7 +1041,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
     ),
     OpInfo(
-        "_masked.softmin",
+        "masked.softmin",
         method_variant=None,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -1027,7 +1062,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
     ),
     OpInfo(
-        "_masked.normalize",
+        "masked.normalize",
         method_variant=None,
         dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_normalize,
@@ -1057,7 +1092,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
     ),
     OpInfo(
-        "_masked.logaddexp",
+        "masked.logaddexp",
         dtypes=floating_types_and(torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
@@ -1074,14 +1109,17 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
             DecorateInfo(
-                unittest.skip("Skipped!"), "TestGradients", "test_fn_gradgrad"
+                unittest.skip("Skipped!"), "TestFwdGradients", "test_fn_gradgrad"
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"), "TestBwdGradients", "test_fn_gradgrad"
             ),
         ),
         sample_inputs_func=sample_inputs_masked_logaddexp,
         gradcheck_wrapper=gradcheck_wrapper_masked_pointwise_operation,
     ),
     ReductionOpInfo(
-        "_masked.logsumexp",
+        "masked.logsumexp",
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         method_variant=None,

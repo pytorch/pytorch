@@ -58,7 +58,7 @@ jobs:
         uses: ./.github/actions/setup-rocm
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.docker-image }}
 
@@ -69,7 +69,7 @@ jobs:
           python3 -m pip install psutil==5.9.1
           python3 -m pip install pynvml==11.4.1
           python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
-          echo "::set-output name=monitor-script-pid::${!}"
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
@@ -96,6 +96,8 @@ jobs:
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
+          PYTORCH_JIT_ENABLE_NVFUSER: 1
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0'}}
         timeout-minutes: 270
         run: |
           set -x
@@ -145,6 +147,7 @@ jobs:
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+            -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \

@@ -2473,7 +2473,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
       .add_output(perm)
       .add_input(*pivots_)
       .build();
-    unpack_pivots_stub(pivots_->device().type(), iter, n);
+    unpack_pivots_stub(pivots_->device().type(), iter, n, n);
 
     if (trans == TransposeType::NoTranspose) {
       // Get the inverse permutation

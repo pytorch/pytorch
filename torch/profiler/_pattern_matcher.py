@@ -1,14 +1,13 @@
-from collections import deque
 import json
 import math
 import os
 import re
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 import torch
 from torch.profiler import profile
 import torch.utils.benchmark as benchmark
-from torch.profiler._utils import index_of_first_match
+from torch.profiler._utils import index_of_first_match, traverse_bfs, traverse_dfs
 from torch._C._profiler import (_ProfilerEvent, _ExtraFields_TorchOp,
                                 _ExtraFields_PyCCall, _ExtraFields_PyCall,
                                 _EventType)
@@ -48,7 +47,7 @@ class Pattern:
         Traverse the event tree and yield all events.
         Override this method in subclass to customize the traversal.
         '''
-        yield from eventTreeDFS(self.event_tree)
+        yield from traverse_dfs(self.event_tree)
 
     def summary(self, events: List[_ProfilerEvent]):
         default_summary = f"{self.name}: {len(events)} events matched."
@@ -139,7 +138,7 @@ class NamePattern(Pattern):
         self.name = name
 
     def match(self, event: _ProfilerEvent):
-        return re.search(self.name, event.name()) is not None
+        return re.search(self.name, event.name) is not None
 
 
 class ExtraCUDACopyPattern(Pattern):
@@ -174,24 +173,24 @@ class ExtraCUDACopyPattern(Pattern):
 
     def match(self, event):
         # TODO: We should also check tensor identities
-        if event.name() != "aten::to":
+        if event.name != "aten::to":
             return False
         to_event = event
         if not event.children:
             return False
         event = event.children[-1]
-        if event.name() != "aten::_to_copy":
+        if event.name != "aten::_to_copy":
             return False
         if not event.children:
             return False
         event = event.children[-1]
-        if event.name() != "aten::copy_":
+        if event.name != "aten::copy_":
             return False
         # aten::copy_ should have the first 2 args dtype the same
         dtypes = input_dtypes(event)
         if len(dtypes) < 2:
             return False
-        if dtypes[0] != dtypes[1]:
+        if dtypes[0] is None or dtypes[0] != dtypes[1]:
             return False
         event = to_event
         # Up one level
@@ -205,9 +204,9 @@ class ExtraCUDACopyPattern(Pattern):
         while event.children:
             event = event.children[-1]
             # aten::zero_ is a special optimzation case where fill_ is not called
-            if event.name() in self.init_ops:
+            if event.name in self.init_ops:
                 return True
-        return event.name() in self.init_ops
+        return event.name in self.init_ops
         # TODO: Check if tensor is reused
 
     def benchmark(self, events: List[_ProfilerEvent]):
@@ -251,10 +250,10 @@ class ForLoopIndexingPattern(Pattern):
         '''
         We need to use BFS traversal order to avoid duplicate match.
         '''
-        yield from eventTreeBFS(self.event_tree)
+        yield from traverse_bfs(self.event_tree)
 
     def match(self, event: _ProfilerEvent):
-        if event.name() != "aten::select":
+        if event.name != "aten::select":
             return False
         if event.id in self.visited:
             return False
@@ -268,13 +267,13 @@ class ForLoopIndexingPattern(Pattern):
             if len(list1) != len(list2):
                 return False
             for op1, op2 in zip(list1, list2):
-                if op1.name() != op2.name():
+                if op1.name != op2.name:
                     return False
             return True
 
         # Record the ops between two aten::select
         next_select_idx = index_of_first_match(
-            next, lambda e: e.name() == "aten::select")
+            next, lambda e: e.name == "aten::select")
         if next_select_idx is None:
             return False
         indexing_ops = [event] + next[:next_select_idx]
@@ -311,7 +310,7 @@ class FP32MatMulPattern(Pattern):
         if event.tag != _EventType.TorchOp:
             return False
         assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
-        if event.name() == "aten::mm":
+        if event.name == "aten::mm":
             if event.extra_fields.allow_tf32_cublas is False:
                 return True
         return False
@@ -370,7 +369,7 @@ class OptimizerSingleTensorPattern(Pattern):
 
     def match(self, event: _ProfilerEvent):
         for optimizer in self.optimizers_with_foreach:
-            if event.name().endswith(f"_single_tensor_{optimizer}"):
+            if event.name.endswith(f"_single_tensor_{optimizer}"):
                 return True
         return False
 
@@ -411,17 +410,17 @@ class SynchronizedDataLoaderPattern(Pattern):
                 os.path.join("torch", "utils", "data",
                              "dataloader.py")) and name.endswith(function_name)
 
-        if not is_dataloader_function(event.name(), "__iter__"):
+        if not is_dataloader_function(event.name, "__iter__"):
             return False
         if not event.children:
             return False
         event = event.children[0]
-        if not is_dataloader_function(event.name(), "_get_iterator"):
+        if not is_dataloader_function(event.name, "_get_iterator"):
             return False
         if not event.children:
             return False
         event = event.children[0]
-        return not is_dataloader_function(event.name(),
+        return not is_dataloader_function(event.name,
                                           "check_worker_number_rationality")
         # TODO: We should also check if the loader is bottleneck.
 
@@ -456,14 +455,13 @@ class GradNotSetToNonePattern(Pattern):
             "#disable-gradient-calculation-for-validation-or-inference")
 
     def match(self, event: _ProfilerEvent):
-        if not event.name().endswith(": zero_grad"):
+        if not event.name.endswith(": zero_grad"):
             return False
         if not event.children:
             return False
 
-        for sub_event in eventTreeDFS(event.children):
-            if sub_event.name(
-            ) == "aten::zero_" and sub_event.parent.name() != "aten::zeros":
+        for sub_event in traverse_dfs(event.children):
+            if sub_event.name == "aten::zero_" and sub_event.parent.name != "aten::zeros":
                 return True
         # TODO: We should also check if the optimizer's numerical behavior will change.
         return False
@@ -495,19 +493,19 @@ class Conv2dBiasFollowedByBatchNorm2dPattern(Pattern):
         return self.prof.record_shapes is False or super().skip
 
     def match(self, event: _ProfilerEvent):
-        if event.name() != "aten::conv2d":
+        if event.name != "aten::conv2d":
             return False
-        if len(input_dtypes(event)) < 3 or input_dtypes(event)[2] == "":
+        if len(input_dtypes(event)) < 3 or input_dtypes(event)[2] is None:
             return False
         # This means bias=True
         event = self.go_up_until(
-            event, lambda e: e.name().startswith("nn.Module: Conv2d"))
+            event, lambda e: e.name.startswith("nn.Module: Conv2d"))
         if not event:
             return False
         event = self.next_of(event)
         if not event:
             return False
-        return event.name().startswith("nn.Module: BatchNorm2d")
+        return event.name.startswith("nn.Module: BatchNorm2d")
 
 
 class MatMulDimInFP16Pattern(Pattern):
@@ -528,15 +526,12 @@ class MatMulDimInFP16Pattern(Pattern):
             return all(dim % multiple == 0 for shape in shapes
                        for dim in shape[-2:])
 
-        if event.name() not in ("aten::mm", "aten::bmm", "aten::addmm"):
+        if event.name not in ("aten::mm", "aten::bmm", "aten::addmm"):
             return False
         if not input_dtypes(event):
             return False
         arg_dtype = input_dtypes(event)[0]
-        # TODO: Have a better way to check dtype_size
-        if (arg_dtype.endswith("c10::BFloat16")
-                or arg_dtype.endswith("c10::Half")) and not mutiple_of(
-                    input_shapes(event), 8):
+        if arg_dtype in (torch.bfloat16, torch.half) and not mutiple_of(input_shapes(event), 8):
             return True
         return False
 
@@ -573,7 +568,7 @@ class MatMulDimInFP16Pattern(Pattern):
         return shapes_factor_map
 
 
-def source_code_location(event: _ProfilerEvent):
+def source_code_location(event: Optional[_ProfilerEvent]):
     while event:
         if event.tag == _EventType.PyCall or event.tag == _EventType.PyCCall:
             assert isinstance(event.extra_fields,
@@ -588,36 +583,12 @@ def source_code_location(event: _ProfilerEvent):
 
 def input_shapes(event: _ProfilerEvent):
     assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
-    return tuple([tuple(shape) for shape in event.extra_fields.inputs.shapes])
+    return tuple(tuple(getattr(i, "sizes", ())) for i in event.extra_fields.inputs)
 
 
 def input_dtypes(event: _ProfilerEvent):
     assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
-    return tuple(t for t in event.extra_fields.inputs.dtypes)
-
-
-def eventTreeDFS(event_tree: List[_ProfilerEvent]):
-    '''
-    Standard DFS traversal of the event tree.
-    '''
-    stack = deque(event_tree)
-    while stack:
-        curr_event = stack.pop()
-        yield curr_event
-        for child_event in curr_event.children:
-            stack.append(child_event)
-
-
-def eventTreeBFS(event_tree: List[_ProfilerEvent]):
-    '''
-    Standard BFS traversal of the event tree.
-    '''
-    stack = deque(event_tree)
-    while stack:
-        curr_event = stack.popleft()
-        yield curr_event
-        for child_event in curr_event.children:
-            stack.append(child_event)
+    return tuple(getattr(i, "dtype", None) for i in event.extra_fields.inputs)
 
 
 def report_all_anti_patterns(prof,

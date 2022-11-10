@@ -16,6 +16,8 @@ from pathlib import Path
 import os
 import warnings
 
+__all__ = ["reduce_graph_module", "reduce_package_graph_module", "reduce_deploy_graph_module", "GraphModule"]
+
 # Normal exec loses the source code, however we can work with
 # the linecache module to recover it.
 # Using _exec_with_source will add it to our local cache
@@ -710,7 +712,7 @@ class {module_name}(torch.nn.Module):
         return GraphModule(self, self.graph)
 
     @compatibility(is_backward_compatible=False)
-    def print_readable(self):
+    def print_readable(self, print_output=True):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
@@ -723,11 +725,14 @@ class {module_name}(torch.nn.Module):
         submodule_code_list = [""]
         for submodule in self.children():
             if isinstance(submodule, GraphModule):
-                submodule_code_list.append(submodule.__nested_code())
+                submodule_code_list.append(submodule.print_readable(print_output=False))
         submodule_code = "\n".join(submodule_code_list)
         submodule_code = _addindent(submodule_code, 4)
 
-        print(module_code + submodule_code)
+        output = module_code + submodule_code
+        if print_output:
+            print(module_code + submodule_code)
+        return output
 
     def __str__(self) -> str:
         orig_str = super().__str__()

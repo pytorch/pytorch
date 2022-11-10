@@ -30,6 +30,29 @@ class Kernel : public ::testing::Test {
   }
 };
 
+TEST_F(Kernel, ParallelExternalCallBuf) {
+  const auto graph_string = R"IR(
+    graph(%0 : Float(1000, 5000, strides=[5000, 1], device=cpu),
+          %1 : Float(1000, 5000, strides=[5000, 1], device=cpu),
+          %2 : Float(5000, 1000, strides=[5000, 1], device=cpu)):
+      %3 : Float(1000, 5000, strides=[5000, 1], device=cpu) = aten::mul(%0, %1)
+      %4 : Float(1000, 5000, strides=[5000, 1], device=cpu) = aten::matmul(%3, %2)
+      return (%4))IR";
+  auto graph = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, &*graph);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int64_t i = 0ll; i < 5000ll; i++)  /* parallel */{)IR";
+
+#ifdef TORCH_ENABLE_LLVM
+  TensorExprKernel k(graph);
+  StmtPtr s = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+#endif
+}
+
 TEST_F(Kernel, InliningIntermediates) {
   // here, each mul has only one use, so it should be completely inlined
   {
@@ -579,6 +602,54 @@ TEST_F(Kernel, CatInputTypesPromotion) {
   }
 }
 
+TEST_F(Kernel, ToDType) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%x.1 : BFloat16(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
+        %1 : NoneType = prim::Constant()
+        %2 : bool = prim::Constant[value=0]()
+        %3 : int = prim::Constant[value=6]()
+        %4 : int = prim::Constant[value=15]()
+        %5 : int = prim::Constant[value=5]()
+        %6 : bool = prim::Constant[value=1]()
+        %y.3 : BFloat16(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::sigmoid(%x.1)
+        %z.3 : BFloat16(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::_autocast_to_reduced_precision(%y.3, %6, %6, %5, %4)
+        %h.3 : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::_autocast_to_full_precision(%z.3, %6, %6)
+        %i.3 : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::to(%h.3, %3, %2, %2, %1)
+        %j.3 : BFloat16(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::to(%i.3, %4, %2, %2, %1)
+        %k.3 : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::to(%j.3, %3, %2, %2, %1)
+        return (%k.3))IR";
+
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  TensorExprKernel k(graph);
+  StmtPtr s = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *s;
+
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_to
+# CHECK-NEXT: }
+# CHECK-NEXT: })IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto a = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kBFloat16));
+  auto ref =
+      at::_to_copy(at::sigmoid(a), TensorOptions(kCPU).dtype(at::kFloat));
+
+  std::vector<at::Tensor> inputs = {a};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+  ASSERT_EQ(o.sizes(), ref.sizes());
+  ASSERT_EQ(o.dtype(), ref.dtype());
+  ASSERT_TRUE(at::allclose(o, ref, 4E-3, 4E-3));
+#endif
+}
+
 TEST_F(Kernel, CatAndInlineWithAConstantDim) {
   const auto graph_string = R"IR(
       graph(%0 : Float(1, 512, strides=[1024, 1], requires_grad=0, device=cpu),
@@ -915,7 +986,7 @@ TEST_F(Kernel, SumOneAxis) {
         o = stack[0].toTensor();
         ASSERT_EQ(o.sizes(), ref.sizes());
         ASSERT_EQ(o.dtype(), ref.dtype());
-        ASSERT_TRUE(at::allclose(o, ref));
+        ASSERT_TRUE(at::allclose(o, ref, 4E-3, 4E-3));
       }
     }
   }

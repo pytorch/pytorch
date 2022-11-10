@@ -1,26 +1,37 @@
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/group_norm.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Parallel.h>
 #include <c10/util/accumulate.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/group_norm_native.h>
+#include <ATen/ops/native_batch_norm.h>
+#include <ATen/ops/native_group_norm.h>
+#include <ATen/ops/native_group_norm_backward_native.h>
+#include <ATen/ops/native_group_norm_native.h>
+#endif
 
 #include <array>
 #include <functional>
-#include <numeric>
 #include <tuple>
 #include <vector>
 
 namespace at {
+
 namespace native {
 
+template <typename T>
 void check_group_norm_inputs(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
-    int64_t C,
+    T C,
     int64_t num_groups) {
   TORCH_CHECK(
       num_groups > 0,
@@ -34,14 +45,14 @@ void check_group_norm_inputs(
       "num_groups=",
       num_groups);
   TORCH_CHECK(
-      !weight.defined() || (weight.dim() == 1 && weight.numel() == C),
+      !weight.defined() || (weight.dim() == 1 && at::symint::numel<T>(weight) == C),
       "Expected weight to be a vector of size equal to the number of ",
       "channels in input, but got weight of shape ",
       weight.sizes(),
       " and input of shape ",
       input.sizes());
   TORCH_CHECK(
-      !bias.defined() || (bias.dim() == 1 && bias.numel() == C),
+      !bias.defined() || (bias.dim() == 1 && at::symint::numel<T>(bias) == C),
       "Expected bias to be a vector of size equal to the number of ",
       "channels in input, but got bias of shape ",
       weight.sizes(),
@@ -162,24 +173,24 @@ Tensor group_norm(
   const Tensor& weight = *weight_maybe_owned;
   const Tensor& bias = c10::value_or_else(bias_opt, [] { return Tensor(); });
 
-  const int64_t N = input.size(0);
-  const int64_t C = input.size(1);
+  const auto N = input.sym_size(0);
+  const auto C = input.sym_size(1);
   check_group_norm_inputs(input, weight, bias, C, num_groups);
 
-  const auto input_shape = input.sizes();
-  const int64_t HxW =
-      c10::multiply_integers(input_shape.cbegin() + 2, input_shape.cend());
+  const auto input_shape = input.sym_sizes();
+  const auto HxW =
+      c10::multiply_integers(input_shape.slice(2));
 
   const Tensor kEmpty;
   auto memory_format = input.suggest_memory_format();
-  const auto& X = input.device().is_cpu() ?
+  const auto& X = input.device().is_cpu() || input.device().is_xpu() ?
       input.contiguous(memory_format) : input.contiguous();
   const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
-  TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
-  TORCH_CHECK(!beta.defined() || beta.numel() == C);
+  TORCH_CHECK(!gamma.defined() || gamma.sym_numel() == C);
+  TORCH_CHECK(!beta.defined() || beta.sym_numel() == C);
   return std::get<0>(
-      at::native_group_norm(X, gamma, beta, N, C, HxW, num_groups, eps));
+      at::native_group_norm_symint(X, gamma, beta, N, C, HxW, num_groups, eps));
 }
 
 DEFINE_DISPATCH(GroupNormKernel);
@@ -224,8 +235,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   } else if (bias.defined()) {
     out = out.add(bias.view(affine_param_shape));
   }
-  at::Tensor mean = std::get<1>(outputs).view({N, group});
-  at::Tensor rstd = std::get<2>(outputs).view({N, group});
+  // convert mean/std to have the same dtype as input.
+  // This follows the same behavior as the CPU and CUDA kernels.
+  at::Tensor mean = std::get<1>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
+  at::Tensor rstd = std::get<2>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
   return std::make_tuple(out, mean, rstd);
 }
 } // namespace native

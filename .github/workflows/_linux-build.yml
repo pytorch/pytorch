@@ -34,6 +34,12 @@ on:
         default: "5.2"
         description: |
           List of CUDA architectures CI build should target.
+      runner:
+        required: false
+        type: string
+        default: "linux.2xlarge"
+        description: |
+          List of CUDA architectures CI build should target.
 
       test-matrix:
         required: false
@@ -55,11 +61,16 @@ jobs:
   build:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
     steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
       # [pytorch repo ref]
       # Use a pytorch/pytorch reference instead of a reference to the local
       # checkout because when we run this action we don't *have* a local
@@ -70,11 +81,6 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
-      - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Calculate docker image
         id: calculate-docker-image
         uses: ./.github/actions/calculate-docker-image
@@ -83,7 +89,7 @@ jobs:
           xla: ${{ contains(inputs.build-environment, 'xla') }}
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -179,5 +185,5 @@ jobs:
           path: sccache-stats-*.json
 
       - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()

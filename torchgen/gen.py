@@ -34,10 +34,10 @@ from torchgen.context import (
     with_native_function_and_indices,
 )
 from torchgen.gen_functionalization_type import (
-    gen_composite_view_copy_kernel,
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
+    GenCompositeViewCopyKernel,
 )
 from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
 
@@ -48,6 +48,7 @@ from torchgen.model import (
     BaseOperatorName,
     DEFAULT_KERNEL_NAMESPACE,
     DispatchKey,
+    FRAGMENT_NAMESPACES,
     FunctionSchema,
     is_cuda_dispatch_key,
     is_generic_dispatch_key,
@@ -636,12 +637,10 @@ static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed
 class ComputeFunction:
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        if Variant.function not in f.variants:
-            return None
-
         sig_group = CppSignatureGroup.from_native_function(
             f, method=False, fallback_binding=f.manual_cpp_binding
         )
+        has_symint = f.func.has_symint()
 
         result = ""
         for sig in sig_group.signatures():
@@ -650,10 +649,31 @@ class ComputeFunction:
             exprs = translate(sig.arguments(), target_sig.arguments())
             exprs_str = ", ".join([e.expr for e in exprs])
 
-            result += f"""
+            if sig.symint:
+                intlike_t = "c10::SymInt"
+            else:
+                intlike_t = "int64_t"
+
+            if Variant.function in f.variants:
+                result += f"""
 // aten::{f.func}
 inline {sig.decl()} {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
+}}"""
+
+            # The template function can be used from template situations
+            # where you want to switch between the symint or not version
+            # depending on a template argument
+            #
+            # NB: we ALWAYS generate this even for methods.  But we put it in
+            # this header so it can take advantage of per-op headers
+            if has_symint:
+                result += f"""
+namespace symint {{
+  template <typename T, typename = std::enable_if_t<std::is_same<T, {intlike_t}>::value>>
+  {sig.decl(suppress_symint_suffix=True)} {{
+    return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
+  }}
 }}
 """
         return result
@@ -1132,7 +1152,9 @@ def compute_argument_yaml(
         "type": cpp.argument_type(a, binds="__placeholder__", symint=False).cpp_type(),
     }
     if a.default is not None:
-        arg["default"] = pythonify_default(cpp.default_expr(a.default, a.type))
+        arg["default"] = pythonify_default(
+            cpp.default_expr(a.default, a.type, symint=False)
+        )
     if a.name in kwarg_only_set:
         arg["kwarg_only"] = True
     if a.name in out_arg_set:
@@ -1451,6 +1473,7 @@ def get_native_function_definitions(
     backend_idx: BackendIndex,
     selector: SelectiveBuilder,
     rocm: bool,
+    symint: bool,
     skip_dispatcher_op_registration: bool,
     gen_dispatch_helpers: bool,
 ) -> List[str]:
@@ -1464,6 +1487,7 @@ def get_native_function_definitions(
         Target.NAMESPACED_DEFINITION,
         selector,
         rocm=rocm,
+        symint=symint,
         class_method_name=None,
         skip_dispatcher_op_registration=skip_dispatcher_op_registration,
     )
@@ -1472,6 +1496,7 @@ def get_native_function_definitions(
         Target.ANONYMOUS_DEFINITION,
         selector,
         rocm=rocm,
+        symint=symint,
         class_method_name=None,
         skip_dispatcher_op_registration=skip_dispatcher_op_registration,
     )
@@ -1480,6 +1505,7 @@ def get_native_function_definitions(
         Target.REGISTRATION,
         selector,
         rocm=rocm,
+        symint=symint,
         class_method_name=None,
         skip_dispatcher_op_registration=skip_dispatcher_op_registration,
     )
@@ -1549,6 +1575,7 @@ def get_namespaced_declaration(
     backend_idx: BackendIndex,
     selector: SelectiveBuilder,
     rocm: bool,
+    symint: bool,
 ) -> List[str]:
     declarations: List[str] = []
     ns_grouped_kernels: Dict[str, List[str]] = defaultdict(list)
@@ -1560,6 +1587,7 @@ def get_namespaced_declaration(
         rocm=rocm,
         class_method_name=None,
         skip_dispatcher_op_registration=False,
+        symint=symint,
     )
     for f in grouped_native_functions:
         namespace = get_kernel_namespace(f=f, backend_idx=backend_idx).replace(
@@ -1613,8 +1641,15 @@ def get_native_function_schema_registrations(
         else:
             custom_namespace = namespace
             tab = "\t"
+            # if the namespace is predefined, we should use define a library fragment
+            # instead of a new library
+            torch_library_macro = (
+                "TORCH_LIBRARY_FRAGMENT"
+                if namespace in FRAGMENT_NAMESPACES
+                else "TORCH_LIBRARY"
+            )
             schema_registrations += f"""
-TORCH_LIBRARY({custom_namespace}, m) {{
+{torch_library_macro}({custom_namespace}, m) {{
   {tab.join(schema_registrations_body)}
 }};"""
     return (aten_schema_registrations, schema_registrations)
@@ -1733,6 +1768,7 @@ def gen_aggregated_headers(
                         backend_idx=backend_indices[dispatch_key],
                         selector=selector,
                         rocm=rocm,
+                        symint=True,
                     ),
                 },
             )
@@ -1873,6 +1909,7 @@ def gen_per_operator_headers(
                         Target.NAMESPACED_DECLARATION,
                         selector,
                         rocm=rocm,
+                        symint=True,
                         class_method_name=None,
                         skip_dispatcher_op_registration=False,
                     ),
@@ -2184,6 +2221,7 @@ def gen_source_files(
             backend_idx=backend_index,
             selector=selector,
             rocm=rocm,
+            symint=True,
             skip_dispatcher_op_registration=skip_dispatcher_op_registration,
             gen_dispatch_helpers=gen_dispatch_helpers,
         )
@@ -2464,7 +2502,11 @@ def gen_source_files(
         lambda: {
             "ops_headers": [
                 "\n".join(
-                    f"#include <ATen/ops/{f.root_name}_ops.h>"
+                    f"#include <ATen/ops/{f.root_name}_ops.h>\n"
+                    # NB: this include is important as it ensures we
+                    # set the visibility on generated view_copy kernels
+                    # correctly
+                    f"#include <ATen/ops/{f.root_name}_native.h>"
                     for f in (
                         [g.view] if g.view_copy is None else [g.view, g.view_copy]
                     )
@@ -2480,7 +2522,14 @@ def gen_source_files(
                 for g in structured_native_functions
             ],
             "CompositeViewCopyKernel_Definitions": list(
-                mapMaybe(gen_composite_view_copy_kernel, view_groups)
+                mapMaybe(
+                    GenCompositeViewCopyKernel(
+                        backend_indices[
+                            DispatchKey.CompositeExplicitAutogradNonFunctional
+                        ]
+                    ),
+                    view_groups,
+                )
             ),
             "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(

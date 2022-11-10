@@ -18,11 +18,6 @@ const BackendImplInterface* getBackend() {
   return interface;
 }
 
-// default implementation
-bool BackendImplInterface::ShouldSyncTensor(const LazyTensorPtr tensor) const {
-  return tensor->GetIrValue()->op() != ltc_not_supported;
-}
-
 BackendRegistrar::BackendRegistrar(
     const BackendImplInterface* backend_impl_interface) {
   backend_impl_registry.store(backend_impl_interface);

@@ -1261,14 +1261,16 @@ class TestTensorExprFuser(BaseTestClass):
             return a + b + c + d
 
         for test in (test_softmax, test_log_softmax, test_softmax_neg_index):
-            old = torch._C._jit_set_texpr_reductions_enabled(True)
-            traced = torch.jit.trace(test, (torch.randn(2, 3, device=device), torch.randn(2, 3, device=device)))
-            inp = torch.randn(2, 3, device=device)
-            res = traced(inp, inp)
-            # Use eager mode as reference.
-            ref = test(inp, inp)
-            np.testing.assert_allclose(ref, res.cpu().numpy(), rtol=1e-06, atol=1e-06)
-            torch._C._jit_set_texpr_reductions_enabled(old)
+            for data_type in self.dtypes:
+                old = torch._C._jit_set_texpr_reductions_enabled(True)
+                traced_input = torch.randn(2, 3, dtype=data_type, device=device)
+                traced = torch.jit.trace(test, (traced_input, traced_input))
+                inp = torch.randn(2, 3, dtype=data_type, device=device)
+                res = traced(inp, inp)
+                # Use eager mode as reference.
+                ref = test(inp, inp)
+                np.testing.assert_allclose(ref, res.cpu().numpy(), rtol=1e-06, atol=1e-06)
+                torch._C._jit_set_texpr_reductions_enabled(old)
 
     def test_softmax_cpu(self):
         self._test_softmax('cpu')

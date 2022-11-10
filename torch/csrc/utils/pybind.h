@@ -12,6 +12,8 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Generator.h>
+#include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 
 #include <stdexcept>
 #include <utility>
@@ -108,6 +110,28 @@ struct TORCH_PYTHON_API type_caster<at::IntArrayRef> {
 };
 
 template <>
+struct TORCH_PYTHON_API type_caster<at::MemoryFormat> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(at::MemoryFormat, _("at::MemoryFormat"));
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+    if (THPMemoryFormat_Check(obj)) {
+      value = reinterpret_cast<THPMemoryFormat*>(obj)->memory_format;
+      return true;
+    }
+    return false;
+  }
+  static handle cast(
+      at::MemoryFormat src,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    return handle(torch::utils::getTHPMemoryFormat(src));
+  }
+};
+
+template <>
 struct type_caster<at::Device> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -161,6 +185,30 @@ struct type_caster<c10::DispatchKey>
       handle parent) {
     return base::cast(src, policy, parent);
   }
+};
+
+template <>
+struct type_caster<c10::SymInt> {
+ public:
+  PYBIND11_TYPE_CASTER(c10::SymInt, _("SymInt"));
+  bool load(py::handle src, bool);
+
+  static py::handle cast(
+      c10::SymInt si,
+      return_value_policy /* policy */,
+      handle /* parent */);
+};
+
+template <>
+struct type_caster<c10::SymFloat> {
+ public:
+  PYBIND11_TYPE_CASTER(c10::SymFloat, _("SymFloat"));
+  bool load(py::handle src, bool);
+
+  static py::handle cast(
+      c10::SymFloat si,
+      return_value_policy /* policy */,
+      handle /* parent */);
 };
 
 // Pybind11 bindings for our optional and variant types.
