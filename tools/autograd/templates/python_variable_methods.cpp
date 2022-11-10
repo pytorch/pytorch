@@ -1193,7 +1193,7 @@ static PyObject* THPVariable_set_(
     case 3: {
       // aten::set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
       auto dispatch_set_ = [](const Tensor& self, const Tensor& source) -> Tensor {
-        TORCH_INTERNAL_ASSERT(source.dtype() == self.dtype());
+        TORCH_CHECK(source.dtype() == self.dtype(), "Could not set tensor of type ", source.dtype(), " to a tensor of type ", self.dtype());
         pybind11::gil_scoped_release no_gil;
         return self.set_(source);
       };
