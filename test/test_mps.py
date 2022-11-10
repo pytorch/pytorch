@@ -2597,7 +2597,7 @@ class TestNLLLoss(TestCase):
 
         helper_dtype_int32(10, 10, 10)  # median at even place
         helper_dtype_int32(3, 3, 3)  # median at odd place
-        helper_dtype_int32(1, 1, 1) 
+        helper_dtype_int32(1, 1, 1)
         helper_dtype_float32(10, 10, 10)
         helper_dtype_float32(3, 3, 3)
         helper_dtype_float32(1, 1, 1)
