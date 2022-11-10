@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import functools
 import os
 import re
 import shutil
@@ -10,8 +11,13 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch._inductor.config
+import torch._inductor.utils
 from torch._dynamo.debug_utils import TEST_REPLACEABLE_COMMENT
 
+_HAS_TRITON = torch._inductor.utils.has_triton()
+requires_cuda = functools.partial(unittest.skipIf, not _HAS_TRITON, "requires cuda")
+torch._inductor.config.triton.autotune = False
 
 RELU_COMPILE_ERROR_BACKEND = """\
 from torch._dynamo.optimizations.backends import register_backend
@@ -270,19 +276,19 @@ torch._dynamo.config.repro_level = {repro_level}
     def test_after_dynamo_cpu_accuracy_error(self):
         self._test_after_dynamo("cpu", 4, RELU_ACCURACY_ERROR_BACKEND, "AccuracyError")
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @requires_cuda()
     def test_after_dynamo_cuda_compile_error(self):
         self._test_after_dynamo(
             "cuda", 2, RELU_COMPILE_ERROR_BACKEND, "DynamoCompileError"
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @requires_cuda()
     def test_after_dynamo_cuda_runtime_error(self):
         self._test_after_dynamo(
             "cuda", 2, RELU_RUNTIME_ERROR_BACKEND, "DynamoRuntimeError"
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @requires_cuda()
     def test_after_dynamo_cuda_accuracy_error(self):
         self._test_after_dynamo("cuda", 4, RELU_ACCURACY_ERROR_BACKEND, "AccuracyError")
 
@@ -303,7 +309,8 @@ torch._dynamo.config.repro_level = {repro_level}
         )
 
         test_code = self._gen_test_code(run_code, "dynamo", repro_level, backend_code)
-        _, repro_dir = self._run_test_code(test_code)
+        proc, repro_dir = self._run_test_code(test_code)
+        self.assertEqual(proc.returncode, 0)
         self.assertIsNone(repro_dir)
 
     def test_after_dynamo_cpu_compile_backend_passes(self):
@@ -315,15 +322,15 @@ torch._dynamo.config.repro_level = {repro_level}
     def test_after_dynamo_cpu_accuracy_backend_passes(self):
         self._test_after_dynamo_backend_passes("cpu", 4, RELU_ACCURACY_ERROR_BACKEND)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @requires_cuda()
     def test_after_dynamo_cuda_compile_backend_passes(self):
         self._test_after_dynamo_backend_passes("cuda", 2, RELU_COMPILE_ERROR_BACKEND)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @requires_cuda()
     def test_after_dynamo_cuda_runtime_backend_passes(self):
         self._test_after_dynamo_backend_passes("cuda", 2, RELU_RUNTIME_ERROR_BACKEND)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @requires_cuda()
     def test_after_dynamo_cuda_accuracy_backend_passes(self):
         self._test_after_dynamo_backend_passes("cuda", 4, RELU_ACCURACY_ERROR_BACKEND)
 
@@ -353,7 +360,7 @@ torch._dynamo.config.repro_level = {repro_level}
         self.assertIn("RuntimeError", launch_proc.stderr.decode("utf-8"))
 
     # Test that a module with mixed cpu/cuda parts with an error after dynamo can be repro'd
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @requires_cuda()
     def test_cpu_cuda_module_after_dynamo(self):
         backend_name = get_fn_name(RELU_COMPILE_ERROR_BACKEND)
 
@@ -501,13 +508,13 @@ torch._dynamo.config.repro_level = {repro_level}
         self.assertIn("AccuracyError", tb1)
         self.assertIn("AccuracyError", tb2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @requires_cuda()
     def test_after_aot_cuda_compile_error(self):
         (tb1, tb2), _ = self._test_after_aot("cuda", TRITON_COMPILE_ERROR, 2)
         self.assertIn("SyntaxError", tb1)
         self.assertIn("SyntaxError", tb2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @requires_cuda()
     def test_after_aot_cuda_accuracy_error(self):
         (tb1, tb2), _ = self._test_after_aot("cuda", TRITON_ACCURACY_ERROR, 4)
         self.assertIn("AccuracyError", tb1)
@@ -546,7 +553,7 @@ torch._dynamo.config.repro_level = {repro_level}
 
     # NOTE: there is currently not an easy way to cause a triton runtime error.
     @unittest.skip
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @requires_cuda()
     def test_after_aot_cuda_runtime_error(self):
         self._test_after_aot_runtime_error("cuda", TRITON_RUNTIME_ERROR)
 
@@ -569,7 +576,8 @@ torch._dynamo.config.repro_level = {repro_level}
         self.assertIsNotNone(patch_code)
 
         test_code = self._gen_test_code(run_code, "aot", repro_level, patch_code)
-        _, repro_dir = self._run_test_code(test_code)
+        proc, repro_dir = self._run_test_code(test_code)
+        self.assertEqual(proc.returncode, 0)
         self.assertIsNone(repro_dir)
 
     def test_after_aot_cpu_compile_backend_passes(self):
@@ -581,17 +589,17 @@ torch._dynamo.config.repro_level = {repro_level}
     def test_after_aot_cpu_accuracy_backend_passes(self):
         self._test_after_aot_backend_passes("cpu", 4, CPP_ACCURACY_ERROR)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @requires_cuda()
     def test_after_aot_cuda_compile_backend_passes(self):
         self._test_after_aot_backend_passes("cuda", 2, TRITON_COMPILE_ERROR)
 
     # NOTE: there is currently not an easy way to cause a triton runtime error.
     @unittest.skip
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @requires_cuda()
     def test_after_aot_cuda_runtime_backend_passes(self):
         self._test_after_aot_backend_passes("cuda", 2, TRITON_RUNTIME_ERROR)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @requires_cuda()
     def test_after_aot_cuda_accuracy_backend_passes(self):
         self._test_after_aot_backend_passes("cuda", 4, TRITON_ACCURACY_ERROR)
 
