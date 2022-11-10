@@ -414,6 +414,19 @@ def _make_elementwise_unary_reference(
     return inner
 
 
+def _make_alias(fn, name):
+    """
+    This function defines an alias of another function and sets its __name__argument
+    Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`.
+    """
+
+    def _fn(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    _fn.__name__ = name
+    return _fn
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
 def abs(a):
     return prims.abs(a)
@@ -611,6 +624,10 @@ def isnan(a: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, a)
 
 
+# alias
+mvlgamma = _make_alias(torch.special.multigammaln, "mvlgamma")  # type: ignore[has-type]
+
+
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=None,  # CompositeImplicitAutograd
@@ -632,10 +649,6 @@ def i0(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def lgamma(a):
     return prims.lgamma(a)
-
-
-# alias
-mvlgamma = torch.special.multigammaln  # type: ignore[has-type]
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -3572,6 +3585,7 @@ diagonal_copy = _make_copy_from_view(diagonal)
 
 
 @register_decomposition(torch.ops.aten.diag_embed)
+@out_wrapper()
 def diag_embed(
     t: TensorLikeType,
     offset: int = 0,
