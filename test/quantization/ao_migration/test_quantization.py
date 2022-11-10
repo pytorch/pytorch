@@ -177,9 +177,9 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             "default_qat_qconfig_v2",
             "get_default_qconfig",
             "get_default_qat_qconfig",
-            "assert_valid_qconfig",
+            "_assert_valid_qconfig",
             "QConfigAny",
-            "add_module_to_qconfig_obs_ctr",
+            "_add_module_to_qconfig_obs_ctr",
             "qconfig_equals"
         ]
         self._test_function_import('qconfig', function_list)
