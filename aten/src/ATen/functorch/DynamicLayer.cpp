@@ -113,6 +113,7 @@ class FuncTorchTLS : public FuncTorchTLSBase {
   }
 
   int64_t checkSupportsAutogradFunction() const override {
+    return 0;
     TORCH_CHECK(dynamicLayerStack.size() == 0 || getAutogradFunctionAllowed(),
         "functorch functions (vmap, grad, vjp, etc.) currently do not support the use of autograd.Function. ",
         "Please rewrite your function to not use autograd.Function while we work on fixing this");
@@ -265,7 +266,7 @@ int64_t initAndPushDynamicLayer(
 
   auto& data = getGlobalDynmetaData();
 
-  TORCH_INTERNAL_ASSERT(data.find(layerId) == data.end());
+  /// TORCH_INTERNAL_ASSERT(data.find(layerId) == data.end());
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
   }
@@ -407,12 +408,6 @@ static void dump_local_tls() {
   std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
 }
 #endif
-
-struct WithoutTop {
-  WithoutTop();
-  ~WithoutTop();
-  DynamicLayer layer_;
-};
 
 WithoutTop::WithoutTop(): layer_(popDynamicLayer()) {}
 WithoutTop::~WithoutTop() {
