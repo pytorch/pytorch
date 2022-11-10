@@ -2325,13 +2325,11 @@ def matmul(tensor1, tensor2):
         expand_batch_product = prod(expand_batch_portion)
 
         # HACK: We need reshape with symint support
-        tensor1_expanded = (
-            tensor1.expand(tensor1_expand_size)
-            .reshape(expand_batch_product, n, m1)
+        tensor1_expanded = tensor1.expand(tensor1_expand_size).reshape(
+            expand_batch_product, n, m1
         )
-        tensor2_expanded = (
-            tensor2.expand(tensor2_expand_size)
-            .reshape(expand_batch_product, m2, p)
+        tensor2_expanded = tensor2.expand(tensor2_expand_size).reshape(
+            expand_batch_product, m2, p
         )
 
         output_shape = expand_batch_portion
