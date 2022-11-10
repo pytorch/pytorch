@@ -37,8 +37,7 @@ class FSDPPolicy(ABC):
     """
 
     # The motivation for this abstract base class is to hide the interface
-    # expected by func:`_recursive_wrap` from users, mainly the `recurse`
-    # argument.
+    # expected by `_recursive_wrap()` from users (i.e. the `recurse` argument).
     def __init__(self):
         ...
 
@@ -56,7 +55,7 @@ def _module_wrap_policy(
 ) -> bool:
     """
     This auto wrap policy wraps every module that is an instance of any type in
-    ``module_classes` as its own FSDP instance. The root module given by
+    ``module_classes`` as its own FSDP instance. The root module given by
     ``module`` is always wrapped as an FSDP instance regardless. Since the
     wrapping proceeds bottom up, each FSDP instance manages the parameters in
     its subtree excluding any already managed by a child FSDP instance.
