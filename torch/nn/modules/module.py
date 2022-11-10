@@ -3,7 +3,6 @@ import itertools
 import warnings
 import functools
 import weakref
-import types
 
 import torch
 from ..parameter import Parameter
