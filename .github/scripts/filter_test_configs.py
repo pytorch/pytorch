@@ -34,8 +34,7 @@ VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}" for label in {
     "xla",
 }}
 
-# Supported mode when running periodically. For simplicity, a random weight
-# will be assigned to each mode so that they can be chosen at random
+# Supported modes when running periodically
 SUPPORTED_PERIODICAL_MODES = {
     "mem_leak_check",
     "rerun_disabled_tests",
@@ -119,7 +118,7 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
 
 def set_periodic_modes(test_matrix: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
     """
-    Apply all periodic modse when running under a schedule
+    Apply all periodic modes when running under a schedule
     """
     scheduled_test_matrix: Dict[str, List[Any]] = {
         "include": [],
