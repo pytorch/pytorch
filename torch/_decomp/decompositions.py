@@ -2292,9 +2292,7 @@ def matmul(tensor1, tensor2):
         t2_is_matrix = t2.dim() == 2
         if t2_is_matrix:
             output_shape.append(t2.shape[1])
-        # HACK: We need reshape with symint support
-        t1 = t1.contiguous()
-        t1_folded = t1.view(folded_dim1, sizes_1[-1])
+        t1_folded = t1.reshape(folded_dim1, sizes_1[-1])
         if t2_is_matrix:
             # FIXME This path always does an unnecessary copy when transpose == True as the returned
             # result from BLAS is already C-transposed
@@ -2329,13 +2327,11 @@ def matmul(tensor1, tensor2):
         # HACK: We need reshape with symint support
         tensor1_expanded = (
             tensor1.expand(tensor1_expand_size)
-            .contiguous()
-            .view(expand_batch_product, n, m1)
+            .reshape(expand_batch_product, n, m1)
         )
         tensor2_expanded = (
             tensor2.expand(tensor2_expand_size)
-            .contiguous()
-            .view(expand_batch_product, m2, p)
+            .reshape(expand_batch_product, m2, p)
         )
 
         output_shape = expand_batch_portion
