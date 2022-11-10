@@ -1,6 +1,7 @@
 # Owner(s): ["module: onnx"]
 
-"""Test consistency between torch.onnx exported operators and torch operators.
+"""Test consistency between the output values of torch.onnx exported operators
+and torch operators given the same inputs.
 
 Usage:
 
@@ -36,6 +37,7 @@ from typing import (
 )
 
 import onnx
+import onnx_test_common
 
 import torch
 from torch.onnx import _constants, verification
@@ -52,7 +54,6 @@ MIN_ONNX_OPSET_VERSION = 9
 MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
 
 TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
-ORT_PROVIDERS = ("CPUExecutionProvider",)
 
 SUPPORTED_DTYPES = (
     # Boolean
@@ -118,14 +119,12 @@ class DecorateMeta:
     op_name: str
     variant_name: str
     decorator: Callable
-    opsets: Collection[Union[int, Callable[[int], bool]]]
-    device_type: Optional[str]
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]]
     dtypes: Optional[Collection[torch.dtype]]
     reason: str
 
     def contains_opset(self, opset: int) -> bool:
-        if not self.opsets:
-            # Any empty container means all opsets
+        if self.opsets is None:
             return True
         return any(
             opset == opset_spec if isinstance(opset_spec, int) else opset_spec(opset)
@@ -137,18 +136,26 @@ def xfail(
     op_name: str,
     variant_name: str = "",
     *,
-    opsets: Collection[Union[int, Callable[[int], bool]]] = tuple(),
-    device_type: Optional[str] = None,
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
-    reason: str = "unspecified",
+    reason: Optional[str] = None,
 ):
-    """Expects a OpInfo test to fail."""
+    """Expects a OpInfo test to fail.
+
+    Args:
+        op_name: The name of the operator.
+        variant_name: The name of the variant.
+        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
+        dtypes: The dtypes to expect the failure.
+        reason: The reason for the failure.
+    """
+    if reason is None:
+        raise ValueError("Please specify a reason.")
     return DecorateMeta(
         op_name=op_name,
         variant_name=variant_name,
         decorator=unittest.expectedFailure,
         opsets=opsets,
-        device_type=device_type,
         dtypes=dtypes,
         reason=reason,
     )
@@ -158,23 +165,28 @@ def dont_care(
     op_name: str,
     variant_name: str = "",
     *,
-    opsets: Collection[Union[int, Callable[[int], bool]]] = tuple(),
-    device_type: Optional[str] = None,
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
-    reason="unspecified",
+    reason: Optional[str] = None,
 ):
     """Skips a test case in OpInfo that we don't care about.
 
     Likely because ONNX does not support the use case or it is by design.
-    However, if ONNX changes its behavior and start to support the use case, we should
-    update the test to expect the new behavior, leveraging XfailOpset.
+
+    Args:
+        op_name: The name of the operator.
+        variant_name: The name of the variant.
+        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
+        dtypes: The dtypes to expect the failure.
+        reason: The reason for the failure.
     """
+    if reason is None:
+        raise ValueError("Please specify a reason.")
     return DecorateMeta(
         op_name=op_name,
         variant_name=variant_name,
         decorator=unittest.skip(f"Don't care: {reason}"),
         opsets=opsets,
-        device_type=device_type,
         dtypes=dtypes,
         reason=reason,
     )
@@ -184,24 +196,32 @@ def fixme(
     op_name: str,
     variant_name: str = "",
     *,
-    opsets: Collection[Union[int, Callable[[int], bool]]] = tuple(),
-    device_type: Optional[str] = None,
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
-    reason="unspecified",
+    reason: Optional[str] = None,
 ):
-    """Skips a test case in OpInfo. It should be eventually fixed."""
+    """Skips a test case in OpInfo. It should be eventually fixed.
+
+    Args:
+        op_name: The name of the operator.
+        variant_name: The name of the variant.
+        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
+        dtypes: The dtypes to expect the failure.
+        reason: The reason for the failure.
+    """
+    if reason is None:
+        raise ValueError("Please specify a reason.")
     return DecorateMeta(
         op_name=op_name,
         variant_name=variant_name,
         decorator=unittest.skip(f"To fix: {reason}"),
         opsets=opsets,
-        device_type=device_type,
         dtypes=dtypes,
         reason=reason,
     )
 
 
-def skip_ops(
+def add_decorate_info(
     all_opinfos: Sequence[opinfo_core.OpInfo],
     test_class_name: str,
     base_test_name: str,
@@ -223,7 +243,6 @@ def skip_ops(
             decorate_meta.decorator,
             test_class_name,
             base_test_name,
-            device_type=decorate_meta.device_type,
             dtypes=decorate_meta.dtypes,
         )
         decorators.append(new_decorator)
@@ -234,19 +253,6 @@ def skip_ops(
         return fn
 
     return wrapped
-
-
-def get_torch_op_name(op: Union[str, Callable]) -> str:
-    """Returns the name of the torch function corresponding to the given op."""
-    if callable(op):
-        module_name = op.__module__.split("torch.", 1)
-        op_name = op.__name__
-        if len(module_name) == 2:
-            # Remove the torch. prefix
-            op_name = f"{module_name[1]}.{op_name}"
-        return op_name
-    # Already a string
-    return op
 
 
 def opsets_before(opset: int) -> Callable[[int], bool]:
@@ -296,23 +302,17 @@ def reason_flaky() -> str:
 # alphabetically.
 #
 # For example, to add a test for torch.ceil:
-# 1.  Add `torch.ceil` to ALLOWLIST_OP then run pytest.
-#         You can also add a string, e.g. "ceil" or "__radd__".
-# 2a. If the test fails, fix the error or add a new entry to EXPECTED_SKIPS_OR_FAILS.
-# 2b. If the test is expected to fail only on certain opsets, add a new entry to
-#     EXPECTED_OPSET_FAILS.
+# 1.  Add "ceil" to ALLOWLIST_OP then run pytest.
+# 2.  If the test fails, fix the error or add a new entry to EXPECTED_SKIPS_OR_FAILS.
 
 # TODO: Directly modify DecorateInfo in each OpInfo in ob_db when all ops are enabled.
-# Ops to be tested for consistency between onnx and pytorch
+# Ops to be tested for numerical consistency between onnx and pytorch
 ALLOWLIST_OP: AbstractSet[str] = frozenset(
-    map(
-        get_torch_op_name,
-        (
-            torch.ceil,
-            torch.sqrt,
-            torch.t,
-        ),
-    )
+    [
+        "ceil",
+        "sqrt",
+        "t",
+    ]
 )
 
 # fmt: off
@@ -355,8 +355,8 @@ class SingleOpModel(torch.nn.Module):
         return self.operator(*args, **self.kwargs)
 
 
-class TestConsistency(common_utils.TestCase):
-    """Test consistency of exported ONNX models.
+class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
+    """Test output consistency between exported ONNX models and PyTorch eager mode.
 
     This is a parameterized test suite.
     """
@@ -366,7 +366,8 @@ class TestConsistency(common_utils.TestCase):
         """Returns the base test method for the given opset."""
 
         def _output_match_base(self, device: str, dtype: torch.dtype, op):
-            """Base test method for testing each opset."""
+            """Base test method for testing each opset, used by instantiate_device_type_tests."""
+            # device is provided by instantiate_device_type_tests, but we only want to run in cpu.
             assert device == "cpu"
 
             samples = op.sample_inputs(
@@ -402,38 +403,29 @@ class TestConsistency(common_utils.TestCase):
                         onnx.checker.check_model(onnx_model, full_check=True)
                         continue
 
-                    verification.verify(
-                        model,
-                        inputs,
-                        input_kwargs={},
-                        opset_version=opset,
-                        keep_initializers_as_inputs=True,
-                        ort_providers=ORT_PROVIDERS,
-                        check_shape=True,
-                        check_dtype=True,
-                        flatten=True,
-                    )
+                    self.run_test(model, inputs)
 
+        test_name = f"test_output_match_opset_{opset}"
+        _output_match_base.__name__ = test_name
         return _output_match_base
 
     @classmethod
     def parameterize_opsets(cls, opsets: Sequence[int]):
-        """Parameterizes the TestConsistency class with the given opsets."""
+        """Parameterizes the TestOnnxModelOutputConsistency class with the given opsets."""
         for opset in opsets:
             # Generate a test method for each opset
-            test_name = f"test_output_match_opset_{opset}"
             base_method = cls.create_test_base(opset)
             # Important to rename the test method so that DecorateInfo can find it
-            base_method.__name__ = test_name
+            test_name = base_method.__name__
 
             # Update the ops to skip in the OpInfo database
-            decorated = skip_ops(
+            add_decorate_info(
                 OPS_DB,
                 cls.__name__,
                 test_name,
                 opset=opset,
                 skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
-            )(base_method)
+            )
 
             # Create parameterized tests for each op
             if opset < 13:
@@ -447,14 +439,14 @@ class TestConsistency(common_utils.TestCase):
             decorated = common_device_type.ops(
                 filtered_ops,
                 allowed_dtypes=allowed_dtypes,
-            )(decorated)
+            )(base_method)
 
             setattr(cls, test_name, decorated)
 
 
-TestConsistency.parameterize_opsets(TESTED_OPSETS)
+TestOnnxModelOutputConsistency.parameterize_opsets(TESTED_OPSETS)
 common_device_type.instantiate_device_type_tests(
-    TestConsistency, globals(), only_for="cpu"
+    TestOnnxModelOutputConsistency, globals(), only_for="cpu"
 )
 
 

@@ -30,11 +30,11 @@ pytorch_converted_dir = os.path.join(onnx_model_dir, "pytorch-converted")
 
 pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
 
-_ORT_PROVIDERS = ("CPUExecutionProvider",)
+ORT_PROVIDERS = ("CPUExecutionProvider",)
 
 
 def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
-    kwargs["ort_providers"] = _ORT_PROVIDERS
+    kwargs["ort_providers"] = ORT_PROVIDERS
     kwargs["opset_version"] = test_suite.opset_version
     kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
     if hasattr(test_suite, "check_shape"):
