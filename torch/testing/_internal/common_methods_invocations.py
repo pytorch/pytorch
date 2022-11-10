@@ -1379,8 +1379,7 @@ def sample_inputs_scalar_tensor(op, device, dtype, requires_grad, **kwargs):
     vals = (-5, 0, 1)
 
     for item in vals:
-        _kwargs = {'device': device, 'dtype': dtype, 'requires_grad': requires_grad}
-        yield SampleInput(item, args=(), kwargs=_kwargs)
+        yield SampleInput(item, device=device, dtype=dtype, requires_grad=requires_grad)
 
 def sample_inputs_eye(op, device, dtype, requires_grad, **kwargs):
     # only ints >= 0 are allowed for both arguments, unless m is omitted
