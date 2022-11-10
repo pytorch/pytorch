@@ -312,11 +312,12 @@ def lookup_backend(compiler_fn):
     """Expand backend strings to functions"""
     if compiler_fn == "inductor":
         if (
-            torch.backends.cuda.matmul.allow_tf32 == False
+            torch.backends.cuda.matmul.allow_tf32 is False
             and torch.cuda.get_device_capability() >= (7, 0)
         ):
             warnings.warn(
-                "Tensor cores are available but not enabled. Consider setting torch.backends.cuda.matmul.allow_tf32 == True in your python script for speedups"
+                "Tensor cores are available but not enabled."
+                "Consider setting torch.backends.cuda.matmul.allow_tf32 == True in your python script for speedups"
             )
 
         compiler_fn = import_module(f"{config.inductor_import}.compile_fx").compile_fx
