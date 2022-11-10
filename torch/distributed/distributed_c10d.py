@@ -1060,10 +1060,13 @@ def _new_process_group_helper(
             pg = backend_pg
             break
 
+        print(f"finished creating {backend_pg} for device {device}")
+        pg._set_backend(torch.device(device), backend_pg)
+
     # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
     if backend in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
         # In debug mode and if GLOO is available, wrap in a wrapper PG that
-        # enables enhanced collective checking for debugability.
+        # enables enhanced collective checking for debuggability.
         if get_debug_level() == DebugLevel.DETAIL:
             if not _GLOO_AVAILABLE:
                 logger.info(
@@ -1082,12 +1085,9 @@ def _new_process_group_helper(
                     timeout=timeout,
                 )
 
-            print(f"finished creating {backend_pg} for device {device}")
-            pg._set_backend(torch.device(device), backend_pg)
-
     # update global state
-    _world._pg_map[pg] = (backend, store)
-    _world._pg_names[pg] = group_name
+    _world.pg_map[pg] = (backend, store)
+    _world.pg_names[pg] = group_name
     _pg_backend_map[pg] = str(backend_config)
     return pg
 
@@ -1938,7 +1938,7 @@ def all_gather_multigpu(
 def _object_to_tensor(obj, device):
     f = io.BytesIO()
     _pickler(f).dump(obj)
-    byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
+    byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
     # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
     # Otherwise, it will casue 100X slowdown.
     # See: https://github.com/pytorch/pytorch/issues/65696
