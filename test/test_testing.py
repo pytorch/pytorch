@@ -1794,8 +1794,14 @@ class TestImports(TestCase):
         if not sys.version_info >= (3, 9):
             ignored_modules.append("torch.utils.benchmark")
         if IS_WINDOWS or IS_MACOS:
-            # Distributed does not work on Windows or by default on Mac
-            ignored_modules.append("torch.distributed.")
+            # Distributed should be importable on Windows(except nn.api.), but not on Mac
+            if IS_MACOS:
+                ignored_modules.append("torch.distributed.")
+            else:
+                ignored_modules.append("torch.distributed.nn.api.")
+                ignored_modules.append("torch.distributed.optim.")
+                ignored_modules.append("torch.distributed.pipeline.")
+                ignored_modules.append("torch.distributed.rpc.")
             ignored_modules.append("torch.testing._internal.dist_utils")
             # And these both end up with transitive dependencies on distributed
             ignored_modules.append("torch.nn.parallel._replicated_tensor_ddp_interop")
