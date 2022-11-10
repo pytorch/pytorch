@@ -48,6 +48,8 @@
 #include <ATen/ops/conj_physical.h>
 #include <ATen/ops/conj_physical_native.h>
 #include <ATen/ops/copy_native.h>
+#include <ATen/ops/deg2rad.h>
+#include <ATen/ops/deg2rad_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/erf.h>
 #include <ATen/ops/erf_native.h>
@@ -58,6 +60,8 @@
 #include <ATen/ops/fill_native.h>
 #include <ATen/ops/floor.h>
 #include <ATen/ops/floor_native.h>
+#include <ATen/ops/frac.h>
+#include <ATen/ops/frac_native.h>
 #include <ATen/ops/isinf.h>
 #include <ATen/ops/isinf_native.h>
 #include <ATen/ops/isnan.h>
@@ -355,10 +359,12 @@ CREATE_UNARY_UFUNC(asinh);
 CREATE_UNARY_UFUNC(atan);
 CREATE_UNARY_UFUNC(atanh);
 CREATE_UNARY_UFUNC(ceil);
+CREATE_UNARY_UFUNC(deg2rad);
 CREATE_UNARY_UFUNC(erf);
 CREATE_UNARY_UFUNC(erfinv);
 CREATE_UNARY_UFUNC(expm1);
 CREATE_UNARY_UFUNC(floor);
+CREATE_UNARY_UFUNC(frac);
 CREATE_UNARY_UFUNC(log1p);
 CREATE_UNARY_UFUNC(neg);
 CREATE_UNARY_UFUNC(rad2deg);
