@@ -568,13 +568,6 @@ class ParsePerformanceLogs(Parser):
     def get_passing_entries(self, compiler, df):
         return df[compiler][df[compiler] > 0]
 
-    def abs_latency(self, compiler, df):
-        df = self.get_passing_entries(compiler, df)
-        if df.empty:
-            return "0.0"
-
-        return f"{df.mean():.2f}"
-
     def comp_time(self, compiler, df):
         df = self.get_passing_entries(compiler, df)
         # df = df.sort_values(by=compiler, ascending=False)[compiler][: self.bottom_k]
@@ -675,11 +668,6 @@ class ParsePerformanceLogs(Parser):
             peak_memory_caption, self.memory, "compression_ratio"
         )
 
-        abs_latency_caption = "Mean absolute latency (seconds)\n"
-        abs_latency_summary = self.exec_summary_text(
-            abs_latency_caption, self.abs_latency, "abs_latency"
-        )
-
         str_io.write(
             "To measure performance, compilation latency and memory footprint reduction, "
             "we remove the models that fail accuracy checks.\n\n"
@@ -688,7 +676,6 @@ class ParsePerformanceLogs(Parser):
         str_io.write(speedup_summary)
         str_io.write(comp_time_summary)
         str_io.write(peak_memory_summary)
-        str_io.write(abs_latency_summary)
         self.executive_summary = str_io.getvalue()
 
     def flag_bad_entries(self, suite, metric, flag_fn):
@@ -715,7 +702,7 @@ class ParsePerformanceLogs(Parser):
         elif metric == "compression_ratio":
             return "Peak Memory Compression Ratio"
         elif metric == "abs_latency":
-            return "Absolute latency (sec)"
+            return "Absolute latency (ms)"
         raise RuntimeError("unknown metric")
 
     def generate_warnings(self):
