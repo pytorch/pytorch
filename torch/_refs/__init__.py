@@ -85,6 +85,7 @@ __all__ = [
     "isnan",
     "isreal",
     "i0",
+    "lerp",
     "lgamma",
     "log",
     "log1p",
@@ -413,6 +414,19 @@ def _make_elementwise_unary_reference(
     return inner
 
 
+def _make_alias(fn, name):
+    """
+    This function defines an alias of another function and sets its __name__argument
+    Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`.
+    """
+
+    def _fn(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    _fn.__name__ = name
+    return _fn
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
 def abs(a):
     return prims.abs(a)
@@ -610,6 +624,10 @@ def isnan(a: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, a)
 
 
+# alias
+mvlgamma = _make_alias(torch.special.multigammaln, "mvlgamma")  # type: ignore[has-type]
+
+
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=None,  # CompositeImplicitAutograd
@@ -631,10 +649,6 @@ def i0(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def lgamma(a):
     return prims.lgamma(a)
-
-
-# alias
-mvlgamma = torch.special.multigammaln  # type: ignore[has-type]
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -1151,7 +1165,7 @@ def _floor_divide_integer(a: Tensor, b: Tensor) -> Tensor:
 
     # Convert truncation to flooring:
     offset = (torch.signbit(a) != torch.signbit(b)).logical_and(torch.fmod(a, b) != 0)
-    return prims.div(a, b) - prims.convert_element_type(offset, a.dtype)
+    return prims.div(a, b) - _maybe_convert_to_dtype(offset, a.dtype)
 
 
 def _floor_divide_float(a: Tensor, b: Tensor) -> Tensor:
@@ -1351,6 +1365,8 @@ def isclose(
 
 def _lcm(a: TensorLikeType, b: TensorLikeType):
     dtype = a.dtype
+    # promoting to int32 to maintain 100% consistency with C++ and to
+    # prevent overflow in case of int8 and int16
     promote_to_int = dtype in (torch.int8, torch.int16)
     if promote_to_int:
         a = prims.convert_element_type(a, torch.int32)
@@ -2838,10 +2854,10 @@ def native_layer_norm(
     elif weight is not None and bias is not None:
         out = out * weight + bias
 
-    out = prims.convert_element_type(out, input.dtype)
+    out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     if input.device.type == "cpu":
-        mean = prims.convert_element_type(mean, input.dtype)
-        rstd = prims.convert_element_type(rstd, input.dtype)
+        mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
+        rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
     return (out, mean, rstd)
 
 
@@ -3136,7 +3152,7 @@ def rot90(
     elif k == 3:
         return torch.transpose(torch.flip(a, (dims[0],)), dims[0], dims[1])
     else:
-        return clone(a)
+        return clone(a, memory_format=torch.contiguous_format)
 
 
 def _check_stack_inputs(tensors: TensorSequenceType) -> None:
@@ -3223,7 +3239,9 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
 @register_decomposition(torch.ops.aten.index_copy)
 @out_wrapper()
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
-    return x.clone().index_copy_(dim, index, tensor)
+    return x.clone(memory_format=torch.contiguous_format).index_copy_(
+        dim, index, tensor
+    )
 
 
 @register_decomposition(torch.ops.aten.index_copy_)
@@ -3567,6 +3585,7 @@ diagonal_copy = _make_copy_from_view(diagonal)
 
 
 @register_decomposition(torch.ops.aten.diag_embed)
+@out_wrapper()
 def diag_embed(
     t: TensorLikeType,
     offset: int = 0,
@@ -4056,6 +4075,36 @@ def arange(
     )
 
 
+@register_decomposition(torch.ops.aten.lerp)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("start", "end", "weight"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
+    check(
+        start.dtype == end.dtype,
+        lambda: f"expected dtype {start.dtype} for `end` but got dtype {end.dtype}",
+    )
+    if isinstance(weight, Number):
+        weight = start.new_full((), weight)  # type: ignore[arg-type]
+    else:
+        check(
+            start.dtype == weight.dtype,
+            lambda: f"expected dtype {start.dtype} for `weight` but got dtype {weight.dtype}",  # type: ignore[union-attr]
+        )
+    assert isinstance(weight, Tensor)  # mypy
+    # We implement it this way for numerical stability. We assume (in the stability optimisation)
+    # that 0 <= weight <= 1. We take the abs to deal with comples numbers
+    # We want to do operations near zero, which is where floating points are most precise
+    # If weight.abs() >= 0.5:
+    #    return (1 - weight) * (start - end) + end
+    mask = weight.abs() >= 0.5
+    coeff = torch.where(mask, weight - 1, weight)
+    base = torch.where(mask, end, start)
+    return coeff * (end - start) + base
+
+
 @register_decomposition(torch.ops.aten.linspace)
 @out_wrapper()
 def linspace(
@@ -4434,7 +4483,7 @@ zeros_like = partial(full_like, fill_value=False)
 
 ones_like = partial(full_like, fill_value=True)
 
-# TODO: add pin_memory support
+
 @register_decomposition(torch.ops.aten.randn.default)
 @out_wrapper()
 def randn(
@@ -4443,10 +4492,9 @@ def randn(
     device: Optional[torch.device] = None,
     layout: Optional[torch.layout] = None,
     requires_grad: bool = False,
-    pin_memory: Optional[bool] = None,
+    pin_memory: bool = False,
 ) -> TensorLikeType:
-
-    check(pin_memory is None, lambda: "pin_memory parameter is not supported!")
+    utils.check_pin_memory(pin_memory)
 
     shape_ = utils.extract_shape_from_varargs(shape)
 
