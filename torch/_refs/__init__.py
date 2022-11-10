@@ -414,6 +414,19 @@ def _make_elementwise_unary_reference(
     return inner
 
 
+def _make_alias(fn, name):
+    """
+    This function defines an alias of another function and sets its __name__argument
+    Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`.
+    """
+
+    def _fn(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    _fn.__name__ = name
+    return _fn
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
 def abs(a):
     return prims.abs(a)
@@ -611,6 +624,10 @@ def isnan(a: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, a)
 
 
+# alias
+mvlgamma = _make_alias(torch.special.multigammaln, "mvlgamma")  # type: ignore[has-type]
+
+
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=None,  # CompositeImplicitAutograd
@@ -632,10 +649,6 @@ def i0(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def lgamma(a):
     return prims.lgamma(a)
-
-
-# alias
-mvlgamma = torch.special.multigammaln  # type: ignore[has-type]
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -2736,19 +2749,39 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
 
 
 # CompositeImplicitAutograd - don't register decomp
-def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
+def narrow(
+    a: TensorLikeType, dim: int, start: Union[int, TensorLikeType], length: int
+) -> TensorLikeType:
+    # Supports Tensor overload that was added for XLA:
+    # https://github.com/pytorch/pytorch/issues/31558
+    if isinstance(start, TensorLike):
+        check(
+            start.dim() == 0 and utils.is_integer_dtype(start.dtype),
+            lambda: "start must be an 0-dim integral Tensor.",
+        )
+        start = start.item()  # type: ignore[assignment]
+    check(a.dim() > 0, lambda: "narrow() cannot be applied to a 0-dim tensor.")
+    check(length >= 0, lambda: "narrow(): length must be non-negative.")
     dim = utils.canonicalize_dim(a.ndim, dim)
+    dim_length = a.size(dim)
+    # Start being the end is usually invalid since it's out of bounds. So it's
+    # not allowed by canonicalize_dim. But for narrow it's valid as long as
+    # the length is 0, which is handled by the check below.
+    if start != dim_length:
+        # Negative start means indexing from the end of dim.
+        # Note: a dimension isn't being canonicalized here, this reuses
+        # canonicalize_dim because the semantics are similar.
+        start = utils.canonicalize_dim(dim_length, start)  # type: ignore[arg-type]
+    check(
+        start <= dim_length - length,  # type: ignore[arg-type]
+        lambda: f"start ({start}) + length ({length}) exceeds dimension size ({dim_length}).",
+    )
     return prims.slice_in_dim(a, start, start + length, axis=dim)
 
 
-@register_decomposition(torch.ops.aten.narrow_copy)
-@out_wrapper()
-def narrow_copy(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
-    # TODO: This must return a sparse tensor if the input is sparse, but refs
-    # have no sparse support.  See narrow_copy_sparse in core.
-    if a.is_sparse:
-        raise NotImplementedError("narrow_copy ref doesn't support sparse tensors")
-    return torch.clone(torch.narrow(a=a, dim=dim, start=start, length=length))  # type: ignore[call-overload]
+# TODO: This must return a sparse tensor if the input is sparse, but refs have
+# no sparse support. See narrow_copy_sparse in core.
+narrow_copy = _make_copy_from_view(narrow)
 
 
 def _normalize(
@@ -3572,6 +3605,7 @@ diagonal_copy = _make_copy_from_view(diagonal)
 
 
 @register_decomposition(torch.ops.aten.diag_embed)
+@out_wrapper()
 def diag_embed(
     t: TensorLikeType,
     offset: int = 0,

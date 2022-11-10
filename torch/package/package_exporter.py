@@ -887,7 +887,7 @@ class PackageExporter:
             if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
                 # remove this case
-                untyped_storage = obj._storage
+                untyped_storage = obj._untyped_storage
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
                 storage_numel = obj.size()
