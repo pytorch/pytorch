@@ -7,13 +7,27 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
 
+__all__ = [
+    "ChunkStorageMetadata",
+    "TensorStorageMetadata",
+    "BytesStorageMetadata",
+    "TENSOR_TYPE",
+    "STORAGE_TYPES",
+    "STATE_DICT_TYPE",
+    "Metadata",
+    "MetadataIndex",
+]
+
+
 @dataclass
 class ChunkStorageMetadata:
     """
     Each chunk is expected to have the same properties of the TensorStorageMetadata that includes it.
     """
+
     offsets: torch.Size
     sizes: torch.Size
+
 
 @dataclass
 class TensorStorageMetadata:
@@ -21,13 +35,16 @@ class TensorStorageMetadata:
     size: torch.Size
     chunks: List[ChunkStorageMetadata]
 
+
 @dataclass
 class BytesStorageMetadata:
     pass
 
+
 TENSOR_TYPE = Union[torch.Tensor, ShardedTensor]
 STORAGE_TYPES = Union[TensorStorageMetadata, BytesStorageMetadata]
 STATE_DICT_TYPE = Dict[str, Any]
+
 
 @dataclass
 class Metadata:
@@ -36,11 +53,13 @@ class Metadata:
     planner_data: Any = None
     storage_data: Any = None
 
+
 @dataclass(frozen=True)
 class MetadataIndex:
     """
     This class represents a lookup key for items in a state dict or Metadata.
     """
+
     fqn: str
     """Fully Qualified Name of the object"""
 
@@ -59,7 +78,12 @@ class MetadataIndex:
     the linear search and thus making it significantly faster.
     """
 
-    def __init__(self, fqn: str, offset: Optional[Sequence[int]] = None, index: Optional[int] = None):
+    def __init__(
+        self,
+        fqn: str,
+        offset: Optional[Sequence[int]] = None,
+        index: Optional[int] = None,
+    ):
         # We must use object.__setattr__ due to frozen=True
         object.__setattr__(self, "fqn", fqn)
         object.__setattr__(self, "index", index)

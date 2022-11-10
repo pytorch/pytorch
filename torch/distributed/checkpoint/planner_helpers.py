@@ -31,7 +31,7 @@ from .metadata import (
 
 from .resharding import _shards_get_overlap_region_wrt_saved_tensor
 
-__all__: List[str]  = []
+__all__: List[str] = []
 
 
 def _create_shard_metadata(size: torch.Size) -> ShardMetadata:
