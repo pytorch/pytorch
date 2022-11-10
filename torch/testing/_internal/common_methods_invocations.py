@@ -783,7 +783,7 @@ def sample_inputs_full(op, device, dtype, requires_grad, **kwargs):
     fill_values = [get_val(dtype), get_val(torch.int)]
 
     for size, fill_value in product(sizes, fill_values):
-        yield SampleInput(size, args=(fill_value,), kwargs={'dtype': dtype, 'device': device})
+        yield SampleInput(size, fill_value, dtype=dtype, device=device)
 
 
 def error_inputs_uniform(op, device, **kwargs):
@@ -14419,12 +14419,17 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-
                # Same failure as arange: cannot find linspace in captured graph
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # boolean alpha not handled properly
+               DecorateInfo(unittest.expectedFailure,
+                            'TestCudaFuserOpInfo',
+                            'test_nvfuser_correctness',
+                            dtypes=(torch.bool,)),
+               # RuntimeError: UNSUPPORTED DTYPE: bool
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bool)),
            )),
     OpInfo('new_empty',
            op=lambda x, *args, **kwargs: x.new_empty(*args, **kwargs),
