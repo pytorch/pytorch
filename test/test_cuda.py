@@ -3266,8 +3266,10 @@ torch.cuda.synchronize()
     def test_graph_warn_if_has_zero_nodes(self):
         with warnings.catch_warnings(record=True) as caught:
             g = torch.cuda.CUDAGraph()
-            g.capture_begin()
-            g.capture_end()
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                g.capture_begin()
+                g.capture_end()
         self.assertTrue(any("The CUDA Graph is empty" in str(w.message) for w in caught))
 
     @unittest.skipIf((not TEST_CUDA) or
