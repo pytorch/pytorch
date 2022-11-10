@@ -88,5 +88,4 @@ jobs:
         uses: ./.github/actions/upload-test-artifacts
         if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
-          use-gha: true
           file-suffix: ${{ github.job }}-mps-1-1-macos-m1-12_${{ steps.get-job-id.outputs.job-id }}
