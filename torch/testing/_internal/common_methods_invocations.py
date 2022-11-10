@@ -14209,6 +14209,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestCommon", "test_multiple_devices"),
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
                # CPU randint generates different values based on the strides of out tensor
