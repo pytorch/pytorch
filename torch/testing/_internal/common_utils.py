@@ -2051,19 +2051,24 @@ class TestCase(expecttest.TestCase):
                 skipped_msg["flaky"] = True
                 # Still flaky, do nothing
                 result.addSkip(self, json.dumps(skipped_msg))
-            elif RERUN_DISABLED_TESTS and num_green == 0 and using_unittest:
-                traceback_str = ""
-                # Hide all failures and errors when RERUN_DISABLED_TESTS is enabled. This is
-                # a verification check, we don't want more red signals coming from it
-                if result.failures:
-                    _, traceback_str = result.failures.pop(-1)
+            elif RERUN_DISABLED_TESTS and using_unittest:
+                if num_green == 0:
+                    traceback_str = ""
+                    # Hide all failures and errors when RERUN_DISABLED_TESTS is enabled. This is
+                    # a verification check, we don't want more red signals coming from it
+                    if result.failures:
+                        _, traceback_str = result.failures.pop(-1)
 
-                if result.errors:
-                    _, traceback_str = result.errors.pop(-1)
+                    if result.errors:
+                        _, traceback_str = result.errors.pop(-1)
 
-                skipped_msg["traceback_str"] = traceback_str
-                # The disabled test fails, report as skipped but don't fail the job
-                result.addSkip(self, json.dumps(skipped_msg))
+                    skipped_msg["traceback_str"] = traceback_str
+                    # The disabled test fails, report as skipped but don't fail the job
+                    result.addSkip(self, json.dumps(skipped_msg))
+                elif num_red == 0:
+                    # The test passes after re-running multiple times. This acts as a signal
+                    # to confirm that it's not flaky anymore
+                    result.addSuccess(self)
 
             return
 
