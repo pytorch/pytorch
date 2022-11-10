@@ -12,6 +12,7 @@ from torch.utils.data.datapipes.utils.common import (
 
 __all__ = ["FilterIterDataPipe", ]
 
+T = TypeVar('T')
 T_co = TypeVar('T_co', covariant=True)
 
 
@@ -74,7 +75,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             else:
                 StreamWrapper.close_streams(data)
 
-    def _returnIfTrue(self, data: T_co) -> Tuple[bool, T_co]:
+    def _returnIfTrue(self, data: T) -> Tuple[bool, T]:
         condition = self._apply_filter_fn(data)
 
         if df_wrapper.is_column(condition):
@@ -86,7 +87,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             if len(result):
                 return True, df_wrapper.concat(result)
             else:
-                return False, None
+                return False, None  # type: ignore[return-value]
 
         if not isinstance(condition, bool):
             raise ValueError("Boolean output is required for `filter_fn` of FilterIterDataPipe, got", type(condition))
