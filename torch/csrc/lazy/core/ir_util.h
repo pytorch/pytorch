@@ -35,7 +35,8 @@ class TORCH_API Util {
 
   // Same as above, but computes the post order on the set of nodes specified as
   // argument.
-  static std::vector<const Node*> ComputePostOrder(c10::ArrayRef<const Node*> nodes);
+  static std::vector<const Node*> ComputePostOrder(
+      c10::ArrayRef<const Node*> nodes);
 
   // Retrieves the number of nodes within the graph whose sink are passed in the
   // nodes argument.

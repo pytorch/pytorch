@@ -5,7 +5,9 @@
 namespace torch {
 namespace lazy {
 
-std::vector<const Node*> Util::ComputePostOrder(const Node* node, EmissionMap* emap) {
+std::vector<const Node*> Util::ComputePostOrder(
+    const Node* node,
+    EmissionMap* emap) {
   std::vector<const Node*> post_order;
   std::vector<const Node*> queue;
   queue.push_back(node);
@@ -56,7 +58,8 @@ std::vector<const Node*> Util::ComputePostOrder(
   return post_order;
 }
 
-std::vector<const Node*> Util::ComputePostOrder(c10::ArrayRef<const Node*> nodes) {
+std::vector<const Node*> Util::ComputePostOrder(
+    c10::ArrayRef<const Node*> nodes) {
   EmissionMap emap;
   return ComputePostOrder(nodes, &emap);
 }
