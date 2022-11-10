@@ -5,7 +5,6 @@
 #include <c10/util/safe_numerics.h>
 
 #include <limits>
-#include <utility>
 
 namespace at {
 namespace detail {
@@ -133,7 +132,7 @@ SymInt computeStorageNbytes(
 
     size += strides[i] * (sizes[i] - 1);
   }
-  return itemsize_bytes * (storage_offset + std::move(size));
+  return itemsize_bytes * (storage_offset + size);
 }
 
 TensorBase empty_generic(

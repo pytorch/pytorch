@@ -7,7 +7,6 @@
 #include <iostream>
 #include <sstream>
 #include <tuple>
-#include <utility>
 
 namespace c10 {
 std::ostream& operator<<(std::ostream & out, Backend b) {
