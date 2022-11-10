@@ -178,6 +178,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
 
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp(self):
@@ -228,8 +229,10 @@ class TestDistributedMultiProc(MultiProcessTestCase):
             self.assertTrue(same(correct_outputs, outputs))
 
     @skip_if_lt_x_gpu(1)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_inductor(self):
         with _per_rank_init(self.rank, self.world_size):
+            # Test with basic FSDP wrapping (outer wrap around whole model)
             m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
             fsdp_m = torch._dynamo.optimize("inductor")(fsdp_m)
