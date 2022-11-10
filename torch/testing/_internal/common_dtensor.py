@@ -167,7 +167,7 @@ def with_comms(
 
         self.device_type = "cuda" if pg_backend == "nccl" else "cpu"
         self.init_pg(backend=pg_backend)
-        func(self)  # type: ignore[operator]
+        func(self)  # type: ignore[misc]
         self.destroy_pg()
 
     return wrapper
@@ -314,9 +314,9 @@ class DTensorConverter(object):
                 else:
                     r = distribute_tensor(t, mesh, placements)
                 if type(t) is torch.nn.Parameter:
-                    r = torch.nn.Parameter(
+                    r = torch.nn.Parameter(  # type: ignore[assignment]
                         r, requires_grad=r.requires_grad
-                    )  # type: ignore[call-overload]
+                    )
                 return r
             else:
                 self.miss += 1

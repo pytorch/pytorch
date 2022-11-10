@@ -210,16 +210,16 @@ class SymInt:
         # class has a field named node that stores SymNode
         self.node = node
 
-    # Magic methods installed later
-
     def __bool__(self):
         return self.node.bool_()
 
     def __int__(self):
         return self.node.int_()
 
+    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+
     def __sym_float__(self):
-        return SymFloat(self.node.sym_float())
+        ...
 
     def __repr__(self):
         return self.node.str()
@@ -242,13 +242,13 @@ class SymFloat:
         # class has a field named node that stores SymNode
         self.node = node
 
-    # Magic methods installed later
-
     def __bool__(self):
         return self.node.bool_()
 
+    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+
     def __sym_int__(self):
-        return SymInt(self.node.sym_int())
+        ...
 
     def __repr__(self):
         return self.node.str()
@@ -500,6 +500,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
           ``mode='max'``
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
+        * :func:`torch.Tensor.scatter` when ``src`` is a tensor and ``reduce=None``
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor
@@ -708,7 +709,7 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage
+from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage, _warn_typed_storage_removal
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
 # dtype, use torch.storage.TypedStorage directly.
@@ -716,86 +717,171 @@ from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage
 class ByteStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.uint8
 
 class DoubleStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.double
 
 class FloatStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.float
 
 class HalfStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.half
 
 class LongStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.long
 
 class IntStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.int
 
 class ShortStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.short
 
 class CharStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.int8
 
 class BoolStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.bool
 
 class BFloat16Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.bfloat16
 
 class ComplexDoubleStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.cdouble
 
 class ComplexFloatStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.cfloat
 
 class QUInt8Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.quint8
 
 class QInt8Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.qint8
 
 class QInt32Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.qint32
 
 class QUInt4x2Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.quint4x2
 
 class QUInt2x4Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
+        return self._dtype
+
+    @classproperty
+    def _dtype(self):
         return torch.quint2x4
 
 _storage_classes = {
@@ -1021,10 +1107,9 @@ def _register_device_module(device_type, module):
 
 # expose return_types
 from . import return_types
-if sys.executable != 'torch_deploy' and os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "0":
-    from . import library
-    if not TYPE_CHECKING:
-        from . import _meta_registrations
+from . import library
+if not TYPE_CHECKING:
+    from . import _meta_registrations
 
 # Enable CUDA Sanitizer
 if 'TORCH_CUDA_SANITIZER' in os.environ:
