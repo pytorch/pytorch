@@ -12,6 +12,7 @@ uint64_t MPSGeneratorImpl::seed() {
   this->set_current_seed(random);
   return random;
 }
+
 uint64_t MPSGeneratorImpl::current_seed() const {
   return seed_;
 }
