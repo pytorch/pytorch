@@ -1,10 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import math
+from typing import Tuple, Union
 
 import torch
 from torch.distributed._tensor import DTensor as DT
 from torch.distributed._tensor.placement_types import Shard
-from typing import Tuple, Union
+from torch.distributed._tensor.ops.utils import prod
 
 
 def _view_with_sharding_dim_change(
@@ -64,8 +64,8 @@ class _ViewAndRedistribute(torch.autograd.Function):
 
             # Infer the dim which is specified with -1.
             if infer_idx is not None:
-                st_size = math.prod(self.size())  # type: ignore[attr-defined]
-                shape_size = -1 * math.prod(shape)  # type: ignore[attr-defined]
+                st_size = prod(self.size())  # type: ignore[attr-defined]
+                shape_size = -1 * prod(shape)  # type: ignore[attr-defined]
                 # pyre-fixme[60]: Concatenation not yet support for multiple variadic
                 shape = (
                     *shape[:infer_idx],
