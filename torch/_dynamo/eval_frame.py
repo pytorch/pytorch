@@ -317,7 +317,7 @@ def lookup_backend(compiler_fn):
         ):
             warnings.warn(
                 "Tensor cores are available but not enabled."
-                "Consider setting torch.backends.cuda.matmul.allow_tf32 == True in your python script for speedups"
+                "Consider setting torch.backends.cuda.matmul.allow_tf32 = True in your python script for speedups"
             )
 
         compiler_fn = import_module(f"{config.inductor_import}.compile_fx").compile_fx
