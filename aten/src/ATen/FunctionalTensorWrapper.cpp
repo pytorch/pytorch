@@ -37,22 +37,10 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
   // to participate in the functorch transforms.
   key_set_ = key_set_ - c10::functorch_transforms_ks - c10::python_ks;
-  // For better error handling,
-  // we also don't want our wrapper tensor to be able to dispatch directly
-  // to a backend kernel.
-  // Dispatching directly to e.g. a CPU kernel would always segfault,
-  // because wrapper tensors don't have any real data.
-  // (This should never happen because we should always hit a functionalization kernel,
-  // but can help make bugs less nasty).
-  // Here, we defensively remove any backend keys from the wrapper's keyset.
-  // We don't want to remove actual backend bits though (say we're redispatching to autograd;
-  // we need to know if we're dispatching to AutogradCPU or AutogradXLA).
-  // Instead, it's sufficient to remove the `Dense` dispatch key,
-  // which prevents us from accidentally trying to directly run a CPU/CUDA kernel.
-  key_set_ = key_set_.remove(c10::DispatchKey::Dense);
   // We override a bunch of _custom(), so make sure they get called
   // TODO: metadata copying may not actually be necessary then
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
+  set_custom_device(true);
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
@@ -343,6 +331,9 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
       std::move(version_counter), allow_tensor_metadata_change);
 }
 
+c10::Device FunctionalTensorWrapper::device_custom() const {
+  return value_.unsafeGetTensorImpl()->device();
+}
 at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sizes();
 }

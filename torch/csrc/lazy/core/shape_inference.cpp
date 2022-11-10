@@ -1356,8 +1356,9 @@ std::vector<Shape> compute_shape_slice_scatter_symint(
       /*layout=*/c10::make_optional(src.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto out_meta = at::compositeexplicitautogradnonfunctional::slice_scatter_symint(
-      self_meta, src_meta, dim, start, end, step);
+  auto out_meta =
+      at::compositeexplicitautogradnonfunctional::slice_scatter_symint(
+          self_meta, src_meta, dim, start, end, step);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
@@ -1381,8 +1382,9 @@ std::vector<Shape> compute_shape_as_strided_scatter_symint(
       /*layout=*/c10::make_optional(src.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto out_meta = at::compositeexplicitautogradnonfunctional::as_strided_scatter_symint(
-      self_meta, src_meta, size, stride, storage_offset);
+  auto out_meta =
+      at::compositeexplicitautogradnonfunctional::as_strided_scatter_symint(
+          self_meta, src_meta, size, stride, storage_offset);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
