@@ -721,7 +721,7 @@ std::vector<BackendDataPtr> LazyGraphExecutor::FetchTensorData(
 LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
     const std::vector<LazyTensorPtr>& tensors,
     SyncTensorCollection* coll) {
-  std::vector<Node*> roots;
+  std::vector<const Node*> roots;
   roots.reserve(coll->indices.size());
   for (auto index : coll->indices) {
     Value ir_value = tensors.at(index)->CurrentIrValue();
