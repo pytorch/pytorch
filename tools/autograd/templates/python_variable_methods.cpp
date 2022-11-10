@@ -979,7 +979,7 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "storage");
+    return handle_torch_function(self, "_storage");
   }
   auto& self_ = THPVariable_Unpack(self);
   return createPyObject(self_.storage());
@@ -1135,7 +1135,7 @@ static PyObject* THPVariable_set_(
       {
           "set_()",
           "set_(Storage source)",
-          "set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride=None)",
+          "set_(Storage source, SymInt storage_offset, SymIntArrayRef size, SymIntArrayRef stride=None)",
           "set_(Tensor source)",
           "set_(Tensor source, SymInt storage_offset, SymIntArrayRef size, SymIntArrayRef stride=None)",
       },
@@ -1181,14 +1181,14 @@ static PyObject* THPVariable_set_(
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self,
                               Storage source,
-                              int64_t storage_offset,
-                              IntArrayRef size,
-                              IntArrayRef stride) -> Tensor {
+                              c10::SymInt storage_offset,
+                              c10::SymIntArrayRef size,
+                              c10::SymIntArrayRef stride) -> Tensor {
         pybind11::gil_scoped_release no_gil;
-        return self.set_(source, storage_offset, size, stride);
+        return self.set__symint(source, storage_offset, size, stride);
       };
       return wrap(dispatch_set_(
-          self, storage, _r.toInt64(1), _r.intlist(2), _r.intlist(3)));
+          self, storage, _r.toSymInt(1), _r.symintlist(2), _r.symintlist(3)));
     }
     case 3: {
       // aten::set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
