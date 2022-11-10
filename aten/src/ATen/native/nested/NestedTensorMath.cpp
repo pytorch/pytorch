@@ -955,7 +955,7 @@ Tensor _nested_view_from_buffer(
 }
 
 // See Note [Special size rule for nested tensor]
-Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
+Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape, bool copy) {
   TORCH_CHECK(
       proposed_shape.size() > 0,
       "shape '[]' is invalid for a nested tensor");
@@ -979,7 +979,7 @@ Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   Tensor sizemat_reshaped, stridemat_reshaped;
   std::tie(viewable, sizemat_reshaped, stridemat_reshaped) = NestedTensor_compute_size_stride(
       sizes, strides, proposed_shape, sizemat.options());
-  if (viewable) {
+  if (viewable && !copy) {
     return self.view(proposed_shape);
   }
   else {

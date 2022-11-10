@@ -4316,7 +4316,7 @@
 - func: repeat_interleave.self_int(Tensor self, int repeats, int? dim=None, *, int? output_size=None) -> Tensor
   variants: function, method
 
-- func: reshape(Tensor(a) self, SymInt[] shape) -> Tensor(a)
+- func: reshape(Tensor(a) self, SymInt[] shape, *, bool copy=False) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False

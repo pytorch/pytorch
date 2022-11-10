@@ -14,9 +14,12 @@ class C10_API CopyOnWriteContext {
   DeleterFnPtr deleter_;
   mutable std::atomic<size_t> refcount_;
   CopyOnWriteContext(void* data, DeleterFnPtr deleter)
-    : data_(data), deleter_(deleter), refcount_(1) {}
-  friend std::unique_ptr<CopyOnWriteContext, DeleterFnPtr> newCopyOnWriteContext(void* data, DeleterFnPtr deleter);
-public:
+      : data_(data), deleter_(deleter), refcount_(1) {}
+  friend std::unique_ptr<CopyOnWriteContext, DeleterFnPtr> newCopyOnWriteContext(
+      void* data,
+      DeleterFnPtr deleter);
+
+ public:
   void incref() {
     detail::atomic_refcount_increment(refcount_);
   }
@@ -32,8 +35,10 @@ public:
 };
 
 C10_API void deleteCopyOnWriteContext(void* ctx);
-C10_API inline std::unique_ptr<CopyOnWriteContext, DeleterFnPtr> newCopyOnWriteContext(void* data, DeleterFnPtr deleter) {
-  return std::unique_ptr<CopyOnWriteContext, DeleterFnPtr>(new CopyOnWriteContext(data, deleter), &deleteCopyOnWriteContext);
+C10_API inline std::unique_ptr<CopyOnWriteContext, DeleterFnPtr>
+newCopyOnWriteContext(void* data, DeleterFnPtr deleter) {
+  return std::unique_ptr<CopyOnWriteContext, DeleterFnPtr>(
+      new CopyOnWriteContext(data, deleter), &deleteCopyOnWriteContext);
 }
 
 } // namespace impl

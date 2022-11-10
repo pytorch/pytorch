@@ -15,8 +15,8 @@
 #include <ATen/ATen.h>
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/MemoryOverlap.h>
-#include <c10/util/Exception.h>
 #include <c10/core/impl/CopyOnWriteContext.h>
+#include <c10/util/Exception.h>
 
 #include <iostream>
 #include <list>
@@ -332,23 +332,50 @@ void bump_version(const Variable& self) {
   self.unsafeGetTensorImpl()->bump_version();
 }
 
-void maybe_copy_on_write(const Variable& self) {
-  if (!self.defined()) return;
+void maybe_copy_on_write_storage(const at::Storage& storage) {
+  if (storage.unsafeGetStorageImpl()->warn_on_write()) {
+    // TODO: When we support this warning on more than warning, store an enum
+    // on storage so we can report the correct function name
+    // TODO: Make a TorchDispatchMode (or TorchFunctionMode?) that can help
+    // users identify where the reshape was actually called
+    TORCH_WARN_ONCE(
+        "You are mutating the input/output of reshape() operation which returned a view.  "
+        "This can unpredictably cause other tensors to be modified.  In a future PyTorch release, "
+        "we plan to make reshape() always copy, which means if you are relying on this mutation "
+        "your program will silently change behavior.  If you know you only want to do a local "
+        "mutation, pass copy=True kwarg to reshape().  Note that copy=True performs copy-on-write, "
+        "so there is no unnecessary copy unless it is required.");
+  }
+
   // this is a write, so guaranteed not to race even with reads (e.g., somone
   // calling copy_on_write on this storage)
-  auto* cow_ctx = self.storage().unsafeGetStorageImpl()->data_ptr().cast_context<c10::impl::CopyOnWriteContext>(&c10::impl::deleteCopyOnWriteContext);
-  if (!cow_ctx) return;
+  auto* cow_ctx = storage.unsafeGetStorageImpl()
+                      ->data_ptr()
+                      .cast_context<c10::impl::CopyOnWriteContext>(
+                          &c10::impl::deleteCopyOnWriteContext);
+  if (!cow_ctx)
+    return;
   // Trigger copy on write
-  // TODO: is cloning the key set here OK?
   // TODO: going through full tensor dispatch is kind of inefficient
-  auto storage = self.storage();
+  auto storage_movable = storage;
   auto storage_tensor = at::detail::make_tensor<at::TensorImpl>(
-    std::move(storage), self.key_set(), caffe2::TypeMeta::Make<uint8_t>());
-  storage_tensor.unsafeGetTensorImpl()->set_sizes_and_strides({self.storage().sym_nbytes()}, {1});
+      std::move(storage_movable),
+      c10::DispatchKeySet(c10::computeDispatchKey(
+          c10::nullopt, c10::nullopt, storage.device())),
+      caffe2::TypeMeta::Make<uint8_t>());
+  storage_tensor.unsafeGetTensorImpl()->set_sizes_and_strides(
+      {storage.sym_nbytes()}, {1});
   auto new_storage_tensor = storage_tensor.clone();
   // Overwriting the original data pointer induces the decref
-  self.storage().unsafeGetStorageImpl()->set_data_ptr_noswap(
-    std::move(new_storage_tensor.storage().unsafeGetStorageImpl()->data_ptr()));
+  storage.unsafeGetStorageImpl()->set_data_ptr_noswap(std::move(
+      new_storage_tensor.storage().unsafeGetStorageImpl()->data_ptr()));
+}
+
+void maybe_copy_on_write(const Variable& self) {
+  if (!self.defined())
+    return;
+  // TODO: Test if self actually has storage
+  maybe_copy_on_write_storage(self.storage());
 }
 
 const c10::VariableVersion& version_counter(const Variable& self) {

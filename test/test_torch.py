@@ -8409,6 +8409,15 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del y
         x.sigmoid()
 
+    def test_copy_on_write(self):
+        x = torch.zeros(2)
+        y = x.reshape(2, copy=True)
+        self.assertEqual(x._storage()._data_ptr_readonly(), y._storage()._data_ptr_readonly())
+        y.add_(1)
+        self.assertEqual(x, torch.zeros(2))
+        self.assertEqual(y, torch.ones(2))
+        self.assertNotEqual(x._storage()._data_ptr_readonly(), y._storage()._data_ptr_readonly())
+
     # FIXME: move to test_linalg
     @torch.inference_mode()
     def test_bmm_multithreaded(self):

@@ -411,10 +411,10 @@ Tensor movedim_batching_rule(const Tensor& self, IntArrayRef source, IntArrayRef
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
-Tensor reshape_batching_rule(const Tensor& self, IntArrayRef shape) {
+Tensor reshape_batching_rule(const Tensor& self, IntArrayRef shape, bool copy) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto shape_physical = self_physical.getPhysicalShape(shape);
-  auto result = self_physical.tensor().reshape(shape_physical);
+  auto result = self_physical.tensor().reshape(shape_physical, copy);
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
@@ -548,7 +548,7 @@ static void checkBasicAsStridedValidForSlice(
 }
 
 Tensor _reshape_alias_batching_rule(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
-  return reshape_batching_rule(self, sizes);
+  return reshape_batching_rule(self, sizes, false);
 }
 
 Tensor _new_zeros_with_same_feature_meta_batching_rule(

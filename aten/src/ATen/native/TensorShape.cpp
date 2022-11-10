@@ -45,6 +45,7 @@
 #include <ATen/ops/_mkldnn_reshape.h>
 #include <ATen/ops/_mkldnn_transpose.h>
 #include <ATen/ops/_neg_view_copy_native.h>
+#include <ATen/ops/_reshape_copy.h>
 #include <ATen/ops/_reshape_alias_copy_native.h>
 #include <ATen/ops/_reshape_alias_native.h>
 #include <ATen/ops/_reshape_from_tensor_native.h>
@@ -1452,10 +1453,15 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
-Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
+Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape, bool copy) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
+
+  if (copy) {
+    return at::_reshape_copy_symint(self, proposed_shape);
+  }
+
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
 
   if (self.is_mkldnn()) {
@@ -1476,30 +1482,22 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   //     `_reshape_alias` that essentially does the same thing as `view` and
   //     `as_strided` without any of the extra overhead.
   if (stride.has_value()) {
-    // old behavior case
-    if (self.is_quantized()) {
-      // Temporary check to revert to the old behavior/view in cases where the
-      // device is not supported (e.g. for XLA the operation is not supported
-      // so we use `view` instead).
-      //
-      // We need to do the checks here instead of in `native_functions.yaml`
-      // to preserve backwards compatibility.
-      if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
-        return self._reshape_alias_symint(shape, stride.value());
-      } else {
-        return self.view_symint(shape);
-      }
+    // Temporary check to revert to the old behavior/view in cases where the
+    // device is not supported (e.g. for XLA the operation is not supported
+    // so we use `view` instead).
+    //
+    // We need to do the checks here instead of in `native_functions.yaml`
+    // to preserve backwards compatibility.
+    Tensor r;
+    if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
+      r = self._reshape_alias_symint(shape, stride.value());
+    } else {
+      r = self.view_symint(shape);
     }
-    auto maybe_cow_storage_impl = self.storage().unsafeGetStorageImpl()->copy_on_write();
-    if (!maybe_cow_storage_impl) {
-      // Immediately do the copy
-      TORCH_INTERNAL_ASSERT(0, "NYI");
-    }
-    auto self_ = at::detail::make_tensor<TensorImpl>(
-      Storage(std::move(maybe_cow_storage_impl)), self.key_set(), self.dtype());
-    auto* self_tmp_ = self_.unsafeGetTensorImpl();
-    self_tmp_->set_sizes_and_strides(self.sym_sizes(), stride.value(), self.sym_storage_offset());
-    return self_;
+    // NB: this mutates the original storage too!  Method takes out a lock.
+    // To bypass the warning, call _unsafe_reshape
+    r.storage().unsafeGetStorageImpl()->set_warn_on_write(true);
+    return r;
   }
   return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
 }
@@ -1508,17 +1506,27 @@ Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_sha
   if (self.is_sparse()) {
     TORCH_CHECK(0, "_reshape_copy is not implemented for sparse tensors");
   }
-  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
-
   if (self.is_mkldnn()) {
     TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tesnors");
   }
 
-  if (self.is_contiguous()) {
-    return self.view_symint(shape).clone(at::MemoryFormat::Contiguous);
-  } else {
-    return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
+  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+  auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape);
+
+  if (stride.has_value()) {
+    auto maybe_cow_storage_impl = self.storage().unsafeGetStorageImpl()->copy_on_write();
+    if (maybe_cow_storage_impl) {
+      // Tensor is eligible for copy-on-write
+      auto self_ = at::detail::make_tensor<TensorImpl>(
+        Storage(std::move(maybe_cow_storage_impl)), self.key_set(), self.dtype());
+      auto* self_tmp_ = self_.unsafeGetTensorImpl();
+      self_tmp_->set_sizes_and_strides(self.sym_sizes(), stride.value(), self.sym_storage_offset());
+      return self_;
+    }
   }
+
+  // Just do a regular copy
+  return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
 // Duplicate of above code for non-symbolic ints. Kept for BC purposes and to

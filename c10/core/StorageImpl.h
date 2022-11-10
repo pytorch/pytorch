@@ -31,7 +31,7 @@ struct UnsafeMovableMutexForStorage {
   }
 };
 
-} // detail
+} // namespace detail
 
 // A storage represents the underlying backing data buffer for a
 // tensor.  This concept was inherited from the original Torch7
@@ -238,6 +238,15 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return received_cuda_;
   }
 
+  void set_warn_on_write(bool warn_on_write);
+
+  // NB: This should only be retrieved in circumstances where you are
+  // logically writing to the Storage; otherwise you may be subject
+  // to a read-write race.
+  bool warn_on_write() const {
+    return warn_on_write_;
+  }
+
   // virtual to deal with FunctionalStorageImpl, sigh
   // NB: This is morally const but we're not const correct and I will
   // need to monkey around data_ptr_ so it was easier to not declare it const
@@ -251,6 +260,23 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation
   bool received_cuda_;
+  // If this storage is written to, raise a warning saying that writes to
+  // this storage have behavior that could potentially change in the future.
+  // This can be changed on read operations (specifically, when you take out a
+  // reshape-induced view on a storage) and so writes to the field must be
+  // guarded by copy_on_write_mutex_ (reads to this field need not be guarded,
+  // as we only read the field on writes, which would already race with a
+  // reshape-induced view read.)
+  //
+  // This warning is a little too aggressive.  There is no problem if you
+  // write to the input/output of a reshape, where the output/input is never
+  // used again.  We can cheaply test a sub-case of this, where the
+  // output/input is dead, but it's not clear to me it's worth implementing;
+  // if the output/input is never used again but still alive, we would still
+  // trigger, and we could only detect this situation by delaying the warning
+  // to reads (which would require a big pile of machinery at read-side,
+  // whereas currently we only need to modify ADInplaceOrView.)
+  bool warn_on_write_;
   Allocator* allocator_;
   detail::UnsafeMovableMutexForStorage copy_on_write_mutex_;
 };

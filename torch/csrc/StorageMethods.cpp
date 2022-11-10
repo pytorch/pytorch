@@ -47,6 +47,17 @@ static PyObject* THPStorage_nbytes(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPStorage_dataPtr(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  at::Storage self_ = torch::createStorage(_self);
+  torch::autograd::impl::maybe_copy_on_write_storage(self_);
+  return PyLong_FromVoidPtr(self_.data<uint8_t>());
+  END_HANDLE_TH_ERRORS
+}
+
+// The invariant is you guarantee you are only going to READ from this data
+// pointer, not going to write to it; this means we don't need to
+// prophylatically trigger copy on write
+static PyObject* THPStorage_dataPtrReadOnly(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
   return PyLong_FromVoidPtr(self->cdata->data<uint8_t>());
   END_HANDLE_TH_ERRORS
@@ -501,6 +512,7 @@ static PyMethodDef THPStorage_methods[] = {
     {"resize_", THPStorage_resize_, METH_O, nullptr},
     {"nbytes", THPStorage_nbytes, METH_NOARGS, nullptr},
     {"data_ptr", THPStorage_dataPtr, METH_NOARGS, nullptr},
+    {"_data_ptr_readonly", THPStorage_dataPtrReadOnly, METH_NOARGS, nullptr},
     {"is_pinned", THPStorage_isPinned, METH_NOARGS, nullptr},
     {"_write_file", THPStorage_writeFile, METH_VARARGS, nullptr},
     {"_new_with_file",
