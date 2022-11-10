@@ -459,9 +459,7 @@ static TypePtr inferShapeAndTypeForInput(
     }
     return TupleType::create(types);
   } else if (auto list_type = input_type->cast<ListType>()) {
-    const TypePtr& sub_type = list_type->getElementType();
-    auto elem_type =
-        inferShapeAndTypeForInput(sub_type, s_iter, s_iter_end, complete);
+    const TypePtr& elem_type = list_type->getElementType();
     return ListType::create(elem_type);
   } else if (auto tensor_type = input_type->cast<TensorType>()) {
     auto type = getTensorType(s_iter->toTensor(), complete);
