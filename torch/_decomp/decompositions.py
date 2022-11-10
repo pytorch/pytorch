@@ -1372,6 +1372,61 @@ def native_batch_norm(
         save_rstd = save_rstd.to(dtype=input.dtype)
     return output.to(dtype=input.dtype), save_mean, save_rstd
 
+@torch.ops.aten.native_batch_norm.default.py_impl(DispatchKey.Autograd)
+def native_batch_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    if running_mean is not None and running_var is not None:
+            return aten.native_batch_norm_legit(input, weight, bias, running_mean, running_var, training, momentum, eps)
+    return aten.native_batch_norm_legit(input, weight, bias, training, momentum, eps)
+ 
+# @torch.ops.aten.batch_norm.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+# def batch_norm(
+#     input: Tensor,
+#     weight: Optional[Tensor],
+#     bias: Optional[Tensor],
+#     running_mean: Optional[Tensor],
+#     running_var: Optional[Tensor],
+#     training: bool,
+#     momentum: float,
+#     eps: float,
+#     cudnn_enabled: bool,
+# ) -> Tensor:
+#     num_features = input.size()[1]
+
+#     if input.numel() == 0:
+#         out = input.clone()
+#         # todo: figure out why we need the following if input has no elements
+#         if weight is not None:
+#             out *= weight[0]
+#         if bias is not None:
+#             out += bias[0]
+#         return out
+    
+#     if running_mean is not None:
+#         assert num_features == running_mean.numel(), f"running_mean should contain {num_features} elements not {running_mean.numel()}"
+#     elif not training:
+#         return RuntimeError("running_mean must be defined in evaluation mode")
+#     if running_var is not None:
+#         assert num_features == running_var.numel(), f"running_var should contain {num_features} elements not {running_var.numel()}"
+#     elif not training:
+#         return RuntimeError("running_var must be defined in evaluation mode")
+#     if weight is not None:
+#         assert num_features == weight.numel(), f"weight should contain {num_features} elements not {weight.numel()}"
+#     if bias is not None:
+#         assert num_features == bias.numel(), f"bias should contain {num_features} elements not {bias.numel()}"
+
+#     use_cudnn = input.is_cuda and input
+#     # INCOMPLETE, hopefully will not have to go this route
+#     return input
+
 
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
