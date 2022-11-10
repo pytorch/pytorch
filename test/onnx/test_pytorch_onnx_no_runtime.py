@@ -408,7 +408,7 @@ class TestONNXExport(common_utils.TestCase):
 
         class Model(torch.nn.Module):
             def forward(self, xs: List[torch.Tensor]):
-                return torch._C._nn.pad_sequence(xs, True, 0.)
+                return torch._C._nn.pad_sequence(xs, True, 0.0)
 
         model = Model()
         model = torch.jit.script(Model())
