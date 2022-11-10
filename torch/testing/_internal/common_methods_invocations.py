@@ -12434,8 +12434,6 @@ op_db: List[OpInfo] = [
                # Lazy tensor failures: mutating and aliasing ops should all have codegen'd kernels
                DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
                DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
-               # TypeError: must be real number, not SymFloat
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
            )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),

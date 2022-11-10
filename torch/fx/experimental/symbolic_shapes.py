@@ -24,7 +24,7 @@ aten = torch.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "sym_float", "FloorDiv", "guard_int", "wrap_node",
+    "SymDispatchMode", "sym_int", "sym_float", "FloorDiv", "guard_int", "wrap_node",
     "sym_sqrt",
 ]
 
@@ -166,7 +166,7 @@ class SymNode:
         return SymNode(sympy.Float(num), self.shape_env, float, constant=num)
 
     def clone(self):
-        return self
+        return SymNode(self.expr, self.shape_env, self.pytype, constant=self.constant)
 
     def str(self):
         return f"{self.expr}"
@@ -264,7 +264,7 @@ magic_methods = {
     'ge': lambda a, b: sympy.Ge(a, b),
     'floor': lambda a: sympy.floor(a),
     'sym_float': lambda a: a,  # TODO: why can't I wrap with sympy.Float?
-    'sym_int': lambda a: sympy.floor(a),
+    'sym_int': lambda a: sympy.floor(a) if a > 0 else sympy.ceiling(a),
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
@@ -281,15 +281,12 @@ unary_magic_methods = {
     'sym_sqrt',
 }
 
-# TODO: sym_int should also work on floats
-magic_methods_not_on_float = {"sym_int"}
-
 magic_methods_on_builtins = {"min", "max"}
 magic_methods_on_math = {"ceil", "floor"}
 magic_methods_on_submodule = {"sym_float", "sym_int", "sym_sqrt"}
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
-always_int_magic_methods = {"ceil", "floor"}
+always_int_magic_methods = {"ceil", "floor", "sym_int"}
 always_bool_magic_methods = {"eq", "gt", "lt", "le", "ge"}
 
 def wrap_node(x):
@@ -353,8 +350,6 @@ def _make_node_magic(method, func):
             pytype = int
         elif method in always_float_magic_methods:
             pytype = float
-        elif method in ["sym_int"]:
-            pytype = int
         else:
             pytype = self.pytype
 
@@ -396,10 +391,6 @@ def _make_user_magic(method, user_type):
 
 for method, func in magic_methods.items():
     _make_user_magic(method, SymInt)
-
-for method, func in magic_methods.items():
-    if method in magic_methods_not_on_float:
-        continue
     _make_user_magic(method, SymFloat)
 
 del method
