@@ -441,7 +441,12 @@ class ParsePerformanceLogs(Parser):
         )
         self.parsed_frames = defaultdict(lambda: defaultdict(None))
         self.untouched_parsed_frames = defaultdict(lambda: defaultdict(None))
-        self.metrics = ["speedup", "compilation_latency", "compression_ratio"]
+        self.metrics = [
+            "speedup",
+            "abs_latency",
+            "compilation_latency",
+            "compression_ratio",
+        ]
         self.bottom_k = 50
         self.parse()
 
@@ -474,6 +479,7 @@ class ParsePerformanceLogs(Parser):
                     "name",
                     "batch_size",
                     "speedup",
+                    "abs_latency",
                     "compilation_latency",
                     "compression_ratio",
                 ],
@@ -511,6 +517,8 @@ class ParsePerformanceLogs(Parser):
             for compiler in self.compilers:
                 output_filename = f"{self.output_dir}/{compiler}_{suite}_{dtype}_{self.mode}_{device}_{testing}.csv"
                 df = self.read_csv(output_filename)
+                if metric not in df:
+                    df.insert(len(df.columns), metric, np.nan)
                 df = df[["dev", "name", "batch_size", metric]]
                 df.rename(columns={metric: compiler}, inplace=True)
                 df["batch_size"] = df["batch_size"].astype(int)
@@ -693,6 +701,8 @@ class ParsePerformanceLogs(Parser):
             return "Compilation latency (sec)"
         elif metric == "compression_ratio":
             return "Peak Memory Compression Ratio"
+        elif metric == "abs_latency":
+            return "Absolute latency (ms)"
         raise RuntimeError("unknown metric")
 
     def generate_warnings(self):
@@ -729,6 +739,7 @@ class ParsePerformanceLogs(Parser):
             "accuracy",
             "compilation_latency",
             "compression_ratio",
+            "abs_latency",
         ]:
             df = self.untouched_parsed_frames[suite][metric]
             df = df.drop("dev", axis=1)
