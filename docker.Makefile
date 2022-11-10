@@ -23,12 +23,15 @@ PYTORCH_VERSION          ?= $(shell git describe --tags --always)
 # Can be either official / dev
 BUILD_TYPE               ?= dev
 BUILD_PROGRESS           ?= auto
+# Intentionally left blank
+TRITON_VERSION           ?=
 BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
 							--build-arg CUDA_VERSION=$(CUDA_VERSION) \
 							--build-arg CUDA_CHANNEL=$(CUDA_CHANNEL) \
 							--build-arg PYTORCH_VERSION=$(PYTORCH_VERSION) \
-							--build-arg INSTALL_CHANNEL=$(INSTALL_CHANNEL)
+							--build-arg INSTALL_CHANNEL=$(INSTALL_CHANNEL) \
+							--build-arg TRITON_VERSION=$(TRITON_VERSION)
 EXTRA_DOCKER_BUILD_FLAGS ?=
 
 BUILD                    ?= build
