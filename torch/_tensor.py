@@ -413,6 +413,10 @@ class Tensor(torch._C._TensorBase):
                 self.requires_grad,
                 backward_hooks,
             )  # previously was self._backward_hooks
+
+            metadata = torch._utils.get_tensor_metadata(self)
+            if metadata:
+                args = args + (metadata,)  # type: ignore[assignment]
             return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
@@ -1293,7 +1297,7 @@ class Tensor(torch._C._TensorBase):
         if not all(issubclass(cls, t) for t in types):
             return NotImplemented
 
-        with _C.DisableTorchFunction():
+        with _C.DisableTorchFunctionSubclass():
             ret = func(*args, **kwargs)
             if func in get_default_nowrap_functions():
                 return ret
