@@ -137,6 +137,7 @@ get_native_quant_patterns.__module__ = "torch.ao.quantization.fx.backend_config_
 get_pattern_to_quantize_handlers.__module__ = "torch.ao.quantization.fx.backend_config_utils"
 
 __all__ = [
+    "get_quantize_handler_cls",
     "get_fusion_pattern_to_fuse_handler_cls",
     "get_native_quant_patterns",
     "get_pattern_to_quantize_handlers",

@@ -200,7 +200,7 @@
 #     preferable since it would be less efficient.
 #
 # NB: The parameter names here MUST be consistent with the parameter names
-# in Decalarations.yaml
+# in native_functions.yaml
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sgn()
   result: handle_r_to_c(result.scalar_type(), self_t.conj() * self_p.sgn())
@@ -220,8 +220,8 @@
 
 - name: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
-  batch1: maybe_multiply(grad.unsqueeze(0).expand({ batch1.size(0), batch1.size(1), batch2.size(2) }).bmm(batch2.transpose(1, 2).conj()), alpha.conj())
-  batch2: maybe_multiply(batch1.transpose(1, 2).conj().bmm(grad.unsqueeze(0).expand({ batch1.size(0), batch1.size(1), batch2.size(2) })), alpha.conj())
+  batch1: maybe_multiply(grad.unsqueeze(0).expand_symint({ batch1.sym_size(0), batch1.sym_size(1), batch2.sym_size(2) }).bmm(batch2.transpose(1, 2).conj()), alpha.conj())
+  batch2: maybe_multiply(batch1.transpose(1, 2).conj().bmm(grad.unsqueeze(0).expand_symint({ batch1.sym_size(0), batch1.sym_size(1), batch2.sym_size(2) })), alpha.conj())
   result: maybe_multiply(self_t, beta) + maybe_multiply(batch1_t.bmm(batch2_p).sum(0), alpha) + maybe_multiply(batch1_p.bmm(batch2_t).sum(0), alpha)
 
 - name: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
@@ -526,10 +526,6 @@
   self: grad.diagonal(offset, dim1, dim2)
   result: auto_linear
 
-- name: diag(Tensor self, int diagonal=0) -> Tensor
-  self: diag_backward_symint(grad, self.sym_sizes(), diagonal)
-  result: auto_linear
-
 - name: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   self: diagonal_backward_symint(grad, self.sym_sizes(), offset, dim1, dim2)
   result: auto_linear
@@ -558,11 +554,11 @@
 - name: div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
   self: div_tensor_self_backward(grad, other, self.scalar_type(), rounding_mode)
   other: div_tensor_other_backward(grad, self, other, rounding_mode)
-  result: "rounding_mode.has_value() ? result.new_zeros(result.sizes()) : self_t / other_p - other_t * (self_p / other_p) / other_p"
+  result: "rounding_mode.has_value() ? result.new_zeros_symint(result.sym_sizes()) : self_t / other_p - other_t * (self_p / other_p) / other_p"
 
 - name: div.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
   self: div_tensor_self_backward(grad, at::lift_fresh(at::scalar_to_tensor(other)), self.scalar_type(), rounding_mode)
-  result: "rounding_mode.has_value() ? result.new_zeros(result.sizes()) : self_t / other"
+  result: "rounding_mode.has_value() ? result.new_zeros_symint(result.sym_sizes()) : self_t / other"
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
   self: grad * tensor.conj()
@@ -828,7 +824,7 @@
   result: at::_index_put_impl_(self_t, indices, values_t, accumulate, unsafe)
 
 - name: index_select(Tensor self, int dim, Tensor index) -> Tensor
-  self: index_select_backward(grad, self.sizes(), dim, index)
+  self: index_select_backward_symint(grad, self.sym_sizes(), dim, index)
   index: non_differentiable
   result: auto_linear
 
@@ -845,7 +841,7 @@
   self: non_differentiable
 
 - name: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
-  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
 
 - name: le_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -999,10 +995,10 @@
   result: linalg_lu_solve_jvp(result, LU_p, pivots, LU_t, B_t, left, adjoint)
 
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
-  LU_data: lu_unpack_backward(grad_L, grad_U, LU_data.size(-2), LU_data.size(-1))
+  LU_data: lu_unpack_backward(grad_L, grad_U, LU_data.sym_size(-2), LU_data.sym_size(-1))
   LU_pivots: non_differentiable
-  L: "LU_data_t.size(-2) >= LU_data_t.size(-1) ? LU_data_t.tril(-1) : LU_data_t.narrow(-1, 0, LU_data_t.size(-2)).tril(-1)"
-  U: "LU_data_t.size(-1) >= LU_data_t.size(-2) ? LU_data_t.triu() : LU_data_t.narrow(-2, 0, LU_data_t.size(-1)).triu()"
+  L: "LU_data_t.sym_size(-2) >= LU_data_t.sym_size(-1) ? LU_data_t.tril(-1) : LU_data_t.narrow_symint(-1, 0, LU_data_t.sym_size(-2)).tril(-1)"
+  U: "LU_data_t.sym_size(-1) >= LU_data_t.sym_size(-2) ? LU_data_t.triu() : LU_data_t.narrow_symint(-2, 0, LU_data_t.sym_size(-1)).triu()"
   output_differentiability: [False, True, True]
 
 - name: masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor
@@ -1018,7 +1014,7 @@
 
 - name: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
   self: grad.masked_fill(mask, 0)
-  source: masked_scatter_backward(grad, mask, source.sizes())
+  source: masked_scatter_backward(grad, mask, source.sym_sizes())
   mask: non_differentiable
   result: self_t.masked_scatter(mask, source_t)
 
@@ -1032,7 +1028,7 @@
   result: linalg_matrix_exp_differential(self_p, self_t, /*adjoint*/ false)
 
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
 
 - name: max(Tensor self) -> Tensor
@@ -1050,7 +1046,7 @@
   result: other_t + (self_p > other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand(self.sizes()) / self.numel()
+  self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
   result: auto_linear
 
 - name: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
@@ -1080,15 +1076,15 @@
 # The backward implementation is correct in the sense that it returns the
 # subgradient on one side.
 - name: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
 
 - name: nanmedian.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
 
 - name: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
 
 - name: min(Tensor self) -> Tensor
@@ -1119,7 +1115,7 @@
   result: at::mm(self_t, mat2_p) + at::mm(self_p, mat2_t)
 
 - name: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
-  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
 
 - name: mul.Tensor(Tensor self, Tensor other) -> Tensor
@@ -1164,7 +1160,7 @@
   rstd: not_implemented("native_layer_norm_backward rstd")
 
 - name: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, SymInt N, SymInt C, SymInt HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
-  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, eps, grad_input_mask) : (grads[0].defined() ? native_group_norm_backward_symint(grads[0].is_contiguous() ? grads[0] : grads[0].contiguous(), input.is_contiguous() ? input : input.contiguous(), result1, result2, weight, N, C, HxW, group, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>())"
+  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, eps, grad_input_mask) : (grads[0].defined() ? native_group_norm_backward_symint(grads[0].device().is_xpu() ? grads[0] : grads[0].contiguous(), input.device().is_xpu() ? input : input.contiguous(), result1, result2, weight, N, C, HxW, group, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>())"
   result0: group_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, result1, result2, group)
   result1: group_norm_mean_jvp(input_t, result1, group)
   result2: group_norm_invstd_jvp(input_p, input_t, result1, result2, group)
@@ -1232,16 +1228,16 @@
   result: self_t.zero_()
 
 - name: normal.Tensor_float(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
-  mean: at::zeros(mean.sizes(), grad.options())
+  mean: at::zeros_symint(mean.sym_sizes(), grad.options())
   result: auto_element_wise
 
 - name: normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor
-  std: at::zeros(std.sizes(), grad.options())
+  std: at::zeros_symint(std.sym_sizes(), grad.options())
   result: auto_element_wise
 
 - name: normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
-  mean: at::zeros(mean.sizes(), grad.options())
-  std: at::zeros(std.sizes(), grad.options())
+  mean: at::zeros_symint(mean.sym_sizes(), grad.options())
+  std: at::zeros_symint(std.sym_sizes(), grad.options())
   result: zeros_like(mean_t)
 
 - name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
@@ -1249,9 +1245,7 @@
   result: householder_product_jvp(input_t, tau_t, result, input_p, tau_p)
 
 - name: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
-  self: not_implemented("ormqr")
-  input2: not_implemented("ormqr")
-  input3: not_implemented("ormqr")
+  self, input2, input3: ormqr_backward(grad, result, self, input2, input3, left, transpose, grad_input_mask)
 
 - name: permute(Tensor(a) self, int[] dims) -> Tensor(a)
   self: permute_backwards(grad, dims)
@@ -1463,29 +1457,29 @@
   output_differentiability: [True, False, False, False]  # LU is an auxiliary tensor not exposed to the user
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
-  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
+  self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), true)
   output_differentiability: [True, False]
   values: gather_with_keepdimed_indices(self_t, dim, indices, true)
 
 - name: sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
-  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
+  self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), true)
   output_differentiability: [True, False]
   values: gather_with_keepdimed_indices(self_t, dim, indices, true)
 
-- name: split.Tensor(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]
-  self: split_backward(grads, split_size, dim, self.sizes(), self.options())
+- name: split.Tensor(Tensor(a -> *) self, SymInt split_size, int dim=0) -> Tensor(a)[]
+  self: split_backward(grads, split_size, dim, self.sym_sizes(), self.options())
   result: auto_linear
 
-- name: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
-  self: split_backward(grads, split_size, dim, self.sizes(), self.options())
+- name: unsafe_split.Tensor(Tensor self, SymInt split_size, int dim=0) -> Tensor[]
+  self: split_backward(grads, split_size, dim, self.sym_sizes(), self.options())
   result: auto_linear
 
-- name: split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
-  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
+- name: split_with_sizes(Tensor(a -> *) self, SymInt[] split_sizes, int dim=0) -> Tensor(a)[]
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
   result: auto_linear
 
-- name: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
-  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
+- name: unsafe_split_with_sizes(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
   result: auto_linear
 
 - name: sqrt(Tensor self) -> Tensor
@@ -1497,8 +1491,12 @@
   result: auto_linear
 
 - name: squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)
-  self: unsqueeze_to(grad, dim, self.sym_sizes())
-  result: auto_linear
+  dispatch:
+    Default:
+      self: unsqueeze_to(grad, dim, self.sym_sizes())
+      result: auto_linear
+    AutogradNestedTensor:
+      self: grad.unsqueeze(dim)
 
 - name: squeeze_(Tensor(a!) self) -> Tensor(a!)
   self: unsqueeze_to(grad, self.sym_sizes())
@@ -1556,12 +1554,12 @@
 
 # We never call _linalg_svd with compute_uv=False in an autograd context, so we don't even consider it here
 - name: _linalg_svd(Tensor A, bool full_matrices=False, bool compute_uv=True, *, str? driver=None) -> (Tensor U, Tensor S, Tensor Vh)
-  A: "svd_backward(full_matrices && grad_U.defined() ? grad_U.narrow(-1, 0, S.size(-1)) : grad_U,
+  A: "svd_backward(full_matrices && grad_U.defined() ? grad_U.narrow_symint(-1, 0, S.sym_size(-1)) : grad_U,
                    grad_S,
-                   full_matrices && grad_Vh.defined() ? grad_Vh.narrow(-2, 0, S.size(-1)) : grad_Vh,
-                   full_matrices ? U.narrow(-1, 0, S.size(-1)) : U,
+                   full_matrices && grad_Vh.defined() ? grad_Vh.narrow_symint(-2, 0, S.sym_size(-1)) : grad_Vh,
+                   full_matrices ? U.narrow_symint(-1, 0, S.sym_size(-1)) : U,
                    S,
-                   full_matrices ? Vh.narrow(-2, 0, S.size(-1)) : Vh)"
+                   full_matrices ? Vh.narrow_symint(-2, 0, S.sym_size(-1)) : Vh)"
   U, S, Vh: linalg_svd_jvp(A_t, U, S, Vh, full_matrices)
 
 - name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
@@ -1612,12 +1610,12 @@
   result: auto_element_wise
 
 - name: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
-  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
+  self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), true)
   output_differentiability: [True, False]
   values: gather(self_t, dim, indices)
 
 - name: trace(Tensor self) -> Tensor
-  self: trace_backward(grad, self.sizes())
+  self: trace_backward_symint(grad, self.sym_sizes())
   result: auto_linear
 
 - name: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
@@ -1666,10 +1664,10 @@
   self: to_mkldnn_backward(grad, self)
 
 - name: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
-  self: unfold_backward(grad, self.sizes(), dimension, size, step)
+  self: unfold_backward_symint(grad, self.sym_sizes(), dimension, size, step)
   result: auto_linear
 
-- name: unfold_backward(Tensor grad_in, int[] input_sizes, int dim, int size, int step) -> Tensor
+- name: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, int size, int step) -> Tensor
   grad_in: grad.unfold(dim, size, step)
   result: auto_linear
 
@@ -1768,7 +1766,7 @@
   self: grad.to_dense().sparse_mask(mask).to_dense()
   mask: non_differentiable
 
-- name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
+- name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, SymInt[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   values: sparse_constructor_values_backward(grad, indices)
 
 - name: _sparse_sum.dim(Tensor self, int[1] dim) -> Tensor
@@ -1783,7 +1781,7 @@
 - name: values(Tensor(a) self) -> Tensor(a)
   dispatch:
     Default:
-      self: at::_sparse_coo_tensor_unsafe(self.indices(), grad, self.sizes())._coalesced_(true)
+      self: at::_sparse_coo_tensor_unsafe_symint(self.indices(), grad, self.sym_sizes())._coalesced_(true)
     AutogradNestedTensor:
       self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_offsets())
 
@@ -1799,9 +1797,9 @@
            _trilinear(i1_p, i2_t, i3_p, expand1, expand2, expand3, sumdim, unroll_dim) +
            _trilinear(i1_p, i2_p, i3_t, expand1, expand2, expand3, sumdim, unroll_dim)"
 
-- name: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
+- name: constant_pad_nd(Tensor self, SymInt[] pad, Scalar value=0) -> Tensor
   self: constant_pad_nd_backward(grad, pad)
-  result: constant_pad_nd(self_t, pad, 0)
+  result: constant_pad_nd_symint(self_t, pad, 0)
 
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
@@ -1840,10 +1838,10 @@
 - name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False, int padding_idx=-1) -> (Tensor, Tensor, Tensor, Tensor)
   indices: non_differentiable
   offsets: non_differentiable
-  weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse, per_sample_weights, padding_idx)
+  weight: _embedding_bag_backward_symint(grad, indices, offsets, result1, result2, result3, weight.sym_size(0), scale_grad_by_freq, mode, sparse, per_sample_weights, padding_idx)
   per_sample_weights: _embedding_bag_per_sample_weights_backward(grad, weight, indices, offsets, result1, mode, padding_idx)
 
-- name: _embedding_bag_dense_backward(Tensor grad, Tensor indices, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, int num_weights, bool scale_grad_by_freq, int mode, Tensor? per_sample_weights, int padding_idx=-1) -> Tensor
+- name: _embedding_bag_dense_backward(Tensor grad, Tensor indices, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, SymInt num_weights, bool scale_grad_by_freq, int mode, Tensor? per_sample_weights, int padding_idx=-1) -> Tensor
   indices: non_differentiable
   offset2bag: non_differentiable
   bag_size: non_differentiable
@@ -1866,15 +1864,15 @@
   self: multilabel_margin_loss_backward(grad, self, target, reduction, is_target)
   target: non_differentiable
 
-- name: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
-  self: nll_loss_backward(grad, self, target, weight, reduction, ignore_index, total_weight)
+- name: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, SymInt ignore_index) -> (Tensor output, Tensor total_weight)
+  self: nll_loss_backward_symint(grad, self, target, weight, reduction, ignore_index, total_weight)
   target: non_differentiable
-  output: std::get<0>(nll_loss_forward(self_t, target, weight, reduction, ignore_index))
+  output: std::get<0>(nll_loss_forward_symint(self_t, target, weight, reduction, ignore_index))
 
-- name: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
-  self: nll_loss2d_backward(grad, self, target, weight, reduction, ignore_index, total_weight)
+- name: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int reduction, SymInt ignore_index) -> (Tensor output, Tensor total_weight)
+  self: nll_loss2d_backward_symint(grad, self, target, weight, reduction, ignore_index, total_weight)
   target: non_differentiable
-  output: std::get<0>(nll_loss2d_forward(self_t, target, weight, reduction, ignore_index))
+  output: std::get<0>(nll_loss2d_forward_symint(self_t, target, weight, reduction, ignore_index))
 
 - name: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean, float beta=1.0) -> Tensor
   self: smooth_l1_loss_backward(grad, self, target, reduction, beta)
@@ -2013,28 +2011,28 @@
   self: threshold_backward(grad, self, threshold)
   result: self_t.copy_(threshold_backward(self_t.conj(), original_self_p, threshold).conj())
 
-- name: reflection_pad1d(Tensor self, int[2] padding) -> Tensor
-  self: reflection_pad1d_backward(grad, self, padding)
+- name: reflection_pad1d(Tensor self, SymInt[2] padding) -> Tensor
+  self: reflection_pad1d_backward_symint(grad, self, padding)
   result: auto_linear
 
-- name: reflection_pad2d(Tensor self, int[4] padding) -> Tensor
-  self: reflection_pad2d_backward(grad, self, padding)
+- name: reflection_pad2d(Tensor self, SymInt[4] padding) -> Tensor
+  self: reflection_pad2d_backward_symint(grad, self, padding)
   result: auto_linear
 
-- name: reflection_pad3d(Tensor self, int[6] padding) -> Tensor
-  self: reflection_pad3d_backward(grad, self, padding)
+- name: reflection_pad3d(Tensor self, SymInt[6] padding) -> Tensor
+  self: reflection_pad3d_backward_symint(grad, self, padding)
   result: auto_linear
 
-- name: replication_pad1d(Tensor self, int[2] padding) -> Tensor
-  self: replication_pad1d_backward(grad, self, padding)
+- name: replication_pad1d(Tensor self, SymInt[2] padding) -> Tensor
+  self: replication_pad1d_backward_symint(grad, self, padding)
   result: auto_linear
 
-- name: replication_pad2d(Tensor self, int[4] padding) -> Tensor
-  self: replication_pad2d_backward(grad, self, padding)
+- name: replication_pad2d(Tensor self, SymInt[4] padding) -> Tensor
+  self: replication_pad2d_backward_symint(grad, self, padding)
   result: auto_linear
 
-- name: replication_pad3d(Tensor self, int[6] padding) -> Tensor
-  self: replication_pad3d_backward(grad, self, padding)
+- name: replication_pad3d(Tensor self, SymInt[6] padding) -> Tensor
+  self: replication_pad3d_backward_symint(grad, self, padding)
   result: auto_linear
 
 - name: upsample_linear1d(Tensor self, SymInt[1] output_size, bool align_corners, float? scales=None) -> Tensor
@@ -2084,53 +2082,6 @@
   self: _upsample_nearest_exact3d_backward_symint(grad, output_size, self.sym_sizes(), scales_d, scales_h, scales_w)
   result: auto_linear
 
-- name: upsample_linear1d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: upsample_linear1d_backward_symint(grad, output_size, input.sym_sizes(), align_corners, scale_factors)
-  result: auto_linear
-
-- name: upsample_bilinear2d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: upsample_bilinear2d_backward_symint(grad, output_size, input.sym_sizes(), align_corners, scale_factors)
-  result: auto_linear
-
-- name: _upsample_bilinear2d_aa.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: _upsample_bilinear2d_aa_backward_symint(grad, output_size, input.sym_sizes(), align_corners, scale_factors)
-  result: auto_linear
-
-- name: upsample_trilinear3d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: upsample_trilinear3d_backward_symint(grad, output_size, input.sym_sizes(), align_corners, scale_factors)
-  result: auto_linear
-
-- name: upsample_bicubic2d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: upsample_bicubic2d_backward_symint(grad, output_size, input.sym_sizes(), align_corners, scale_factors)
-  result: auto_linear
-
-- name: _upsample_bicubic2d_aa.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: _upsample_bicubic2d_aa_backward_symint(grad, output_size, input.sym_sizes(), align_corners, scale_factors)
-
-- name: upsample_nearest1d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
-  input: upsample_nearest1d_backward_symint(grad, output_size, input.sym_sizes(), scale_factors)
-  result: auto_linear
-
-- name: _upsample_nearest_exact1d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
-  input: _upsample_nearest_exact1d_backward_symint(grad, output_size, input.sym_sizes(), scale_factors)
-  result: auto_linear
-
-- name: upsample_nearest2d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
-  input: upsample_nearest2d_backward_symint(grad, output_size, input.sym_sizes(), scale_factors)
-  result: auto_linear
-
-- name: _upsample_nearest_exact2d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
-  input: _upsample_nearest_exact2d_backward_symint(grad, output_size, input.sym_sizes(), scale_factors)
-  result: auto_linear
-
-- name: upsample_nearest3d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
-  input: upsample_nearest3d_backward_symint(grad, output_size, input.sym_sizes(), scale_factors)
-  result: auto_linear
-
-- name: _upsample_nearest_exact3d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
-  input: _upsample_nearest_exact3d_backward_symint(grad, output_size, input.sym_sizes(), scale_factors)
-  result: auto_linear
-
 - name: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
   self: pixel_unshuffle(grad, upscale_factor)
   result: auto_linear
@@ -2143,7 +2094,7 @@
   self: _adaptive_avg_pool2d_backward(grad, self)
   result: auto_linear
 
-- name: _adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
+- name: _adaptive_avg_pool3d(Tensor self, SymInt[3] output_size) -> Tensor
   self: _adaptive_avg_pool3d_backward(grad, self)
   result: auto_linear
 
@@ -2208,19 +2159,19 @@
   indices: non_differentiable
   result: auto_linear
 
-- name: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
+- name: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, SymInt[] padding, int[] dilation, bool transposed, SymInt[] output_padding, int groups) -> Tensor
   input, weight, bias: "grad.defined() ? convolution_backward_symint(grad, input, weight, bias->sym_sizes(), stride, padding, dilation, transposed, output_padding, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
   result: convolution_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, stride, padding, dilation, transposed, output_padding, groups)
 
 # TorchScript serializes calls to _convolution so this entry is present until that is changed to use convolution.
 # Note that the benchmark, deterministic, cudnn_enabled, and allow_tf32 flags are queried from the global context
 # by convolution_backward instead of being passed along from the forward pass.
-- name: _convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor
-  input, weight, bias: "grad.defined() ? convolution_backward(grad, input, weight, bias->sizes(), stride, padding, dilation, transposed, output_padding, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+- name: _convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, SymInt[] padding, int[] dilation, bool transposed, SymInt[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor
+  input, weight, bias: "grad.defined() ? convolution_backward_symint(grad, input, weight, bias->sym_sizes(), stride, padding, dilation, transposed, output_padding, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
   result: _convolution_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, stride, padding, dilation, transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled, allow_tf32)
 
-- name: convolution_backward(Tensor grad_output, Tensor input, Tensor weight, SymInt[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  grad_output, input, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, input, stride, padding, dilation, transposed, output_padding, groups, grad_input_mask)
+- name: convolution_backward(Tensor grad_output, Tensor input, Tensor weight, SymInt[]? bias_sizes, int[] stride, SymInt[] padding, int[] dilation, bool transposed, SymInt[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  grad_output, input, weight: _convolution_double_backward_symint(grads[0], grads[1], grads[2], grad_output, weight, input, stride, padding, dilation, transposed, output_padding, groups, grad_input_mask)
   result0: std::get<0>(convolution_backward_symint(grad_output_p, input_p, weight_t, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, {true, false, false})) + std::get<0>(convolution_backward_symint(grad_output_t, input_p, weight_p, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, {true, false, false}))
   result1: std::get<1>(convolution_backward_symint(grad_output_p, input_t, weight_p, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, {false, true, false})) + std::get<1>(convolution_backward_symint(grad_output_t, input_p, weight_p, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, {false, true, false}))
   result2: convolution_backward_jvp_grad_bias(grad_output_t, result2)
@@ -2231,11 +2182,11 @@
 - name: convolution_backward_overrideable(Tensor grad_output, Tensor input, Tensor weight, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   grad_output, input, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, input, stride, padding, dilation, transposed, output_padding, groups, grad_input_mask)
 
-- name: slow_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1) -> Tensor
-  self, weight, bias: "grad.defined() ? convolution_backward(grad, self, weight, bias->sizes(), stride, padding, dilation, true, output_padding, 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+- name: slow_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, SymInt[2] padding=0, SymInt[2] output_padding=0, int[2] dilation=1) -> Tensor
+  self, weight, bias: "grad.defined() ? convolution_backward_symint(grad, self, weight, bias->sym_sizes(), stride, padding, dilation, true, output_padding, 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
-- name: slow_conv_transpose3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1) -> Tensor
-  self, weight, bias: "grad.defined() ? convolution_backward(grad, self, weight, bias->sizes(), stride, padding, dilation, true, output_padding, 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+- name: slow_conv_transpose3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, SymInt[3] padding=0, SymInt[3] output_padding=0, int[3] dilation=1) -> Tensor
+  self, weight, bias: "grad.defined() ? convolution_backward_symint(grad, self, weight, bias->sym_sizes(), stride, padding, dilation, true, output_padding, 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
 - name: _slow_conv2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding) -> Tensor
   self, weight, bias: "grad.defined() ? _slow_conv2d_backward(grad, self, weight, kernel_size, stride, padding, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
@@ -2243,20 +2194,20 @@
 - name: _slow_conv2d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, {{1, 1}}, false, {{0, 0}}, 1, grad_input_mask)
 
-- name: _conv_depthwise2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation) -> Tensor
-  self, weight, bias: "grad.defined() ? convolution_backward(grad.contiguous(), self, weight, bias->sizes(), stride, padding, dilation, /*transposed=*/ false, /*output_padding=*/ {{0, 0}}, /*groups=*/ 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+- name: _conv_depthwise2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, SymInt[2] padding, int[2] dilation) -> Tensor
+  self, weight, bias: "grad.defined() ? convolution_backward_symint(grad.contiguous(), self, weight, bias->sym_sizes(), stride, padding, dilation, /*transposed=*/ false, /*output_padding=*/ {{0, 0}}, /*groups=*/ 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
-- name: conv_depthwise3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] dilation) -> Tensor
-  self, weight, bias: "grad.defined() ? convolution_backward(grad.contiguous(), self, weight, bias->sizes(), stride, padding, dilation, /*transposed=*/ false, /*output_padding=*/ {{0, 0, 0}}, /*groups=*/ 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+- name: conv_depthwise3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, SymInt[3] padding, int[3] dilation) -> Tensor
+  self, weight, bias: "grad.defined() ? convolution_backward_symint(grad.contiguous(), self, weight, bias->sym_sizes(), stride, padding, dilation, /*transposed=*/ false, /*output_padding=*/ {{0, 0, 0}}, /*groups=*/ 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
-- name: slow_conv3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding) -> Tensor
-  self, weight, bias: "grad.defined() ? convolution_backward(grad, self, weight, bias->sizes(), stride, padding, /*dilation=*/ {{1, 1, 1}}, false, /*output_padding=*/ {{0, 0, 0}}, 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+- name: slow_conv3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, SymInt[3] padding) -> Tensor
+  self, weight, bias: "grad.defined() ? convolution_backward_symint(grad, self, weight, bias->sym_sizes(), stride, padding, /*dilation=*/ {{1, 1, 1}}, false, /*output_padding=*/ {{0, 0, 0}}, 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
-- name: slow_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor
-  self, weight, bias: "grad.defined() ? convolution_backward(grad, self, weight, bias->sizes(), stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+- name: slow_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, SymInt[2] padding=0, int[2] dilation=1) -> Tensor
+  self, weight, bias: "grad.defined() ? convolution_backward_symint(grad, self, weight, bias->sym_sizes(), stride, padding, dilation, false, std::vector<c10::SymInt>(padding.size(), 0), 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
-- name: slow_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1) -> Tensor
-  self, weight, bias: "grad.defined() ? convolution_backward(grad, self, weight, bias->sizes(), stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+- name: slow_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, SymInt[3] padding=0, int[3] dilation=1) -> Tensor
+  self, weight, bias: "grad.defined() ? convolution_backward_symint(grad, self, weight, bias->sym_sizes(), stride, padding, dilation, false, std::vector<c10::SymInt>(padding.size(), 0), 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
 - name: col2im(Tensor self, SymInt[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   self: im2col(grad, kernel_size, dilation, padding, stride)
@@ -2272,7 +2223,7 @@
   result: _adaptive_avg_pool2d_backward(grad_output_t, self_p)
 
 - name: _adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
-  grad_output: _adaptive_avg_pool3d(grad, { grad_output.size(-3), grad_output.size(-2), grad_output.size(-1) })
+  grad_output: _adaptive_avg_pool3d_symint(grad, { grad_output.sym_size(-3), grad_output.sym_size(-2), grad_output.sym_size(-1) })
   self: zeros_like(self)
   result: _adaptive_avg_pool3d_backward(grad_output_t, self_p)
 
@@ -2373,13 +2324,13 @@
            + mse_loss_backward(grad_output_t, self_p, target_p, reduction)
           "
 
-- name: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
-  grad_output: nll_loss(grad, target, weight, reduction, ignore_index)
+- name: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, SymInt ignore_index, Tensor total_weight) -> Tensor
+  grad_output: nll_loss_symint(grad, target, weight, reduction, ignore_index)
   self: zeros_like(grad)
   target: non_differentiable
 
-- name: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
-  grad_output: nll_loss2d(grad, target, weight, reduction, ignore_index)
+- name: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, SymInt ignore_index, Tensor total_weight) -> Tensor
+  grad_output: nll_loss2d_symint(grad, target, weight, reduction, ignore_index)
   self: zeros_like(grad)
   target: non_differentiable
 
@@ -2389,35 +2340,35 @@
   self: zeros_like(grad)
   result: rrelu_with_noise_backward(grad_output_t, self_p, noise, lower, upper, training, false)
 
-- name: reflection_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor
-  grad_output: reflection_pad1d(grad, padding)
+- name: reflection_pad1d_backward(Tensor grad_output, Tensor self, SymInt[2] padding) -> Tensor
+  grad_output: reflection_pad1d_symint(grad, padding)
   self: zeros_like(self)
-  result: reflection_pad1d_backward(grad_output_t, self_p, padding)
+  result: reflection_pad1d_backward_symint(grad_output_t, self_p, padding)
 
-- name: reflection_pad2d_backward(Tensor grad_output, Tensor self, int[4] padding) -> Tensor
-  grad_output: reflection_pad2d(grad, padding)
+- name: reflection_pad2d_backward(Tensor grad_output, Tensor self, SymInt[4] padding) -> Tensor
+  grad_output: reflection_pad2d_symint(grad, padding)
   self: zeros_like(self)
-  result: reflection_pad2d_backward(grad_output_t, self_p, padding)
+  result: reflection_pad2d_backward_symint(grad_output_t, self_p, padding)
 
-- name: reflection_pad3d_backward(Tensor grad_output, Tensor self, int[6] padding) -> Tensor
-  grad_output: reflection_pad3d(grad, padding)
+- name: reflection_pad3d_backward(Tensor grad_output, Tensor self, SymInt[6] padding) -> Tensor
+  grad_output: reflection_pad3d_symint(grad, padding)
   self: zeros_like(self)
-  result: reflection_pad3d_backward(grad_output_t, self_p, padding)
+  result: reflection_pad3d_backward_symint(grad_output_t, self_p, padding)
 
-- name: replication_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor
-  grad_output: replication_pad1d(grad, padding)
+- name: replication_pad1d_backward(Tensor grad_output, Tensor self, SymInt[2] padding) -> Tensor
+  grad_output: replication_pad1d_symint(grad, padding)
   self: zeros_like(self)
-  result: replication_pad1d_backward(grad_output_t, self_p, padding)
+  result: replication_pad1d_backward_symint(grad_output_t, self_p, padding)
 
-- name: replication_pad2d_backward(Tensor grad_output, Tensor self, int[4] padding) -> Tensor
-  grad_output: replication_pad2d(grad, padding)
+- name: replication_pad2d_backward(Tensor grad_output, Tensor self, SymInt[4] padding) -> Tensor
+  grad_output: replication_pad2d_symint(grad, padding)
   self: zeros_like(self)
-  result: replication_pad2d_backward(grad_output_t, self_p, padding)
+  result: replication_pad2d_backward_symint(grad_output_t, self_p, padding)
 
-- name: replication_pad3d_backward(Tensor grad_output, Tensor self, int[6] padding) -> Tensor
-  grad_output: replication_pad3d(grad, padding)
+- name: replication_pad3d_backward(Tensor grad_output, Tensor self, SymInt[6] padding) -> Tensor
+  grad_output: replication_pad3d_symint(grad, padding)
   self: zeros_like(self)
-  result: replication_pad3d_backward(grad_output_t, self_p, padding)
+  result: replication_pad3d_backward_symint(grad_output_t, self_p, padding)
 
 - name: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
@@ -2509,53 +2460,6 @@
   grad_output: _upsample_nearest_exact3d_symint(grad, output_size, scales_d, scales_h, scales_w)
   result: auto_linear
 
-- name: upsample_linear1d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: upsample_linear1d_symint(grad, output_size, align_corners, scale_factors)
-  result: auto_linear
-
-- name: upsample_bilinear2d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: upsample_bilinear2d_symint(grad, output_size, align_corners, scale_factors)
-  result: auto_linear
-
-- name: _upsample_bilinear2d_aa_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_bilinear2d_aa_symint(grad, output_size, align_corners, scale_factors)
-  result: auto_linear
-
-- name: upsample_trilinear3d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: upsample_trilinear3d_symint(grad, output_size, align_corners, scale_factors)
-  result: auto_linear
-
-- name: upsample_bicubic2d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: upsample_bicubic2d_symint(grad, output_size, align_corners, scale_factors)
-  result: auto_linear
-
-- name: _upsample_bicubic2d_aa_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_bicubic2d_aa_symint(grad, output_size, align_corners, scale_factors)
-
-- name: upsample_nearest1d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: upsample_nearest1d_symint(grad, output_size, scale_factors)
-  result: auto_linear
-
-- name: _upsample_nearest_exact1d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_nearest_exact1d_symint(grad, output_size, scale_factors)
-  result: auto_linear
-
-- name: upsample_nearest2d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: upsample_nearest2d_symint(grad, output_size, scale_factors)
-  result: auto_linear
-
-- name: _upsample_nearest_exact2d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_nearest_exact2d_symint(grad, output_size, scale_factors)
-  result: auto_linear
-
-- name: upsample_nearest3d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: upsample_nearest3d_symint(grad, output_size, scale_factors)
-  result: auto_linear
-
-- name: _upsample_nearest_exact3d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_nearest_exact3d_symint(grad, output_size, scale_factors)
-  result: auto_linear
-
 - name: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
   grad_output: sigmoid_backward(grad, output.conj())
   output: grad.conj() * grad_output * (-2 * output.conj() + 1)
@@ -2610,9 +2514,9 @@
 
 # nnpack
 
-- name: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int[2] padding, int[2] stride=1) -> Tensor
+- name: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, SymInt[2] padding, int[2] stride=1) -> Tensor
   # NNPACK does not support strided convolutions in the backwards path, which is the reason why we are using the closest available function that does here.
-  input, weight, bias: "grad.defined() ? convolution_backward(grad, input, weight, bias->sizes(), stride, padding, std::vector<int64_t>(padding.size(), 1), false, std::vector<int64_t>(padding.size(), 0), 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+  input, weight, bias: "grad.defined() ? convolution_backward_symint(grad, input, weight, bias->sym_sizes(), stride, padding, std::vector<int64_t>(padding.size(), 1), false, std::vector<c10::SymInt>(padding.size(), 0), 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
 #LSTM MPS
 - name: _lstm_mps(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
@@ -2643,14 +2547,14 @@
 
 # miopen
 
-- name: miopen_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  self, weight, bias: "grad.defined() ? convolution_backward(grad, self, weight, bias->sizes(), stride, padding, dilation, true, output_padding, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+- name: miopen_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, SymInt[] padding, SymInt[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+  self, weight, bias: "grad.defined() ? convolution_backward_symint(grad, self, weight, bias->sym_sizes(), stride, padding, dilation, true, output_padding, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
-- name: miopen_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  self, weight, bias: "grad.defined() ? convolution_backward(grad, self, weight, bias->sizes(), stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+- name: miopen_convolution(Tensor self, Tensor weight, Tensor? bias, SymInt[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+  self, weight, bias: "grad.defined() ? convolution_backward_symint(grad, self, weight, bias->sym_sizes(), stride, padding, dilation, false, std::vector<c10::SymInt>(padding.size(), 0), groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
-- name: miopen_depthwise_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  self, weight, bias: "grad.defined() ? convolution_backward(grad, self, weight, bias->sizes(), stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+- name: miopen_depthwise_convolution(Tensor self, Tensor weight, Tensor? bias, SymInt[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+  self, weight, bias: "grad.defined() ? convolution_backward_symint(grad, self, weight, bias->sym_sizes(), stride, padding, dilation, false, std::vector<c10::SymInt>(padding.size(), 0), groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
 - name: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   input, weight, bias: "grad.defined() ? (training ? miopen_batch_norm_backward(input, grad.contiguous(), weight, running_mean, running_var, result1, result2, epsilon) : native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, epsilon, grad_input_mask)) : std::tuple<Tensor, Tensor, Tensor>()"
@@ -2669,8 +2573,8 @@
   dropout_state: non_differentiable
 
 # mkldnn
-- name: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
-  self, weight, bias: "grad.defined() ? convolution_backward(grad, self, weight, bias->sizes(), stride, padding, dilation, /*transposed=*/ false, /*output_padding=*/ std::vector<int64_t>(padding.size(), 0), groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+- name: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, SymInt[] padding, int[] stride, int[] dilation, int groups) -> Tensor
+  self, weight, bias: "grad.defined() ? convolution_backward_symint(grad, self, weight, bias->sym_sizes(), stride, padding, dilation, /*transposed=*/ false, /*output_padding=*/ std::vector<c10::SymInt>(padding.size(), 0), groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
 - name: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   self, weight, bias: mkldnn_linear_backward(self, grad, weight, grad_input_mask)
@@ -2685,21 +2589,21 @@
   self: mkldnn_adaptive_avg_pool2d_backward(grad, self)
 
 - name: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
-  self: grad.reshape(self.sizes())
+  self: grad.reshape_symint(self.sym_sizes())
 
 # Nested Tensor
 - name: _nested_tensor_from_tensor_list(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   list: "grad.defined()? at::unbind(grad) : std::vector<Tensor>(list.size())"
 
 - name: _nested_tensor_from_mask(Tensor t, Tensor mask, bool mask_check=True) -> Tensor
-  t: grad.to_padded_tensor(0, t.sizes())
+  t: grad.to_padded_tensor_symint(0, t.sym_sizes())
   mask: non_differentiable
 
 - name: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
   padded: _nested_from_padded_backward(grad, padded, fuse_transform_0213)
   cpu_nested_shape_example: non_differentiable
 
-- name: to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
+- name: to_padded_tensor(Tensor self, float padding, SymInt[]? output_size=None) -> Tensor
   self: at::_nested_from_padded(grad, self._nested_tensor_size())
   padding: non_differentiable
 
@@ -2710,15 +2614,15 @@
 
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
-  self: fft_r2c_backward(grad, dim, normalization, onesided, self.size(dim.back()))
+  self: fft_r2c_backward(grad, dim, normalization, onesided, self.sym_size(dim.back()))
   result: auto_linear
 
 - name: _fft_c2r(Tensor self, int[] dim, int normalization, int last_dim_size) -> Tensor
   self: fft_c2r_backward(grad, dim, normalization)
   result: auto_linear
 
-- name: _fft_c2c(Tensor self, int[] dim, int normalization, bool forward) -> Tensor
-  self: _fft_c2c(grad, dim, normalization, !forward)
+- name: _fft_c2c(Tensor self, SymInt[] dim, int normalization, bool forward) -> Tensor
+  self: _fft_c2c_symint(grad, dim, normalization, !forward)
   result: auto_linear
 
 - name: unbind.int(Tensor(a -> *) self, int dim=0) -> Tensor(a)[]
@@ -2742,7 +2646,7 @@
 
 # PackedSequence helpers
 - name: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
-  input: _pack_padded_sequence_backward(grad, input.sizes(), result1, batch_first)
+  input: _pack_padded_sequence_backward_symint(grad, input.sym_sizes(), result1, batch_first)
 
 # TH wrappers
 - name: eq.Scalar(Tensor self, Scalar other) -> Tensor
@@ -2804,12 +2708,12 @@
 - name: _test_autograd_multiple_dispatch.fullcoverage(Tensor self) -> Tensor
   dispatch:
     Default:
-      self: grad.expand(self.sizes()) + 1
+      self: grad.expand_symint(self.sym_sizes()) + 1
       result: auto_linear
     AutogradNestedTensor:
       self: grad.mul(grad)
     AutogradCUDA:
-      self: grad.expand(self.sizes()) * 2
+      self: grad.expand_symint(self.sym_sizes()) * 2
 
 - name: _test_autograd_multiple_dispatch.ntonly(Tensor self, bool b) -> Tensor
   dispatch:
@@ -2986,3 +2890,7 @@
 
 - name: special_spherical_bessel_j0(Tensor x) -> Tensor
   x: non_differentiable
+
+- name: _reshape_copy(Tensor self, SymInt[] size) -> Tensor
+  self: grad.reshape_symint(self.sym_sizes())
+  result: auto_linear

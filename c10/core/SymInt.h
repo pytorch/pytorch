@@ -1,35 +1,31 @@
 #pragma once
 
-#include <c10/core/SymIntNodeImpl.h>
+#include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 
 #include <memory>
 #include <numeric>
+#include <utility>
 
 namespace c10 {
 
 class SymFloat;
 
-// `SymInt` is a C++ wrapper class around int64_t data_ which  and is used to
-// represent concrete dimension values.
+// SymInt represents either a regular int64_t, or a symbolic integer
+// (represented in a type erased way as SymNode).  The intention is for SymInt
+// to represent symbolic sizes that arise when doing shape computation in
+// operator kernels. This allows for tracing through programs without baking in
+// concrete sizes into kernel calls.
 //
-// `SymInt` is also a data type in Pytorch that can be used in function schemas
-// to enable tracing.
+// SymInt has an API equivalent to int64_t.  In particular, it is a value type.
+// Internally, SymInt is represented in a clever packed way, so that it only
+// occupies one word of space; but morally, it is a union between an int64_t
+// and an intrusive pointer to SymNodeImpl.
 //
-// `SymInt` is introduced to enable tracing arithmetic
-// operations on symbolic integers (e.g. sizes). Tracing symbolic sizes will
-// allow LTC and AOTAutograd representing dynamic shapes in expression graphs
-// faithfully without baking in concrete dimension values.
-//
-// To trace the operations, SymInt will overload arithmetic operators (e.g. +,
-// -, *) and will provide overloads taking SymInt for commonly used math
-// functions.
-//
-// SymInt will be extenteded to represent a union structure Union[int64_t,
-// SymIntNodeImpl*] which will be implemented as a single packed int64_t field
-// named data_.
+// Invariant: the referenced SymNodeImpl is guaranteed to be a SymNode where
+// is_int() returns true
 
 class C10_API SymInt {
  public:
@@ -44,6 +40,7 @@ class C10_API SymInt {
     TORCH_CHECK(!is_symbolic());
   };
   SymInt() : data_(0) {}
+  SymInt(SymNode n);
 
   // unchecked c-tor accepting raw `data_`
   // One appropriate use for this is when you are constructing a symint
@@ -55,28 +52,28 @@ class C10_API SymInt {
   // temporary and then use the move constructor/assignment
   SymInt(const SymInt& s) : data_(0) {
     if (s.is_symbolic()) {
-      *this = SymInt::toSymInt(s.toSymIntNodeImpl());
+      *this = SymInt(s.toSymNodeImpl());
     } else {
       data_ = s.data_;
     }
   }
-  SymInt(SymInt&& s) : data_(s.data_) {
+  SymInt(SymInt&& s) noexcept : data_(s.data_) {
     s.data_ = 0;
   }
 
   SymInt& operator=(const SymInt& s) {
     if (this != &s) {
       if (s.is_symbolic()) {
-        *this = SymInt::toSymInt(s.toSymIntNodeImpl());
+        *this = SymInt(s.toSymNodeImpl());
       } else {
         data_ = s.data_;
       }
     }
     return *this;
   }
-  SymInt& operator=(SymInt&& s) {
+  SymInt& operator=(SymInt&& s) noexcept {
     if (this != &s) {
-      release_(); // release the current SymIntNode if any
+      release_(); // release the current SymNode if any
       data_ = s.data_;
       if (s.is_symbolic())
         s.data_ = 0;
@@ -86,31 +83,31 @@ class C10_API SymInt {
 
   SymInt clone() const {
     if (is_symbolic()) {
-      return toSymIntNodeImplUnowned()->clone()->toSymInt();
+      return SymInt(toSymNodeImplUnowned()->clone());
     }
     return *this;
   }
 
-  SymIntNodeImpl* toSymIntNodeImplUnowned() const {
+  SymNodeImpl* toSymNodeImplUnowned() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(is_symbolic());
     uint64_t unextended_bits = static_cast<uint64_t>(data_) & ~MASK;
     uint64_t sign_bit_mask = 1ULL << (62 - 1);
     // https://stackoverflow.com/questions/42534749/signed-extension-from-24-bit-to-32-bit-in-c
     uint64_t extended_bits = (unextended_bits ^ sign_bit_mask) - sign_bit_mask;
-    return static_cast<SymIntNodeImpl*>(
+    return static_cast<SymNodeImpl*>(
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
   void release_() {
     if (is_symbolic()) {
-      SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
+      SymNode::reclaim(toSymNodeImplUnowned()); // steal
     }
   }
 
-  SymIntNodeImpl* release() && {
+  SymNodeImpl* release() && {
 #ifndef C10_MOBILE
     TORCH_INTERNAL_ASSERT(is_symbolic());
-    auto* r = toSymIntNodeImplUnowned();
+    auto* r = toSymNodeImplUnowned();
     data_ = 0; // transfer ownership
     return r;
 #else
@@ -118,8 +115,7 @@ class C10_API SymInt {
 #endif
   }
 
-  SymIntNode toSymIntNodeImpl() const;
-  static c10::SymInt toSymInt(SymIntNode sin);
+  SymNode toSymNodeImpl() const;
 
   ~SymInt() {
     release_();
@@ -156,22 +152,23 @@ class C10_API SymInt {
 #endif
   }
 
-  SymInt operator+(SymInt sci) const;
-  SymInt operator-(SymInt sci) const;
-  SymInt operator*(SymInt sci) const;
-  SymInt operator/(SymInt sci) const;
-  SymInt operator%(SymInt sci) const;
-  bool operator==(SymInt sci) const;
-  bool operator!=(SymInt p2) const;
-  bool operator<(SymInt sci) const;
-  bool operator<=(SymInt sci) const;
-  bool operator>(SymInt sci) const;
-  bool operator>=(SymInt sci) const;
-  void operator*=(SymInt sci);
-  void operator+=(SymInt sci);
+  SymInt operator+(const SymInt& sci) const;
+  SymInt operator-(const SymInt& sci) const;
+  SymInt operator*(const SymInt& sci) const;
+  SymInt operator/(const SymInt& sci) const;
+  SymInt operator%(const SymInt& sci) const;
+  bool operator==(const SymInt& sci) const;
+  bool operator!=(const SymInt& p2) const;
+  bool operator<(const SymInt& sci) const;
+  bool operator<=(const SymInt& sci) const;
+  bool operator>(const SymInt& sci) const;
+  bool operator>=(const SymInt& sci) const;
+  void operator*=(const SymInt& sci);
+  void operator+=(const SymInt& sci);
+  void operator/=(const SymInt& sci);
 
-  SymInt min(SymInt sci) const;
-  SymInt max(SymInt sci) const;
+  SymInt min(const SymInt& sci) const;
+  SymInt max(const SymInt& sci) const;
 
   SymInt operator*(int64_t sci) const;
   bool operator<(int64_t sci) const;
@@ -235,8 +232,9 @@ inline c10::SymInt multiply_integers(const C& container) {
       container.begin(),
       container.end(),
       c10::SymInt(1),
-      [](c10::SymInt a, c10::SymInt b) { return a * b; });
+      [](const c10::SymInt& a, const c10::SymInt& b) { return a * b; });
 }
 
-C10_API std::ostream& operator<<(std::ostream& os, SymInt s);
+C10_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
+C10_API SymInt operator-(const SymInt& s);
 } // namespace c10

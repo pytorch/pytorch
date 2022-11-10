@@ -16,6 +16,7 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/Functions.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/TracerMode.h>
 #include <ATen/core/LegacyTypeDispatch.h>
