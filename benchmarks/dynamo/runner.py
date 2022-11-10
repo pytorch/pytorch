@@ -441,7 +441,12 @@ class ParsePerformanceLogs(Parser):
         )
         self.parsed_frames = defaultdict(lambda: defaultdict(None))
         self.untouched_parsed_frames = defaultdict(lambda: defaultdict(None))
-        self.metrics = ["speedup", "abs_latency", "compilation_latency", "compression_ratio"]
+        self.metrics = [
+            "speedup",
+            "abs_latency",
+            "compilation_latency",
+            "compression_ratio",
+        ]
         self.bottom_k = 50
         self.parse()
 
@@ -513,7 +518,7 @@ class ParsePerformanceLogs(Parser):
                 output_filename = f"{self.output_dir}/{compiler}_{suite}_{dtype}_{self.mode}_{device}_{testing}.csv"
                 df = self.read_csv(output_filename)
                 if metric not in df:
-                    df = df.insert(len(df.columns), metric, pd.nan)
+                    df.insert(len(df.columns), metric, np.nan)
                 df = df[["dev", "name", "batch_size", metric]]
                 df.rename(columns={metric: compiler}, inplace=True)
                 df["batch_size"] = df["batch_size"].astype(int)
@@ -563,7 +568,14 @@ class ParsePerformanceLogs(Parser):
     def get_passing_entries(self, compiler, df):
         return df[compiler][df[compiler] > 0]
 
-    def mean(self, compiler, df):
+    def abs_latency(self, compiler, df):
+        df = self.get_passing_entries(compiler, df)
+        if df.empty:
+            return "0.0"
+
+        return f"{df.mean():.2f}"
+
+    def comp_time(self, compiler, df):
         df = self.get_passing_entries(compiler, df)
         # df = df.sort_values(by=compiler, ascending=False)[compiler][: self.bottom_k]
         if df.empty:
@@ -653,7 +665,7 @@ class ParsePerformanceLogs(Parser):
 
         comp_time_caption = "Mean compilation time (seconds)\n"
         comp_time_summary = self.exec_summary_text(
-            comp_time_caption, self.mean, "compilation_latency"
+            comp_time_caption, self.comp_time, "compilation_latency"
         )
 
         peak_memory_caption = (
@@ -665,7 +677,7 @@ class ParsePerformanceLogs(Parser):
 
         abs_latency_caption = "Mean absolute latency (seconds)\n"
         abs_latency_summary = self.exec_summary_text(
-            abs_latency_caption, self.mean, "abs_latency"
+            abs_latency_caption, self.abs_latency, "abs_latency"
         )
 
         str_io.write(
@@ -1103,7 +1115,7 @@ class DashboardUpdater:
                 gh_fh.write("")
 
         comment = self.gen_comment()
-        # self.comment_on_gh(comment)
+        self.comment_on_gh(comment)
 
         self.archive()
 
