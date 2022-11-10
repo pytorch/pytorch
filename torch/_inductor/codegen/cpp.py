@@ -1291,7 +1291,7 @@ class KernelGroup:
         codecache_def.splice(code)
         codecache_def.writeline("''')")
 
-        kernel_name = wrapper.next_kernel_name()
+        kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
         codecache_str = codecache_def.getvalue()
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
