@@ -244,12 +244,20 @@ def _outs_and_grads(fn, inps):
 
 class TestAOTAutograd(AOTTestCase):
     def verify_aot_autograd(self, f, inp):
+        # Create a copy of inputs, so we can test input mutation correctness.
+        inp_copy = []
+        for x in inp:
+            x_copy = x.clone().detach().requires_grad_(x.requires_grad)
+            if x.requires_grad and not x.is_leaf:
+                x_copy = x_copy.clone()
+            inp_copy.append(x_copy)
+
         if isinstance(f, nn.Module):
             compiled_f = aot_module(f, nop)
         else:
             compiled_f = aot_function(f, nop)
         ref_out, ref_grad = _outs_and_grads(f, inp)
-        test_out, test_grad = _outs_and_grads(compiled_f, inp)
+        test_out, test_grad = _outs_and_grads(compiled_f, inp_copy)
         self.assertEqual(ref_out, test_out)
         self.assertEqual(ref_grad, test_grad)
 
@@ -259,6 +267,12 @@ class TestAOTAutograd(AOTTestCase):
         for ref_o, test_o in zip(ref_out, test_out):
             if isinstance(ref_o, torch.Tensor):
                 self.assertEqual(ref_o.requires_grad, test_o.requires_grad)
+                self.assertEqual(ref_o.is_leaf, test_o.is_leaf)
+                self.assertEqual(ref_o, test_o)
+        for ref_i, test_i in zip(inp, inp_copy):
+            if isinstance(ref_i, torch.Tensor):
+                self.assertEqual(ref_i.requires_grad, test_i.requires_grad)
+                self.assertEqual(ref_i, test_i)
 
     def test_single_output(self):
         def f(a, b):
@@ -276,6 +290,47 @@ class TestAOTAutograd(AOTTestCase):
         def f(a, b):
             return [a + b, a - b]
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
+        self.verify_aot_autograd(f, inp)
+
+    def test_input_mutation_simple(self):
+        def f(a):
+            a.add_(1)
+            return a + 2
+        inp = [torch.ones(3, 3, requires_grad=True).add(1)]
+
+        self.verify_aot_autograd(f, inp)
+
+    def test_input_mutation_is_output(self):
+        def f(a):
+            a.add_(1)
+            return a
+        inp = [torch.ones(3, 3, requires_grad=True).add(1)]
+
+        self.verify_aot_autograd(f, inp)
+
+    def test_input_mutation_multiple(self):
+        def f(a, b, c):
+            b.add_(1)
+            c.add_(1)
+            return a + b + c
+
+        inp = [
+            torch.ones(3, 3, requires_grad=True).add(1),
+            torch.ones(3, 3, requires_grad=True).add(1),
+            torch.ones(3, 3, requires_grad=True).add(1),
+        ]
+
+        self.verify_aot_autograd(f, inp)
+
+    def test_input_metadata_mutation(self):
+        # TODO:
+        # ALSO TEST LAYER NORM
+        def f(a, b, c):
+            b.add_(1)
+            c.add_(1)
+            return a + b + c
+        inp = [torch.ones(3, 3, requires_grad=True).add(1)]
+
         self.verify_aot_autograd(f, inp)
 
     def test_no_grad_input_output(self):
