@@ -745,8 +745,8 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
                                  "Quantization observer hook has disappeared")
                 num_fwd_hooks = 2
 
-            self.assertObjectIn(fw_pre_hook, model.fc._forward_pre_hooks.values())
-            self.assertObjectIn(fw_hook, model.fc._forward_hooks.values())
+            self.assertTrue(fw_pre_hook.__name__ in [x.__name__ for x in model.fc._forward_pre_hooks.values()])
+            self.assertTrue(fw_hook.__name__ in [x.__name__ for x in model.fc._forward_hooks.values()])
             self.assertEqual(len(model.fc._forward_pre_hooks.values()), 1,
                              "Extra pre forward hooks have appeared on a layer")
             # During static quantization non stub layers are provided with quantization observer hook too
@@ -1405,8 +1405,8 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
             prepare_dynamic(model, qconfig_dict)
 
             def checkHooksIsPresent(model):
-                self.assertObjectIn(fw_pre_hook, model.fc1._forward_pre_hooks.values())
-                self.assertObjectIn(fw_hook, model.fc1._forward_hooks.values())
+                self.assertTrue(fw_pre_hook.__name__ in [x.__name__ for x in model.fc._forward_pre_hooks.values()])
+                self.assertTrue(fw_hook.__name__ in [x.__name__ for x in model.fc._forward_hooks.values()])
                 self.assertEqual(len(model.fc1._forward_pre_hooks.values()), 1,
                                  "Extra pre forward hooks have appeared on a layer")
                 self.assertEqual(len(model.fc1._forward_hooks.values()), 1,
