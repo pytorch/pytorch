@@ -1,7 +1,7 @@
 import functools
 import sys
 import warnings
-from typing import Callable, Sequence
+from typing import Callable
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -10,6 +10,7 @@ from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import (  # noqa: F401
+    _constants,
     _patch_torch,
     _type_utils,
     errors,
@@ -251,47 +252,12 @@ def _max_pool(name: str, tuple_fn: Callable, ndims: int, return_indices: bool):
 )
 @_beartype.beartype
 def _avg_pool(name, tuple_fn):
-    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
-    @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
-    @_beartype.beartype
-    def symbolic_fn(
-        g,
-        input: _C.Value,
-        kernel_size: Sequence[int],
-        stride: Sequence[int],
-        padding: Sequence[int],
-        ceil_mode: int,
-        count_include_pad: int,
-        divisor_override=None,
-    ):
-        if not stride:
-            stride = kernel_size
-        padding = symbolic_helper._avgpool_helper(
-            tuple_fn, padding, kernel_size, stride, divisor_override, name
-        )
-        assert isinstance(padding, tuple)
-        if count_include_pad:
-            input = opset9._op_with_optional_float_cast(
-                g,
-                "Pad",
-                input,
-                pads_i=((0,) * 2 + padding) * 2,
-                mode_s="constant",
-                value_f=0.0,
-                opset_before=11,
-            )
-            padding = (0,) * len(padding)
-        output = g.op(
-            "AveragePool",
-            input,
-            kernel_shape_i=tuple_fn(kernel_size),
-            strides_i=tuple_fn(stride),
-            pads_i=padding * 2,
-            ceil_mode_i=ceil_mode,
-        )
-        return output
-
-    return symbolic_fn
+    # Although onnx::AvgPool provides count_include_pad and ceil_mode,
+    # The corner case of Average Pooling with ceil_mode on
+    # PyTorch allows sliding window go off bound, which leads to
+    # this accommodation.
+    # More detail on https://github.com/pytorch/pytorch/issues/57178
+    return opset9._avg_pool(name, tuple_fn)
 
 
 @_onnx_symbolic(
@@ -380,7 +346,7 @@ def _slice(
         if (
             len(starts) == 1
             and starts[0] == 0
-            and ends[0] == 9223372036854775807
+            and ends[0] == _constants.INT64_MAX
             and (steps is None or (len(steps) == 1 and steps[0] == 1))
         ):
             return input
@@ -423,11 +389,13 @@ def slice(g: jit_utils.GraphContext, self, *args):
         if is_start_none:
             start = g.op("Constant", value_t=torch.tensor(0))
         if is_end_none:
-            end = g.op("Constant", value_t=torch.tensor(9223372036854775807))
+            end = g.op("Constant", value_t=torch.tensor(_constants.INT64_MAX))
     else:
         start = [0 if is_start_none else symbolic_helper._parse_arg(start, "i")]
         end = [
-            9223372036854775807 if is_end_none else symbolic_helper._parse_arg(end, "i")
+            _constants.INT64_MAX
+            if is_end_none
+            else symbolic_helper._parse_arg(end, "i")
         ]
         dim = [symbolic_helper._parse_arg(dim, "i")]
         dynamic_slice = False
@@ -451,7 +419,7 @@ def flip(g: jit_utils.GraphContext, input, dims):
         input,
         axes=dims,
         starts=[-1] * len(dims),
-        ends=[-9223372036854775807] * len(dims),
+        ends=[-_constants.INT64_MAX] * len(dims),
         steps=[-1] * len(dims),
     )
 
@@ -638,7 +606,7 @@ def nan_to_num(g: jit_utils.GraphContext, input, nan, posinf, neginf):
     # return the original tensor
     if not symbolic_helper._is_fp(input):
         return input
-    input_dtype = _type_utils.JitScalarType.from_name(input.type().scalarType()).dtype()
+    input_dtype = _type_utils.JitScalarType.from_value(input).dtype()
     if nan is None:
         nan = 0.0
     nan_cond = opset9.isnan(g, input)

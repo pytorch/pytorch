@@ -1,6 +1,7 @@
 import torch
 import torch.utils._pytree as pytree
 from typing import Set, Dict, List, Type, Optional, cast
+import sys
 import operator
 import builtins
 import math
@@ -139,9 +140,9 @@ class SymNode:
         elif isinstance(num, float):
             return self.wrap_float(num)
         else:
-            # NotImplementedError is important so that Python tries the
+            # NotImplemented is important so that Python tries the
             # other magic method
-            raise NotImplementedError(type(num))
+            return NotImplemented
 
     def is_int(self):
         return self.pytype is int
@@ -155,7 +156,7 @@ class SymNode:
 
     def wrap_float(self, num):
         assert isinstance(num, float)
-        return SymNode(sympy.Integer(num), self.shape_env, float, constant=num)
+        return SymNode(sympy.Float(num), self.shape_env, float, constant=num)
 
     def clone(self):
         return SymNode(self.expr, self.shape_env, self.pytype, constant=self.constant)
@@ -168,6 +169,13 @@ class SymNode:
 
     def __repr__(self):
         return self.str()
+
+    # These methods are metaprogrammed in below
+    def sym_int(self) -> "SymNode":
+        ...
+
+    def sym_float(self) -> "SymNode":
+        ...
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     def int_(self):
@@ -183,27 +191,6 @@ class SymNode:
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         return float(self.shape_env.evaluate_expr(self.expr))
-
-    def sym_float(self):
-        if SYM_FUNCTION_MODE:
-            r = _handle_sym_dispatch(sym_float, (wrap_node(self),), {})
-            assert isinstance(r, (SymInt, SymFloat)), type(r)
-            return r.node
-        # TODO: consider constant prop here
-        # TODO: wrapping the expr with sympy.Float doesn't seem to work, why
-        # not?
-        return SymNode(self.expr, self.shape_env, float)
-
-    def sym_int(self):
-        raise NotImplementedError("sym_int NYI")
-        """
-        if SYM_FUNCTION_MODE:
-            return _handle_sym_dispatch(sym_int, (self,), {})
-        # TODO: consider constant prop here
-        # XXX: need to cast float to int in sympy; math.floor is wrong
-        # because negatives round to zero
-        return SymNode(self.expr, self.shape_env, int)
-        """
 
     def bool_(self):
         return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
@@ -258,6 +245,9 @@ reflectable_magic_methods = {
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
+def _nyi():
+    raise NotImplementedError()
+
 magic_methods = {
     **reflectable_magic_methods,
     'eq': lambda a, b: sympy.Eq(a, b),
@@ -265,6 +255,8 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
+    'sym_float': lambda a: a,  # TODO: why can't I wrap with sympy.Float?
+    'sym_int': lambda a: _nyi(),
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
@@ -272,11 +264,22 @@ magic_methods = {
 }
 
 unary_magic_methods = {
+    'sym_float',
+    'sym_int',
     'ceil',
-    'neg'
+    'neg',
 }
 
-float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
+# TODO: sym_int should also work on floats
+magic_methods_not_on_float = {"sym_int"}
+
+magic_methods_on_builtins = {"min", "max"}
+magic_methods_on_math = {"ceil", "floor"}
+magic_methods_on_submodule = {"sym_float", "sym_int"}
+
+always_float_magic_methods = {"truediv", "sym_float"}
+always_int_magic_methods = {"ceil", "floor"}
+always_bool_magic_methods = {"eq", "gt", "lt", "le", "ge"}
 
 def wrap_node(x):
     if not isinstance(x, SymNode):
@@ -294,7 +297,7 @@ def _make_node_magic(method, func):
     func = lru_cache(256)(func)
 
     def binary_magic_impl(self, other):
-        if method in ["min", "max"]:
+        if method in magic_methods_on_builtins:
             op = getattr(builtins, method)
         else:
             op = getattr(operator, method)
@@ -309,7 +312,8 @@ def _make_node_magic(method, func):
         other_expr = self.shape_env.replace(other_expr)
         out = func(expr, other_expr)
         out = sympy.expand(out)
-        if method in ["truediv"]:
+        pytype: Type
+        if method in always_float_magic_methods:
             pytype = float
         else:
             pytype = self.pytype
@@ -320,8 +324,10 @@ def _make_node_magic(method, func):
 
     def unary_magic_impl(self):
         if SYM_FUNCTION_MODE:
-            if method in ["ceil", "floor"]:
+            if method in magic_methods_on_math:
                 op = getattr(math, method)
+            elif method in magic_methods_on_submodule:
+                op = getattr(sys.modules[__name__], method)
             else:
                 op = getattr(operator, method)
             r = _handle_sym_dispatch(op, (wrap_node(self),), {})
@@ -331,8 +337,11 @@ def _make_node_magic(method, func):
         expr = self.shape_env.replace(self.expr)
         out = func(expr)
         out = sympy.expand(out)
-        if method in ["ceil", "floor"]:
+        pytype: Type
+        if method in always_int_magic_methods:
             pytype = int
+        elif method in always_float_magic_methods:
+            pytype = float
         else:
             pytype = self.pytype
 
@@ -354,10 +363,16 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method)())
 
     def binary_magic_impl(self, other):
-        return wrap_node(getattr(self.node, method)(self.node.to_node(other)))
+        other_node = self.node.to_node(other)
+        if other_node is NotImplemented:
+            return NotImplemented
+        return wrap_node(getattr(self.node, method)(other_node))
 
     def rbinary_magic_impl(self, other):
-        return wrap_node(getattr(self.node.to_node(other), method)(self.node))
+        other_node = self.node.to_node(other)
+        if other_node is NotImplemented:
+            return NotImplemented
+        return wrap_node(getattr(other_node, method)(self.node))
 
     if method in unary_magic_methods:
         setattr(user_type, f"__{method}__", unary_magic_impl)
@@ -370,7 +385,7 @@ for method, func in magic_methods.items():
     _make_user_magic(method, SymInt)
 
 for method, func in magic_methods.items():
-    if method not in float_magic_methods:
+    if method in magic_methods_not_on_float:
         continue
     _make_user_magic(method, SymFloat)
 

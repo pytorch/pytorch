@@ -19,8 +19,10 @@ from torch.ao.quantization import (
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
     float_qparams_weight_only_qconfig_4bit,
+    FixedQParamsObserver,
     PerChannelMinMaxObserver,
     default_dynamic_quant_observer,
+    default_weight_observer,
     QConfig,
 )
 
@@ -61,8 +63,6 @@ from torch.testing._internal.common_quantized import (
     supported_qengines,
     override_qengines,
 )
-from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_utils import skipIfNoCaffe2
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -71,7 +71,6 @@ hu.assert_deadline_disabled()
 
 # Standard library
 from typing import Tuple
-import unittest
 import numpy as np
 
 class TestQuantizeEagerOps(QuantizationTestCase):
@@ -1025,6 +1024,48 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
         mq = torch.ao.quantization.convert(mp)
         self.assertTrue(isinstance(mq[0].dequant, nnq.DeQuantize))
 
+    def test_activations_in_non_leaf_module_list(self):
+        """
+        Ensure activations like `nn.Sigmoid` and `nn.Tanh` are properly handled in
+        `non_leaf_module_list`.
+        """
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = QuantStub()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.softmax = torch.nn.Softmax()
+                self.tanh = torch.nn.Tanh()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.sigmoid(x)
+                x = self.hardsigmoid(x)
+                x = self.softmax(x)
+                x = self.tanh(x)
+                x = self.dequant(x)
+                return x
+
+        qconfig = QConfig(
+            activation=FixedQParamsObserver.with_args(scale=123.0, zero_point=0),
+            weight=default_weight_observer
+        )
+        m = MyModel()
+        m.qconfig = qconfig
+        m = prepare(m, observer_non_leaf_module_list=[
+            torch.nn.Sigmoid,
+            torch.nn.Hardsigmoid,
+            torch.nn.Softmax,
+            torch.nn.Tanh,
+        ])
+
+        # Should use the observer specified in the QConfig instead of the default (FixedQParamsFakeQuantize)
+        self.assertTrue(isinstance(m.sigmoid.activation_post_process, FixedQParamsObserver))
+        self.assertTrue(isinstance(m.hardsigmoid.activation_post_process, FixedQParamsObserver))
+        self.assertTrue(isinstance(m.softmax.activation_post_process, FixedQParamsObserver))
+        self.assertTrue(isinstance(m.tanh.activation_post_process, FixedQParamsObserver))
 
 @skipIfNoFBGEMM
 class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
@@ -1441,33 +1482,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
         q_model(indices, offsets, torch.randn(5, 5))
         self.assertTrue('QuantizedEmbedding' in str(q_model))
         self.assertTrue('DynamicQuantizedLinear' in str(q_model))
-
-class TestQuantizeEagerONNXExport(JitTestCase):
-
-    @skipIfNoFBGEMM
-    @skipIfNoCaffe2
-    def test_lower_graph_linear(self):
-        model = torch.ao.quantization.QuantWrapper(torch.nn.Linear(5, 10, bias=True)).to(dtype=torch.float)
-        data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
-        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_lower_graph_impl(model, data)
-
-    @skipIfNoFBGEMM
-    @skipIfNoCaffe2
-    def test_lower_graph_conv2d(self):
-        model = torch.ao.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
-        data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
-        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_lower_graph_impl(model, data)
-
-    @skipIfNoFBGEMM
-    @unittest.skip("onnx opset9 does not support quantize_per_tensor and caffe2 \
-    does not support conv3d")
-    def test_lower_graph_conv3d(self):
-        model = torch.ao.quantization.QuantWrapper(torch.nn.Conv3d(3, 5, 2, bias=True)).to(dtype=torch.float)
-        data_numpy = np.random.rand(1, 3, 6, 6, 6).astype(np.float32)
-        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_lower_graph_impl(model, data)
 
 
 if __name__ == '__main__':
