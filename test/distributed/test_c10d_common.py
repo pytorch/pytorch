@@ -1466,9 +1466,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         # multi tensor collectives
         if collective == dist.barrier:
             collective()
-        elif collective == dist.all_gather:
+        elif collective in (dist.all_gather, dist.gather):
             collective([tensor], tensor, *args)
-        elif collective == dist.reduce_scatter or collective == dist.all_to_all:
+        elif collective == dist.scatter:
+            collective(tensor, [tensor], *args)
+        elif collective in (dist.reduce_scatter, dist.all_to_all):
             # gloo does not support reduce_scatter or all_to_all
             if backend != "gloo":
                 if collective == dist.reduce_scatter:
@@ -1495,6 +1497,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             (dist.reduce_scatter,),
             (dist.barrier,),
             (dist.all_to_all,),
+            (dist.scatter,),
         ]
         for collective, *args in collectives_and_args:
             with self.subTest(collective=collective, args=args):
