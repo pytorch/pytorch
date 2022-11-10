@@ -1118,7 +1118,7 @@ class DashboardUpdater:
         comment = self.gen_comment()
         self.comment_on_gh(comment)
 
-        # self.archive()
+        self.archive()
 
 
 if __name__ == "__main__":
