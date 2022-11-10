@@ -707,7 +707,12 @@ class ParsePerformanceLogs(Parser):
 
     def generate_warnings(self):
         title = "## Warnings ##"
-        body = ""
+        body = (
+            "We flag models where:\n\n"
+            " - speedup < 0.95x\n"
+            " - compilation latency > 120 sec.\n"
+            " - compression ratio < 0.9\n\n"
+        )
         for metric in [
             "speedup",
             "compilation_latency",
@@ -858,9 +863,14 @@ class AccuracyRegressionTracker:
 
     def generate_comment(self):
         title = "## Accuracy Regressions ##\n"
-        body = ""
+        body = (
+            "For each relevant compiler, we compare the most recent 2 reports "
+            "(that run actually the compiler) to find models where previously "
+            "successful accuracy tests now fail.\n\n"
+        )
         dtype = self.args.dtypes[0]
         device = self.args.devices[0]
+        regressions_present = False
         for suite in self.args.suites:
             dfs = []
             for compiler in self.args.flag_compilers:
@@ -893,6 +903,7 @@ class AccuracyRegressionTracker:
             df = pd.concat(dfs, axis=0)
             if df.empty:
                 continue
+            regressions_present = True
             tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
             str_io = io.StringIO()
             str_io.write("\n")
@@ -901,6 +912,9 @@ class AccuracyRegressionTracker:
             str_io.write(f"{tabform}\n")
             str_io.write("~~~\n")
             body += str_io.getvalue()
+
+        if not regressions_present:
+            body += "No accuracy regressions found.\n"
 
         comment = generate_dropdown_comment(title, body)
 
@@ -1104,7 +1118,7 @@ class DashboardUpdater:
         comment = self.gen_comment()
         self.comment_on_gh(comment)
 
-        self.archive()
+        # self.archive()
 
 
 if __name__ == "__main__":
