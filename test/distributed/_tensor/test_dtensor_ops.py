@@ -186,6 +186,7 @@ dtensor_fails = {
     xfail("diag_embed"),
     xfail("diagflat"),
     xfail("diagonal"),
+    xfail("diagonal_copy"),
     xfail("diagonal_scatter"),
     xfail("diff"),
     xfail("dist"),
