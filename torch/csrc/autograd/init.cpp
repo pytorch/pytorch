@@ -60,13 +60,14 @@ struct DisableAutocast {
 
 struct EnableTorchFunction {
   EnableTorchFunction()
-      : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
-    at::impl::PythonTorchFunctionTLS::set_disabled(false);
+      : old_(at::impl::PythonTorchFunctionTLS::get_disabled_state()) {
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ENABLED);
   }
   ~EnableTorchFunction() {
-    at::impl::PythonTorchFunctionTLS::set_disabled(old_);
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_);
   }
-  bool old_;
+  at::impl::TorchFunctionDisabledState old_;
 };
 
 struct EnablePythonDispatcher {
@@ -343,7 +344,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       _C_m, "_RestorePythonTLSSnapshot")
       .def(py::init<>());
 
-  // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
       .def(py::init<>());
   py::class_<EnableTorchFunction>(_C_m, "_EnableTorchFunction")

@@ -71,7 +71,11 @@ def set_proxy_slot(obj, tracer, proxy):
     # This works because primals get their SymInts set first, and
     # THEN later we allocate tangent inputs.  Make sure if a SymInt
     # is derivable from a primal that we use that.
-    if tracer not in d:
+    #
+    # However, we DO want to clobber proxies whenever we run an inplace operation
+    # on a tensor, and it affects the metadata on the proxy.
+    # This doesn't really apply to SymInts/SymFloats though, which are immutable.
+    if tracer not in d or isinstance(obj, torch.Tensor):
         d[tracer] = proxy
 
 def has_proxy_slot(obj, tracer):

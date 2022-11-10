@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple, Union
 
 from torchgen.api import cpp, dispatcher
@@ -16,6 +17,7 @@ from torchgen.api.types import (
     ViewInverseSignature,
 )
 from torchgen.context import (
+    method_with_native_function,
     native_function_manager,
     with_native_function,
     with_native_function_and,
@@ -73,18 +75,25 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
 
 # Generates the body of the default composite C++ kernel for a {view}_copy NativeFunction
 # See Note [view_copy NativeFunctions]
-@with_native_function
-def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]:
+@dataclass(frozen=True)
+class GenCompositeViewCopyKernel:
+    backend_index: BackendIndex
 
-    if g.view_copy is None:
-        return None
+    @method_with_native_function
+    def __call__(self, g: NativeFunctionsViewGroup) -> Optional[str]:
+        if g.view_copy is None:
+            return None
 
-    # We can make view_copy work in more cases by using reshape()
-    # when a normal view call would ordinarily fail.
-    # This also makes LTC more efficient, because they don't need to include
-    # clone() calls in their graph (which is normally needed by reshape).
-    if str(g.view_copy.func.name) == "view_copy":
-        return """\
+        metadata = self.backend_index.get_kernel(g.view_copy)
+        assert metadata is not None
+
+        # We can make view_copy work in more cases by using reshape()
+        # when a normal view call would ordinarily fail.
+        # This also makes LTC more efficient, because they don't need to include
+        # clone() calls in their graph (which is normally needed by reshape).
+        if str(g.view_copy.func.name) == "view_copy":
+            assert metadata.kernel == "view_copy_symint"
+            return """\
 at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
   c10::SymDimVector shape = infer_size_dv(size, self.sym_numel());
   if (!at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape).has_value()) {
@@ -95,42 +104,42 @@ at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
   }
 }
 """
-    # view_copy is a native signature, since we're generating an at::native:: kernel
-    # Functionalization always operates on symints though
-    view_copy_sig = NativeSignature(
-        g.view_copy.func, symint=False
-    )  # TODO: flag day this True
+        # view_copy is a native signature, since we're generating an at::native:: kernel
+        # Functionalization always operates on symints though
+        view_copy_sig = NativeSignature(
+            g.view_copy.func, symint=metadata.supports_symint()
+        )
 
-    # view is a dispatcher signature, since we're calling into the at::_ops API
-    view_sig = DispatcherSignature(g.view.func)
+        # view is a dispatcher signature, since we're calling into the at::_ops API
+        view_sig = DispatcherSignature(g.view.func)
 
-    view_api_name = g.view.func.name.unambiguous_name()
-    exprs = ", ".join(
-        [e.expr for e in translate(view_copy_sig.arguments(), view_sig.arguments())]
-    )
+        view_api_name = g.view.func.name.unambiguous_name()
+        exprs = ", ".join(
+            [e.expr for e in translate(view_copy_sig.arguments(), view_sig.arguments())]
+        )
 
-    # view ops today always return either a Tensor or a list of Tensors
-    assert len(g.view.func.returns) == 1
-    assert g.view.func.returns[0].type == BaseType(
-        BaseTy.Tensor
-    ) or g.view.func.returns[0].type == ListType(BaseType(BaseTy.Tensor), None)
+        # view ops today always return either a Tensor or a list of Tensors
+        assert len(g.view.func.returns) == 1
+        assert g.view.func.returns[0].type == BaseType(
+            BaseTy.Tensor
+        ) or g.view.func.returns[0].type == ListType(BaseType(BaseTy.Tensor), None)
 
-    if g.view.func.returns[0].type == BaseType(BaseTy.Tensor):
-        return_cloned_output = """\
+        if g.view.func.returns[0].type == BaseType(BaseTy.Tensor):
+            return_cloned_output = """\
   return output.clone(/*memory_format=*/at::MemoryFormat::Contiguous);"""
-    else:
-        # If the return type is a list, we need to clone each tensor in the list.
-        return_cloned_output = f"""\
+        else:
+            # If the return type is a list, we need to clone each tensor in the list.
+            return_cloned_output = f"""\
   {view_copy_sig.returns_type().cpp_type()} out_clone;
   for (const auto i : c10::irange(output.size())) {{
     out_clone.push_back(output[i].clone(/*memory_format=*/at::MemoryFormat::Contiguous));
   }}
   return out_clone;"""
 
-    # The default generated composite kernel for {view}_copy() operators just clones
-    # the input tensor, and runs the underlying view on the clone.
-    return f"""
-{view_copy_sig.defn()} {{
+        # The default generated composite kernel for {view}_copy() operators just clones
+        # the input tensor, and runs the underlying view on the clone.
+        return f"""
+{view_copy_sig.defn(name=metadata.kernel)} {{
   auto output = at::_ops::{view_api_name}::call({exprs});
   {return_cloned_output}
 }}
