@@ -52,11 +52,6 @@ unittest.expectedFailure(
 
 
 unittest.expectedFailure(
-    DynamicShapesReproTests.test_issue175_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
-)
-
-unittest.expectedFailure(
     DynamicShapesReproTests.test_do_paste_mask_dynamic_shapes
     # aten.min.dim - couldn't find symbolic meta function/decomposition
 )

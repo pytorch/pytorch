@@ -181,7 +181,6 @@ class TensorVariable(VariableTracker):
         from .builder import wrap_fx_proxy
 
         kwargs = dict(kwargs)
-        # print("CALLING TENSOR OP", name)
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)

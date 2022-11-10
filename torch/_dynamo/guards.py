@@ -534,18 +534,9 @@ class DynamoGuardPrinter(StrPrinter):
             return "0"
         if expr == 1:
             return "1"
-        if expr not in self.expr_to_tensor_ref:
-            # Please keep these 2 lines here for debugging
-            # if expr not in self.intermediary_symbols:
-            # log.warning(f"DROPPING GUARD SYMBOL: {expr}")
-            # This is an intermediary symbol with no tensor association, skip it
-            # If we did not make the symbol, it came from something dynamo does not know about
-            # So either: (A) skipping the guard is safe because something else (like module id check)
-            # Cover it. This happens for things like channel in/out on conv2d,
-            # Where changing those will break
-            # other guards - or (B) it is not and we made a mistake, hence the warning above.
-            return f"{self.shape_env.var_to_val[expr]}"
-        # f"Unknown expression {expr}"
+        assert expr in (self.expr_to_tensor_ref) or (
+            expr in self.intermediary_symbols
+        ), breakpoint()
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
