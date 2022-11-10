@@ -1,6 +1,6 @@
 import contextlib
 import warnings
-from typing import Generator, List
+from typing import cast, Generator, List
 
 import torch
 import torch.nn as nn
@@ -79,7 +79,7 @@ def _deregister_flat_param(state: _FSDPState, module: nn.Module) -> None:
     """
     if _has_fsdp_params(state, module):
         # TODO: figure out the case for the composable APIs.
-        module.module._parameters.pop(FLAT_PARAM, None)
+        cast(nn.Module, module.module)._parameters.pop(FLAT_PARAM, None)
 
 
 def _register_flat_param(state: _FSDPState, module: nn.Module) -> None:
@@ -94,7 +94,7 @@ def _register_flat_param(state: _FSDPState, module: nn.Module) -> None:
     handles = _module_handles(state, module)
     if _has_fsdp_params(state, module):
         # TODO: figure out the case for the composable APIs.
-        module.module._parameters[FLAT_PARAM] = handles[0].flat_param
+        cast(nn.Module, module.module)._parameters[FLAT_PARAM] = handles[0].flat_param
 
 
 @contextlib.contextmanager
