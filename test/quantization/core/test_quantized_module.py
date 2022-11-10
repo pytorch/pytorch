@@ -20,7 +20,8 @@ from torch.testing._internal.common_quantization import (
     prepare_dynamic,
     _make_conv_test_input,
     skipIfNoFBGEMM,
-    lengths_to_offsets
+    lengths_to_offsets,
+    skipIfNoONEDNN,
 )
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_qparams,
@@ -72,22 +73,28 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             [16, 32],
             [4, 8],
             [True, False],
-            [True, False],
+            ['relu', 'none'],
             [True, False])
         for (batch_size, in_features, out_features, use_bias,
-             use_fused, per_channel) in options:
+             post_op, per_channel) in options:
             self._test_linear_api_impl(
-                batch_size, in_features, out_features, use_bias, use_fused,
+                batch_size, in_features, out_features, use_bias, post_op,
                 per_channel)
 
-    def _test_linear_api_impl(self, batch_size, in_features, out_features, use_bias, use_fused, per_channel):
+    def _test_linear_api_impl(self, batch_size, in_features, out_features, use_bias, post_op, per_channel, **post_ops_kwargs):
         if torch.backends.quantized.engine == 'qnnpack':
             per_channel = False
 
         # use_fused -> quantized class
         class_map = {
-            True: nniq.LinearReLU,
-            False: nnq.Linear,
+            'none': nnq.Linear,
+            'relu': nniq.LinearReLU,
+            'leaky_relu': nniq.LinearLeakyReLU,
+        }
+        q_module_name_map = {
+            'none': 'QuantizedLinear',
+            'relu': 'QuantizedLinearReLU',
+            'leaky_relu': 'QuantizedLinearLeakyReLU',
         }
 
         W = torch.rand(out_features, in_features).float()
@@ -109,7 +116,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         B = torch.rand(out_features).float() if use_bias else None
         scale = 0.5
         zero_point = 3
-        qlinear = class_map[use_fused](in_features, out_features)
+        qlinear = class_map[post_op](in_features, out_features, **post_ops_kwargs)
 
         qlinear_copy = copy.deepcopy(qlinear)
         # set random quantized weight and bias before test torch scriptable
@@ -131,14 +138,16 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # Check if the module implementation matches calling the
         # ops directly
         W_pack = qlinear._packed_params._packed_params
-        if use_fused:
+        if post_op == 'relu':
             Z_ref = torch.ops.quantized.linear_relu(X_q, W_pack, scale, zero_point)
+        elif post_op == 'leaky_relu':
+            Z_ref = torch.ops.quantized.linear_leaky_relu(
+                X_q, W_pack, scale, zero_point, **post_ops_kwargs)
         else:
             Z_ref = torch.ops.quantized.linear(X_q, W_pack, scale, zero_point)
 
         self.assertEqual(Z_ref, Z_q)
-        self.assertTrue(
-            ("QuantizedLinearReLU" if use_fused else "QuantizedLinear") in str(qlinear))
+        self.assertTrue(q_module_name_map[post_op] in str(qlinear))
 
         # Test serialization of quantized Linear Module using state_dict
         model_dict = qlinear.state_dict()
@@ -156,8 +165,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             else:
                 self.assertEqual(model_dict[key], loaded_dict[key])
 
-        loaded_qlinear = class_map[use_fused](
-            in_features, out_features)
+        loaded_qlinear = class_map[post_op](
+            in_features, out_features, **post_ops_kwargs)
         loaded_qlinear.load_state_dict(loaded_dict)
         linear_unpack = torch.ops.quantized.linear_unpack
         self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
@@ -1035,6 +1044,51 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy_ref = torch.prelu(qx, qw)
         self.assertEqual(qy_ref, qy,
                          msg="PReLU module API failed")
+
+    def test_channel_shuffle(self):
+        """Tests the correctness of the ChannelShuffle module.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 1
+        y_scale = x_scale
+        y_zero_point = x_zero_point
+
+        dims = (1, 4, 4, 8)
+        groups = 2
+
+        X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+        qX = torch.quantize_per_tensor(X, x_scale, x_zero_point, dtype=torch.quint8)
+        dqX = qX.dequantize()
+
+        float_mod = torch.nn.ChannelShuffle(groups).float()
+        dqY_ref = float_mod(dqX)
+        qY_ref = torch.quantize_per_tensor(
+            dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+        quant_mod = torch.nn.ChannelShuffle(groups)
+        qY = quant_mod(qX)
+
+        self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                         msg="ChannelShuffle module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(qY_ref, qY))
+
+    @skipIfNoONEDNN
+    def test_linear_leaky_relu(self):
+        """test API functionality for nn.intrinsic.quantized.linear_leaky_relu"""
+        with override_quantized_engine('onednn'):
+            options = itertools.product(
+                [1, 5],  # batch size
+                [16, 32],  # in_features
+                [4, 8],  # out_features
+                [True, False],  # use_bias
+                [True, False],  # per_channel
+                [0.01, 0.05])  # negative slope
+            post_op = 'leaky_relu'
+            for (batch_size, in_features, out_features, use_bias,
+                 per_channel, neg_slope) in options:
+                self._test_linear_api_impl(
+                    batch_size, in_features, out_features, use_bias, post_op,
+                    per_channel, negative_slope=neg_slope)
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
     def _test_qconv_impl(self, q_mod, dq_mod, dim, dtype, bias):
