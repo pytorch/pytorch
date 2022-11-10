@@ -1338,6 +1338,8 @@ class FlatParamHandle:
                 module.register_parameter(param_name, prim_param)
             else:
                 setattr(module, param_name, prim_param)
+                if self._use_orig_params and self._training_state == HandleTrainingState.FORWARD:
+                    module._parameters[param_name] = prim_param  # type: ignore[assignment]
 
     def _use_unsharded_grad_views(self) -> None:
         """

@@ -122,19 +122,21 @@ def fsdp_checkpointing_base(model, blocks):
     )
 
 
-# from transformers.models.t5.modeling_t5 import T5Block
-
-MODEL_FSDP_WRAP = {
-    ToyModel: (MyModule,)
-    # TODO T5: (T5Block,)
-}
-
-
 def apply_fsdp(model, use_checkpointing=False, use_wrap_policy=True):
-    blocks = MODEL_FSDP_WRAP[model.__class__]
-
     wrap_policy = None
     if use_wrap_policy:
+        from transformers.models.bert.modeling_bert import (
+            BertForMaskedLM,
+            BertLayer,
+            BertLMPredictionHead,
+        )
+
+        MODEL_FSDP_WRAP = {
+            ToyModel: (MyModule,),
+            BertForMaskedLM: (BertLayer, BertLMPredictionHead),
+        }
+
+        blocks = MODEL_FSDP_WRAP[model.__class__]
         # transformer policy is really a generic policy that wraps modules of specified classes
         wrap_policy = functools.partial(
             transformer_auto_wrap_policy, transformer_layer_cls=blocks
@@ -143,5 +145,4 @@ def apply_fsdp(model, use_checkpointing=False, use_wrap_policy=True):
     model = FSDP(model, auto_wrap_policy=wrap_policy, use_orig_params=True)
     if use_checkpointing:
         fsdp_checkpointing_base(model, blocks)
-
     return model

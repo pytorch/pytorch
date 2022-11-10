@@ -160,7 +160,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    model_name = "ToyModel" if args.toy_model else args.torchbench_model
+    model_name = args.torchbench_model
+    if args.toy_model:
+        model_name = "ToyModel"
     model, inputs = get_model(args)
 
     fn = partial(run_model, args, model, inputs)

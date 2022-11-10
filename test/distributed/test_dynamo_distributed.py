@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import copy
 import functools
 import logging
 import os
@@ -251,6 +252,53 @@ class TestDistributedMultiProc(MultiProcessTestCase):
             fsdp_m = torch._dynamo.optimize("inductor")(fsdp_m)
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
+
+    @import_transformers_or_skip()
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(torch._inductor.config, "fallback_random", True)
+    def test_hf_bert_fsdp(self):
+        from transformers.models.bert.modeling_bert import BertLayer
+        def apply_fsdp(model, wrap_policy):
+            model = FSDP(
+                copy.deepcopy(model),
+                auto_wrap_policy=wrap_policy,
+                use_orig_params=True
+            )
+            return model
+
+        with _per_rank_init(self.rank, self.world_size):
+            for (wrap_policy, test_instance) in (
+                (
+                    None,
+                    "FSDP without recursive wrapping"
+                ),
+                (
+                    functools.partial(
+                        transformer_auto_wrap_policy, transformer_layer_cls=(BertLayer, )
+                    ),
+                    "FSDP with recursive wrapping BertLayer instances"
+                )
+            ):
+                print(f"Running hf_bert test for {test_instance}")
+                model, inputs = get_hf_bert(self.rank)
+                reset_rng_state()
+                eager_model = apply_fsdp(model, wrap_policy)
+                correct_outputs = eager_model(**inputs)
+                correct_loss = correct_outputs.loss
+                correct_loss.backward()
+
+                reset_rng_state()
+                opt_model = apply_fsdp(model, wrap_policy)
+
+                opt_model = torch._dynamo.optimize("aot_eager")(opt_model)
+                opt_outputs = opt_model(**inputs)
+                opt_loss = opt_outputs.loss
+                opt_loss.backward()
+
+                inputs_flat = [inputs[k] for k in inputs]
+                correct_results = collect_results(eager_model, correct_outputs.logits, correct_loss, inputs_flat)
+                opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
+                self.assertTrue(same(correct_results, opt_results))
 
 
 @requires_nccl()
