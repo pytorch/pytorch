@@ -255,9 +255,12 @@ class TestDistributedMultiProc(MultiProcessTestCase):
 
     @import_transformers_or_skip()
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
+    @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_fsdp(self):
         from transformers.models.bert.modeling_bert import BertLayer
+
         def apply_fsdp(model, wrap_policy):
             model = FSDP(
                 copy.deepcopy(model),
@@ -290,7 +293,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
                 reset_rng_state()
                 opt_model = apply_fsdp(model, wrap_policy)
 
-                opt_model = torch._dynamo.optimize("aot_eager")(opt_model)
+                opt_model = torch._dynamo.optimize("inductor")(opt_model)
                 opt_outputs = opt_model(**inputs)
                 opt_loss = opt_outputs.loss
                 opt_loss.backward()
