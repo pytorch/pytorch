@@ -12602,8 +12602,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_view_reshape,
            error_inputs_func=error_inputs_view_reshape,
            skips=(
-               # view_copy does not support automatic differentiation for outputs with complex dtype
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
                # The size of tensor a (0) must match the size of tensor b (5) at non-singleton dimension 1
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
