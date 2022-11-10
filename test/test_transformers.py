@@ -869,17 +869,18 @@ class TestTransformers(NNTestCase):
     @torch.no_grad()
     def test_mask_check_fastpath(self):
         """
-        Test that fastpath is executed independently of the mask that is passed.
-        If the passed mask is left aligned or mask_check=False, test that nested tensors are used (sparsity fastpath),
-        otherwise use fastpath with traditional tensors.
+        Test that fastpath is executed independently of the masks that are passed.
+        If the passed key padding mask is left aligned or mask_check=False, test that nested tensors are used
+        (sparsity fastpath), otherwise use fastpath with traditional tensors.
+        Also test that fast path is executed with both key padding mask and attention mask passed at the same time.
         """
 
         x = torch.Tensor([[[1, 2], [3, 4], [5, 6]]]).to(torch.float)
 
-        def _test_fastpath(model, mask, mock_return_value, nested_tensors=True):
+        def _test_fastpath(model, key_padding_mask, mock_return_value, attn_mask=None, nested_tensors=True):
             with patch('torch._transformer_encoder_layer_fwd') as fastpath_mock:
                 fastpath_mock.return_value = mock_return_value
-                model(x, src_key_padding_mask=mask)
+                model(x, src_key_padding_mask=key_padding_mask, mask=attn_mask)
 
                 # If mock was called, fastpath was taken
                 self.assertTrue(fastpath_mock.called)
@@ -893,31 +894,33 @@ class TestTransformers(NNTestCase):
         model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True, mask_check=True)
         model.eval()
 
-        aligned_mask = torch.Tensor([[0, 0, 1]]).to(torch.bool)
-        not_aligned_mask = torch.Tensor([[1, 0, 1]]).to(torch.bool)
+        aligned_key_padding_mask = torch.Tensor([[0, 0, 1]]).to(torch.bool)
+        not_aligned_key_padding_mask = torch.Tensor([[1, 0, 1]]).to(torch.bool)
+        attn_mask = torch.Tensor([[1, 0, 1], [0, 1, 0], [1, 0, 1]]).to(torch.bool)
         nested_tensor_return_value = torch.nested.nested_tensor([torch.ones((2, 2), dtype=torch.float)])
         tensor_return_value = torch.ones((1, 3, 2), dtype=torch.float)
 
         # Left aligned mask results in sparsity fastpath
-        _test_fastpath(model, aligned_mask, nested_tensor_return_value, nested_tensors=True)
+        _test_fastpath(model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
 
         # Not aligned mask results in fastpath
-        _test_fastpath(model, not_aligned_mask, tensor_return_value, nested_tensors=False)
+        _test_fastpath(model, not_aligned_key_padding_mask, tensor_return_value, nested_tensors=False)
 
         model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=False, mask_check=True)
         model.eval()
 
         # If nested tensor disabled, fastpath is always taken
-        _test_fastpath(model, aligned_mask, tensor_return_value, nested_tensors=False)
-        _test_fastpath(model, not_aligned_mask, tensor_return_value, nested_tensors=False)
-
+        _test_fastpath(model, aligned_key_padding_mask, tensor_return_value, nested_tensors=False)
+        _test_fastpath(model, not_aligned_key_padding_mask, tensor_return_value, nested_tensors=False)
+        # Fast path is taken if both attention mask and key padding mask are present
+        _test_fastpath(model, aligned_key_padding_mask, tensor_return_value, attn_mask=attn_mask, nested_tensors=False)
 
         model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True, mask_check=False)
         model.eval()
 
         # Mask check disabled results in sparisty fastpath, independently of the mask
-        _test_fastpath(model, aligned_mask, nested_tensor_return_value, nested_tensors=True)
-        _test_fastpath(model, not_aligned_mask, nested_tensor_return_value, nested_tensors=True)
+        _test_fastpath(model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
+        _test_fastpath(model, not_aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
 
     @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM or IS_WINDOWS, "Flash Attention was not built for this system")
     @parametrize("type", ["dense", "nested"])
