@@ -16,6 +16,7 @@
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/MemoryOverlap.h>
 #include <c10/util/Exception.h>
+#include <c10/core/impl/CopyOnWriteContext.h>
 
 #include <iostream>
 #include <list>
@@ -329,6 +330,25 @@ void set_version_counter(
 void bump_version(const Variable& self) {
   TORCH_CHECK(self.defined(), "cannot call bump_version() on undefined tensor");
   self.unsafeGetTensorImpl()->bump_version();
+}
+
+void maybe_copy_on_write(const Variable& self) {
+  if (!self.defined()) return;
+  // this is a write, so guaranteed not to race even with reads (e.g., somone
+  // calling copy_on_write on this storage)
+  auto* cow_ctx = self.storage().unsafeGetStorageImpl()->data_ptr().cast_context<c10::impl::CopyOnWriteContext>(&c10::impl::deleteCopyOnWriteContext);
+  if (!cow_ctx) return;
+  // Trigger copy on write
+  // TODO: is cloning the key set here OK?
+  // TODO: going through full tensor dispatch is kind of inefficient
+  auto storage = self.storage();
+  auto storage_tensor = at::detail::make_tensor<at::TensorImpl>(
+    std::move(storage), self.key_set(), caffe2::TypeMeta::Make<uint8_t>());
+  storage_tensor.unsafeGetTensorImpl()->set_sizes_and_strides({self.storage().sym_nbytes()}, {1});
+  auto new_storage_tensor = storage_tensor.clone();
+  // Overwriting the original data pointer induces the decref
+  self.storage().unsafeGetStorageImpl()->set_data_ptr_noswap(
+    std::move(new_storage_tensor.storage().unsafeGetStorageImpl()->data_ptr()));
 }
 
 const c10::VariableVersion& version_counter(const Variable& self) {

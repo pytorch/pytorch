@@ -15,6 +15,7 @@ using namespace at;
 using torch::autograd::CreationMeta;
 using torch::autograd::as_view;
 using torch::autograd::increment_version;
+using torch::autograd::impl::maybe_copy_on_write;
 
 namespace torch {
 

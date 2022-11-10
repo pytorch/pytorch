@@ -472,6 +472,10 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
     # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
     # We could probably work harder to ensure that the fast variants are called instead, but the perf benefit would be minimal.
     if modifies_arguments(f):  # inplace op
+        # TODO: This seems bad; if an argument is mutated but not returned
+        # as a result, we won't increment its version
+        for r in cpp.return_names(f):
+            inplace_view_body.append(f"maybe_copy_on_write({r});")
         inplace_view_body.append(
             INPLACE_REDISPATCH.substitute(
                 unambiguous_name=f.func.name.unambiguous_name(),

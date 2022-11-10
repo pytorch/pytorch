@@ -174,6 +174,8 @@ TORCH_API void set_version_counter(
     const Variable&,
     const c10::VariableVersion& version_counter);
 
+TORCH_API void maybe_copy_on_write(const Variable&);
+
 /// Retrieves this `Variable`s version counter.
 TORCH_API const c10::VariableVersion& version_counter(const Variable&);
 
