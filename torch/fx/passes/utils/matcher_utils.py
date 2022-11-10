@@ -4,7 +4,7 @@ import copy
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
-from typing import Dict, List, Set, Any
+from typing import Callable, Dict, List, Set, Any
 import logging
 import os
 
@@ -51,7 +51,8 @@ class SubgraphMatcher:
     def __init__(self, pattern: Graph,
                  match_output: bool = False,
                  match_placeholder: bool = False,
-                 remove_overlapping_matches: bool = True) -> None:
+                 remove_overlapping_matches: bool = True,
+                 custom_node_args_matcher: Callable[[Node, Node], bool] = None) -> None:
         """
         Args:
             pattern: the targeted matching pattern, represented in fx.Graph.
@@ -61,12 +62,17 @@ class SubgraphMatcher:
                 the targeted pattern. If False, placeholder nodes will be used a wildcard.
             remove_overlapping_matches: If True, in the case of overlapping matches, only the first match
                 will be returned.
+            custom_node_args_matcher: If present, will be called to match args that are not from upstream nodes.
+                Example of such args include kernel size, stride, etc. Returns True if match is successful in which
+                case exact the args match will be skipped. Returns False if it's not a match or if the node type is
+                not relevant to the matcher, in which the exact args match will be performed as usual.
         """
 
         self.pattern = pattern
         self.match_output = match_output
         self.match_placeholder = match_placeholder
         self.remove_overlapping_matches = remove_overlapping_matches
+        self.custom_node_args_matcher = custom_node_args_matcher
 
         if len(pattern.nodes) == 0:
             raise ValueError("SubgraphMatcher cannot be initialized with an empty pattern")
@@ -208,12 +214,23 @@ class SubgraphMatcher:
         else:
             match_found = False
 
+        if self.custom_node_args_matcher:
+            custom_args_match = self.custom_node_args_matcher(pn, gn)
+        else:
+            custom_args_match = False
+
         if match_found and len(pn_flatten_args) == len(gn_flatten_args):
             for pn_, gn_ in zip(pn_flatten_args, gn_flatten_args):
                 if isinstance(gn_, Node) and isinstance(pn_, Node):
                     matched = self._match_nodes(pn_, gn_, match)
-                else:
+                elif (
+                    isinstance(gn_, Node)
+                    or isinstance(pn_, Node)
+                    or not custom_args_match
+                ):
                     matched = self._match_args(pn_, gn_, match)
+                else:
+                    matched = custom_args_match
 
                 if not matched:
                     match_found = False

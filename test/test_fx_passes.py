@@ -14,6 +14,7 @@ from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 
 from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
 from torch.testing._internal.jit_utils import JitTestCase
+from typing import Callable
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -341,6 +342,7 @@ class TestCase:
     match_placeholder: bool
     num_matches: int
     remove_overlapping_matches: bool = True
+    custom_node_args_matcher: Callable[[torch.fx.Node, torch.fx.Node], bool] = None
 
 class SingleNodePattern:
     @staticmethod
@@ -746,6 +748,24 @@ class NoAnchorFound:
         TestCase(True, True, 0)
     ]
 
+class MatchKernalSizeStrideUpperBounds:
+    @staticmethod
+    def match(pn, gn):
+        if pn.target != torch.nn.functional.avg_pool2d:
+            return False
+        return gn.args[1] <= pn.args[1] and gn.args[2] <= pn.args[2]
+
+    @staticmethod
+    def forward(x):
+        x = torch.nn.functional.avg_pool2d(x, 2, 2)  # match
+        x = torch.nn.functional.avg_pool2d(x, 8, 8)  # mo match
+
+    @staticmethod
+    def pattern(x):
+        return torch.nn.functional.avg_pool2d(x, 4, 4)
+
+    test_cases = [TestCase(False, False, 1, custom_node_args_matcher=match.__func__)]
+
 @instantiate_parametrized_tests
 class TestFXMatcherUtils(JitTestCase):
 
@@ -766,6 +786,7 @@ class TestFXMatcherUtils(JitTestCase):
         MultiOutputWithWithInvalidMatches,
         QuantizationFp8Pattern,
         NoAnchorFound,
+        MatchKernalSizeStrideUpperBounds,
     ])
     def test_subgraph_matcher(self, test_model):
 
@@ -781,7 +802,8 @@ class TestFXMatcherUtils(JitTestCase):
             matcher = SubgraphMatcher(pattern_traced.graph,
                                       match_output=test_case.match_output,
                                       match_placeholder=test_case.match_placeholder,
-                                      remove_overlapping_matches=test_case.remove_overlapping_matches)
+                                      remove_overlapping_matches=test_case.remove_overlapping_matches,
+                                      custom_node_args_matcher=test_case.custom_node_args_matcher)
             matches = matcher.match(traced.graph)
 
             assert len(matches) == test_case.num_matches
