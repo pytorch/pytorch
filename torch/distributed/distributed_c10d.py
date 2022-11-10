@@ -226,7 +226,7 @@ class Backend(object):
             f"{name.upper()} c10d backend creator function already exist"
         )
 
-        setattr(Backend, name.upper(), name.lower())
+        setattr(Backend, name.upper(), name.upper())
         Backend.backend_list.append(name.lower())
         Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
 

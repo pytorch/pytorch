@@ -1178,6 +1178,17 @@ class TestAssertCloseSparseCSR(TestCase):
             with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR values")):
                 fn()
 
+    @unittest.expectedFailure
+    def test_hybrid_support(self):
+        # If you read this after the test unexpectedly succeeded, this is a good thing. It means that you added support
+        # for `.to_dense()` for hybrid sparse CSR tensors and in turn enabled support for them in
+        # `torch.testing.assert_close` if comparing to strided tensors. You can safely remove this test as well as the
+        # patch on `TensorOrArrayPair` in `torch.testing._internal.common_utils`.
+        actual = torch.sparse_csr_tensor([0, 2, 4], [0, 1, 0, 1], [[1, 11], [2, 12], [3, 13], [4, 14]])
+        expected = torch.stack([actual[0].to_dense(), actual[1].to_dense()])
+
+        torch.testing.assert_close(actual, expected, check_layout=False)
+
 
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSC testing")
 class TestAssertCloseSparseCSC(TestCase):
