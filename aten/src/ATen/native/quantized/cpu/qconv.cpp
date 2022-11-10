@@ -1322,7 +1322,6 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     });
     // If hit, use cached data. If miss, fall back to normal path.
     if (get_conv_cache().hit(cache_key)) {
-      std::cout<<"conv cache hit..................."<<std::endl;
       ConvDesc& pd = get_conv_cache().get_primitive_desc();
       Conv& primitive = get_conv_cache().get_primitive();
       auto& src_zp_tensor = get_conv_cache().get_src_zp_tensor();
@@ -1330,7 +1329,6 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
       ideep::convolution_forward::compute(
           pd, primitive, src, weights, expected_bias, dst, src_zp_tensor, groups());
     } else {
-      std::cout<<"conv cache not hit..................."<<std::endl;
       src.set_zero_point(src_zero_points);
       dst.set_zero_point(dst_zero_points);
       ConvParams params;
@@ -1341,21 +1339,9 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
           op_attr, dnnl::algorithm::convolution_direct,
           dnnl::prop_kind::forward_inference,
           ideep::u8s8, ideep::engine::cpu_engine());
-      std::cout<<"try conv weight reorder..................."<<std::endl;
       onednn_utils::try_reorder(
             weights, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
-      std::cout<<"try conv compute..................."<<std::endl;
       ideep::convolution_forward::compute(params, src, weights, b, dst);
-      /*
-      ideep::convolution_forward::compute_v2(
-          src, plain_weights, b, dst_dims, dst,
-          strides, dilates, padding_l, padding_r, groups(),
-          src_scales, weights_scales, ideep::scale_t(scale_size, inv_output_scale),
-          src_zero_points, dst_zero_points, op_attr,
-          dnnl::algorithm::convolution_direct,
-          dnnl::prop_kind::forward_inference,
-          ideep::u8s8, ideep::engine::cpu_engine());
-      */
     }
   }
   return output;

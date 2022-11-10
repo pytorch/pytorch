@@ -22,6 +22,9 @@ VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}" for label in {
     "dynamo",
     "force_on_cpu",
     "functorch",
+    "inductor",
+    "inductor_distributed",
+    "inductor_timm",
     "jit_legacy",
     "multigpu",
     "nogpu_AVX512",
@@ -37,6 +40,7 @@ def parse_args() -> Any:
     parser.add_argument("--test-matrix", type=str, required=True, help="the original test matrix")
     parser.add_argument("--pr-number", type=str, help="the pull request number")
     parser.add_argument("--tag", type=str, help="the associated tag if it exists")
+    parser.add_argument("--event-name", type=str, help="name of the event that triggered the job (pull, schedule, etc)")
     return parser.parse_args()
 
 
@@ -105,6 +109,14 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
         return filtered_test_matrix
 
 
+def set_output(name: str, val: Any) -> None:
+    if os.getenv("GITHUB_OUTPUT"):
+        with open(str(os.getenv("GITHUB_OUTPUT")), "a") as env:
+            print(f"{name}={val}", file=env)
+    else:
+        print(f"::set-output name={name}::{val}")
+
+
 def main() -> None:
     args = parse_args()
     # Load the original test matrix set by the workflow. Its format, however,
@@ -115,7 +127,7 @@ def main() -> None:
     if test_matrix is None:
         warnings.warn(f"Invalid test matrix input '{args.test_matrix}', exiting")
         # We handle invalid test matrix gracefully by marking it as empty
-        print("::set-output name=is-test-matrix-empty::True")
+        set_output("is-test-matrix-empty", True)
         sys.exit(0)
 
     pr_number = args.pr_number
@@ -150,13 +162,17 @@ def main() -> None:
         # No PR number, no tag, we can just return the test matrix as it is
         filtered_test_matrix = test_matrix
 
+    if args.event_name == "schedule":
+        for config in filtered_test_matrix.get("include", []):
+            config["mem_leak_check"] = "mem_leak_check"
+
     # Set the filtered test matrix as the output
-    print(f"::set-output name=test-matrix::{json.dumps(filtered_test_matrix)}")
+    set_output("test-matrix", json.dumps(filtered_test_matrix))
 
     filtered_test_matrix_len = len(filtered_test_matrix.get("include", []))
     # and also put a flag if the test matrix is empty, so subsequent jobs can
     # quickly check it without the need to parse the JSON string
-    print(f"::set-output name=is-test-matrix-empty::{filtered_test_matrix_len == 0}")
+    set_output("is-test-matrix-empty", filtered_test_matrix_len == 0)
 
 
 if __name__ == "__main__":

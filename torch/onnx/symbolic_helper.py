@@ -31,6 +31,7 @@ __all__ = [
     "check_training_mode",
     "dequantize_helper",
     "is_caffe2_aten_fallback",
+    "is_complex_value",
     "parse_args",
     "pytorch_name_to_type",
     "quantize_helper",
@@ -430,11 +431,12 @@ def _if_scalar_type_as(self, tensor):
     if isinstance(self, _C.Value):
         return self
 
-    scalar_type = tensor.type().scalarType()
-    if scalar_type:
-        ty = scalar_type.lower()
+    scalar_type = _type_utils.JitScalarType.from_value(
+        tensor, _type_utils.JitScalarType.UNDEFINED
+    )
+    if scalar_type != _type_utils.JitScalarType.UNDEFINED:
+        ty = scalar_type.scalar_name().lower()
         return getattr(self, ty)()
-
     return self
 
 
@@ -491,16 +493,25 @@ def _is_scalar_list(x: _C.Value) -> bool:
     x_type = _as_list_type(x.type())
     if x_type is None:
         return False
-    element_type = str(x_type.getElementType())
-    return (
-        _type_utils.valid_torch_name(element_type)
-        and _type_utils.JitScalarType.from_name(element_type).onnx_compatible()
-    )
+    scalar_type = _type_utils.JitScalarType.from_value(x)
+    return scalar_type.onnx_compatible()
 
 
 @_beartype.beartype
 def _is_tuple_construct(x: _C.Value) -> bool:
     return x.node().kind() == "prim::TupleConstruct"
+
+
+@_beartype.beartype
+def is_complex_value(x: _C.Value) -> bool:
+    assert _is_value(x)
+    return _type_utils.JitScalarType.from_value(
+        x, _type_utils.JitScalarType.UNDEFINED
+    ) in {
+        _type_utils.JitScalarType.COMPLEX32,
+        _type_utils.JitScalarType.COMPLEX64,
+        _type_utils.JitScalarType.COMPLEX128,
+    }
 
 
 @_beartype.beartype
@@ -633,12 +644,13 @@ def _block_list_in_opset(name: str):
 
 
 @_beartype.beartype
-def _try_get_scalar_type(*args) -> Optional[str]:
+def _try_get_scalar_type(*args) -> Optional[_type_utils.JitScalarType]:
     for arg in args:
-        try:
-            return arg.type().scalarType()
-        except RuntimeError:
-            pass
+        scalar_type = _type_utils.JitScalarType.from_value(
+            arg, _type_utils.JitScalarType.UNDEFINED
+        )
+        if scalar_type != _type_utils.JitScalarType.UNDEFINED:
+            return scalar_type
     return None
 
 
@@ -656,8 +668,13 @@ def _select_helper(g: jit_utils.GraphContext, self, dim, index, apply_reshape=Tr
                 g, index, g.op("Constant", value_t=torch.LongTensor([1]))
             )
 
-    index_scalar_type = index.type().scalarType()
-    if index_scalar_type is None or index_scalar_type not in {"Long", "Int"}:
+    index_scalar_type = _type_utils.JitScalarType.from_value(
+        index, _type_utils.JitScalarType.UNDEFINED
+    )
+    if index_scalar_type not in {
+        _type_utils.JitScalarType.INT64,
+        _type_utils.JitScalarType.INT,
+    }:
         index = g.op("Cast", index, to_i=_C_onnx.TensorProtoDataType.INT64)
     return g.op("Gather", self, index, axis_i=dim)
 
@@ -683,46 +700,22 @@ def _slice_helper(
 
 
 @_beartype.beartype
-def _is_in_type_group(value, scalar_types: Set[_type_utils.JitScalarType]) -> bool:
-    """Helper function for determining if a value is in a scalar type group."""
-    if value is None:
-        return False
-    if isinstance(value, torch.Tensor):
-        return _type_utils.JitScalarType.from_dtype(value.dtype) in scalar_types
-    elif isinstance(value.type(), torch.ListType):
-        return (
-            _type_utils.JitScalarType.from_dtype(value.type().getElementType().dtype())
-            in scalar_types
-        )
-    scalar_type = value.type().scalarType()
-    if scalar_type is None:
-        warnings.warn(
-            "Type cannot be inferred, which might cause exported graph to produce incorrect results."
-        )
-        return False
-    try:
-        return _type_utils.JitScalarType.from_name(scalar_type) in scalar_types
-    except ValueError:
-        # scalar_type is not a known ScalarType
-        return False
-
-
-@_beartype.beartype
 def _is_fp(value) -> bool:
-    return _is_in_type_group(
-        value,
-        {
-            _type_utils.JitScalarType.FLOAT,
-            _type_utils.JitScalarType.DOUBLE,
-            _type_utils.JitScalarType.HALF,
-            _type_utils.JitScalarType.BFLOAT16,
-        },
-    )
+    return _type_utils.JitScalarType.from_value(
+        value, _type_utils.JitScalarType.UNDEFINED
+    ) in {
+        _type_utils.JitScalarType.FLOAT,
+        _type_utils.JitScalarType.DOUBLE,
+        _type_utils.JitScalarType.HALF,
+        _type_utils.JitScalarType.BFLOAT16,
+    }
 
 
 @_beartype.beartype
 def _is_bool(value) -> bool:
-    return _is_in_type_group(value, {_type_utils.JitScalarType.BOOL})
+    return _type_utils.JitScalarType.from_value(
+        value, _type_utils.JitScalarType.UNDEFINED
+    ) in {_type_utils.JitScalarType.BOOL}
 
 
 @_beartype.beartype
@@ -774,7 +767,7 @@ def _topk_helper(
         k = g.op("Constant", value_t=torch.tensor([k], dtype=torch.int64))
     else:
         k = _reshape_helper(g, k, g.op("Constant", value_t=torch.tensor([1])))
-        if _try_get_scalar_type(k) != "Long":
+        if _try_get_scalar_type(k) != _type_utils.JitScalarType.INT64:
             k = g.op("Cast", k, to_i=_C_onnx.TensorProtoDataType.INT64)
     if g.opset <= 10:
         if not largest:
@@ -1250,13 +1243,14 @@ def _arange_cast_helper(
 ]:
     def _is_all_integral(scalars):
         for scalar in scalars:
-            try:
-                if scalar.type().scalarType() != "Long":
-                    return False
-            except Exception:
-                # FIXME(justinchuby): Avoid catching Exception.
-                # Catch a more specific exception instead.
-                pass
+            scalar_type = _type_utils.JitScalarType.from_value(
+                scalar, _type_utils.JitScalarType.UNDEFINED
+            )
+            if (
+                scalar_type != _type_utils.JitScalarType.INT64
+                and scalar_type != _type_utils.JitScalarType.UNDEFINED
+            ):
+                return False
         return True
 
     # This logic is based on torch.arange docs. If "dtype" is provided,
@@ -1364,9 +1358,7 @@ def _batchnorm_helper(
             )
         weight_value = torch.tensor(
             [1.0] * channel_size,
-            dtype=_type_utils.JitScalarType.from_name(
-                input.type().scalarType()
-            ).dtype(),
+            dtype=_type_utils.JitScalarType.from_value(input).dtype(),
         )
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or _is_none(bias):
@@ -1377,9 +1369,7 @@ def _batchnorm_helper(
             )
         bias_value = torch.tensor(
             [0.0] * channel_size,
-            dtype=_type_utils.JitScalarType.from_name(
-                input.type().scalarType()
-            ).dtype(),
+            dtype=_type_utils.JitScalarType.from_value(input).dtype(),
         )
         bias = g.op("Constant", value_t=bias_value)
     # If track_running_stats is set to False batch statistics are instead used during evaluation time
@@ -1523,9 +1513,7 @@ def dequantize_helper(
     tensor, scale, zero_point = unpacked_qtensors[:3]
     axis = unpacked_qtensors[3] if len(unpacked_qtensors) >= 4 else None
     axis_i = _get_const(axis, "i", "axis")
-    input_scalar_type = tensor.type().scalarType()
-    assert input_scalar_type is not None
-    input_qdtype = _type_utils.JitScalarType.from_name(tensor.type().scalarType())
+    input_qdtype = _type_utils.JitScalarType.from_value(tensor)
     if qdtype is None:
         if input_qdtype is not None:
             qdtype = input_qdtype.onnx_type()
@@ -1587,11 +1575,19 @@ def quantize_helper(
         )
 
     assert scale is not None
-    if scale.type().scalarType() != "Float":
+    if (
+        _type_utils.JitScalarType.from_value(scale, _type_utils.JitScalarType.UNDEFINED)
+        != _type_utils.JitScalarType.FLOAT
+    ):
         scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
     assert zero_point is not None
-    if zero_point.type().scalarType() not in ("Byte", "Char"):
+    if _type_utils.JitScalarType.from_value(
+        zero_point, _type_utils.JitScalarType.UNDEFINED
+    ) not in {
+        _type_utils.JitScalarType.UINT8,
+        _type_utils.JitScalarType.INT8,
+    }:
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     output = g.op(
         "QuantizeLinear",
@@ -1632,8 +1628,10 @@ def requantize_bias_helper(
 @_beartype.beartype
 def args_have_same_dtype(args):
     assert args
-    base_dtype = args[0].type().scalarType()
-    has_same_dtype = all(elem.type().scalarType() == base_dtype for elem in args)
+    base_dtype = _type_utils.JitScalarType.from_value(args[0])
+    has_same_dtype = all(
+        _type_utils.JitScalarType.from_value(elem) == base_dtype for elem in args
+    )
     return has_same_dtype
 
 

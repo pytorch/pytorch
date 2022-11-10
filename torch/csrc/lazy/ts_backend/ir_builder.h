@@ -30,10 +30,6 @@ struct TorchScriptIrBuilder : IrBuilder {
       const bool& is_scalar_expand) const override {
     return ReuseOrMakeNode<Expand>(input0, size, is_scalar_expand);
   }
-  NodePtr MakeView(const Value& input0, const std::vector<int64_t>& output_size)
-      const override {
-    return ReuseOrMakeNode<View>(input0, output_size);
-  }
   NodePtr MakeCast(
       const Value& input0,
       const at::ScalarType& dtype,
@@ -53,84 +49,6 @@ struct TorchScriptIrBuilder : IrBuilder {
       const hash_t& hash_seed =
           static_cast<uint32_t>(0x5a2d296e9)) const override {
     return MakeNode<Generic>(op, operands, shape, num_outputs, hash_seed);
-  }
-
-  // View op nodes
-  NodePtr MakeAsStridedViewUpdate(
-      const Value& input0,
-      const Value& input1,
-      const std::vector<int64_t>& size,
-      const std::vector<int64_t>& stride,
-      const int64_t& storage_offset) const override {
-    return ReuseOrMakeNode<AsStridedViewUpdate>(
-        input0, input1, size, stride, storage_offset);
-  }
-  NodePtr MakeAsStrided(
-      const Value& input0,
-      const std::vector<int64_t>& size,
-      const std::vector<int64_t>& stride,
-      const int64_t& storage_offset) const override {
-    return ReuseOrMakeNode<AsStrided>(input0, size, stride, storage_offset);
-  }
-  NodePtr MakeDiagonalViewUpdate(
-      const Value& input0,
-      const Value& input1,
-      const int64_t& offset,
-      const int64_t& dim1,
-      const int64_t& dim2) const override {
-    return ReuseOrMakeNode<DiagonalViewUpdate>(
-        input0, input1, offset, dim1, dim2);
-  }
-  NodePtr MakeDiagonal(
-      const Value& input0,
-      const int64_t& offset,
-      const int64_t& dim1,
-      const int64_t& dim2) const override {
-    return ReuseOrMakeNode<Diagonal>(input0, offset, dim1, dim2);
-  }
-  NodePtr MakeNarrowViewUpdate(
-      const Value& input0,
-      const Value& input1,
-      const std::vector<int64_t>& base_indices) const override {
-    return ReuseOrMakeNode<NarrowViewUpdate>(input0, input1, base_indices);
-  }
-  NodePtr MakeNarrow(
-      const Value& input0,
-      const std::vector<int64_t>& base_indices,
-      const std::vector<int64_t>& sizes) const override {
-    return ReuseOrMakeNode<Narrow>(input0, base_indices, sizes);
-  }
-  NodePtr MakePermute(const Value& input0, const std::vector<int64_t>& dims)
-      const override {
-    return ReuseOrMakeNode<Permute>(input0, dims);
-  }
-  NodePtr MakeResize(const Value& input0, const std::vector<int64_t>& size)
-      const override {
-    return ReuseOrMakeNode<Resize>(input0, size);
-  }
-  NodePtr MakeSelectViewUpdate(
-      const Value& input0,
-      const Value& input1,
-      const int64_t& dim,
-      const int64_t& start,
-      const int64_t& end,
-      const int64_t& stride) const override {
-    return ReuseOrMakeNode<SelectViewUpdate>(
-        input0, input1, dim, start, end, stride);
-  }
-  NodePtr MakeSelect(
-      const Value& input0,
-      const int64_t& dim,
-      const int64_t& start,
-      const int64_t& end,
-      const int64_t& stride) const override {
-    return ReuseOrMakeNode<Select>(input0, dim, start, end, stride);
-  }
-  NodePtr MakeSqueeze(const Value& input0, const int& dim) const override {
-    return ReuseOrMakeNode<Squeeze>(input0, dim);
-  }
-  NodePtr MakeUnsqueeze(const Value& input0, const int& dim) const override {
-    return ReuseOrMakeNode<Unsqueeze>(input0, dim);
   }
 
   // dynamic ir nodes

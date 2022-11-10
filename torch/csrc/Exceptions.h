@@ -75,6 +75,8 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt) \
   _CATCH_GENERIC_ERROR(                                                 \
       OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)        \
+  _CATCH_GENERIC_ERROR(                                                 \
+      DistBackendError, THPException_DistBackendError, retstmnt)        \
   _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)             \
   catch (torch::PyTorchError & e) {                                     \
     auto msg = torch::processErrorMsg(e.what());                        \
@@ -146,7 +148,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError;
+    *THPException_OutOfMemoryError, *THPException_DistBackendError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
@@ -337,19 +339,6 @@ struct LinAlgError : public PyTorchError {
   }
 };
 
-struct WarningMeta {
-  WarningMeta(
-      const c10::SourceLocation& _source_location,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
-      const std::string& _msg,
-      const bool _verbatim)
-      : source_location_{_source_location}, msg_{_msg}, verbatim_{_verbatim} {}
-
-  c10::SourceLocation source_location_;
-  std::string msg_;
-  bool verbatim_;
-};
-
 // ATen warning handler for Python
 struct PyWarningHandler {
   // Move actual handler into a separate class with a noexcept
@@ -357,12 +346,9 @@ struct PyWarningHandler {
   // subclasses to have a noexcept(false) destructor.
   struct InternalHandler : at::WarningHandler {
     ~InternalHandler() override = default;
-    void process(
-        const at::SourceLocation& source_location,
-        const std::string& msg,
-        const bool verbatim) override;
+    void process(const c10::Warning& warning) override;
 
-    std::vector<WarningMeta> warning_buffer_;
+    std::vector<c10::Warning> warning_buffer_;
   };
 
  public:
