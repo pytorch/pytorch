@@ -24,7 +24,7 @@ from ..utils import (
     specialize_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import VariableTracker, wrap_fx_proxy
+from .base import VariableTracker
 from .lists import ListVariable, TupleVariable
 from .misc import AutocastModeVariable, ProfilerContextWrapperVariable
 from .nn_module import NNModuleVariable
@@ -172,13 +172,15 @@ class TorchVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        # print("CALLING ON TORCH", self.value)
         from . import (
             ConstantVariable,
             DynamicShapeVariable,
             GradModeVariable,
             TensorVariable,
         )
+
+        # print("CALLING ON TORCH", self.value)
+        from .builder import wrap_fx_proxy
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
@@ -476,6 +478,8 @@ class TorchVariable(VariableTracker):
         dim = args[0] if args else kwargs.get("dim", variables.ConstantVariable(None))
 
         def fake_softmax(input):
+            from .builder import wrap_fx_proxy
+
             return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -528,6 +532,8 @@ class TorchVariable(VariableTracker):
         ) = normalize_args(*args, **kwargs)
 
         def fake_cross_entropy_loss(input, target):
+            from .builder import wrap_fx_proxy
+
             return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -603,6 +609,7 @@ class TorchPyOperator(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import ListVariable, TensorVariable, UserFunctionVariable
+        from .builder import wrap_fx_proxy
 
         assert kwargs is None or len(kwargs) == 0, "kwargs are not supported, yet"
 

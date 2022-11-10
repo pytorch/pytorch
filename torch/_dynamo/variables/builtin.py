@@ -25,7 +25,7 @@ from ..utils import (
     proxy_args_kwargs,
     specialize_args_kwargs,
 )
-from .base import MutableLocal, VariableTracker, wrap_fx_proxy, wrap_fx_proxy_cls
+from .base import MutableLocal, VariableTracker
 from .dicts import ConstDictVariable
 from .tensor import DynamicShapeVariable, FakeItemVariable
 
@@ -227,6 +227,8 @@ class BuiltinVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
+
         # print("CALLING BUILTIN", self.fn, args)
         constant_args = check_constant_args(args, kwargs)
         tensor_args = self.tensor_args(*args, **kwargs)
@@ -403,6 +405,8 @@ class BuiltinVariable(VariableTracker):
 
             # Dynamic input does not get resolved, rather, gets stored as call_function
             if isinstance(a, DynamicShapeVariable):
+                from .builder import wrap_fx_proxy
+
                 return wrap_fx_proxy(
                     tx=tx,
                     proxy=tx.output.create_proxy(

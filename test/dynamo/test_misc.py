@@ -116,7 +116,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return o
 
         torch._dynamo.testing.standard_test(
-            self, unpack4, 2, expected_ops=5, expected_ops_dynamic=7
+            self, unpack4, 2, expected_ops=5, expected_ops_dynamic=8
         )
 
     def test_unpack5(self):
@@ -129,7 +129,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return o
 
         torch._dynamo.testing.standard_test(
-            self, unpack5, 2, expected_ops=5, expected_ops_dynamic=7
+            self, unpack5, 2, expected_ops=5, expected_ops_dynamic=8
         )
 
     def test_matmul1(self):

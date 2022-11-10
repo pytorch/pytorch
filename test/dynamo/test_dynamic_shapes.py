@@ -8,7 +8,6 @@ try:
         test_functions,
         test_misc,
         test_modules,
-        test_no_fake_tensors,
         test_repros,
         test_subgraphs,
         test_unspec,
@@ -18,7 +17,6 @@ except ImportError:
     import test_functions
     import test_misc
     import test_modules
-    import test_no_fake_tensors
     import test_repros
     import test_subgraphs
     import test_unspec
@@ -107,10 +105,6 @@ unittest.expectedFailure(DynamicShapesSubGraphTests.test_restore_state_dynamic_s
 # FakeTensor(FakeTensor(..., device='meta', size=()), cpu)), **{}):
 # aten._local_scalar_dense.default
 unittest.expectedFailure(test_unspec.UnspecReproTests.test_batch_norm_act_unspec)
-
-unittest.expectedFailure(
-    test_no_fake_tensors.NoFakeTensorsMiscTests.test_onnx_shape_as_tensor_no_fake_tensors
-)
 
 # SymIntArrayRef expected to contain only concrete integers
 unittest.expectedFailure(

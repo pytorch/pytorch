@@ -18,7 +18,7 @@ from ..utils import (
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import VariableTracker, wrap_fx_proxy
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import ShapeVariable, SizeVariable
 
@@ -178,6 +178,7 @@ class TensorVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, TupleVariable
+        from .builder import wrap_fx_proxy
 
         kwargs = dict(kwargs)
         # print("CALLING TENSOR OP", name)
@@ -188,47 +189,16 @@ class TensorVariable(VariableTracker):
             sizes = [variables.ConstantVariable(x) for x in self.size]
             constant_result = SizeVariable(sizes, **options)
         elif name == "size" and self.size is None and config.dynamic_shapes:
-            example_size = self.proxy.node.meta["example_value"].size()
-            pure_size_proxy = tx.output.create_proxy(
-                "call_method",
-                name,
-                *proxy_args_kwargs([self], kwargs),
-                current_tx=tx,
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self] + args, kwargs),
+                    current_tx=tx,
+                ),
+                **options,
             )
-            if len(args) == 1 and isinstance(args[0], ConstantVariable):
-                assert isinstance(args[0].value, int)
-                proxy = tx.output.create_proxy(
-                    "call_function",
-                    operator.getitem,
-                    (pure_size_proxy, args[0].as_proxy()),
-                    {},
-                )
-                value = example_size[args[0].value]
-                proxy.node.meta["example_value"] = value
-                return DynamicShapeVariable.create(tx, proxy, value)
-            items = []
-            for i, element in enumerate(example_size):
-                if isinstance(element, int):
-                    items.append(variables.ConstantVariable(element))
-                else:
-                    proxy = tx.output.create_proxy(
-                        "call_function",
-                        operator.getitem,
-                        (pure_size_proxy, i),
-                        {},
-                    )
-                    proxy.node.meta["example_value"] = element
-                    items.append(DynamicShapeVariable.create(tx, proxy, element))
-
-            def extract(item):
-                if isinstance(item, ConstantVariable):
-                    return item.value
-                return item.proxy.node.meta["example_value"]
-
-            pure_size_proxy.node.meta["example_value"] = torch.Size(
-                [extract(item) for item in items]
-            )
-            return SizeVariable(items, pure_size_proxy, **options)
         elif name == "numel" and self.size is not None:
             constant_result = ConstantVariable(product(self.size), **options)
         elif name in ("ndimension", "dim") and self.ndim is not None:
@@ -369,6 +339,8 @@ class DynamicShapeVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         return wrap_fx_proxy(
