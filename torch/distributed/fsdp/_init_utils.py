@@ -255,7 +255,7 @@ def _init_param_handle_from_module(
 def _init_param_handles_from_module(
     state: _FSDPState,
     root_module: nn.Module,
-    auto_wrap_policy: _FSDPPolicy,
+    policy: _FSDPPolicy,
     device_id: Optional[Union[int, torch.device]],
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
@@ -266,7 +266,7 @@ def _init_param_handles_from_module(
     """
     submodule_to_states = _get_submodule_to_states(
         root_module,
-        auto_wrap_policy,
+        policy,
         state._ignored_modules,
         state._ignored_params,
     )
