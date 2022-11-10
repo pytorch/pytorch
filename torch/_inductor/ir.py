@@ -695,10 +695,22 @@ class Reduction(Loops):
 
         if reduction_numel == 0:
 
+            # N.B. This is a hack to generate the literal of the given type
+            # Ideally, we should be fixing `def constant` in triton.py
+            # but it breaks due to hardcoded dtypes in other places
+            def py_cnst(val):
+                return (
+                    bool(val)
+                    if dst_dtype == torch.bool
+                    else float(val)
+                    if dst_dtype.is_floating_point
+                    else int(val)
+                )
+
             rtypes_to_inits = {
-                "sum": 0,
-                "prod": 1,
-                "any": 0,
+                "sum": py_cnst(0),
+                "prod": py_cnst(1),
+                "any": py_cnst(0),
                 # "all" is desugared to `!any(!val)`
             }
 
