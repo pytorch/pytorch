@@ -158,9 +158,16 @@ if __name__ == "__main__":
     model_arg.add_argument(
         "--toy_model", action="store_true", help="use toy model instead"
     )
+    model_arg.add_argument(
+        "--toy_bert", action="store_true", help="use toy model instead"
+    )
     args = parser.parse_args()
 
-    model_name = "ToyModel" if args.toy_model else args.torchbench_model
+    model_name = args.torchbench_model
+    if args.toy_model:
+        model_name =  "ToyModel"
+    elif args.toy_bert:
+        model_name = "BertLMPredictionHead"
     model, inputs = get_model(args)
 
     fn = partial(run_model, args, model, inputs)

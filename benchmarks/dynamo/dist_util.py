@@ -14,6 +14,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from transformers.models.bert.configuration_bert import BertConfig
 
 try:
     from .torchbench import setup_torchbench_cwd
@@ -96,6 +97,30 @@ def get_model(args):
     elif args.toy_model:
         model = ToyModel()
         inputs = (torch.randn(20, 10),)
+    elif args.toy_bert:
+        config = BertConfig(**{
+            "attention_probs_dropout_prob": 0.1,
+            "classifier_dropout": None,
+            "hidden_act": "gelu",
+            "hidden_dropout_prob": 0.1,
+            "hidden_size": 768,
+            "initializer_range": 0.02,
+            "intermediate_size": 3072,
+            "layer_norm_eps": 1e-12,
+            "max_position_embeddings": 512,
+            "model_type": "bert",
+            "num_attention_heads": 12,
+            "num_hidden_layers": 12,
+            "pad_token_id": 0,
+            "position_embedding_type": "absolute",
+            "transformers_version": "4.20.1",
+            "type_vocab_size": 2,
+            "use_cache": True,
+            "vocab_size": 30522
+        })
+        model = BertLMPredictionHead(config)
+        inputs = (torch.randn((4, 512, 768)), )
+
     else:
         raise argparse.ArgumentError(
             args.torchbench_model, message="Must specify a model"
@@ -135,10 +160,9 @@ MODEL_FSDP_WRAP = {
 
 
 def apply_fsdp(model, use_checkpointing=False, use_wrap_policy=True):
-    blocks = MODEL_FSDP_WRAP[model.__class__]
-
     wrap_policy = None
     if use_wrap_policy:
+        blocks = MODEL_FSDP_WRAP[model.__class__]
         # transformer policy is really a generic policy that wraps modules of specified classes
         wrap_policy = functools.partial(
             transformer_auto_wrap_policy, transformer_layer_cls=blocks
