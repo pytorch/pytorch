@@ -172,6 +172,7 @@ class GenLazyIR(ABC):
     backend_index: BackendIndex
     backend_name: str
     node_base: str
+    use_lazy_shape: bool
 
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
@@ -252,7 +253,7 @@ class GenLazyIR(ABC):
 
         ctor_args = [f"const {i.lazy_type.cpp_type()}& {i.name}" for i in all_args]
         reuse_ctor_args = ", ".join(ctor_args)
-        if schema.properties.ShapePrecompute:
+        if self.use_lazy_shape and schema.properties.ShapePrecompute:
             ctor_args.append("std::vector<torch::lazy::Shape>&& shapes")
         node_ctor_args = ", ".join(ctor_args)
 
@@ -540,7 +541,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
                 dispatch_ns = "meta"
             aten_name = schema.aten_name
             # TODO: this is trolling
-            if func.func.has_symint():
+            if func.func.has_symint() and metadata.supports_symint():
                 aten_name += "_symint"
             shape_str = f"""\
         {meta_conversion_str}

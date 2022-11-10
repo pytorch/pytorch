@@ -8,6 +8,7 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace ops {
+
 namespace utils {
 
 Tensor nchw_to_nc4hw(const Tensor&);
@@ -15,6 +16,12 @@ Tensor nchw_to_nc4hw(const Tensor&);
 Tensor create_staging_tensor(const vTensor&);
 
 Tensor nc4hw_to_nchw(const Tensor&, IntArrayRef);
+
+void copy_buffer_to_buffer(
+    api::Context* const context,
+    api::StorageBuffer& src,
+    api::StorageBuffer& dst,
+    VkFence fence_handle);
 
 void copy_buffer_to_vtensor(
     api::VulkanBuffer&,

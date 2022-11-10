@@ -101,7 +101,7 @@ struct ConvParams {
   bool is_padding_neg() const;
   bool is_stride_nonpos() const;
   void view1d_as_2d();
-  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const c10::optional<at::Tensor>& bias) const;
   bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
@@ -114,6 +114,7 @@ struct ConvParams {
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
+// Keep in sync with py::enum_ in Module.cpp
 enum class ConvBackend {
   CudaDepthwise2d,
   CudaDepthwise3d,
@@ -144,6 +145,15 @@ enum class ConvBackend {
 // NB: The forward pass provides a bias tensor while the backward pass provides
 // a bool indicating whether the bias is defined. This is done to save memory by
 // avoiding saving the full bias tensor for backward.
+TORCH_API ConvBackend _select_conv_backend(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt,
+    const at::OptionalIntArrayRef bias_sizes_opt,
+    const bool need_backward,
+    const ConvParams& params);
+
+// For BC reasons, have a copy that does not require bias_opt
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
@@ -156,7 +166,11 @@ TORCH_API ConvBackend select_conv_backend(
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
-    bool transposed, IntArrayRef output_padding, int64_t groups);
+    bool transposed, IntArrayRef output_padding, int64_t groups, const at::OptionalIntArrayRef bias_sizes_opt);
+
+TORCH_API at::MemoryFormat _determine_backend_memory_format(const Tensor& input,
+    const Tensor& weight,
+    const ConvBackend backend);
 
 // ---------------------------------------------------------------------
 //
@@ -227,7 +241,7 @@ static void convolution_shape_check(
 
   // Input
   checkDimRange(c, input, 3, 6 /* exclusive */);
-  checkSize(c, input, input_channels_dim, weight->size(1) * groups);
+  checkSize_symint(c, input, input_channels_dim, weight->size(1) * groups);
 
   // Weight
   checkSameDim(c, input, weight);

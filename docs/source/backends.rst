@@ -15,6 +15,7 @@ These backends include:
 - ``torch.backends.mkl``
 - ``torch.backends.mkldnn``
 - ``torch.backends.openmp``
+- ``torch.backends.opt_einsum``
 - ``torch.backends.xeon``
 
 
@@ -51,6 +52,19 @@ torch.backends.cuda
 
 .. autofunction:: torch.backends.cuda.preferred_linalg_library
 
+.. autofunction:: torch.backends.cuda.flash_sdp_enabled
+
+.. autofunction:: torch.backends.cuda.enable_mem_efficient_sdp
+
+.. autofunction:: torch.backends.cuda.mem_efficient_sdp_enabled
+
+.. autofunction:: torch.backends.cuda.enable_flash_sdp
+
+.. autofunction:: torch.backends.cuda.math_sdp_enabled
+
+.. autofunction:: torch.backends.cuda.enable_math_sdp
+
+.. autofunction:: torch.backends.cuda.sdp_kernel
 
 torch.backends.cudnn
 ^^^^^^^^^^^^^^^^^^^^
@@ -126,6 +140,32 @@ torch.backends.openmp
 .. add anything to the rendered page for now.
 .. py:module:: torch.backends.quantized
 .. py:module:: torch.backends.xnnpack
+
+
+torch.backends.opt_einsum
+^^^^^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.opt_einsum
+
+.. autofunction:: torch.backends.opt_einsum.is_available
+
+.. autofunction:: torch.backends.opt_einsum.get_opt_einsum
+
+.. attribute::  torch.backends.opt_einsum.enabled
+
+    A :class:``bool`` that controls whether opt_einsum is enabled (``True`` by default). If so,
+    torch.einsum will use opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html)
+    if available to calculate an optimal path of contraction for faster performance.
+
+    If opt_einsum is not available, torch.einsum will fall back to the default contraction path
+    of left to right.
+
+.. attribute::  torch.backends.opt_einsum.strategy
+
+    A :class:``str`` that specifies which strategies to try when ``torch.backends.opt_einsum.enabled``
+    is ``True``. By default, torch.einsum will try the "auto" strategy, but the "greedy" and "optimal"
+    strategies are also supported. Note that the "optimal" strategy is factorial on the number of
+    inputs as it tries all possible paths. See more details in opt_einsum's docs
+    (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html).
 
 
 torch.backends.xeon

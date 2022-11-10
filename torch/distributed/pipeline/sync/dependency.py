@@ -12,7 +12,7 @@ from torch import Tensor
 
 from .phony import get_phony
 
-__all__: List[str] = []
+__all__: List[str] = ["fork", "Fork", "join", "Join"]
 
 
 def fork(input: Tensor) -> Tuple[Tensor, Tensor]:

@@ -28,17 +28,17 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: [self-hosted, linux.2xlarge]
     steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-
-      - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Calculate docker image
         id: calculate-docker-image
@@ -47,7 +47,7 @@ jobs:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -197,5 +197,5 @@ jobs:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()

@@ -1,11 +1,26 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
 #include <ATen/NestedTensorImpl.h>
+#include <ATen/Parallel.h>
+#include <ATen/core/Tensor.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cat.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/ones_native.h>
+#include <ATen/ops/prod.h>
+#include <ATen/ops/stack_native.h>
+#include <ATen/ops/tensor.h>
+#endif
 
 #include <vector>
 
@@ -37,6 +52,19 @@ inline at::Tensor wrap_buffer(
       std::move(nested_size_tensor),
       std::move(nested_stride_tensor),
       std::move(offsets));
+}
+
+inline at::Tensor wrap_buffer(
+    at::Tensor buffer,
+    at::Tensor nested_size_tensor,
+    at::Tensor nested_stride_tensor,
+    const std::vector<int64_t>& offsets) {
+  std::vector<int64_t> offsets_copy(offsets);
+  return wrap_buffer(
+      buffer,
+      nested_size_tensor,
+      nested_stride_tensor,
+      std::move(offsets_copy));
 }
 
 inline at::Tensor get_buffer(const at::Tensor& tensor) {
@@ -86,8 +114,27 @@ inline at::Tensor create_nested_view_tensor(
 int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt);
 
 // The sizes of the underlying tensors
-std::vector<IntArrayRef> NestedTensor_get_sizes(
-    const NestedTensorImpl* self_ptr);
+inline std::vector<IntArrayRef> NestedTensor_get_sizes(
+    const NestedTensorImpl* self_ptr) {
+  int64_t ntensors = self_ptr->size(0);
+  std::vector<IntArrayRef> sizes(ntensors);
+  if (ntensors == 0) {
+    return sizes;
+  }
+  const Tensor& sizemat = self_ptr->get_nested_size_tensor();
+  int64_t orig_dim = sizemat.size(1);
+  // nesting scalars has empty sizes
+  if (orig_dim == 0) {
+    return sizes;
+  }
+  const int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
+
+  for (const auto i : c10::irange(ntensors)) {
+    sizes[i] = IntArrayRef(sizemat_ptr, sizemat_ptr + orig_dim);
+    sizemat_ptr += orig_dim;
+  }
+  return sizes;
+}
 
 TORCH_API std::vector<int64_t> NestedTensor_get_max_size(
     const NestedTensorImpl& nt);
@@ -126,8 +173,22 @@ inline std::vector<IntArrayRef> NestedTensor_get_strides(
   const NestedTensorImpl* self_ptr = get_nested_tensor_impl(self);
   return NestedTensor_get_strides(self_ptr);
 }
+
+inline void check_numel_equals_buffer_size(const at::Tensor& self) {
+  auto self_impl = get_nested_tensor_impl(self);
+  TORCH_CHECK(
+      self.numel() == self_impl->get_buffer_size(),
+      "Number of elements in nested tensor must match number of elements in buffer.");
+}
+
+inline void check_numel_equals_buffer_size(const NestedTensorImpl* self_ptr) {
+  TORCH_CHECK(
+      self_ptr->numel() == self_ptr->get_buffer_size(),
+      "Number of elements in nested tensor must match number of elements in buffer.");
+}
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Data structures and functions for generically applying a function on a nested tensor.
+// Data structures and functions for generically applying a function on a nested
+// tensor.
 namespace impl {
 
 template <typename T>
@@ -264,17 +325,84 @@ inline Tensor wrap_tensor_node(
   if (tensor_node.degree() == 0) {
     return wrap_buffer(ones({0}, dtype, layout, device), ones({}));
   }
-  std::vector<Tensor> sizes;
-  std::vector<Tensor> flat_tensors;
+
+  // Fast path: if all tensors are on CPU, have contiguous memory, and the same
+  // dtype, copying can be done much faster.
+  bool all_tensors_cpu = true;
+  bool all_tensors_contiguous = true;
+  bool all_tensors_same_dtype = true;
+  auto first_dtype = tensor_node.children(0).dtype();
+  std::vector<long> start_offsets(tensor_node.degree());
+  start_offsets[0] = 0;
+  long total_size = 0;
   for (const auto i : c10::irange(tensor_node.degree())) {
-    flat_tensors.push_back(tensor_node.children(i).reshape(-1).contiguous());
-    sizes.push_back(tensor(c10::IntArrayRef(tensor_node.children(i).sizes())));
+    all_tensors_cpu = all_tensors_cpu && tensor_node.children(i).is_cpu();
+    all_tensors_contiguous =
+        all_tensors_contiguous && tensor_node.children(i).is_contiguous();
+    all_tensors_same_dtype = all_tensors_same_dtype &&
+        (first_dtype == tensor_node.children(i).dtype());
+    if (!(all_tensors_cpu && all_tensors_contiguous &&
+          all_tensors_same_dtype)) {
+      break;
+    }
+    if (i > 0) {
+      start_offsets[i] =
+          start_offsets[i - 1] + tensor_node.children(i - 1).numel();
+    }
+    total_size += tensor_node.children(i).numel();
   }
 
-  TensorOptions options = flat_tensors[0].options().merge_in(options_);
+  TensorOptions options;
+  Tensor nt_buffer, nt_sizes;
+  if (all_tensors_cpu && all_tensors_contiguous && all_tensors_same_dtype) {
+    nt_buffer = at::empty({total_size}, tensor_node.children(0).options());
+    nt_sizes = at::empty(
+        {static_cast<long>(tensor_node.degree()),
+         static_cast<long>(tensor_node.children(0).sizes().size())},
+        TensorOptions().dtype(kLong));
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        at::ScalarType::Half,
+        at::ScalarType::Bool,
+        at::ScalarType::BFloat16,
+        c10::typeMetaToScalarType(first_dtype),
+        "create_nt_buffer",
+        [&]() {
+          at::parallel_for(
+              0, tensor_node.degree(), 1, [&](int64_t begin, int64_t end) {
+                for (int64_t i = begin; i < end; ++i) {
+                  // Only try copying memory if there is more than 0 elements
+                  // for a certain tensor
+                  if (tensor_node.children(i).numel() > 0) {
+                    memcpy(
+                        nt_buffer.data_ptr<scalar_t>() + start_offsets[i],
+                        tensor_node.children(i).data_ptr<scalar_t>(),
+                        tensor_node.children(i).numel() * sizeof(scalar_t));
+                  }
+                }
+              });
+        });
+    long sizes_offset = 0;
+    for (size_t i = 0; i < tensor_node.degree(); ++i) {
+      auto tensor_sizes = tensor_node.children(i).sizes();
+      for (size_t j = 0; j < tensor_sizes.size(); ++j) {
+        nt_sizes.data_ptr<int64_t>()[sizes_offset++] = tensor_sizes[j];
+      }
+    }
+    options = nt_buffer.options().merge_in(options_);
+  } else { // Slow path
+    std::vector<Tensor> flat_tensors;
+    std::vector<Tensor> sizes;
+    for (const auto i : c10::irange(tensor_node.degree())) {
+      flat_tensors.push_back(tensor_node.children(i).reshape(-1).contiguous());
+      sizes.push_back(
+          tensor(c10::IntArrayRef(tensor_node.children(i).sizes())));
+    }
+    options = flat_tensors[0].options().merge_in(options_);
+    nt_buffer = at::cat(flat_tensors);
+    nt_sizes = at::native::stack(sizes);
+  }
 
-  return wrap_buffer(
-      at::cat(flat_tensors).to(options), at::native::stack(sizes));
+  return wrap_buffer(nt_buffer.to(options), nt_sizes);
 }
 
 } // namespace impl

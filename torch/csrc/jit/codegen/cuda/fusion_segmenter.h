@@ -488,7 +488,7 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
 
   SegmentedGroup* mergeNodes();
 
-  bool codeGenSupportedMerge(SegmentedEdge* edge);
+  bool codeGenSupportedMerge(SegmentedGroup* group1, SegmentedGroup* group2);
 
   void findSegments();
 

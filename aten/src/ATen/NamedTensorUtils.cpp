@@ -234,7 +234,7 @@ std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor) {
   std::vector<Dimname> outnames;
   auto tensor_names = tensor.names();
   for (const auto d : c10::irange(tensor.dim())) {
-    if (tensor.sizes()[d] != 1) {
+    if (tensor.sym_sizes()[d] != 1) {
       outnames.push_back(tensor_names[d]);
     }
   }
@@ -410,12 +410,12 @@ std::vector<Dimname> broadcast_to_outnames(
   return unify_from_right(reference_names, tensor_names);
 }
 
-std::vector<Dimname> compute_cat_outnames(ITensorListRef tensors) {
+std::vector<Dimname> compute_cat_outnames(const MaterializedITensorListRef& tensors) {
   if (!at::has_names(tensors)) {
     return {};
   }
   std::vector<Dimname> result;
-  for (const auto& tensor : tensors) {
+  for (const Tensor& tensor : tensors) {
     const auto tensor_names = tensor.names();
     TORCH_CHECK(tensor_names.size() > 0, "zero-dimensional tensor cannot be concatenated");
     TORCH_CHECK(result.empty() || tensor_names.size() == result.size(),

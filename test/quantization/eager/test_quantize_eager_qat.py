@@ -6,12 +6,12 @@ import torch
 import torch.nn as nn
 import torch.backends.mkldnn
 from torch.nn import Conv2d, BatchNorm2d, ReLU, init
-from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
+from torch.ao.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.qat as nnqat
-import torch.nn.intrinsic.qat as nniqat
+import torch.ao.nn.intrinsic.qat as nniqat
 import torch.ao.nn.qat.dynamic as nnqatd
 from torch.ao.quantization import (
     prepare,
@@ -594,6 +594,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
         eps = 1e-5
         self.assertTrue(torch.abs(mq.quant.scale * 2 - res.q_scale()) < eps)
 
+    @override_qengines
     def test_qat_embedding_bag_errors(self):
         default_qat_qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
 
@@ -749,7 +750,10 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
            use_relu=st.booleans(),
            eps=st.sampled_from([1e-5, 1e-4, 1e-3]),
            momentum=st.sampled_from([0.1, 0.2, 0.3]),
-           freeze_bn=st.booleans())
+           freeze_bn=st.booleans(),
+           zero_gamma=st.booleans(),
+           has_bias=st.booleans(),
+           use_slow_fusion=st.booleans())
     def test_conv_bn_relu(
             self,
             batch_size,
@@ -769,7 +773,10 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             use_relu,
             eps,
             momentum,
-            freeze_bn
+            freeze_bn,
+            zero_gamma,
+            has_bias,
+            use_slow_fusion,
     ):
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
@@ -783,7 +790,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             (pad_h, pad_w),
             (dilation_h, dilation_w),
             groups,
-            False,  # No bias
+            has_bias,
             padding_mode
         ).to(dtype=torch.double)
         bn_op = BatchNorm2d(output_channels, eps, momentum).to(dtype=torch.double)
@@ -798,22 +805,30 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             (pad_h, pad_w),
             (dilation_h, dilation_w),
             groups,
-            None,  # bias
+            has_bias,
             padding_mode,
             eps,
             momentum,
             freeze_bn=True,
             qconfig=default_qat_qconfig
         ).to(dtype=torch.double)
+        qat_op._enable_slow_path_for_better_numerical_stability = use_slow_fusion
+
+        # the approximate fusion will not work if bn.weight has 0
+        if zero_gamma and use_slow_fusion:
+            torch.nn.init.zeros_(qat_op.bn.weight)
+
         qat_op.apply(torch.ao.quantization.disable_fake_quant)
         if freeze_bn:
-            qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+            qat_op.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
         else:
-            qat_op.apply(torch.nn.intrinsic.qat.update_bn_stats)
+            qat_op.apply(torch.ao.nn.intrinsic.qat.update_bn_stats)
 
         # align inputs and internal parameters
         input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
         conv_op.weight = torch.nn.Parameter(qat_op.weight.detach())
+        if has_bias:
+            conv_op.bias = torch.nn.Parameter(qat_op.bias.detach())
         bn_op.running_mean = qat_op.bn.running_mean.clone()
         bn_op.running_var = qat_op.bn.running_var.clone()
         bn_op.weight = torch.nn.Parameter(qat_op.bn.weight.detach())
@@ -978,7 +993,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             input_clone = input.clone().detach().requires_grad_()
 
             if i > 2:
-                qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                qat_op.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
                 qat_ref_op.freeze_bn_stats()
 
             if i > 3:

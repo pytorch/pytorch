@@ -31,7 +31,7 @@ def is_masked_tensor(a):
     return isinstance(a, MaskedTensor)
 
 
-def _tensors_match(a, b, exact=True):
+def _tensors_match(a, b, exact=True, rtol=1e-05, atol=1e-08):
     if is_masked_tensor(a) or is_masked_tensor(b):
         raise ValueError("Neither `a` nor `b` can be a MaskedTensor.")
     if a.layout != b.layout:
@@ -51,7 +51,7 @@ def _tensors_match(a, b, exact=True):
         )
     if exact:
         return (a.dim() == b.dim()) and torch.eq(a, b).all().item()
-    return (a.dim() == b.dim()) and torch.allclose(a, b)
+    return (a.dim() == b.dim()) and torch.allclose(a, b, rtol=rtol, atol=atol)
 
 
 def _masks_match(a, b):
@@ -141,9 +141,9 @@ def _maybe_get_mask(a):
 class MaskedTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, data, mask, requires_grad=False):
-        if not torch.is_tensor(data):
+        if is_masked_tensor(data) or not torch.is_tensor(data):
             raise TypeError("data must be a Tensor")
-        if not torch.is_tensor(mask):
+        if is_masked_tensor(mask) or not torch.is_tensor(mask):
             raise TypeError("mask must be a Tensor")
         # Use a Tensor that of the give size for the wrapper.
         kwargs = {}
@@ -153,13 +153,17 @@ class MaskedTensor(torch.Tensor):
         kwargs["requires_grad"] = requires_grad
         kwargs["dispatch_sizes_strides_policy"] = "strides"
         kwargs["dispatch_layout"] = True
+        warnings.warn(("The PyTorch API of MaskedTensors is in prototype stage "
+                       "and will change in the near future. Please open a Github issue "
+                       "for features requests and see our documentation on the torch.masked "
+                       "module for further information about the project."), UserWarning)
         if data.requires_grad:
             warnings.warn("It is not recommended to create a MaskedTensor with a tensor that requires_grad. "
                           "To avoid this, you can use data.clone().detach()", UserWarning)
         return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
 
     def _preprocess_data(self, data, mask):
-        from torch._masked import _sparse_coo_where, _sparse_csr_where
+        from .._ops import _sparse_coo_where, _sparse_csr_where
 
         if data.layout != mask.layout:
             raise TypeError("data and mask must have the same layout.")
@@ -208,8 +212,6 @@ class MaskedTensor(torch.Tensor):
             raise ValueError("data.dim() must equal mask.dim()")
         if data.size() != mask.size():
             raise ValueError("data.size() must equal mask.size()")
-        if mask.requires_grad:
-            raise ValueError("mask cannot have requires_grad=True")
 
     def __init__(self, data, mask, requires_grad=False):
         self._preprocess_data(data, mask)

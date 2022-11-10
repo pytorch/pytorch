@@ -2,7 +2,7 @@ import torch
 from collections import defaultdict, OrderedDict
 from typing import Callable, Any, Dict, Tuple, Set, List
 from torch.ao.quantization import QConfig
-from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny, qconfig_equals
+from torch.ao.quantization.qconfig import _add_module_to_qconfig_obs_ctr, QConfigAny, qconfig_equals
 from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
@@ -38,7 +38,7 @@ from ..qconfig_mapping_utils import (
 __all__ = [
     "check_is_valid_config_dict",
     "compare_prepare_convert_qconfig_mappings",
-    "generate_qconfig_map",
+    "generate_node_name_to_qconfig",
     "is_qconfig_supported_by_dtype_configs",
     "maybe_adjust_qconfig_for_module_name_object_type_order",
     "update_qconfig_for_fusion",
@@ -100,14 +100,14 @@ def update_qconfig_for_fusion(model: GraphModule, qconfig_mapping: QConfigMappin
             if fused_qconfig is not None:
                 object_type_dict[type(maybe_fused_module)] = fused_qconfig
 
-def generate_qconfig_map(
+def generate_node_name_to_qconfig(
         root: torch.nn.Module,
         modules: Dict[str, torch.nn.Module],
         input_graph: Graph,
         qconfig_mapping: QConfigMapping,
         node_name_to_scope: Dict[str, Tuple[str, type]]) -> Dict[str, QConfigAny]:
     global_qconfig = qconfig_mapping.global_qconfig
-    qconfig_map = {}
+    node_name_to_qconfig = {}
 
     # example:
     #
@@ -123,7 +123,7 @@ def generate_qconfig_map(
             module_name, _ = _parent_name(node.target)
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_mapping, type(modules[module_name]), module_name, global_qconfig)
-            qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
+            qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
         elif node.op == "call_function":
             # precedence: module_name_qconfig
             # > function_qconfig > global_qconfig
@@ -139,7 +139,7 @@ def generate_qconfig_map(
             submodule_to_object_type_to_cur_idx[module_path][node.target] += 1
             qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
                 qconfig_mapping, module_path, node.target, cur_object_type_idx, qconfig)
-            qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
+            qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
 
         elif node.op == "call_method":
             module_path, module_type = node_name_to_scope[node.name]
@@ -154,7 +154,7 @@ def generate_qconfig_map(
                 qconfig_mapping, module_type, module_path, qconfig)
             # currently call_method does not support modifying qconfig
             # by order, we can add this later if it is needed.
-            qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
+            qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
 
         elif node.op == 'call_module':
             # if the node is an observer, just continue - don't add it to the qconfig_map
@@ -174,7 +174,7 @@ def generate_qconfig_map(
             qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
                 qconfig_mapping, parent_name, module_type, cur_object_type_idx,
                 qconfig)
-            qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
+            qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
 
             # regex is not supported eager mode propagate_qconfig_, we'll
             # need to set the qconfig explicitly here in case regex
@@ -183,8 +183,8 @@ def generate_qconfig_map(
         else:
             qconfig_with_device_check = None
 
-        qconfig_map[node.name] = qconfig_with_device_check
-    return qconfig_map
+        node_name_to_qconfig[node.name] = qconfig_with_device_check
+    return node_name_to_qconfig
 
 
 def check_is_valid_config_dict(config_dict: Any, allowed_keys: Set[str], dict_name: str) -> None:

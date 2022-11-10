@@ -26,11 +26,13 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"Tensor", ParameterType::TENSOR},
     {"Scalar", ParameterType::SCALAR},
     {"int64_t", ParameterType::INT64},
+    {"SymInt", ParameterType::SYM_INT},
     {"double", ParameterType::DOUBLE},
     {"complex", ParameterType::COMPLEX},
     {"TensorList", ParameterType::TENSOR_LIST},
     {"c10::List<c10::optional<Tensor>>", ParameterType::TENSOR_LIST},
     {"IntArrayRef", ParameterType::INT_LIST},
+    {"SymIntArrayRef", ParameterType::SYM_INT_LIST},
     {"ArrayRef<double>", ParameterType::FLOAT_LIST},
     {"Generator", ParameterType::GENERATOR},
     {"bool", ParameterType::BOOL},
@@ -44,9 +46,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"Stream", ParameterType::STREAM},
     {"std::string", ParameterType::STRING},
     {"c10::string_view", ParameterType::STRING},
-    {"SymInt", ParameterType::SYM_INT},
     {"Dimname", ParameterType::DIMNAME},
-    {"SymIntArrayRef", ParameterType::SYM_INT_LIST},
     {"DimnameList", ParameterType::DIMNAME_LIST},
     {"ScalarList", ParameterType::SCALAR_LIST},
 };
@@ -289,27 +289,41 @@ auto handle_torch_function_no_python_arg_parser(
   py::tuple py_types = py::cast(overloaded_types);
   py::object ret;
   PyObject* mode_obj = nullptr;
+
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
-  auto get_mode = [&]() {
-    return is_torch_function ? at::impl::PythonTorchFunctionTLS::get_mode()
-                             : c10::impl::TorchDispatchModeTLS::get_state();
+  auto get_stack_len = [&]() {
+    return is_torch_function ? at::impl::PythonTorchFunctionTLS::stack_len()
+                             : c10::impl::TorchDispatchModeTLS::stack_len();
   };
 
-  const auto& maybe_mode = get_mode();
-  if (maybe_mode) {
-    mode_obj = maybe_mode->ptr(getPyInterpreter());
-    TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
-    TORCH_INTERNAL_ASSERT(args != nullptr);
+  if (get_stack_len() > 0) {
     // Disable mode on the inside; this makes for a more user-friendly
     // experience if you try to, e.g., print your tensors.
     at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
     at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
     if (is_torch_function) {
       tf_g.emplace();
+      mode_obj = tf_g->get_cur_mode()->ptr(getPyInterpreter());
     } else {
       td_g.emplace();
+      mode_obj = td_g->get_cur_mode()->ptr(getPyInterpreter());
     }
+    py::object torch_function =
+        PyObject_FastGetAttrString(mode_obj, torch_function_name_str);
+    if (!torch_function) {
+      TORCH_INTERNAL_ASSERT(0);
+    }
+    TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
+    TORCH_INTERNAL_ASSERT(args != nullptr);
+
+    TORCH_CHECK(
+        PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
+            .is(py::reinterpret_borrow<py::object>(mode_obj)),
+        "Defining your mode's `",
+        torch_function_name_str,
+        "` as a classmethod is not supported, please make it a plain method");
+
     // Blegh.  This accidentally works in PyObject_CallFunctionObjArgs below
     // because the nullptr terminates the argument list ick ick ick.
     if (kwargs == nullptr) {
@@ -393,18 +407,6 @@ auto handle_torch_function_no_python_arg_parser(
       }
     }
     ss << "]";
-    if (mode_obj) {
-      // Note [Paranoid check mode is same]
-      // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-      // If a user forcibly changes the mode in a non-lexical way
-      // in the inner context, the mode could be invalid here.  So just be
-      // a bit safe, it doesn't cost us anything since this is error reporting
-      const auto& maybe_mode = get_mode();
-      TORCH_INTERNAL_ASSERT(
-          maybe_mode && mode_obj == maybe_mode->ptr(getPyInterpreter()));
-      ss << " nor was it found on the currently active mode "
-         << py::repr(mode_obj);
-    }
     const std::string& tmp = ss.str();
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
     throw python_error();
@@ -662,7 +664,10 @@ bool is_float_or_complex_list(PyObject* obj) {
   return true;
 }
 
-static bool is_int_list(PyObject* obj, int broadcast_size) {
+static bool is_int_list(
+    PyObject* obj,
+    int broadcast_size,
+    int64_t* failed_idx = nullptr) {
   if (PyTuple_Check(obj) || PyList_Check(obj)) {
     auto len = PySequence_Size(obj);
     if (len == 0) {
@@ -680,8 +685,11 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
     // NB: do NOT check that the later arguments are ints, as this is
     // BC-breaking for FX
     for (int i = 1; i < len; i++) {
-      if (torch::is_symint_node(
+      if (torch::is_symint(
               py::reinterpret_steal<py::object>(PySequence_GetItem(obj, i)))) {
+        if (failed_idx != nullptr) {
+          *failed_idx = i;
+        }
         return false;
       }
     }
@@ -692,9 +700,13 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
 
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
     // in an intlist argument. Even float or complex scalar tensors.
-    return (
-        jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-        THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+    bool r =
+        (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
+         THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+    if (!r && failed_idx != nullptr) {
+      *failed_idx = 0;
+    }
+    return r;
   }
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
   // int
@@ -704,12 +716,15 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
 static bool is_int_or_symint(PyObject* obj) {
   // THPUtils_checkIndex may call __index__ or __int__
   // which may have side effects if obj is a symint node
-  // so we do `is_symint_node` check first
+  // so we do `is_symint` check first
   // TODO: maybe we should be using checkLong here?
-  return torch::is_symint_node(py::handle(obj)) || THPUtils_checkIndex(obj);
+  return torch::is_symint(py::handle(obj)) || THPUtils_checkIndex(obj);
 }
 
-static bool is_int_or_symint_list(PyObject* obj, int broadcast_size) {
+static bool is_int_or_symint_list(
+    PyObject* obj,
+    int broadcast_size,
+    int64_t* failed_idx = nullptr) {
   if (PyTuple_Check(obj) || PyList_Check(obj)) {
     if (PySequence_Size(obj) == 0) {
       return true;
@@ -721,9 +736,13 @@ static bool is_int_or_symint_list(PyObject* obj, int broadcast_size) {
     }
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
     // in an intlist argument. Even float or complex scalar tensors.
-    return (
-        jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-        THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+    bool r =
+        (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
+         THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+    if (!r && failed_idx != nullptr) {
+      *failed_idx = 0;
+    }
+    return r;
   }
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
   // int
@@ -734,7 +753,8 @@ static bool is_int_or_symint_list(PyObject* obj, int broadcast_size) {
 auto FunctionParameter::check(
     PyObject* obj,
     std::vector<py::handle>& overloaded_args,
-    int argnum) -> bool {
+    int argnum,
+    int64_t* failed_idx) -> bool {
   switch (type_) {
     case ParameterType::TENSOR: {
       if (is_tensor_and_append_overloaded(obj, &overloaded_args)) {
@@ -791,7 +811,7 @@ auto FunctionParameter::check(
           obj, &overloaded_args, argnum, true /* throw_error */);
     }
     case ParameterType::INT_LIST:
-      return is_int_list(obj, size);
+      return is_int_list(obj, size, failed_idx);
     case ParameterType::FLOAT_LIST:
       return is_float_or_complex_list(obj);
     case ParameterType::GENERATOR:
@@ -817,20 +837,18 @@ auto FunctionParameter::check(
       return THPStream_Check(obj);
     case ParameterType::STRING:
       return THPUtils_checkString(obj);
+    case ParameterType::SCALAR_LIST:
+      return is_scalar_list(obj);
+    case ParameterType::SYM_INT:
+      return is_int_or_symint(obj);
+    case ParameterType::SYM_INT_LIST:
+      return is_int_or_symint_list(obj, size, failed_idx);
     default:
       throw std::runtime_error("unknown parameter type");
-    case ParameterType::SCALAR_LIST: {
-      return is_scalar_list(obj);
-    }
-    case ParameterType::SYM_INT: {
-      return is_int_or_symint(obj);
-    }
-    case ParameterType::SYM_INT_LIST: {
-      return is_int_or_symint_list(obj, size);
-    }
   }
 }
 
+// WARNING: these strings are parsed invalid_arguments.cpp
 std::string FunctionParameter::type_name() const {
   switch (type_) {
     case ParameterType::TENSOR:
@@ -838,9 +856,10 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::SCALAR:
       return "Number";
     case ParameterType::INT64:
-      return "int";
+    // NB: SymInt is intentionally not mentioned here, as conventional user
+    // use will only know about ints
     case ParameterType::SYM_INT:
-      return "SymInt";
+      return "int";
     case ParameterType::DOUBLE:
       return "float";
     case ParameterType::COMPLEX:
@@ -878,7 +897,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::SCALAR_LIST:
       return "tuple of Scalars";
     case ParameterType::SYM_INT_LIST:
-      return "tuple of SymInts";
+      return "tuple of ints";
     default:
       throw std::runtime_error("unknown parameter type");
   }
@@ -912,6 +931,7 @@ static inline std::vector<int64_t> parse_intlist_args(
 
   // case 1. s is an int (e.g., s=2)
   if (s[0] != '{') {
+    TORCH_CHECK(size > 0, "Incorrect size of IntArrayRef: ", size);
     return std::vector<int64_t>(size, std::stol(s));
   }
 
@@ -1005,7 +1025,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
       throw std::runtime_error(
           "default value for Tensor must be none, got: " + str);
     }
-  } else if (type_ == ParameterType::INT64) {
+  } else if (type_ == ParameterType::INT64 || type_ == ParameterType::SYM_INT) {
     default_int = atol(str.c_str());
   } else if (type_ == ParameterType::BOOL) {
     default_bool = (str == "True" || str == "true");
@@ -1021,7 +1041,9 @@ void FunctionParameter::set_default_str(const std::string& str) {
       default_scalar = as_integer.has_value() ? at::Scalar(as_integer.value())
                                               : at::Scalar(atof(str.c_str()));
     }
-  } else if (type_ == ParameterType::INT_LIST) {
+  } else if (
+      type_ == ParameterType::INT_LIST ||
+      type_ == ParameterType::SYM_INT_LIST) {
     if (str != "None") {
       default_intlist = parse_intlist_args(str, size);
     }
@@ -1059,6 +1081,31 @@ void FunctionParameter::set_default_str(const std::string& str) {
     if (str != "None") {
       default_string = parse_string_literal(str);
     }
+  }
+  // These types weren't handled here before. Adding a default error
+  // led to a lot of test failures so adding this skip for now.
+  // We should correctly handle these though because it might be causing
+  // silent failures.
+  else if (type_ == ParameterType::TENSOR_LIST) { // NOLINT
+    // throw std::runtime_error("Invalid Tensor List");
+  } else if (type_ == ParameterType::GENERATOR) { // NOLINT
+    // throw std::runtime_error("ParameterType::GENERATOR");
+  } else if (type_ == ParameterType::PYOBJECT) { // NOLINT
+    // throw std::runtime_error("ParameterType::PYOBJECT");
+  } else if (type_ == ParameterType::MEMORY_FORMAT) { // NOLINT
+    // throw std::runtime_error("ParameterType::MEMORY_FORMAT");
+  } else if (type_ == ParameterType::DIMNAME) { // NOLINT
+    // throw std::runtime_error("ParameterType::DIMNAME");
+  } else if (type_ == ParameterType::DIMNAME_LIST) { // NOLINT
+    // throw std::runtime_error("ParameterType::DIMNAME_LIST");
+  } else if (type_ == ParameterType::SCALAR_LIST) { // NOLINT
+    // throw std::runtime_error("ParameterType::SCALAR_LIST");
+  } else if (type_ == ParameterType::STORAGE) { // NOLINT
+    // throw std::runtime_error("ParameterType::STORAGE");
+  } else if (type_ == ParameterType::QSCHEME) { // NOLINT
+    // throw std::runtime_error("ParameterType::QSCHEME");
+  } else {
+    throw std::runtime_error("unknown parameter type");
   }
 }
 
@@ -1315,6 +1362,8 @@ bool FunctionSignature::parse(
       is_kwd = true;
     }
 
+    int64_t failed_idx = -1;
+    bool varargs_eligible = allow_varargs_intlist && arg_pos == 0 && !is_kwd;
     if ((!obj && param.optional) || (obj == Py_None && param.allow_none)) {
       dst[i++] = nullptr;
     } else if (!obj) {
@@ -1323,15 +1372,16 @@ bool FunctionSignature::parse(
         missing_args(*this, i);
       }
       return false;
-    } else if (param.check(obj, this->overloaded_args, i)) {
+    } else if (param.check(obj, this->overloaded_args, i, &failed_idx)) {
       dst[i++] = obj;
       // XXX: the Variable check is necessary because sizes become tensors when
       // tracer is enabled. This behavior easily leads to ambiguities, and we
       // should avoid having complex signatures that make use of it...
     } else if (
-        allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-        ((int_list_overload ? is_int_list(args, param.size)
-                            : is_int_or_symint_list(args, param.size)))) {
+        varargs_eligible &&
+        ((int_list_overload
+              ? is_int_list(args, param.size, &failed_idx)
+              : is_int_or_symint_list(args, param.size, &failed_idx)))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;
@@ -1348,6 +1398,24 @@ bool FunctionSignature::parse(
             Py_TYPE(obj)->tp_name);
       } else {
         // foo(): argument 'other' (position 2) must be str, not int
+        if (failed_idx != -1) {
+          if (!(PyTuple_Check(obj) || PyList_Check(obj))) {
+            TORCH_INTERNAL_ASSERT(varargs_eligible);
+            obj = args;
+          }
+          TORCH_INTERNAL_ASSERT(failed_idx < PySequence_Size(obj));
+          throw TypeError(
+              "%s(): argument '%s' (position %ld) must be %s, but found element of type %s at pos %ld",
+              name.c_str(),
+              param.name.c_str(),
+              static_cast<long>(arg_pos + 1),
+              param.type_name().c_str(),
+              Py_TYPE(py::reinterpret_steal<py::object>(
+                          PySequence_GetItem(obj, failed_idx))
+                          .ptr())
+                  ->tp_name,
+              static_cast<long>(failed_idx));
+        }
         throw TypeError(
             "%s(): argument '%s' (position %ld) must be %s, not %s",
             name.c_str(),
@@ -1503,13 +1571,13 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     // NB: we DO NOT put symbolic ints/floats into the Scalar itself,
     // because although Scalar supports SymInt/SymFloat, the subsequent
     // conversion to Tensor does not.  Instead, do it out of band.
-  } else if (torch::is_symint_node(py::handle(obj))) {
+  } else if (torch::is_symint(py::handle(obj))) {
     save_symint = true;
     // This scalar value doesn't matter, it shouldn't ever actually
     // get read out.  Make it a big and weird looking number to help
     // people figure out if there's aproblem.
     scalar = at::Scalar(7777777);
-  } else if (torch::is_symfloat_node(py::handle(obj))) {
+  } else if (torch::is_symfloat(py::handle(obj))) {
     save_symint = true;
     scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
   } else {
@@ -1566,11 +1634,11 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
     return at::Scalar(THPUtils_unpackComplexDouble(arg));
   }
 
-  if (torch::is_symint_node(arg)) {
+  if (torch::is_symint(arg)) {
     return at::Scalar(py::cast<c10::SymInt>(arg));
   }
 
-  if (torch::is_symfloat_node(arg)) {
+  if (torch::is_symfloat(arg)) {
     return at::Scalar(py::cast<c10::SymFloat>(arg));
   }
 

@@ -1,4 +1,5 @@
-#include <ATen/ATen.h>
+#pragma once
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 
 namespace at {

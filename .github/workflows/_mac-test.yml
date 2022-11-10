@@ -82,7 +82,6 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
-
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
@@ -94,25 +93,28 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.8
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Setup miniconda (arm64, py3.9)
         if: ${{ runner.arch == 'ARM64' }}
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.9
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Start monitoring script
         id: monitor-script
         run: |
-          ${CONDA_RUN} python3 -m pip install psutil==5.9.1
-          ${CONDA_RUN} python3 -m pip install pynvml==11.4.1
           ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
-          echo "::set-output name=monitor-script-pid::${!}"
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Install macOS homebrew dependencies
         run: |
           # Install dependencies
           brew install libomp
+          brew link --force libomp
 
       - name: Parse ref
         id: parse-ref
@@ -126,6 +128,8 @@ jobs:
 
       - name: Test
         id: test
+        env:
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0'}}
         run: |
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
 
@@ -142,7 +146,7 @@ jobs:
           export PR_BODY="${PR_BODY//[\'\"]}"
           arch
 
-          ${CONDA_RUN} python3 -mpip install dist/*.whl
+          ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
           ${CONDA_RUN} .jenkins/pytorch/macos-test.sh
 
       - name: Get workflow job id
@@ -188,6 +192,4 @@ jobs:
           GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           set -x
-          ${CONDA_RUN} python3 -m pip install -r requirements.txt
-          ${CONDA_RUN} python3 -m pip install boto3==1.19.12
           ${CONDA_RUN} python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test

@@ -5,11 +5,11 @@
 #include <utility>
 #include <vector>
 
+#include <ATen/Utils.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/Export.h>
-#include <torch/csrc/utils/disallow_copy.h>
 
 namespace torch {
 namespace jit {
@@ -118,7 +118,7 @@ void setTypeTags(bool state);
 bool getTypeTags();
 
 class TORCH_API Pickler {
-  TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
+  AT_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
  public:
   Pickler(std::function<void(const char*, size_t)> writer)
@@ -130,12 +130,14 @@ class TORCH_API Pickler {
       std::vector<at::Tensor>* tensor_table,
       std::function<c10::QualifiedName(const c10::ClassTypePtr&)> type_renamer,
       std::vector<c10::ClassTypePtr>* memoized_class_types,
-      std::function<std::string(const at::Tensor&)> get_tensor_id = nullptr)
+      std::function<std::string(const at::Tensor&)> get_tensor_id = nullptr,
+      bool tag_aggregates = true)
       : writer_(std::move(writer)),
         tensor_table_(tensor_table),
         type_renamer_(std::move(type_renamer)),
         memoized_class_types_(memoized_class_types),
-        get_tensor_id_(std::move(get_tensor_id)) {}
+        get_tensor_id_(std::move(get_tensor_id)),
+        tag_aggregates_(tag_aggregates) {}
   // NOLINTNEXTLINE(bugprone-exception-escape)
   ~Pickler();
 
@@ -274,6 +276,11 @@ class TORCH_API Pickler {
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
   std::unordered_map<std::string, uint32_t> memoized_devices_map_;
+  // when true, List and Dict objects will be wrapped in a
+  // torch.jit._pickle.restore_type_tag call to correctly set the dynamic
+  // TorchScript type for the object. When true the thing unpickling must have
+  // torch installed.
+  bool tag_aggregates_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
@@ -288,6 +295,55 @@ uint64_t getStorageKey(const at::Tensor& tensor);
 // assert they have the right schema and return true,
 // otherwise return false
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
+
+// Return a map of Tensor Metadata for serialization.
+// For now, it only takes care of `conj` and `neg` bit.
+inline std::unordered_map<std::string, bool> getTensorMetadata(
+    const at::Tensor& t) {
+  std::unordered_map<std::string, bool> metadata{};
+
+  // Only add meta-data if the value is not default.
+  if (t.is_conj()) {
+    metadata["conj"] = true;
+  }
+  if (t.is_neg()) {
+    metadata["neg"] = true;
+  }
+  return metadata;
+}
+
+// set Tensor Metadata based on the map.
+// Refer: getTensorMathdata
+inline void setTensorMetadata(
+    const at::Tensor& t,
+    std::unordered_map<std::string, bool> metadata) {
+  for (auto& key_value_pair : metadata) {
+    if (key_value_pair.first == "conj") {
+      t._set_conj(true);
+    } else if (key_value_pair.first == "neg") {
+      t._set_neg(true);
+    } else {
+      TORCH_CHECK(
+          false,
+          "Unexpected key `",
+          key_value_pair.first,
+          "` passed to setTensorMetadata.");
+    }
+  }
+}
+
+// set Tensor metadata based on the map.
+// NOTE: This overload is required by unpickler.cpp
+inline void setTensorMetadata(
+    const at::Tensor& t,
+    c10::Dict<c10::IValue, c10::IValue> metadata_idict) {
+  std::unordered_map<std::string, bool> metadata;
+  for (auto& pair : metadata_idict) {
+    auto key = *pair.key().toString();
+    metadata[key] = pair.value().toBool();
+  }
+  setTensorMetadata(t, metadata);
+}
 
 } // namespace jit
 } // namespace torch

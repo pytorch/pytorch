@@ -36,10 +36,10 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, tensor1, tensor2}, false);
 
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if(!cachedGraph) {
-        MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+        cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
 
           CachedGraph* newCachedGraph = nil;
           @autoreleasepool {
@@ -72,7 +72,6 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
           }
           return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
     // Inputs as placeholders
@@ -80,13 +79,14 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
     Placeholder tensor1Placeholder = Placeholder(cachedGraph->firstTensor, tensor1);
     Placeholder tensor2Placeholder = Placeholder(cachedGraph->secondTensor, tensor2);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+    MPSScalar value_scalar = getMPSScalar(value_opt, self.scalar_type());
 
     // Create dictionary of inputs and outputs
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
       tensor1Placeholder.getMPSGraphTensor() : tensor1Placeholder.getMPSGraphTensorData(),
       tensor2Placeholder.getMPSGraphTensor() : tensor2Placeholder.getMPSGraphTensorData(),
-      cachedGraph->valueTensor : getMPSGraphTensorFromScalar(mpsStream, value_opt, getMPSScalarType(self.scalar_type())),
+      cachedGraph->valueTensor : getMPSGraphTensorFromScalar(mpsStream, value_scalar),
     };
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{

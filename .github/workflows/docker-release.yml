@@ -6,6 +6,7 @@ on:
     paths:
       - Dockerfile
       - docker.Makefile
+      - .github/workflows/docker-release.yml
   push:
     branches:
       - nightly
@@ -44,16 +45,19 @@ jobs:
       BUILD_IMAGE_TYPE: ${{ matrix.image_type }}
       BUILD_PLATFORMS: ${{ matrix.platform }}
     steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required for git merge-base
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-      - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
       - name: Login to GitHub Container Registry
         if: ${{ env.WITH_PUSH == 'true' }}
         uses: docker/login-action@v2
@@ -76,14 +80,17 @@ jobs:
           # Generate PyTorch version to use
           echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py)" >> "${GITHUB_ENV}"
       - name: Setup nightly specific variables
-        if: ${{ github.event.ref == 'refs/heads/nightly' }}
+        if: ${{ github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/ciflow/nightly/') }}
         run: |
-          # Use nightly image if building for nightly
-          echo "DOCKER_IMAGE=pytorch-nightly" >> "${GITHUB_ENV}"
+          {
+            echo "DOCKER_IMAGE=pytorch-nightly";
+            echo "INSTALL_CHANNEL=pytorch-nightly";
+            echo "TRITON_VERSION=2.0.0+$(cut -c -10 .github/ci_commit_pins/triton.txt)";
+          } >> "${GITHUB_ENV}"
       - name: Run docker build / push
         # WITH_PUSH is used here to determine whether or not to add the --push flag
         run: |
           make -f docker.Makefile "${BUILD_IMAGE_TYPE}-image"
       - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
