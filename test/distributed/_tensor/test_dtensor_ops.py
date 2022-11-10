@@ -30,7 +30,6 @@ from torch.testing._internal.common_dtensor import (
     TEST_SKIPS,
     DTensorConverter,
     DEVICE_TYPE,
-    NUM_DEVICES,
 )
 
 # rewrite common size variables to sth can be sharded evenly
@@ -659,7 +658,7 @@ def check_dtensor_func(test_case, test_func, opinfo, dry_run=False):
 class TestDTensorOps(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        return NUM_DEVICES
+        return 4
 
     # only allow float dytpe for now, we can relax this constraint
     # when feel necessary later (i.e when adding quantization support).
