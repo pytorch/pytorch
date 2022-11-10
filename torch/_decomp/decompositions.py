@@ -2200,9 +2200,10 @@ def dot(self, other):
 
 @register_decomposition(aten.mul.left_t)
 def mul_left_t(self, n):
-    for i, v in enumerate(self):
-        self[i] = v * n
-    return self
+    result = []
+    for i in range(0, n):
+        result.extend(self)
+    return result
 
 
 @register_decomposition(aten.binary_cross_entropy_with_logits)
