@@ -93,7 +93,6 @@ from ._state_dict_utils import (
 )
 from ._utils import p_assert
 from .flat_param import FlatParameter, FlatParamHandle
-from .wrap import ParamExecOrderWrapPolicy
 
 
 _TORCH_FX_AVAIL = True
@@ -423,25 +422,6 @@ class FullyShardedDataParallel(nn.Module):
         limit_all_gathers: bool = False,
         use_orig_params: bool = False,
     ):
-        if isinstance(auto_wrap_policy, ParamExecOrderWrapPolicy):
-            self._init_param_exec_order_wrap_policy(
-                module=module,
-                process_group=process_group,
-                sharding_strategy=sharding_strategy,
-                cpu_offload=cpu_offload,
-                auto_wrap_policy=auto_wrap_policy,
-                backward_prefetch=backward_prefetch,
-                mixed_precision=mixed_precision,
-                ignored_modules=ignored_modules,
-                param_init_fn=param_init_fn,
-                device_id=device_id,
-                sync_module_states=sync_module_states,
-                forward_prefetch=forward_prefetch,
-                limit_all_gathers=limit_all_gathers,
-                use_orig_params=use_orig_params,
-            )
-            return
-
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
 
@@ -2191,89 +2171,6 @@ class FullyShardedDataParallel(nn.Module):
             ), f"communication hook should be default, but it is {submodule._communication_hook.__name__} instead"
             submodule._communication_hook_state = state
             submodule._communication_hook = hook
-
-    def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
-        auto_wrap_policy = kwargs["auto_wrap_policy"]
-        module = kwargs["module"]
-        assert hasattr(auto_wrap_policy, "tracing_config")
-        if not _TORCH_FX_AVAIL:
-            assert (
-                auto_wrap_policy.tracing_config is None
-            ), "tracing_config should be None when torch.fx is not enabled"
-        elif isinstance(auto_wrap_policy.tracing_config, TracingConfig):
-            tracer = auto_wrap_policy.tracing_config.tracer
-            execution_info = _init_execution_info(module)
-
-            for m in module.modules():
-                assert not isinstance(
-                    m, FullyShardedDataParallel
-                ), "The input module of _patch_tracer should not contain FSDP modules"
-
-            with _patch_tracer(
-                tracer=tracer,
-                root_module=module,
-                execution_info=execution_info,
-            ):
-                try:
-                    tracer.trace(module, auto_wrap_policy.tracing_config.concrete_args)
-                except BaseException as e:
-                    raise RuntimeError(
-                        "tracer.trace failed inside _init_param_exec_order_wrap_policy"
-                        f" with the error: {e}."
-                    )
-        else:
-            assert (
-                auto_wrap_policy.tracing_config is None
-            ), "tracing_config should either be an instance of TracingConfig or be None"
-        # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
-        kwargs["auto_wrap_policy"] = auto_wrap_policy.init_policy
-        self.__init__(*args, **kwargs)
-        self._param_exec_order_policy: bool = True
-        # self._param_exec_order_prep_stage is set to True before we get the execution order
-        self._param_exec_order_prep_stage: bool = True
-        # A list that stores the flatten parameters and its name based on the parameter execution order
-        self._fsdp_params_exec_order: List[FlatParameter] = []
-        if _TORCH_FX_AVAIL and isinstance(
-            auto_wrap_policy.tracing_config, TracingConfig
-        ):
-            # Initialize a dict that maps each module to its parent FSDP wrap
-            module_to_fsdp: Dict[nn.Module, FullyShardedDataParallel] = dict()
-            for wrap in self.fsdp_modules(self):
-                module_to_fsdp[wrap.module] = wrap
-            # Set self._fsdp_params_exec_order based on execution_info.module_forward_order.
-            # TODO (linjianma): self._fsdp_params_exec_order will be set based on
-            # the parameter execution order rather than module_forward_order,
-            # once the non-recursive wrapping policy is fully implemented.
-            for m in execution_info.module_forward_order:
-                if m in module_to_fsdp:
-                    for flat_param in module_to_fsdp[m].params:
-                        self._fsdp_params_exec_order.append(flat_param)
-            self._param_exec_order_prep_stage = False
-
-        for m in self.modules():
-            if m is not self and isinstance(m, FullyShardedDataParallel):
-                # Assignment by reference, so each children FSDP wrap has access to
-                # the _fsdp_params_exec_order of the root module
-                m._fsdp_params_exec_order = self._fsdp_params_exec_order
-                m._param_exec_order_policy = self._param_exec_order_policy
-                m._param_exec_order_prep_stage = self._param_exec_order_prep_stage
-
-    def _use_param_exec_order_policy(self) -> bool:
-        return (
-            hasattr(self, "_param_exec_order_policy") and self._param_exec_order_policy
-        )
-
-    def _is_param_exec_order_prep_stage(self) -> bool:
-        is_prep_stage = (
-            hasattr(self, "_param_exec_order_prep_stage")
-            and self._param_exec_order_prep_stage
-        )
-        if not is_prep_stage:
-            for p in self.parameters():
-                assert not hasattr(
-                    p, "_params_exec_order_hook_handle"
-                ), "When not in execution order prep stage, all _params_exec_order_hook_handle should be removed."
-        return is_prep_stage
 
 
 def _get_grad_norm(
