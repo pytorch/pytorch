@@ -377,25 +377,6 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
-        elif all([isinstance(x, DynamicShapeVariable) for x in args]):
-            if self.value == math.sqrt:
-                from torch.fx.experimental.symbolic_shapes import sym_sqrt
-
-                fn_ = sym_sqrt
-            else:
-                fn_ = self.value
-
-            out = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
-                ),
-                **options,
-            )
-            return out
         else:
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
@@ -408,11 +389,23 @@ class TorchVariable(VariableTracker):
                 for x in args[0].items:
                     if isinstance(x.value, numpy.generic):
                         x.value = x.value.item()
+
+            # TODO(voz): Replace w/ dynamic shape rewrite table.
+            # Ideally, we would be able to do this at ctor time, but alas we need a combination
+            # of value + args to determine this.
+            if all([isinstance(x, DynamicShapeVariable) for x in args]):
+                if self.value == math.sqrt:
+                    from torch.fx.experimental.symbolic_shapes import sym_sqrt
+
+                    fn_ = sym_sqrt
+            else:
+                fn_ = self.value
+
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    self.value,
+                    fn_,
                     *proxy_args_kwargs(args, kwargs),
                     current_tx=tx,
                 ),
