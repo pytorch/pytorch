@@ -393,14 +393,13 @@ class TorchVariable(VariableTracker):
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.
+            fn_ = self.value
             if all([isinstance(x, DynamicShapeVariable) for x in args]):
                 if self.value == math.sqrt:
                     from torch.fx.experimental.symbolic_shapes import sym_sqrt
 
                     fn_ = sym_sqrt
-            else:
-                fn_ = self.value
-
+ 
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
