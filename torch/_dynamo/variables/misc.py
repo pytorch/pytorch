@@ -283,7 +283,7 @@ class GradModeVariable(ContextWrappingVariable):
         return "_C._set_grad_enabled"
 
     def fn_name(self):
-        if self.target_values:
+        if self.target_values[0]:
             return "enable_grad"
         else:
             return "no_grad"
@@ -538,7 +538,7 @@ class GetAttrVariable(VariableTracker):
             options = VariableTracker.propagate(self, new_args, new_kwargs.values())
             # Disable __torch_function__ here to prevent the clone of the
             # example tensor from going into the override.
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 if isinstance(args[0], TorchVariable):
                     return TensorVariable.create(
                         tx=tx,

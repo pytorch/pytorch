@@ -14,6 +14,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/batch_norm.h>
 #include <ATen/native/Normalization.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
 
@@ -124,17 +125,17 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     const Tensor& save_mean /* optional */, const Tensor& save_invstd /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
-    bool train, double eps) {
+    bool train, double eps, Tensor& output) {
 
   bool all_contiguous = is_contiguous(input)
-      && (!weight.defined() || weight.is_contiguous())
-      && (!bias.defined() || bias.is_contiguous())
-      && running_mean.is_contiguous()
-      && running_var.is_contiguous();
+    && is_contiguous(output)
+    && (!weight.defined() || weight.is_contiguous())
+    && (!bias.defined() || bias.is_contiguous())
+    && running_mean.is_contiguous()
+    && running_var.is_contiguous();
 
   // inference contiguous path
   if (all_contiguous) {
-    Tensor output = at::empty_like(input, suggest_memory_format_contig(input));
     batch_norm_cpu_stub(kCPU, output, input, weight, bias,
         save_mean, save_invstd, running_mean, running_var, train, eps);
     return std::make_tuple(output, save_mean, save_invstd);
@@ -166,7 +167,6 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
   auto b = bias.defined() ? as_nd(bias) :
       at::detail::scalar_tensor_static(0, dtype, kCPU);
 
-  Tensor output = at::empty_like(input, input.suggest_memory_format());
   auto iter = TensorIteratorConfig()
     .add_output(output)
     .add_input(input)
@@ -186,30 +186,17 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
 template<typename scalar_t, typename param_t, template<typename T> class VarTransform>
 std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     const Tensor& input, const Tensor& running_mean, const Tensor& running_var,
-    double momentum, double eps) {
+    double momentum, double eps, Tensor& save_mean, Tensor& save_var_transform) {
 
   using accscalar_t = at::acc_type<scalar_t, false>;
 
   int64_t n_input = input.size(1);
   int64_t n = input.numel() / n_input;
-  const int64_t ndim = input.dim();
-
-  // Reduce all dimensions except dim=1
-  DimVector reduce_dims(ndim - 1);
-  reduce_dims[0] = 0;
-  for (const auto i : c10::irange(2, ndim)) {
-    reduce_dims[i - 1] = i;
-  }
 
   bool all_contiguous = is_contiguous(input);
   const bool mixed_type = !std::is_same<scalar_t, param_t>::value;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
 
-  // For contiguous case, leave 'mean' computation to kernel
-  Tensor save_mean = all_contiguous
-      ? at::empty({n_input}, input.options().dtype(dtype))
-      : at::mean(input, /*dim=*/reduce_dims, /*keepdim=*/false, dtype);
-  Tensor save_var_transform = at::empty({n_input}, input.options().dtype(dtype));
   auto save_mean_a = save_mean.accessor<param_t, 1>();
   auto save_var_transform_a = save_var_transform.accessor<param_t, 1>();
 
@@ -277,6 +264,25 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     }
   });
   return std::make_tuple(save_mean, save_var_transform);
+}
+
+template<typename scalar_t, typename param_t, template<typename T> class VarTransform>
+std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
+    const Tensor& input, const Tensor& running_mean, const Tensor& running_var,
+    double momentum, double eps) {
+  int64_t n_input = input.size(1);
+  const int64_t ndim = input.dim();
+  DimVector reduce_dims(ndim - 1);
+  reduce_dims[0] = 0;
+  for (const auto i : c10::irange(2, ndim)) {
+    reduce_dims[i - 1] = i;
+  }
+
+  const bool mixed_type = !std::is_same<scalar_t, param_t>::value;
+  const auto dtype = mixed_type ? kFloat : input.scalar_type();
+  Tensor save_mean = is_contiguous(input) ? at::empty({n_input}, input.options().dtype(dtype)) : at::mean(input, /*dim=*/reduce_dims, /*keepdim=*/false, dtype);
+  Tensor save_var_transform = at::empty({n_input}, input.options().dtype(dtype));
+  return batch_norm_cpu_update_stats_template<scalar_t, param_t, VarTransform>(input, running_mean, running_var, momentum, eps, save_mean, save_var_transform);
 }
 
 template<typename scalar_t, typename param_t>
@@ -691,6 +697,48 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
   });
 }
 
+std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+                                                  bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
+  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+
+  checkBackend("batch_norm_cpu_out", {self, weight, bias, running_mean, running_var}, Backend::CPU);
+  // Resize out
+  at::native::resize_output(out, self.sizes());
+
+  const bool mixed_type = is_mixed_type(self, weight, bias, running_mean, running_var);
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "batch_norm", [&] {
+    if (mixed_type) {
+      check_mixed_data_type(self, weight, bias, running_mean, running_var);
+      if (!train) {
+        return batch_norm_cpu_transform_input_template<BFloat16, float>(self, weight, bias, save_mean, save_var, running_mean, running_var, train, eps, out);
+      } else {
+        // Resize save_mean and save_var
+        at::native::resize_output(save_mean, {self.size(1)});
+        at::native::resize_output(save_var, {self.size(1)});
+        auto save_stats = batch_norm_cpu_update_stats_template<BFloat16, float, InvStd>(self, running_mean, running_var, momentum, eps, save_mean, save_var);
+        return batch_norm_cpu_transform_input_template<BFloat16, float>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps, out);
+      }
+    } else {
+      if (!train) {
+        return batch_norm_cpu_transform_input_template<scalar_t, scalar_t>(self, weight, bias, save_mean, save_var, running_mean, running_var, train, eps, out);
+      } else {
+        // Resize save_mean and save_var
+        at::native::resize_output(save_mean, {self.size(1)});
+        at::native::resize_output(save_var, {self.size(1)});
+        auto save_stats = batch_norm_cpu_update_stats_template<scalar_t, scalar_t, InvStd>(self, running_mean, running_var, momentum, eps, save_mean, save_var);
+        return batch_norm_cpu_transform_input_template<scalar_t, scalar_t>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps, out);
+      }
+    }
+  });
+
+  return std::tuple<Tensor& ,Tensor&, Tensor&>(out, save_mean, save_var);
+}
+
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
                                                   bool train, double momentum, double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -702,29 +750,42 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
 
   checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
 
+  // Prepare output tensor
+  const bool all_contiguous = is_contiguous(self)
+    && (!weight.defined() || weight.is_contiguous())
+    && (!bias.defined() || bias.is_contiguous())
+    && running_mean.is_contiguous()
+    && running_var.is_contiguous();
+  Tensor output = at::empty_like(self, all_contiguous ? suggest_memory_format_contig(self) : self.suggest_memory_format());
+
+  // Prepare save_mean and save_var
+  Tensor save_var;
+  Tensor save_mean;
   const bool mixed_type = is_mixed_type(self, weight, bias, running_mean, running_var);
-  return AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "batch_norm", [&] {
-    if (mixed_type) {
-      check_mixed_data_type(self, weight, bias, running_mean, running_var);
-      if (!train) {
-        auto save_mean = at::empty({0}, self.options().dtype(kFloat));
-        auto save_var = at::empty({0}, self.options().dtype(kFloat));
-        return batch_norm_cpu_transform_input_template<BFloat16, float>(self, weight, bias, save_mean, save_var, running_mean, running_var, train, eps);
-      } else {
-        auto save_stats = batch_norm_cpu_update_stats_template<BFloat16, float, InvStd>(self, running_mean, running_var, momentum, eps);
-        return batch_norm_cpu_transform_input_template<BFloat16, float>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps);
-      }
+  const int64_t ndim = self.dim();
+  DimVector reduce_dims(ndim - 1);
+  reduce_dims[0] = 0;
+  for (const auto i : c10::irange(2, ndim)) {
+    reduce_dims[i - 1] = i;
+  }
+  if (mixed_type) {
+    if (!train) {
+      save_mean = at::empty({0}, self.options().dtype(kFloat));
+      save_var = at::empty({0}, self.options().dtype(kFloat));
     } else {
-      if (!train) {
-        auto save_mean = at::empty({0}, self.options());
-        auto save_var = at::empty({0}, self.options());
-        return batch_norm_cpu_transform_input_template<scalar_t, scalar_t>(self, weight, bias, save_mean, save_var, running_mean, running_var, train, eps);
-      } else {
-        auto save_stats = batch_norm_cpu_update_stats_template<scalar_t, scalar_t, InvStd>(self, running_mean, running_var, momentum, eps);
-        return batch_norm_cpu_transform_input_template<scalar_t, scalar_t>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps);
-      }
+      save_mean = is_contiguous(self) ? at::empty({self.size(1)}, self.options().dtype(kFloat)) : at::mean(self, /*dim=*/reduce_dims, /*keepdim=*/false, kFloat);
+      save_var = at::empty({self.size(1)}, self.options().dtype(kFloat));
     }
-  });
+  } else {
+    if (!train) {
+      save_mean = at::empty({0}, self.options());
+      save_var = at::empty({0}, self.options());
+    } else {
+      save_mean = is_contiguous(self) ? at::empty({self.size(1)}, self.options()) : at::mean(self, /*dim=*/reduce_dims, /*keepdim=*/false);
+      save_var = at::empty({self.size(1)}, self.options());
+    }
+  }
+  return batch_norm_cpu_out(self, weight_opt, bias_opt, running_mean_opt, running_var_opt, train, momentum, eps, output, save_mean, save_var);
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_out, const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt,
