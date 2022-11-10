@@ -121,15 +121,15 @@ DASHBOARD_DEFAULTS = {
 
 
 def flag_speedup(x):
-    return pd.isna(x) or x < 0.95
+    return x < 0.95
 
 
 def flag_compilation_latency(x):
-    return pd.isna(x) or x == 0 or x > 120
+    return x > 120
 
 
 def flag_compression_ratio(x):
-    return pd.isna(x) or x < 0.9
+    return x < 0.9
 
 
 FLAG_FNS = {
