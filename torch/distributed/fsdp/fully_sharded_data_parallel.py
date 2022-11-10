@@ -93,7 +93,7 @@ from ._state_dict_utils import (
 )
 from ._utils import p_assert
 from .flat_param import FlatParameter, FlatParamHandle
-from .wrap import FSDPPolicy
+from .wrap import _FSDPPolicy
 
 
 __all__ = [
@@ -286,11 +286,11 @@ class FullyShardedDataParallel(nn.Module):
             This configures CPU offloading. If this is set to ``None``, then
             no CPU offloading happens. See :class:`CPUOffload` for details.
             (Default: ``None``)
-        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], FSDPPolicy]]):
-            This is either ``None``, an ``FSDPPolicy``, or a callable of
+        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], _FSDPPolicy]]):
+            This is either ``None``, an ``_FSDPPolicy``, or a callable of
             a fixed signature. If it is ``None``, then ``module`` is wrapped
             with only a top-level FSDP instance without any nested wrapping. If
-            it is an ``FSDPPolicy``, then the wrapping follows the given
+            it is an ``_FSDPPolicy``, then the wrapping follows the given
             policy. ``ModuleWrapPolicy`` in ``torch.distributed.fsdp.wrap.py``
             is an example. If it is a callable, then it should take in three
             arguments ``module: nn.Module``, ``recurse: bool``, and
@@ -421,7 +421,7 @@ class FullyShardedDataParallel(nn.Module):
         _init_ignored_module_states(self, module, ignored_modules)
         if auto_wrap_policy is not None:
             # Support new way to pass an auto wrap policy
-            if isinstance(auto_wrap_policy, FSDPPolicy):
+            if isinstance(auto_wrap_policy, _FSDPPolicy):
                 auto_wrap_policy = auto_wrap_policy.policy
             auto_wrap_kwargs = {
                 "module": module,

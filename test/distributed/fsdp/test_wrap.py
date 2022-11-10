@@ -16,11 +16,11 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
 )
 from torch.distributed.fsdp.wrap import (
+    _FSDPPolicy,
     _or_policy,
     _wrap_batchnorm_individually,
     always_wrap_policy,
     enable_wrap,
-    FSDPPolicy,
     ModuleWrapPolicy,
     size_based_auto_wrap_policy,
     transformer_auto_wrap_policy,
@@ -386,7 +386,9 @@ class TestAutoWrap(TestCase):
         )
         self._test_transformer_wrapping(auto_wrap_policy)
 
-    def _test_transformer_wrapping(self, auto_wrap_policy: Union[Callable, FSDPPolicy]):
+    def _test_transformer_wrapping(
+        self, auto_wrap_policy: Union[Callable, _FSDPPolicy]
+    ):
         fsdp_kwargs = {"auto_wrap_policy": auto_wrap_policy}
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
