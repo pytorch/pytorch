@@ -133,7 +133,7 @@ class _RemoteModule(nn.Module):
         It creates a user-specified module on a specified remote node.
         It behaves like a regular ``nn.Module`` except that the ``forward`` method is
         executed on the remote node.
-        It takes care of autograd recording to ensure the backward pass propogates
+        It takes care of autograd recording to ensure the backward pass propagates
         gradients back to the corresponding remote module.
         It can be shared across processors using `RPC framework <https://pytorch.org/docs/stable/rpc.html>`__,
         without incurring any overheads of copying the actual module,
@@ -391,7 +391,10 @@ class _RemoteModule(nn.Module):
         )
 
     def named_parameters(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+        remove_duplicate: bool = True
     ) -> Iterator[Tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
@@ -595,7 +598,7 @@ class RemoteModule(_RemoteModule):
         It creates a user-specified module on a specified remote node.
         It behaves like a regular ``nn.Module`` except that the ``forward`` method is
         executed on the remote node.
-        It takes care of autograd recording to ensure the backward pass propogates
+        It takes care of autograd recording to ensure the backward pass propagates
         gradients back to the corresponding remote module.
 
         It generates two methods ``forward_async`` and ``forward`` based on the
