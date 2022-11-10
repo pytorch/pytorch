@@ -5,12 +5,13 @@
 # can be added in the future for the corresponding higher-level torch/aten
 # functions.
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 
 from torch._prims_common import (
     DimsSequenceType,
+    elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     getnvFuserDtype,
     make_contiguous_strides_for,
@@ -19,6 +20,7 @@ from torch._prims_common import (
 )
 
 from torch._prims_common.wrappers import (
+    _maybe_convert_to_dtype,
     backwards_not_supported,
     elementwise_type_promotion_wrapper,
 )
@@ -214,6 +216,8 @@ _nvfuser_impls["{fname}"] = _{fname}_nvfuser
 def _native_batch_norm_nvfuser(
     fd, input, weight, bias, running_mean, running_var, training, momentum, eps
 ):
+
+    """
     if weight is None:
         weight = fd.define_null_tensor()
     if bias is None:
@@ -222,15 +226,16 @@ def _native_batch_norm_nvfuser(
         running_mean = fd.define_null_tensor()
     if running_var is None:
         running_var = fd.define_null_tensor()
+    """
     return fd.ops.batch_norm(
         input,
         weight,
         bias,
         running_mean,
         running_var,
-        training,
         momentum,
         eps,
+        training,
     )
 
 
@@ -248,8 +253,8 @@ def _convert_element_type_nvfuser(fd: Any, a: TensorLikeType, dtype: torch.dtype
     return fd.ops.cast(a, nvfuser_dtype)  # type: ignore[attr-defined]
 
 
-def _transpose_nvfuser(fd, a, permutation):
-    return fd.ops.permute(a, permutation)  # type: ignore[attr-defined]
+def _transpose_nvfuser(fd, a, dims):
+    return fd.ops.permute(a, dims)  # type: ignore[attr-defined]
 
 
 def _squeeze_nvfuser(fd, a, a_shape, dimensions):
@@ -351,6 +356,82 @@ _nvfuser_impls["var_mean"] = _var_mean_nvfuser
 _nvfuser_impls["amax"] = _amax_nvfuser
 _nvfuser_impls["amin"] = _amin_nvfuser
 
+# functorch.compile.min_cut_rematerialization_partition accepts a list of
+# operators that can be recomputed in the backward pass. This list is used to
+# determine which operators can be recomputed. If an operator is not in this
+# list, it will not be recomputed.
+_nvfuser_is_recomputable: Dict[str, bool] = {
+    # Reductions are not allowed to be recomputed
+    "amax": False,
+    "amin": False,
+    "sum": False,
+    "var": False,
+    "var_mean": False,
+    # Normalizations are not allowed to be recomputed
+    "native_batch_norm": False,
+    # Random ops are not allowed to be recomputed
+    "rand_like": False,
+    # Everything else is allowed to be recomputed
+    "abs": True,
+    "acos": True,
+    "add": True,
+    "asin": True,
+    "atan": True,
+    "atan2": True,
+    "atanh": True,
+    "bitwise_and": True,
+    "bitwise_not": True,
+    "bitwise_or": True,
+    "bitwise_xor": True,
+    "broadcast_in_dim": True,
+    "ceil": True,
+    "clone": True,
+    "convert_element_type": True,
+    "cos": True,
+    "cosh": True,
+    "div": True,
+    "eq": True,
+    "erf": True,
+    "erfc": True,
+    "exp": True,
+    "expm1": True,
+    "floor": True,
+    "fmod": True,
+    "ge": True,
+    "gt": True,
+    "imag": True,
+    "isfinite": True,
+    "le": True,
+    "lgamma": True,
+    "log": True,
+    "log10": True,
+    "log1p": True,
+    "log2": True,
+    "lt": True,
+    "mul": True,
+    "ne": True,
+    "neg": True,
+    "pow": True,
+    "real": True,
+    "reciprocal": True,
+    "remainder": True,
+    "round": True,
+    "rsqrt": True,
+    "sign": True,
+    "sin": True,
+    "sinh": True,
+    "sqrt": True,
+    "squeeze": True,
+    "sub": True,
+    "tan": True,
+    "tanh": True,
+    "transpose": True,
+    "trunc": True,
+    "view": True,
+    "view_of": True,
+    "where": True,
+}
+
 
 def register_native_batch_norm():
     """This function is used to register the native_batch_norm function in torch.ops.nvprims module."""
@@ -370,15 +451,64 @@ def register_native_batch_norm():
         )
 
     nvprim_impl.impl(name, _prim_impl)
-    nvprim_autograd_impl.impl(
-        name, backwards_not_supported(torch.ops.nvprims.native_batch_norm.default)
-    )
-
     prim_packet = torch.ops.nvprims.native_batch_norm
     prim = prim_packet.default
+
+    def _native_batch_norm_ref(
+        input: torch.Tensor,
+        weight: Optional[torch.Tensor],
+        bias: Optional[torch.Tensor],
+        running_mean: Optional[torch.Tensor],
+        running_var: Optional[torch.Tensor],
+        training: bool,
+        momentum: float,
+        eps: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
+        if torch._prims_common.is_complex_dtype(input.dtype):
+            raise NotImplementedError("Complex tensors are not supported")
+
+        # note: BN only promotes input to dtype of weight/bias, but keeps the same output dtype
+        result_dtype = input.dtype
+        computation_dtype, _ = elementwise_dtypes(
+            input,
+            weight,
+            bias,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+        )
+
+        input_ = _maybe_convert_to_dtype(input, computation_dtype)
+        output, mean, rstd = prim(
+            input_, weight, bias, running_mean, running_var, training, momentum, eps
+        )
+        output_ = _maybe_convert_to_dtype(output, result_dtype)  # type: ignore[arg-type]
+        return (output_, mean, rstd)  # type: ignore[return-value]
+
+    def _native_batch_norm_autograd(
+        input: torch.Tensor,
+        weight: Optional[torch.Tensor],
+        bias: Optional[torch.Tensor],
+        running_mean: Optional[torch.Tensor],
+        running_var: Optional[torch.Tensor],
+        training: bool,
+        momentum: float,
+        eps: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # This wrapper is needed to convert prims calls inside
+        # _native_batch_norm_ref to nvprims calls
+        from torch._prims.context import NvfuserPrimsMode
+
+        with NvfuserPrimsMode():
+            return backwards_not_supported(_native_batch_norm_ref)(
+                input, weight, bias, running_mean, running_var, training, momentum, eps
+            )
+
+    nvprim_autograd_impl.impl(name, _native_batch_norm_autograd)
+
     for p in (prim_packet, prim):
         p.__doc__ = "Computes batch normalization."
         p.impl_nvfuser = _nvfuser_impls["native_batch_norm"]
+        p.is_recomputable = _nvfuser_is_recomputable["native_batch_norm"]
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
@@ -437,6 +567,7 @@ def register_rand_like():
     for p in (prim_packet, prim):
         p.__doc__ = "Computes rand_like"
         p.impl_nvfuser = _nvfuser_impls["rand_like"]
+        p.is_recomputable = _nvfuser_is_recomputable["rand_like"]
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
@@ -535,6 +666,7 @@ def register_var_mean():
     for p in (prim_packet, prim):
         p.__doc__ = "Computes the variance and mean of x over the list of dimensions specified in the dim argument"
         p.impl_nvfuser = _nvfuser_impls["var_mean"]
+        p.is_recomputable = _nvfuser_is_recomputable["var_mean"]
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
@@ -572,6 +704,7 @@ def register_view():
     for p in (prim_packet, prim):
         p.__doc__ = "Creates a tensor with the specified shape containing a copy of the data in a."
         p.impl_nvfuser = _nvfuser_impls["view"]
+        p.is_recomputable = _nvfuser_is_recomputable["view"]
         p.return_type = torch._prims_common.RETURN_TYPE.VIEW  # type: ignore[attr-defined]
         p.impl_aten = _nvprims_view_impl_aten
 
@@ -598,5 +731,6 @@ def register_nvprims():
         for p in (prim_packet, prim):
             p.__doc__ = main_prim.__doc__
             p.impl_nvfuser = _nvfuser_impls[name]
+            p.is_recomputable = _nvfuser_is_recomputable.get(name, False)
             p.return_type = main_prim.return_type  # type: ignore[attr-defined]
             p.impl_aten = main_prim.impl_aten
