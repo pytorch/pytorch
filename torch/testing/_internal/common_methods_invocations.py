@@ -12594,6 +12594,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('view_copy',
            dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           ref=lambda x, newshape: np.reshape(x, newshape).copy(),
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
