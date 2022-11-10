@@ -63,7 +63,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(bitwise_or, Scalar);
   OP_DECOMPOSE2(bitwise_xor, Scalar);
   OP_DECOMPOSE(broadcast_tensors);
-  OP_DECOMPOSE(broadcast_to);
+  m.impl("broadcast_to", native::broadcast_to_symint);
   OP_DECOMPOSE(cartesian_prod);
   OP_DECOMPOSE(cdist);
   OP_DECOMPOSE(clip);
