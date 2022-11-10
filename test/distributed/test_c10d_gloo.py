@@ -2311,6 +2311,10 @@ class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
     def test_collectives(self):
         self._test_collectives(backend="gloo")
 
+    @requires_gloo()
+    def test_allreduce_coalesced(self):
+        self._test_allreduce_coalesced(backend="gloo")
+
 class CompilerTest(test_c10d_common.CompilerTest):
 
     @property

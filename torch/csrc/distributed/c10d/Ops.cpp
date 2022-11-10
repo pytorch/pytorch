@@ -40,6 +40,19 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_(
       std::move(tensor_vec), work);
 }
 
+c10::intrusive_ptr<Work> allreduce_coalesced_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  AllreduceCoalescedOptions opts = AllreduceCoalescedOptions{};
+  opts.reduceOp = *reduce_op.get();
+  opts.timeout = std::chrono::milliseconds(timeout);
+
+  return process_group->allreduce_coalesced(tensor_vec, opts);
+}
+
 c10::intrusive_ptr<Work> reduce_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -180,6 +193,10 @@ TORCH_LIBRARY(c10d, m) {
       "allreduce_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, allreduce_));
   m.def(
+      "allreduce_coalesced_",
+      dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, allreduce_coalesced_));
+  m.def(
       "allgather_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, allgather_));
   m.def(
@@ -249,6 +266,25 @@ c10::intrusive_ptr<Work> allreduce(
       process_group,
       c10::make_intrusive<ReduceOp>(opts.reduceOp),
       opts.timeout.count()));
+}
+
+c10::intrusive_ptr<Work> allreduce_coalesced(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::TensorList tensors,
+    const AllreduceCoalescedOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::allreduce_coalesced_", "")
+                       .typed<c10::intrusive_ptr<::c10d::Work>(
+                           at::TensorList,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                           int64_t)>();
+
+  return op.call(
+      tensors,
+      process_group,
+      c10::make_intrusive<ReduceOp>(opts.reduceOp),
+      opts.timeout.count());
 }
 
 c10::intrusive_ptr<Work> allgather(
