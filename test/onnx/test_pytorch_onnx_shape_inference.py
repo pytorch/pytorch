@@ -313,9 +313,13 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
-        self.assertTrue(model_proto.graph.value_info is not None)
-        dims = model_proto.graph.value_info[0].type.tensor_type.shape.dim
+        model_value_info = model_proto.graph.value_info
+        self.assertIsNotNone(model_value_info)
+        assert model_value_info
+        dims = model_value_info[0].type.tensor_type.shape.dim
         for i in range(len(dims)):
+            # If node output has shape info, it should have dim_value
+            # Otherwise, it has dim_params with dynamic shape
             self.assertTrue(dims[i].HasField("dim_value"))
         for dim, rank in zip(dims, x.size()):
             self.assertEqual(dim.dim_value, rank)
@@ -344,9 +348,13 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
-        self.assertTrue(model_proto.graph.value_info is not None)
-        dims = model_proto.graph.value_info[0].type.tensor_type.shape.dim
+        model_value_info = model_proto.graph.value_info
+        self.assertIsNotNone(model_value_info)
+        assert model_value_info
+        dims = model_value_info[0].type.tensor_type.shape.dim
         for i in range(len(dims)):
+            # If node output has shape info, it should have dim_value
+            # Otherwise, it has dim_params with dynamic shape
             self.assertTrue(dims[i].HasField("dim_param"))
 
     def test_setType_maintains_output_shape_for_single_custom_op_with_onnx_ops(self):
@@ -385,15 +393,20 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
             if node.op_type == "Inverse":
                 output_name = node.output[0]
                 break
-        self.assertTrue(model_proto.graph.value_info is not None)
-        for value_info in model_proto.graph.value_info:
+
+        model_value_info = model_proto.graph.value_info
+        self.assertIsNotNone(model_value_info)
+        assert model_value_info
+        for value_info in model_value_info:
+            assert value_info.name
             if value_info.name == output_name:
                 dims = value_info.type.tensor_type.shape.dim
                 for i in range(len(dims)):
+                    # If node output has shape info, it should have dim_value
+                    # Otherwise, it has dim_params with dynamic shape
                     self.assertTrue(dims[i].HasField("dim_value"))
                 for dim, rank in zip(dims, x.size()):
                     self.assertEqual(dim.dim_value, rank)
-
 
 if __name__ == "__main__":
     common_utils.run_tests()
