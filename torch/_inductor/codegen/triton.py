@@ -240,7 +240,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def fmod(a, b):
-        return f"tl.libdevice.fmod({a}, ({b}).to(tl.float32))"
+        return f"tl.libdevice.fmod({a}, {b})"
 
     @staticmethod
     def pow(a, b):
