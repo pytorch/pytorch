@@ -2835,10 +2835,10 @@ class CommonTemplate:
     def test_upsample_nearest2d(self):
         def fn(a):
             return (
-                aten.upsample_nearest2d(a, [74, 76], None),
-                aten.upsample_nearest2d(a, [70, 75], None),
-                aten.upsample_nearest2d(a, [45, 74], None),
-                aten.upsample_nearest2d(a, [36, 39], None),
+                aten.upsample_nearest2d(a, [74, 76]),
+                aten.upsample_nearest2d(a, [70, 75]),
+                aten.upsample_nearest2d(a, [45, 74]),
+                aten.upsample_nearest2d(a, [36, 39]),
                 aten.upsample_nearest2d(a, None, [2.0, 2.0]),
             )
 
@@ -2857,25 +2857,15 @@ class CommonTemplate:
         self.common(fn, (torch.randn([2, 4, 37, 38, 39]),))
 
     def test_upsample_nearest2d_backward(self):
-        func = torch.ops.aten.upsample_nearest2d_backward.vec
+        func = torch.ops.aten.upsample_nearest2d_backward
 
         def fn(a):
             return (
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 3, 6], scale_factors=None
-                ),
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 4, 5], scale_factors=None
-                ),
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 2, 8], scale_factors=None
-                ),
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 2, 8], scale_factors=None
-                ),
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 4, 7], scale_factors=None
-                ),
+                func(a, output_size=[6, 12], input_size=[3, 3, 3, 6]),
+                func(a, output_size=[6, 12], input_size=[3, 3, 4, 5]),
+                func(a, output_size=[6, 12], input_size=[3, 3, 2, 8]),
+                func(a, output_size=[6, 12], input_size=[3, 3, 2, 8]),
+                func(a, output_size=[6, 12], input_size=[3, 3, 4, 7]),
             )
 
         self.common(fn, (torch.randn([3, 3, 6, 12]),))
@@ -4315,6 +4305,16 @@ class CommonTemplate:
                 else:
                     self.assertEqual(len(inps), 0)
 
+    def test_dtype_mismatch_issue(self):
+        def fn(x):
+            attn = torch.nn.functional.pad(x, [0, 1])
+            return attn.softmax(dim=-1)
+
+        x = torch.rand(128, 32, 63)
+        res_ref = fn(x)
+        res = torch._dynamo.optimize("inductor")(fn)(x)
+        self.assertEqual(res, res_ref)
+
     @unittest.skipIf(HAS_CUDA, "histogramdd only supports cpu")
     def test_kwargs(self):
         def fn(x, y):
@@ -4344,6 +4344,45 @@ if HAS_CPU:
     CommonTemplate.install(CpuTests, "cpu")
 
     class CPUReproTests(TestCase):
+        def test_conv_stride_constraints(self):
+            for fmt in [torch.channels_last, torch.contiguous_format]:
+                # TorchDispatch doesn't work in our cuda invocation for some reason
+                m = torch.nn.Conv2d(5, 6, [3, 3])
+
+                def fn(inp, weight):
+                    return (
+                        F.conv2d(
+                            inp, weight, None, m.stride, m.padding, m.dilation, m.groups
+                        ),
+                    )
+
+                inp = torch.randn([2, 5, 16, 16])
+                inps = [inp, m.weight.to(memory_format=fmt)]
+                fn_fx = make_fx(fn)(*inps)
+                fn_compiled = compile_fx_inner(fn_fx, inps)
+                test_self = self
+                conv_seen = False
+
+                class RecordFunctions(TorchDispatchMode):
+                    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                        kwargs = kwargs if kwargs else {}
+                        if func == torch.ops.aten.convolution.default:
+                            test_self.assertTrue(
+                                args[0].is_contiguous(memory_format=fmt)
+                            )
+                            test_self.assertTrue(
+                                args[1].is_contiguous(memory_format=fmt)
+                            )
+                            nonlocal conv_seen
+                            conv_seen = True
+
+                        return func(*args, **kwargs)
+
+                with RecordFunctions():
+                    out = fn_compiled(inps)
+
+                self.assertTrue(conv_seen)
+
         def test_inplace_squeeze_needed(self):
             mod = torch.nn.Sequential(
                 torch.nn.Linear(10, 10),
