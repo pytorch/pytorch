@@ -559,22 +559,27 @@ class TensorVariable(VariableTracker):
             )
             return ConstantVariable(None, **options)
         elif name in ("resize_", "resize_as_"):
+            if "memory_format" in kwargs:
+                memory_format = kwargs["memory_format"].as_python_constant()
+            else:
+                memory_format = torch.contiguous_format
+
             if name == "resize_":
-                new_size = args[0].as_python_constant()
+                self.size = args[0].as_python_constant()
+                self.is_contiguous = (memory_format,)
             else:
                 assert isinstance(args[0], TensorVariable)
-                new_size = args[0].size
-            if self.size and new_size:
-                if "memory_format" in kwargs:
-                    memory_format = kwargs["memory_format"].as_python_constant()
-                else:
-                    memory_format = torch.contiguous_format
-
-                if self.size == new_size or memory_format is torch.preserve_format:
-                    self.is_contiguous = args[0].is_contiguous
-                else:
-                    self.size = new_size
-                    self.is_contiguous = (memory_format,)
+                if self.size and args[0].size:
+                    if (
+                        self.size == args[0].size
+                        or memory_format is torch.preserve_format
+                    ):
+                        self.is_contiguous = args[0].is_contiguous
+                    else:
+                        self.size = args[0].size
+                        self.stride = args[0].stride
+                        self.ndim = args[0].ndim
+                        self.is_contiguous = (memory_format,)
 
             return self.__class__.create(
                 tx,
