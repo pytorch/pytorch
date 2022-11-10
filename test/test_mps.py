@@ -4279,6 +4279,7 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 4, 5), 3, [2, 3, 0])
         helper((2, 3, 3), -1, [1, 2])
 
+    @skip("This test is flaky, tracked in https://github.com/pytorch/pytorch/issues/88679")
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
             embeddingMPS = nn.Embedding(n, d, max_norm=True, device='mps')
