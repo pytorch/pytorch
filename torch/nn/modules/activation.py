@@ -1098,17 +1098,22 @@ class MultiheadAttention(Module):
             why_not_fast_path = "autocast is enabled"
 
         if not why_not_fast_path:
-            tensor_args = (
+            tensor_args = [
                 query,
                 key,
                 value,
                 self.in_proj_weight,
-                self.in_proj_bias,
                 self.out_proj.weight,
-                self.out_proj.bias,
-            )
+            ]
             # We have to use list comprehensions below because TorchScript does not support
             # generator expressions.
+            # But comprehensions in TorchScript do not support conditionals of type
+            # for x in y if cond(x)
+            if (self.in_proj_bias is not None):
+                tensor_args.append(self.in_proj_bias)
+            if (self.out_proj.bias is not None):
+                tensor_args.append(self.out_proj.bias)
+
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_fast_path = "some Tensor argument has_torch_function"
             elif not all([(x is None or x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]):
