@@ -109,8 +109,8 @@ class DTensorTestBase(MultiProcessTestCase):
         dist.init_process_group(
             backend=backend,
             world_size=self.world_size,
-            rank=self.rank,
-            init_method=f"file://{self.file_name}",
+            rank=self.rank,  # pyre-ignore[16]
+            init_method=f"file://{self.file_name}",  # pyre-ignore[16]
         )
 
         # set device for nccl pg for collectives
