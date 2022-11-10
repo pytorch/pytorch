@@ -17043,6 +17043,10 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
+                         'TestCommon',
+                         'test_compare_cpu'),
         )
     ),
     ElementwiseUnaryPythonRefInfo(
