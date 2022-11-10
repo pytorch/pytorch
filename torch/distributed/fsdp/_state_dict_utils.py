@@ -59,9 +59,9 @@ def _convert_to_wrapped_module_name(module_name: str) -> str:
 
 
 def _param_fqns(module, fsdp_state: _FSDPState) -> Iterator[Tuple[str, str, str]]:
-    if not _has_fsdp_params(module, fsdp_state):
+    if not _has_fsdp_params(fsdp_state, module):
         return
-    for param_name, module_name in _module_handles(module, fsdp_state)[
+    for param_name, module_name in _module_handles(fsdp_state, module)[
         0
     ].parameter_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
@@ -70,7 +70,7 @@ def _param_fqns(module, fsdp_state: _FSDPState) -> Iterator[Tuple[str, str, str]
 
 
 def _shared_param_fqns(module, fsdp_state) -> Iterator[Tuple[str, str, str]]:
-    for param_name, module_name in _module_handles(module, fsdp_state)[
+    for param_name, module_name in _module_handles(fsdp_state, module)[
         0
     ].shared_parameter_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
@@ -127,8 +127,8 @@ def _common_pre_state_dict_hook(
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     # if fsdp_state.is_root:
     #    _clear_grads_if_needed(_all_handles(fsdp_state))
-    if _has_fsdp_params(module, fsdp_state):
-        _clear_grads_if_needed([_module_handles(module, fsdp_state)[0]])
+    if _has_fsdp_params(fsdp_state, module):
+        _clear_grads_if_needed([_module_handles(fsdp_state, module)[0]])
 
 
 def _common_summon_pre_state_dict_hook(
@@ -165,7 +165,7 @@ def _common_summon_post_state_dict_hook(
     """
     _replace_by_prefix(state_dict, prefix + f"{FSDP_PREFIX}", prefix)
     # Return early for trivial cases
-    if not state_dict or not _has_fsdp_params(module, fsdp_state):
+    if not state_dict or not _has_fsdp_params(fsdp_state, module):
         _exit_full_param_ctx(fsdp_state)
         return state_dict
 
@@ -354,8 +354,8 @@ def _local_pre_state_dict_hook(
     `_local_post_state_dict_hook()` to simulate the case.
     """
     if (
-        _has_fsdp_params(module, fsdp_state)
-        and not _module_handles(module, fsdp_state)[0].uses_sharded_strategy
+        _has_fsdp_params(fsdp_state, module)
+        and not _module_handles(fsdp_state, module)[0].uses_sharded_strategy
     ):
         raise RuntimeError(
             "``local_state_dict`` can only be used when parameters are flatten "
@@ -380,15 +380,15 @@ def _local_post_state_dict_hook(
     _local_pre_state_dict_hook(module, fsdp_state, state_dict, prefix)
 
     _replace_by_prefix(state_dict, f"{prefix}{FSDP_PREFIX}", prefix)
-    if not _has_fsdp_params(module, fsdp_state):
+    if not _has_fsdp_params(fsdp_state, module):
         return state_dict
 
     # state_dict[f"{prefix}{FLAT_PARAM}"] exists and has the same tensor
     # value as the flat_param but it is a pure Tensor because
     # nn.Module.state_dict() will detach the parameter. Therefore, we need
     # to get flat_param to get the metadata.
-    assert _module_handles(module, fsdp_state), "Should have returned early"
-    flat_param = _module_handles(module, fsdp_state)[0].flat_param
+    assert _module_handles(fsdp_state, module), "Should have returned early"
+    flat_param = _module_handles(fsdp_state, module)[0].flat_param
     # Construct a ShardedTensor from the flat_param.
     full_numel = flat_param._unpadded_unsharded_size.numel()  # type: ignore[attr-defined]
     shard_offset = flat_param.numel() * fsdp_state.rank
@@ -428,7 +428,7 @@ def _local_pre_load_state_dict_hook(
     _replace_by_prefix(state_dict, prefix, f"{prefix}{FSDP_PREFIX}")
     fqn = f"{prefix}{FSDP_PREFIX}{FLAT_PARAM}"
     if fqn not in state_dict:
-        assert not _has_fsdp_params(module, fsdp_state), (
+        assert not _has_fsdp_params(fsdp_state, module), (
             "No `FlatParameter` in `state_dict` for this FSDP instance "
             "but it has parameters"
         )
@@ -445,7 +445,7 @@ def _local_pre_load_state_dict_hook(
 
     # Get the metadata of the flat_param to decide whether to pad the loaded
     # tensor.
-    flat_param = _module_handles(module, fsdp_state)[0].flat_param
+    flat_param = _module_handles(fsdp_state, module)[0].flat_param
     assert flat_param is not None
     if flat_param._shard_numel_padded not in (0, flat_param.numel()):
         assert load_tensor.numel() < flat_param.numel(), (
@@ -467,8 +467,8 @@ def _sharded_pre_state_dict_hook(
     ``_full_pre_load_state_dict_hook`` for the detail.
     """
     if (
-        _has_fsdp_params(module, fsdp_state)
-        and not _module_handles(module, fsdp_state)[0].uses_sharded_strategy
+        _has_fsdp_params(fsdp_state, module)
+        and not _module_handles(fsdp_state, module)[0].uses_sharded_strategy
     ):
         raise RuntimeError(
             "``sharded_state_dict`` can only be used when parameters are flatten "
@@ -538,10 +538,10 @@ def _sharded_pre_load_state_dict_hook(
     """
     _lazy_init(fsdp_state, module)
     _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
-    if not _has_fsdp_params(module, fsdp_state):
+    if not _has_fsdp_params(fsdp_state, module):
         return
 
-    if not _module_handles(module, fsdp_state)[0].uses_sharded_strategy:
+    if not _module_handles(fsdp_state, module)[0].uses_sharded_strategy:
         raise RuntimeError(
             "load_sharded_state_dict can only be called when parameters "
             "are flatten and sharded."
@@ -586,7 +586,7 @@ def _sharded_pre_load_state_dict_hook(
         nonsharded_tensors.append(tensor)
 
     # Create a new flat_param from the loaded, non-sharded tensors.
-    flat_param = _module_handles(module, fsdp_state)[0].flat_param
+    flat_param = _module_handles(fsdp_state, module)[0].flat_param
     loaded_flat_param = FlatParamHandle.flatten_params(
         nonsharded_tensors, requires_grad=False
     )
