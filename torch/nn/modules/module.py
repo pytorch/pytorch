@@ -92,6 +92,15 @@ class _PreForwardWrappedHook(_WrappedHook):
         super().__init__(hook, module)
         self.with_kwargs = with_kwargs
 
+    def __getstate__(self) -> Dict:
+        state = super().__getstate__()
+        state['with_kwargs'] = self.with_kwargs
+        return state
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        self.with_kwargs = state.get("with_kwargs")
+
     def __call__(self, module, inp, kwargs):
         if self.with_kwargs:
             return super().__call__(module, inp, kwargs)
@@ -103,6 +112,15 @@ class _ForwardWrappedHook(_WrappedHook):
     def __init__(self, hook: Callable, module: Optional["Module"] = None, with_kwargs: bool = False):
         super().__init__(hook, module)
         self.with_kwargs = with_kwargs
+
+    def __getstate__(self) -> Dict:
+        state = super().__getstate__()
+        state['with_kwargs'] = self.with_kwargs
+        return state
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        self.with_kwargs = state.get("with_kwargs")
 
     def __call__(self, module, inp, out, kwargs):
         if self.with_kwargs:
@@ -1379,7 +1397,7 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
-        self._forward_pre_hooks[handle.id] = _PreForwardWrappedHook(hook, with_kwargs=with_kwargs)
+        self._forward_pre_hooks[handle.id] = _PreForwardWrappedHook(hook, with_kwargs=with_kwargs)hook
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
