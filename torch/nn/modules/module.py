@@ -1397,7 +1397,7 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
-        self._forward_pre_hooks[handle.id] = _PreForwardWrappedHook(hook, with_kwargs=with_kwargs)hook
+        self._forward_pre_hooks[handle.id] = _PreForwardWrappedHook(hook, with_kwargs=with_kwargs)
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
@@ -1493,7 +1493,7 @@ class Module:
                     input = result
 
         if self._forward_pre_hooks:
-            for hook in self._forward_pre_hooks.values():
+            for hook in list(self._forward_pre_hooks.values()):
                 result, kwargs = hook(self, input, kwargs)
                 if result is not None:
                     if not isinstance(result, tuple):
@@ -1513,7 +1513,7 @@ class Module:
                     result = hook_result
 
         if self._forward_hooks:
-            for hook in self._forward_hooks.values():
+            for hook in list(self._forward_hooks.values()):
                 hook_result = hook(self, input, result, kwargs)
                 if hook_result is not None:
                     result = hook_result
