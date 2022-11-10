@@ -438,6 +438,9 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
             result = self.call_method(tx, "dim", [], {})
+        elif name == "T":
+            args = [variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)]
+            result = self.call_method(tx, "permute", args, {})
 
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
@@ -701,7 +704,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
         # Disable __torch_function__ here to prevent the clone of the
         # example tensor from going into the override.
-        with torch._C.DisableTorchFunction():
+        with torch._C.DisableTorchFunctionSubclass():
             return tx.inline_user_function_return(tf_func_var, tf_args, {})
 
 

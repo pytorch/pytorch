@@ -29,6 +29,8 @@ else:
 
 from ._six import string_classes as _string_classes
 
+from torch.types import _bool
+from torch._prims_common import NumberType
 from typing import Set, Type, TYPE_CHECKING, Union, Callable, Any
 import builtins
 
@@ -218,8 +220,23 @@ class SymInt:
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
+    def __eq__(self, other: object) -> _bool:
+        raise AssertionError("type stub not overridden")
+
+    def __lt__(self, other: NumberType) -> _bool:
+        raise AssertionError("type stub not overridden")
+
+    def __gt__(self, other: NumberType) -> _bool:
+        raise AssertionError("type stub not overridden")
+
+    def __le__(self, other: NumberType) -> _bool:
+        raise AssertionError("type stub not overridden")
+
+    def __ge__(self, other: NumberType) -> _bool:
+        raise AssertionError("type stub not overridden")
+
     def __sym_float__(self):
-        ...
+        raise AssertionError("type stub not overridden")
 
     def __repr__(self):
         return self.node.str()
@@ -247,8 +264,20 @@ class SymFloat:
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
-    def __sym_int__(self):
-        ...
+    def __eq__(self, other: object) -> _bool:
+        raise AssertionError("type stub not overridden")
+
+    def __lt__(self, other: NumberType) -> _bool:
+        raise AssertionError("type stub not overridden")
+
+    def __gt__(self, other: NumberType) -> _bool:
+        raise AssertionError("type stub not overridden")
+
+    def __le__(self, other: NumberType) -> _bool:
+        raise AssertionError("type stub not overridden")
+
+    def __ge__(self, other: NumberType) -> _bool:
+        raise AssertionError("type stub not overridden")
 
     def __repr__(self):
         return self.node.str()
@@ -288,7 +317,7 @@ for name in dir(_C):
         if (isinstance(obj, Callable) or inspect.isclass(obj)):  # type: ignore[arg-type]
             if (obj.__module__ != 'torch'):
                 # TODO: fix their module from C++ side
-                if name not in ['DisableTorchFunction', 'Generator']:
+                if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
                     obj.__module__ = 'torch'
 
 if not TYPE_CHECKING:

@@ -110,11 +110,20 @@ def sym_sqrt(a):
         return a.__sym_sqrt__()
     return math.sqrt(a)
 
+# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
+# directly usable, but this has a more relaxed type signature for mypy
+# (mypy requires SupportFloat which is too strict)
+def sym_floor(a):
+    return math.floor(a)  # type: ignore[type]
+
+def sym_ceil(a):
+    return math.ceil(a)  # type: ignore[type]
+
 def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return math.floor(a) if a > 0 else math.ceil(a)
+        return sym_floor(a) if a > 0 else sym_ceil(a)
     return int(a)
 
 # TODO: An incomplete list
