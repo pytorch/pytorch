@@ -289,7 +289,7 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
 
     opset_version = _constants.ONNX_MAX_OPSET
 
-    def test_single_customOp_setType(self):
+    def test_setType_maintains_output_shape_for_single_custom_op(self):
 
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
 
@@ -297,10 +297,10 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
             def forward(self, x):
                 return torch.inverse(x) + x
 
-        def linalg_inv_setType(g, self):
+        def linalg_inv_settype(g, self):
             return g.op("com.microsoft::Inverse", self).setType(self.type())
 
-        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_setType, 9)
+        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_settype, 9)
         model = CustomInverse()
         x = torch.randn(2, 3, 3)
         f = io.BytesIO()
@@ -313,13 +313,14 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertTrue(model_proto.graph.value_info is not None)
         dims = model_proto.graph.value_info[0].type.tensor_type.shape.dim
         for i in range(len(dims)):
             self.assertTrue(dims[i].HasField("dim_value"))
         for dim, rank in zip(dims, x.size()):
             self.assertEqual(dim.dim_value, rank)
 
-    def test_single_customOp_NO_setType(self):
+    def test_no_setType_for_single_custom_op(self):
 
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
 
@@ -327,10 +328,10 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
             def forward(self, x):
                 return torch.inverse(x) + x
 
-        def linalg_inv_NO_setType(g, self):
+        def linalg_inv_no_settype(g, self):
             return g.op("com.microsoft::Inverse", self)
 
-        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_NO_setType, 9)
+        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_no_settype, 9)
         model = CustomInverse()
         x = torch.randn(2, 3, 3)
         f = io.BytesIO()
@@ -343,11 +344,12 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertTrue(model_proto.graph.value_info is not None)
         dims = model_proto.graph.value_info[0].type.tensor_type.shape.dim
         for i in range(len(dims)):
             self.assertTrue(dims[i].HasField("dim_param"))
 
-    def test_customOp_with_onnxOp_setType(self):
+    def test_setType_maintains_output_shape_for_single_custom_op_with_onnx_ops(self):
 
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
 
@@ -356,12 +358,12 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
                 x = torch.inverse(x)
                 return x + y + z
 
-        def linalg_inv_setType(g, self):
+        def linalg_inv_settype(g, self):
             return g.op("com.microsoft::Inverse", self).setType(
                 self.type().with_dtype(torch.float).with_sizes([2, 3, 10, 10])
             )
 
-        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_setType, 9)
+        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_settype, 9)
         model = CustomInverse()
         x = torch.randn(2, 3, 10, 10)
         y = torch.randn(2, 3, 10, 10)
@@ -383,6 +385,7 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
             if node.op_type == "Inverse":
                 output_name = node.output[0]
                 break
+        self.assertTrue(model_proto.graph.value_info is not None)
         for value_info in model_proto.graph.value_info:
             if value_info.name == output_name:
                 dims = value_info.type.tensor_type.shape.dim
