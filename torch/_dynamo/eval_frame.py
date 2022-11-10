@@ -313,7 +313,7 @@ def lookup_backend(compiler_fn):
     if compiler_fn == "inductor":
         if (
             torch.backends.cuda.matmul.allow_tf32 is False
-            and torch.cuda.get_device_capability() >= (7, 0)
+            and torch.cuda.get_device_capability() >= (8, 0)
         ):
             warnings.warn(
                 "Tensor cores are available but not enabled."
