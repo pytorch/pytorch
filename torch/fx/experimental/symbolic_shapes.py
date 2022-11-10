@@ -265,11 +265,13 @@ magic_methods = {
 
 unary_magic_methods = {
     'sym_float',
+    'sym_int',
     'ceil',
     'neg',
 }
 
-float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
+# TODO: sym_int should also work on floats
+magic_methods_not_on_float = {"sym_int"}
 
 magic_methods_on_builtins = {"min", "max"}
 magic_methods_on_math = {"ceil", "floor"}
@@ -383,7 +385,7 @@ for method, func in magic_methods.items():
     _make_user_magic(method, SymInt)
 
 for method, func in magic_methods.items():
-    if method not in float_magic_methods:
+    if method in magic_methods_not_on_float:
         continue
     _make_user_magic(method, SymFloat)
 

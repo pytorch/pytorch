@@ -3853,12 +3853,12 @@ class TestNLLLoss(TestCase):
 
     # Test softplus
     def test_softplus(self):
-        def helper(shape):
+        def helper(shape, beta=0.5, threshold=0.5):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
-            softplus_result = torch.nn.Softplus(beta=0.5, threshold=0.5)(x)
-            softplus_result_cpu = torch.nn.Softplus(beta=0.5, threshold=0.5)(cpu_x)
+            softplus_result = torch.nn.Softplus(beta=beta, threshold=threshold)(x)
+            softplus_result_cpu = torch.nn.Softplus(beta=beta, threshold=threshold)(cpu_x)
 
             cpu_grad = torch.randn(softplus_result.shape)
             grad = cpu_grad.to('mps')
@@ -3872,6 +3872,8 @@ class TestNLLLoss(TestCase):
         # Test empty shape too
         for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
             helper(shape)
+            helper(shape, beta=0.6, threshold=0.6)  # relu path
+            helper(shape, beta=1, threshold=20)  # softplus path
 
     # Test silu
 
@@ -7001,7 +7003,7 @@ class TestFallbackWarning(TestCase):
             # On Windows, opening the subprocess with the default CWD makes `import torch`
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
-        self.assertEquals(out, "")
+        self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
         # This can be changed once we actually implement `torch.bincount`
@@ -7322,6 +7324,7 @@ class TestConsistency(TestCase):
         'nn.functional.smooth_l1_loss': ['f16', 'f32'],
         'nn.functional.soft_margin_loss': ['f32'],
         'nn.functional.softmin': ['f32'],
+        'nn.functional.softplus': ['f32'],
         'nn.functional.softsign': ['f16', 'f32', 'i16', 'u8'],
         'nn.functional.tanhshrink': ['f32', 'i16', 'i32', 'u8'],
         'nn.functional.threshold': ['f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7522,6 +7525,7 @@ class TestConsistency(TestCase):
         'nn.functional.silu': ['f32'],
         'nn.functional.soft_margin_loss': ['f32'],
         'nn.functional.softmin': ['f32'],
+        'nn.functional.softplus': ['f32'],
         'nn.functional.softsign': ['f16', 'f32'],
         'nn.functional.threshold': ['f32'],
         'nn.functional.triplet_margin_loss': ['f32'],
@@ -7614,7 +7618,6 @@ class TestConsistency(TestCase):
         'nn.functional.huber_loss': [torch.float16],
         'nn.functional.local_response_norm': [torch.int64],
         'nn.functional.padcircular': [torch.uint8],
-        'nn.functional.softplus': [torch.float32],
         'pow': [torch.int64],
         'select_scatter': [torch.uint8],
         'sigmoid': [torch.int64],
