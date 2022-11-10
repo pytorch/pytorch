@@ -173,12 +173,17 @@ class VecISA(object):
 
 __attribute__((aligned(64))) float in_out_ptr0[16] = {0.0};
 
-int main() {
+extern "C" void __avx_chk_kernel() {
     auto tmp0 = at::vec::Vectorized<float>(1);
     auto tmp1 = tmp0.exp();
     tmp1.store(in_out_ptr0);
-    return 0;
 }
+"""
+
+    _avx_py_load = """
+import torch
+from ctypes import cdll
+cdll.LoadLibrary("__lib_path__")
 """
 
     def bit_width(self):
@@ -211,8 +216,14 @@ int main() {
             try:
                 # Check build result
                 subprocess.check_output(build_cmd, stderr=subprocess.STDOUT)
-                so_handle = cdll.LoadLibrary(output_path)
-                del so_handle
+                subprocess.check_call(
+                    [
+                        "python",
+                        "-c",
+                        VecISA._avx_py_load.replace("__lib_path__", output_path),
+                    ],
+                    stderr=subprocess.DEVNULL,
+                )
             except Exception as e:
                 return False
 
