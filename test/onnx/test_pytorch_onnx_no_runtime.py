@@ -399,6 +399,22 @@ class TestONNXExport(common_utils.TestCase):
         with self.assertRaisesRegex(RuntimeError, r"DictConstruct.+is not supported."):
             torch.onnx.export_to_pretty_string(torch.jit.script(mod), (x_in,))
 
+    def test_export_custom_pad_sequence_script_mode(self):
+        @torch.onnx.symbolic_helper.parse_args("v", "b", "f")
+        def pad_sequence(g, input, batch_first, padding_value):
+            return g.op("custom::MySequencePad", input)
+
+        torch.onnx.register_custom_op_symbolic("::pad_sequence", pad_sequence, 13)
+
+        class Model(torch.nn.Module):
+            def forward(self, xs: List[torch.Tensor]):
+                return torch._C._nn.pad_sequence(xs, True, 0.)
+
+        model = Model()
+        model = torch.jit.script(Model())
+        args = ([torch.rand(2, 5), torch.rand(3, 5)],)
+        torch.onnx.export(model, args, io.BytesIO())
+
     def test_source_range_propagation(self):
         class ExpandingModule(torch.nn.Module):
             def __init__(self):
