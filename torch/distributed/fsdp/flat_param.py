@@ -1307,6 +1307,7 @@ class FlatParamHandle:
                         param_var = tensor
                 setattr(module, param_name, param_var)
                 if self._use_orig_params and self._training_state == HandleTrainingState.FORWARD:
+                    print(f"flatparam: {module}:{param_name} updated")
                     module._parameters[param_name] = param_var  # type: ignore[assignment]
         for i, (
             param_name,

@@ -877,7 +877,8 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
     :func:`aot_module_simplified` removes these overheads.
     """
     #########################################################
-
+    names ='\n'.join([n for n, _ in mod.named_parameters() if 'cls' in n])
+    print(f"aot_ sees params with cls in name:\n{names}")
     params = {
         **dict(_named_parameters(mod, remove_duplicate=False)),
         **dict(_named_buffers(mod, remove_duplicate=False)),

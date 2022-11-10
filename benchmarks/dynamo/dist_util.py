@@ -122,11 +122,15 @@ def fsdp_checkpointing_base(model, blocks):
     )
 
 
-# from transformers.models.t5.modeling_t5 import T5Block
+from transformers.models.bert.modeling_bert import (
+    BertForMaskedLM,
+    BertLayer,
+    BertLMPredictionHead,
+)
 
 MODEL_FSDP_WRAP = {
-    ToyModel: (MyModule,)
-    # TODO T5: (T5Block,)
+    ToyModel: (MyModule,),
+    BertForMaskedLM: (BertLayer, BertLMPredictionHead),
 }
 
 
@@ -143,5 +147,5 @@ def apply_fsdp(model, use_checkpointing=False, use_wrap_policy=True):
     model = FSDP(model, auto_wrap_policy=wrap_policy, use_orig_params=True)
     if use_checkpointing:
         fsdp_checkpointing_base(model, blocks)
-
+    print(model)
     return model
