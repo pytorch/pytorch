@@ -37,7 +37,7 @@ try:
     import torch._inductor.config
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
-    from torch._inductor import config
+    from torch._inductor import codecache, config, metrics
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
@@ -52,7 +52,6 @@ except (ImportError, AssertionError) as e:
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
-
 
 HAS_CPU = False
 try:
@@ -2825,10 +2824,10 @@ class CommonTemplate:
     def test_upsample_nearest2d(self):
         def fn(a):
             return (
-                aten.upsample_nearest2d(a, [74, 76], None),
-                aten.upsample_nearest2d(a, [70, 75], None),
-                aten.upsample_nearest2d(a, [45, 74], None),
-                aten.upsample_nearest2d(a, [36, 39], None),
+                aten.upsample_nearest2d(a, [74, 76]),
+                aten.upsample_nearest2d(a, [70, 75]),
+                aten.upsample_nearest2d(a, [45, 74]),
+                aten.upsample_nearest2d(a, [36, 39]),
                 aten.upsample_nearest2d(a, None, [2.0, 2.0]),
             )
 
@@ -2847,25 +2846,15 @@ class CommonTemplate:
         self.common(fn, (torch.randn([2, 4, 37, 38, 39]),))
 
     def test_upsample_nearest2d_backward(self):
-        func = torch.ops.aten.upsample_nearest2d_backward.vec
+        func = torch.ops.aten.upsample_nearest2d_backward
 
         def fn(a):
             return (
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 3, 6], scale_factors=None
-                ),
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 4, 5], scale_factors=None
-                ),
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 2, 8], scale_factors=None
-                ),
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 2, 8], scale_factors=None
-                ),
-                func(
-                    a, output_size=[6, 12], input_size=[3, 3, 4, 7], scale_factors=None
-                ),
+                func(a, output_size=[6, 12], input_size=[3, 3, 3, 6]),
+                func(a, output_size=[6, 12], input_size=[3, 3, 4, 5]),
+                func(a, output_size=[6, 12], input_size=[3, 3, 2, 8]),
+                func(a, output_size=[6, 12], input_size=[3, 3, 2, 8]),
+                func(a, output_size=[6, 12], input_size=[3, 3, 4, 7]),
             )
 
         self.common(fn, (torch.randn([3, 3, 6, 12]),))
@@ -3465,6 +3454,18 @@ class CommonTemplate:
             )
 
         self.common(fn, [torch.randn(64, 64)])
+
+    def test_as_strided_scatter(self):
+        def fn(a, b):
+            return aten.as_strided_scatter(
+                a * 8 + 10,
+                b * 2 - 4,
+                size=(a.shape[0], a.shape[1] // 2),
+                stride=(a.shape[1], 2),
+                storage_offset=0,
+            )
+
+        self.common(fn, [torch.randn(10, 1024), torch.randn(10, 512)])
 
     def test_select_scatter(self):
         def fn(x, a, b):
@@ -4293,6 +4294,30 @@ class CommonTemplate:
                 else:
                     self.assertEqual(len(inps), 0)
 
+    def test_dtype_mismatch_issue(self):
+        def fn(x):
+            attn = torch.nn.functional.pad(x, [0, 1])
+            return attn.softmax(dim=-1)
+
+        x = torch.rand(128, 32, 63)
+        res_ref = fn(x)
+        res = torch._dynamo.optimize("inductor")(fn)(x)
+        self.assertEqual(res, res_ref)
+
+    @unittest.skipIf(HAS_CUDA, "histogramdd only supports cpu")
+    def test_kwargs(self):
+        def fn(x, y):
+            return torch.histogramdd(
+                x,
+                bins=[3, 3],
+                weight=y,
+            )
+
+        self.common(
+            fn,
+            [torch.randn((4, 2)), torch.randn((4))],
+        )
+
 
 if HAS_CPU:
 
@@ -4308,6 +4333,45 @@ if HAS_CPU:
     CommonTemplate.install(CpuTests, "cpu")
 
     class CPUReproTests(TestCase):
+        def test_conv_stride_constraints(self):
+            for fmt in [torch.channels_last, torch.contiguous_format]:
+                # TorchDispatch doesn't work in our cuda invocation for some reason
+                m = torch.nn.Conv2d(5, 6, [3, 3])
+
+                def fn(inp, weight):
+                    return (
+                        F.conv2d(
+                            inp, weight, None, m.stride, m.padding, m.dilation, m.groups
+                        ),
+                    )
+
+                inp = torch.randn([2, 5, 16, 16])
+                inps = [inp, m.weight.to(memory_format=fmt)]
+                fn_fx = make_fx(fn)(*inps)
+                fn_compiled = compile_fx_inner(fn_fx, inps)
+                test_self = self
+                conv_seen = False
+
+                class RecordFunctions(TorchDispatchMode):
+                    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                        kwargs = kwargs if kwargs else {}
+                        if func == torch.ops.aten.convolution.default:
+                            test_self.assertTrue(
+                                args[0].is_contiguous(memory_format=fmt)
+                            )
+                            test_self.assertTrue(
+                                args[1].is_contiguous(memory_format=fmt)
+                            )
+                            nonlocal conv_seen
+                            conv_seen = True
+
+                        return func(*args, **kwargs)
+
+                with RecordFunctions():
+                    out = fn_compiled(inps)
+
+                self.assertTrue(conv_seen)
+
         def test_inplace_squeeze_needed(self):
             mod = torch.nn.Sequential(
                 torch.nn.Linear(10, 10),
@@ -4389,6 +4453,96 @@ if HAS_CPU:
             gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
             self.assertFalse(complex_memory_overlap(gathered))
             self.assertFalse(complex_memory_overlap(gathered.t()))
+
+        @unittest.skipIf(
+            not codecache.get_cpu_proc_info(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_sign_cpu_only(self):
+            def fn(x):
+                return (torch.sign(x),)
+
+            x = torch.randn((2, 9))
+            x[0, 0] = torch.nan
+            x[1, -1] = torch.nan
+
+            with patch.object(config.cpp, "simdlen", 8):
+                torch._dynamo.reset()
+                metrics.reset()
+                traced = make_fx(fn)(x)
+                compiled = compile_fx_inner(traced, [x])
+                assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+        # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
+        # supported, the vectorization will not work and skip this test case. For ARM or
+        # other platforms support, we just need to add the ISA info to the supported_vector_isa
+        # and include proper aten vectorization head file.
+        @unittest.skipIf(
+            not codecache.get_cpu_proc_info(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_vec_kernel_cpu_only(self):
+            def fn(x1, x2):
+                # Current, there are some limitations as follows.
+                #   rsqrt:
+                #     assert [both a fallback and a decomp for same kernel: aten.rsqrt.default]
+                #   round:
+                #     couldn't find symbolic meta function/decomposition
+                #   fmod/logical_and/logic_or:
+                #     vec kernel has not support to_type
+                x = torch.abs(x1)
+                x = torch.sin(x)
+                x = torch.neg(x)
+                x = torch.square(x)
+                x = torch.sigmoid(x)
+                x = torch.relu(x)
+                x = torch.cos(x)
+                x = torch.exp(x)
+                x = torch.sqrt(x)
+                x = torch.add(x, x1)
+                x = torch.sub(x, x2)
+                x = torch.mul(x, x1)
+                x = torch.div(x, x1)
+                x = torch.pow(x, 10)
+                x = torch.log(x)
+                x = torch.floor(x)
+                x = torch.ceil(x)
+                x = torch.trunc(x)
+                x = torch.lgamma(x)
+                x = torch.fmod(x, x2)
+                x = torch.sign(x)
+                res = x + x2
+                return (res,)
+
+            x1 = torch.randn((10, 20))
+            x2 = torch.randn((10, 20))
+
+            with patch.object(config.cpp, "simdlen", 8):
+                torch._dynamo.reset()
+                metrics.reset()
+                traced = make_fx(fn)(x1, x2)
+                compiled = compile_fx_inner(traced, [x1, x2])
+                assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+                torch._dynamo.reset()
+                metrics.reset()
+                x1 = x1.permute(1, 0)
+                x2 = torch.randn((20, 10))
+                traced = make_fx(fn)(x1, x2)
+                compiled = compile_fx_inner(traced, [x1, x2])
+                assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+                torch._dynamo.reset()
+                metrics.reset()
+                x1 = torch.randn((10, 7))
+                x2 = torch.randn((10, 7))
+                traced = make_fx(fn)(x1, x2)
+                compiled = compile_fx_inner(traced, ([x1, x2]))
+                assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
 
 if HAS_CUDA:
