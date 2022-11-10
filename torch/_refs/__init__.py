@@ -2835,8 +2835,8 @@ def native_group_norm(
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
     rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
 
-    mean = prims._squeeze_aten(mean, reduction_dims)
-    rstd = prims._squeeze_aten(rstd, reduction_dims)
+    mean = prims.squeeze(mean, reduction_dims)
+    rstd = prims.squeeze(rstd, reduction_dims)
     return (out, mean, rstd)
 
 
