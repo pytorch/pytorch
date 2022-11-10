@@ -75,3 +75,17 @@ jobs:
           # TODO(https://github.com/pytorch/pytorch/issues/79293)
 
           ${CONDA_RUN} python3 test/run_test.py --mps --verbose
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
+        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
+        with:
+          use-gha: true
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
