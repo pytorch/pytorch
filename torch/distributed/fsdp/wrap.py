@@ -30,9 +30,10 @@ def always_wrap_policy(*args, **kwargs) -> bool:
     return True
 
 
-class AutoWrapPolicy(ABC):
+class FSDPPolicy(ABC):
     """
-    This defines an abstract base class that represents an auto wrap policy.
+    This defines an abstract base class that represents an FSDP policy for
+    constructing ``FlatParameter`` s.
     """
 
     # The motivation for this abstract base class is to hide the interface
@@ -43,7 +44,7 @@ class AutoWrapPolicy(ABC):
 
     @property
     @abstractmethod
-    def auto_wrap_policy(self) -> Callable:
+    def policy(self) -> Callable:
         ...
 
 
@@ -79,18 +80,18 @@ def _module_wrap_policy(
     return isinstance(module, tuple(module_classes))
 
 
-class ModuleWrapPolicy(AutoWrapPolicy):
+class ModuleWrapPolicy(FSDPPolicy):
     """This is a wrapper around :func:`_module_wrap_policy`."""
 
     def __init__(self, module_classes: Set[Type[nn.Module]]):
-        self._auto_wrap_policy: Callable = functools.partial(
+        self._policy: Callable = functools.partial(
             _module_wrap_policy,
             module_classes=module_classes,
         )
 
     @property
-    def auto_wrap_policy(self):
-        return self._auto_wrap_policy
+    def policy(self):
+        return self._policy
 
 
 def lambda_auto_wrap_policy(
@@ -172,7 +173,7 @@ def size_based_auto_wrap_policy(
     recurse: bool,
     nonwrapped_numel: int,
     # Additional custom arguments
-    min_nonwrapped_numel: int = int(1e8),
+    min_num_params: int = int(1e8),
     force_leaf_modules: Optional[Set[Type[nn.Module]]] = None,
     exclude_wrap_modules: Optional[Set[Type[nn.Module]]] = None,
 ) -> bool:
@@ -187,8 +188,9 @@ def size_based_auto_wrap_policy(
             tree as a part of the DFS.
         nonwrapped_numel (int): Parameter numel not yet wrapped.
 
-        min_nonwrapped_numel (int): Customizable policy input that controls the
-            size threshold over which a module is ready to be wrapped.
+        min_num_params (int): Customizable policy input that controls the size
+            threshold over which a module is ready to be wrapped. This is in
+            units of numel.
         force_leaf_modules (Set[Type[nn.Module]]): Set of module types to keep
             as leaves, i.e. their children will never be wrapped.
         exclude_wrap_modules (Set[Type[nn.Module]]): Set of module types to be
@@ -208,6 +210,9 @@ def size_based_auto_wrap_policy(
         else exclude_wrap_modules
     )
 
+    # Keep the argument `min_num_params` for BC for now, but it represents the
+    # minimum non-wrapped *numel* before triggering a wrapping
+    min_nonwrapped_numel = min_num_params
     is_large = nonwrapped_numel >= min_nonwrapped_numel
     if recurse:
         # We should recurse if the module is big enough but not in force_leaf_modules list.

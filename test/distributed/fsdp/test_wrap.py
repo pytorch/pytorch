@@ -19,8 +19,8 @@ from torch.distributed.fsdp.wrap import (
     _or_policy,
     _wrap_batchnorm_individually,
     always_wrap_policy,
-    AutoWrapPolicy,
     enable_wrap,
+    FSDPPolicy,
     ModuleWrapPolicy,
     size_based_auto_wrap_policy,
     transformer_auto_wrap_policy,
@@ -386,9 +386,7 @@ class TestAutoWrap(TestCase):
         )
         self._test_transformer_wrapping(auto_wrap_policy)
 
-    def _test_transformer_wrapping(
-        self, auto_wrap_policy: Union[Callable, AutoWrapPolicy]
-    ):
+    def _test_transformer_wrapping(self, auto_wrap_policy: Union[Callable, FSDPPolicy]):
         fsdp_kwargs = {"auto_wrap_policy": auto_wrap_policy}
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,

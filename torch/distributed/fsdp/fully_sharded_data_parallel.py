@@ -93,7 +93,7 @@ from ._state_dict_utils import (
 )
 from ._utils import p_assert
 from .flat_param import FlatParameter, FlatParamHandle
-from .wrap import AutoWrapPolicy
+from .wrap import FSDPPolicy
 
 
 __all__ = [
@@ -275,26 +275,22 @@ class FullyShardedDataParallel(nn.Module):
 
     Args:
         module (nn.Module):
-            module to be wrapped with FSDP.
+            This is the module to be wrapped with FSDP.
         process_group (Optional[ProcessGroup]):
-            process group for sharding
+            This is the process group used for collective communications.
         sharding_strategy (Optional[ShardingStrategy]):
-            Config sharding algorithm, different sharding algorithm has trade
-            off between memory saving and communication overhead. ``FULL_SHARD``
-            will be chosen if sharding_strategy is not specified.
+            This configures the sharding strategy used by FSDP, which may trade
+            off memory saving and communication overhead. See
+            :class:`ShardingStrategy` for details. (Default: ``FULL_SHARD``)
         cpu_offload (Optional[CPUOffload]):
-            CPU offloading config. Currently, only parameter and gradient CPU
-            offload is supported. It can be enabled via passing in
-            ``cpu_offload=CPUOffload(offload_params=True)``. Note that this
-            currently implicitly enables gradient offloading to CPU in order for
-            params and grads to be on same device to work with optimizer. This
-            API is subject to change. Default is ``None`` in which case there
-            will be no offloading.
-        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], AutoWrapPolicy]]):
-            This is either ``None``, an ``AutoWrapPolicy``, or a callable of
+            This configures CPU offloading. If this is set to ``None``, then
+            no CPU offloading happens. See :class:`CPUOffload` for details.
+            (Default: ``None``)
+        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], FSDPPolicy]]):
+            This is either ``None``, an ``FSDPPolicy``, or a callable of
             a fixed signature. If it is ``None``, then ``module`` is wrapped
             with only a top-level FSDP instance without any nested wrapping. If
-            it is an ``AutoWrapPolicy``, then the wrapping follows the given
+            it is an ``FSDPPolicy``, then the wrapping follows the given
             policy. ``ModuleWrapPolicy`` in ``torch.distributed.fsdp.wrap.py``
             is an example. If it is a callable, then it should take in three
             arguments ``module: nn.Module``, ``recurse: bool``, and
@@ -322,25 +318,13 @@ class FullyShardedDataParallel(nn.Module):
                 >>> my_auto_wrap_policy = functools.partial(custom_auto_wrap_policy, min_num_params=int(1e5))
 
         backward_prefetch (Optional[BackwardPrefetch]):
-            This is an experimental feature that is subject to change in the
-            the near future. It allows users to enable two different backward_prefetch
-            algorithms to help backward communication and computation overlapping.
-            Pros and cons of each algorithm is explained in the class ``BackwardPrefetch``.
-        mixed_precision (Optional[MixedPrecision]): A ``MixedPrecision`` instance
-            describing the mixed precision training config to be used. ``MixedPrecision``
-            supports configuring parameter, buffer, and gradient communication dtype. Note
-            that only floating point data is cast to the reduced precision. This allows
-            users potential memory saving and training speedup while trading off
-            accuracy during model training. If ``None``, no mixed precision is applied.
-            Note that if ``mixed_precision`` is enabled for FSDP model that
-            contains ``BatchNorm`` with ``auto_wrap_policy``, FSDP will take
-            care to disable mixed precision for ``BatchNorm`` units by wrapping
-            them separately in their own FSDP unit with ``mixed_precision=None``.
-            This is done because several ``BatchNorm`` kernels do not implement
-            reduced type support at the moment. If individually wrapping the model,
-            users must take care to set ``mixed_precision=None`` for
-            ``BatchNorm`` units.
-            (Default: ``None``)
+            This configures explicit backward prefetching of all-gathers. See
+            :class:`BackwardPrefetch` for details. (Default: ``BACKWARD_PRE``)
+        mixed_precision (Optional[MixedPrecision]):
+            This configures native mixed precision for FSDP. If this is set to
+            ``None``, then no mixed precision is used. Otherwise, parameter,
+            buffer, and gradient reduction dtypes can be set. See
+            :class:`MixedPrecision` for details. (Default: ``None``)
         ignored_modules (Optional[Iterable[torch.nn.Module]]): Modules whose
             own parameters and child modules' parameters and buffers are
             ignored by this instance. None of the modules directly in
@@ -360,7 +344,7 @@ class FullyShardedDataParallel(nn.Module):
             is not specified, otherwise we run ``param_init_fn`` to initialize the passed
             in ``nn.Module``. In particular, this means that if ``is_meta=True`` for any
             module parameters for modules that will be wrapped with FSDP and ``param_init_fn``
-            is not specified, we assume your module properly implements a ``reset_paramters()``
+            is not specified, we assume your module properly implements a ``reset_parameters()``
             and will throw errors if not. Note that additionally, we offer support for modules
             initialized with torchdistX's (https://github.com/pytorch/torchdistX)
             ``deferred_init`` API. In this case, deferred modules would be initialized
@@ -421,7 +405,7 @@ class FullyShardedDataParallel(nn.Module):
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
         auto_wrap_policy: Optional[Callable] = None,
-        backward_prefetch: Optional[BackwardPrefetch] = None,
+        backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
@@ -437,8 +421,8 @@ class FullyShardedDataParallel(nn.Module):
         _init_ignored_module_states(self, module, ignored_modules)
         if auto_wrap_policy is not None:
             # Support new way to pass an auto wrap policy
-            if isinstance(auto_wrap_policy, AutoWrapPolicy):
-                auto_wrap_policy = auto_wrap_policy.auto_wrap_policy
+            if isinstance(auto_wrap_policy, FSDPPolicy):
+                auto_wrap_policy = auto_wrap_policy.policy
             auto_wrap_kwargs = {
                 "module": module,
                 "auto_wrap_policy": auto_wrap_policy,
