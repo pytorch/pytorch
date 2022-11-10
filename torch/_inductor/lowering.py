@@ -3095,7 +3095,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
     denom = sympy_product(size[i] for i in axis)
     denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
-    return to_dtype(div(sum_result, denom), output_dtype)
+    return to_dtype(true_divide(sum_result, denom), output_dtype)
 
 
 @register_lowering([aten.var, prims.var])
@@ -3110,7 +3110,7 @@ def var_(x, axis, correction=1, keepdim=False):
         denom = denom - correction
     denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
-    return div(sum_result, denom)
+    return true_divide(sum_result, denom)
 
 
 @register_lowering(aten.var_mean)
@@ -3245,7 +3245,7 @@ def mul(a, b):
 # NOTE: prims.div maps to a / b in C, so performs truncation division on
 #   integer inputs and true division for floating and complex inputs.
 @register_lowering([prims.div], broadcast=True)
-def div(a, b):
+def div_prim(a, b):
     is_integral = is_boolean_type(a) or is_integer_type(a)
 
     if is_integral:
@@ -3261,7 +3261,14 @@ def div(a, b):
     return make_pointwise(fn)(a, b)
 
 
-@register_lowering([aten.fmod, prims.fmod])
+true_divide = register_lowering(
+    [aten.true_divide, aten.div.Tensor],
+    broadcast=True,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)(div_prim)
+
+
+@register_lowering([aten.fmod, prims.fmod], broadcast=True)
 def fmod(a, b):
     is_integral = is_boolean_type(a) or is_integer_type(a)
 
@@ -3407,7 +3414,7 @@ def register_inplace(aten_op, outplace_op):
 
 register_inplace(aten.add_, add)
 register_inplace(aten.mul_, mul)
-register_inplace(aten.div_, div)
+register_inplace(aten.div_.Tensor, true_divide)
 register_inplace(aten.sub_, sub)
 register_inplace(aten.relu_, relu)
 register_inplace(aten.sigmoid_, sigmoid)
