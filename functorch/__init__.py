@@ -24,6 +24,7 @@ from ._src.make_functional import (
     make_functional_with_buffers,
     make_functional,
     combine_state_for_ensemble,
+    combine_weights_for_ensemble,
     FunctionalModule,
     FunctionalModuleWithBuffers,
 )

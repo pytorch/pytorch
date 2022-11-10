@@ -497,6 +497,54 @@ def combine_state_for_ensemble(models):
     return funcs[0], params, buffers
 
 
+def combine_weights_for_ensemble(models):
+    """combine_weights_for_ensemble(models) -> params, buffers
+
+    Prepares a list of torch.nn.Modules for ensembling with :func:`vmap`.
+
+    Given a list of ``M`` ``nn.Modules`` of the same class, returns two dictionaries
+    that stack all of their parameters and buffers together, indexed by name.
+
+    Here's an example of how to ensemble over a very simple model:
+
+    .. code-block:: python
+
+        num_models = 5
+        batch_size = 64
+        in_features, out_features = 3, 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        data = torch.randn(batch_size, 3)
+
+        def wrapper(params, buffers, data):
+            return torch.nn.utils.stateless.functional_call(model[0], {**params, **buffers}, data)
+
+        params, buffers = combine_weights_for_ensemble(models)
+        output = vmap(wrapper, (0, 0, None))(params, buffers, data)
+
+        assert output.shape == (num_models, batch_size, out_features)
+
+    .. warning::
+        All of the modules being stacked together must be the same (except for
+        the values of their parameters/buffers). For example, they should be in the
+        same mode (training vs eval).
+    """
+    if len(models) == 0:
+        raise RuntimeError('combine_state_for_ensemble: Expected at least one model, got 0.')
+    if not (all(m.training for m in models) or all(not m.training for m in models)):
+        raise RuntimeError('combine_state_for_ensemble: Expected all models to '
+                           'have the same training/eval mode.')
+    model0_typ = type(models[0])
+    if not all(type(m) == model0_typ for m in models):
+        raise RuntimeError('combine_state_for_ensemble: Expected all models to '
+                           'be of the same class.')
+    all_params = [{k: v for k, v in model.named_parameters()} for model in models]
+    params = {k: torch.stack(tuple(params[k] for params in all_params)) for k in all_params[0]}
+    all_buffers = [{k: v for k, v in model.named_buffers()} for model in models]
+    buffers = {k: torch.stack(tuple(buffers[k] for buffers in all_buffers)) for k in all_buffers[0]}
+
+    return params, buffers
+
+
 def functional_init(model_class, ensemble_shape=(), device='cpu'):
     def wrapped(*args, **kwargs):
         if len(ensemble_shape) >= 2:
