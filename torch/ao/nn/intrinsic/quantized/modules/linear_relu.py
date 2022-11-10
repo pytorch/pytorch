@@ -64,7 +64,7 @@ class LinearLeakyReLU(nnq.Linear):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.ops.quantized.linear_leaky_relu(
-            x, self._packed_params._packed_params, self.negative_slope, self.scale, self.zero_point)
+            x, self._packed_params._packed_params, self.scale, self.zero_point, self.negative_slope)
 
     def _get_name(self):
         return 'QuantizedLinearLeakyReLU'
