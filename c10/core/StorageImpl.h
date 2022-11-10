@@ -71,6 +71,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
         size_bytes_is_symbolic_(size_bytes_.is_symbolic()),
         resizable_(resizable),
         received_cuda_(false),
+        warn_on_write_(false),
         allocator_(allocator) {
     if (resizable) {
       TORCH_INTERNAL_ASSERT(

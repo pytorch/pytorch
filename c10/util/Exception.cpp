@@ -177,6 +177,7 @@ WarnAlways::~WarnAlways() {
 } // namespace WarningUtils
 
 void warn(const Warning& warning) {
+  TORCH_INTERNAL_ASSERT(0);
   WarningUtils::ThreadWarningHandler::get_handler()->process(warning);
 }
 
