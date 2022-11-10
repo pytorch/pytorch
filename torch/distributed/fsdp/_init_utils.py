@@ -43,7 +43,7 @@ from torch.distributed.fsdp.flat_param import (
     HandleConfig,
     HandleShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import AutoWrapPolicy
+from torch.distributed.fsdp.wrap import FSDPPolicy
 from torch.distributed.utils import _sync_params_and_buffers
 from torch.utils.hooks import RemovableHandle
 
@@ -255,7 +255,7 @@ def _init_param_handle_from_module(
 def _init_param_handles_from_module(
     state: _FSDPState,
     root_module: nn.Module,
-    auto_wrap_policy: AutoWrapPolicy,
+    auto_wrap_policy: FSDPPolicy,
     device_id: Optional[Union[int, torch.device]],
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
