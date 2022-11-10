@@ -46,6 +46,9 @@ def _auto_wrap(
     ``fsdp_kwargs`` contains all FSDP arguments except ``module``.
     """
     auto_wrap_policy = auto_wrap_kwargs["auto_wrap_policy"]
+    # Support new way to pass an auto wrap policy
+    if isinstance(auto_wrap_policy, _FSDPPolicy):
+        auto_wrap_policy = auto_wrap_policy.policy
     root_module = auto_wrap_kwargs["module"]
     assert auto_wrap_policy is not None
     # For auto wrapping, submodules should not already be wrapped with FSDP
