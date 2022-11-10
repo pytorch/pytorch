@@ -1078,7 +1078,12 @@ class Scheduler:
 
             return CppScheduling(self)
         else:
-            assert has_triton(), f"Found {device.type}, but triton is not installed. Please install triton."
+            if not has_triton():
+                device_props = torch.cuda.get_device_properties(device)
+                if device_props.major < 6:
+                    raise RuntimeError(f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 6.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}")
+                else:
+                    raise RuntimeError(f"Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton")
             from .codegen.triton import TritonScheduling
 
             return TritonScheduling(self)
