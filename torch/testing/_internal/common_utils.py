@@ -2159,7 +2159,10 @@ class TestCase(expecttest.TestCase):
         elif (RERUN_DISABLED_TESTS or report_only) and num_retries_left < MAX_NUM_RETRIES:
             # Always re-run up to MAX_NUM_RETRIES when running under report only or rerun disabled tests modes
             print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
-            result.addUnexpectedSuccess(self)
+            if RERUN_DISABLED_TESTS:
+                result.addSuccess(self)
+            else:
+                result.addUnexpectedSuccess(self)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red, num_green=num_green + 1)
         elif not report_only and num_retries_left < MAX_NUM_RETRIES:
