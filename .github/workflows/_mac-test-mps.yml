@@ -66,6 +66,7 @@ jobs:
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
 
       - name: Run MPS tests
+        id: test
         env:
           ENV_NAME: conda-test-env-${{ github.run_id }}
         shell: arch -arch arm64 bash {0}
@@ -88,4 +89,4 @@ jobs:
         if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
           use-gha: true
-          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+          file-suffix: ${{ github.job }}-mps-1-1-macos-m1-12_${{ steps.get-job-id.outputs.job-id }}
