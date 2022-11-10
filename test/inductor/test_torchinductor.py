@@ -4893,14 +4893,13 @@ if HAS_CUDA:
             with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
                 graph.run(*(cxt.example_args))
                 mod = graph.compile_to_module()
-                i = 0
-                while True:
-                    attribute = f"kernel{i}"
-                    if not hasattr(mod, attribute):
-                        break
-                    else:
-                        kernels.append(getattr(mod, attribute))
-                        i = i + 1
+
+                for val in mod.__dict__.values():
+                    if isinstance(
+                        val, torch._inductor.triton_ops.autotune.CachingAutotuner
+                    ):
+                        kernels.append(val)
+
             return kernels
 
         def test_divisibile_by_16_covers_numel_args(self):
