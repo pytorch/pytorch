@@ -3017,10 +3017,10 @@ class Convolution(ExternKernelAlloc):
         groups: int,
     ):
         with torch._subclasses.FakeTensorMode():
-            x_fake = ir_node_to_tensor(x, guard_shape=False)
-            weight_fake = ir_node_to_tensor(weight, guard_shape=False)
+            x_fake = ir_node_to_tensor(x, guard_shape=True)
+            weight_fake = ir_node_to_tensor(weight, guard_shape=True)
             bias_fake = (
-                ir_node_to_tensor(bias, guard_shape=False) if bias is not None else bias
+                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
             )
             output = torch.ops.aten.convolution(
                 x_fake,
@@ -3043,22 +3043,6 @@ class Convolution(ExternKernelAlloc):
         assert isinstance(transposed, bool)
         output_padding = tuple(output_padding_)
         assert isinstance(groups, int)
-
-        # TODO - enable FakeTensorMode for propagation more globally. incorrect stride metas for fallback
-        # kernels will lead to runtime failures
-        with FakeTensorMode():
-            output, *_ = cls.process_kernel(
-                torch.ops.aten.convolution,
-                x,
-                weight,
-                bias,
-                stride,
-                padding,
-                dilation,
-                transposed,
-                output_padding,
-                groups,
-            )
 
         output_size = output.shape
 
@@ -3140,7 +3124,7 @@ class Convolution(ExternKernelAlloc):
             x.get_device(),
             x.get_dtype(),
             output_size,
-            stride_order,
+            output.stride(),
         )
 
         if bias is not None:
@@ -3159,13 +3143,6 @@ class Convolution(ExternKernelAlloc):
                 stride_order,
                 kernel,
             )
-
-    def apply_constraint(self):
-        x = self.inputs[0]
-        # FixedLayout of input
-        x = self.require_stride_order(x, self.layout.preferred_stride_order)
-        self.inputs[0] = x
-        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
     def map_args(self):
         # x, w, bias
