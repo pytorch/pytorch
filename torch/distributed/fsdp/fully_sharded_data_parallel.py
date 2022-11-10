@@ -93,7 +93,6 @@ from ._state_dict_utils import (
 )
 from ._utils import p_assert
 from .flat_param import FlatParameter, FlatParamHandle
-from .wrap import _FSDPPolicy
 
 
 __all__ = [
@@ -420,9 +419,6 @@ class FullyShardedDataParallel(nn.Module):
 
         _init_ignored_module_states(self, module, ignored_modules)
         if auto_wrap_policy is not None:
-            # Support new way to pass an auto wrap policy
-            if isinstance(auto_wrap_policy, _FSDPPolicy):
-                auto_wrap_policy = auto_wrap_policy.policy
             auto_wrap_kwargs = {
                 "module": module,
                 "auto_wrap_policy": auto_wrap_policy,
