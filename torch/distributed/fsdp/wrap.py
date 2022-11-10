@@ -18,6 +18,7 @@ __all__ = [
     "size_based_auto_wrap_policy",
     "enable_wrap",
     "wrap",
+    "ModuleWrapPolicy",
 ]
 
 
@@ -30,7 +31,7 @@ def always_wrap_policy(*args, **kwargs) -> bool:
     return True
 
 
-class FSDPPolicy(ABC):
+class _FSDPPolicy(ABC):
     """
     This defines an abstract base class that represents an FSDP policy for
     constructing ``FlatParameter`` s.
@@ -79,7 +80,7 @@ def _module_wrap_policy(
     return isinstance(module, tuple(module_classes))
 
 
-class ModuleWrapPolicy(FSDPPolicy):
+class ModuleWrapPolicy(_FSDPPolicy):
     """This is a wrapper around :func:`_module_wrap_policy`."""
 
     def __init__(self, module_classes: Set[Type[nn.Module]]):
