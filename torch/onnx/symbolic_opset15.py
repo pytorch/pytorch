@@ -56,7 +56,7 @@ def aten__isnot_(g: jit_utils.GraphContext, self, other):
 
 @_onnx_symbolic("aten::bernoulli")
 @_beartype.beartype
-def bernoulli(g: jit_utils.GraphContext, input, tensor_or_prob=None, generator=None, out=None):
+def bernoulli(g: jit_utils.GraphContext, input, p=None, generator=None, out=None):
     if out is not None and not symbolic_helper._is_none(out):
         symbolic_helper._unimplemented(
             "Bernoulli", "out parameter is not supported for bernoulli", input
@@ -65,9 +65,9 @@ def bernoulli(g: jit_utils.GraphContext, input, tensor_or_prob=None, generator=N
         symbolic_helper._unimplemented(
             "Bernoulli", "generator is not supported for bernoulli", input
         )
-    if tensor_or_prob is None or symbolic_helper._is_none(tensor_or_prob):
+    if p is None or symbolic_helper._is_none(p):
         return g.op("Bernoulli", input)
-    return opset9.bernoulli(g, input, tensor_or_prob, generator, out)
+    return opset9.bernoulli(g, input, p, generator, out)
 
 
 @_onnx_symbolic("prim::unchecked_cast")
