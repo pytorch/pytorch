@@ -218,8 +218,23 @@ class SymInt:
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
+    def __eq__(self, other: object) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __lt__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __gt__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __le__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
     def __sym_float__(self):
-        ...
+        raise AssertionError("type stub not overridden")
 
     def __repr__(self):
         return self.node.str()
@@ -247,8 +262,20 @@ class SymFloat:
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
-    def __sym_int__(self):
-        ...
+    def __eq__(self, other: object) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __lt__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __gt__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __le__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
 
     def __repr__(self):
         return self.node.str()
