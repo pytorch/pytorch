@@ -19,7 +19,10 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 import torch.testing._internal.common_methods_invocations as common_ops
-from torch.testing._internal.common_methods_invocations import op_db, DecorateInfo
+from torch.testing._internal.common_methods_invocations import (
+    op_db,
+    DecorateInfo,
+)
 
 from torch.distributed._tensor import DTensor, DeviceMesh, Replicate
 from torch.testing._internal.common_dtensor import (

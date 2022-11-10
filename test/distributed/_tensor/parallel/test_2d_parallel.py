@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import functools
 from typing import Any
 
 
@@ -85,10 +84,6 @@ def _replicate_input_tensor(
     return module
 
 
-def _gradient_hook(param, grad):
-    param._local_tensor.grad = grad._local_tensor
-
-
 def shard_module(m, pg):
     start_idx = distributed_c10d.get_global_rank(pg, 0)
     device_mesh = DeviceMesh(
@@ -111,14 +106,6 @@ def shard_module(m, pg):
     )
     m = _replicate_input_tensor(m, device_mesh, replicate)
     m.net2 = _aggregate_local_tensor(m.net2)
-    m.net1.weight.register_hook(
-        functools.partial(_gradient_hook, m.net1.weight)
-    )
-    m.net2.weight.register_hook(
-        functools.partial(_gradient_hook, m.net2.weight)
-    )
-    m.net1.bias.register_hook(functools.partial(_gradient_hook, m.net1.bias))
-    m.net2.bias.register_hook(functools.partial(_gradient_hook, m.net2.bias))
 
 
 def _shard_wrap_module(module, module_shard, fsdp_wrap, tp_pg, fsdp_pg):
@@ -173,11 +160,11 @@ def is_nested_tensor(val: Any) -> bool:
 class Test2dParallelIntegration(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_2d_fsdp_integration(self) -> None:
+    def test_2d_fsdp_integration_functionality(self) -> None:
         if not is_available():
             self.skipTest("FSDP 2d parallel integration not available")
 
-        model_tp, tp_pg, dp_pg = init_model()
+        model_tp = init_model()[0]
 
         with FSDP.state_dict_type(model_tp, StateDictType.SHARDED_STATE_DICT):
             state_dict = model_tp.state_dict()
@@ -203,6 +190,33 @@ class Test2dParallelIntegration(DTensorTestBase):
         self.assertFalse(
             is_nested_tensor(optim_state["state"]["net3.bias"]["exp_avg"])
         )
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_2d_fsdp_integration_correctness(self) -> None:
+        if not is_available():
+            self.skipTest("FSDP 2d parallel integration not available")
+        torch.manual_seed(0)
+        model = SimpleModel().cuda(self.rank)
+        model = FSDP(model)
+        torch.manual_seed(0)
+        model_2d, _, dp_pg = init_model()
+
+        optim = torch.optim.Adam(model.parameters(), lr=0.0001)
+        optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.0001)
+
+        for i in range(5):
+            # Ensure all input across TP ranks are same.
+            torch.manual_seed(i + dist.get_rank(dp_pg))
+            input = torch.rand(4, 5).cuda(self.rank)
+            output = model(input)
+            output_2d = model_2d(input)
+            self.assertEqual(output, output_2d)
+            output.sum().backward()
+            output_2d.sum().backward()
+            optim.step()
+            optim_2d.step()
+            self.assertEqual(model(input), model_2d(input))
 
 
 if __name__ == "__main__":

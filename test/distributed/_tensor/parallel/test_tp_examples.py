@@ -3,7 +3,6 @@
 
 import torch
 import torch.nn as nn
-import functools
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_dtensor import (
     DTensorTestBase,
@@ -53,10 +52,6 @@ def _aggregate_local_tensor(module: torch.nn.Module) -> torch.nn.Module:
     return module
 
 
-def _gradient_hook(param, grad):
-    param._local_tensor.grad = grad._local_tensor
-
-
 def shard_mlp(m, device_type, tp_size):
     start_idx = 0
     device_mesh = DeviceMesh(
@@ -67,7 +62,7 @@ def shard_mlp(m, device_type, tp_size):
     row_wise_sharding = [Shard(1)]
     replicate = [Replicate()] * device_mesh.ndim
 
-    def shard_params(name, module):
+    def shard_params(name, module, device_mesh):
         if isinstance(module, nn.Linear):
             if name == "net1":
                 sharded_weight = nn.Parameter(
@@ -82,9 +77,6 @@ def shard_mlp(m, device_type, tp_size):
                 )
                 module.register_parameter("weight", sharded_weight)
                 module.register_parameter("bias", sharded_bias)
-                module.weight.register_hook(
-                    functools.partial(_gradient_hook, module.weight)
-                )
             elif name == "net2":
                 sharded_weight = nn.Parameter(
                     distribute_tensor(
@@ -97,15 +89,10 @@ def shard_mlp(m, device_type, tp_size):
                 module.register_parameter("weight", sharded_weight)
                 module.register_parameter("bias", replicated_bias)
 
-    def replicate_input(inputs):
-        return DTensor.from_local(inputs[0], device_mesh, replicate)
-
-    def aggregate_output(outputs):
+    def aggregate_output(outputs, device_mesh):
         assert isinstance(outputs, DTensor)
         return (
-            outputs.redistribute(outputs.device_mesh, replicate)
-            .contiguous()
-            .to_local()
+            outputs.redistribute(device_mesh, replicate).contiguous().to_local()
         )
 
     dist_mod = distribute_module(
@@ -157,8 +144,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
         output.sum().backward()
         output_tp.sum().backward()
-        # This is for FSDP + TP integration.
-        self.assertTrue(model_tp.net1.weight._local_tensor.grad is not None)
 
         device_mesh = model_tp.net1.weight.device_mesh
         replicate = [Replicate()] * device_mesh.ndim
@@ -264,8 +249,8 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         distribute_module(
             model_tp,
             device_mesh,
-            partition_fn=tp_shard_self_attn(device_mesh),
-            input_fn=replicate_input(device_mesh),
+            partition_fn=tp_shard_self_attn,
+            input_fn=replicate_input,
             output_fn=replicate_output,
         )
 
@@ -421,8 +406,8 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         distribute_module(
             model_tp,
             device_mesh,
-            partition_fn=tp_shard_self_attn(device_mesh),
-            input_fn=replicate_input(device_mesh),
+            partition_fn=tp_shard_self_attn,
+            input_fn=replicate_input,
             output_fn=replicate_output,
         )
 

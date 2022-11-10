@@ -1,8 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import torch
 import torch.nn as nn
-import functools
-from typing import Sequence, Tuple, Callable
+from typing import Sequence, Tuple
 from torch.distributed._tensor import (
     distribute_tensor,
     DTensor,
@@ -14,7 +13,7 @@ from torch.distributed._tensor import (
 from torch.distributed._tensor.parallel import TensorParallelMultiheadAttention
 
 
-def _replicate_input(
+def replicate_input(
     inputs: Sequence[torch.Tensor], device_mesh: DeviceMesh
 ) -> Tuple[DTensor, ...]:
     replicate = [Replicate()] * device_mesh.ndim
@@ -23,7 +22,18 @@ def _replicate_input(
     )
 
 
-def _shard_self_attn(
+def replicate_output(output: DTensor, device_mesh: DeviceMesh) -> torch.Tensor:
+    if isinstance(output, DTensor):
+        replicate = [Replicate()] * output.device_mesh.ndim
+        # TODO: can the output be left incontiguous?
+        return (
+            output.redistribute(output.device_mesh, replicate)
+            .to_local()
+            .contiguous()
+        )
+
+
+def tp_shard_self_attn(
     name: str, module: nn.Module, device_mesh: DeviceMesh
 ) -> None:
     col_wise_sharding: Sequence[Placement] = [Shard(0)]
@@ -74,26 +84,3 @@ def _shard_self_attn(
                 )
                 tp_multi_head_attention.copy(m)
                 module.register_module(n, tp_multi_head_attention)
-
-
-def tp_shard_self_attn(
-    device_mesh: DeviceMesh,
-) -> Callable[[str, nn.Module], None]:
-    return functools.partial(_shard_self_attn, device_mesh=device_mesh)
-
-
-def replicate_input(
-    device_mesh: DeviceMesh,
-) -> functools.partial[Tuple[DTensor, ...]]:
-    return functools.partial(_replicate_input, device_mesh=device_mesh)
-
-
-def replicate_output(output: DTensor) -> torch.Tensor:
-    if isinstance(output, DTensor):
-        replicate = [Replicate()] * output.device_mesh.ndim
-        # TODO: can the output be left incontiguous?
-        return (
-            output.redistribute(output.device_mesh, replicate)
-            .to_local()
-            .contiguous()
-        )

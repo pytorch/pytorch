@@ -1,5 +1,4 @@
 import warnings
-import functools
 import copy
 from typing import List, NamedTuple, Optional, Tuple, cast
 
@@ -206,21 +205,12 @@ def _unflatten_tensor(
             process_group=cast(dist.ProcessGroup, sharding_info.process_group),
         )
     else:
-
-        def _dt_gradient_hook(
-            param: DistributedTensor, grad: DistributedTensor
-        ) -> None:
-            param.grad = grad
-            param._local_tensor.grad = grad._local_tensor
-
-        result = dtensor = DistributedTensor.from_local(
+        result = DistributedTensor.from_local(
             tensor,
             device_mesh=sharding_info.device_mesh,
             placements=sharding_info.placements,
             run_check=False,
         )
-        if dtensor.requires_grad:
-            dtensor.register_hook(functools.partial(_dt_gradient_hook, dtensor))
 
     _set_fsdp_flattened(result)
     return result

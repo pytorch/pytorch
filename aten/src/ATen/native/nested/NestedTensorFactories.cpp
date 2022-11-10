@@ -114,21 +114,10 @@ Tensor& copy_nested_(Tensor& self, const Tensor& src, bool non_blocking) {
   const auto* nt_self = get_nested_tensor_impl(self);
   const auto* nt_src = get_nested_tensor_impl(src);
   TORCH_CHECK(
-      at::equal(nt_self->get_nested_size_tensor(), nt_src->get_nested_size_tensor()),
+      at::equal(
+          nt_self->get_nested_size_tensor(), nt_src->get_nested_size_tensor()),
       "copy_ only supports tensors that are the same size for Nested implementations");
   nt_self->get_buffer().copy_(nt_src->get_buffer(), non_blocking);
-  return self;
-}
-
-Tensor& fill_nested_(Tensor& self, const Scalar& value) {
-  const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
-  self_buf.fill_(value);
-  return self;
-}
-
-Tensor& fill_nested_(Tensor& self, const Tensor& value) {
-  const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
-  self_buf.fill_(value);
   return self;
 }
 
