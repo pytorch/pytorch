@@ -26,16 +26,34 @@ decomposition_table = global_decomposition_table["post_autograd"]
 pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
 meta_table = global_decomposition_table["meta"]
 
-meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
-# decompositions which have been disabled as meta kernel implementations,
-# usually due to mismatching strides, aliasing, or other inconsistent property
-_disabled_meta_decomps = set()
+def _add_op_to_registry(registry, op, fn):
+    """
+    This is an internal API for adding an op to the decomposition table.
+
+    If op is OpOverload, it will be added to the registry directly.
+    If op is OpOverloadPacket, all the valid op_overloads in the packet will be added to the registry.
+    """
+    overloads = []
+    if isinstance(op, OpOverload):
+        overloads.append(op)
+    else:
+        assert isinstance(op, OpOverloadPacket)
+        for ol in op.overloads():
+            overloads.append(getattr(op, ol))
+
+    for op_overload in overloads:
+        if op_overload in registry:
+            raise RuntimeError(f"duplicate registrations for {op_overload}")
+
+        # TorchScript dumps a bunch of extra nonsense overloads
+        # which don't have corresponding dispatcher entries, we need
+        # to filter those out, e.g aten.add.float_int
+        if torch._C._dispatch_has_kernel(op_overload.name()):
+            registry[op_overload] = fn
 
 
-def register_decomposition(
-    aten_op, registry=None, *, type="post_autograd", disable_meta: bool = False
-):
+def register_decomposition(aten_op, registry=None, *, type="post_autograd"):
     """
     A decorator to register a function as a decomposition to the Python
     decomposition table.  Use it like this::
@@ -52,9 +70,8 @@ def register_decomposition(
     autograd) and not just backend tracing, where we then need to know if a
     decomposition can be used to simulate a transform.
 
-    By default, if the decomposition is for an operator that doesn't have
-    a Meta implementation, we will register it to the dispatcher.  Use
-    `disable_meta` to disable this behavior.
+    By default, we also will register it to the Meta key of dispatcher,
+    and replace the c++ Meta implementation if there is already one.
     """
 
     assert type in {"post_autograd", "pre_autograd", "meta"}
@@ -106,62 +123,11 @@ def register_decomposition(
         if registry is None:
             registry = global_decomposition_table[type]
 
-        def add_op_to_table(aten_op):
-            overloads = []
-            if isinstance(aten_op, OpOverload):
-                overloads.append(aten_op)
-            else:
-                assert isinstance(aten_op, OpOverloadPacket)
-                for ol in aten_op.overloads():
-                    overloads.append(getattr(aten_op, ol))
-            for op_overload in overloads:
-                if op_overload in registry:
-                    raise RuntimeError(f"duplicate registrations for {op_overload}")
-                registry[op_overload] = fn
-                op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
-                # TODO: factor this logic into OpOverload or Library API
-                name = op_overload._schema.name
-                if op_overload._schema.overload_name:
-                    name += "." + op_overload._schema.overload_name
-
-                if disable_meta:
-                    global _disabled_meta_decomps
-                    _disabled_meta_decomps.add(op_overload)
-
-                if (
-                    not disable_meta
-                    # TorchScript dumps a bunch of extra nonsense overloads
-                    # which don't have corresponding dispatcher entries, we need
-                    # to filter those out
-                    and torch._C._dispatch_has_kernel(name)
-                    # Don't register a python meta kernel to any operator that has
-                    # should already work with meta tensors today.
-                    # We can check that by seeing if the "computed table" for the operator
-                    # has a registration to Meta;
-                    # either through a direct registration, or an indirect one through
-                    # an alias dispatch key (e.g. CompositeImplicitAutograd)
-                    and not torch._C._dispatch_has_computed_kernel_for_dispatch_key(
-                        name, "Meta"
-                    )
-                ):
-                    if any(
-                        a.alias_info is not None and not a.alias_info.is_write
-                        for a in op_overload._schema.arguments
-                    ):
-                        raise RuntimeError(
-                            f"""
-Attempting to register a python meta kernel for a view operator: {str(op_overload)}.
-We shouldn't do this, because the output will report as not having aliased storages.
-All view ops have meta kernels in C++ today, so we should use those instead.
-
-If you're registering an operator through the `@register_decomposition` decorator,
-Please set `disable_meta=True`.
-                        """
-                        )
-                    meta_lib.impl(op_overload, fn)
+        def register(op):
+            _add_op_to_registry(registry, op, fn)
 
         # To handle allowing multiple aten_ops at once
-        tree_map(add_op_to_table, aten_op)
+        tree_map(register, aten_op)
         return fn
 
     return decomposition_decorator

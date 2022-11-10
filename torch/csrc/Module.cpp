@@ -1,3 +1,4 @@
+#include <c10/util/Optional.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
 
@@ -55,6 +56,7 @@
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/lazy/python/init.h>
 #include <torch/csrc/monitor/python_init.h>
 #include <torch/csrc/multiprocessing/init.h>
@@ -181,6 +183,25 @@ static PyObject* THPModule_crashIfCsrcUBSAN(PyObject* module, PyObject* arg) {
   int32_t x = THPUtils_unpackInt(arg);
   double y = 1.0 / x;
   return THPUtils_packInt32((int)y);
+}
+
+static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
+  // This code shoud work perfectly fine, as vtables are idential for Foo and
+  // Baz unless rtti and ubsan are enabled
+  struct Foo {
+    virtual int bar() = 0;
+    virtual ~Foo() = default;
+  };
+  struct Baz {
+    virtual int bar() {
+      return 17;
+    }
+    virtual ~Baz() = default;
+  };
+  Baz x{};
+  auto y = static_cast<Foo*>(static_cast<void*>(&x));
+  auto rc = y->bar();
+  return THPUtils_packInt32(rc);
 }
 
 static PyObject* THPModule_crashIfATenASAN(PyObject* module, PyObject* arg) {
@@ -513,6 +534,21 @@ PyObject* THPModule_userEnabledFlashSDP(PyObject* _unused, PyObject* noargs) {
   else
     Py_RETURN_FALSE;
 }
+PyObject* THPModule_setSDPUseMemEfficient(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_sdp_use_math expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseMemEfficient(arg == Py_True);
+  Py_RETURN_NONE;
+}
+PyObject* userEnabledMemEfficientSDP(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().userEnabledMemEfficientSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
 PyObject* THPModule_setSDPUseMath(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -813,6 +849,28 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_getCurrentGraphTaskExecutionOrder(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  std::vector<torch::autograd::Node*> nodes =
+      torch::autograd::get_current_graph_task_execution_order();
+  TORCH_CHECK(
+      nodes.size(),
+      "_current_graph_task_execution_order should only be called during the backward pass");
+  auto list = THPObjectPtr(PyList_New(nodes.size()));
+  if (!list)
+    return nullptr;
+  for (const auto i : c10::irange(nodes.size())) {
+    // This node is guaranteed to be alive since the backward is still running
+    PyObject* pyobj_node =
+        torch::autograd::functionToPyObject(nodes[i]->getptr());
+    PyList_SET_ITEM(list.get(), i, pyobj_node);
+  }
+  return list.release();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_getCurrentGraphTaskId(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(torch::autograd::get_current_graph_task_id());
@@ -895,6 +953,7 @@ static PyMethodDef TorchMethods[] = {
     {"_infer_size", THPModule_inferSize, METH_VARARGS, nullptr},
     {"_crash_if_csrc_asan", THPModule_crashIfCsrcASAN, METH_O, nullptr},
     {"_crash_if_csrc_ubsan", THPModule_crashIfCsrcUBSAN, METH_O, nullptr},
+    {"_crash_if_vptr_ubsan", THPModule_crashIfvptrUBSAN, METH_NOARGS, nullptr},
     {"_crash_if_aten_asan", THPModule_crashIfATenASAN, METH_O, nullptr},
     {"_show_config", THPModule_showConfig, METH_NOARGS, nullptr},
     {"_cxx_flags", THPModule_cxxFlags, METH_NOARGS, nullptr},
@@ -930,6 +989,14 @@ static PyMethodDef TorchMethods[] = {
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
+    {"_get_mem_efficient_sdp_enabled",
+     userEnabledMemEfficientSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_sdp_use_mem_efficient",
+     THPModule_setSDPUseMemEfficient,
+     METH_O,
+     nullptr},
     {"_get_math_sdp_enabled",
      THPModule_userEnabledMathSDP,
      METH_NOARGS,
@@ -1018,6 +1085,10 @@ static PyMethodDef TorchMethods[] = {
     {"_will_engine_execute_node",
      THPModule_willEngineExecuteNode,
      METH_O,
+     nullptr},
+    {"_current_graph_task_execution_order",
+     THPModule_getCurrentGraphTaskExecutionOrder,
+     METH_NOARGS,
      nullptr},
     {"_current_graph_task_id",
      THPModule_getCurrentGraphTaskId,
@@ -1327,7 +1398,9 @@ Call this whenever a new thread is created in order to propagate values from
       .value("SlowTranspose3d", at::native::ConvBackend::SlowTranspose3d)
       .value(
           "Winograd3x3Depthwise", at::native::ConvBackend::Winograd3x3Depthwise)
-      .value("Xnnpack2d", at::native::ConvBackend::Xnnpack2d);
+      .value("Xnnpack2d", at::native::ConvBackend::Xnnpack2d)
+      .value("Mps", at::native::ConvBackend::Mps)
+      .value("MpsTranspose,", at::native::ConvBackend::MpsTranspose);
 
   py_module.def(
       "_select_conv_backend",
@@ -1349,8 +1422,62 @@ Call this whenever a new thread is created in order to propagate values from
             dilation_,
             transposed_,
             output_padding_,
-            groups_);
-      });
+            groups_,
+            c10::nullopt);
+      },
+      py::arg("input"),
+      py::arg("weight"),
+      py::arg("bias"),
+      py::arg("stride"),
+      py::arg("padding"),
+      py::arg("dilation"),
+      py::arg("transposed"),
+      py::arg("output_padding"),
+      py::arg("groups"));
+
+  // overload for bias_sizes_opt/backward TODO: figure out default value
+  py_module.def(
+      "_select_conv_backend",
+      [](const at::Tensor& input,
+         const at::Tensor& weight,
+         const c10::optional<at::Tensor>& bias,
+         at::IntArrayRef stride_,
+         at::IntArrayRef padding_,
+         at::IntArrayRef dilation_,
+         bool transposed_,
+         at::IntArrayRef output_padding_,
+         int64_t groups_,
+         c10::optional<std::vector<int64_t>> bias_sizes_opt) {
+        c10::OptionalArrayRef<int64_t> ref = c10::nullopt;
+        if (bias_sizes_opt) {
+          ref = (*bias_sizes_opt);
+        }
+        return at::native::select_conv_backend(
+            input,
+            weight,
+            bias,
+            stride_,
+            padding_,
+            dilation_,
+            transposed_,
+            output_padding_,
+            groups_,
+            ref);
+      },
+      py::arg("input"),
+      py::arg("weight"),
+      py::arg("bias"),
+      py::arg("stride"),
+      py::arg("padding"),
+      py::arg("dilation"),
+      py::arg("transposed"),
+      py::arg("output_padding"),
+      py::arg("groups"),
+      py::arg("bias_sizes"));
+
+  py_module.def(
+      "_conv_determine_backend_memory_format",
+      at::native::_determine_backend_memory_format);
 
   py::enum_<at::LinalgBackend>(py_module, "_LinalgBackend")
       .value("Default", at::LinalgBackend::Default)
@@ -1418,6 +1545,12 @@ Call this whenever a new thread is created in order to propagate values from
       "_set_conj", [](const at::Tensor& x, bool conj) { x._set_conj(conj); });
   py_module.def(
       "_set_neg", [](const at::Tensor& x, bool neg) { x._set_neg(neg); });
+  py_module.def("_get_tensor_metadata", &torch::jit::getTensorMetadata);
+  py_module.def(
+      "_set_tensor_metadata",
+      static_cast<void (*)(
+          const at::Tensor&, std::unordered_map<std::string, bool>)>(
+          torch::jit::setTensorMetadata));
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());
   });

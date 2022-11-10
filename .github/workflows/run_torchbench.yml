@@ -1,4 +1,4 @@
-name: TorchBench CI (pytorch-linux-py3.7-cu102)
+name: TorchBench CI (pytorch-linux-py3.8-cu116)
 on:
   pull_request:
 
@@ -6,6 +6,7 @@ env:
   PYTHON_VERSION: "3.8"
   # must be consistent with https://github.com/pytorch/benchmark/blob/main/requirements.txt#L19
   NUMPY_VERSION: "1.21.2"
+  SETUP_SCRIPT: "/data/nvme/bin/setup_instance.sh"
   PR_NUM: ${{ github.event.number }}
   PR_BODY: ${{ github.event.pull_request.body }}
   PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -35,18 +36,19 @@ jobs:
       - name: Create conda environment and install deps
         run: |
           conda create -y -n pr-ci python="${PYTHON_VERSION}"
-          # shellcheck disable=SC1091
-          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          # shellcheck source=/dev/null
+          . "${SETUP_SCRIPT}"
           conda activate pr-ci
           # pin cmake version to 3.22 since 3.23 breaks pytorch build
           # see details at: https://github.com/pytorch/pytorch/issues/74985
           conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
                            setuptools cmake=3.22 cffi typing_extensions boto3 \
                            future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
+          pip install --pre torch torchvision torchtext -f https://download.pytorch.org/whl/nightly/cu116/torch_nightly.html
       - name: Setup TorchBench branch
         run: |
-          # shellcheck disable=SC1091
-          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          # shellcheck source=/dev/null
+          . "${SETUP_SCRIPT}"
           conda activate pr-ci
           PR_BODY_FILE=/tmp/pr-body.txt
           echo "$PR_BODY" > ${PR_BODY_FILE}
@@ -69,8 +71,8 @@ jobs:
           popd
           PR_BODY_FILE=/tmp/pr-body.txt
           echo "$PR_BODY" > ${PR_BODY_FILE}
-          # shellcheck disable=SC1091
-          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          # shellcheck source=/dev/null
+          . "${SETUP_SCRIPT}"
           conda activate pr-ci
           python3 pytorch/.github/scripts/run_torchbench.py \
                   --pr-body "$PR_BODY_FILE" \
@@ -82,7 +84,8 @@ jobs:
                   --pr-head-sha "$PR_HEAD_SHA"
       - name: Upload result to S3
         run: |
-          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          # shellcheck source=/dev/null
+          . "${SETUP_SCRIPT}"
           conda activate pr-ci
           python3 pytorch/.github/scripts/run_torchbench.py \
                   upload-s3 \

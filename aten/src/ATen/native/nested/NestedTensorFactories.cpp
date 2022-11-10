@@ -106,8 +106,19 @@ Tensor _to_copy_nested(
   Tensor r;
   r = at::empty_like(self, dtype, layout, device, pin_out, memory_format);
   get_nested_tensor_impl(r)->get_buffer().copy_(
-      get_nested_tensor_impl(self)->get_buffer());
+      get_nested_tensor_impl(self)->get_buffer(), non_blocking);
   return r;
+}
+
+Tensor& copy_nested_(Tensor& self, const Tensor& src, bool non_blocking) {
+  const auto* nt_self = get_nested_tensor_impl(self);
+  const auto* nt_src = get_nested_tensor_impl(src);
+  TORCH_CHECK(
+      at::equal(
+          nt_self->get_nested_size_tensor(), nt_src->get_nested_size_tensor()),
+      "copy_ only supports tensors that are the same size for Nested implementations");
+  nt_self->get_buffer().copy_(nt_src->get_buffer(), non_blocking);
+  return self;
 }
 
 } // namespace native

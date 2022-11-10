@@ -101,6 +101,8 @@ decompositions = get_decompositions(
         aten.unfold_backward,
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
+        aten.softplus,
+        aten.softplus_backward,
     ]
 )
 
@@ -109,7 +111,7 @@ def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
         if op in decompositions:
             log.warning(f"duplicate decomp: {ops}")
-    return decomp.register_decomposition(ops, decompositions, disable_meta=True)
+    return decomp.register_decomposition(ops, decompositions)
 
 
 @register_decomposition([aten.clamp])
@@ -317,7 +319,7 @@ turning them on and off via `config.fallback_random`.
 """
 extra_random_decomps = get_decompositions([aten.native_dropout])
 register_extra_random_decomp = functools.partial(
-    decomp.register_decomposition, registry=extra_random_decomps, disable_meta=True
+    decomp.register_decomposition, registry=extra_random_decomps
 )
 
 

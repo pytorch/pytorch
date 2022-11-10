@@ -18,9 +18,11 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
     convert_to_reference_fx,
+    _convert_to_reference_decomposed_fx,
     prepare_qat_fx,
     fuse_fx,
 )
+
 
 from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
 
@@ -5237,6 +5239,105 @@ class TestQuantizeFx(QuantizationTestCase):
             with self.assertRaisesRegex(AssertionError, "not supported"):
                 qconfig_mapping = get_default_qat_qconfig_mapping(invalid_backend)
 
+    def test__convert_to_reference_decomposed_fx(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M().eval()
+        qconfig_mapping = get_default_qconfig_mapping("fbgemm")
+        example_inputs = (torch.randn(1, 5),)
+        m = prepare_fx(m, qconfig_mapping, example_inputs)
+        m_ref = copy.deepcopy(m)
+        m_ref = convert_to_reference_fx(m_ref)
+        m = _convert_to_reference_decomposed_fx(m)
+        expected_occurrence = {
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence)
+        # make sure it runs
+        res_ref = m_ref(*example_inputs)
+        res = m(*example_inputs)
+        self.assertEqual(res, res_ref)
+
+    def test_change_backend_config_for_fixed_qparam_ops(self):
+        """ Making sure we can skip validation of qconfigs for fixedqparam ops based
+        on BackendConfig
+        """
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tanh = torch.nn.Tanh()
+
+            def forward(self, x: torch.Tensor):
+                x = self.tanh(x)
+                return x
+
+        model = M().eval()
+        # we set a global default_qconfig, which will be ignored since the backend
+        # we defined doesn't support anything
+        # this is to make sure we don't validate the qconfig when BackendConfig does not
+        # have fixed qparam op related configurations
+        qconfig_mapping = QConfigMapping().set_global(default_qconfig)
+        backend_config = BackendConfig()
+        # make sure this runs
+        model = prepare_fx(
+            model,
+            qconfig_mapping=qconfig_mapping,
+            example_inputs=(torch.randn(1, 2, 3, 4),),
+            backend_config=backend_config
+        )
+
+    def test_channel_shuffle_lowering(self):
+        # Three versions of channel shuffle
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.op = torch.nn.ChannelShuffle(2)
+
+            def forward(self, x):
+                return self.op(x + x) + x
+
+        class M2(torch.nn.Module):
+            def forward(self, x):
+                return torch.channel_shuffle(x + x, 2) + x
+
+        class M3(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.channel_shuffle(x + x, 2) + x
+
+        x = torch.randn(4, 4, 4, 4)
+        # torch.channel_shuffle is equivalent to torch.nn.functional.channel_shuffle
+        model_node_pairs = [
+            (M1().eval(), ns.call_module(torch.nn.ChannelShuffle)),
+            (M2().eval(), ns.call_function(torch.channel_shuffle)),
+            (M3().eval(), ns.call_function(torch.channel_shuffle))
+        ]
+        for m, node in model_node_pairs:
+            m = prepare_fx(m, {"": default_qconfig}, example_inputs=(x,))
+            m_copy = copy.deepcopy(m)
+            m = convert_fx(m)
+            m_ref = convert_to_reference_fx(m_copy)
+            node_occurrence = {
+                node: 1,
+                ns.call_function(torch.quantize_per_tensor): 1,
+                ns.call_method("dequantize"): 1
+            }
+            node_occurrence_ref = {
+                node: 1,
+                ns.call_function(torch.quantize_per_tensor): 4,
+                ns.call_method("dequantize"): 4
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+            self.checkGraphModuleNodes(m_ref, expected_node_occurrence=node_occurrence_ref)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):
@@ -8099,7 +8200,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             inp = torch.randn(5, 5, device=device, requires_grad=True)
             out_ref = prepared_ref(inp)
             out = prepared(inp)
-            torch.testing.assert_allclose(out, out_ref)
+            torch.testing.assert_close(out, out_ref)
 
             # try backward pass
             labels = torch.randn(5, 5, device=device)
@@ -8107,7 +8208,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             grad = torch.autograd.grad(loss, [inp])
             loss_ref = (out_ref - labels).sum()
             grad_ref = torch.autograd.grad(loss_ref, [inp])
-            torch.testing.assert_allclose(grad[0], grad_ref[0])
+            torch.testing.assert_close(grad[0], grad_ref[0])
 
         if 'fbgemm' in torch.backends.quantized.supported_engines:
             # During the lowering step in convert, fold_weight calls quantized::linear_prepack
@@ -8120,7 +8221,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             out = converted(inp)
             out_ref = converted_ref(inp)
 
-            torch.testing.assert_allclose(out, out_ref)
+            torch.testing.assert_close(out, out_ref)
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"

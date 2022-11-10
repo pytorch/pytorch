@@ -901,6 +901,7 @@ class MultiheadAttention(Module):
 
     - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor. This
       restriction will be loosened in the future.)
+    - inputs are batched (3D) with ``batch_first==True``
     - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
     - dropout is 0
@@ -908,9 +909,9 @@ class MultiheadAttention(Module):
     - ``add_zero_attn`` is ``False``
     - ``batch_first`` is ``True`` and the input is batched
     - ``kdim`` and ``vdim`` are equal to ``embed_dim``
-    - at most one of ``key_padding_mask`` or ``attn_mask`` is passed
     - if a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ is passed, neither ``key_padding_mask``
       nor ``attn_mask`` is passed
+    - autocast is disabled
 
     If the optimized implementation is in use, a
     `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be passed for
@@ -1093,12 +1094,9 @@ class MultiheadAttention(Module):
             why_not_fast_path = "add_zero_attn was enabled"
         elif not self._qkv_same_embed_dim:
             why_not_fast_path = "_qkv_same_embed_dim was not True"
-        elif attn_mask is not None:
-            why_not_fast_path = "attn_mask was not None"
-        elif query.is_nested and key_padding_mask is not None:
-            why_not_fast_path = "key_padding_mask is not supported with NestedTensor input"
-        elif self.num_heads % 2 == 1:
-            why_not_fast_path = "num_heads is odd"
+        elif query.is_nested and (key_padding_mask is not None or attn_mask is not None):
+            why_not_fast_path = "supplying both src_key_padding_mask and src_mask at the same time \
+                                 is not supported with NestedTensor input"
         elif torch.is_autocast_enabled():
             why_not_fast_path = "autocast is enabled"
 
@@ -1122,6 +1120,8 @@ class MultiheadAttention(Module):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")
             if not why_not_fast_path:
+                merged_mask, mask_type = self.merge_masks(attn_mask, key_padding_mask, query)
+
                 return torch._native_multi_head_attention(
                     query,
                     key,
@@ -1132,10 +1132,10 @@ class MultiheadAttention(Module):
                     self.in_proj_bias,
                     self.out_proj.weight,
                     self.out_proj.bias,
-                    key_padding_mask if key_padding_mask is not None else attn_mask,
+                    merged_mask,
                     need_weights,
                     average_attn_weights,
-                    1 if key_padding_mask is not None else 0 if attn_mask is not None else None)
+                    mask_type)
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
@@ -1176,6 +1176,40 @@ class MultiheadAttention(Module):
             return attn_output.transpose(1, 0), attn_output_weights
         else:
             return attn_output, attn_output_weights
+
+    def merge_masks(self, attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor],
+                    query: Tensor) -> Tuple[Optional[Tensor], Optional[int]]:
+        r"""
+        Determine mask type and combine masks if necessary. If only one mask is provided, that mask
+        and the corresponding mask type will be returned. If both masks are provided, they will be both
+        expanded to shape ``(batch_size, num_heads, seq_len, seq_len)``, combined with logical ``or``
+        and mask type 2 will be returned
+        Args:
+            attn_mask: attention mask of shape ``(seq_len, seq_len)``, mask type 0
+            key_padding_mask: padding mask of shape ``(batch_size, seq_len)``, mask type 1
+            query: query embeddings of shape ``(batch_size, seq_len, embed_dim)``
+        Returns:
+            merged_mask: merged mask
+            mask_type: merged mask type (0, 1, or 2)
+        """
+        mask_type: Optional[int] = None
+        merged_mask: Optional[Tensor] = None
+        if attn_mask is not None:
+            mask_type = 0
+            merged_mask = attn_mask
+        if key_padding_mask is not None:
+            mask_type = 1
+            merged_mask = key_padding_mask
+        if (attn_mask is not None) and (key_padding_mask is not None):
+            # In this branch query can't be a nested tensor, so it has a shape
+            batch_size, seq_len, _ = query.shape
+            mask_type = 2
+            key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len) \
+                                                        .expand(-1, self.num_heads, -1, -1)
+            attn_mask_expanded = attn_mask.view(1, 1, seq_len, seq_len).expand(batch_size, self.num_heads, -1, -1)
+            merged_mask = attn_mask_expanded.logical_or(key_padding_mask_expanded)
+        return merged_mask, mask_type
+
 
 class PReLU(Module):
     r"""Applies the element-wise function:
@@ -1346,7 +1380,7 @@ class Softmax(Module):
     .. math::
         \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
 
-    When the input Tensor is a sparse tensor then the unspecifed
+    When the input Tensor is a sparse tensor then the unspecified
     values are treated as ``-inf``.
 
     Shape:

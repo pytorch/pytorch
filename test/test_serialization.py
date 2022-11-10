@@ -567,6 +567,25 @@ class SerializationMixin(object):
         b = torch.load(data)
         self.assertTrue(data.was_called('readinto'))
 
+    def test_serialization_filelike_exceptions(self):
+        # Try to serialize to buffers that does not have write method
+        # Or have a malfrormed one, and make sure it does not cause an abort
+        # See https://github.com/pytorch/pytorch/issues/87997
+        x = torch.rand(10)
+        with self.assertRaises(AttributeError):
+            # Tries to serialize str into tensor
+            torch.save('foo', x)
+        x.write = "bar"
+        x.flush = "baz"
+        with self.assertRaises(TypeError):
+            # Tries to serialize str into tensor with write property
+            torch.save('foo', x)
+        x.write = str.__add__
+        x.flush = str.__mul__
+        with self.assertRaises(TypeError):
+            # Tries to serialize str into tensor with wrong callable write property
+            torch.save('foo', x)
+
 
     def test_serialization_storage_slice(self):
         # Generated using:
@@ -909,6 +928,26 @@ class TestSerialization(TestCase, SerializationMixin):
             # Safe load should assert
             with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported class"):
                 torch.load(f, weights_only=True)
+
+    @parametrize('weights_only', (False, True))
+    def test_serialization_math_bits(self, weights_only):
+        t = torch.randn(1, dtype=torch.cfloat)
+
+        def _save_load_check(t):
+            with BytesIOContext() as f:
+                torch.save(t, f)
+                f.seek(0)
+                # Unsafe load should work
+                self.assertEqual(torch.load(f, weights_only=weights_only), t)
+
+        t_conj = torch.conj(t)
+        _save_load_check(t_conj)
+
+        t_neg = torch._neg_view(t)
+        _save_load_check(t_neg)
+
+        t_n_c = torch._neg_view(torch.conj(t))
+        _save_load_check(t_n_c)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

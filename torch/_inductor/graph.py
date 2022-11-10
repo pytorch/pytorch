@@ -18,10 +18,10 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, InputBuffer, TensorBox
+from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import lowerings, make_fallback, needs_realized_inputs
 from .sizevars import SizeVarAllocator
-from .utils import dynamo_logging, dynamo_utils
+from .utils import dynamo_utils
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -40,11 +40,9 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
 
-        size = [
-            i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in size
-        ]
+        size = [i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in size]
         stride = [
-            i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in stride
+            i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in stride
         ]
         return size, stride
 
@@ -305,8 +303,11 @@ class GraphLowering(torch.fx.Interpreter):
             num_users = len(set(n.users))
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
-                    if user.target in needs_realized_inputs or user.op == "output":
+                    if user.target in needs_realized_inputs:
                         result.realize_hint()
+                    elif user.op == "output":
+                        if isinstance(result.data.data, (Pointwise, Reduction)):
+                            result.realize()
 
                 # TODO(jansel): introduce a store vs inline choice
                 result.mark_reuse(len(n.users))
@@ -339,7 +340,7 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        log.log(dynamo_logging.CODE, "Output code: %s", mod.__file__)
+        log.log(logging.CODE, "Output code: %s", mod.__file__)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod

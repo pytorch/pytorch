@@ -99,18 +99,16 @@ class _TorchDynamoContext:
     def __enter__(self):
         if config.raise_on_ctx_manager_usage:
             raise RuntimeError(
-                "torchdynamo.optimize(...) is used with a context manager. "
+                "torch._dynamo.optimize(...) is used with a context manager. "
                 "Please refer to https://github.com/pytorch/torchdynamo#usage-example "
-                "to use torchdynamo.optimize(...) as an annotation/decorator. "
+                "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
-        utils.debug_dir.setup()
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        utils.debug_dir.clear()
         set_eval_frame(self.prior)
         self.prior = unset
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
@@ -151,15 +149,25 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
+            if (
+                not isinstance(self, DisableContext)
+                and torch.fx._symbolic_trace.is_fx_tracing()
+            ):
+                if config.error_on_nested_fx_trace:
+                    raise RuntimeError(
+                        "Detected that you are using FX to symbolically trace "
+                        "a dynamo-optimized function. This is not supported at the moment."
+                    )
+                else:
+                    return fn(*args, **kwargs)
+
             on_enter()
-            utils.debug_dir.setup()
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
             finally:
-                utils.debug_dir.clear()
                 set_eval_frame(prior)
                 backend_ctx.__exit__(None, None, None)
 
@@ -173,7 +181,7 @@ class _TorchDynamoContext:
         # of decorators.
         _fn._torchdynamo_orig_callable = fn
 
-        # If the function is called using torchdynamo.optimize decorator, we
+        # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
         if callback not in (None, False):
             always_optimize_code_objects[fn.__code__] = True
@@ -216,35 +224,27 @@ class DisableContext(_TorchDynamoContext):
 def catch_errors_wrapper(callback):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
-        try:
-            if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
-                log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
-                return None
-            if (
-                frame.f_code.co_filename == "<string>"
-                and frame.f_code.co_name == "__new__"
-            ):
-                # nametuple constructor
-                return None
-            if config.optimize_ddp:
-                ddp_module = DistributedDataParallel._get_active_ddp_module()
-                if ddp_module:
-                    with compile_lock:
-                        ddp_optimizer = DDPOptimizer(
-                            bucket_bytes_cap=ddp_module.bucket_bytes_cap,
-                            parameters_to_ignore=ddp_module.parameters_to_ignore,
-                            backend_compile_fn=callback._torchdynamo_orig_callable,
-                        )
-                        hijacked_callback = convert_frame.convert_frame(
-                            ddp_optimizer.compile_fn, guard_export_fn=None
-                        )
-                        return hijacked_callback(frame, cache_size)
+        if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
+            log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
+            return None
+        if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
+            # nametuple constructor
+            return None
+        if config.optimize_ddp:
+            ddp_module = DistributedDataParallel._get_active_ddp_module()
+            if ddp_module:
+                with compile_lock:
+                    ddp_optimizer = DDPOptimizer(
+                        bucket_bytes_cap=ddp_module.bucket_bytes_cap,
+                        backend_compile_fn=callback._torchdynamo_orig_callable,
+                    )
+                    hijacked_callback = convert_frame.convert_frame(
+                        ddp_optimizer.compile_fn, guard_export_fn=None
+                    )
+                    return hijacked_callback(frame, cache_size)
 
-            with compile_lock:
-                return callback(frame, cache_size)
-        except Exception:
-            log.exception("Error while processing frame")
-            raise
+        with compile_lock:
+            return callback(frame, cache_size)
 
     catch_errors._torchdynamo_orig_callable = callback
     return catch_errors
@@ -340,14 +340,14 @@ def optimize(
             One can also provide additional context for the backend, like
             torch.jit.fuser("fuser2"), by setting the backend_ctx_ctor attribute.
             See AOTAutogradMemoryEfficientFusionWithContext for the usage.
-            - Or, a string backend name in `torchdynamo.list_backends()`
+            - Or, a string backend name in `torch._dynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
         disable: If True, turn this decorator into a no-op
 
     Example Usage:
 
-        @torchdynamo.optimize()
+        @torch._dynamo.optimize()
         def toy_example(a, b):
             ...
     """
@@ -554,7 +554,10 @@ def export(
             )
 
         def placeholder(self, target, args, kwargs):
-            return next(self.old_args_gen)
+            arg = next(self.old_args_gen)
+            if "val" in self.current_node.meta:
+                arg.node.meta["val"] = self.current_node.meta["val"]
+            return arg
 
         def output(self, target, args, kwargs):
             dynamo_result_flat = args[0]
@@ -563,6 +566,10 @@ def export(
             new_result = pytree.tree_unflatten(new_result_flat, out_spec_traced)
 
             return super().output(target, (new_result,), {})
+
+        def run_node(self, n):
+            self.current_node = n
+            return super().run_node(n)
 
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
@@ -585,15 +592,12 @@ def export(
 
 def assume_constant_result(fn):
     fn._dynamo_marked_constant = True
-    assert (
-        not config.fake_tensor_propagation
-    ), "Constant result capture is not supported with fake tensors."
     return fn
 
 
 def optimize_assert(backend, *, guard_export_fn=None, export=False):
     """
-    The same as `torchdynamo.optimize(backend, nopython=True)`
+    The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
     backend = get_compiler_fn(backend)
 

@@ -2,6 +2,7 @@
 
 #ifdef USE_CUDA
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -38,6 +39,24 @@ void initNvFuserPythonBindings(PyObject* module) {
       .value("ComplexFloat", Nvf::DataType::ComplexFloat)
       .value("ComplexDouble", Nvf::DataType::ComplexDouble)
       .value("Null", Nvf::DataType::Null);
+
+  nvfuser.def(
+      "compute_contiguity",
+      [](const std::vector<int64_t>& sizes,
+         const std::vector<int64_t>& strides) {
+        py::tuple contiguity(sizes.size());
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "compute_contiguity: Sizes and strides must have the same number of dimensions");
+        if (sizes.size() == 0) {
+          return contiguity;
+        }
+        contiguity[sizes.size() - 1] = strides.back() == 1;
+        for (int64_t i = static_cast<int64_t>(sizes.size()) - 2; i >= 0; --i) {
+          contiguity[i] = strides[i] == strides[i + 1] * sizes[i + 1];
+        }
+        return contiguity;
+      });
 
   //! Binding the FusionCache that holds a cache of Fusions
   //! This is only bound to provide an interface to get the number of fusions
@@ -126,16 +145,6 @@ void initNvFuserPythonBindings(PyObject* module) {
             self.defineRecord(new nvfuser::OutputRecord<Nvf::TensorView>(
                 {self.recordingState(output())}));
           })
-      .def(
-          "define_null_tensor",
-          [](nvfuser::FusionDefinition& self) -> nvfuser::Tensor {
-            FUSER_PERF_SCOPE("FusionDefinition.define_null_tensor");
-            nvfuser::Tensor out = self.defineTensor();
-            self.defineRecord(
-                new nvfuser::NullTensorRecord({self.recordingState(out())}));
-            return out;
-          },
-          py::return_value_policy::reference)
       .def(
           "define_tensor",
           [](nvfuser::FusionDefinition& self,
@@ -381,7 +390,7 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_UNARY_OP("neg", neg)
   NVFUSER_PYTHON_BINDING_UNARY_OP("bitwise_not", bitwise_not)
   NVFUSER_PYTHON_BINDING_UNARY_OP("relu", relu)
-  NVFUSER_PYTHON_BINDING_UNARY_OP("rand_like", randlike)
+  NVFUSER_PYTHON_BINDING_UNARY_OP("rand_like", rand_like)
   NVFUSER_PYTHON_BINDING_UNARY_OP("reciprocal", reciprocal)
   NVFUSER_PYTHON_BINDING_UNARY_OP("round", round)
   NVFUSER_PYTHON_BINDING_UNARY_OP("rsqrt", rsqrt)
@@ -1191,15 +1200,15 @@ void initNvFuserPythonBindings(PyObject* module) {
       "permute",
       [](nvfuser::FusionDefinition::Operators& self,
          nvfuser::Tensor arg,
-         std::vector<int64_t>& permutation) -> nvfuser::Tensor {
+         std::vector<int64_t>& dims) -> nvfuser::Tensor {
         nvfuser::FusionDefinition* fd = self.fusion_definition;
         nvfuser::Tensor output = fd->defineTensor();
         self.fusion_definition->defineRecord(new nvfuser::PermuteOpRecord(
-            {fd->recordingState(arg())},
-            {fd->recordingState(output())},
-            permutation));
+            {fd->recordingState(arg())}, {fd->recordingState(output())}, dims));
         return output;
       },
+      py::arg("arg"),
+      py::arg("dims"),
       py::return_value_policy::reference);
 
   nvf_ops.def(
@@ -1292,26 +1301,38 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(
       "batch_norm",
       [](nvfuser::FusionDefinition::Operators& self,
-         nvfuser::Tensor x,
-         nvfuser::Tensor weight,
-         nvfuser::Tensor bias,
-         nvfuser::Tensor running_mean,
-         nvfuser::Tensor running_var,
-         bool training,
+         nvfuser::Tensor arg,
+         c10::optional<nvfuser::Tensor> weight,
+         c10::optional<nvfuser::Tensor> bias,
+         c10::optional<nvfuser::Tensor> running_mean,
+         c10::optional<nvfuser::Tensor> running_var,
          nvfuser::Scalar momentum,
          nvfuser::Scalar eps,
+         bool training,
          bool channels_last) -> decltype(auto) {
         FUSER_PERF_SCOPE("Operators.batch_norm");
         nvfuser::FusionDefinition* fd = self.fusion_definition;
         nvfuser::Tensor output = fd->defineTensor();
         nvfuser::Tensor mean = fd->defineTensor();
         nvfuser::Tensor invstd = fd->defineTensor();
+        auto weight_state = weight.has_value()
+            ? fd->recordingState(weight.value()())
+            : nvfuser::State(0, nvfuser::StateType::None);
+        auto bias_state = bias.has_value()
+            ? fd->recordingState(bias.value()())
+            : nvfuser::State(0, nvfuser::StateType::None);
+        auto running_mean_state = running_mean.has_value()
+            ? fd->recordingState(running_mean.value()())
+            : nvfuser::State(0, nvfuser::StateType::None);
+        auto running_var_state = running_var.has_value()
+            ? fd->recordingState(running_var.value()())
+            : nvfuser::State(0, nvfuser::StateType::None);
         fd->defineRecord(new nvfuser::BatchNormOpRecord(
-            {fd->recordingState(x()),
-             fd->recordingState(weight()),
-             fd->recordingState(bias()),
-             fd->recordingState(running_mean()),
-             fd->recordingState(running_var()),
+            {fd->recordingState(arg()),
+             weight_state,
+             bias_state,
+             running_mean_state,
+             running_var_state,
              fd->recordingState(momentum()),
              fd->recordingState(eps())},
             {fd->recordingState(output()),
@@ -1321,14 +1342,14 @@ void initNvFuserPythonBindings(PyObject* module) {
             channels_last));
         return std::make_tuple(output, mean, invstd);
       },
-      py::arg("x"),
+      py::arg("arg"),
       py::arg("weight").none(true),
       py::arg("bias").none(true),
       py::arg("running_mean").none(true),
       py::arg("running_var").none(true),
-      py::arg("training"),
       py::arg("momentum"),
       py::arg("eps"),
+      py::arg("training"),
       py::arg("channels_last") = false,
       py::return_value_policy::reference);
   nvf_ops.def(
@@ -1343,7 +1364,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             output_shape.size() >= broadcast_dims.size(),
             "broadcast_dims vector size is too big for output shape!");
         nvfuser::Tensor output = fd->defineTensor();
-        fd->defineRecord(new nvfuser::BroadcastOpRecord(
+        fd->defineRecord(new nvfuser::BroadcastInDimOpRecord(
             {fd->recordingState(arg())},
             {fd->recordingState(output())},
             "ops.broadcast_in_dim",
@@ -1354,6 +1375,24 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("arg"),
       py::arg("output_shape"),
       py::arg("broadcast_dims"),
+      py::return_value_policy::reference);
+  nvf_ops.def(
+      "broadcast",
+      [](nvfuser::FusionDefinition::Operators& self,
+         nvfuser::Tensor arg,
+         std::vector<bool>& is_broadcast_dim) -> nvfuser::Tensor {
+        FUSER_PERF_SCOPE("Operators.broadcast");
+        nvfuser::FusionDefinition* fd = self.fusion_definition;
+        nvfuser::Tensor output = fd->defineTensor();
+        fd->defineRecord(new nvfuser::BroadcastOpRecord(
+            {fd->recordingState(arg())},
+            {fd->recordingState(output())},
+            "ops.broadcast",
+            is_broadcast_dim));
+        return output;
+      },
+      py::arg("arg"),
+      py::arg("is_broadcast_dim"),
       py::return_value_policy::reference);
 }
 

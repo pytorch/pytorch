@@ -1412,8 +1412,26 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 1, 7)
         self.run_test(model, x)
 
-    def test_avgpool_2d_ceil(self):
-        model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
+    @common_utils.parametrize(
+        "padding",
+        (0, 1),
+    )
+    @common_utils.parametrize(
+        "ceil_mode",
+        (True, False),
+    )
+    @common_utils.parametrize(
+        "count_include_pad",
+        (True, False),
+    )
+    def test_avgpool_2d(self, padding, ceil_mode, count_include_pad):
+        model = torch.nn.AvgPool2d(
+            3,
+            3,
+            padding=padding,
+            ceil_mode=ceil_mode,
+            count_include_pad=count_include_pad,
+        )
         x = torch.randn(20, 16, 50, 32)
         self.run_test(model, x)
 
@@ -7437,6 +7455,27 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 2, 4, 4)
         self.run_test(Pad(), (x, pad))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_pad_circular(self):
+        class PadModel(torch.nn.Module):
+            def forward(self, x):
+                out = torch.nn.functional.pad(x, (1, 2, 1, 2), mode="circular")
+                return out
+
+        x = torch.randn(2, 3, 3, 4)
+        self.run_test(PadModel(), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_pad_circular_negative(self):
+        # Test for different pad integer types
+        class PadModel(torch.nn.Module):
+            def forward(self, x):
+                out = torch.nn.functional.pad(x, (-1, -2), mode="circular")
+                return out
+
+        x = torch.randn(2, 3, 6)
+        self.run_test(PadModel(), (x))
+
     @skipIfUnsupportedMaxOpsetVersion(10)
     @skipScriptTest()  # TODO: the logic in symbolic_opset9 doesn't handle script
     def test_unsupported_pad(self):
@@ -11834,6 +11873,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quantized_conv1d_relu(self):
+        model = torch.nn.intrinsic.quantized.ConvReLU1d(16, 33, 3, stride=2)
+        # Manually initialize model weight and bias to random numbers.
+        # By default all zeros.
+        q_weight = torch.quantize_per_tensor(
+            torch.randn(33, 16, 3), 0.5, 0, torch.qint8
+        )
+        bias = torch.arange(33).to(torch.float) - 16
+        model.set_weight_bias(q_weight, bias)
+        input = torch.randn(3, 16, 32)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
+        self.run_test(model, q_input)
+
     @common_utils.parametrize(
         "function_or_module",
         [
@@ -12268,6 +12321,17 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = _construct_tensor_for_quantization_test((4, 3, 2, 2))
         self.run_test(model, input)
 
+    def test_0d_tensor_broadcast(self):
+        class fn(torch.nn.Module):
+            def forward(self, x, y):
+                a = torch.add(x, y)
+                b = torch.mul(y, y)
+                return a + b
+
+        x = torch.ones(0)
+        y = torch.ones(1)
+        self.run_test(fn(), (x, y), input_names=["x", "y"], output_names=["output"])
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_convolution_allow_tf32(self):
         class Module(torch.nn.Module):
@@ -12374,8 +12438,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 y = None
             return y
 
-    #  Skip now to wait more insight on https://github.com/onnx/onnx/issues/4424
-    #  Model fails on type inference, as it's input/output type mismatch.
     class LoopNoneInput(torch.nn.Module):
         def forward(self, x) -> Optional[Tensor]:
             y: Optional[Tensor] = None
@@ -12415,7 +12477,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             input_names=["x"],
         )
         exported = onnx.load_from_string(f.getvalue())
-        expected_elem_type = torch.onnx.JitScalarType.from_dtype(x.dtype).onnx_type()
+        expected_elem_type = torch.onnx.JitScalarType.from_value(x).onnx_type()
         expected_output_type = onnx.helper.make_optional_type_proto(
             onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,))
         )
@@ -12523,6 +12585,59 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 m,
                 x,
             )
+
+    @skipScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(16)
+    @unittest.skipIf(
+        not torch.hub._check_module_exists("torch_geometric"),
+        "torch_geometric not installed.",
+    )
+    def test_sage_conv(self):
+        from torch_geometric import nn as torch_geometric_nn
+
+        # Input
+        coords0 = torch.randn(1, 6)
+        coords1 = torch.randn(1, 6)
+        coords = torch.transpose(torch.cat((coords0, coords1), dim=0), 0, 1)
+        adj = torch_geometric_nn.knn_graph(coords, k=2, batch=None, loop=True)
+        edge_from = adj[0:1, :]
+        edge_to = adj[1:, :]
+        inputs = (coords0, coords1, edge_from, edge_to)
+
+        class MySAGEConv(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.SAGEConvBlock1 = torch_geometric_nn.SAGEConv(
+                    2, 512, normalize=True
+                )
+                self.bano1 = torch_geometric_nn.BatchNorm(512)
+                self.relu = torch.nn.ReLU()
+                self.dense1 = torch.nn.Seq(Lin(512, 1))
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, coords0, coords1, edge_from, edge_to):
+                adj = torch.cat((edge_from, edge_to), dim=0)
+                gra = torch.transpose(torch.cat((coords0, coords1), dim=0), 0, 1)
+                x1 = self.SAGEConvBlock1(gra, edge_index=adj)
+                x = torch.unsqueeze(torch.sum(x1), dim=0)
+                return x
+
+        input_names = ["coords0", "coords1", "edge_from", "edge_to"]
+        output_names = ["outputs"]
+        dynamic_axes = {
+            "coords0": {0: "batch_size", 1: "features"},
+            "coords1": {0: "batch_size", 1: "features"},
+            "edge_from": {0: "batch_size", 1: "features"},
+            "edge_to": {0: "batch_size", 1: "features"},
+            "outputs": {0: "batch_size"},
+        }
+        self.run_test(
+            MySAGEConv(),
+            inputs,
+            input_names=input_names,
+            output_names=output_names,
+            dynamic_axes=dynamic_axes,
+        )
 
     # Cannot export with older opsets because of "ConstantFill" op
     # ConstantFill was a temp op removed at opset 8. This is no longer supported by onnxruntime

@@ -323,6 +323,13 @@ class NNModuleVariable(VariableTracker):
             ):
                 result.append(named_embed(name, param))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+        elif name == "named_buffers":
+            result = []
+            for name, buffer in module.named_buffers(
+                **get_kwargs("prefix", "recurse", "remove_duplicate")
+            ):
+                result.append(named_embed(name, buffer))
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "named_modules":
             result = []
             for name, submod in module.named_modules(
