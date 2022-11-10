@@ -399,7 +399,7 @@ class TestONNXExport(common_utils.TestCase):
         with self.assertRaisesRegex(RuntimeError, r"DictConstruct.+is not supported."):
             torch.onnx.export_to_pretty_string(torch.jit.script(mod), (x_in,))
 
-    def test_export_custom_pad_sequence_script_mode(self):
+    def test_export_listtype_input_custom_pad_sequence_script_mode(self):
         @torch.onnx.symbolic_helper.parse_args("v", "b", "f")
         def pad_sequence(g, input, batch_first, padding_value):
             return g.op("custom::MySequencePad", input)
