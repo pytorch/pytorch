@@ -62,21 +62,21 @@ def _all_handles(state: _FSDPState) -> List:
 
 
 @no_type_check
-def _module_handles(module: nn.Module, state: _FSDPState) -> List:
+def _module_handles(state: _FSDPState, module: nn.Module) -> List:
     """
     Given a module and returns the flat handles that map to this module. If the
     module is FullyShardedDataParallel, the module._handles will be returned.
     """
-    if module == state:
-        return module._handles[:]
-    else:
+    if _is_composable(state):
         return state._module_to_handles[module][:]
+    else:
+        return module._handles[:]
 
 
 @no_type_check
-def _has_fsdp_params(module: nn.Module, state: _FSDPState) -> bool:
+def _has_fsdp_params(state: _FSDPState, module: nn.Module) -> bool:
     """Given a module and returns if this module has parameters sharded by FSDP."""
-    return len(_module_handles(module, state)) > 0
+    return len(_module_handles(state, module)) > 0
 
 
 def clean_tensor_name(tensor_name: str) -> str:
