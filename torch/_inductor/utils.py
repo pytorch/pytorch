@@ -282,3 +282,7 @@ def fresh_inductor_cache(cache_entries=None):
                                 if ".lock" not in f
                             }
                         )
+
+
+def argsort(seq):
+    return sorted(range(len(seq)), key=seq.__getitem__)

@@ -1670,6 +1670,71 @@ def meta_scatter_add(self, dim, index, src):
     return self.new_empty(self.shape)
 
 
+@register_meta(aten.scatter_add_)
+def meta_scatter_add_(self, dim, index, src):
+    scatter_meta_impl(self, dim, index, src, "add")
+    return self
+
+
+@register_meta(aten.scatter)
+@out_wrapper()
+def meta_scatter(self, dim, index, src_or_value, reduce=None):
+    src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
+    scatter_meta_impl(self, dim, index, src, reduce)
+    return self.new_empty(self.shape)
+
+
+@register_meta(aten.scatter_)
+def meta_scatter_(self, dim, index, src_or_value, reduce=None):
+    src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
+    scatter_meta_impl(self, dim, index, src, reduce)
+    return self
+
+
+@register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
+@out_wrapper()
+def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
+    scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
+    return self.new_empty(self.shape)
+
+
+@register_meta(aten.scatter_reduce_.two)
+def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
+    scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
+    return self
+
+
+@register_meta(aten.upsample_nearest2d.vec)
+def upsample_nearest2d_vec(input, output_size, scale_factors):
+    mem_format = utils.suggest_memory_format(input)
+    spatial_dimensions = input.dim() - 2
+
+    input_shape = input.shape
+    if output_size is not None:
+        assert scale_factors is None
+        out_size = output_size
+    elif scale_factors is not None:
+        assert output_size is None
+        out_size = []
+        for i in range(spatial_dimensions):
+            sym_float = (input_shape[i + 2] / 1) * scale_factors[i]
+            assert sym_float >= 0
+            out_size.append(math.floor(sym_float))
+
+    output_height = out_size[0]
+    output_width = out_size[1]
+    nbatch = input_shape[0]
+    channels = input_shape[1]
+    return input.new_empty((nbatch, channels, output_height, output_width)).to(
+        memory_format=mem_format
+    )
+
+
+@register_meta([aten.sort.default, aten.sort.stable])
+def meta_sort(self, stable=None, dim=-1, descending=False):
+    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
@@ -1703,10 +1768,7 @@ def activate_meta():
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
             pass
-        elif any(
-            a.alias_info is not None and not a.alias_info.is_write
-            for a in op_overload._schema.arguments
-        ):
+        elif op_overload.is_view:
             # Attempting to register a python meta kernel for a view operator.
             # We shouldn't do this, because the output will report as not having aliased storages.
             # All view ops have meta kernels in C++ today, so we should use those instead.

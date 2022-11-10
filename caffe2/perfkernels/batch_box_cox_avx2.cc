@@ -3,6 +3,35 @@
 #include <caffe2/perfkernels/common.h>
 #include <folly/SingletonThreadLocal.h>
 
+#include "vectorizer.h"
+
+#ifndef VECTORIZED_KERNEL
+#define CPU_CAPABILITY_AVX2
+#include <ATen/cpu/vec/vec.h>
+
+namespace at::vec {
+
+template <typename scalar_t>
+Vectorized<scalar_t> max(const Vectorized<scalar_t>& a, const Vectorized<scalar_t>& b);
+
+// Implements the vectorized version of std::max() operation,
+// which DOESNOT propagates NaN for second argument
+template <>
+Vectorized<double> max(const Vectorized<double>& a, const Vectorized<double>& b) {
+  // std::max(NaN, nonNan) -> NaN
+  return _mm256_max_pd(b, a);
+}
+
+
+template <>
+Vectorized<float> max(const Vectorized<float>& a, const Vectorized<float>& b) {
+  // std::max(NaN, nonNan) -> NaN
+  return _mm256_max_ps(b, a);
+}
+
+}
+#endif
+
 #include <cstdint>
 #include <cmath>
 #include <vector>
@@ -65,6 +94,7 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Ln, vsLn)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Ln, vdLn)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
+#ifndef VECTORIZED_KERNEL
 template <typename T>
 void box_cox_zero_lambda(
     size_t D,
@@ -72,35 +102,92 @@ void box_cox_zero_lambda(
     const T* const lambda2_data,
     T k_eps,
     T* const output_data) {
-  Add(D, self_data, lambda2_data, output_data);
-  for (const auto j : c10::irange(D)) {
-    output_data[j] = std::max(output_data[j], k_eps);
+  int j = 0;
+  using Vec = at::vec::Vectorized<T>;
+  constexpr int64_t VLEN = Vec::size();
+  auto k_eps_vec = Vec(k_eps);
+  for(; j + VLEN < D; j += VLEN) {
+    auto data = Vec::loadu(self_data + j);
+    auto lambda2 = Vec::loadu(lambda2_data + j);
+    auto sum = data + lambda2;
+    auto max = at::vec::max(sum, k_eps_vec);
+    auto res = max.log();
+    res.store(output_data + j);
   }
-
-  Ln(D, output_data, output_data);
+  for ( ;j < D; ++j) {
+    auto sum = self_data[j] + lambda2_data[j];
+    auto max = std::max(sum, k_eps);
+    output_data[j] = std::log(max);
+  }
 }
 
 template <typename T>
 void box_cox_nonzero_lambda(
+    int64_t D,
+    const T* data_ptr,
+    const T* lambda1_ptr,
+    const T* lambda2_ptr,
+    T k_eps,
+    T* out) {
+
+  int j = 0;
+  using Vec = at::vec::Vectorized<T>;
+  constexpr int64_t VLEN = Vec::size();
+  auto k_eps_vec = Vec(k_eps);
+  for(; j + VLEN < D; j += VLEN) {
+    auto data = Vec::loadu(data_ptr + j);
+    auto lambda2 = Vec::loadu(lambda2_ptr + j);
+    auto sum = data + lambda2;
+    auto max = at::vec::max(sum, k_eps_vec);
+    auto lambda1 = Vec::loadu(lambda1_ptr + j);
+    auto lambda_over_1 = lambda1.reciprocal();
+    auto pow = max.pow(lambda1);
+    auto res = at::vec::fmsub(pow, lambda_over_1, lambda_over_1);
+    res.store(out + j);
+  }
+  for ( ;j < D; ++j) {
+    auto sum = data_ptr[j] + lambda2_ptr[j];
+    auto max = std::max(sum, k_eps);
+    auto lambda_over_1 = 1 / lambda1_ptr[j];
+    auto pow = std::pow(max, lambda1_ptr[j]);
+    out[j] = pow * lambda_over_1 - lambda_over_1;
+  }
+}
+#else
+template <typename T>
+void box_cox_zero_lambda(
     size_t D,
     const T* const self_data,
-    const T* const lambda1_data,
     const T* const lambda2_data,
     T k_eps,
     T* const output_data) {
-  Add(D, self_data, lambda2_data, output_data);
-  for (const auto j : c10::irange(D)) {
-    output_data[j] = std::max(output_data[j], k_eps);
+  VECTOR_LOOP for (auto j=0 ;j < D; ++j) {
+    auto sum = self_data[j] + lambda2_data[j];
+    auto max = std::max(sum, k_eps);
+    output_data[j] = std::log(max);
   }
-
-  // output = output ^ lambda1
-  Pow(D, output_data, lambda1_data, output_data);
-  // output = (output  - 1)/ lambda1
-  for (const auto j : c10::irange(D)) {
-    output_data[j] -= 1.0;
-  }
-  Div(D, output_data, lambda1_data, output_data);
 }
+
+template <typename T>
+void box_cox_nonzero_lambda(
+    int64_t D,
+    const T* data_ptr,
+    const T* lambda1_ptr,
+    const T* lambda2_ptr,
+    T k_eps,
+    T* out) {
+
+  VECTOR_LOOP for (auto j=0 ;j < D; ++j) {
+    FAST_MATH
+    auto sum = data_ptr[j] + lambda2_ptr[j];
+    auto max = std::max(sum, k_eps);
+    auto lambda_over_1 = 1 / lambda1_ptr[j];
+    auto pow = std::pow(max, lambda1_ptr[j]);
+    out[j] = pow * lambda_over_1 - lambda_over_1;
+  }
+}
+
+#endif
 
 template <typename T>
 void box_cox_mixed_lambda(

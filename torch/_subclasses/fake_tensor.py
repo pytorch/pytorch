@@ -1093,5 +1093,5 @@ class FakeCopyMode(TorchFunctionMode):
             memo[id(tensor)] = out
             return out
         else:
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 return func(*args, **kwargs)

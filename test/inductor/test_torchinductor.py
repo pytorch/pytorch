@@ -962,6 +962,28 @@ class CommonTemplate:
             ),
         )
 
+    def test_view_dtype(self):
+        # FIXME: Only support view as another dtype with the same size for now.
+        # FIXME: float16/int16 conversion for the triton backend does not work
+        #        because of float16 is promoted to float32.
+        def fn(i8_tensor, f32_tensor, f64_tensor):
+            return (
+                i8_tensor.view(torch.bool),
+                i8_tensor.view(torch.uint8),
+                f32_tensor.view(torch.int32),
+                f64_tensor.view(torch.int64),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randint(-128, 127, (3, 4), dtype=torch.int8),
+                torch.randn(3, 4, dtype=torch.float32),
+                torch.randn(3, 4, dtype=torch.float64),
+            ),
+            check_lowp=False,
+        )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
@@ -4333,6 +4355,45 @@ if HAS_CPU:
     CommonTemplate.install(CpuTests, "cpu")
 
     class CPUReproTests(TestCase):
+        def test_conv_stride_constraints(self):
+            for fmt in [torch.channels_last, torch.contiguous_format]:
+                # TorchDispatch doesn't work in our cuda invocation for some reason
+                m = torch.nn.Conv2d(5, 6, [3, 3])
+
+                def fn(inp, weight):
+                    return (
+                        F.conv2d(
+                            inp, weight, None, m.stride, m.padding, m.dilation, m.groups
+                        ),
+                    )
+
+                inp = torch.randn([2, 5, 16, 16])
+                inps = [inp, m.weight.to(memory_format=fmt)]
+                fn_fx = make_fx(fn)(*inps)
+                fn_compiled = compile_fx_inner(fn_fx, inps)
+                test_self = self
+                conv_seen = False
+
+                class RecordFunctions(TorchDispatchMode):
+                    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                        kwargs = kwargs if kwargs else {}
+                        if func == torch.ops.aten.convolution.default:
+                            test_self.assertTrue(
+                                args[0].is_contiguous(memory_format=fmt)
+                            )
+                            test_self.assertTrue(
+                                args[1].is_contiguous(memory_format=fmt)
+                            )
+                            nonlocal conv_seen
+                            conv_seen = True
+
+                        return func(*args, **kwargs)
+
+                with RecordFunctions():
+                    out = fn_compiled(inps)
+
+                self.assertTrue(conv_seen)
+
         def test_inplace_squeeze_needed(self):
             mod = torch.nn.Sequential(
                 torch.nn.Linear(10, 10),
