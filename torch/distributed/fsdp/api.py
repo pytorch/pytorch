@@ -64,6 +64,10 @@ class BackwardPrefetch(Enum):
       reduce-scatter) and computation (next gradient computation).
       Specifically, the next all-gather is reordered to be before the current
       reduce-scatter.
+
+    .. note:: If the increase in peak memory usage from prefetching is an
+        issue, you may consider passing ``limit_all_gathers=True`` to the FSDP
+        constructor, which may help reduce peak memory usage in some cases.
     """
 
     # NOTE: For both modes, the ordering that defines "current" and "next" is
@@ -95,14 +99,16 @@ class MixedPrecision:
             pass. This may be set to ``False`` to save memory if using custom
             optimizers that can perform the optimizer step in ``reduce_dtype``.
 
+    .. note:: This API is experimental and subject to change.
+
+    .. note:: Only floating point tensors are cast to their specified dtypes.
+
     .. note:: In ``summon_full_params``, parameters are forced to full
         precision, but buffers are not.
 
     .. note:: ``state_dict`` checkpoints parameters and buffers in full
         precision. For buffers, this is only supported for
         ``StateDictType.FULL_STATE_DICT``.
-
-    .. note:: This API is experimental and subject to change.
 
     .. note:: Each low precision dtype must be specified explicitly. For
         example, ``MixedPrecision(reduce_dtype=torch.float16)`` only specifies
@@ -112,6 +118,15 @@ class MixedPrecision:
     .. note:: If a ``reduce_dtype`` is not specified, then gradient reduction
         happens in ``param_dtype`` if specified or the original parameter dtype
         otherwise.
+
+    .. note:: If the user passes a model with ``BatchNorm`` modules and an
+        ``auto_wrap_policy`` to the FSDP constructor, then FSDP will disable
+        mixed precision for ``BatchNorm`` modules by wrapping them separately
+        in their own FSDP instance with mixed precision disabled. This is due
+        to some missing low precision ``BatchNorm`` kernels. If the user does
+        not use an ``auto_wrap_policy``, then the user must take care to not
+        use mixed precision for FSDP instances containing ``BatchNorm``
+        modules.
     """
 
     param_dtype: Optional[torch.dtype] = None

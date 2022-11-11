@@ -20,7 +20,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_methods_invocations import op_db, SampleInput
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, slowTest, \
-    is_iterable_of_tensors, freeze_rng_state
+    is_iterable_of_tensors, freeze_rng_state, skipIfRocm
 from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs, JitTestCase, RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
@@ -382,6 +382,27 @@ class TestCudaFuser(JitTestCase):
                         self.assertEqual(o.dtype, jit_o.dtype)
                         self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
                         self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
+
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_variance_profiling(self):
+        with nvfuser_singleton_fusion(True):
+            for op in [torch.var, torch.std]:
+                for dtype in [torch.float16, torch.float32, torch.double]:
+                    for axis in [-2, -1, 2, 1]:
+                        for unbiased in [False, True]:
+                            for keepdim in [False, True]:
+                                def t(x: torch.Tensor, dim: List[int], unbiased: bool, keepdim: bool):
+                                    o = torch.mul(x, 2.0)
+                                    o = op(o, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                                    return o
+
+                                x = torch.randn(8, 4, 16, dtype=dtype, device="cuda")
+                                t_jit = torch.jit.script(t)
+                                self._run_helper(t_jit, t, x, [axis], unbiased, keepdim, check_stride=False, check_runs=5)
+
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -1744,6 +1765,7 @@ class TestCudaFuser(JitTestCase):
                         x[1] = C
                         self._norm_helper(x, torch.float32, "cuda", 1e-4, is_batch_norm_else_instance_norm)
 
+    @skipIfRocm
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -3365,6 +3387,7 @@ class TestCudaFuser(JitTestCase):
             training, track_running_stats = training_and_track
             self._test_batch_norm_impl_index_helper(2, 1, 1, affine, track_running_stats, training)
 
+    @skipIfRocm
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -4464,6 +4487,125 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(jit_o, o)
             self.assertGraphContainsExactly(t_jit.graph_for(x, w), FUSION_GUARD, 2, consider_subgraphs=True)
 
+    @skipIfRocm
+    # see issue here on why we disabled this test https://github.com/csarofeen/pytorch/issues/2127
+    @unittest.skipIf(is_pre_volta(), "permutation scheduling can be dangerous on pre-volta device")
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_view_before_permute(self):
+        view_examples = [[[1, 19, 1, 12, 7, 1, 99], [1, 19, 1, 3, 2772]],
+                         [[3, 17, 80, 1], [51, 1, 2, 4, 10]],
+                         [[3, 17, 80, 1, 9], [51, 1, 2, 4, 10, 9]],
+                         [[2, 3, 4, 5], [1, 6, 1, 2, 2, 5]],
+                         [[22, 22, 2], [22, 11, 1, 1, 4]],
+                         [[37, 9, 7, 6, 10], [333, 2, 2, 3, 35]],
+                         [[8, 1, 1, 8, 1, 8], [8, 2, 4, 1, 8]],
+                         [[1, 333, 1], [1, 37, 9]],
+                         [[1, 333], [1, 1, 1, 111, 1, 3]],
+                         [[1, 27454, 1, 2], [1, 7844, 1, 7]],
+                         [[1, 7844, 1, 7], [1, 27454, 2]]]
+
+        def _getTransposeAxes(sizes):
+            # broadcast do not change
+            # always move inner-most dim
+            # random permutation of other dims
+            result = []
+            valid_sizes = []
+            for idx, val in enumerate(sizes):
+                if val > 1 and idx < len(sizes) - 1:
+                    valid_sizes.append((idx, val))
+                result.append(idx)
+            idx, new_size = valid_sizes[random.randint(0, len(valid_sizes) - 1)]
+            result[idx] = len(sizes) - 1
+            result[len(sizes) - 1] = idx
+            return result
+
+        def _transposeSize(sizes, dims):
+            return [sizes[old_pos] for old_pos in dims]
+
+        for example in view_examples:
+            before_view_size, after_view_size = example
+            axes = _getTransposeAxes(after_view_size)
+            output_size = _transposeSize(after_view_size, axes)
+            self._view_before_permute_helper(before_view_size, after_view_size, output_size, axes)
+
+    def _view_before_permute_helper(self, input_shape, view_shape, output_shape, dims):
+        def t(x, y, view_shape : List[int], dims : List[int]):
+            x_v = x.view(view_shape)
+            x_t = torch.permute(x_v, dims)
+            o = torch.add(x_t, y)
+            o = torch.relu(o)
+            return o
+
+        x = torch.randn(*input_shape, device="cuda")
+        y = torch.randn(*output_shape, device="cuda")
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x, y, view_shape, dims)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_permute(self):
+        max_dims = 4
+        for ndims in range(2, max_dims + 1):
+            shape = [idx + 2 for idx in range(ndims)]
+            for dims in itertools.permutations(range(ndims)):
+                self._permute_helper(shape, dims)
+
+    def _permute_helper(self, shape, dims):
+        def t(x, y, dims : List[int]):
+            x_t = torch.permute(x, dims)
+            y_t = torch.permute(y, dims)
+            o = torch.add(x_t, y_t)
+            o = torch.relu(o)
+            return o
+
+        x = torch.randn(*shape, device="cuda")
+        y = torch.randn(*shape, device="cuda")
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x, y, dims)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_transpose(self):
+        max_dims = 4
+        for ndims in range(2, max_dims + 1):
+            shape = [idx + 2 for idx in range(ndims)]
+            for idx in range(1, ndims):
+                for jdx in range(idx):
+                    self._transpose_helper(shape, idx, jdx)
+
+    def _transpose_helper(self, shape, dim0, dim1):
+        def t(x, y, dim0 : int, dim1 : int):
+            x_t = torch.transpose(x, dim0, dim1)
+            y_t = torch.transpose(y, dim0, dim1)
+            o = torch.add(x_t, y_t)
+            o = torch.nn.functional.gelu(o)
+            return o
+
+        x = torch.randn(*shape, device="cuda")
+        y = torch.randn(*shape, device="cuda")
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x, y, dim0, dim1)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_transpose_default(self):
+        def t(x, y):
+            x_t = torch.t(x)
+            y_t = torch.t(y)
+            o = torch.add(x_t, y_t)
+            o = torch.nn.functional.gelu(o)
+            return o
+
+        x = torch.randn(3, 5, device="cuda")
+        y = torch.randn(3, 5, device="cuda")
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x, y)
+
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
@@ -5107,6 +5249,7 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
         # if the CU is not cleared.
         torch.jit._state._python_cu.drop_all_functions()
 
+    @skipIfRocm
     @slowTest
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
