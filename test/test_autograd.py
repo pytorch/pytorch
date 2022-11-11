@@ -6795,6 +6795,20 @@ for shape in [(1,), ()]:
         # not leaf, not output
         test(lambda: (1 + torch.randn(5, requires_grad=True)), False)
 
+    def test_saved_variable_saved_original_inplace_detach(self):
+        # Detaching a tensor that is saved input raises
+        a = torch.tensor(1., requires_grad=True).clone()
+        b = a.sin()
+        a.detach_()
+        with self.assertRaisesRegex(RuntimeError, "Trying to use a saved tensor that has been detached"):
+            b.backward()
+
+        # Detaching a tensor that is saved as output is OK
+        a = torch.tensor(1., requires_grad=True).clone()
+        b = a.exp()
+        a.detach_()
+        b.backward()
+
     def test_saved_variable_packing_unpacking_did_not_save_original_with_hooks(self):
         # Tests that packing/unpacking a SavedVariable works correctly with user-defined hooks
         # The saved_original / did_not_save_original distinction corresponds to the `save_original`
