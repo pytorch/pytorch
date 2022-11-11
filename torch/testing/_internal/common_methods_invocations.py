@@ -1174,7 +1174,7 @@ def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
     cases = ((), (S, S, S), (S,))
 
     for shape in cases:
-        yield(SampleInput(make_arg(shape)))
+        yield (SampleInput(make_arg(shape)))
 
 # TODO: add reduction kwargs
 def sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
@@ -6075,7 +6075,7 @@ def sample_inputs_resize_ops(op_info, device, dtype, requires_grad, **kwargs):
         else:
             raise ValueError("sample_inputs_resize_ops is being used with incorrect operator")
 
-        yield(SampleInput(make_arg(shape, requires_grad=requires_grad), args=args))
+        yield (SampleInput(make_arg(shape, requires_grad=requires_grad), args=args))
 
 def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -6331,7 +6331,7 @@ def sample_inputs_expand(op_info, device, dtype, requires_grad, **kwargs):
 
     for case in cases:
         shape, args = case
-        yield(SampleInput(make_arg(shape), args=(args, )))
+        yield (SampleInput(make_arg(shape), args=(args, )))
 
 def sample_inputs_conversion(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -6354,7 +6354,7 @@ def sample_inputs_expand_as(op_info, device, dtype, requires_grad, **kwargs):
              )
 
     for shape, shape_other in cases:
-        yield(SampleInput(make_arg(shape, requires_grad=requires_grad),
+        yield (SampleInput(make_arg(shape, requires_grad=requires_grad),
                           args=(make_arg(shape_other, requires_grad=False), )))
 
 
@@ -6473,7 +6473,7 @@ def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
         inputs.append(mixed)
 
     for input_t, as_tuple in product(inputs, [False, True]):
-        yield(SampleInput(input_t.clone().requires_grad_(requires_grad),
+        yield (SampleInput(input_t.clone().requires_grad_(requires_grad),
                           kwargs=dict(as_tuple=as_tuple)))
 
 def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
@@ -6485,7 +6485,7 @@ def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
 
     for case in cases:
         shape, args = case
-        yield(SampleInput(make_arg(shape), args=args))
+        yield (SampleInput(make_arg(shape), args=args))
 
 def reference_inputs_chunk(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_chunk(op, device, dtype, requires_grad, **kwargs)
@@ -7989,7 +7989,7 @@ def reference_flatten(input, start_dim=0, end_dim=-1):
     in_shape = input.shape
     in_rank = len(in_shape)
     for d in start_dim, end_dim:
-        if not((in_rank == 0 and d in (-1, 0)) or -in_rank <= d < in_rank):
+        if not ((in_rank == 0 and d in (-1, 0)) or -in_rank <= d < in_rank):
             raise IndexError(f"Dimension out of range (expected to be in range of [{-in_rank}, {in_rank-1}], but got {d}")
     end_dim = end_dim if end_dim >= 0 else in_rank + end_dim
     start_dim = start_dim if start_dim >= 0 else in_rank + start_dim
@@ -10450,20 +10450,21 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=True),
-    OpInfo('_softmax_backward_data',
-           op=torch.ops.aten._softmax_backward_data,
-           aten_name='_softmax_backward_data',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
-           sample_inputs_func=sample_inputs_softmax_backward_data,
-           assert_autodiffed=True,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           supports_out=False,
-           skips=(
-              DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),
-              DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-           )
+    OpInfo(
+        '_softmax_backward_data',
+        op=torch.ops.aten._softmax_backward_data,
+        aten_name='_softmax_backward_data',
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        sample_inputs_func=sample_inputs_softmax_backward_data,
+        assert_autodiffed=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+        ),
     ),
     # `softmin` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
@@ -15769,17 +15770,17 @@ op_db: List[OpInfo] = [
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs, inplace=True)),
     OpInfo(
         "native_dropout_backward",
-        op=torch.ops.aten.native_dropout_backward,
+        op=torch.ops.aten.native_dropout_backward.default,
+        aten_name="native_dropout_backward",
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-        supports_out=True,
+        supports_out=False,
         sample_inputs_func=sample_inputs_dropout_backward,
         skips=(
-            # RuntimeError not raised: Expected RuntimeError when calling with out.device=cuda
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cuda'),
-            # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-            DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit')),
+           DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
+            DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir')
+        ),
     ),
     OpInfo(
         "nn.functional.dropout2d",
