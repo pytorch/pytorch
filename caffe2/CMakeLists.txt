@@ -1521,6 +1521,12 @@ endif()
 
 # ---[ CUDA library.
 if(USE_CUDA)
+  # FIXME: If kineto is linked with CUPTI it pollutes torch_cpu with CUDA dependencies
+  # Even worse, it never declares that it depends on cudart, but calls the API, see
+  # https://github.com/pytorch/kineto/blob/aef2f5c0f15e3be52406ac0b885e8689de6bc9f6/libkineto/src/CudaDeviceProperties.cpp#L24
+  if(USE_KINETO AND NOT MSVC)
+    target_link_libraries(torch_cpu PRIVATE torch::cudart)
+  endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
   target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
 
