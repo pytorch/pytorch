@@ -178,6 +178,33 @@ def cache_on_self(fn):
     return wrapper
 
 
+def get_fused_kernel_name(node_schedule):
+    return "_".join(
+        ["fused"]
+        + [
+            str(origin.name)
+            for origin in functools.reduce(
+                operator.or_,
+                [node.node.origins for node in node_schedule if hasattr(node, "node")],
+            )
+            if origin.op == "call_function"
+        ][0 : config.kernel_name_max_ops]
+    )
+
+
+def gather_origins(args, kwargs):
+    import itertools
+
+    from .ir import ComputedBuffer, IRNode
+
+    def is_unrealized_node(n):
+        return isinstance(n, IRNode) and not isinstance(n, ComputedBuffer)
+
+    kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
+    arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
+    return set(itertools.chain(*arg_origins, *kwarg_origins))
+
+
 def sympy_str(expr: sympy.Expr):
     """
     Normal sympy str is very slow, this is a lot faster.  The result are
@@ -267,3 +294,7 @@ def fresh_inductor_cache(cache_entries=None):
                                 if ".lock" not in f
                             }
                         )
+
+
+def argsort(seq):
+    return sorted(range(len(seq)), key=seq.__getitem__)
