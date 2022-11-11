@@ -1453,27 +1453,6 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertTrue(called)
 
-    def test_disable_subclass_mode(self):
-        called = False
-
-        class A(TorchFunctionMode):
-            def __torch_function__(self, func, types, args=(), kwargs=None):
-                nonlocal called
-                if kwargs is None:
-                    kwargs = {}
-                called = True
-                return func(*args, **kwargs)
-
-        class B(torch.Tensor):
-            pass
-
-        x = B(torch.randn(5))
-        with A():
-            with torch._C.DisableTorchFunction():
-                self.assertNotIsInstance(torch.sum(x), B)
-
-        self.assertFalse(called)
-
     def test_disable_enable_subclass(self):
         called = False
 
