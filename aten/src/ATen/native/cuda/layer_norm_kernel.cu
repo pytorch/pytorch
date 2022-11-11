@@ -1086,7 +1086,7 @@ void LayerNormBackwardKernelImplInternal(
               dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-#if defined __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
       // For small batch size, do colwise reduce directly.
       const int part_size = warp_size;
       const dim3 threads2(warp_size, 4, 1);
