@@ -11480,8 +11480,9 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_max_pool2d,
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('max_pool2d_with_indices_backward',
-           aten_name=None,
            op=max_pool2d_backward,
+           # We've defined a custom op, so there's no corresponding aten op
+           aten_name=None,
            method_variant=None,
            inplace_variant=None,
            operator_variant=None,
@@ -11495,11 +11496,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_pool,
            skips=(
-               # RuntimeError: Stride mismatch! Strides are (36, 18, 6, 1) and (36, 1, 12, 2) (mismatched at 1)!
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_amp'),
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_no_amp'),
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake', device_type='cuda'),
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', device_type='cuda'),
+               # We've defined a custom op here, and we don't handle the case where we receive an out kwarg
                DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
            )),
