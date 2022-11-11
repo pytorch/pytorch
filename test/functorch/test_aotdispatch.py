@@ -1095,7 +1095,8 @@ symbolic_aot_autograd_failures = {
     xfail('masked_fill', ''),  # could not find kernel
     xfail('masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposi...
     xfail('masked.logsumexp', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked.median', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    # Seems flaky: https://github.com/pytorch/pytorch/issues/88883
+    skip('masked.median', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
@@ -1206,7 +1207,6 @@ symbolic_aot_autograd_failures = {
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('topk', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trapz', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
