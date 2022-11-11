@@ -104,7 +104,7 @@ def triton_accuracy_error(x):
     return f"{x} + 1"
 """
 
-DEBUG_DIR = ("/tmp/_torchdynamo_debug_/",)
+DEBUG_DIR = "/tmp/_torchdynamo_debug_/"
 
 # Search for the name of the first function defined in a code string.
 def get_fn_name(code):
@@ -175,6 +175,10 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
 
     # Patch generated files with testing patches
     def _inject_code(self, patch_code, filename):
+        patch_code = f"""\
+{patch_code}
+torch._dynamo.config.debug_dir_root = "{DEBUG_DIR}"
+"""
         with open(filename, "r") as f:
             code = f.read()
         code = code.replace(TEST_REPLACEABLE_COMMENT, patch_code)
@@ -188,11 +192,13 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
         launch_file = os.path.join(repro_dir, "minifier_launcher.py")
         self.assertTrue(os.path.exists(launch_file))
         launch_code = self._inject_code(patch_code, launch_file)
+
         launch_proc = subprocess.run(
             ["python3", launch_file],
             capture_output=True,
             cwd=repro_dir,
         )
+
         return launch_proc, launch_code
 
     # Runs the repro script in `repro_dir`, patched with `patch_code`
@@ -229,12 +235,10 @@ torch._dynamo.config.debug_dir_root = "{DEBUG_DIR}"
     # 3. Run the generated repro script
     def _run_full_test(self, run_code, repro_after, repro_level, patch_code):
         test_code = self._gen_test_code(run_code, repro_after, repro_level, patch_code)
-
         test_proc, repro_dir = self._run_test_code(test_code)
         self.assertIsNotNone(repro_dir)
         launch_proc, launch_code = self._run_minifier_launcher(patch_code, repro_dir)
         repro_proc, repro_code = self._run_repro(patch_code, repro_dir)
-
         return ((test_proc, launch_proc, repro_proc), (launch_code, repro_code))
 
     # Test that compile, runtime, and accuracy errors after dynamo can be repro'd (both CPU and CUDA)

@@ -9,6 +9,7 @@ import sympy
 
 import torch
 import torch.fx
+import torch.utils._pytree as pytree
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -22,6 +23,7 @@ from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
+    get_stride_order,
     IndexingConstant,
     IndexingDiv,
     PermuteView,
@@ -934,11 +936,27 @@ def register_onednn_fusion_ops():
             stride,
             dilation,
             groups,
-            attr,
+            binary_attr,
+            binary_alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
         ):
             return TensorBox.create(
                 ir.ConvolutionBinary.create(
-                    x, other, weight, bias, padding, stride, dilation, groups, attr
+                    x,
+                    other,
+                    weight,
+                    bias,
+                    padding,
+                    stride,
+                    dilation,
+                    groups,
+                    binary_attr,
+                    binary_alpha,
+                    unary_attr,
+                    unary_scalars,
+                    unary_algorithm,
                 )
             )
 
@@ -961,20 +979,20 @@ def register_onednn_fusion_ops():
 register_onednn_fusion_ops()
 
 
-def fallback_handler(kernel):
+def fallback_handler(kernel, inps_hook=None):
     fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
-        result = ir.FallbackKernel.create(kernel, *args, **kwargs)
-        if isinstance(result, (list, tuple)):
-            return list(map(TensorBox.create, result))
-        else:
-            return TensorBox.create(result)
+        if inps_hook is not None:
+            args, kwargs = inps_hook(*args, **kwargs)
+        return pytree.tree_map(
+            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
+        )
 
     return handler
 
 
-def make_fallback(kernel):
+def make_fallback(kernel, inps_hook=None):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
@@ -984,7 +1002,9 @@ def make_fallback(kernel):
         )
 
     add_needs_realized_inputs(kernel)
-    return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
+    return register_lowering(kernel, type_promotion_kind=None)(
+        fallback_handler(kernel, inps_hook)
+    )
 
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
@@ -993,12 +1013,10 @@ def native_dropout(x, p, train):
         config.fallback_random
     ), "this should be handled in decomps unless config.fallback_random"
     if train:
-        return list(
-            map(
-                TensorBox.create,
-                ir.FallbackKernel.create(aten.native_dropout, x, p, train),
-            )
+        return pytree.tree_map(
+            TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
         )
+
     return x, ones_like(x, dtype=torch.bool)
 
 
@@ -1137,29 +1155,101 @@ def philox_rand_like(x, seed, offset):
     )
 
 
+def conv_backward(*args, **kwargs):
+    # output striding complex and has a lot of build dependent options,
+    # take the output strides to determine what to set the inputs
+    with torch._subclasses.FakeTensorMode():
+        args_fake, kwargs_fake = pytree.tree_map_only(
+            ir.IRNode,
+            lambda t: ir.ir_node_to_tensor(t, guard_shape=False),
+            (args, kwargs),
+        )
+        output = aten.convolution_backward(*args_fake, **kwargs_fake)
+
+    def constraints(
+        grad_output,
+        input,
+        weight,
+        bias_sizes,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+        output_mask,
+    ):
+        out = (
+            output[0]
+            if output[0] is not None
+            else output[1]
+            if output[1] is not None
+            else output[2]
+        )
+        if out is not None:
+            stride_order = get_stride_order(out.stride())
+            grad_output = ir.ExternKernel.require_stride_order(
+                grad_output, stride_order
+            )
+            weight = ir.ExternKernel.require_stride_order(weight, stride_order)
+            # Only make input contiguous when it is necessary for the backwards computation
+            if output_mask[1]:
+                input = ir.ExternKernel.require_stride_order(input, stride_order)
+
+        return (
+            grad_output,
+            input,
+            weight,
+            bias_sizes,
+            stride,
+            padding,
+            dilation,
+            transposed,
+            output_padding,
+            groups,
+            output_mask,
+        ), {}
+
+    return constraints(*args, **kwargs)
+
+
+def require_dense(*args, **kwargs):
+    args, kwargs = pytree.tree_map_only(
+        ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs)
+    )
+    return args, kwargs
+
+
+def require_contiguous(*args, **kwargs):
+    args, kwargs = pytree.tree_map_only(
+        ir.IRNode, lambda t: ir.ExternKernel.require_contiguous(t), (args, kwargs)
+    )
+    return args, kwargs
+
+
 if has_torchvision_roi_align():
     make_fallback(torch.ops.torchvision.roi_align)
 
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
-make_fallback(aten._adaptive_avg_pool2d_backward)
-make_fallback(aten.convolution_backward)
-make_fallback(aten._cudnn_rnn)
-make_fallback(aten._cudnn_rnn_backward)
-make_fallback(aten.cumsum)
-make_fallback(aten._embedding_bag)
-make_fallback(aten._embedding_bag_forward_only)
+make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
+make_fallback(aten.convolution_backward, inps_hook=conv_backward)
+make_fallback(aten._cudnn_rnn, require_dense)
+make_fallback(aten._cudnn_rnn_backward, inps_hook=require_contiguous)
+make_fallback(aten.cumsum, inps_hook=require_dense)
+make_fallback(aten._embedding_bag, inps_hook=require_contiguous)
+make_fallback(aten._embedding_bag_forward_only, inps_hook=require_contiguous)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
-make_fallback(aten.grid_sampler_2d_backward)
+make_fallback(aten.grid_sampler_2d_backward, inps_hook=require_dense)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
-make_fallback(aten._thnn_fused_lstm_cell)
+make_fallback(aten._thnn_fused_lstm_cell, inps_hook=require_dense)
 make_fallback(aten.topk)
-make_fallback(aten.upsample_bicubic2d_backward)
-make_fallback(aten.upsample_bilinear2d_backward)
+make_fallback(aten.upsample_bicubic2d_backward, inps_hook=require_contiguous)
+make_fallback(aten.upsample_bilinear2d_backward, inps_hook=require_dense)
 
 
 @register_lowering(aten.convolution)
@@ -2028,20 +2118,20 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     return self
 
 
-def upsample_nearestnd(x, output_size=None, scale_factors=None, n=2):
+def upsample_nearestnd(x, output_size, scales_x: Tuple[float] = None, n: int = 2):
     x.realize_hint()  # elements are reused
     x_loader = x.make_loader()
     i_sizes = x.get_size()[-n:]
     batch = x.get_size()[:-n]
     i_sizes = [V.graph.sizevars.guard_static_shape(i) for i in i_sizes]
 
-    if scale_factors:
-        assert not output_size
-        o_sizes = [int(i * s) for i, s in zip(i_sizes, scale_factors)]
-    else:
-        o_sizes = output_size
+    assert len(scales_x) == n
+    o_sizes = output_size
 
     scales = [i / o for i, o in zip(i_sizes, o_sizes)]
+    for i, scale in enumerate(scales):
+        if scale:
+            scales[i] = scale
 
     def scale(x, scale):
         x = ops.index_expr(x, torch.float32)
@@ -2062,9 +2152,27 @@ def upsample_nearestnd(x, output_size=None, scale_factors=None, n=2):
     )
 
 
-register_lowering(aten.upsample_nearest1d)(functools.partial(upsample_nearestnd, n=1))
-register_lowering(aten.upsample_nearest2d)(functools.partial(upsample_nearestnd, n=2))
-register_lowering(aten.upsample_nearest3d)(functools.partial(upsample_nearestnd, n=3))
+@register_lowering(aten.upsample_nearest1d.default)
+def upsample_nearest1d(x, output_size, scales: Optional[float] = None):
+    return upsample_nearestnd(x, output_size, (scales,), n=1)
+
+
+@register_lowering(aten.upsample_nearest2d.default)
+def upsample_nearest2d(
+    x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
+):
+    return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2)
+
+
+@register_lowering(aten.upsample_nearest3d.default)
+def upsample_nearest3d(
+    x,
+    output_size,
+    scales_d: Optional[float] = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+):
+    return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
 
 
 @register_lowering(aten.upsample_bicubic2d.default)
@@ -2180,26 +2288,6 @@ def upsample_bicubic2d_default(
         inner_fn=fn,
         ranges=[N, C, sympy.Integer(oH), sympy.Integer(oW)],
     )
-
-
-@register_lowering(aten.upsample_bicubic2d.vec)
-def upsample_bicubic2d_vec(
-    a,
-    output_size,
-    align_corners: bool,
-    scale_factors: Optional[Tuple[float, float]] = None,
-):
-    _, _, iH, iW = a.get_size()
-    iH = V.graph.sizevars.guard_static_shape(iH)
-    iW = V.graph.sizevars.guard_static_shape(iW)
-
-    if bool(output_size) + bool(scale_factors) != 1:
-        raise RuntimeError("Must specify exactly one of output_size and scale_factor.")
-    if output_size is None:
-        assert scale_factors is not None
-        output_size = (int(iH * scale_factors[0]), int(iW * scale_factors[1]))
-    scale_h, scale_w = scale_factors if scale_factors else (None, None)
-    return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
 @register_lowering(aten.reflection_pad2d)
@@ -2719,9 +2807,9 @@ def _adaptive_avg_pool2d(x, output_size):
     return rv
 
 
-@register_lowering(aten.upsample_nearest2d_backward.vec)
+@register_lowering(aten.upsample_nearest2d_backward.default)
 def upsample_nearest2d_backward(
-    x, output_size=None, input_size=None, scale_factors=None
+    x, output_size=None, input_size=None, scales_h=None, scales_w=None
 ):
     x.realize_hint()
 
@@ -3299,6 +3387,23 @@ def div_prim(a, b):
         return div(a, b)
 
 
+@register_lowering([aten.fmod, prims.fmod])
+def fmod(a, b):
+    is_integral = is_boolean_type(a) or is_integer_type(a)
+
+    if is_integral:
+
+        def fn(a, b):
+            return ops.mod(a, b)
+
+    else:
+
+        def fn(a, b):
+            return ops.fmod(a, b)
+
+    return make_pointwise(fn)(a, b)
+
+
 # TODO - enable builtin and disable decomp to lower to ptx instruction
 # Causes compilation to not complete on timm_vision_transformers inference
 # @register_lowering(aten.rsqrt)
@@ -3391,7 +3496,6 @@ register_pointwise(
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
-register_pointwise(aten.fmod)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
 register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)
