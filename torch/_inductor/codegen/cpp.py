@@ -708,7 +708,7 @@ class CppVecKernel(CppKernel):
     def __init__(self, args, num_threads):
         super(CppVecKernel, self).__init__(args, num_threads)
         assert codecache.pick_vec_isa()
-        self.simd_len = codecache.pick_vec_isa().nelements()
+        self.simd_nelements = codecache.pick_vec_isa().nelements()
         self.reduction_omp_dec: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
@@ -724,10 +724,10 @@ class CppVecKernel(CppKernel):
 
     def transform_index(self, index: sympy.Expr):
         expanded_index = sympy.expand(index)
-        assert self.simd_len
-        assert self.simd_len >= 1
+        assert self.simd_nelements
+        assert self.simd_nelements >= 1
         most_inner_var = self.itervars[-1]
-        replacement = {most_inner_var: most_inner_var * self.simd_len}
+        replacement = {most_inner_var: most_inner_var * self.simd_nelements}
         new_index = sympy_subs(expanded_index, replacement)
         return new_index
 
@@ -948,10 +948,11 @@ class CppKernelProxy(CppKernel):
         super(CppKernelProxy, self).__init__(args, num_threads)
         self.simd_vec_kernel: CppVecKernel = None
         self.simd_omp_kernel: CppKernel = None
+        self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
 
     def vectorize_most_inner_loop(self, loop_nest, dtype=torch.float):
-        assert codecache.pick_vec_isa()
-        nelements = codecache.pick_vec_isa().nelements(dtype)
+        assert self.picked_vec_isa
+        nelements = self.picked_vec_isa.nelements(dtype)
         loop_nest.split_most_inner_loop(nelements)
         loop_with_tail = loop_nest.loops[-1]
         assert isinstance(loop_with_tail, LoopLevelWithTail)
@@ -964,7 +965,7 @@ class CppKernelProxy(CppKernel):
         # nelements. But for the tail loop, it still could be vectorized. For example,
         # if the nelements is 8(256bits), then the tail loop still could be vectorized
         # as 4(128bits).
-        loop_with_tail.tail_loop.simd_len = int(nelements / 2)
+        loop_with_tail.tail_loop.simd_nelements = int(nelements / 2)
         loop_with_tail.tail_loop.simd_vec = False
 
         loop_with_tail.main_loop_body = self.simd_vec_kernel
@@ -974,7 +975,7 @@ class CppKernelProxy(CppKernel):
     def codegen_loops(self, code, worksharing):
         threads = parallel_num_threads()
 
-        if self.simd_vec_kernel is None:
+        if self.simd_vec_kernel is None or not self.picked_vec_isa:
             assert self.simd_omp_kernel
             return self.simd_omp_kernel.codegen_loops(code, worksharing)
 
@@ -996,12 +997,49 @@ class CppKernelProxy(CppKernel):
         ), LoopNest(loops[reduction_depth:])
         loops_nest_reduce.mark_reduction(self.simd_vec_kernel.reduction_vars)
 
-        if codecache.pick_vec_isa():
-            # TODO(jansel): detect stride-1 dimension and vectorize that
-            if loops_nest_reduce:
-                loops_nest_reduce.loops[-1].simd = True
-            elif loops_nest_non_reduce:
-                loops_nest_non_reduce.loops[-1].simd = True
+        assert self.picked_vec_isa
+        # Do not apply vectorization since the range of most inner is too small. Meanwhile,
+        # If the range of the most inner is less then the codecache.pick_vec_isa().nelements(),
+        # the generated code for some reduction will be as follows that leads to incrrect result.
+        #
+        #    LINE01:  float tmp1 = 0;
+        #    LINE02:  auto tmp1_vec = at::vec::Vectorized<float>(tmp1);
+        #    LINE03:  for(long i1=0; i1<2; i1+=1)
+        #    LINE04:  {
+        #    LINE05:      for(long i2=0; i2<0; i2+=1)
+        #    LINE06:      {
+        #    LINE07:          auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i0) + (16*i2) + (32*i1));
+        #    LINE08:          tmp1_vec += tmp0;
+        #    LINE09:      }
+        #    LINE10:      tmp1 = vec_reduce_all<float>([](Vectorized<float>& x, Vectorized<float>&y) {return x + y;}, tmp1_vec);
+        #    LINE11:      #pragma omp simd simdlen(8)  reduction(+:tmp1)
+        #    LINE12:      for(long i2=0; i2<8; i2+=1)
+        #    LINE13:      {
+        #    LINE14:          auto tmp0 = in_ptr0[i2 + (8*i0) + (32*i1)];
+        #    LINE15:          tmp1 += tmp0;
+        #    LINE16:      }
+        #    LINE17:  }
+        #    LINE18:  out_ptr3[i0] = tmp1;
+        #
+        # tmp1_vec(LINE02) will always be zero as it is initialized with tmp1 value and the range(LINE05)
+        # is 0. Hence, the LINE10 will always reset tmp1 to 0. But tmp1(LINE01) is global value. So the result
+        # will be incorrect. We skip thie case.
+        most_inner_loop = (
+            loops_nest_reduce.loops[-1]
+            if loops_nest_reduce
+            else loops_nest_non_reduce.loops[-1]
+        )
+        main_loop_range = ir.IndexingDiv(
+            most_inner_loop.size, self.picked_vec_isa.nelements()
+        )
+        if sympy.simplify(main_loop_range) <= 0:
+            return self.simd_omp_kernel.codegen_loops(code, worksharing)
+
+        # TODO(jansel): detect stride-1 dimension and vectorize that
+        if loops_nest_reduce:
+            loops_nest_reduce.loops[-1].simd = True
+        elif loops_nest_non_reduce:
+            loops_nest_non_reduce.loops[-1].simd = True
 
         par_depth = 0
         reduction_par_depth = 0
@@ -1351,9 +1389,8 @@ class LoopLevel:
     steps: sympy.Expr = sympy.Integer(1)
     parallel: int = 0
     simd_omp: bool = False
-    simd_len: int = (
-        codecache.pick_vec_isa().nelements() if codecache.pick_vec_isa() else 0
-    )
+    picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+    simd_nelements: int = picked_vec_isa.nelements() if picked_vec_isa else 0
     simd_vec: bool = False
     collapsed: bool = False
     reduction_vars: Dict[str, str] = None
@@ -1368,8 +1405,8 @@ class LoopLevel:
         else:
             reduction = ""
         simd = (
-            f"simd simdlen({self.simd_len}) "
-            if self.simd_omp and self.simd_len > 1
+            f"simd simdlen({self.simd_nelements}) "
+            if self.simd_omp and self.simd_nelements > 1
             else ""
         )
         if self.parallel:
