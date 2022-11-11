@@ -336,6 +336,8 @@ def _rebuild_parameter(data, requires_grad, backward_hooks):
     return param
 
 
+# TODO(kshitij12345): Support serializing nn.Parameter with Python Attributes.
+# NOTE: We are just defining it here now for future use.
 def _rebuild_parameter_with_state(data, requires_grad, backward_hooks, state):
     param = torch.nn.Parameter(data, requires_grad)
     # NB: This line exists only for backwards compatibility; the
