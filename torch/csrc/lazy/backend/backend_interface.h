@@ -59,7 +59,7 @@ class TORCH_API BackendImplInterface {
 
   // Gets backend data if the node is a device data node. Otherwise returns
   // nullptr
-  virtual BackendDataPtr GetComputationDataFromNode(const Node*) const = 0;
+  virtual BackendDataPtr GetComputationDataFromNode(Node*) const = 0;
 
   virtual at::Tensor MakeTensorFromComputationData(
       const BackendDataPtr data,
@@ -72,7 +72,7 @@ class TORCH_API BackendImplInterface {
   virtual std::unique_ptr<LoweringContext> CreateLoweringContext(
       const std::string& name,
       BackendDevice device,
-      c10::ArrayRef<const torch::lazy::Node*> post_order,
+      c10::ArrayRef<torch::lazy::Node*> post_order,
       Util::EmissionMap emit_status) const = 0;
 
   virtual std::unique_ptr<LoweringContext> CreateLoweringContext(

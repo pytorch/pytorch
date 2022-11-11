@@ -9,7 +9,6 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/_to_dense_native.h>
-#include <ATen/ops/_add_relu_native.h>
 #include <ATen/ops/conv2d.h>
 #include <ATen/ops/conv3d.h>
 #include <ATen/ops/empty.h>
@@ -176,23 +175,51 @@ static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bo
    return memory_format;
 }
 
-void _mkldnn_convolution_out (
+Tensor _mkldnn_convolution(
     const Tensor& input_t,
     const Tensor& weight_t,
-    const Tensor& bias,
-    std::vector<int64_t>& output_sizes,
-    ideep::tensor& y,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    IntArrayRef padding,
     int64_t groups,
-    bool is_channels_last,
-    const ideep::attr_t& op_attr) {
+    c10::string_view attr = "none",
+    torch::List<c10::optional<at::Scalar>> scalars =
+        torch::List<c10::optional<at::Scalar>>(),
+    c10::optional<c10::string_view> algorithm = c10::nullopt) {
+  ideep::attr_t op_attr = ideep::attr_t();
+  if (attr != "none") {
+    auto it = fx_fusion_attr_map().find(attr);
+    TORCH_CHECK(it != fx_fusion_attr_map().end(), "Fusion behavior undefined.");
+    op_attr = it->second(scalars, algorithm);
+  }
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  if (input_t.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
+
+  check_shape_forward(input_t, weight_t, bias, padding, stride, dilation, groups);
+
+  bool is_channels_last = mkldnn_conv_use_channels_last(input_t, weight_t);
   auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
+
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
+  auto output_sizes = conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
+  auto output = at::empty({0}, input.options());
+
   const ideep::tensor x = itensor_from_tensor(input);
   const ideep::tensor w = itensor_from_tensor(weight);
+
+  ideep::tensor y;
+  if (is_channels_last) {
+    output.resize_(output_sizes, memory_format);
+    y = itensor_from_tensor(output);
+  }
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_tensor(bias);
     ideep::convolution_forward::compute_v3(
@@ -222,55 +249,11 @@ void _mkldnn_convolution_out (
         is_channels_last,
         op_attr);
   }
-}
 
-Tensor _mkldnn_convolution(
-    const Tensor& input_t,
-    const Tensor& weight_t,
-    const c10::optional<Tensor>& bias_opt,
-    IntArrayRef padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
-    int64_t groups,
-    c10::string_view attr = "none",
-    torch::List<c10::optional<at::Scalar>> scalars =
-        torch::List<c10::optional<at::Scalar>>(),
-    c10::optional<c10::string_view> algorithm = c10::nullopt) {
-  ideep::attr_t op_attr = ideep::attr_t();
-  if (attr != "none") {
-    auto it = fusion_unary_attr_map().find(attr);
-    TORCH_CHECK(
-        it != fusion_unary_attr_map().end(), "Fusion behavior undefined.");
-    op_attr = it->second(scalars, algorithm);
-  }
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
-  if (input_t.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
-
-  check_shape_forward(input_t, weight_t, bias, padding, stride, dilation, groups);
-
-  bool is_channels_last = mkldnn_conv_use_channels_last(input_t, weight_t);
-  auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
-
-  auto output_sizes = conv_output_size(input_t.sizes(), weight_t.sizes(), padding, stride, dilation);
-  auto output = at::empty({0}, input_t.options());
-  ideep::tensor y;
-  if (is_channels_last) {
-    output.resize_(output_sizes, memory_format);
-    y = itensor_from_tensor(output);
-  }
-  _mkldnn_convolution_out(
-    input_t, weight_t, bias, output_sizes, y, stride, dilation, padding, groups, is_channels_last, op_attr);
-
-  if (input_t.is_mkldnn()) {
-    return MKLDNNTensor(y, input_t.options());
+  if (input.is_mkldnn()) {
+    return MKLDNNTensor(y, input.options());
   } else if (!is_channels_last) {
-    return mkldnn_to_dense(MKLDNNTensor(y, input_t.options()));
+    return mkldnn_to_dense(MKLDNNTensor(y, input.options()));
   } else {
     TORCH_INTERNAL_ASSERT(y.get_desc().is_nhwc());
     return output;
@@ -314,14 +297,6 @@ Tensor mkldnn_convolution_pointwise(
       algorithm);
 }
 
-// Fuse convolution+binary_op+unary_op for good performance, which doing such
-// operation: output=unary_op(binary_op(conv(input_t, ...), other_t, alpha)).
-// The binary_attr means which binary_op is, it can be "add", or
-// other binary operation. the unary_attr means which unary_op is,
-// it can be "relu" or other unary operation, if it is none, meaning that
-// there doesn't have a unary post op. unary_scalars and unary_algorithm
-// are the parameters of the unary op, such as "hardtanh" has scalar parameters,
-// "gelu" has algorithm parameters.
 Tensor mkldnn_convolution_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
@@ -331,17 +306,10 @@ Tensor mkldnn_convolution_pointwise_binary(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    c10::string_view binary_attr,
-    c10::optional<at::Scalar> alpha,
-    c10::optional<c10::string_view> unary_attr,
-    torch::List<c10::optional<at::Scalar>> unary_scalars,
-    c10::optional<c10::string_view> unary_algorithm) {
+    c10::string_view attr) {
   TORCH_CHECK(
       input_t.ndimension() == 4 || input_t.ndimension() == 5,
       "mkldnn_convolution_pointwise_binary: currently only support 2d and 3d")
-  TORCH_CHECK(
-      !alpha.has_value() || alpha.value().to<float>() == 1.0,
-      "mkldnn_convolution_pointwise_binary: the alpha value should be none or 1.0");
 
   c10::MaybeOwned<Tensor> bias_maybe_owned =
       at::borrow_from_optional_tensor(bias_opt);
@@ -366,22 +334,9 @@ Tensor mkldnn_convolution_pointwise_binary(
   bool can_be_fused =
       groups == 1 && mkldnn_conv_use_channels_last(input_t, weight_t);
 
-  c10::string_view unary_attr_value = "none";
-  ideep::algorithm unary_alg;
-  if (unary_attr.has_value()) {
-    auto it_unary = fusion_unary_alg_map().find(unary_attr.value());
-    // Now, we only support conv+binary+relu.
-    TORCH_CHECK(
-        it_unary != fusion_unary_alg_map().end(),
-        "Unary Fusion behavior undefined.");
-    unary_attr_value = unary_attr.value();
-    unary_alg = it_unary->second;
-  }
-  auto it_binary = fusion_binary_alg_map().find(binary_attr);
+  auto it_binary = fusion_binary_alg_map().find(attr);
   TORCH_CHECK(
-      it_binary != fusion_binary_alg_map().end(),
-      "Binary Fusion behavior undefined.");
-
+      it_binary != fusion_binary_alg_map().end(), "Fusion behavior undefined.");
   if (can_be_fused) {
     c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
     auto memory_format =
@@ -401,15 +356,7 @@ Tensor mkldnn_convolution_pointwise_binary(
     }
     auto other_desc = ideep::tensor::desc(
         output_size, get_mkldnn_dtype(weight.scalar_type()), format_tag);
-
-    ideep::attr_t op_attr;
-    ideep::post_ops po;
-    po.append_binary(it_binary->second, other_desc);
-    if (unary_attr_value != "none") {
-      po.append_eltwise(1.0, unary_alg, 0.f, 0.f);
-    }
-    op_attr.set_post_ops(po);
-
+    auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
     if (bias.defined()) {
       const ideep::tensor b = itensor_from_tensor(bias);
       ideep::convolution_forward::compute_binary(
@@ -453,121 +400,17 @@ Tensor mkldnn_convolution_pointwise_binary(
       output = at::conv3d(
           input_t, weight_t, bias_opt, stride, padding, dilation, groups);
     }
-    if (binary_attr == "add" && unary_attr_value != "none") {
-      output = at::native::add_relu_(output, other_t);
-      return output;
-    }
-    if (binary_attr == "add") {
+    if (attr == "add") {
       output.add_(other_t);
-    } else if (binary_attr == "sub") {
+    } else if (attr == "sub") {
       output.sub_(other_t);
-    } else if (binary_attr == "mul") {
+    } else if (attr == "mul") {
       output.mul_(other_t);
     } else {
       output.div_(other_t);
     }
-    if (unary_attr_value != "none") {
-      output.relu_();
-    }
     return output;
   }
-}
-
-// Fuse convolution+binary_op+unary_op for good performance, which doing
-// such operation: other_t=unary_op(binary_op(conv(input_t, ...), other_t,
-// alpha)). The binary_attr means which binary_op is, it can be "add", or other
-// binary operation. the unary_attr means which unary_op is, it can be "relu" or
-// other unary operation, if it is none, meaning that there doesn't have a unary
-// post op. unary_scalars and unary_algorithm are the parameters of the unary
-// op, such as "hardtanh" has scalar parameters "gelu" has algorithm parameters.
-
-Tensor& mkldnn_convolution_pointwise_binary_(
-    const Tensor& input_t,
-    Tensor& other_t,
-    const Tensor& weight_t,
-    const c10::optional<Tensor>& bias_opt,
-    IntArrayRef padding,
-    IntArrayRef stride,
-    IntArrayRef dilation,
-    int64_t groups,
-    c10::string_view binary_attr,
-    c10::optional<at::Scalar> alpha,
-    c10::optional<c10::string_view> unary_attr,
-    torch::List<c10::optional<at::Scalar>> unary_scalars,
-    c10::optional<c10::string_view> unary_algorithm) {
-  // other_t += convolution(...), other_t = unary(other_t)
-  TORCH_CHECK(
-      input_t.ndimension() == 4 || input_t.ndimension() == 5,
-      "mkldnn_convolution_add_: currently only support 2d and 3d")
-  TORCH_CHECK(
-      binary_attr == "add",
-      "mkldnn_convolution_pointwise_binary_: only support binary op fusion")
-  TORCH_CHECK(
-      !alpha.has_value() || alpha.value().to<float>() == 1.0,
-      "mkldnn_convolution_pointwise_binary: the alpha value for the binary op should be none(meaning 1.0) or 1.0");
-  TORCH_CHECK(
-      !unary_attr.has_value() || unary_attr.value() == "relu",
-      "mkldnn_convolution_pointwise_binary: only support none or relu unary op fusion after binary op");
-
-  c10::MaybeOwned<Tensor> bias_maybe_owned =
-      at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
-  // Make sure inputs have same type(device, layout, dtype), device is cpu and
-  // dtype is float or bfloat16.
-  check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
-
-  check_shape_forward(
-      input_t, weight_t, bias, padding, stride, dilation, groups);
-
-  auto output_sizes = conv_output_size(
-      input_t.sizes(), weight_t.sizes(), padding, stride, dilation);
-  TORCH_CHECK(
-      output_sizes == other_t.sizes(),
-      "Add Fusion's inputs should have same shape");
-  // Only calling fusion path for channels_last path and the output is contiguous tensor(channels_last).
-  bool can_be_fused = mkldnn_conv_use_channels_last(input_t, weight_t)
-                      && (other_t.is_contiguous(at::MemoryFormat::ChannelsLast)
-                          || other_t.is_contiguous(at::MemoryFormat::ChannelsLast3d));
-  if (can_be_fused) {
-    c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-    ideep::tensor y = itensor_from_tensor(other_t);
-    ideep::attr_t op_attr;
-    if (unary_attr.has_value()) {
-      op_attr = ideep::attr_t::residual();
-    } else {
-      op_attr = ideep::attr_t::fuse_sum();
-    }
-    _mkldnn_convolution_out(
-        input_t,
-        weight_t,
-        bias,
-        output_sizes,
-        y,
-        stride,
-        dilation,
-        padding,
-        groups,
-        true,
-        op_attr);
-  } else {
-    // Fallback case, if inputs are not channels last or have different dtype,
-    // OneDNN fusion may have performance regression.
-    Tensor output;
-    if (input_t.ndimension() == 4) {
-      output = at::conv2d(
-          input_t, weight_t, bias_opt, stride, padding, dilation, groups);
-    } else {
-      output = at::conv3d(
-          input_t, weight_t, bias_opt, stride, padding, dilation, groups);
-    }
-    if (unary_attr.has_value()) {
-      other_t = at::native::add_relu_(other_t, output);
-    } else {
-      other_t.add_(output);
-    }
-  }
-  return other_t;
 }
 
 Tensor mkldnn_convolution_backward_input(
@@ -697,9 +540,6 @@ TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise.binary"),
       TORCH_FN(mkldnn_convolution_pointwise_binary));
-  m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise_.binary"),
-      TORCH_FN(mkldnn_convolution_pointwise_binary_));
 }
 
 }}  // namespace at::native

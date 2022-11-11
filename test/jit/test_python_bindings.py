@@ -84,11 +84,6 @@ class TestPythonBindings(JitTestCase):
         with self.assertRaises(ValueError):
             gr.create("prim::Constant", [None])
 
-    def test_add_input(self):
-        gr = torch._C.Graph()
-        foo_value = gr.addInput("foo")
-        assert foo_value in gr.inputs()
-
     def test_canonicalize(self):
         ir = """
 graph(%p207 : Tensor,

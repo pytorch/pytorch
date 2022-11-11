@@ -121,15 +121,15 @@ DASHBOARD_DEFAULTS = {
 
 
 def flag_speedup(x):
-    return x < 0.95
+    return pd.isna(x) or x < 0.95
 
 
 def flag_compilation_latency(x):
-    return x > 120
+    return pd.isna(x) or x == 0 or x > 120
 
 
 def flag_compression_ratio(x):
-    return x < 0.9
+    return pd.isna(x) or x < 0.9
 
 
 FLAG_FNS = {
@@ -441,12 +441,7 @@ class ParsePerformanceLogs(Parser):
         )
         self.parsed_frames = defaultdict(lambda: defaultdict(None))
         self.untouched_parsed_frames = defaultdict(lambda: defaultdict(None))
-        self.metrics = [
-            "speedup",
-            "abs_latency",
-            "compilation_latency",
-            "compression_ratio",
-        ]
+        self.metrics = ["speedup", "compilation_latency", "compression_ratio"]
         self.bottom_k = 50
         self.parse()
 
@@ -479,7 +474,6 @@ class ParsePerformanceLogs(Parser):
                     "name",
                     "batch_size",
                     "speedup",
-                    "abs_latency",
                     "compilation_latency",
                     "compression_ratio",
                 ],
@@ -517,8 +511,6 @@ class ParsePerformanceLogs(Parser):
             for compiler in self.compilers:
                 output_filename = f"{self.output_dir}/{compiler}_{suite}_{dtype}_{self.mode}_{device}_{testing}.csv"
                 df = self.read_csv(output_filename)
-                if metric not in df:
-                    df.insert(len(df.columns), metric, np.nan)
                 df = df[["dev", "name", "batch_size", metric]]
                 df.rename(columns={metric: compiler}, inplace=True)
                 df["batch_size"] = df["batch_size"].astype(int)
@@ -551,12 +543,12 @@ class ParsePerformanceLogs(Parser):
                     for compiler in self.compilers:
                         if not perf_row.empty:
                             if acc_row.empty:
-                                perf_row[compiler] = 0.0
+                                perf_row.loc[0, compiler] = 0.0
                             elif acc_row[compiler].iloc[0] not in (
                                 "pass",
                                 "pass_due_to_skip",
                             ):
-                                perf_row[compiler] = 0.0
+                                perf_row.loc[0, compiler] = 0.0
                     perf_rows.append(perf_row)
                 df = pd.concat(perf_rows)
             df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
@@ -701,18 +693,11 @@ class ParsePerformanceLogs(Parser):
             return "Compilation latency (sec)"
         elif metric == "compression_ratio":
             return "Peak Memory Compression Ratio"
-        elif metric == "abs_latency":
-            return "Absolute latency (ms)"
         raise RuntimeError("unknown metric")
 
     def generate_warnings(self):
         title = "## Warnings ##"
-        body = (
-            "We flag models where:\n\n"
-            " - speedup < 0.95x\n"
-            " - compilation latency > 120 sec.\n"
-            " - compression ratio < 0.9\n\n"
-        )
+        body = ""
         for metric in [
             "speedup",
             "compilation_latency",
@@ -744,7 +729,6 @@ class ParsePerformanceLogs(Parser):
             "accuracy",
             "compilation_latency",
             "compression_ratio",
-            "abs_latency",
         ]:
             df = self.untouched_parsed_frames[suite][metric]
             df = df.drop("dev", axis=1)
@@ -863,14 +847,9 @@ class AccuracyRegressionTracker:
 
     def generate_comment(self):
         title = "## Accuracy Regressions ##\n"
-        body = (
-            "For each relevant compiler, we compare the most recent 2 reports "
-            "(that run actually the compiler) to find models where previously "
-            "successful accuracy tests now fail.\n\n"
-        )
+        body = ""
         dtype = self.args.dtypes[0]
         device = self.args.devices[0]
-        regressions_present = False
         for suite in self.args.suites:
             dfs = []
             for compiler in self.args.flag_compilers:
@@ -903,7 +882,6 @@ class AccuracyRegressionTracker:
             df = pd.concat(dfs, axis=0)
             if df.empty:
                 continue
-            regressions_present = True
             tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
             str_io = io.StringIO()
             str_io.write("\n")
@@ -912,9 +890,6 @@ class AccuracyRegressionTracker:
             str_io.write(f"{tabform}\n")
             str_io.write("~~~\n")
             body += str_io.getvalue()
-
-        if not regressions_present:
-            body += "No accuracy regressions found.\n"
 
         comment = generate_dropdown_comment(title, body)
 

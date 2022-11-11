@@ -725,7 +725,7 @@ class {module_name}(torch.nn.Module):
         submodule_code_list = [""]
         for submodule in self.children():
             if isinstance(submodule, GraphModule):
-                submodule_code_list.append(submodule.print_readable(print_output=False))
+                submodule_code_list.append(submodule.__nested_code())
         submodule_code = "\n".join(submodule_code_list)
         submodule_code = _addindent(submodule_code, 4)
 

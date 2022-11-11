@@ -23,8 +23,8 @@ from torch.ao.quantization.qconfig import (
     default_qat_qconfig_v2,
     get_default_qconfig,
     get_default_qat_qconfig,
-    _assert_valid_qconfig,
+    assert_valid_qconfig,
     QConfigAny,
-    _add_module_to_qconfig_obs_ctr,
+    add_module_to_qconfig_obs_ctr,
     qconfig_equals
 )

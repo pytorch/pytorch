@@ -8,7 +8,6 @@ from typing import Callable
 
 import onnx
 import parameterized
-import pytorch_test_common
 
 import torch
 import torch.onnx
@@ -28,7 +27,13 @@ from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
 from verify import verify
 
 
-class _BaseTestCase(pytorch_test_common.ExportTestCase):
+class _BaseTestCase(common_utils.TestCase):
+    def setUp(self):
+        super().setUp()
+        torch.manual_seed(0)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(0)
+
     def _model_to_graph(
         self,
         model,
@@ -59,7 +64,7 @@ class _BaseTestCase(pytorch_test_common.ExportTestCase):
 
 
 @common_utils.instantiate_parametrized_tests
-class TestUnconvertibleOps(pytorch_test_common.ExportTestCase):
+class TestUnconvertibleOps(common_utils.TestCase):
     """Unit tests for the `unconvertible_ops` function."""
 
     def setUp(self):

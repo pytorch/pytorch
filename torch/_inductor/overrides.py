@@ -151,11 +151,7 @@ class ConvBinary2d(nn.Conv2d):
 
     def _update_module_params(self, conv, binary_op_name):
         self.__dict__ = copy.deepcopy(conv.__dict__)
-        self.binary_attr = binary_op_name
-        self.binary_alpha = None
-        self.unary_attr = None
-        self.unary_scalars = []
-        self.unary_algorithm = None
+        self.attr = binary_op_name
 
     def _conv_forward(self, input, other, weight, bias):
         if self.padding_mode != "zeros":
@@ -170,11 +166,7 @@ class ConvBinary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                self.binary_attr,
-                self.binary_alpha,
-                self.unary_attr,
-                self.unary_scalars,
-                self.unary_algorithm,
+                self.attr,
             )
         return torch.ops.mkldnn._convolution_pointwise(
             input,
@@ -185,11 +177,7 @@ class ConvBinary2d(nn.Conv2d):
             self.stride,
             self.dilation,
             self.groups,
-            self.binary_attr,
-            self.binary_alpha,
-            self.unary_attr,
-            self.unary_scalars,
-            self.unary_algorithm,
+            self.attr,
         )
 
     def forward(self, input, other):
@@ -562,7 +550,7 @@ class LowmemDropout(torch.autograd.Function):
 
 
 @torch.fx.wrap
-def lowmem_dropout(input, p=0.5, training=True, inplace=False):
+def lowmem_dropout(input, p, training=True, inplace=False):
     if isinstance(input, torch.fx.Proxy):
         # double check we don't FX trace this
         return input.tracer.create_proxy(

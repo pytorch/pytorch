@@ -46,27 +46,49 @@ class UnsupportedOperatorError(OnnxExporterError):
     """Raised when an operator is unsupported by the exporter."""
 
     def __init__(self, name: str, version: int, supported_version: Optional[int]):
+        msg = f"Exporting the operator '{name}' to ONNX opset version {version} is not supported. "
         if supported_version is not None:
-            diagnostic_rule: diagnostics.infra.Rule = (
-                diagnostics.rules.operator_supported_in_newer_opset_version
+            msg += (
+                f"Support for this operator was added in version {supported_version}. "
+                "Please try exporting with this version."
             )
-            msg = diagnostic_rule.format_message(name, version, supported_version)
-            diagnostics.diagnose(diagnostic_rule, diagnostics.levels.ERROR, msg)
+            diagnostics.context.diagnose(
+                diagnostics.rules.operator_supported_in_newer_opset_version,
+                diagnostics.levels.ERROR,
+                message_args=(
+                    name,
+                    version,
+                    supported_version,
+                ),
+            )
         else:
+            msg += "Please feel free to request support or submit a pull request on PyTorch GitHub: "
+            msg += _constants.PYTORCH_GITHUB_ISSUES_URL
+
             if (
                 name.startswith("aten::")
                 or name.startswith("prim::")
                 or name.startswith("quantized::")
             ):
-                diagnostic_rule = diagnostics.rules.missing_standard_symbolic_function
-                msg = diagnostic_rule.format_message(
-                    name, version, _constants.PYTORCH_GITHUB_ISSUES_URL
+                diagnostics.context.diagnose(
+                    diagnostics.rules.missing_standard_symbolic_function,
+                    diagnostics.levels.ERROR,
+                    message_args=(
+                        name,
+                        version,
+                        _constants.PYTORCH_GITHUB_ISSUES_URL,
+                    ),
                 )
-                diagnostics.diagnose(diagnostic_rule, diagnostics.levels.ERROR, msg)
             else:
-                diagnostic_rule = diagnostics.rules.missing_custom_symbolic_function
-                msg = diagnostic_rule.format_message(name)
-                diagnostics.diagnose(diagnostic_rule, diagnostics.levels.ERROR, msg)
+                msg += (
+                    "If you are trying to export a custom operator, make sure you registered "
+                    "it with the correct domain and version."
+                )
+                diagnostics.context.diagnose(
+                    diagnostics.rules.missing_custom_symbolic_function,
+                    diagnostics.levels.ERROR,
+                    message_args=(name,),
+                )
         super().__init__(msg)
 
 

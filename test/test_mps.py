@@ -3853,12 +3853,12 @@ class TestNLLLoss(TestCase):
 
     # Test softplus
     def test_softplus(self):
-        def helper(shape, beta=0.5, threshold=0.5):
+        def helper(shape):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
-            softplus_result = torch.nn.Softplus(beta=beta, threshold=threshold)(x)
-            softplus_result_cpu = torch.nn.Softplus(beta=beta, threshold=threshold)(cpu_x)
+            softplus_result = torch.nn.Softplus(beta=0.5, threshold=0.5)(x)
+            softplus_result_cpu = torch.nn.Softplus(beta=0.5, threshold=0.5)(cpu_x)
 
             cpu_grad = torch.randn(softplus_result.shape)
             grad = cpu_grad.to('mps')
@@ -3872,8 +3872,6 @@ class TestNLLLoss(TestCase):
         # Test empty shape too
         for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
             helper(shape)
-            helper(shape, beta=0.6, threshold=0.6)  # relu path
-            helper(shape, beta=1, threshold=20)  # softplus path
 
     # Test silu
 
@@ -4282,9 +4280,8 @@ class TestNLLLoss(TestCase):
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
             embeddingMPS = nn.Embedding(n, d, max_norm=True, device='mps')
-            emedding_weight = embeddingMPS.weight.detach().cpu()
             W_MPS = torch.randn((m, d), requires_grad=True, device='mps')
-            idx_MPS = torch.tensor(idx, device='mps')
+            idx_MPS = torch.tensor(idx).to('mps')
             a_MPS = embeddingMPS.weight.clone() @ W_MPS.t()  # weight must be cloned for this to be differentiable
             a_MPS.retain_grad()
             b_MPS = embeddingMPS(idx_MPS) @ W_MPS.t()  # modifies weight in-place
@@ -4293,7 +4290,7 @@ class TestNLLLoss(TestCase):
             loss_MPS = out_MPS.sigmoid().prod()
             loss_MPS.backward()
 
-            embeddingCPU = nn.Embedding(n, d, max_norm=True, _weight=emedding_weight)
+            embeddingCPU = nn.Embedding(n, d, max_norm=True, scale_grad_by_freq=True)
             W_CPU = W_MPS.to('cpu')
             idx_CPU = torch.tensor(idx)
             a_CPU = embeddingCPU.weight.clone() @ W_CPU.t()  # weight must be cloned for this to be differentiable
@@ -7325,7 +7322,6 @@ class TestConsistency(TestCase):
         'nn.functional.smooth_l1_loss': ['f16', 'f32'],
         'nn.functional.soft_margin_loss': ['f32'],
         'nn.functional.softmin': ['f32'],
-        'nn.functional.softplus': ['f32'],
         'nn.functional.softsign': ['f16', 'f32', 'i16', 'u8'],
         'nn.functional.tanhshrink': ['f32', 'i16', 'i32', 'u8'],
         'nn.functional.threshold': ['f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7526,7 +7522,6 @@ class TestConsistency(TestCase):
         'nn.functional.silu': ['f32'],
         'nn.functional.soft_margin_loss': ['f32'],
         'nn.functional.softmin': ['f32'],
-        'nn.functional.softplus': ['f32'],
         'nn.functional.softsign': ['f16', 'f32'],
         'nn.functional.threshold': ['f32'],
         'nn.functional.triplet_margin_loss': ['f32'],
@@ -7619,6 +7614,7 @@ class TestConsistency(TestCase):
         'nn.functional.huber_loss': [torch.float16],
         'nn.functional.local_response_norm': [torch.int64],
         'nn.functional.padcircular': [torch.uint8],
+        'nn.functional.softplus': [torch.float32],
         'pow': [torch.int64],
         'select_scatter': [torch.uint8],
         'sigmoid': [torch.int64],

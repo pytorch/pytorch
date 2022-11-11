@@ -16,7 +16,6 @@ from .. import config, ir, scheduler
 from ..ir import ReductionHint
 from ..utils import (
     free_symbol_startswith,
-    get_fused_kernel_name,
     instance_descriptor,
     sympy_product,
     sympy_subs,
@@ -1282,11 +1281,7 @@ class TritonScheduling:
         if src_code in wrapper.kernels:
             kernel_name = wrapper.kernels[src_code]
         else:
-            kernel_name = (
-                "triton_"
-                + get_fused_kernel_name(node_schedule)
-                + wrapper.next_kernel_suffix()
-            )
+            kernel_name = wrapper.next_kernel_name()
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
             src_code = src_code.replace("KERNEL_NAME", subs_name)

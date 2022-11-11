@@ -61,10 +61,6 @@ comment_origin = False
 
 compile_threads = min(32, os.cpu_count()) if sys.platform != "win32" else 1
 
-# If kernel is fused, the name is generated from the origin node op names
-# for larger kernels limit this
-kernel_name_max_ops = 10
-
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = __name__.replace(".config", "")
 

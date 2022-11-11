@@ -218,23 +218,8 @@ class SymInt:
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
-    def __eq__(self, other: object) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
-
-    def __lt__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
-
-    def __gt__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
-
-    def __le__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
-
-    def __ge__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
-
     def __sym_float__(self):
-        raise AssertionError("type stub not overridden")
+        ...
 
     def __repr__(self):
         return self.node.str()
@@ -262,20 +247,8 @@ class SymFloat:
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
-    def __eq__(self, other: object) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
-
-    def __lt__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
-
-    def __gt__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
-
-    def __le__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
-
-    def __ge__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
+    def __sym_int__(self):
+        ...
 
     def __repr__(self):
         return self.node.str()
@@ -315,7 +288,7 @@ for name in dir(_C):
         if (isinstance(obj, Callable) or inspect.isclass(obj)):  # type: ignore[arg-type]
             if (obj.__module__ != 'torch'):
                 # TODO: fix their module from C++ side
-                if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
+                if name not in ['DisableTorchFunction', 'Generator']:
                     obj.__module__ = 'torch'
 
 if not TYPE_CHECKING:
@@ -527,6 +500,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
           ``mode='max'``
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
+        * :func:`torch.Tensor.scatter` when ``src`` is a tensor and ``reduce=None``
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor

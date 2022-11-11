@@ -101,6 +101,9 @@ TESTS = discover_tests(
         'test_jit_simple',
         'test_jit_string',
         'test_kernel_launch_checks',
+        'test_metal',
+        # Right now we have a separate CI job for running MPS
+        'test_mps',
         'test_nnapi',
         'test_segment_reductions',
         'test_static_runtime',
@@ -841,14 +844,6 @@ def parse_args():
         )
     )
     parser.add_argument(
-        "--mps",
-        "--mps",
-        action="store_true",
-        help=(
-            "If this flag is present, we will only run test_mps and test_metal"
-        )
-    )
-    parser.add_argument(
         "-core",
         "--core",
         action="store_true",
@@ -1056,12 +1051,6 @@ def get_selected_tests(options):
     else:
         # Exclude all functorch tests otherwise
         options.exclude.extend(FUNCTORCH_TESTS)
-
-    if options.mps:
-        selected_tests = ['test_mps', 'test_metal']
-    else:
-        # Exclude all mps tests otherwise
-        options.exclude.extend(['test_mps', 'test_metal'])
 
     # process reordering
     if options.bring_to_front:
