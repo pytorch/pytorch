@@ -208,7 +208,7 @@ def _export_fx_to_ts(fx_module_with_metadata):
                 v = symbolic_fn(graph_context, *ts_args)
                 assert (
                     v is not None
-                ), f"Node creates None with target={node.target} and name={node.name}"
+                ), f"Node creates None with target={node.target}, name={node.name}, args={ts_args}"
                 # One fx node could produce multiple outputs (e.g., tuple of tensors); in
                 # that case, v is a tuple of TorchScript values.
                 fx_name_to_ts_value[node.name] = v
