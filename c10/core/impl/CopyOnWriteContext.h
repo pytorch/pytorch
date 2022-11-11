@@ -15,9 +15,8 @@ class C10_API CopyOnWriteContext {
   mutable std::atomic<size_t> refcount_;
   CopyOnWriteContext(void* data, DeleterFnPtr deleter)
       : data_(data), deleter_(deleter), refcount_(1) {}
-  friend C10_API std::unique_ptr<CopyOnWriteContext, DeleterFnPtr> newCopyOnWriteContext(
-      void* data,
-      DeleterFnPtr deleter);
+  friend C10_API std::unique_ptr<CopyOnWriteContext, DeleterFnPtr>
+  newCopyOnWriteContext(void* data, DeleterFnPtr deleter);
 
  public:
   void incref() {

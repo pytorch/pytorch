@@ -372,9 +372,12 @@ void maybe_copy_on_write_storage(const at::Storage& storage) {
 }
 
 void maybe_copy_on_write(const Variable& self) {
-  if (!self.defined())
+  if (!self.defined()) {
     return;
-  // TODO: Test if self actually has storage
+  }
+  if (!self.has_storage()) {
+    return;
+  }
   maybe_copy_on_write_storage(self.storage());
 }
 

@@ -1825,7 +1825,7 @@ int nnc_lowerings_lazy_registration() {
       {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> (Tensor(a))"},
       computeFlatten);
   RegisterNNCLoweringsFunction aten_view(
-      {"aten::reshape(Tensor(a) self, int[] shape) -> (Tensor(a))",
+      {"aten::reshape(Tensor(a) self, int[] shape, *, bool copy=False) -> (Tensor(a))",
        "aten::reshape_as(Tensor(a) self, Tensor other) -> (Tensor(a))",
        "aten::view(Tensor(a) self, int[] size) -> (Tensor(a))",
        "aten::view_as(Tensor(a) self, Tensor other) -> (Tensor(a))"},

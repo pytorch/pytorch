@@ -426,21 +426,19 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
-REGISTER_NATIVE_OPERATOR_FUNCTOR(
-    aten::reshape,
-    aten_reshape,
-    [](Node* n) -> SROperator {
-      if (!n->matches(torch::schema(
-              "aten::reshape(Tensor(a) self, int[] shape) -> Tensor(a)"))) {
-        LogAndDumpSchema(n);
-        return nullptr;
-      }
-      return [](ProcessedNode* p_node) {
-        const auto& in0_t = p_node->Input(0).toTensor();
-        const auto in1_iv = p_node->Input(1).toDimVector();
-        p_node->Output(0) = at::native::reshape(in0_t, in1_iv);
-      };
-    });
+REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::reshape, aten_reshape, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::reshape(Tensor(a) self, int[] shape, *, bool copy=False) -> Tensor(a)"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    const auto in1_iv = p_node->Input(1).toDimVector();
+    const auto in2_i = p_node->Input(2).toBool();
+    p_node->Output(0) = at::native::reshape(in0_t, in1_iv, in2_i);
+  };
+});
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::slice, aten_slice, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(

@@ -4182,7 +4182,8 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto reshape_schema =
-      getOperatorForLiteral("aten::reshape(Tensor self, int[] shape) -> Tensor")
+      getOperatorForLiteral(
+          "aten::reshape(Tensor self, int[] shape, *, bool copy=False) -> Tensor")
           ->schema();
   static auto reshape_copy_schema =
       getOperatorForLiteral(

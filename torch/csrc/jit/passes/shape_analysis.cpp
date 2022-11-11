@@ -1769,7 +1769,7 @@ class ShapePropagator : public PropertyPropBase {
         return nullptr;
       } else if (
           node->matches(
-              "aten::reshape(Tensor(a) self, int[] shape) -> Tensor(a)")) {
+              "aten::reshape(Tensor(a) self, int[] shape, *, bool copy=False) -> Tensor(a)")) {
         return reshape_prop(node, attr::shape, tensor_types);
       } else if (node->matches(
                      "aten::repeat(Tensor self, int[] repeats) -> Tensor")) {

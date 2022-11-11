@@ -8,7 +8,7 @@ namespace native {
 // This file contains non-symbolic signatures for ops that we have sym-intified the signature of.
 // However, in certain cases (such as static runtime), we call the native versions of the ops directly.
 // In those cases, we will duplicate the signature here with non-symbolic ints, and also duplicate the C++ implementation.
-TORCH_API at::Tensor reshape(const at::Tensor& self, at::IntArrayRef proposed_shape);
+TORCH_API at::Tensor reshape(const at::Tensor& self, at::IntArrayRef proposed_shape, bool copy = false);
 TORCH_API at::Tensor narrow(const at::Tensor& self, int64_t dim, int64_t start, int64_t length);
 TORCH_API at::Tensor _sparse_coo_tensor_unsafe(const at::Tensor & indices, const at::Tensor & values, at::IntArrayRef size, c10::optional<at::ScalarType> dtype=c10::nullopt, c10::optional<at::Layout> layout=c10::nullopt, c10::optional<at::Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 TORCH_API at::Tensor nll_loss(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor>& weight_opt, int64_t reduction, int64_t ignore_index);
