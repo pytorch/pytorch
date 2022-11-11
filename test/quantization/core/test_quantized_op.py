@@ -3846,6 +3846,25 @@ class TestQuantizedLinear(TestCase):
                                         use_bias, post_op, use_multi_dim_input,
                                         use_channelwise, negative_slope=neg_slope)
 
+    @skipIfNoONEDNN
+    def test_qlinear_tanh(self):
+        with override_quantized_engine('onednn'):
+            batch_size_list = [1, 4]
+            input_channels_list = [16, 32]
+            output_channels_list = [4, 8]
+            use_bias_list = [True, False]
+            use_multi_dim_input_list = [True, False]
+            use_channelwise_list = [True, False]
+            post_op = 'tanh'
+            cases = itertools.product(batch_size_list, input_channels_list,
+                                      output_channels_list, use_bias_list,
+                                      use_multi_dim_input_list, use_channelwise_list)
+            for batch_size, input_channels, output_channels, use_bias,\
+                    use_multi_dim_input, use_channelwise in cases:
+                self._test_qlinear_impl(batch_size, input_channels, output_channels,
+                                        use_bias, post_op, use_multi_dim_input,
+                                        use_channelwise)
+
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
 class TestQuantizedEmbeddingOps(TestCase):
 

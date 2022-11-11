@@ -645,6 +645,8 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
     op_attr = ideep::attr_t::fuse_relu();
   } else if (post_op == LeakyRelu) {
     op_attr = ideep::attr_t::fuse_relu(/*scale=*/1.0f, /*alpha=*/post_op_args.get(0).to<double>());
+  } else if (post_op == Tanh) {
+    op_attr = ideep::attr_t::fuse_tanh();
   }
   ideep::tensor x(input_desc, input_contig->data_ptr<c10::quint8>());
   auto dst_dims = {M, N};
@@ -734,6 +736,14 @@ at::Tensor PackedLinearWeightsOnednn:: apply_leaky_relu(
       std::move(input), output_scale, output_zero_point, post_op_args);
 }
 
+at::Tensor PackedLinearWeightsOnednn:: apply_tanh(
+    at::Tensor input,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl<Tanh>(
+      std::move(input), output_scale, output_zero_point);
+}
+
 #endif // #if AT_MKLDNN_ENABLED()
 
 namespace at {
@@ -780,10 +790,32 @@ class QLinearLeakyReluInt8 final {
   }
 };
 
+class QLinearTanhInt8 final {
+ public:
+  static at::Tensor run(
+      at::Tensor input,
+      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
+      double output_scale,
+      int64_t output_zero_point) {
+    auto& ctx = at::globalContext();
+#if AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+      return dynamic_cast<PackedLinearWeightsOnednn*>(packed_weight.get())->apply_tanh(
+          std::move(input), output_scale, output_zero_point);
+    }
+#endif
+    TORCH_CHECK(
+        false,
+        "Didn't find engine for operation quantized::linear_tanh ",
+        toString(ctx.qEngine()));
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu"), TORCH_FN(QLinearInt8<true>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_leaky_relu"), TORCH_FN(QLinearLeakyReluInt8::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_tanh"), TORCH_FN(QLinearTanhInt8::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
