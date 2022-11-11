@@ -4,7 +4,7 @@ set -eou pipefail
 
 
 DISTRIBUTION=$(. /etc/os-release;echo $ID$VERSION_ID)
-DRIVER_VERSION="515.57"
+DRIVER_VERSION="515.76"
 DRIVER_FN="NVIDIA-Linux-x86_64-${DRIVER_VERSION}.run"
 YUM_REPO_URL="https://nvidia.github.io/nvidia-docker/${DISTRIBUTION}/nvidia-docker.repo"
 
@@ -74,7 +74,8 @@ install_nvidia_driver_amzn2() {
                     DEVICE_ENABLED=$(cat /sys/bus/pci/devices/$PCI_ID/enable)
 
                     echo "Reseting $PCI_ID (enabled state: $DEVICE_ENABLED)"
-                    echo "1" > /sys/bus/pci/devices/$PCI_ID/reset
+                    # This requires sudo permission of course
+                    echo "1" | sudo tee /sys/bus/pci/devices/$PCI_ID/reset
                     sleep 1
                 done
             fi

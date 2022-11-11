@@ -23,7 +23,7 @@ void NonDivisibleSplitInfo::build(Fusion* fusion) {
         tv->domain()->domain().begin(), tv->domain()->domain().end());
     current_tv_ = tv;
     clearReachability();
-    traverseFrom(fusion, domain_vals);
+    traverseTo(fusion, domain_vals);
     current_tv_ = nullptr;
   }
 
@@ -53,7 +53,16 @@ void NonDivisibleSplitInfo::handle(Split* split) {
         splits_to_validate_.insert(split);
       } else {
         // Not proven to be a divisible split
-        splits_to_predicate_[current_tv_].push_back(split);
+        auto gpu_lower = GpuLower::current();
+        TORCH_INTERNAL_ASSERT(gpu_lower != nullptr);
+
+        // If we know this split must be divisible, it's either validated as
+        // above, exact matches to a case matching the above, or exact matches
+        // to a transformation from view which must be divisible.
+        if (gpu_lower->divisbleSplitSet().find(split) ==
+            gpu_lower->divisbleSplitSet().end()) {
+          splits_to_predicate_[current_tv_].push_back(split);
+        }
       }
 
       is_protected = true;
