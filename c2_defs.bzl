@@ -166,6 +166,7 @@ def get_c2_fbandroid_xplat_compiler_flags():
         # T95767731 -- remove this once all builds are on at least llvm-13
         "-Wno-unknown-warning-option",
         "-Wno-unused-but-set-variable",
+        "-DHAVE_MMAP",
     ]
 
     if get_c2_strip_glog():
@@ -392,6 +393,7 @@ def c2_cxx_library(**kwargs):
     args = get_c2_default_cxx_args()
     args.update(kwargs)
     args.setdefault("platforms", (ANDROID, APPLE, CXX, WINDOWS))
+
     fb_xplat_cxx_library(
         labels = [
             "supermodule:android/default/caffe2",
