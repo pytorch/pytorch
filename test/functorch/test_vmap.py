@@ -3229,15 +3229,15 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linspace', ''),  # test runner can't handle factory functions
         xfail('arange', ''),  # test runner can't handle factory functions
         xfail('logspace', ''),  # test runner can't handle factory functions
+        xfail('scalar_tensor'),  # test runner can't handle factory functions
         xfail('empty', ''),  # test runner can't handle factory functions
         xfail('ones', ''),  # test runner can't handle factory functions
         xfail('zeros', ''),  # test runner can't handle factory functions
+        xfail('full', ''),  # test runner can't handle factory functions
         xfail('eye', ''),  # non-tensor input
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
         xfail('cross'),  # The default value of dim in op is *very* weird. No wonder it doesn't work
-        xfail('svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
-        xfail('linalg.svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
@@ -3331,7 +3331,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('masked_scatter'),
         xfail('masked_select'),
         xfail('nanquantile'),
-        xfail('narrow_copy'),  # hit the vmap fallback which is currently disabled
         xfail('ormqr'),
         xfail('put'),
         xfail('quantile'),

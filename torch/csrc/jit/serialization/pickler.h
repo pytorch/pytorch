@@ -296,5 +296,60 @@ uint64_t getStorageKey(const at::Tensor& tensor);
 // otherwise return false
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 
+// Return a map of Tensor Metadata for serialization.
+// For now, it only takes care of `conj` and `neg` bit.
+inline std::unordered_map<std::string, bool> getTensorMetadata(
+    const at::Tensor& t) {
+  // We don't support serializing `ZeroTensor` as it is not public
+  // facing yet.
+  TORCH_CHECK(
+      !t._is_zerotensor(),
+      "ZeroTensor is not serializable,",
+      " please file an issue if required.");
+  std::unordered_map<std::string, bool> metadata{};
+
+  // Only add meta-data if the value is not default.
+  if (t.is_conj()) {
+    metadata["conj"] = true;
+  }
+  if (t.is_neg()) {
+    metadata["neg"] = true;
+  }
+  return metadata;
+}
+
+// set Tensor Metadata based on the map.
+// Refer: getTensorMathdata
+inline void setTensorMetadata(
+    const at::Tensor& t,
+    std::unordered_map<std::string, bool> metadata) {
+  for (auto& key_value_pair : metadata) {
+    if (key_value_pair.first == "conj") {
+      t._set_conj(true);
+    } else if (key_value_pair.first == "neg") {
+      t._set_neg(true);
+    } else {
+      TORCH_CHECK(
+          false,
+          "Unexpected key `",
+          key_value_pair.first,
+          "` passed to setTensorMetadata.");
+    }
+  }
+}
+
+// set Tensor metadata based on the map.
+// NOTE: This overload is required by unpickler.cpp
+inline void setTensorMetadata(
+    const at::Tensor& t,
+    c10::Dict<c10::IValue, c10::IValue> metadata_idict) {
+  std::unordered_map<std::string, bool> metadata;
+  for (auto& pair : metadata_idict) {
+    auto key = *pair.key().toString();
+    metadata[key] = pair.value().toBool();
+  }
+  setTensorMetadata(t, metadata);
+}
+
 } // namespace jit
 } // namespace torch
