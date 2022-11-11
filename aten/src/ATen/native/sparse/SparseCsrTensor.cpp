@@ -861,7 +861,7 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
           } else {
             Tensor subblock_indices = at::arange(0, blocksize[1], indices_options);
             blockcol_indices.mul_(blocksize[1]);
-            Tensor indices = blockcol_indices.add(subblock_indices.view({1, -1}));  // broadcasts
+            Tensor indices = blockcol_indices.repeat_interleave(blocksize[1]).add(subblock_indices.repeat(blockcol_indices.size(0))).view({1, -1});
             Tensor values = self.values().index_select(0, blockrow_indices).select(1, blockindex).flatten(0, 1);
             return at::_sparse_coo_tensor_unsafe(indices.to(kLong), values, output_shape);
           }
