@@ -156,6 +156,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "hrnet_w18",  # accuracy
     "lcnet_0500",  # accuracy
     "levit_128",  # levit_128
+    "poolformer_m36",
     "rexnet_100",  # accuracy
     "swin_base_patch4_window7_224",
     "twins_pcpvt_base",  # time out
