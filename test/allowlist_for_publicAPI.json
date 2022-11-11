@@ -795,7 +795,7 @@
     "prepare_qat",
     "propagate_qconfig_",
     "qconfig_equals",
-    "quant_type_to_str",
+    "_get_quant_type_to_str",
     "quantize",
     "quantize_dynamic",
     "quantize_dynamic_jit",
@@ -874,7 +874,7 @@
   ],
   "torch.quantization.quant_type": [
     "QuantType",
-    "quant_type_to_str"
+    "_get_quant_type_to_str"
   ],
   "torch.quantization.quantization_mappings": [
     "get_default_compare_output_module_list",
