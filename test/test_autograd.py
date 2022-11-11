@@ -5538,9 +5538,7 @@ for shape in [(1,), ()]:
 
         a = torch.ones(1, 1, 2, requires_grad=True)
         out = torch.nn.functional.interpolate(a, scale_factor=0.5, mode="linear")
-        self.assertIsNone(out.grad_fn._saved_output_size)
-        self.assertEqual(out.grad_fn._saved_scale_factors, (0.5,))
-        self.assertIsInstance(out.grad_fn._saved_scale_factors[0], float)
+        self.assertEqual(out.grad_fn._saved_scales, 0.5)
 
         a = torch.ones(2, 2, requires_grad=True)
         out = torch.pdist(a, p=1)
@@ -6915,8 +6913,8 @@ for shape in [(1,), ()]:
         with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
             a = torch.ones(5, requires_grad=True)
 
-            warnings.simplefilter('always')
             with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter('always')
                 y = a * a
                 # should raise two warnings from a being saved twice
                 self.assertEqual(len(w), 2)
