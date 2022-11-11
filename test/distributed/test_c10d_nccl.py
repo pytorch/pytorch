@@ -2971,9 +2971,24 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
         device = "cuda"
         tensor = torch.ones(10, 10, device=torch.device(device))
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
-        dist._all_gather_base(output_tensor, tensor)
+        dist.all_gather_into_tensor(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter_base(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda"
+        tensor = torch.ones(10, 10, device=torch.device(device))
+        output_tensor = torch.zeros(10, 10, device=torch.device(device))
+        dist.reduce_scatter_tensor(output_tensor, tensor)
+        self.assertEqual(output_tensor, tensor)
 
 if __name__ == "__main__":
     assert (
