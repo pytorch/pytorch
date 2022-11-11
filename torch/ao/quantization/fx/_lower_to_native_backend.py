@@ -111,6 +111,9 @@ def is_copy_node(node, modules):
         torch.flatten,
         torch.mean,
         operator.floordiv,
+        # F.channel_shuffle and torch.channel_shuffle are essentially the same thing
+        # so we only need to put one of them here
+        torch.channel_shuffle,
     ]
     _method_list = [
         "clamp",
@@ -131,6 +134,7 @@ def is_copy_node(node, modules):
         torch.nn.MaxPool3d,
         torch.nn.ReLU,
         torch.nn.ReLU6,
+        torch.nn.ChannelShuffle,
     ]
     return _is_node_in_list(node, modules, _func_list, _method_list, _module_type_list)
 
