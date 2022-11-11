@@ -186,8 +186,8 @@ void update_cpp_hooks_on_new_gradfn(
   // Since this is a new list, 0 is the index of the retains_grad hook
   meta->retains_grad_ = 0;
   std::unique_ptr<FunctionPreHook> hook_ptr(
-      new CppFunctionTensorPreHook(meta->cpp_hooks_list_, self.output_nr()));
-  new_fn->add_tensor_pre_hook(std::move(hook_ptr));
+      new CppFunctionPreHook(meta->cpp_hooks_list_, self.output_nr()));
+  new_fn->add_pre_hook(std::move(hook_ptr));
 }
 
 void rebase_history(const Variable& self, Edge gradient_edge) {
@@ -226,12 +226,12 @@ void create_cpp_hook(const at::TensorBase& self) {
   // NOLINTNEXTLINE(modernize-make-shared)
   list.reset(new hooks_list());
   std::unique_ptr<FunctionPreHook> hook_ptr(
-      new CppFunctionTensorPreHook(list, self.output_nr()));
+      new CppFunctionPreHook(list, self.output_nr()));
   clear_hooks(self);
-  add_hook(self, std::make_shared<CppFunctionTensorPreHook>(list, 0));
+  add_hook(self, std::make_shared<CppFunctionPreHook>(list, 0));
   const auto& fn = self.grad_fn();
   if (fn) {
-    fn->add_tensor_pre_hook(std::move(hook_ptr));
+    fn->add_pre_hook(std::move(hook_ptr));
   }
 }
 
@@ -343,9 +343,7 @@ const c10::VariableVersion& version_counter(const Variable& self) {
 void add_hook(
     const at::TensorBase& self,
     std::shared_ptr<FunctionPreHook> hook) {
-  auto meta = materialize_autograd_meta(self);
-  meta->hooks_version_++;
-  meta->hooks_.push_back(std::move(hook));
+  materialize_autograd_meta(self)->hooks_.push_back(std::move(hook));
 }
 
 namespace {
@@ -365,13 +363,7 @@ const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(
 
 void clear_hooks(const at::TensorBase& self) {
   // This is a little goofy, but usually this should be a no oop
-  auto meta = materialize_autograd_meta(self);
-  meta->hooks_version_++;
-  meta->hooks_.clear();
-}
-
-int64_t _get_hooks_version(const at::TensorBase& self) {
-  return materialize_autograd_meta(self)->hooks_version_;
+  materialize_autograd_meta(self)->hooks_.clear();
 }
 
 void set_name(const Variable& self, const std::string& name) {
@@ -547,7 +539,7 @@ void VariableHooks::retain_grad(const at::TensorBase& self) const {
   c10::weak_intrusive_ptr<c10::TensorImpl> weak_self(self.getIntrusivePtr());
 
   auto retain_grad_hook = [weak_self](const at::Tensor& grad) {
-    if (weak_self.expired() || !grad.defined()) {
+    if (weak_self.expired()) {
       return;
     } else {
       auto var = weak_self.lock();

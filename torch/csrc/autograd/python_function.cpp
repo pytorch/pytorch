@@ -213,13 +213,8 @@ static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
   // TODO: I'm not really sure if we're actually obligated to traverse PyObject
   // that is stored in PyNode, since we don't really own that C++ object.
   if (auto cdata = self->cdata.lock()) {
-    for (const auto& hook : cdata->tensor_pre_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
-        Py_VISIT(pyhook->dict);
-      }
-    }
     for (const auto& hook : cdata->pre_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+      if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
     }
@@ -929,7 +924,7 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
       "access pattern that is no longer supported. For examples on how to use new-style "
       "autograd functions, see "
       "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
-  cdata->add_tensor_pre_hook(std::move(hook));
+  cdata->add_pre_hook(std::move(hook));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

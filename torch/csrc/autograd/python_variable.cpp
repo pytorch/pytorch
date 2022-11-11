@@ -658,7 +658,6 @@ static int THPVariable_clear(THPVariable* self) {
       if (auto grad_acc =
               torch::autograd::impl::try_get_grad_accumulator(tensor)) {
         grad_acc->pre_hooks().clear();
-        grad_acc->tensor_pre_hooks().clear();
       }
     }
   }
