@@ -65,11 +65,11 @@ def _bsr_strided_dense_rowspace_kernel(
     # output epilogue
     GROUP_SIZE_ROW: tl.constexpr,
 ):
-    batch_pid = tl.program_id(axis=0)
-    row_block_pid = tl.program_id(axis=1)
-    col_block_pid = tl.program_id(axis=2)
-    n_block_rows = tl.num_programs(axis=1)
-    n_block_cols = tl.num_programs(axis=2)
+    batch_pid = tl.program_id(axis=2)
+    row_block_pid = tl.program_id(axis=0)
+    col_block_pid = tl.program_id(axis=1)
+    n_block_rows = tl.num_programs(axis=0)
+    n_block_cols = tl.num_programs(axis=1)
 
     row_block_pid, col_block_pid = tl.swizzle2d(
         row_block_pid, col_block_pid, n_block_rows, n_block_cols, GROUP_SIZE_ROW
@@ -299,7 +299,7 @@ def _run_dense_rowspace_kernel(
     n_batches = dense.size(0)
     n_block_rows = crow_indices.size(-1) - 1
     n_block_cols = dense.size(-3)
-    grid = (n_batches, n_block_rows, n_block_cols)
+    grid = (n_block_rows, n_block_cols, n_batches)
     _bsr_strided_dense_rowspace_kernel[grid](
         *blocksize,
         values,
@@ -444,7 +444,7 @@ if __name__ == "__main__":
     torch.set_printoptions(threshold=2000, linewidth=150)
     torch.manual_seed(13)
     dtype = torch.float32
-    p = 0.01
+    p = 0.5
     batch_size_bsr = (10,)
     mask_size = (8, 8)
     block_size = (64, 64)
@@ -453,11 +453,7 @@ if __name__ == "__main__":
     n_exp = 512
     diff = torch.ones(n_exp, device="cuda", dtype=torch.double)
     for i in range(n_exp):
-        # mask = torch.rand(*mask_size, device='cuda') < p
-        mask = torch.zeros(*mask_size).to(torch.bool)
-        mask[0, 0] = True
-        # mask[1, 0] = True
-        mask = mask.cuda()
+        mask = torch.rand(*mask_size, device='cuda') < p
         x = torch.rand(*mask_size, *block_size, dtype=dtype, device="cuda") / 10
         x = (
             (mask[:, :, None, None] * x)
