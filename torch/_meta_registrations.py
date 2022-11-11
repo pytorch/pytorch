@@ -1165,6 +1165,9 @@ def meta_binop_inplace(self, other):
 def meta_binop_inplace_alpha(self, other, alpha=1):
     return self
 
+@register_meta([aten.round.default, aten.round.decimals])
+def meta_round(self, **kwargs):
+    return self.new_empty(self.shape)
 
 @register_meta(aten.zero.default)
 def meta_zero(self):
@@ -1428,6 +1431,9 @@ def meta_max_pool2d_with_indices_backward(
         self, kernel_size, stride, padding, dilation, ceil_mode
     )
 
+    check(self.dtype == grad_output.dtype,
+          lambda: "expected dtype {self.dtype} for `gradOutput` but got dtype {grad_output.dtype}")
+
     nOutputPlane = nInputPlane
     ndim = self.ndim
 
@@ -1439,7 +1445,8 @@ def meta_max_pool2d_with_indices_backward(
     _check_dim_size(grad_output)
     _check_dim_size(indices)
 
-    return self.new_empty(self.shape)
+    memory_format = utils.suggest_memory_format(self)
+    return torch.empty(self.shape, dtype=self.dtype, device=self.device, memory_format=memory_format)
 
 
 @register_meta(aten.max_pool2d_with_indices.default)
