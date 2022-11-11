@@ -31,7 +31,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
-    _get_param_to_unflat_param_names,
+    _get_param_to_fqns,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
     HandleTrainingState,
@@ -52,7 +52,6 @@ from torch.distributed.fsdp._init_utils import (
 from torch.distributed.fsdp._runtime_utils import (
     _cast_buffers_to_dtype_and_device,
     _clear_grads_if_needed,
-    _fsdp_root_pre_forward,
     _get_buffers_and_dtypes_for_checkpoint,
     _lazy_init,
     _post_forward,
@@ -61,6 +60,7 @@ from torch.distributed.fsdp._runtime_utils import (
     _pre_forward_unshard,
     _reshard,
     _reshard_grads,
+    _root_pre_forward,
     _should_free_in_backward,
     _unshard,
     _unshard_grads,
@@ -94,6 +94,7 @@ from ._state_dict_utils import (
 from ._utils import p_assert
 from .flat_param import FlatParameter, FlatParamHandle
 from .wrap import ParamExecOrderWrapPolicy
+
 
 _TORCH_FX_AVAIL = True
 if not hasattr(torch, "fx"):
@@ -281,21 +282,17 @@ class FullyShardedDataParallel(nn.Module):
 
     Args:
         module (nn.Module):
-            module to be wrapped with FSDP.
+            This is the module to be wrapped with FSDP.
         process_group (Optional[ProcessGroup]):
-            process group for sharding
+            This is the process group used for collective communications.
         sharding_strategy (Optional[ShardingStrategy]):
-            Config sharding algorithm, different sharding algorithm has trade
-            off between memory saving and communication overhead. ``FULL_SHARD``
-            will be chosen if sharding_strategy is not specified.
+            This configures the sharding strategy used by FSDP, which may trade
+            off memory saving and communication overhead. See
+            :class:`ShardingStrategy` for details. (Default: ``FULL_SHARD``)
         cpu_offload (Optional[CPUOffload]):
-            CPU offloading config. Currently, only parameter and gradient CPU
-            offload is supported. It can be enabled via passing in
-            ``cpu_offload=CPUOffload(offload_params=True)``. Note that this
-            currently implicitly enables gradient offloading to CPU in order for
-            params and grads to be on same device to work with optimizer. This
-            API is subject to change. Default is ``None`` in which case there
-            will be no offloading.
+            This configures CPU offloading. If this is set to ``None``, then
+            no CPU offloading happens. See :class:`CPUOffload` for details.
+            (Default: ``None``)
         auto_wrap_policy (Optional[Callable[[nn.Module, bool, int], bool]]):
             A callable specifying a policy to recursively wrap layers with FSDP.
             Note that this policy currently will only apply to child modules of
@@ -329,25 +326,13 @@ class FullyShardedDataParallel(nn.Module):
                 >>> my_auto_wrap_policy = functools.partial(custom_auto_wrap_policy, min_num_params=1e5)
 
         backward_prefetch (Optional[BackwardPrefetch]):
-            This is an experimental feature that is subject to change in the
-            the near future. It allows users to enable two different backward_prefetch
-            algorithms to help backward communication and computation overlapping.
-            Pros and cons of each algorithm is explained in the class ``BackwardPrefetch``.
-        mixed_precision (Optional[MixedPrecision]): A ``MixedPrecision`` instance
-            describing the mixed precision training config to be used. ``MixedPrecision``
-            supports configuring parameter, buffer, and gradient communication dtype. Note
-            that only floating point data is cast to the reduced precision. This allows
-            users potential memory saving and training speedup while trading off
-            accuracy during model training. If ``None``, no mixed precision is applied.
-            Note that if ``mixed_precision`` is enabled for FSDP model that
-            contains ``BatchNorm`` with ``auto_wrap_policy``, FSDP will take
-            care to disable mixed precision for ``BatchNorm`` units by wrapping
-            them separately in their own FSDP unit with ``mixed_precision=None``.
-            This is done because several ``BatchNorm`` kernels do not implement
-            reduced type support at the moment. If individually wrapping the model,
-            users must take care to set ``mixed_precision=None`` for
-            ``BatchNorm`` units.
-            (Default: ``None``)
+            This configures explicit backward prefetching of all-gathers. See
+            :class:`BackwardPrefetch` for details. (Default: ``BACKWARD_PRE``)
+        mixed_precision (Optional[MixedPrecision]):
+            This configures native mixed precision for FSDP. If this is set to
+            ``None``, then no mixed precision is used. Otherwise, parameter,
+            buffer, and gradient reduction dtypes can be set. See
+            :class:`MixedPrecision` for details. (Default: ``None``)
         ignored_modules (Optional[Iterable[torch.nn.Module]]): Modules whose
             own parameters and child modules' parameters and buffers are
             ignored by this instance. None of the modules directly in
@@ -428,7 +413,7 @@ class FullyShardedDataParallel(nn.Module):
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
         auto_wrap_policy: Optional[Callable] = None,
-        backward_prefetch: Optional[BackwardPrefetch] = None,
+        backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
@@ -935,7 +920,7 @@ class FullyShardedDataParallel(nn.Module):
         with torch.autograd.profiler.record_function(
             "FullyShardedDataParallel.forward"
         ):
-            args, kwargs = _fsdp_root_pre_forward(self, self, *args, **kwargs)
+            args, kwargs = _root_pre_forward(self, self, *args, **kwargs)
             unused = None
             unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
             reshard_fn = functools.partial(_post_forward_reshard, self, self._handles)
@@ -2107,7 +2092,7 @@ class FullyShardedDataParallel(nn.Module):
                 if using_optim_input
                 else _get_param_id_to_param(optim)
             )
-            param_to_param_name = _get_param_to_param_name(model)
+            param_to_param_name = _get_param_to_fqn(model)
             param_id_to_param_name: List[str] = [
                 param_to_param_name[param] for param in param_id_to_param
             ]
@@ -2125,7 +2110,7 @@ class FullyShardedDataParallel(nn.Module):
                 )
             return new_osd
         elif optim_state_key_type == OptimStateKeyType.PARAM_ID:  # name -> ID
-            param_name_to_param = _get_param_name_to_param(model)
+            param_name_to_param = _get_fqn_to_param(model)
             param_to_param_id = (
                 _get_param_to_param_id_from_optim_input(model, optim_input)
                 if using_optim_input
@@ -2324,14 +2309,14 @@ def _get_grad_norm(
     return grad_norm
 
 
-def _get_param_to_param_name(
+def _get_param_to_fqn(
     model: torch.nn.Module,
 ) -> Dict[torch.nn.Parameter, str]:
     """
     Constructs a mapping from parameters to their parameter names. ``model``
     should not contain any :class:`FullyShardedDataParallel` instances, which
     means that none of the parameters should be ``FlatParameter`` s. As a
-    result, compared to :meth:`_get_param_to_unflat_param_names`, the mapped
+    result, compared to :meth:`_get_param_to_fqns`, the mapped
     values may be flattened from singleton :class:`list` s to the contained
     names themselves.
 
@@ -2339,10 +2324,10 @@ def _get_param_to_param_name(
         model (torch.nn.Module): Root module, which should not contain any
             :class:`FullyShardedDataParallel` instances.
     """
-    param_to_param_names = _get_param_to_unflat_param_names(model)
+    param_to_param_names = _get_param_to_fqns(model)
     for param_names in param_to_param_names.values():
         assert len(param_names) > 0, (
-            "`_get_param_to_unflat_param_names()` " "should not construct empty lists"
+            "`_get_param_to_fqns()` " "should not construct empty lists"
         )
         if len(param_names) > 1:
             raise RuntimeError(
@@ -2355,9 +2340,9 @@ def _get_param_to_param_name(
     return param_to_param_name
 
 
-def _get_param_name_to_param(
+def _get_fqn_to_param(
     model: torch.nn.Module,
 ) -> Dict[str, torch.nn.Parameter]:
-    """Constructs the inverse mapping of :meth:`_get_param_to_param_name`."""
-    param_to_param_name = _get_param_to_param_name(model)
+    """Constructs the inverse mapping of :meth:`_get_param_to_fqn`."""
+    param_to_param_name = _get_param_to_fqn(model)
     return dict(zip(param_to_param_name.values(), param_to_param_name.keys()))

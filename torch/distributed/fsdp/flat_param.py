@@ -5,7 +5,6 @@ from enum import auto, Enum
 from itertools import accumulate, chain
 from typing import (
     Any,
-    cast,
     Dict,
     Generator,
     Iterator,
@@ -30,7 +29,13 @@ from torch.distributed.fsdp._common_utils import (
 )
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
-from ._utils import _alloc_storage, _free_storage, _same_storage, p_assert
+from ._utils import (
+    _alloc_storage,
+    _free_storage,
+    _no_dispatch_record_stream,
+    _same_storage,
+    p_assert,
+)
 
 __all__ = [
     "FlatParameter",
@@ -159,6 +164,8 @@ class FlatParameter(nn.Parameter):
             (i.e. some per-parameter state) used to customize pre-flatten and
             post-unflatten behavior. This is experimental, and users should not
             depend on its existence in the future.
+        _modules (Set[nn.Module]): Modules that contain some original parameter
+            that is flattened into the ``FlatParameter``.
 
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
@@ -255,6 +262,9 @@ class FlatParameter(nn.Parameter):
         self._fqns = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
         self._param_extensions = tuple(param_extensions)
+        self._modules = set(pi.module for pi in self._param_infos).union(
+            set(spi.module for spi in self._shared_param_infos)
+        )
         assert (params is None) == (shared_params is None)
         if params is not None:
             assert shared_params is not None and len(shared_params) == len(
@@ -483,7 +493,7 @@ class FlatParamHandle:
                 flat_param.storage_offset() == 0,
                 "The `FlatParameter` is not the sole occupant of its storage",
             )
-            orig_storage = flat_param.storage()
+            orig_storage = flat_param._typed_storage()
             sharded_flat_param, numel_padded = FlatParamHandle._get_shard(
                 flat_param, self.rank, self.world_size
             )
@@ -491,8 +501,8 @@ class FlatParamHandle:
             start = sharded_flat_param.numel() * self.rank
             end = sharded_flat_param.numel() * (self.rank + 1) - 1  # inclusive
             self._init_shard_metadata(numel_padded, start, end)
-            if orig_storage.size() > 0:
-                orig_storage.resize_(0)
+            if orig_storage._size() > 0:
+                orig_storage._resize_(0)
         if self._use_orig_params:
             self._use_sharded_views()
 
@@ -828,7 +838,7 @@ class FlatParamHandle:
             return False
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         already_unsharded = (
-            unsharded_flat_param.storage().size() == unsharded_flat_param.numel()
+            unsharded_flat_param._typed_storage()._size() == unsharded_flat_param.numel()
         )
         return not already_unsharded
 
@@ -1131,9 +1141,9 @@ class FlatParamHandle:
         # the padded unsharded flattened parameter as expected
         # NOTE: This check is not strictly needed for correctness but is a
         # useful sanity check since the tensor should only be used internally.
-        unpadded_storage_ptr = self.flat_param.storage().data_ptr()
+        unpadded_storage_ptr = self.flat_param._typed_storage()._data_ptr()
         padded_storage_ptr = (
-            self._get_padded_unsharded_flat_param().storage().data_ptr()
+            self._get_padded_unsharded_flat_param()._typed_storage()._data_ptr()
         )
         p_assert(
             unpadded_storage_ptr == padded_storage_ptr,
@@ -1195,9 +1205,7 @@ class FlatParamHandle:
         self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
-        unsharded_flat_param.record_stream(
-            cast(torch._C.Stream, torch.cuda.current_stream())
-        )
+        _no_dispatch_record_stream(unsharded_flat_param, torch.cuda.current_stream())
         _free_storage(unsharded_flat_param)
 
     def _use_sharded_flat_param(self) -> None:
@@ -1816,7 +1824,7 @@ class FlatParamHandle:
 
     @staticmethod
     def _check_storage_freed(tensor: Tensor):
-        storage_size: int = tensor.storage().size()
+        storage_size: int = tensor._typed_storage()._size()
         p_assert(
             storage_size == 0,
             f"Expects storage to be freed but got storage with size {storage_size}",
@@ -1824,7 +1832,7 @@ class FlatParamHandle:
 
     @staticmethod
     def _check_storage_allocated(tensor: Tensor):
-        storage_size: int = tensor.storage().size()
+        storage_size: int = tensor._typed_storage()._size()
         p_assert(storage_size > 0, "Expects storage to be allocated")
 
     def _check_low_precision_shard(self):

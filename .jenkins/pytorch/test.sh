@@ -109,14 +109,6 @@ if [[ "$TEST_CONFIG" == *inductor* ]]; then
   export PYTORCH_TEST_WITH_INDUCTOR=1
 fi
 
-# TODO: this condition is never true, need to fix this.
-if [[ -n "$PR_NUMBER" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
-  # skip expensive checks when on PR and CI_MASTER flag is not set
-  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
-else
-  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
@@ -125,7 +117,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
-  pip_install --user ninja
+  pip_install --user "ninja==1.10.2"
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
@@ -252,12 +244,12 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed
+  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed --verbose
   assert_git_not_dirty
 }
 
 test_inductor() {
-  python test/test_modules.py --verbose
+  python test/run_test.py --include test_modules --verbose
   # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
   # seen intest_ops_gradients.py
   # pytest test/test_ops_gradients.py --verbose -k "not _complex and not test_inplace_grad_acos_cuda_float64"
@@ -268,7 +260,10 @@ test_inductor_huggingface_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  TEST_REPORTS_DIR=/tmp/test-reports
+  # Use test-reports directory under test folder will allow the CI to automatically pick up
+  # the test reports and upload them to S3. Need to use full path here otherwise the script
+  # will bark about file not found later on
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
     --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
@@ -281,10 +276,13 @@ test_inductor_timm_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  TEST_REPORTS_DIR=/tmp/test-reports
+  # Use test-reports directory under test folder will allow the CI to automatically pick up
+  # the test reports and upload them to S3. Need to use full path here otherwise the script
+  # will bark about file not found later on
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 5 --partition-id "$1" \
+    --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
 }
@@ -405,12 +403,9 @@ test_libtorch() {
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
 
-    # TODO: this condition is never (BUILD_ENVIRONMENT doesn't start with pytorch-), need to fix this.
-    if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
-      if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
-        # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
-        "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
-      fi
+    if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
+      # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
+      "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
     fi
     assert_git_not_dirty
   fi
@@ -733,6 +728,7 @@ elif [[ "$TEST_CONFIG" == deploy ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   install_filelock
   install_triton
+  install_huggingface
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
@@ -745,6 +741,13 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
+elif [[ "${TEST_CONFIG}" == *inductor_timm* && $SHARD_NUMBER -lt 3 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_timm
+  id=$((SHARD_NUMBER-1))
+  test_inductor_timm_shard $id
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
@@ -757,13 +760,6 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SH
   install_triton
   install_huggingface
   test_inductor_huggingface_shard 0
-elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 8 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  install_filelock
-  install_triton
-  install_timm
-  id=$((SHARD_NUMBER-3))
-  test_inductor_timm_shard $id
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
