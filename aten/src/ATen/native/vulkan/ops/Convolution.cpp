@@ -125,7 +125,7 @@ at::Tensor rearrange_weights_dw(const Tensor& weight_in) {
   // reshape to stack the resulting batches vertically
   weight = weight.permute({1, 0, 2, 3}).reshape({4, N4 * C, H * W});
 
-  return weight;
+  return weight.contiguous();
 }
 
 /*
@@ -228,7 +228,7 @@ at::Tensor rearrange_weights_2d(const Tensor& weight_in, bool tconv) {
   // Collapse the outermost dim so that each group of 4 is stacked vertically
   weight = weight.permute({1, 0, 2, 3}).reshape({4, N4 * H, C_aligned * W});
 
-  return weight;
+  return weight.contiguous();
 }
 
 /*
@@ -272,7 +272,7 @@ at::Tensor rearrange_bias(
   bias = bias.reshape({L4, 4}).permute({1, 0});
   bias = bias.reshape({4, 1, L4});
 
-  return bias;
+  return bias.contiguous();
 }
 
 //
@@ -517,8 +517,8 @@ vTensor pack_weights(
   vTensor v_weight{
       api::context(),
       weight_rearranged.sizes(),
-      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
       weight_arg.options(),
+      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
   if (quantized) {
@@ -542,8 +542,8 @@ vTensor pack_biases(
   vTensor v_bias{
       api::context(),
       bias_rearranged.sizes(),
-      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
       weight.options(),
+      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
   if (quantized) {
