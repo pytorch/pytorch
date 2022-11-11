@@ -766,6 +766,34 @@ class TestNN(NNTestCase):
             names(s.named_parameters()),
             ['0.dummy_param', '0.l1.layer_dummy_param'])
 
+    def test_named_parameters_remove_duplicate(self):
+        def names(named_parameters):
+            return [k for k, _ in named_parameters]
+
+        class M1(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param1 = nn.Parameter(torch.empty(3, 3))
+                self.param2 = self.param1
+
+        m1 = M1()
+        self.assertEqual(names(m1.named_parameters()),
+                         ["param1"])
+        self.assertEqual(names(m1.named_parameters(remove_duplicate=False)),
+                         ["param1", "param2"])
+
+        class M2(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod1 = nn.Linear(3, 4, bias=False)
+                self.mod2 = self.mod1
+
+        m2 = M2()
+        self.assertEqual(names(m2.named_parameters()),
+                         ["mod1.weight"])
+        self.assertEqual(names(m2.named_parameters(remove_duplicate=False)),
+                         ["mod1.weight", "mod2.weight"])
+
     def test_buffers_and_named_buffers(self):
         def names(named_buffers):
             return [k for k, _ in named_buffers]
@@ -6143,20 +6171,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                          F.poisson_nll_loss(input, target, reduction='mean'))
         with self.assertRaisesRegex(ValueError, 'is not valid'):
             F.poisson_nll_loss(input, target, reduction='total')
-
-    def test_gaussian_nll_loss_reduction_modes(self):
-        input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
-        target = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
-        var = torch.tensor([[0.5, 1., 1.5], [1., 1.5, 2.]])
-        component_wise_loss = 0.5 * (torch.log(var) + (input - target)**2 / var)
-        self.assertEqual(component_wise_loss,
-                         F.gaussian_nll_loss(input, target, var, reduction='none'))
-        self.assertEqual(torch.sum(component_wise_loss),
-                         F.gaussian_nll_loss(input, target, var, reduction='sum'))
-        self.assertEqual(torch.mean(component_wise_loss),
-                         F.gaussian_nll_loss(input, target, var, reduction='mean'))
-        with self.assertRaisesRegex(ValueError, 'is not valid'):
-            F.gaussian_nll_loss(input, target, var, reduction='total')
 
     def test_gaussian_nll_loss_broadcasting(self):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
