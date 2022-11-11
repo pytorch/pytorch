@@ -5,7 +5,6 @@ import math
 import traceback
 import warnings
 from contextlib import contextmanager
-from dataclasses import dataclass
 from enum import auto, Enum
 from typing import (
     Any,
@@ -25,7 +24,6 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed import ProcessGroup
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    _CHECKPOINT_PREFIX,
     _CHECKPOINT_WRAPPED_MODULE,
     ActivationWrapper,
 )
@@ -50,9 +48,7 @@ from torch.distributed.fsdp._init_utils import (
     _init_state_dict_state,
 )
 from torch.distributed.fsdp._runtime_utils import (
-    _cast_buffers_to_dtype_and_device,
     _clear_grads_if_needed,
-    _get_buffers_and_dtypes_for_checkpoint,
     _lazy_init,
     _post_forward,
     _post_forward_reshard,
@@ -70,8 +66,13 @@ from torch.distributed.fsdp._wrap_utils import _auto_wrap
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
+    FullStateDictConfig,
+    LocalStateDictConfig,
     MixedPrecision,
+    ShardedStateDictConfig,
     ShardingStrategy,
+    StateDictConfig,
+    StateDictType,
 )
 
 from ._optim_utils import (
@@ -105,100 +106,11 @@ if _TORCH_FX_AVAIL:
 
 __all__ = [
     "FullyShardedDataParallel",
-    "StateDictType",
-    "StateDictConfig",
-    "FullStateDictConfig",
-    "LocalStateDictConfig",
-    "ShardedStateDictConfig",
     "OptimStateKeyType",
 ]
 
 
 FLAT_PARAM = "_flat_param"
-
-
-class StateDictType(Enum):
-    """
-    This enum indicates that which type of ``state_dict`` the FSDP module is
-    currently processing (returning or loading).
-    The default value is FULL_STATE_DICT to comply the PyTorch convention.
-    ..note::
-        FSDP currently supports three types of ``state_dict``:
-            1. ``state_dict/load_state_dict`: this pair of APIs return and load
-               the non-sharded, unflattened parameters. The semantics is the
-               same as using DDP.
-            2. ``_local_state_dict/_load_local_state_dict``: this pair of APIs return
-               and load local sharded, flattened parameters. The values returned
-               by ``_local_state_dict`` can be directly used by FSDP and is only
-               meaningful to FSDP (because parameters are flattened). Note that
-               these APIs are meant for use via the :func:`state_dict_type`
-               context manager as follows:
-                   >>> # xdoctest: +SKIP("undefined variables")
-                   >>> with fsdp.state_dict_type(StateDictType.LOCAL_STATE_DICT):
-                   ...     state = fsdp.state_dict()  # loads local state dict
-            3. ``_sharded_state_dict/_load_sharded_state_dict``: this pair of APIs
-               return and load sharded, unflattened parameters. The ``state_dict``
-               return by ``sharded_state_dict`` can be used by all other parallel
-               schemes (resharding may be required).
-    """
-
-    FULL_STATE_DICT = auto()
-    LOCAL_STATE_DICT = auto()
-    SHARDED_STATE_DICT = auto()
-
-
-@dataclass
-class StateDictConfig:
-    """
-    ``StateDictConfig`` is the base class for all state_dict configuration classes.
-    Users should instantiate a child version (i.e. ``FullStateDictConfig``) in
-    order to configure settings for the particular type of ``state_dict``
-    implementation FSDP will use.
-    """
-
-    offload_to_cpu: bool = False
-
-
-@dataclass
-class FullStateDictConfig(StateDictConfig):
-    """
-    ``FullStateDictConfig`` is a config class meant to be used with
-    ``StateDictType.FULL_STATE_DICT``. Currently, it accepts two parameters,
-    ``offload_to_cpu`` and ``rank0_only`` which can be configured to offload
-    the full ``state_dict`` to CPU and to materialize the ``state_dict`` on
-    rank 0 only. When used, it is recommended to enable both of these flags
-    together to optimize memory savings when taking checkpoints. Note that
-    this config class is meant for user via the :func:`state_dict_type`
-    context manager as follows:
-        >>> # xdoctest: +SKIP("undefined variables")
-        >>> fsdp = FSDP(model, auto_wrap_policy=...)
-        >>> cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-        >>> with FullyShardedDataParallel.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
-        >>>     state = fsdp.state_dict()
-        >>>     # state will be empty on non rank 0 and contain CPU tensors on rank 0.
-        >>> # To reload checkpoint for inference, finetuning, transfer learning, etc:
-        >>> model = model_fn() # Initialize model on CPU in preparation for wrapping with FSDP
-        >>> if dist.get_rank() == 0:
-        >>>     # Load checkpoint only on rank 0 to avoid memory redundancy
-        >>>     state_dict = torch.load("my_checkpoint.pt")
-        >>>     model.load_state_dict(state_dict)
-        >>> # All ranks initialize FSDP module as usual. ``sync_module_states`` argument
-        >>> # communicates loaded checkpoint states from rank 0 to rest of the world.
-        >>> fsdp = FSDP(model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
-        >>> # After this point, all ranks have FSDP model with loaded checkpoint.
-    """
-
-    rank0_only: bool = False
-
-
-@dataclass
-class LocalStateDictConfig(StateDictConfig):
-    pass
-
-
-@dataclass
-class ShardedStateDictConfig(StateDictConfig):
-    pass
 
 
 class OptimStateKeyType(Enum):
@@ -504,9 +416,7 @@ class FullyShardedDataParallel(nn.Module):
 
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
-        _init_state_dict_state(self)  # TODO: currently a no-op; need to refactor below
-        self._state_dict_type = StateDictType.FULL_STATE_DICT
-        self._state_dict_config = FullStateDictConfig()
+        _init_state_dict_state(self)
         self._register_state_dict_hook(_post_state_dict_hook)
         self._register_load_state_dict_pre_hook(
             _pre_load_state_dict_hook, with_module=True
@@ -786,131 +696,9 @@ class FullyShardedDataParallel(nn.Module):
                     module, prev_state_dict_type, prev_state_dict_config
                 )
 
-    def _convert_to_wrapped_module_name(self, module_name: str) -> str:
-        module_name = module_name.replace(f"{FSDP_PREFIX}", "")
-        module_name = module_name.replace(f"{FSDP_WRAPPED_MODULE}", "")
-        if module_name:
-            module_name = f"{module_name}."
-        # Activation checkpoint adds a prefix that has to be
-        # removed as well.
-        module_name = module_name.replace(_CHECKPOINT_PREFIX, "")
-        return module_name
-
-    @property
-    def _param_fqns(self) -> Iterator[Tuple[str, str, str]]:
-        if not self._has_params:
-            return
-        for param_name, module_name in self._handles[0].parameter_module_names():
-            module_name = self._convert_to_wrapped_module_name(module_name)
-            fqn = f"{module_name}{param_name}"
-            yield fqn, param_name, module_name
-
-    @property
-    def _shared_param_fqns(self) -> Iterator[Tuple[str, str, str]]:
-        for param_name, module_name in self._handles[0].shared_parameter_module_names():
-            module_name = self._convert_to_wrapped_module_name(module_name)
-            fqn = f"{module_name}{param_name}"
-            yield fqn, param_name, module_name
-
     def state_dict(self, *args, **kwargs):
-        """
-        This is the entry point of all three FSDP ``state_dict`` APIs: full,
-        local, and sharded. For the full state dict
-        (``StateDictType.FULL_STATE_DICT``), FSDP attempts to unshard the model
-        on all ranks, which may result in an OOM error if the full model cannot
-        fit on a single GPU. In that case, users may pass in a
-        :class:`FullStateDictConfig` to only save the checkpoint on rank 0 and/
-        or to offload it to CPU memory layer by layer, enabling much larger
-        checkpoints. If the full model cannot fit in CPU memory, then users may
-        instead take a local state dict (``StateDictType.LOCAL_STATE_DICT``)
-        that only saves the local shard of the model. The sharded state dict
-        (``StateDictType.SHARDED_STATE_DICT``) saves the model parameters as
-        ``ShardedTensor`` s. The ``state_dict`` type can be configured using
-        the :meth:`state_dict_type` context manager.
-
-        Example::
-
-            >>> # xdoctest: +SKIP("undefined variables")
-            >>> import torch
-            >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-            >>> from torch.distributed.fsdp import StateDictType
-            >>> torch.cuda.set_device(device_id)
-            >>> my_module = nn.Linear(...)
-            >>> sharded_module = FSDP(my_module)
-            >>> full_state_dict_config = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-            >>> with FSDP.state_dict_type(sharded_module, StateDictType.FULL_STATE_DICT, full_state_dict_config):
-            >>>     full_dict = sharded_module.state_dict()
-            >>> full_dict.keys()
-            >>> odict_keys(['weight', 'bias'])
-            >>> # using local state dict
-            >>> with FSDP.state_dict_type(sharded_module, StateDictType.LOCAL_STATE_DICT):
-            >>>     local_dict = sharded_module.state_dict()
-            >>> local_dict.keys()
-            >>> odict_keys(['flat_param', 'inner.flat_param'])
-
-        .. warning:: This needs to be called on all ranks since it uses
-            collective communications.
-        """
-        # TODO (rohan-varma): separate these out once a state_dict pre-hook
-        # is available.
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
         _lazy_init(self, self)
-        if self._is_root:
-            _clear_grads_if_needed(self._fsdp_handles(self))
-        if self._state_dict_type == StateDictType.FULL_STATE_DICT:
-            # Get config args
-            full_state_dict_config = (
-                self._state_dict_config
-                if self._state_dict_config is not None
-                else FullStateDictConfig()
-            )
-            rank0_only = full_state_dict_config.rank0_only
-            offload_to_cpu = full_state_dict_config.offload_to_cpu
-            summon_ctx = (
-                self._summon_full_params(
-                    recurse=False,
-                    writeback=False,
-                    offload_to_cpu=offload_to_cpu,
-                    rank0_only=rank0_only,
-                )
-                if self.training_state != TrainingState.SUMMON_FULL_PARAMS
-                else contextlib.suppress()
-            )
-            with summon_ctx:
-                # Since buffers stay in their low precision throughout runtime,
-                # we must explicitly restore them to their original dtypes for
-                # model checkpointing. We have the root module cast for all
-                # submodules.
-                # TODO: Investigate if this can and should be refactored into
-                # `summon_full_params()`.
-                if self._is_root and self._mixed_precision_enabled_for_buffers():
-                    buffers, buffer_dtypes = _get_buffers_and_dtypes_for_checkpoint(
-                        self, self
-                    )
-                    _cast_buffers_to_dtype_and_device(
-                        buffers, buffer_dtypes, self.compute_device
-                    )
-                state_dict = super().state_dict(*args, **kwargs)
-
-            # TODO: support offload to CPU in post state dict hook.
-            if not rank0_only or self.rank == 0:
-                return state_dict
-            else:
-                return {}
-
-        elif (
-            self._state_dict_type == StateDictType.LOCAL_STATE_DICT
-            or self._state_dict_type == StateDictType.SHARDED_STATE_DICT
-        ):
-            if self._has_params and not self._handles[0].uses_sharded_strategy:
-                raise RuntimeError(
-                    "sharded_state_dict/local_state_dict can only be called "
-                    "when parameters are flatten and sharded."
-                )
-            return super().state_dict(*args, **kwargs)
-        else:
-            raise ValueError(f"Unknown StateDictType {self._state_dict_type}.")
+        return super().state_dict(*args, **kwargs)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """
