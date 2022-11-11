@@ -10,7 +10,6 @@ from .qconfig_mapping import *  # noqa: F403
 from .quant_type import *  # noqa: F403
 from .quantization_mappings import *  # type: ignore[no-redef]
 from .quantize import *  # noqa: F403
-from .quantize import _get_observer_dict
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
 
