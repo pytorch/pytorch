@@ -175,9 +175,9 @@ class TorchVariable(VariableTracker):
             DynamicShapeVariable,
             GradModeVariable,
             TensorVariable,
+            UserDefinedObjectVariable,
         )
 
-        # print("CALLING ON TORCH", self.value)
         from .builder import wrap_fx_proxy
 
         constant_args = check_constant_args(args, kwargs)
@@ -208,7 +208,8 @@ class TorchVariable(VariableTracker):
             assert len(args) == 1
             if isinstance(args[0], TensorVariable) or (
                 self.value is torch.overrides.is_tensor_like
-                and hasattr(args[0].as_python_constant(), "__torch_function__")
+                and isinstance(args[0], UserDefinedObjectVariable)
+                and hasattr(args[0].value, "__torch_function__")
             ):
                 return ConstantVariable(True, **options)
             else:

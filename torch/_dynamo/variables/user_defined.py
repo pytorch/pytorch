@@ -122,9 +122,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self.value_type = value_type or type(value)
         assert type(value) is self.value_type
 
-    def as_python_constant(self):
-        return self.value
-
     def __str__(self):
         inner = self.value_type.__name__
         if inner in [
