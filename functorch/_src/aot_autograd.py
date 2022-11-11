@@ -440,7 +440,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, s
     def new_fn(args):
         nonlocal compiled_fw
         return call_func_with_args(compiled_fw, args, disable_amp=disable_amp)
-    
+
     new_fn.guards = compiled_guard_expr
 
     return new_fn
@@ -608,8 +608,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         num_outs = _num_outs
         num_symints = _num_symints
         flat_outs_not_requiring_grad = _flat_outs_not_requiring_grad
-        guards = compiled_guard_expr
-        
+
         @staticmethod
         @disable_torchdynamo
         def forward(ctx, *deduped_flat_tensor_args):
@@ -662,11 +661,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     def compiled_function(*args):
         return CompiledFunction.apply(*remove_dupe_args(args))
 
-    CompiledFunction.compiled_flat_fn = flat_fn
-    CompiledFunction.compiled_aot_config = aot_config
-    CompiledFunction.compiled_shape_env = shape_env
-
-    autograd_cache.update({flat_fn.mod.code: compiled_function})
+    compiled_function.guards = compiled_guard_expr
     return compiled_function
 
 
@@ -794,9 +789,10 @@ def create_aot_dispatcher_function(
         # crappy version of dispatcher
         # TODO: Do this properly
         if needs_autograd:
-            return make_boxed_func(
-                aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config, shape_env)
-            )
+            fn = aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config, shape_env)
+            boxed_fn = make_boxed_func(fn)
+            boxed_fn.guards = fn.guards
+            return boxed_fn
         else:
             return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config, shape_env)
 
@@ -1075,17 +1071,15 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         def new_func(*args):
             nonlocal compiled_fn
             pre_dispatch_guards = copy.deepcopy(shape_env.guards)
-            breakpoint()
             def inp_to_key(inp):
                 return str(inp.size()) + str(inp.stride())
 
             key = "".join([inp_to_key(arg) for arg in args])
-            key = key + flat_fn.mod.code
-            
-            needs_recompile = True
+            key = key + fn.mod.code
 
+            needs_compile = True
             if key in aot_autograd_compiled_fn_cache:
-                compiled_fn = aot_autograd_compiled_fn_cache[key](args)
+                compiled_fn = aot_autograd_compiled_fn_cache[key]
                 if compiled_fn.guards:
                     Eq = sympy.Eq
                     Ne = sympy.Ne
@@ -1093,18 +1087,19 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
                     floor = math.floor
                     if eval(compiled_fn.guards):
                         # Guards passed
-                        needs_recompile = False
+                        needs_compile = False
                 else:
                     # No guards, no need to recompile
-                    needs_recompile = False
+                    needs_compile = False
 
-            if needs_recompile:
+            if needs_compile:
                 compiled_fn = create_aot_dispatcher_function(
                     fn,
                     args,
                     aot_config,
                     shape_env,
                 )
+                aot_autograd_compiled_fn_cache[key] = compiled_fn
             return compiled_fn(args)
 
         return new_func
