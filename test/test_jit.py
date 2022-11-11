@@ -15059,6 +15059,67 @@ dedent """
         # print(jit_out / py_out - 1)
         self.assertEqual(jit_out, py_out, atol=5e-4, rtol=1e-4)
 
+    def test_functional_multi_head_attn_fast_path(self):
+        src_l = 3
+        bsz = 5
+        embed_size = 8
+        nhead = 2
+        query = key = value = torch.rand((src_l, bsz, embed_size))
+        multi_head_attn_nn = torch.nn.MultiheadAttention(embed_size, nhead, batch_first=True)
+        multi_head_attn_nn = multi_head_attn_nn.eval()
+
+        with torch.no_grad():
+            fn_out = torch.nn.functional.multi_head_attention_forward(query, key, value,
+                                                                      embed_size, nhead,
+                                                                      multi_head_attn_nn.in_proj_weight,
+                                                                      multi_head_attn_nn.in_proj_bias,
+                                                                      multi_head_attn_nn.bias_k,
+                                                                      multi_head_attn_nn.bias_v,
+                                                                      multi_head_attn_nn.add_zero_attn,
+                                                                      multi_head_attn_nn.dropout,
+                                                                      multi_head_attn_nn.out_proj.weight,
+                                                                      None,
+                                                                      training=False)[0]
+
+            query_fb = key_fb = value_fb = query.transpose(1, 0)
+            py_out = multi_head_attn_nn(query_fb, key_fb, value_fb)[0].transpose(1,0)
+            mha = torch.jit.script(multi_head_attn_nn)
+            jit_out = mha(query_fb, key_fb, value_fb)[0].transpose(1,0)
+            torch.testing.assert_close(fn_out, py_out)
+            torch.testing.assert_close(fn_out, jit_out)
+
+    def test_functional_multi_head_attn_fast_path_None(self):
+        random_seed = 1 # or any of your favorite number
+        torch.manual_seed(random_seed)
+        torch.cuda.manual_seed(random_seed)
+
+        np.random.seed(random_seed)
+
+        src_l = 3
+        bsz = 5
+        embed_size = 8
+        nhead = 2
+        query = key = value = torch.rand((src_l, bsz, embed_size))
+        multi_head_attn_nn = torch.nn.MultiheadAttention(embed_size, nhead, batch_first=True)
+        multi_head_attn_nn = multi_head_attn_nn.eval()
+
+        with torch.no_grad():
+            fn_out = torch.nn.functional.multi_head_attention_forward(query, key, value,
+                                                                      embed_size, nhead,
+                                                                      None,
+                                                                      None,
+                                                                      multi_head_attn_nn.bias_k,
+                                                                      multi_head_attn_nn.bias_v,
+                                                                      multi_head_attn_nn.add_zero_attn,
+                                                                      multi_head_attn_nn.dropout,
+                                                                      multi_head_attn_nn.out_proj.weight,
+                                                                      None,
+                                                                      training=False)[0]
+
+            query_fb = key_fb = value_fb = query.transpose(1, 0)
+            py_out = multi_head_attn_nn(query_fb, key_fb, value_fb)[0].transpose(1,0)
+            self.assertEqual(fn_out.shape, py_out.shape)
+
     def test_torchscript_multi_head_attn_fast_path(self):
         src_l = 3
         bsz = 5
