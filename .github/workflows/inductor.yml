@@ -23,10 +23,13 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 3, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 4, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 5, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 6, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 7, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
         ]}
 

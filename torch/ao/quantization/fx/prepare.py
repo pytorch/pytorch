@@ -18,10 +18,10 @@ from ..observer import (
     ObserverBase,
 )
 from ..qconfig import (
-    _obs_or_fq_ctr_equals,
+    obs_or_fq_ctr_equals,
     float16_dynamic_qconfig,
     float16_static_qconfig,
-    _is_reuse_input_qconfig,
+    is_reuse_input_qconfig,
     QConfigAny,
 )
 from ..qconfig_mapping import (
@@ -585,7 +585,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
         # regular flow for most nodes, except standalone modules
         is_weight = node_arg_is_weight(node, arg, backend_config)
 
-        _is_reuse_input_qconfig_ = _is_reuse_input_qconfig(qconfig)
+        is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
 
         act_post_process_ctr = qconfig.weight if is_weight else \
             qconfig.activation
@@ -613,7 +613,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
                 # if arg output dtype is in DO_NOT_OBS_DTYPE_LIST do not insert observer
                 (arg_as_output_target_dtype not in DO_NOT_OBS_DTYPE_LIST) and
                 # if qconfig is reuse_input qconfig, we won't insert extra observer for input
-                not _is_reuse_input_qconfig_
+                not is_reuse_input_qconfig_
             ) or (
                 # need to add input observer for dynamic quantization
                 # only add observer for first input for now, we may need to extend
@@ -1312,7 +1312,7 @@ def insert_observers_for_model(
                     is_last_node_of_pattern = node is last_node
                     is_general_tensor_value_op = \
                         (qhandler is not None and qhandler.is_general_tensor_value_op())
-                    _is_reuse_input_qconfig_ = _is_reuse_input_qconfig(qconfig)
+                    is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
 
                     if is_last_node_of_pattern:
                         if _is_custom_module_lstm(node, modules, qconfig, qhandler):
@@ -1364,7 +1364,7 @@ def insert_observers_for_model(
                                 # to make all inputs and outputs use the first input's
                                 # observer
                                 if (is_general_tensor_value_op and is_observer_in_same_graph_) or \
-                                        _is_reuse_input_qconfig_:
+                                        is_reuse_input_qconfig_:
                                     if not maybe_make_input_output_share_observers(node, model, modules):
                                         remove_output_observer(node, model, modules)
 
@@ -1423,10 +1423,10 @@ def _validate_fixed_qparams_qconfigs(
             else:
                 for observer_ctr in allowed_observer_ctrs + [
                         fixed_qparams_op_to_overwrite_output_observer[module_type_or_function_or_method]]:
-                    if _obs_or_fq_ctr_equals(
+                    if obs_or_fq_ctr_equals(
                             qconfig.activation,
                             FixedQParamsFakeQuantize.with_args(observer=observer_ctr)) or \
-                            _obs_or_fq_ctr_equals(qconfig.activation, observer_ctr):
+                            obs_or_fq_ctr_equals(qconfig.activation, observer_ctr):
                         bad_observer = False
             if bad_observer:
                 raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "

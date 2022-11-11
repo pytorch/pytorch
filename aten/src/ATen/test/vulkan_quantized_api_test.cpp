@@ -12,13 +12,6 @@
 
 #include <c10/util/irange.h>
 
-/*
- * TODO: rename this file to something like vulkan_experimental_test and move
- * this under caffe2/fb/vulkan. This file should be used to test experimental
- * features of the Vulkan backend. vulkan_api_test cannot serve this purpose
- * because it cannot link against symbols in the ATen/native/vulkan folder.
- */
-
 namespace {
 
 bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
@@ -168,85 +161,6 @@ at::Tensor vulkan_to_cpu(at::Tensor vulkan, at::Tensor in_cpu) {
     auto output = at::empty(in_cpu.sizes(), q_options);
     at::native::vulkan::ops::copy_(output, vulkan);
     return output;
-  }
-}
-
-TEST_F(VulkanAPITest, uniform_buffer_copy) {
-  using namespace at::native::vulkan;
-
-  struct TestStruct{
-    int a;
-    int b;
-    int c;
-  };
-
-  TestStruct test_struct{4, 9, 10};
-
-  api::UniformParamsBuffer params(api::context(), test_struct);
-  api::UniformParamsBuffer params_copy = params;
-
-  api::MemoryMap copy_mapping(
-      params_copy.buffer(), api::MemoryAccessType::READ);
-
-  TestStruct* test_copy_p = copy_mapping.template data<TestStruct>();
-
-  ASSERT_TRUE(test_copy_p->a == test_struct.a);
-  ASSERT_TRUE(test_copy_p->b == test_struct.b);
-  ASSERT_TRUE(test_copy_p->c == test_struct.c);
-}
-
-TEST_F(VulkanAPITest, copy_to_buffer) {
-  using namespace at::native::vulkan;
-
-  at::Tensor test_tensors[] = {
-    // 4D
-    at::rand({7, 17, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    // 3D
-    at::rand({67, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    // 2D
-    at::rand({229, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    // 1D
-    at::rand({1902}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-  };
-
-  for (auto in_cpu : test_tensors) {
-    ops::vTensor in_vk_copied = ops::to_vulkan(in_cpu, api::StorageType::BUFFER);
-    at::Tensor out_copied = ops::from_vulkan(in_vk_copied);
-
-    const auto check_copy = almostEqual(out_copied, in_cpu);
-
-    if(!check_copy) {
-      std::cout << "Copy failed on size " << in_cpu.sizes()
-                << "with dtype" << in_cpu.dtype() << std::endl;
-    }
-
-    ASSERT_TRUE(check_copy);
-  }
-}
-
-TEST_F(VulkanAPITest, copy_to_buffer_channels_last) {
-  using namespace at::native::vulkan;
-
-  at::TensorOptions options(at::kCPU);
-  options = options.dtype(at::kFloat);
-
-  at::Tensor test_tensors[] = {
-    // 4D
-    at::rand({7, 17, 134, 213}, options).to(at::MemoryFormat::ChannelsLast),
-  };
-
-  for (auto in_cpu : test_tensors) {
-    ops::vTensor in_vk_copied = ops::to_vulkan(in_cpu, api::StorageType::BUFFER);
-    at::Tensor out_copied = ops::from_vulkan(in_vk_copied);
-
-    const auto check_copy = almostEqual(out_copied, in_cpu);
-
-    if(!check_copy) {
-      std::cout << "Copy failed on size " << in_cpu.sizes()
-                << "with dtype" << in_cpu.dtype() << std::endl;
-    }
-
-    ASSERT_TRUE(check_copy);
   }
 }
 

@@ -22,7 +22,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
-from functorch._src.aot_autograd import set_model_name
+from microbenchmarks.operator_inp_utils import OperatorInputsMode
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.optimizations import backends
 from torch._dynamo.optimizations.log_args import conv_args_analysis
@@ -36,9 +36,11 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map
 
 try:
-    from .microbenchmarks.operator_inp_utils import OperatorInputsMode
+    from functorch._src.aot_autograd import set_model_name
 except ImportError:
-    from microbenchmarks.operator_inp_utils import OperatorInputsMode
+
+    def set_model_name(name):
+        pass
 
 
 log = logging.getLogger(__name__)
@@ -411,14 +413,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             timings,
         )
 
-    headers = ("dev", "name", "batch_size", "speedup", "abs_latency")
-    row = [
-        current_device,
-        current_name,
-        current_batch_size,
-        float(speedup),
-        median[1] * 1000,
-    ]
+    headers = ("dev", "name", "batch_size", "speedup")
+    row = [current_device, current_name, current_batch_size, float(speedup)]
     if "compilation_latency" in kwargs:
         headers = headers + ("compilation_latency", "compression_ratio")
         row.append(kwargs["compilation_latency"])
@@ -1312,7 +1308,8 @@ def help(fn):
     return fn.__doc__
 
 
-def parse_args(args=None):
+def parse_args():
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--filter", "-k", action="append", help="filter benchmarks with regexp"
@@ -1333,10 +1330,7 @@ def parse_args(args=None):
         default=0,
         help="ID of the benchmark suite partition to be run. Used to divide CI tasks",
     )
-    parser.add_argument(
-        "--devices", "--device", "-d", action="append", help="cpu or cuda"
-    )
-    parser.add_argument("--device-index", help="CUDA device index")
+    parser.add_argument("--devices", "-d", action="append", help="cpu or cuda")
     parser.add_argument(
         "--repeat", "-n", type=int, default=30, help="number of timing runs"
     )
@@ -1573,7 +1567,8 @@ def parse_args(args=None):
     mode_group.add_argument(
         "--performance", action="store_true", help="Measures performance speedup"
     )
-    return parser.parse_args(args)
+    args = parser.parse_args()
+    return args
 
 
 def main(runner, original_dir=None):
@@ -1622,11 +1617,7 @@ def run(runner, args, original_dir=None):
         else:
             # TODO(whc) after enabling DDPOptimizer by default this could be removed or assert
             torch._dynamo.config.optimize_ddp = True
-        if args.only == "dlrm":
-            log.error(
-                "DLRM+DDP is unsupported as it requires sharding the embedding layer separately from DDP"
-            )
-            return sys.exit(-1)
+
     if args.accuracy:
         # Use small batch size. We use >1 batch size to ensure we test
         # batch_norm type of operators that work on batch dims.
@@ -1645,13 +1636,10 @@ def run(runner, args, original_dir=None):
 
         # Some models e.g. yolov3 assert batch size on n_gpus
         if "CUDA_VISIBLE_DEVICES" not in os.environ:
-            args.device_index = "0"
+            os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
         # Stricter check to disable fallbacks
         args.suppress_errors = False
-
-    if args.device_index is not None:
-        os.environ["CUDA_VISIBLE_DEVICES"] = args.device_index
 
     elif args.performance:
         # Ensure that we test on real scenarios
