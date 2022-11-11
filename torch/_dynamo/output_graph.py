@@ -225,7 +225,13 @@ class OutputGraph(fx.Tracer):
                 return NNModuleVariable(type(target), module_key, **options)
 
         elif isinstance(target, (torch.SymInt, torch.SymFloat)):
-            self.intermediary_symbols.update({target.get_pyobj().expr: ""})
+            # HACKY CODE REGION BEGIN
+            # WE ARE PIGGYBACKING ON EXISTING INFRA TO REGISTER ATTRS
+            # This ultimately gets written to self.nn_modules, which is unfortunate
+            # Attrs that are tenors and symints and such need to be migrated to have their
+            # own storage
+            # alas, this is like this for now
+            self.intermediary_symbols.update({target.get_pyobj().expr: None})
 
             def wrap_name(module_key):
                 return DynamicShapeVariable.create(
@@ -235,6 +241,7 @@ class OutputGraph(fx.Tracer):
                     **options,
                 )
 
+            # HACKY CODE REGION END
         else:
 
             def wrap_name(module_key):

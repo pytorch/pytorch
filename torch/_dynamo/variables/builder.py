@@ -3,6 +3,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import math
 import numbers
 import operator
 import re
@@ -52,7 +53,7 @@ from ..utils import (
     wrap_to_fake_tensor_and_record,
 )
 
-from .base import MutableLocal
+from .base import MutableLocal, typestr
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .dicts import (
@@ -96,6 +97,10 @@ from .torch import (
     TorchVariable,
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+
+
+class _missing:
+    pass
 
 
 @dataclasses.dataclass
@@ -709,8 +714,13 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
         from . import TorchVariable
 
         return TorchVariable(proxy.node.target)
-    elif istype(example_value, (int, bool, float)) and not config.dynamic_shapes:
-        return ConstantVariable(example_value)
+    elif (
+        proxy.node.target == torch._C._DisableFuncTorch
+        or proxy.node.target == torch.cuda._is_in_bad_fork
+    ):
+        from . import UserDefinedObjectVariable
+
+        return UserDefinedObjectVariable(example_value)
     elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
         proxy.node.meta["example_value"] = example_value
         return DynamicShapeVariable.create(tx, proxy, example_value, **options)
@@ -728,8 +738,11 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),
     ):
-        proxy.node.meta["example_value"] = example_value
-        return DynamicShapeVariable.create(tx, proxy, example_value, **options)
+        if config.dynamic_shapes:
+            proxy.node.meta["example_value"] = example_value
+            return DynamicShapeVariable.create(tx, proxy, example_value, **options)
+        else:
+            return ConstantVariable(example_value, **options)
     elif istype(example_value, torch.Size) and all(
         [isinstance(x, int) for x in example_value]
     ):
@@ -796,13 +809,6 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
                 need_unwrap=False,
                 **options,
             )
-    elif (
-        proxy.node.target == torch._C._DisableFuncTorch
-        or proxy.node.target == torch.cuda._is_in_bad_fork
-    ):
-        from . import UserDefinedObjectVariable
-
-        return UserDefinedObjectVariable(example_value)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
         proxy.node.meta["example_value"] = example_value
         return DynamicShapeVariable(proxy, example_value, **options)

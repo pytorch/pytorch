@@ -27,7 +27,7 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .dicts import ConstDictVariable
-from .tensor import DynamicShapeVariable, FakeItemVariable
+from .tensor import DynamicShapeVariable, FakeItemVariable, UnspecializedPythonVariable
 
 log = logging.getLogger(__name__)
 

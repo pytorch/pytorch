@@ -141,9 +141,11 @@ class AotNop(AotAutogradStrategy):
 
     def candidate(self):
         from functorch._src.compilers import debug_nop
+        from functorch.compile import nop
 
+        DEBUG = False
         return BACKENDS["aot_autograd"](
-            self.gm, self.example_inputs, fw_compiler=debug_nop
+            self.gm, self.example_inputs, fw_compiler=debug_nop if DEBUG else nop
         )
 
 

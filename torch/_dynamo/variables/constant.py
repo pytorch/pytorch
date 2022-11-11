@@ -83,6 +83,14 @@ class ConstantVariable(VariableTracker):
             ).call_method(tx, name, args, kwargs)
 
         if any([isinstance(x, DynamicShapeVariable) for x in args]):
+            # NOTE! DANGER! THIS ONLY WORKS FOR COMMUTATIVE OPS
+            # we are relying on add to have arg[0] be a DynamicShapeVariable
+            # because we are in ConstantVariable land
+            # This transforms
+            # constant + dynamic
+            # into
+            # dynamic + constant
+            # Which already has infra built for writing to the graph
             if name == "__add__":
                 assert len(args) == 1
                 return args[0].call_method(tx, name, [self], {})
@@ -113,11 +121,11 @@ class ConstantVariable(VariableTracker):
                 from .tensor import DynamicShapeVariable
 
                 # Addition between a non sym and sym makes a sym
-                dyn_shape = tx.output.register_attr_or_module(
-                    add_target, f"sym_shape_{add_target}", source=None
-                )
+                # dyn_shape = tx.output.register_attr_or_module(
+                #     add_target, f"sym_shape_{add_target}", source=None
+                # )
                 proxy = tx.output.create_proxy(
-                    "call_function", op, (self.value, dyn_shape.proxy), {}
+                    "call_function", op, (self.value, add_target), {}
                 )
                 return DynamicShapeVariable.create(tx, proxy, add_target, **options)
             return ConstantVariable(op(self.value, add_target), **options)
