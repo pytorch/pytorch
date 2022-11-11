@@ -232,7 +232,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def libdevice_sigmoid(x):
-        return f"1/(1 + tl.libdevice.exp(-({x})))"
+        return f"1/(1 + tl.lievice.exp(-({x})))"
 
     @staticmethod
     def signbit(x):
