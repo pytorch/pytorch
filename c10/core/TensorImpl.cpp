@@ -440,7 +440,7 @@ void TensorImpl::destroy_pyobj_if_needed() {
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 bool TensorImpl::has_storage() const {
-  return storage_;
+  return !storage_access_should_throw_ && storage_;
 }
 #endif
 

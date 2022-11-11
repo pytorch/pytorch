@@ -333,8 +333,8 @@ def _reshape_from_tensor(g: jit_utils.GraphContext, input, shape):
 @_onnx_symbolic("aten::reshape")
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
-def reshape(g: jit_utils.GraphContext, self, shape):
-    return symbolic_helper._reshape_helper(g, self, shape)
+def reshape(g: jit_utils.GraphContext, self, shape, copy):
+    return symbolic_helper._reshape_helper(g, self, shape, copy=copy)
 
 
 @_onnx_symbolic("aten::reshape_as")

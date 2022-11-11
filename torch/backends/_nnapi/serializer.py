@@ -959,7 +959,7 @@ class _NnapiSerializer(object):
         self._identity(node)
 
     def add_reshape(self, node):
-        assert node.inputsSize() == 2
+        assert node.inputsSize() == 3
         assert node.outputsSize() == 1
 
         in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
