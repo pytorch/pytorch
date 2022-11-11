@@ -405,7 +405,8 @@ $5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)'''
 
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
-$1 = torch._ops.my_lib.weird.default([None, $0])''')
+$1 = torch._ops.my_lib.weird.default([None, LoggingTensor(tensor([[1., 1.],
+        [1., 1.]]))])''')
 
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
