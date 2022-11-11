@@ -5447,7 +5447,9 @@ for shape in [(1,), ()]:
 
         a = torch.ones(1, 1, 2, requires_grad=True)
         out = torch.nn.functional.interpolate(a, scale_factor=0.5, mode="linear")
-        self.assertEqual(out.grad_fn._saved_scales, 0.5)
+        self.assertIsNone(out.grad_fn._saved_output_size)
+        self.assertEqual(out.grad_fn._saved_scale_factors, (0.5,))
+        self.assertIsInstance(out.grad_fn._saved_scale_factors[0], float)
 
         a = torch.ones(2, 2, requires_grad=True)
         out = torch.pdist(a, p=1)

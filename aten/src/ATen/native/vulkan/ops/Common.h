@@ -106,12 +106,6 @@ uint32_t get_dim(const vTensor& v_in) {
   return get_dim<N>(v_in.sizes());
 }
 
-/*
- * Given an IntArrayRef of up to 4 elements, constructs a uvec4 containing those
- * elements in reverse order.
- */
-api::utils::uvec4 make_nchw_uvec4(const IntArrayRef arr);
-
 inline c10::optional<Tensor> get_optional_tensor(
     const c10::impl::GenericList& gen_list,
     const uint32_t idx) {

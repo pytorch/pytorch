@@ -413,10 +413,6 @@ class Tensor(torch._C._TensorBase):
                 self.requires_grad,
                 backward_hooks,
             )  # previously was self._backward_hooks
-
-            metadata = torch._utils.get_tensor_metadata(self)
-            if metadata:
-                args = args + (metadata,)  # type: ignore[assignment]
             return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):

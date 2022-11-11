@@ -107,23 +107,6 @@ def meta_copy_(self, src, non_blocking=False):
     return self
 
 
-def inferUnsqueezeGeometry(tensor, dim):
-    result_sizes = list(tensor.size())
-    result_strides = list(tensor.stride())
-    new_stride = 1 if dim >= tensor.dim() else result_sizes[dim] * result_strides[dim]
-    result_sizes.insert(dim, 1)
-    result_strides.insert(dim, new_stride)
-    return result_sizes, result_strides
-
-
-@register_meta(aten.unsqueeze_.default)
-def meta_unsqueeze_(self, dim):
-    dim = maybe_wrap_dim(dim, self.dim() + 1)
-    g_sizes, g_strides = inferUnsqueezeGeometry(self, dim)
-    self.as_strided_(g_sizes, g_strides)
-    return self
-
-
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
 @register_meta(aten.index_select.default)
 def meta_index_select(self, dim, index):
@@ -269,22 +252,9 @@ def meta_pad2d(self, padding):
         return self.new_empty((nbatch, nplane, output_h, output_w))
 
 
-@register_meta([aten.bernoulli.default, aten.bernoulli.out])
-@out_wrapper()
-def meta_bernoulli(self, *, generator=None):
-    # https://github.com/pytorch/pytorch/issues/88612
-    return torch.empty_like(self).contiguous()
-
-
 @register_meta(aten.bernoulli_.float)
 def meta_bernoulli_(self, p=0.5, generator=None):
     return self
-
-
-@register_meta(aten.bernoulli.p)
-def meta_bernoulli_p(self, p=0.5, generator=None):
-    # https://github.com/pytorch/pytorch/issues/88612
-    return torch.empty_like(self).contiguous()
 
 
 @register_meta(aten._fused_moving_avg_obs_fq_helper.default)
@@ -339,6 +309,12 @@ def _compute_reduction_shape(self, dims, keepdim):
         return tuple(self.shape[i] if i not in dims else 1 for i in range(self.ndim))
 
     return utils.compute_reduction_output_shape(self.shape, dims)
+
+
+@register_meta(aten.bernoulli.out)
+def meta_bernoulli(self, *, generator=None, out):
+    torch._resize_output_(out, self.size(), self.device)
+    return out
 
 
 # FakeTensors (meta tensors with a device) will report device as meta
@@ -1139,33 +1115,6 @@ def meta_zero_(self):
     return self
 
 
-@register_meta(
-    [
-        aten.mul_.Scalar,
-        aten.div_.Scalar,
-        aten.mul_.Tensor,
-        aten.div_.Tensor,
-        aten.logical_and_.default,
-        aten.logical_or_.default,
-        aten.logical_xor_.default,
-    ],
-)
-def meta_binop_inplace(self, other):
-    return self
-
-
-@register_meta(
-    [
-        aten.add_.Scalar,
-        aten.sub_.Scalar,
-        aten.add_.Tensor,
-        aten.sub_.Tensor,
-    ],
-)
-def meta_binop_inplace_alpha(self, other, alpha=1):
-    return self
-
-
 @register_meta(aten.zero.default)
 def meta_zero(self):
     return self.new_empty(self.shape)
@@ -1670,40 +1619,6 @@ def meta_scatter_add(self, dim, index, src):
     return self.new_empty(self.shape)
 
 
-@register_meta(aten.scatter_add_)
-def meta_scatter_add_(self, dim, index, src):
-    scatter_meta_impl(self, dim, index, src, "add")
-    return self
-
-
-@register_meta(aten.scatter)
-@out_wrapper()
-def meta_scatter(self, dim, index, src_or_value, reduce=None):
-    src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
-    scatter_meta_impl(self, dim, index, src, reduce)
-    return self.new_empty(self.shape)
-
-
-@register_meta(aten.scatter_)
-def meta_scatter_(self, dim, index, src_or_value, reduce=None):
-    src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
-    scatter_meta_impl(self, dim, index, src, reduce)
-    return self
-
-
-@register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
-@out_wrapper()
-def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
-    scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
-    return self.new_empty(self.shape)
-
-
-@register_meta(aten.scatter_reduce_.two)
-def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
-    scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
-    return self
-
-
 @register_meta(aten.upsample_nearest2d.vec)
 def upsample_nearest2d_vec(input, output_size, scale_factors):
     mem_format = utils.suggest_memory_format(input)
@@ -1728,11 +1643,6 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
     return input.new_empty((nbatch, channels, output_height, output_width)).to(
         memory_format=mem_format
     )
-
-
-@register_meta([aten.sort.default, aten.sort.stable])
-def meta_sort(self, stable=None, dim=-1, descending=False):
-    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
 
 
 # We must also trigger meta registrations from PrimTorch ref
@@ -1768,7 +1678,10 @@ def activate_meta():
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
             pass
-        elif op_overload.is_view:
+        elif any(
+            a.alias_info is not None and not a.alias_info.is_write
+            for a in op_overload._schema.arguments
+        ):
             # Attempting to register a python meta kernel for a view operator.
             # We shouldn't do this, because the output will report as not having aliased storages.
             # All view ops have meta kernels in C++ today, so we should use those instead.

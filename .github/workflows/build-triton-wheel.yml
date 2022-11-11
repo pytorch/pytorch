@@ -31,11 +31,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       PY_VERS: ${{ matrix.py_vers }}
     steps:
-      - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
@@ -43,6 +38,11 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main

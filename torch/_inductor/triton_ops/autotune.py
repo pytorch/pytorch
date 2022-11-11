@@ -213,8 +213,7 @@ def load_cached_autotuning(
     if not os.path.exists(cache_filename):
         return None
 
-    with open(cache_filename, "r") as fd:
-        best_config = json.loads(fd.read())
+    best_config = json.loads(open(cache_filename).read())
     if best_config.get("configs_hash") != configs_hash:
         return None
 

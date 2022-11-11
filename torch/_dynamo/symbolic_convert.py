@@ -137,7 +137,7 @@ def _detect_and_normalize_assert_statement(
     #
     # Python 3.8 assertion is in following format:
     # 18 POP_JUMP_IF_TRUE       28
-    # 20 LOAD_GLOBAL              0
+    # 20 LOAD_GLOBAL              0 (Assertion type)
     # 22 LOAD_CONST               3 ('Assert message') -> optional instruction
     # 24 CALL_FUNCTION            1                    -> optional instruction
     # 26 RAISE_VARARGS            1
@@ -149,7 +149,11 @@ def _detect_and_normalize_assert_statement(
     inst = self.instructions[current_instruction_pointer]
     # Detect LOAD_ASSERTION_ERROR or LOAD_GLOBAL 0
     if sys.version_info < (3, 9):
-        if inst.opname != "LOAD_GLOBAL" and inst.arg != 0:
+        if (
+            inst.opname != "LOAD_GLOBAL"
+            or inst.arg != 0
+            or inst.argval != "AssertionError"
+        ):
             return False
     else:
         if inst.opname != "LOAD_ASSERTION_ERROR":

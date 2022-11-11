@@ -494,61 +494,23 @@ Tensor NestedTensor_sum_dim_CPU(
 
 Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
   auto self_ptr = get_nested_tensor_impl(self);
-  std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
-                           strides = NestedTensor_get_strides(self_ptr);
-  const std::vector<int64_t>& offsets = self_ptr->get_storage_offsets();
-  const at::Tensor& buffer = self_ptr->get_unsafe_storage_as_tensor();
   int64_t positive_dim = at::maybe_wrap_dim(dim, self_ptr->dim());
-  int64_t ntensors = self_ptr->size(0);
-  TORCH_CHECK_INDEX(ntensors > 0, "You can only select when the NT is not empty.");
-  int64_t ndims = static_cast<long>(sizes[0].size());
   TORCH_CHECK(
-    positive_dim == 0 || positive_dim == 1,
-    "NestedTensor can only be selected along dimension 0 or 1",
+    positive_dim == 0,
+    "NestedTensor can only be selected along dimension 0 ",
     "got dimension ", dim, " instead."
   );
-  if (positive_dim == 0) {
-    TORCH_CHECK_INDEX(
-        index >= -ntensors && index < ntensors,
-        "index ",
-        index,
-        " is out of bounds for dimension 0 with size ",
-        ntensors);
-    int64_t positive_index = index < 0 ? index + ntensors : index;
-    return buffer.as_strided(
-        sizes[positive_index],
-        strides[positive_index],
-        offsets[positive_index]);
-  } else {
-    auto new_sizes = at::empty({ntensors, ndims-1}, TensorOptions().dtype(kLong));
-    auto new_strides = at::empty({ntensors, ndims-1}, TensorOptions().dtype(kLong));
-    auto new_offsets = std::vector<int64_t>(offsets);
-    std::vector<Tensor> tensor_slices(ntensors);
-    for (int64_t i : c10::irange(ntensors)) {
-      int64_t *size_ptr = new_sizes[i].data_ptr<int64_t>();
-      int64_t *stride_ptr = new_strides[i].data_ptr<int64_t>();
-
-      int64_t dim_idx = 0;
-      for (int64_t j : c10::irange(ndims)) {
-        if (j != dim - 1) {
-          size_ptr[dim_idx] = sizes[i][j];
-          stride_ptr[dim_idx] = strides[i][j];
-          ++dim_idx;
-        }
-        else {
-          TORCH_CHECK_INDEX(
-              index >= 0 && index < sizes[i][j],
-              "index ",
-              index,
-              " is out of bounds for irregular dimension 1 with size ",
-              sizes[i][j]);
-          new_offsets[i] = offsets[i] + index * strides[i][j];
-        }
-      }
-    }
-    return create_nested_view_tensor(self, new_sizes, new_strides, std::move(new_offsets));
-  }
-
+  int64_t ntensors = self_ptr->size(0);
+  TORCH_CHECK_INDEX(
+      index >= -ntensors && index < ntensors,
+      "index ", index,
+      " is out of bounds for dimension 0 with size ", ntensors);
+  int64_t positive_index = index < 0 ? index + ntensors : index;
+  const at::Tensor& buffer = self_ptr->get_unsafe_storage_as_tensor();
+  std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
+      strides = NestedTensor_get_strides(self_ptr);
+  const std::vector<int64_t>& offsets = self_ptr->get_storage_offsets();
+  return buffer.as_strided(sizes[positive_index], strides[positive_index], offsets[positive_index]);
 }
 
 Tensor clone_nested(
@@ -741,6 +703,7 @@ Tensor unsqueeze_nested(const Tensor& self, int64_t dim) {
   return create_nested_view_tensor(
       self, sizemat_unsqueezed, stridemat_unsqueezed, std::vector<int64_t>(self_ptr->get_storage_offsets()));
 }
+
 
 // utilities supporting `view_nested` and `reshape_nested`
 namespace {
