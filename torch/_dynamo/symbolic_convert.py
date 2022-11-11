@@ -133,6 +133,13 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
             isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
         ):
             # compile a partial subgraph prefix then jump into user code
+            if self.has_backedge():
+                msg = (
+                    "Skipping frame because there is a graph break in a for/while loop"
+                )
+                log.debug(msg)
+                raise exc.SkipFrame(msg)
+
             self.push(value)
             self.output.compile_subgraph(
                 self,
@@ -245,7 +252,11 @@ class InstructionTranslatorBase(object):
     def has_backedge(self):
         cur_offset = self.current_instruction.offset
         for inst in self.instructions[self.instruction_pointer :]:
-            if inst.opname == "JUMP_ABSOLUTE":
+            if inst.opname in (
+                "JUMP_ABSOLUTE",
+                "POP_JUMP_IF_TRUE",
+                "POP_JUMP_IF_FALSE",
+            ):
                 jump_offset = inst.arg
                 if jump_offset < cur_offset:
                     return True
