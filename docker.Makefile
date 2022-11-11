@@ -87,7 +87,7 @@ devel-push:
 
 .PHONY: devel-latest-push
 devel-latest-push: BASE_IMAGE := $(BASE_DEVEL)
-devel-latest-push: LATEST_TAG := latest
+devel-latest-push: DOCKER_TAG := latest
 devel-push-push:
 	$(DOCKER_PUSH)
 
