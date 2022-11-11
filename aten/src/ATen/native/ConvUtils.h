@@ -401,7 +401,7 @@ static inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const 
         input.unsafeGetTensorImpl()->is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
         return at::MemoryFormat::ChannelsLast3d;
       }
-    } 
+    }
     return at::MemoryFormat::Contiguous;
   };
 

@@ -1585,7 +1585,7 @@ at::Tensor _convolution(
   }
 
   if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
-    output = view3d(output);
+    output = view3d(output).contiguous();
   }
 
   return output;
