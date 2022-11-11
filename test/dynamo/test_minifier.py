@@ -104,6 +104,8 @@ def triton_accuracy_error(x):
     return f"{x} + 1"
 """
 
+DEBUG_DIR = ("/tmp/_torchdynamo_debug_/",)
+
 # Search for the name of the first function defined in a code string.
 def get_fn_name(code):
     fn_name_match = re.search(r"def (\w+)\(", code)
@@ -140,7 +142,7 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
             unittest.mock.patch.object(
                 torch._dynamo.config,
                 "debug_dir_root",
-                "/tmp/_torchdynamo_debug_/",
+                DEBUG_DIR,
             )
         )
 
@@ -200,7 +202,9 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(os.path.exists(repro_file))
         repro_code = self._inject_code(patch_code, repro_file)
 
-        repro_proc = subprocess.run(["python3", repro_file], capture_output=True)
+        repro_proc = subprocess.run(
+            ["python3", repro_file], capture_output=True, cwd=repro_dir
+        )
 
         return repro_proc, repro_code
 
@@ -214,7 +218,7 @@ import torch._dynamo
 {patch_code}
 torch._dynamo.config.repro_after = "{repro_after}"
 torch._dynamo.config.repro_level = {repro_level}
-
+torch._dynamo.config.debug_dir_root = "{DEBUG_DIR}"
 {run_code}
 """
 
