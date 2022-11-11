@@ -187,7 +187,8 @@ class TORCH_CUDA_CU_API Allocate final : public Expr {
       Val* buffer,
       MemoryType memory_type,
       std::vector<Val*> shape = {},
-      bool zero_init = false);
+      bool zero_init = false,
+      const Allocate* alias = nullptr);
 
   //! Allocation of a non-dimensional buffer
   //!
@@ -223,12 +224,6 @@ class TORCH_CUDA_CU_API Allocate final : public Expr {
 
   const Allocate* alias() const {
     return alias_;
-  }
-
-  void setAlias(const Allocate* alias) {
-    TORCH_INTERNAL_ASSERT(alias != this);
-    TORCH_INTERNAL_ASSERT(alias->memoryType() == memory_type_);
-    alias_ = alias;
   }
 
  private:

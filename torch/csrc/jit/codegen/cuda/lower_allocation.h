@@ -20,8 +20,8 @@ struct LocalAllocationInfo {
   bool has_halo = false;
 };
 
-using LocalAllocationInfoMap =
-    std::unordered_map<kir::Allocate*, std::unique_ptr<LocalAllocationInfo>>;
+using LocalAllocationInfoMap = std::
+    unordered_map<const kir::Allocate*, std::unique_ptr<LocalAllocationInfo>>;
 
 //! Insert buffer allocations
 std::vector<Expr*> insertAllocations(const std::vector<Expr*>& exprs);

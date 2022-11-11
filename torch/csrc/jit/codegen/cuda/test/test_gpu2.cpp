@@ -8210,7 +8210,10 @@ TEST_F(NVFuserTest, FusionWARSyncAliasedSmem_CUDA) {
       const auto& body = loop->body().exprs();
       TORCH_CHECK(!body.empty());
       auto last_expr = dynamic_cast<kir::BlockSync*>(body.back());
-      TORCH_CHECK(last_expr != nullptr, "Invalid expr found");
+      TORCH_CHECK(
+          last_expr != nullptr,
+          "Invalid expr found: ",
+          body.back()->toString());
       TORCH_CHECK(last_expr->isWarHazardSync(), "Not a sync for WAR hazard");
     }
   }

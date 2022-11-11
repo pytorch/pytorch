@@ -396,6 +396,16 @@ bool GpuLower::hasCurrent() {
 
 void GpuLower::propagateExprInfo(const Expr* old_expr, const Expr* new_expr) {
   pred_elimination_.propagateRemovalInfo(old_expr, new_expr);
+  if (old_expr->isA<kir::Allocate>()) {
+    auto alloc_info_it =
+        localAllocationInfoMap().find(old_expr->as<kir::Allocate>());
+    if (alloc_info_it != localAllocationInfoMap().end()) {
+      auto alloc_info =
+          std::make_unique<LocalAllocationInfo>(*(alloc_info_it->second));
+      localAllocationInfoMap().emplace(
+          new_expr->as<kir::Allocate>(), std::move(alloc_info));
+    }
+  }
 }
 
 } // namespace cuda

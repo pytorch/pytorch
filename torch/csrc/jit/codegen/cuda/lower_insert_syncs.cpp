@@ -131,10 +131,6 @@ class WarSyncInserter : private kir::ExprMutator {
   //! Insert Sync nodes at the end of a given for-loop when a WAR
   //! hazard may happen.
   WarSyncInserter(const std::vector<Expr*>& exprs) {
-    auto& lower_alloc_info_map = GpuLower::current()->localAllocationInfoMap();
-    for (const auto& entry : lower_alloc_info_map) {
-      alloc_map_.insert(entry.first);
-    }
     kir::ExprMutator::traverseAndInsert(exprs);
   }
 
@@ -194,6 +190,10 @@ class WarSyncInserter : private kir::ExprMutator {
       }
     }
     return false;
+  }
+
+  void handle(kir::Allocate* allocate) final {
+    alloc_map_.insert(allocate);
   }
 
   void handle(Expr* expr) final {

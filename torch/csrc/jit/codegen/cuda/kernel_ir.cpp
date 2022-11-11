@@ -449,12 +449,14 @@ Allocate::Allocate(
     Val* buffer,
     MemoryType memory_type,
     std::vector<Val*> shape,
-    bool zero_init)
+    bool zero_init,
+    const Allocate* alias)
     : Expr(passkey, ExprType::Allocate),
       buffer_(buffer),
       memory_type_(memory_type),
       shape_(std::move(shape)),
-      zero_init_(zero_init) {
+      zero_init_(zero_init),
+      alias_(alias) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -482,6 +484,12 @@ Allocate::Allocate(
 
   if (size_ == nullptr) {
     size_ = FusionGuard::getCurFusion()->oneVal();
+  }
+
+  if (alias_ != nullptr) {
+    TORCH_INTERNAL_ASSERT(alias_ != this, "Invalid alias");
+    TORCH_INTERNAL_ASSERT(
+        alias_->memoryType() == memory_type_, "Invalid alias");
   }
 
   addInput(size_);
