@@ -16147,6 +16147,60 @@ class TestStateDictHooks(TestCase):
             m.load_state_dict(sd)
             self.assertTrue(called)
 
+    @unittest.skipIf(IS_WINDOWS, "Tempfile permission issue on windows")
+    def test_register_state_dict_pre_hook_backward_compat(self):
+        called = False
+
+        def my_state_dict_pre_hook(*args, **kwargs):
+            nonlocal called
+            called = True
+
+        m = nn.Linear(1, 1)
+        self.assertTrue(hasattr(m, '_state_dict_pre_hooks'))
+        delattr(m, '_state_dict_pre_hooks')
+        # Save and load, ensure we can still call state_dict
+        # without running issues.
+        with NamedTemporaryFile() as f:
+            # Note that torch.save / torch.load is not recommended
+            # to save / load modules.
+            torch.save(m, f.name)
+            m = torch.load(f.name)
+
+        # Ensure we can run state_dict without issues
+        _ = m.state_dict()
+        self.assertFalse(called)
+        m.register_state_dict_pre_hook(my_state_dict_pre_hook)
+        _ = m.state_dict()
+        self.assertTrue(called)
+
+    def test_register_state_dict_pre_hook(self):
+        _state_dict_prefix = "foo"
+        state_dict_pre_hook_called = False
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3))
+
+            def forward(self, x):
+                return self.a(x)
+
+        def my_state_dict_pre_hook(module, prefix, keep_vars):
+            nonlocal keep_var_setting
+            self.assertEqual(keep_vars, keep_var_setting)
+            nonlocal state_dict_pre_hook_called
+            state_dict_pre_hook_called = True
+            self.assertEqual(prefix, _state_dict_prefix)
+            nonlocal mod
+            self.assertTrue(module is mod)
+
+        mod = MyModule()
+        mod.register_state_dict_pre_hook(my_state_dict_pre_hook)
+        for keep_var_setting in [True, False]:
+            _ = mod.state_dict(prefix=_state_dict_prefix, keep_vars=keep_var_setting)
+            self.assertTrue(state_dict_pre_hook_called)
+            state_dict_pre_hook_called = False
+
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 instantiate_parametrized_tests(TestNN)
