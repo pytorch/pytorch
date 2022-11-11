@@ -50,6 +50,7 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
 
     if args.fsdp:
         model = apply_fsdp(
+            args,
             model,
             use_checkpointing=args.fsdp_checkpoint,
             use_wrap_policy=args.fsdp_wrap,
@@ -160,7 +161,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    model_name = "ToyModel" if args.toy_model else args.torchbench_model
+    model_name = args.torchbench_model
+    if args.toy_model:
+        model_name = "ToyModel"
     model, inputs = get_model(args)
 
     fn = partial(run_model, args, model, inputs)
