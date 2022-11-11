@@ -1338,7 +1338,13 @@ Arguments:
 
           .def(
               "_reduce_scatter_base",
-              &::c10d::ProcessGroup::_reduce_scatter_base,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 at::Tensor& output_tensor,
+                 at::Tensor& input_tensor,
+                 const ::c10d::ReduceScatterOptions& opts) {
+                return ::c10d::ops::_reduce_scatter_base(
+                    self, output_tensor, input_tensor, opts);
+              },
               py::arg("outputTensor"),
               py::arg("inputTensor"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),

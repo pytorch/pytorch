@@ -126,7 +126,6 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_cpu_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const c10::intrusive_ptr<ReduceOp>& reduce_op,
     int64_t timeout) {
-  std::cout << "IN ALLREDUCE CPU" << std::endl;
   auto tensor_vec = tensors.vec();
   auto work =
       process_group->getBackend(c10::DeviceType::CPU)
@@ -172,7 +171,8 @@ c10::intrusive_ptr<Work> allreduce_coalesced_cpu_(
   opts.reduceOp = *reduce_op.get();
   opts.timeout = std::chrono::milliseconds(timeout);
 
-  return process_group->allreduce_coalesced(tensor_vec, opts);
+  return process_group->getBackend(c10::DeviceType::CPU)
+      ->allreduce_coalesced(tensor_vec, opts);
 }
 
 c10::intrusive_ptr<Work> allreduce_coalesced_cuda_(
@@ -185,7 +185,8 @@ c10::intrusive_ptr<Work> allreduce_coalesced_cuda_(
   opts.reduceOp = *reduce_op.get();
   opts.timeout = std::chrono::milliseconds(timeout);
 
-  return process_group->allreduce_coalesced(tensor_vec, opts);
+  return process_group->getBackend(c10::DeviceType::CUDA)
+      ->allreduce_coalesced(tensor_vec, opts);
 }
 
 std::tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>
@@ -234,14 +235,16 @@ c10::intrusive_ptr<Work> _allgather_base_cpu_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const c10::intrusive_ptr<ProcessGroup>& process_group) {
-  return process_group->_allgather_base(output_tensor, input_tensor);
+  return process_group->getBackend(c10::DeviceType::CPU)
+      ->_allgather_base(output_tensor, input_tensor);
 }
 
 c10::intrusive_ptr<Work> _allgather_base_cuda_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const c10::intrusive_ptr<ProcessGroup>& process_group) {
-  return process_group->_allgather_base(output_tensor, input_tensor);
+  return process_group->getBackend(c10::DeviceType::CUDA)
+      ->_allgather_base(output_tensor, input_tensor);
 }
 
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>
@@ -280,6 +283,34 @@ reduce_scatter_cuda_(
 
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
       output_tensors, work);
+}
+
+c10::intrusive_ptr<Work> _reduce_scatter_base_cpu_(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t timeout) {
+  return process_group->getBackend(c10::DeviceType::CPU)
+      ->_reduce_scatter_base(
+          output_tensor,
+          input_tensor,
+          ReduceScatterOptions{
+              *reduce_op.get(), std::chrono::milliseconds(timeout)});
+}
+
+c10::intrusive_ptr<Work> _reduce_scatter_base_cuda_(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t timeout) {
+  return process_group->getBackend(c10::DeviceType::CUDA)
+      ->_reduce_scatter_base(
+          output_tensor,
+          input_tensor,
+          ReduceScatterOptions{
+              *reduce_op.get(), std::chrono::milliseconds(timeout)});
 }
 
 c10::intrusive_ptr<Work> gather_cpu_(
@@ -470,6 +501,14 @@ TORCH_LIBRARY_IMPL(c10d, CPU, m) {
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("reduce_scatter_", reduce_scatter_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("_reduce_scatter_base_", _reduce_scatter_base_cpu_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("_reduce_scatter_base_", _reduce_scatter_base_cuda_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
