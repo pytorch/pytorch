@@ -1,6 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import unittest
-
 from torch._dynamo.testing import make_test_cls_with_patches
 
 try:

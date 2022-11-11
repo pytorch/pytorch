@@ -14,8 +14,8 @@ from .utils import is_safe_constant, istype, rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
-    TensorVariable,
     DynamicShapeVariable,
+    TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,

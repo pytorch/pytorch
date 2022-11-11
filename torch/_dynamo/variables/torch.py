@@ -24,7 +24,7 @@ from ..utils import (
     specialize_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import VariableTracker, wrap_fx_proxy
+from .base import VariableTracker
 from .lists import ListVariable, TupleVariable
 from .misc import AutocastModeVariable, ProfilerContextWrapperVariable
 from .nn_module import NNModuleVariable
@@ -172,13 +172,15 @@ class TorchVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        # print("CALLING ON TORCH", self.value)
         from . import (
             ConstantVariable,
             DynamicShapeVariable,
             GradModeVariable,
             TensorVariable,
         )
+
+        # print("CALLING ON TORCH", self.value)
+        from .builder import wrap_fx_proxy
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
@@ -375,25 +377,6 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
-        if all([isinstance(x, DynamicShapeVariable) for x in args]):
-            if self.value == math.sqrt:
-                from torch.fx.experimental.symbolic_shapes import sym_sqrt
-
-                fn_ = sym_sqrt
-            else:
-                fn_ = self.value
-
-            out = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    *proxy_args_kwargs(args, kwargs),
-                    current_tx=tx,
-                ),
-                **options,
-            )
-            return out
         else:
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
@@ -406,11 +389,22 @@ class TorchVariable(VariableTracker):
                 for x in args[0].items:
                     if isinstance(x.value, numpy.generic):
                         x.value = x.value.item()
+
+            # TODO(voz): Replace w/ dynamic shape rewrite table.
+            # Ideally, we would be able to do this at ctor time, but alas we need a combination
+            # of value + args to determine this.
+            fn_ = self.value
+            if any([isinstance(x, DynamicShapeVariable) for x in args]):
+                if self.value == math.sqrt:
+                    from torch.fx.experimental.symbolic_shapes import sym_sqrt
+
+                    fn_ = sym_sqrt
+
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    self.value,
+                    fn_,
                     *proxy_args_kwargs(args, kwargs),
                     current_tx=tx,
                 ),
@@ -476,6 +470,8 @@ class TorchVariable(VariableTracker):
         dim = args[0] if args else kwargs.get("dim", variables.ConstantVariable(None))
 
         def fake_softmax(input):
+            from .builder import wrap_fx_proxy
+
             return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -528,6 +524,8 @@ class TorchVariable(VariableTracker):
         ) = normalize_args(*args, **kwargs)
 
         def fake_cross_entropy_loss(input, target):
+            from .builder import wrap_fx_proxy
+
             return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -603,6 +601,7 @@ class TorchPyOperator(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import ListVariable, TensorVariable, UserFunctionVariable
+        from .builder import wrap_fx_proxy
 
         assert kwargs is None or len(kwargs) == 0, "kwargs are not supported, yet"
 

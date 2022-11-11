@@ -1082,7 +1082,9 @@ class FakeCopyMode(TorchFunctionMode):
 
         # clone will get called in Parameter deepcopy
         if func == torch._C._TensorBase.clone:
-            return func(self.fake_mode.from_tensor(args[0]), **kwargs)
+            return func(
+                self.fake_mode.from_tensor(args[0], static_shapes=True), **kwargs
+            )
         elif func == torch.Tensor.__deepcopy__:
             assert len(args) == 2 and len(kwargs) == 0
             tensor, memo = args
@@ -1090,7 +1092,7 @@ class FakeCopyMode(TorchFunctionMode):
             if id(tensor) in memo:
                 return memo[id(tensor)]
 
-            out = self.fake_mode.from_tensor(tensor)
+            out = self.fake_mode.from_tensor(tensor, static_shapes=True)
             memo[id(tensor)] = out
             return out
         else:

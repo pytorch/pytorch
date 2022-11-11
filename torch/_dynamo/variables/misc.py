@@ -11,7 +11,7 @@ from ..exc import unimplemented
 from ..guards import Guard, GuardBuilder, GuardSource
 from ..source import AttrSource
 from ..utils import identity, proxy_args_kwargs
-from .base import VariableTracker, wrap_fx_proxy
+from .base import VariableTracker
 from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
@@ -513,6 +513,7 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
 
         # This variable is True when it corresponds to user code such as
         #
@@ -530,7 +531,7 @@ class GetAttrVariable(VariableTracker):
         if is_original_tensor_torch_function:
             # Instead of tracing inside torch.Tensor.__torch_function__,
             # record the `call_function` or `call_method` call into the graph.
-            from . import TensorVariable, TorchVariable
+            from . import TorchVariable
 
             original_torch_or_getattr_variable = args[0]
             new_args = args[2].items

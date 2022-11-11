@@ -21,7 +21,7 @@ from ..utils import (
     istype,
     proxy_args_kwargs,
 )
-from .base import MutableLocal, typestr, VariableTracker, wrap_fx_proxy
+from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
@@ -197,6 +197,7 @@ class NNModuleVariable(VariableTracker):
                 # The module type will change after it is called
                 if is_lazy:
                     self.module_type = mod.cls_to_become
+                from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(
                     tx=tx,
@@ -451,6 +452,8 @@ class NNModuleVariable(VariableTracker):
             proxy_for_mod.node.meta["example_value"] = module
 
             proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+
+            from .builder import wrap_fx_proxy
 
             return wrap_fx_proxy(
                 tx=tx,

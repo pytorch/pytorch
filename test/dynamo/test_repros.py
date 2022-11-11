@@ -885,7 +885,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         # Dyn recompiles are due to changes in hidden_state (Should we be guarding on this?)
         self.assertEqual(cnt.frame_count, ifdyn(4, 2))
-        self.assertEqual(cnt.op_count, ifdyn(88, 4))
+        self.assertEqual(cnt.op_count, ifdyn(76, 4))
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])

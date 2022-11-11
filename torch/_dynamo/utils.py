@@ -669,10 +669,8 @@ try:
         UnsupportedFakeTensorException,
     )
 
-    def make_fake_tensor(e, fake_mode, tx=None):
-        fake_tensor = fake_mode.from_tensor(
-            e, static_shapes=config.dynamic_shapes is False
-        )
+    def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
+        fake_tensor = fake_mode.from_tensor(e, static_shapes=static_shapes)
         if tx is not None:
             from torch._dynamo.guards import TensorReference
 
@@ -718,13 +716,23 @@ try:
 
     def wrap_to_fake_tensor(e, fake_mode):
         if type(e) in (torch.Tensor, torch.nn.Parameter):
-            return wrap_fake_exception(lambda: make_fake_tensor(e, fake_mode))
+            return wrap_fake_exception(
+                lambda: make_fake_tensor(
+                    e, fake_mode, static_shapes=config.dynamic_shapes is False
+                )
+            )
         else:
             return e
 
     def wrap_to_fake_tensor_and_record(e, tx):
         if type(e) in (torch.Tensor, torch.nn.Parameter):
-            return wrap_fake_exception(lambda: make_fake_tensor(e, tx.fake_mode, tx))
+            static_shapes = config.dynamic_shapes is False
+            if type(e) is torch.nn.Parameter:
+                # Always static for params
+                static_shapes = True
+            return wrap_fake_exception(
+                lambda: make_fake_tensor(e, tx.fake_mode, static_shapes, tx)
+            )
         else:
             return e
 
@@ -1036,6 +1044,20 @@ def get_fake_value(node, tx):
 
 
 def run_node(output_graph, node, args, kwargs, nnmodule):
+    """
+    Runs a given node, with the given args and kwargs.
+
+    Behavior is dicatated by a node's op.
+
+    run_node is useful for extracting real values out of nodes.
+    See get_real_value for more info on common usage.
+
+    Note: The output_graph arg is only used for 'get_attr' ops
+    Note: The nnmodule arg is only used for 'call_module' ops
+
+    Nodes that are not call_function, call_method, call_module, or get_attr will
+    raise an AssertionError.
+    """
     op = node.op
     try:
         if op == "call_function":
