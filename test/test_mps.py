@@ -3273,6 +3273,27 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 4, 5), "floor")
         helper((2, 8, 4, 5), "trunc")
 
+    def test_fmod(self):
+        def helper(shape):
+            for dtype in [torch.float32, torch.float16, torch.int32, torch.int64]:
+                cpu_x = None
+                cpu_y = None
+                if(dtype in [torch.float32, torch.float16]):
+                    cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                    cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                else:
+                    cpu_x = torch.randint(-10, 0, shape, device='cpu', dtype=dtype, requires_grad=False)
+                    cpu_y = torch.randint(-10, 0, shape, device='cpu', dtype=dtype, requires_grad=False)
+
+                mps_x = cpu_x.detach().clone().to('mps')
+                mps_y = cpu_y.detach().clone().to('mps')
+
+                result_fmod_cpu = torch.fmod(cpu_x, cpu_y)
+                result_fmod_mps = torch.fmod(mps_x, mps_y)
+                self.assertEqual(result_fmod_mps, result_fmod_cpu)
+
+        helper((2, 8, 4, 5))
+
     def test_rounding(self):
         def helper(shape):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)

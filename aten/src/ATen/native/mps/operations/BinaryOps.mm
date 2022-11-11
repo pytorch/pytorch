@@ -184,6 +184,37 @@ void div_mode_template(const Tensor& self, const Tensor& other,
   binaryOpTensor(self, other, Scalar(1.0), output, op_name + "_out_mps:" + (rounding_mode.has_value() ? c10::str(*rounding_mode) : ""), div_mode_op_block);
 }
 
+void fmod_template(const Tensor& self, const Tensor& other,
+                   const Tensor& output, const string op_name)
+{
+  BinaryOpBlock fmod_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    MPSGraphTensor* absPrimaryTensor = [mpsGraph absoluteWithTensor:primaryCastTensor
+                                                               name:nil];
+    MPSGraphTensor* absSecondaryTensor = [mpsGraph absoluteWithTensor:secondaryCastTensor
+                                                                 name:nil];
+    MPSGraphTensor* modTensor = [mpsGraph floorModuloWithPrimaryTensor:absPrimaryTensor
+                                                       secondaryTensor:absSecondaryTensor
+                                                                  name:nil];
+    MPSGraphTensor *signbitTensor = [mpsGraph signbitWithTensor:modTensor
+                                                           name:nil];
+    MPSGraphTensor* prodTensor = [mpsGraph multiplicationWithPrimaryTensor:absSecondaryTensor
+                                                           secondaryTensor:signbitTensor
+                                                                      name:nil];
+    MPSGraphTensor* sumTensor = [mpsGraph additionWithPrimaryTensor:modTensor
+                                                    secondaryTensor:prodTensor
+                                                               name:nil];
+    MPSGraphTensor *signTensor = [mpsGraph signWithTensor:primaryCastTensor
+                                                     name:nil];
+    MPSGraphTensor* fmodTensor = [mpsGraph multiplicationWithPrimaryTensor:sumTensor
+                                                           secondaryTensor:signTensor
+                                                                      name:nil];
+    return fmodTensor;
+  };
+  binaryOpTensor(self, other, Scalar(1.0), output, op_name + "_out_mps:", fmod_op_block);
+}
+
+
 void add_sub_template(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output, std::string op_name)
 {
   if (alpha.toDouble() == 0.0) {
@@ -302,6 +333,9 @@ TORCH_IMPL_FUNC(sub_out_mps) (const Tensor& self, const Tensor& other, const Sca
   mps::add_sub_template(self, other, alpha, output, "sub");
 }
 
+TORCH_IMPL_FUNC(fmod_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output) {
+  mps::fmod_template(self, other, output, "fmod");
+}
 
 TORCH_IMPL_FUNC(logaddexp_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output)
 {

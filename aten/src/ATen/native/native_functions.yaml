@@ -8678,6 +8678,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: fmod_out
+    MPS: fmod_out_mps
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
