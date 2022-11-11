@@ -3334,26 +3334,71 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
 def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    # Ordered as input shape, num groups, and eps
+    # Ordered as input shape, num groups, and kwargs for eps
     cases: Tuple[Tuple[int], int, float] = (  # type: ignore[assignment]
-        ((1, 6, 3), 2, 0.5),
-        ((2, 6, 3), 2, -0.5),
-        ((1, 2), 1, None),
-        ((0, 2), 1, None),
+        ((1, 6, 3), 2, {'eps' : 0.5}),
+        ((2, 6, 3), 2, {'eps' : -0.5}),
+        ((1, 3), 1, {'eps' : 1e-5}),
+        ((0, 2), 1, {'eps' : 1e-5}),
+        ((S, S, S), 1, {'eps' : 0.5}),
     )
 
-    for input_shape, num_groups, eps in cases:
+    # num_channels is inferred to be input.shape[1] dimension
+    for input_shape, num_groups, kwargs in cases:
         # Shape of weight and bias should be the same as num_channels
-        weight = make_arg(input_shape[1])
-        bias = make_arg(input_shape[1])
-        kwargs = {'weight': weight, 'bias': bias} if eps is None else {'weight': weight, 'bias': bias, 'eps': eps}
-        yield SampleInput(
-            make_arg(input_shape),
-            args=(num_groups,),
-            kwargs=kwargs
-        )
+        channels = input_shape[1] if len(input_shape) > 1 else 0
+        weight_tensor = make_arg(channels)
+        bias_tensor = make_arg(channels)
+
+        # Checking for permutations of weights and biases as `None`
+        weights = [weight_tensor, None]
+        biases = [bias_tensor, None]
+        for weight, bias in itertools.product(weights, biases):
+            kwargs = {
+                'weight': weight,
+                'bias': bias,
+                **kwargs
+            }
+            yield SampleInput(make_arg(input_shape), num_groups, **kwargs)
+
     # Without any optional args
     yield SampleInput(make_arg((1, 2)), args=(1,))
+
+def reference_inputs_group_norm(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_group_norm(
+        op_info, device, dtype, requires_grad, **kwargs)
+
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as input shape, num groups, and kwargs for eps
+    cases: Tuple[Tuple[int], int, float] = (  # type: ignore[assignment]
+        ((20, 6, 10, 10), 3, {'eps' : 1e-5}),
+        # equivalent with InstanceNorm
+        # GroupNorm(C, num_groups=C) == InstanceNorm(num_features=C)
+        ((20, 6, 10, 10), 6, {'eps' : 1e-5}),
+        # equivalent with LayerNorm
+        # GroupNorm(C, num_groups=1, affine=False) == LayerNorm(normalized_shape=[C, H, W], elementwise_affine=False)
+        ((20, 6, 10, 10), 1, {'eps' : 1e-5}),
+    )
+
+    # num_channels is inferred to be input.shape[1] dimension
+    for input_shape, num_groups, kwargs in cases:
+        # Shape of weight and bias should be the same as num_channels
+        channels = input_shape[1] if len(input_shape) > 1 else 0
+        input_tensor = make_arg(input_shape)
+        weight_tensor = make_arg(channels)
+        bias_tensor = make_arg(channels)
+
+        # Checking for permutations of weights and biases as `None`
+        weights = [weight_tensor, None]
+        biases = [bias_tensor, None]
+        for weight, bias in itertools.product(weights, biases):
+            kwargs = {
+                'weight': weight,
+                'bias': bias,
+                **kwargs
+            }
+            yield SampleInput(input_tensor, num_groups, **kwargs)
 
 
 def sample_inputs_instance_norm(opinfo, device, dtype, requires_grad, **kwargs):
@@ -3481,6 +3526,18 @@ def sample_inputs_native_layer_norm(opinfo, device, dtype, requires_grad, **kwar
             args=(normalized_shape, None, None, eps),
         )
 
+def error_inputs_group_norm(opinfo, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
+
+    # check that input has minimum number of dimensions
+    err_msg1 = "Expected at least 2 dimensions for input tensor but received"
+    s1 = SampleInput(make_arg((1)), args=(1,))
+    yield ErrorInput(s1, error_regex=err_msg1)
+
+    # check that the channels dimension is compatible with number of groups
+    err_msg2 = "Expected number of channels in input to be divisible by num_groups, but got input of shape"
+    s2 = SampleInput(make_arg((2, 7, 4)), args=(2,))
+    yield ErrorInput(s2, error_regex=err_msg2)
 
 def error_inputs_native_layer_norm(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
@@ -7747,12 +7804,12 @@ def reference_group_norm(inp: np.ndarray, num_groups: int, weight=None, bias=Non
     if weight is not None:
         # weight is a vector of length equal to the channel
         if len(Y.shape) > 2:
-            weight = np.tile(np.expand_dims(weight, 1), [1] + list(inp.shape[2:]))
+            weight = np.expand_dims(weight, [0] + [idx + 2 for idx in range(inp.ndim - 2)])
         Y = Y * weight
     if bias is not None:
         # bias is a vector of length equal to the channel
         if len(Y.shape) > 2:
-            bias = np.tile(np.expand_dims(bias, 1), [1] + list(inp.shape[2:]))
+            bias = np.expand_dims(bias, [0] + [idx + 2 for idx in range(inp.ndim - 2)])
         Y = Y + bias
     return Y
 
@@ -10921,12 +10978,14 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           error_inputs_func=error_inputs_group_norm,
            decorators=[
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
            ],
            sample_inputs_func=sample_inputs_group_norm,
+           reference_inputs_func=reference_inputs_group_norm,
            supports_expanded_weight=True,),
     OpInfo('nn.functional.instance_norm',
            # no ref because instance_norm will often have numerical instability (large numbers or nan)
@@ -17940,6 +17999,12 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         )
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.group_norm",
+        torch_opinfo_name="nn.functional.group_norm",
+        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.narrow_copy",
