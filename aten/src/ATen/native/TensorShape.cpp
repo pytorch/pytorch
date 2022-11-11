@@ -1506,7 +1506,9 @@ Tensor _reshape(const Tensor& self, c10::ArrayRef<T> proposed_shape, bool copy) 
     }
     // NB: this mutates the original storage too!  Method takes out a lock.
     // To bypass the warning, call _unsafe_reshape
-    r.storage().unsafeGetStorageImpl()->set_warn_on_write(true);
+    if (r.has_storage()) {
+      r.storage().unsafeGetStorageImpl()->set_warn_on_write(true);
+    }
     return r;
   }
   return at::symint::_unsafe_view<T>(self.clone(at::MemoryFormat::Contiguous), shape);
