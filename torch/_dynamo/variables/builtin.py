@@ -511,6 +511,7 @@ class BuiltinVariable(VariableTracker):
     def _dyn_proxy(self, tx, *args, **kwargs):
         assert self._dynamic_args(*args, **kwargs)
         from .builder import wrap_fx_proxy
+
         options = VariableTracker.propagate(self, args, kwargs.values())
         return wrap_fx_proxy(
             tx,
