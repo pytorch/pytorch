@@ -10599,15 +10599,17 @@
   autogen: _adaptive_avg_pool2d_backward.out
   tags: canonical
 
-- func: adaptive_avg_pool3d.out(Tensor self, int[3] output_size, *, Tensor(a!) out) -> Tensor(a!)
+- func: adaptive_avg_pool3d.out(Tensor self, SymInt[3] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: adaptive_avg_pool3d_out_cpu
     CUDA: adaptive_avg_pool3d_out_cuda
     QuantizedCPU: adaptive_avg_pool3d_out_quantized_cpu
 
-- func: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
+- func: adaptive_avg_pool3d(Tensor self, SymInt[3] output_size) -> Tensor
   python_module: nn
+  dispatch:
+    CompositeImplicitAutograd: adaptive_avg_pool3d_symint
 
 - func: _adaptive_avg_pool3d(Tensor self, SymInt[3] output_size) -> Tensor
   dispatch:
