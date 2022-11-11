@@ -1037,8 +1037,7 @@ class InstructionTranslatorBase(object):
         seq = self.pop()
         options = VariableTracker.propagate([seq])
         if isinstance(seq, BaseListVariable):
-            if len(seq.items) != inst.argval:
-                unimplemented(f"UNPACK_SEQUENCE {seq}")
+            assert len(seq.items) == inst.argval
             self.output.guards.update(seq.guards)
             for i in reversed(seq.items):
                 self.push(i)

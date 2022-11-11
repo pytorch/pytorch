@@ -229,7 +229,6 @@ class BuiltinVariable(VariableTracker):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
-        # print("CALLING BUILTIN", self.fn, args)
         constant_args = check_constant_args(args, kwargs)
         tensor_args = self.tensor_args(*args, **kwargs)
         unspec_python_args = self.unspec_python_args(*args, **kwargs)

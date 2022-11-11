@@ -536,7 +536,7 @@ class DynamoGuardPrinter(StrPrinter):
             return "1"
         assert expr in (self.expr_to_tensor_ref) or (
             expr in self.intermediary_symbols
-        ), breakpoint()
+        )
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
