@@ -73,9 +73,16 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
 
           // this type inference is only required at the time of graph creation
           ScalarType common_dtype = c10::promoteTypes(self.scalar_type(), other.scalar_type());
-          // Integer input must be cast to float if output is float
-          if (isIntegralType(common_dtype, true) && isFloatingType(output.scalar_type())) {
-            common_dtype = output_.scalar_type();
+          if (isIntegralType(common_dtype, true)) {
+            // integer inputs must be cast to float, if output is float
+            if (isFloatingType(output_.scalar_type())) {
+              common_dtype = output_.scalar_type();
+            // in boolean comparison ops with signed vs. unsigned integers, we always cast to the unsigned type
+            } else if (output_.scalar_type() == ScalarType::Bool &&
+                      (self.scalar_type()  == ScalarType::Byte ||
+                       other.scalar_type() == ScalarType::Byte)) {
+              common_dtype = ScalarType::Byte;
+            }
           }
           if (self.scalar_type() != common_dtype) {
             primaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->primaryTensor, common_dtype);
@@ -230,16 +237,15 @@ TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Te
                                                name:nil]; });                                   \
 }
 
-// Boolean Ops require casting output to "MPSDataTypeBool"
+// output of Boolean Ops will be cast to "MPSDataTypeBool" at the end of binaryOpTensor()
 #define CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(func_out, func_stub, other_type)                  \
 TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Tensor& output) { \
   mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                       \
     ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                          \
       MPSGraph* mpsGraph = cachedGraph->graph();                                                \
-      MPSGraphTensor* outputTensor = [mpsGraph func_stub##WithPrimaryTensor:primaryCastTensor   \
-                                                            secondaryTensor:secondaryCastTensor \
-                                                                       name:nil];               \
-      return mps::castMPSTensor(mpsGraph, outputTensor, ScalarType::Bool); });                  \
+      return [mpsGraph func_stub##WithPrimaryTensor:primaryCastTensor                           \
+                                    secondaryTensor:secondaryCastTensor                         \
+                                               name:nil]; });                                   \
 }
 
 // Boolean Binary Ops

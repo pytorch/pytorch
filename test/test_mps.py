@@ -2396,6 +2396,14 @@ class TestNLLLoss(TestCase):
 
         self.assertEqual(result_cpu, result_mps.to('cpu'))
 
+    def test_signed_vs_unsigned_comparison(self):
+        cpu_x = torch.tensor((-1, 2, 3), device='cpu', dtype=torch.uint8)
+        mps_x = torch.tensor((-1, 2, 3), device='mps', dtype=torch.uint8)
+        # in the comparison of signed vs. unsigned we should always cast to unsigned
+        self.assertEqual(cpu_x == -1, mps_x == -1)
+        self.assertEqual(cpu_x > -1, mps_x > -1)
+        self.assertEqual(cpu_x < -1, mps_x < -1)
+
     def test_eq_int64(self):
         values1 = [[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]]
         values2 = [[[1, 2, 15], [4, 5, 6]], [[7, 8, 9], [0, 11, 12]]]
@@ -7554,19 +7562,11 @@ class TestConsistency(TestCase):
         'nn.functional.conv1d': ['f32'],
         'nn.functional.conv2d': ['f32'],
         'nn.functional.conv_transpose1d': ['f32'],
-        'nn.functional.cosine_embedding_loss': ['b8',
-                                                'f32',
-                                                'i16',
-                                                'i32',
-                                                'i64'],
+        'nn.functional.cosine_embedding_loss': ['b8', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'nn.functional.cosine_similarity': ['f32'],
         'nn.functional.elu': ['f32'],
-        'nn.functional.feature_alpha_dropout': ['b8',
-                                                'f16',
-                                                'f32',
-                                                'i16',
-                                                'i32',
-                                                'i64',
-                                                'u8'],
+        'nn.functional.feature_alpha_dropout': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'nn.functional.embedding': ['f16', 'f32'],
         'nn.functional.gaussian_nll_loss': ['f32'],
         'nn.functional.glu': ['f32'],
         'nn.functional.group_norm': ['f32'],
