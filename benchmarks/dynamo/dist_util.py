@@ -20,6 +20,11 @@ try:
 except ImportError:
     from torchbench import setup_torchbench_cwd
 
+from transformers.models.bert.modeling_bert import (
+    BertForMaskedLM,
+    BertLayer,
+    BertLMPredictionHead,
+)
 
 def setup(rank, world_size):
     os.environ["MASTER_ADDR"] = "localhost"
@@ -122,21 +127,15 @@ def fsdp_checkpointing_base(model, blocks):
     )
 
 
+
+MODEL_FSDP_WRAP = {
+    ToyModel: (MyModule,),
+    BertForMaskedLM: (BertLayer, BertLMPredictionHead),
+}
 def apply_fsdp(model, use_checkpointing=False, use_wrap_policy=True):
     wrap_policy = None
+    blocks = MODEL_FSDP_WRAP[model.__class__]
     if use_wrap_policy:
-        from transformers.models.bert.modeling_bert import (
-            BertForMaskedLM,
-            BertLayer,
-            BertLMPredictionHead,
-        )
-
-        MODEL_FSDP_WRAP = {
-            ToyModel: (MyModule,),
-            BertForMaskedLM: (BertLayer, BertLMPredictionHead),
-        }
-
-        blocks = MODEL_FSDP_WRAP[model.__class__]
         # transformer policy is really a generic policy that wraps modules of specified classes
         wrap_policy = functools.partial(
             transformer_auto_wrap_policy, transformer_layer_cls=blocks

@@ -335,6 +335,21 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
         )
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
+"""
+So.. dynamo is compiling stuff and running aot.
+
+aot is about to call .grad() or backward or wahtever
+
+during that backward, this hook thing gets called.
+
+    ?
+
+then this hook thing captures 'function' which is just "MyModule".  it's not dynamo/aot code
+
+then later this hook thing runs and dynamo tries to compile its forward again.  and faketensor errors.
+
+"""
+
 def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kwargs):
     """Checkpointining without re-entrant autograd
     Args:
@@ -349,6 +364,8 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
         *args: Arguments to pass in to the given ``function``.
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
+    print(f"_checkpoint {function}")
+    breakpoint()
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
     gpu_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs()
 
@@ -376,6 +393,7 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
     weak_holder_list = []
 
     def pack(x):
+        print(f"pack({x})")
         # TODO(varal7): Instead of returning abstract object, we can return things metadata (such as
         # size, device, ...) to catch certain cases of undeterministic behavior of the forward
         res = Holder()
@@ -384,6 +402,7 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
 
 
     def unpack(x):
+        print(f"unpack({x})")
         unpack_counter = 0
         if len(storage) == 0:
             def inner_pack(inner):

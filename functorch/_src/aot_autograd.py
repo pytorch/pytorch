@@ -253,6 +253,7 @@ def create_joint_forward_backward_pure(fn):
         backward_out = []
         # Call the backwards pass
         if grad_primals:
+            breakpoint()
             with fx_traceback.override_stack_trace():
                 backward_out = torch.autograd.grad(
                     needed_outs,
