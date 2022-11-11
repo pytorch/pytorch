@@ -23,6 +23,7 @@ class MLP(torch.nn.Module):
         return x
 
 
+
 class SmokeTest(unittest.TestCase):
     def test_mlp(self):
         mlp = torchdynamo.optimize("inductor")(MLP().cuda())
