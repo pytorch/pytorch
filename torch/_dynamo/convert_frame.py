@@ -168,19 +168,6 @@ def has_tensor_in_frame(frame):
         elif is_namedtuple(obj):
             seen_ids[obj_id] = any([has_tensor(getattr(obj, v)) for v in obj._fields])
             return seen_ids[obj_id]
-        elif (
-            not is_allowed(obj)
-            and not hasattr(
-                obj, "__getattr__"
-            )  # overridden __getattr__ can lead to infinite recursion
-            and not hasattr(
-                obj, "__get__"
-            )  # overridden __get__ can lead to infinite recursion
-            and hasattr(obj, "__dict__")
-            and istype(obj.__dict__, dict)
-        ):
-            seen_ids[obj_id] = has_tensor(obj.__dict__)
-            return seen_ids[obj_id]
         else:
             # if config.debug:
             #     print(
