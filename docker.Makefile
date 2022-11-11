@@ -78,6 +78,7 @@ devel-push: BASE_IMAGE := $(BASE_DEVEL)
 devel-push: DOCKER_TAG := $(PYTORCH_VERSION)-devel
 devel-push:
 	$(DOCKER_PUSH)
+	docker push $(BASE_DEVEL):latest
 
 .PHONY: runtime-image
 runtime-image: BASE_IMAGE := $(BASE_RUNTIME)
