@@ -29,7 +29,6 @@ struct DisableTorchDispatch {
 } // namespace torch
 
 PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject* unused);
-PyObject* THPModule_DisableTorchFunctionType();
 PyObject* THPModule_DisableTorchFunctionSubclassType();
 PyObject* THPModule_disable_torch_function(PyObject* self, PyObject* args);
 PyObject* THPModule_disable_torch_dispatch(PyObject* self, PyObject* args);
