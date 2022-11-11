@@ -962,54 +962,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         for (p1, p2) in zip(mod.parameters(), opt_mod.parameters()):
             self.assertTrue(id(p1) == id(p2))
 
-        mod_params = {}
-        for (name, param) in mod.named_parameters():
-            mod_params[name] = param
-        for (name, param) in mod.named_buffers():
-            mod_params[name] = param
-
-        opt_mod_params = {}
-        for (name, param) in mod.named_parameters():
-            opt_mod_params[name] = param
-        for (name, param) in mod.named_buffers():
-            opt_mod_params[name] = param
-
-        self.assertTrue(mod_params.keys() == opt_mod_params.keys())
-        self.assertTrue(
-            all(
-                [a is b for (a, b) in zip(mod_params.values(), opt_mod_params.values())]
-            )
-        )
-
-        # Check get_parameter and get_buffer
-        self.assertTrue(id(mod.get_buffer("buf0")) == id(opt_mod.get_buffer("buf0")))
-        self.assertTrue(
-            id(mod.get_parameter("linear.weight"))
-            == id(opt_mod.get_parameter("linear.weight"))
-        )
-
-        # Check modules
-        for (p1, p2) in zip(mod.modules(), opt_mod.modules()):
-            self.assertTrue(id(p1) == id(p2))
-
-        mod_modules = {}
-        for (name, module) in mod.named_modules():
-            mod_modules[name] = module
-
-        opt_mod_modules = {}
-        for (name, module) in mod.named_modules():
-            opt_mod_modules[name] = module
-
-        self.assertTrue(mod_modules.keys() == opt_mod_modules.keys())
-        self.assertTrue(
-            all(
-                [
-                    a is b
-                    for (a, b) in zip(mod_modules.values(), opt_mod_modules.values())
-                ]
-            )
-        )
-
     def test_recursion(self):
         mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
