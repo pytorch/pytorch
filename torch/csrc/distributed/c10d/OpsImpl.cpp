@@ -394,13 +394,12 @@ TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
-  m.impl("allreduce_coalesced", allreduce_coalesced_cpu_);
+  m.impl("allreduce_coalesced_", allreduce_coalesced_cpu_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
-  m.impl("allreduce_coalesced", allreduce_coalesced_cuda_);
+  m.impl("allreduce_coalesced_", allreduce_coalesced_cuda_);
 }
-
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("allgather_", allgather_cpu_);
