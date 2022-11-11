@@ -306,7 +306,7 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
   // 2. We are decref-ing some other Python object. We don't do
   // PyObject resurrection on non-Tensors, so we just carry on as usual
   if (is_tensor) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+    TORCH_INTERNAL_ASSERT(
         !c10::impl::HermeticPyObjectTLS::get_state());
   }
   if (is_tensor && Py_REFCNT(pyobj) > 1) {
