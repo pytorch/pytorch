@@ -417,9 +417,10 @@ class TestCommon(TestCase):
 
         # skip zero-dim tensors for some composites of reduction operations and view
         skip_zero_dim_ops = [
-            "_refs.softmax",
             "_refs.logsumexp",
             "_refs.log_softmax",
+            "_refs.native_group_norm",
+            "_refs.softmax",
             "_refs.sum_to_size",
             "ops.nvprims.view",
         ]
@@ -1659,11 +1660,13 @@ class TestRefsOpsInfo(TestCase):
         '_refs.index_add_',
         '_refs.index_copy_',
         '_refs.index_fill_',
+        '_refs.native_group_norm',
     }
 
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
+        '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
         '_refs.rsub',
         # duplicated due to efficiency concerns of the ref vs the decomp
