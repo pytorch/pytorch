@@ -11499,6 +11499,9 @@ op_db: List[OpInfo] = [
                # We've defined a custom op here, and we don't handle the case where we receive an out kwarg
                DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+
            )),
     OpInfo('nn.functional.max_pool3d',
            aten_name='max_pool3d',
