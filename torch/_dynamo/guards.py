@@ -534,9 +534,7 @@ class DynamoGuardPrinter(StrPrinter):
             return "0"
         if expr == 1:
             return "1"
-        assert expr in (self.expr_to_tensor_ref) or (
-            expr in self.intermediary_symbols
-        )
+        assert expr in (self.expr_to_tensor_ref) or (expr in self.intermediary_symbols)
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)

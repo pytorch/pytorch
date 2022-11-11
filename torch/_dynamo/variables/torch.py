@@ -394,7 +394,7 @@ class TorchVariable(VariableTracker):
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.
             fn_ = self.value
-            if all([isinstance(x, DynamicShapeVariable) for x in args]):
+            if any([isinstance(x, DynamicShapeVariable) for x in args]):
                 if self.value == math.sqrt:
                     from torch.fx.experimental.symbolic_shapes import sym_sqrt
 

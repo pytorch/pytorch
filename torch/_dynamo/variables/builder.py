@@ -507,7 +507,7 @@ class VariableBuilder:
     def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
         if not is_constant_source(self.get_source()):
             self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
-        if is_constant_source(self.get_source()):
+        elif is_constant_source(self.get_source()):
             return self.tx.output.register_attr_or_module(
                 value,
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
