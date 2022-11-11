@@ -904,7 +904,6 @@ class MultiheadAttention(Module):
     - inputs are batched (3D) with ``batch_first==True``
     - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
-    - dropout is 0
     - ``add_bias_kv`` is ``False``
     - ``add_zero_attn`` is ``False``
     - ``batch_first`` is ``True`` and the input is batched
@@ -1088,8 +1087,6 @@ class MultiheadAttention(Module):
             why_not_fast_path = "self.bias_k was not None"
         elif self.bias_v is not None:
             why_not_fast_path = "self.bias_v was not None"
-        elif self.dropout:
-            why_not_fast_path = f"dropout was {self.dropout}, required zero"
         elif self.add_zero_attn:
             why_not_fast_path = "add_zero_attn was enabled"
         elif not self._qkv_same_embed_dim:
