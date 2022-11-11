@@ -56,6 +56,7 @@
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/lazy/python/init.h>
 #include <torch/csrc/monitor/python_init.h>
 #include <torch/csrc/multiprocessing/init.h>
@@ -1544,6 +1545,12 @@ Call this whenever a new thread is created in order to propagate values from
       "_set_conj", [](const at::Tensor& x, bool conj) { x._set_conj(conj); });
   py_module.def(
       "_set_neg", [](const at::Tensor& x, bool neg) { x._set_neg(neg); });
+  py_module.def("_get_tensor_metadata", &torch::jit::getTensorMetadata);
+  py_module.def(
+      "_set_tensor_metadata",
+      static_cast<void (*)(
+          const at::Tensor&, std::unordered_map<std::string, bool>)>(
+          torch::jit::setTensorMetadata));
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());
   });
@@ -1585,6 +1592,10 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr(
       "default_generator",
       (PyObject*)THPDefaultCPUGenerator,
+      /* incref= */ false));
+  ASSERT_TRUE(set_module_attr(
+      "DisableTorchFunctionSubclass",
+      (PyObject*)THPModule_DisableTorchFunctionSubclassType(),
       /* incref= */ false));
   ASSERT_TRUE(set_module_attr(
       "DisableTorchFunction",
