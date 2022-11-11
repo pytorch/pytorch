@@ -69,6 +69,10 @@ void calculateUniqueTensorIDs(
   // --------------------------------------------------------------------------
   {
     RawTensors raw_tensors;
+
+    // The python tracer caches values, so it's only safe to use the first case.
+    ska::flat_hash_set<PyModuleSelf> seen_modules;
+    ska::flat_hash_set<PyOptimizerSelf> seen_optimizers;
     for (auto& result : sorted_results) {
       result->visit(c10::overloaded(
           [&](ExtraFields<EventType::TorchOp>& torch_op) {
@@ -78,7 +82,8 @@ void calculateUniqueTensorIDs(
           },
           [&](ExtraFields<EventType::PyCall>& py_call) {
             // torch.nn.Module
-            if (py_call.module_.has_value()) {
+            if (py_call.module_.has_value()&&
+                seen_modules.insert(py_call.module_->self_).second) {
               for (auto& p : py_call.module_->parameters_) {
                 raw_tensors(p.metadata_);
                 raw_tensors(p.grad_metadata_);
@@ -86,7 +91,8 @@ void calculateUniqueTensorIDs(
             }
 
             // torch.optim.Optimizer
-            if (py_call.optimizer_.has_value()) {
+            if (py_call.optimizer_.has_value() &&
+                seen_optimizers.insert(py_call.optimizer_->self_).second) {
               for (auto& p : py_call.optimizer_->parameters_) {
                 raw_tensors(p.metadata_);
                 raw_tensors(p.grad_metadata_);
