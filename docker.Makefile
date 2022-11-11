@@ -72,13 +72,25 @@ devel-image: BASE_IMAGE := $(BASE_DEVEL)
 devel-image: DOCKER_TAG := $(PYTORCH_VERSION)-devel
 devel-image:
 	$(DOCKER_BUILD)
+	
+.PHONY: devel-latest-image
+devel-image: BASE_IMAGE := $(BASE_DEVEL)
+devel-image: DOCKER_TAG := latest
+devel-image:
+	$(DOCKER_BUILD)
 
 .PHONY: devel-push
 devel-push: BASE_IMAGE := $(BASE_DEVEL)
 devel-push: DOCKER_TAG := $(PYTORCH_VERSION)-devel
 devel-push:
 	$(DOCKER_PUSH)
-	docker push $(BASE_DEVEL):latest
+
+.PHONY: devel-latest-push
+devel-latest-push: BASE_IMAGE := $(BASE_DEVEL)
+devel-latest-push: LATEST_TAG := latest
+devel-push-push:
+	$(DOCKER_PUSH)
+
 
 .PHONY: runtime-image
 runtime-image: BASE_IMAGE := $(BASE_RUNTIME)
