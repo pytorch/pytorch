@@ -6,6 +6,8 @@ import operator
 import builtins
 import math
 import functools
+import threading
+from contextlib import contextmanager
 from functools import lru_cache, partial
 import traceback
 import collections
@@ -445,6 +447,18 @@ class ShapeEnv(object):
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
+        self.tls = threading.local()
+
+    def _suppress_guards_tls(self):
+        return getattr(self.tls, "suppress_guards", False)
+
+    @contextmanager
+    def suppress_guards(self):
+        self.tls.suppress_guards = True
+        try:
+            yield
+        finally:
+            self.tls.suppress_guards = False
 
     def _get_key(self):
         """
@@ -684,11 +698,12 @@ class ShapeEnv(object):
         # TODO: optimize this; avoid formatting traces until we need them
         # NB: drop two frames; evaluate_expr and the Sym* function that
         # actually called us
-        stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
-        if concrete_val is sympy.true:
-            self.guards.append((expr, stack))
-        elif concrete_val is sympy.false:
-            self.guards.append((sympy.Not(expr), stack))
-        else:
-            self.guards.append((sympy.Eq(expr, concrete_val), stack))
+        if not self._suppress_guards_tls():
+            stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
+            if concrete_val is sympy.true:
+                self.guards.append((expr, stack))
+            elif concrete_val is sympy.false:
+                self.guards.append((sympy.Not(expr), stack))
+            else:
+                self.guards.append((sympy.Eq(expr, concrete_val), stack))
         return concrete_val
