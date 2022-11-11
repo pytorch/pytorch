@@ -70,6 +70,7 @@ Features described in this documentation are classified by release status:
    torch.distributed.elastic <distributed.elastic>
    torch.distributed.fsdp <fsdp>
    torch.distributed.optim <distributed.optim>
+   torch.distributed.checkpoint <distributed.distributed.checkpoint>
    torch.distributions <distributions>
    torch.fft <fft>
    futures
