@@ -534,11 +534,11 @@ PickleOpCode Unpickler::readInstruction() {
     } break;
     case PickleOpCode::SETITEM: {
       // At this OpCode, stack looks like
-      // | Stack Top |
-      // | ......    |
-      // | Dict      | -> (stack_size - 3)
-      // | Key       | -> (stack_size - 2)
-      // | Value     | -> (stack_size - 1)
+      // | Stack Bottom |
+      // | ......       |
+      // | Dict         | -> (stack_size - 3)
+      // | Key          | -> (stack_size - 2)
+      // | Value        | -> (stack_size - 1)
       auto stack_size = stack_.size();
       auto dict_pos = stack_size - 3;
       auto key_pos = stack_size - 2;
