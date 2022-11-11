@@ -601,6 +601,15 @@ namespace {
     TensorArg grad_input_arg{ gradInput, "gradInput", 1 },
               grad_output_arg{ gradOutput_, "gradOutput_", 2 },
               input_arg{ input, "input", 3 };
+
+    int64_t ndim = gradOutput_.ndimension();
+    for (const auto i : c10::irange(1, ndim)) {
+      TORCH_CHECK(gradOutput_.size(i) > 0,
+        "adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
+        "but grad_output has sizes ", gradOutput_.sizes(), " with dimension ", i,
+        " being empty");
+    }
+
     checkAllSameGPU(__func__, {grad_input_arg, grad_output_arg, input_arg});
 
     switch (input.suggest_memory_format()) {

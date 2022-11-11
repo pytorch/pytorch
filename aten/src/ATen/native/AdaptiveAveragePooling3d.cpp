@@ -243,6 +243,14 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
 
+  int64_t ndim = gradOutput_.ndimension();
+  for (const auto i : c10::irange(1, ndim)) {
+    TORCH_CHECK(gradOutput_.size(i) > 0,
+      "adaptive_avg_pool3d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
+      "but grad_output has sizes ", gradOutput_.sizes(), " with dimension ", i,
+      " being empty");
+  }
+
   /* sizes */
   int64_t sizeD = input.size(-4);
   int64_t isizeT = input.size(-3);
