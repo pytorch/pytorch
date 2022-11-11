@@ -3666,13 +3666,24 @@ class CommonTemplate:
         torch.manual_seed(1234)
 
         @torch._dynamo.optimize("inductor")
-        def fn(a):
-            return torch.nn.functional.dropout(a, 0.5, True)
+        def fn1(a):
+            return torch.nn.functional.dropout(a)
 
         x = torch.ones(1000, device=self.device, dtype=torch.float32)
-        result = fn(x)
-        self.assertTrue(400 < result.nonzero().shape[0] < 600)
-        self.assertTrue(0.9 < result.mean().item() < 1.1)
+        result1 = fn1(x)
+        self.assertTrue(400 < result1.nonzero().shape[0] < 600)
+        self.assertTrue(0.9 < result1.mean().item() < 1.1)
+
+        random.seed(1234)
+        torch.manual_seed(1234)
+
+        @torch._dynamo.optimize("inductor")
+        def fn2(a):
+            return torch.nn.functional.dropout(a, 0.5, True)
+
+        result2 = fn2(x)
+        self.assertTrue(400 < result2.nonzero().shape[0] < 600)
+        self.assertTrue(0.9 < result2.mean().item() < 1.1)
 
     def test_dropout_deterministic(self):
         @torch._dynamo.optimize("inductor")
@@ -4213,6 +4224,27 @@ class CommonTemplate:
         ]
         self.common(forward, args)
 
+    def test_zero_dim_reductions(self):
+        for kd in [True, False]:
+            inps0 = (torch.zeros(2, 0, device=self.device, dtype=torch.float16), 1, kd)
+            failed_ops = [aten.argmin, aten.argmax, aten.max, aten.min]
+            for fo in failed_ops:
+                with self.assertRaisesRegex(
+                    IndexError, "Expected reduction dim 1 to have non-zero size"
+                ):
+                    mod = make_fx(fo)(*inps0)
+                    _ = compile_fx_inner(mod, inps0)
+
+            pass_ops = [
+                lambda *x: fn(*x) for fn in [aten.sum, aten.prod, aten.any, aten.all]
+            ]
+            for po in pass_ops:
+                compiled = torch._dynamo.optimize("inductor")(po)
+                expected = po(*inps0)
+                actual = compiled(*inps0)
+
+            self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
+
     @requires_cuda()
     def test_unspec_inputs(self):
         def fn(x, y):
@@ -4333,6 +4365,45 @@ if HAS_CPU:
     CommonTemplate.install(CpuTests, "cpu")
 
     class CPUReproTests(TestCase):
+        def test_conv_stride_constraints(self):
+            for fmt in [torch.channels_last, torch.contiguous_format]:
+                # TorchDispatch doesn't work in our cuda invocation for some reason
+                m = torch.nn.Conv2d(5, 6, [3, 3])
+
+                def fn(inp, weight):
+                    return (
+                        F.conv2d(
+                            inp, weight, None, m.stride, m.padding, m.dilation, m.groups
+                        ),
+                    )
+
+                inp = torch.randn([2, 5, 16, 16])
+                inps = [inp, m.weight.to(memory_format=fmt)]
+                fn_fx = make_fx(fn)(*inps)
+                fn_compiled = compile_fx_inner(fn_fx, inps)
+                test_self = self
+                conv_seen = False
+
+                class RecordFunctions(TorchDispatchMode):
+                    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                        kwargs = kwargs if kwargs else {}
+                        if func == torch.ops.aten.convolution.default:
+                            test_self.assertTrue(
+                                args[0].is_contiguous(memory_format=fmt)
+                            )
+                            test_self.assertTrue(
+                                args[1].is_contiguous(memory_format=fmt)
+                            )
+                            nonlocal conv_seen
+                            conv_seen = True
+
+                        return func(*args, **kwargs)
+
+                with RecordFunctions():
+                    out = fn_compiled(inps)
+
+                self.assertTrue(conv_seen)
+
         def test_inplace_squeeze_needed(self):
             mod = torch.nn.Sequential(
                 torch.nn.Linear(10, 10),
@@ -4854,14 +4925,13 @@ if HAS_CUDA:
             with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
                 graph.run(*(cxt.example_args))
                 mod = graph.compile_to_module()
-                i = 0
-                while True:
-                    attribute = f"kernel{i}"
-                    if not hasattr(mod, attribute):
-                        break
-                    else:
-                        kernels.append(getattr(mod, attribute))
-                        i = i + 1
+
+                for val in mod.__dict__.values():
+                    if isinstance(
+                        val, torch._inductor.triton_ops.autotune.CachingAutotuner
+                    ):
+                        kernels.append(val)
+
             return kernels
 
         def test_divisibile_by_16_covers_numel_args(self):

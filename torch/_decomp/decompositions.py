@@ -1138,37 +1138,6 @@ def normalize(input, norm_dims, eps):
     return out, mean, rstd
 
 
-@register_decomposition(aten.native_group_norm.default)
-def native_group_norm(
-    input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
-    N: int,
-    C: int,
-    HxW: int,
-    group: int,
-    eps: float,
-) -> Tuple[Tensor, Tensor, Tensor]:
-    orig_shape = input.shape
-    input = input.view(N, group, C // group, HxW)
-    reduction_dims = [2, 3]
-    out, mean, rstd = normalize(input, reduction_dims, eps)
-    mean = _squeeze_multiple(mean, reduction_dims)
-    rstd = _squeeze_multiple(rstd, reduction_dims)
-    out = out.view(orig_shape)
-    if weight is not None:
-        weight = _unsqueeze_to_dim(weight, out.dim() - 1)
-        out = out * weight
-    if bias is not None:
-        bias = _unsqueeze_to_dim(bias, out.dim() - 1)
-        out = out + bias
-
-    out = out.to(dtype=input.dtype)
-    mean = mean.to(dtype=input.dtype)
-    rstd = rstd.to(dtype=input.dtype)
-    return (out, mean, rstd)
-
-
 @register_decomposition(aten.native_group_norm_backward)
 @pw_cast_for_opmath
 def native_group_norm_backward(

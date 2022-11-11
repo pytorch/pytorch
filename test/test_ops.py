@@ -422,6 +422,7 @@ class TestCommon(TestCase):
             "_refs.log_softmax",
             "_refs.logsumexp",
             "_refs.native_batch_norm",
+            "_refs.native_group_norm",
             "_refs.softmax",
             "_refs.sum_to_size",
         ]
@@ -1663,11 +1664,13 @@ class TestRefsOpsInfo(TestCase):
         '_refs.index_add_',
         '_refs.index_copy_',
         '_refs.index_fill_',
+        '_refs.native_group_norm',
     }
 
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
+        '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
         '_refs.instance_norm',
         '_refs.rsub',
@@ -1745,7 +1748,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.unflatten',
         '_refs.sum_to_size',
         # ref implementation missing kwargs
-        '_refs.full',  # missing "layout"
         '_refs.full_like',  # missing "layout"
         '_refs.ones_like',  # missing "layout"
         '_refs.round',  # missing "decimals"
