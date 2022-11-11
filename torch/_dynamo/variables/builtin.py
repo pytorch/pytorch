@@ -371,25 +371,6 @@ class BuiltinVariable(VariableTracker):
                 ),
                 **options,
             )
-        if any([isinstance(x, DynamicShapeVariable) for x in args]) or any(
-            [isinstance(x, DynamicShapeVariable) for x in kwargs.values()]
-        ):
-            proxy = tx.output.create_proxy(
-                "call_function", self.fn, *proxy_args_kwargs(args, kwargs)
-            )
-            value = None
-            if self.fn == range:
-                assert len(kwargs) == 0
-
-                def guard_if_dyn(arg):
-                    if isinstance(arg, DynamicShapeVariable):
-                        return arg.evaluate_expr(tx.output)
-                    return arg
-
-                args = [guard_if_dyn(arg) for arg in args]
-                value = self.fn(*args)
-
-            return DynamicShapeVariable.create(tx, proxy, value, **options)
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, a, b):
@@ -527,15 +508,25 @@ class BuiltinVariable(VariableTracker):
     def call_slice(self, tx, *args):
         return variables.SliceVariable(args)
 
+    def _dyn_proxy(self, tx, *args, **kwargs):
+        assert self._dynamic_args(*args, **kwargs)
+        from .builder import wrap_fx_proxy
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", self.fn, *proxy_args_kwargs(args, kwargs)
+            ),
+            **options,
+        )
+
+    def call_mod(self, tx, *args, **kwargs):
+        if self._dynamic_args(*args, **kwargs):
+            return self._dyn_proxy(tx, *args, **kwargs)
+
     def _call_iter_tuple_list(self, tx, obj=None, *args, **kwargs):
         if self._dynamic_args(*args, **kwargs):
-            return wrap_fx_proxy(
-                tx,
-                tx.output.create_proxy(
-                    "call_function", self.fn, *proxy_args_kwargs(args, kwargs)
-                ),
-                **options,
-            )
+            return self._dyn_proxy(tx, *args, **kwargs)
         cls = variables.BaseListVariable.cls_for(self.fn)
         if obj is None:
             return cls(
