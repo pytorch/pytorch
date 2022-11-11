@@ -1852,17 +1852,18 @@ def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
-    return torch.ops.aten.upsample_bilinear2d.default(input, osize, align_corners, scale_h, scale_w)
+    # TODO: don't directly dispatch like this
+    return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)
 
-@register_decomposition(torch.ops.aten.upsample_bilinear2d.default)
-@register_decomposition(torch.ops.aten.upsample_bilinear2d.default, type="pre_autograd")
+#@register_decomposition(torch.ops.aten.upsample_bilinear2d.default)
+@torch.ops.aten.upsample_bilinear2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @pw_cast_for_opmath
 def upsample_bilinear2d(
     input: Tensor,
     output_size: List[int],
     align_corners: bool,
-    scales_h: Optional[float],
-    scales_w: Optional[float],
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
 ) -> Tensor:
     # get dimensions of original image
     n_batch, n_channels, in_h, in_w = input.shape
