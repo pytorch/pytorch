@@ -1205,7 +1205,6 @@ symbolic_aot_autograd_failures = {
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('topk', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trapz', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
