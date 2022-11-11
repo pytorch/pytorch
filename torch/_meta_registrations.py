@@ -1165,9 +1165,11 @@ def meta_binop_inplace(self, other):
 def meta_binop_inplace_alpha(self, other, alpha=1):
     return self
 
+
 @register_meta([aten.round.default, aten.round.decimals])
 def meta_round(self, **kwargs):
     return self.new_empty(self.shape)
+
 
 @register_meta(aten.zero.default)
 def meta_zero(self):
