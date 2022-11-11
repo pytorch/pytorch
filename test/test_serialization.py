@@ -585,6 +585,15 @@ class SerializationMixin(object):
         with self.assertRaises(TypeError):
             # Tries to serialize str into tensor with wrong callable write property
             torch.save('foo', x)
+        s_data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        s = torch.CharStorage(s_data)
+        with self.assertRaises(AttributeError):
+            # Tries to serialize list into CharStorage
+            torch.save(s_data, s)
+        x = torch.randint(10, (3, 3), dtype=torch.float).cpu().numpy()
+        with self.assertRaises(AttributeError):
+            # Tries to serialize ndarray into ndarray
+            torch.save(x, x)
 
 
     def test_serialization_storage_slice(self):
