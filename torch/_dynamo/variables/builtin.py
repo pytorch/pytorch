@@ -498,11 +498,44 @@ class BuiltinVariable(VariableTracker):
                     **{k: v.value for k, v in kwargs.items()},
                 ),
             )
+        elif self._dynamic_args(*args, **kwargs):
+            assert len(kwargs) == 0
+
+            def guard_if_dyn(arg):
+                if isinstance(arg, DynamicShapeVariable):
+                    return arg.evaluate_expr(tx.output)
+                return arg
+
+            args = [guard_if_dyn(arg) for arg in args]
+            value = self.fn(*args)
+            return DynamicShapeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function", self.fn, *proxy_args_kwargs(args, kwargs)
+                ),
+                value,
+                **options,
+            )
+        # None no-ops this handler and lets the driving function proceed
+        return None
+
+    def _dynamic_args(self, *args, **kwargs):
+        return any([isinstance(x, DynamicShapeVariable) for x in args]) or any(
+            [isinstance(x, DynamicShapeVariable) for x in kwargs.values()]
+        )
 
     def call_slice(self, tx, *args):
         return variables.SliceVariable(args)
 
-    def _call_iter_tuple_list(self, tx, obj=None):
+    def _call_iter_tuple_list(self, tx, obj=None, *args, **kwargs):
+        if self._dynamic_args(*args, **kwargs):
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_function", self.fn, *proxy_args_kwargs(args, kwargs)
+                ),
+                **options,
+            )
         cls = variables.BaseListVariable.cls_for(self.fn)
         if obj is None:
             return cls(
