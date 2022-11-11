@@ -27,13 +27,14 @@ py::handle type_caster<c10::SymInt>::cast(
   if (si.is_symbolic()) {
     // TODO: generalize this to work with C++ backed class
     
-    // if it's not a python sym node impl, ask pybind11 to cast symnode to pyobject
     auto* py_node =
           dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImpl().get());
     pybind11::handle pyObj;
     if (py_node != nullptr) {
       pyObj = py_node->getPyObj();
     }else {
+      // If it's not a python sym node impl, ask pybind11 to cast symnode to
+      // pyobject.
       pyObj = py::cast(si.toSymNodeImpl().get()).release().ptr();
     }
     
