@@ -362,8 +362,8 @@ __global__ void batch_norm_backward_kernel(
     const GenericPackedTensorAccessor<stat_scalar_t, 1, DefaultPtrTraits, index_t> weight,
     const GenericPackedTensorAccessor<stat_scalar_t, 1, DefaultPtrTraits, index_t> running_mean,
     const GenericPackedTensorAccessor<stat_scalar_t, 1, DefaultPtrTraits, index_t> running_var,
-    const GenericPackedTensorAccessor<stat_accscalar_t, 1, DefaultPtrTraits, index_t> save_mean,
-    const GenericPackedTensorAccessor<stat_accscalar_t, 1, DefaultPtrTraits, index_t> save_invstd,
+    const GenericPackedTensorAccessor<stat_scalar_t, 1, DefaultPtrTraits, index_t> save_mean,
+    const GenericPackedTensorAccessor<stat_scalar_t, 1, DefaultPtrTraits, index_t> save_invstd,
     bool train,
     stat_accscalar_t epsilon) {
 
@@ -640,9 +640,9 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
   auto running_var = packed_accessor_or_dummy<
       stat_scalar_t, 1, DefaultPtrTraits, index_t>(running_var_, "running_var");
   auto save_mean = packed_accessor_or_dummy<
-      accscalar_t, 1, DefaultPtrTraits, index_t>(save_mean_, "save_mean");
+      stat_scalar_t, 1, DefaultPtrTraits, index_t>(save_mean_, "save_mean");
   auto save_invstd = packed_accessor_or_dummy<
-      accscalar_t, 1, DefaultPtrTraits, index_t>(save_invstd_, "save_invstd");
+      stat_scalar_t, 1, DefaultPtrTraits, index_t>(save_invstd_, "save_invstd");
 
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 blocks(input.size(1));
