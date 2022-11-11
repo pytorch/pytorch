@@ -1209,7 +1209,13 @@ Arguments:
 
           .def(
               "_allgather_base",
-              &::c10d::ProcessGroup::_allgather_base,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 at::Tensor& output_tensor,
+                 at::Tensor& input_tensor,
+                 const ::c10d::AllgatherOptions& opts) {
+                return ::c10d::ops::_allgather_base(
+                    self, output_tensor, input_tensor, opts);
+              },
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
