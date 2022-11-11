@@ -1143,10 +1143,10 @@ class TestMemoryProfilerE2E(TestCase):
             aten::binary_cross_entropy_with_logits   7 (INPUT), 2 (INPUT)                          -> 13 (INPUT)
 
             -- Backward ---------------------------------------------------------------------------------------------
-            aten::ones_like                          13 (INPUT)                                    -> 16 (INPUT,???)
+            aten::ones_like                          13 (INPUT)                                    -> 16 (INPUT)
             aten::sigmoid                            7 (INPUT)                                     -> 17 (TEMPORARY)
             aten::sub.Tensor                         17 (TEMPORARY), 2 (INPUT)                     -> 18 (TEMPORARY)
-            aten::mul.Tensor                         18 (TEMPORARY), 16 (INPUT,???)                -> 19 (???)
+            aten::mul.Tensor                         18 (TEMPORARY), 16 (INPUT)                    -> 19 (???)
             aten::div_.Scalar                        19 (???)                                      -> 19 (???)
             aten::slice.Tensor                       19 (???)                                      -> 19 (???)
             aten::slice.Tensor                       19 (???)                                      -> 19 (???)
@@ -1214,10 +1214,8 @@ class TestMemoryProfilerE2E(TestCase):
             aten::detach                             25 (GRADIENT)                                 -> 25 (GRADIENT)
 
             -- Optimizer --------------------------------------------------------------------------------------------
-            aten::zeros                                                                            -> 26 (???)
             aten::add_.Tensor                        3 (PARAMETER), 25 (GRADIENT)                  -> 3 (PARAMETER)
             aten::add_.Tensor                        5 (PARAMETER), 23 (GRADIENT)                  -> 5 (PARAMETER)
-            aten::zeros                                                                            -> 28 (???)
             aten::zero_                              25 (GRADIENT)                                 -> 25 (GRADIENT)
             aten::zero_                              23 (GRADIENT)                                 -> 23 (GRADIENT)""",
         )
@@ -1307,16 +1305,14 @@ class TestMemoryProfilerE2E(TestCase):
             aten::detach                             7 (GRADIENT)                                  -> 7 (GRADIENT)
 
             -- Optimizer --------------------------------------------------------------------------------------------
-            aten::zeros                                                                            -> 10 (???)
-            aten::clone                              7 (GRADIENT)                                  -> 12 (???)
-            aten::detach                             12 (???)                                      -> 12 (???)
-            aten::detach                             12 (???)                                      -> 12 (???)
-            aten::add_.Tensor                        2 (PARAMETER), 12 (???)                       -> 2 (PARAMETER)
-            aten::clone                              9 (GRADIENT)                                  -> 13 (???)
-            aten::detach                             13 (???)                                      -> 13 (???)
-            aten::detach                             13 (???)                                      -> 13 (???)
-            aten::add_.Tensor                        3 (PARAMETER), 13 (???)                       -> 3 (PARAMETER)
-            aten::zeros                                                                            -> 14 (???)
+            aten::clone                              7 (GRADIENT)                                  -> 10 (???)
+            aten::detach                             10 (???)                                      -> 10 (???)
+            aten::detach                             10 (???)                                      -> 10 (???)
+            aten::add_.Tensor                        2 (PARAMETER), 10 (???)                       -> 2 (PARAMETER)
+            aten::clone                              9 (GRADIENT)                                  -> 11 (???)
+            aten::detach                             11 (???)                                      -> 11 (???)
+            aten::detach                             11 (???)                                      -> 11 (???)
+            aten::add_.Tensor                        3 (PARAMETER), 11 (???)                       -> 3 (PARAMETER)
             aten::zero_                              7 (GRADIENT)                                  -> 7 (GRADIENT)
             aten::zero_                              9 (GRADIENT)                                  -> 9 (GRADIENT)""",
         )
