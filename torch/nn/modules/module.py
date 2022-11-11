@@ -1590,9 +1590,9 @@ class Module:
         return handle
 
     def register_state_dict_pre_hook(self, hook):
-        r"""These hooks will be called with arguments: `self`, `prefix`,
-        and `keep_vars` before calling `state_dict` on `self`. The registered
-        hooks can be used to perform pre-processing before the `state_dict`
+        r"""These hooks will be called with arguments: ``self``, ``prefix``,
+        and ``keep_vars`` before calling ``state_dict`` on ``self``. The registered
+        hooks can be used to perform pre-processing before the ``state_dict``
         call is made.
         """
         handle = hooks.RemovableHandle(self._state_dict_pre_hooks)
@@ -1974,7 +1974,12 @@ class Module:
         for name, param in self.named_parameters(recurse=recurse):
             yield param
 
-    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Parameter]]:
+    def named_parameters(
+            self,
+            prefix: str = '',
+            recurse: bool = True,
+            remove_duplicate: bool = True
+    ) -> Iterator[Tuple[str, Parameter]]:
         r"""Returns an iterator over module parameters, yielding both the
         name of the parameter as well as the parameter itself.
 
@@ -1983,6 +1988,8 @@ class Module:
             recurse (bool): if True, then yields parameters of this module
                 and all submodules. Otherwise, yields only parameters that
                 are direct members of this module.
+            remove_duplicate (bool, optional): whether to remove the duplicated
+                parameters in the result. Defaults to True.
 
         Yields:
             (str, Parameter): Tuple containing the name and parameter
@@ -1997,7 +2004,7 @@ class Module:
         """
         gen = self._named_members(
             lambda module: module._parameters.items(),
-            prefix=prefix, recurse=recurse)
+            prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
         for elem in gen:
             yield elem
 
