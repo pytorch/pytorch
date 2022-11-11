@@ -912,9 +912,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
         t = torch.zeros(3, 3)
         _test_save_load_attr(t)
-        with self.assertRaises(AttributeError):
-            # Support to be added soon.
-            _test_save_load_attr(torch.nn.Parameter(t))
+        _test_save_load_attr(torch.nn.Parameter(t))
 
     def test_weights_only_assert(self):
         class HelloWorld:

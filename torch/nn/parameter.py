@@ -60,11 +60,18 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         return 'Parameter containing:\n' + super(Parameter, self).__repr__()
 
     def __reduce_ex__(self, proto):
+        state = torch._utils._get_obj_state(self)
         # See Note [Don't serialize hooks]
-        return (
-            torch._utils._rebuild_parameter,
-            (self.data, self.requires_grad, OrderedDict())
-        )
+        if not state:
+            return (
+                torch._utils._rebuild_parameter,
+                (self.data, self.requires_grad, OrderedDict())
+            )
+        else:
+            return (
+                torch._utils._rebuild_parameter_with_state,
+                (self.data, self.requires_grad, OrderedDict(), state)
+            )
 
     __torch_function__ = _disabled_torch_function_impl
 

@@ -336,10 +336,7 @@ def _rebuild_parameter(data, requires_grad, backward_hooks):
     return param
 
 
-# Unused for now, but should be used very soon!
-def _rebuild_parameter_v2(data, requires_grad, backward_hooks, state=None):
-    if not state:
-        state = {}
+def _rebuild_parameter_with_state(data, requires_grad, backward_hooks, state):
     param = torch.nn.Parameter(data, requires_grad)
     # NB: This line exists only for backwards compatibility; the
     # general expectation is that backward_hooks is an empty
