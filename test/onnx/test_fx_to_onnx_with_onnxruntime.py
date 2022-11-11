@@ -35,8 +35,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 tensor_x = torch.flatten(tensor_x, 1)
                 tensor_x = self.fc1(tensor_x)
                 tensor_x = torch.sigmoid(tensor_x)
-                tensor_x = self.fc2(tensor_x)
-                output = F.log_softmax(tensor_x, dim=1)
+                output = self.fc2(tensor_x)
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
