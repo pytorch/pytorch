@@ -729,6 +729,42 @@ class Reduction(Loops):
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
+
+        if reduction_numel == 0:
+
+            # N.B. This is a hack to generate the literal of the given type
+            # Ideally, we should be fixing `def constant` in triton.py
+            # but it breaks due to hardcoded dtypes in other places
+            def py_cnst(val):
+                return (
+                    bool(val)
+                    if dst_dtype == torch.bool
+                    else float(val)
+                    if dst_dtype.is_floating_point
+                    else int(val)
+                )
+
+            rtypes_to_inits = {
+                "sum": py_cnst(0),
+                "prod": py_cnst(1),
+                "any": py_cnst(0),
+                # "all" is desugared to `!any(!val)`
+            }
+
+            assert (
+                reduction_type in rtypes_to_inits.keys()
+            ), f"{reduction_type} not supported for zero-dimension tensors!"
+
+            def const_fn(index):
+                return ops.constant(rtypes_to_inits[reduction_type], dst_dtype)
+
+            return Pointwise.create(
+                device=device,
+                dtype=src_dtype,
+                inner_fn=const_fn,
+                ranges=list(ranges),
+            )
+
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
             if reduction_type in ("argmin", "argmax"):
