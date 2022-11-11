@@ -2479,10 +2479,10 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         m = M().eval()
         example_input = (torch.randn(2, 2),)
 
-        qconfig_mappings = [
-            QConfigMapping().set_global(torch.quantization.default_qat_qconfig),
-        ]
+        qconfig_mappings = QConfigMultiMapping().set_global([torch.quantization.default_qat_qconfig])
+
         custom_tracer = torch.ao.quantization.quantize_fx.QuantizationTracer(["fc2"], [])
+
         exposed_prepare_command = torch.ao.quantization.quantize_fx.prepare_qat_fx
 
         def exposed_convert_function(module, to_print):
@@ -2504,7 +2504,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             msp(*example_input)
 
         msq = convert_n_shadows_model(msp, exposed_convert_function=exposed_convert_function, exposed_convert_kwargs=kwargs)
-
+        print(msq)
         loggers_set_enabled(msq, True)
         msq(*example_input)
 

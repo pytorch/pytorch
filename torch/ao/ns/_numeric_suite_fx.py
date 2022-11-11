@@ -840,13 +840,9 @@ def prepare_n_shadows_model(
             enumerate(subgraphs_dedup.items()):
         handle_subgraph(
             mt, subgraph_idx, match_name, nodes_in_this_subgraph,
-<<<<<<< HEAD
-            qconfig_multi_mapping.qconfig_mappings_list, list_of_node_name_to_qconfig)
-=======
-            qconfig_mappings, list_of_node_name_to_qconfig,
+            qconfig_multi_mapping.qconfig_mappings_list, list_of_node_name_to_qconfig,
             exposed_prepare_function, exposed_prepare_kwargs
         )
->>>>>>> e631712ada1 ([ao][ns] PNP demo for exposing arbitrary model transforms)
 
     mt.recompile()
     return mt
