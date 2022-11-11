@@ -50,6 +50,7 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
 
     if args.fsdp:
         model = apply_fsdp(
+            args,
             model,
             use_checkpointing=args.fsdp_checkpoint,
             use_wrap_policy=args.fsdp_wrap,
