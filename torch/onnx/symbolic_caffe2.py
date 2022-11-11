@@ -290,7 +290,7 @@ def avg_pool2d(
     return output
 
 
-def reshape(g: jit_utils.GraphContext, input, shape, copy):
+def reshape(g: jit_utils.GraphContext, input, shape, copy=False):
     if input not in symbolic_helper._quantized_ops:
         return opset9.reshape(g, input, shape, copy)
 

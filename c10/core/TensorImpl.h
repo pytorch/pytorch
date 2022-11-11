@@ -1022,7 +1022,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // it a non-error.
 #ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   {
-    return storage_;
+    return !storage_access_should_throw_ && storage_;
   }
 #else
       ;
