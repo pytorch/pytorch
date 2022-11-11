@@ -406,6 +406,21 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     # running_mean and running_var are required in evaluation mode (training: False) but not in training mode
     yield SampleInput(make_arg((1, 2, 3)), args=(None, None, None, None), kwargs={'training': True})
 
+def sample_inputs_softmax_backward_data(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    cases = [
+        ((S,), 0),
+        ((S, S), 0),
+        ((S, M, S), -1),
+    ]
+    input_dtypes = [dtype]
+    if dtype == torch.float and device == 'cuda':
+        input_dtypes += [torch.float16]
+
+    for (shape, dim), input_dtype in product(cases, input_dtypes):
+        yield SampleInput(make_arg(shape), make_arg(shape), dim, input_dtype)
 
 def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
@@ -10435,6 +10450,21 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=True),
+    OpInfo('_softmax_backward_data',
+           op=torch.ops.aten._softmax_backward_data,
+           aten_name='_softmax_backward_data',
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+           sample_inputs_func=sample_inputs_softmax_backward_data,
+           assert_autodiffed=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False,
+           skips=(
+              DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),
+              DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           )
+    ),
     # `softmin` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     # https://github.com/pytorch/pytorch/issues/68752
@@ -15738,15 +15768,15 @@ op_db: List[OpInfo] = [
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs, inplace=True)),
     OpInfo(
-        "aten.native_dropout_backward",
+        "native_dropout_backward",
         op=torch.ops.aten.native_dropout_backward,
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=True,
         sample_inputs_func=sample_inputs_dropout_backward,
         skips=(
-            # RuntimeError not raised: Expected RuntimeError when calling with input.device=cpu and out.device=cuda
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+            # RuntimeError not raised: Expected RuntimeError when calling with out.device=cuda
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cuda'),
             # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit')),
