@@ -600,7 +600,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             compiled_fw_func.chained = None
             delta = shape_env.guards_not_overlapping(pre_dispatch_guards)
             if len(delta) > 0:
-                compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env, "deduped_flat_tensor_args")
+                compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env, "args")
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
