@@ -156,7 +156,7 @@ class FakeTensorConverter(object):
         # const_tensor.add_(torch.rand([1]))
         # all aliases of it must become no longer const
         assert isinstance(fake_tensor, FakeTensor) and fake_tensor.constant is not None
-        weak_st = StorageWeakRef(fake_tensor.constant.storage())
+        weak_st = StorageWeakRef(fake_tensor.constant._typed_storage())
 
         # we need a map from a weak storage to all of its corresponding
         # constant tensors. python doesn't have the weak value equivalent
@@ -168,7 +168,7 @@ class FakeTensorConverter(object):
     def invalidate_constant_aliases(self, tensor):
         assert not isinstance(tensor, FakeTensor)
 
-        weak_st = StorageWeakRef(tensor.storage())
+        weak_st = StorageWeakRef(tensor._typed_storage())
         if weak_st not in self.constant_storage_mapping:
             return
 
@@ -717,7 +717,11 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]
-        if func in [torch.ops.aten.is_coalesced.default]:
+        if func in {
+            torch.ops.aten.is_coalesced.default,
+            torch.ops.aten.dense_dim.default,
+            torch.ops.aten.sparse_dim.default,
+        }:
             # NB: no_dispatch is ok here too, this func is very simple
             with in_kernel_invocation_manager(self):
                 return func(*args, **kwargs)
@@ -826,10 +830,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return r
 
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
-        if (
-            has_symbolic_sizes
-            and func not in self.functions_with_cpp_meta_impl_that_support_symint
-        ):
+        if has_symbolic_sizes and not self.cpp_meta_supports_symint(func):
             from torch._decomp import meta_table as meta_table
 
             if func == aten.size.default:
@@ -869,7 +870,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
-            if func not in self.functions_with_cpp_meta_impl_that_support_symint:
+            if not self.cpp_meta_supports_symint(func):
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"
                 )
@@ -960,15 +961,18 @@ class FakeTensorMode(TorchDispatchMode):
 
         return wrap
 
-    @property
-    def functions_with_cpp_meta_impl_that_support_symint(self):
-        return [
+    def cpp_meta_supports_symint(self, func):
+        if torch.Tag.view_copy in func.tags:  # type: ignore[attr-defined]
+            return True
+        return func in [
             aten.empty_strided.default,
             aten.as_strided_scatter.default,
             aten.as_strided.default,
+            aten.as_strided_.default,
             aten.zeros.default,
             aten.detach.default,
             aten.set_.source_Storage_storage_offset,
+            aten._sparse_coo_tensor_with_dims_and_tensors.default,
         ]
 
     @property
@@ -1040,7 +1044,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
     for e in tree_flatten((args, kwargs))[0]:
         if isinstance(e, torch.Tensor):
             if not e.is_sparse:
-                storages.add(e.storage()._cdata)
+                storages.add(e._typed_storage()._cdata)
 
     # TODO: also check metadata change on inputs
     # proper aliasing/metadata relationship between outputs and inputs will
@@ -1050,7 +1054,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
         if id(e) not in inp_impls and (
             isinstance(e, torch.Tensor)
             and not e.is_sparse
-            and e.storage()._cdata in storages
+            and e._typed_storage()._cdata in storages
         ):
             raise orig_not_implemented_exception
 
@@ -1089,5 +1093,5 @@ class FakeCopyMode(TorchFunctionMode):
             memo[id(tensor)] = out
             return out
         else:
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 return func(*args, **kwargs)
