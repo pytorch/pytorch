@@ -147,17 +147,17 @@ def forward(self, a_1):
     sum_1 = torch.ops.aten.sum.default(relu)
     ones_like = torch.ops.aten.ones_like.default(sum_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand_copy = torch.ops.aten.expand_copy.default(ones_like, [16, 64, 128, 128]);  ones_like = None
-    _reshape_alias_copy = torch.ops.aten._reshape_alias_copy.default(expand_copy, [1, 1024, 128, 128], [16777216, 16384, 128, 1]);  expand_copy = None
-    new_empty_strided = torch.ops.aten.new_empty_strided.default(_reshape_alias_copy, [1, 1024, 128, 128], [16777216, 16384, 128, 1])
-    view_copy_3 = torch.ops.aten.view_copy.default(_reshape_alias_copy, [16, 64, 128, 128])
-    view_copy_4 = torch.ops.aten.view_copy.default(_reshape_alias_copy, [16, 64, 128, 128])
-    clone_1 = torch.ops.aten.clone.default(view_copy_4, memory_format = torch.contiguous_format);  view_copy_4 = None
+    view_copy_3 = torch.ops.aten.view_copy.default(expand_copy, [1, 1024, 128, 128]);  expand_copy = None
+    new_empty_strided = torch.ops.aten.new_empty_strided.default(view_copy_3, [1, 1024, 128, 128], [16777216, 16384, 128, 1])
+    view_copy_4 = torch.ops.aten.view_copy.default(view_copy_3, [16, 64, 128, 128])
+    view_copy_5 = torch.ops.aten.view_copy.default(view_copy_3, [16, 64, 128, 128])
+    clone_1 = torch.ops.aten.clone.default(view_copy_5, memory_format = torch.contiguous_format);  view_copy_5 = None
     threshold_backward = torch.ops.aten.threshold_backward.default(clone_1, relu, 0);  clone_1 = relu = None
-    _reshape_alias_copy_1 = torch.ops.aten._reshape_alias_copy.default(_reshape_alias_copy, [16, 64, 128, 128], [1048576, 16384, 128, 1]);  _reshape_alias_copy = None
-    detach_copy = torch.ops.aten.detach_copy.default(_reshape_alias_copy_1);  _reshape_alias_copy_1 = None
-    view_copy_5 = torch.ops.aten.view_copy.default(threshold_backward, [1, 1024, 128, 128]);  threshold_backward = None
-    _reshape_alias_copy_2 = torch.ops.aten._reshape_alias_copy.default(view_copy_5, [16, 64, 128, 128], [1048576, 16384, 128, 1]);  view_copy_5 = None
-    detach_copy_1 = torch.ops.aten.detach_copy.default(_reshape_alias_copy_2);  _reshape_alias_copy_2 = None
+    view_copy_6 = torch.ops.aten.view_copy.default(view_copy_3, [16, 64, 128, 128]);  view_copy_3 = None
+    detach_copy = torch.ops.aten.detach_copy.default(view_copy_6);  view_copy_6 = None
+    view_copy_7 = torch.ops.aten.view_copy.default(threshold_backward, [1, 1024, 128, 128]);  threshold_backward = None
+    view_copy_8 = torch.ops.aten.view_copy.default(view_copy_7, [16, 64, 128, 128]);  view_copy_7 = None
+    detach_copy_1 = torch.ops.aten.detach_copy.default(view_copy_8);  view_copy_8 = None
     return detach_copy_1
     """)  # noqa: B950
 
@@ -710,40 +710,40 @@ def forward(self, a_1):
     ones = torch.ops.aten.ones.default([2, 2], device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
     view_copy = torch.ops.aten.view_copy.default(add, [8])
-    _reshape_alias_copy = torch.ops.aten._reshape_alias_copy.default(view_copy, [2, 4], [4, 1]);  view_copy = None
-    transpose_copy = torch.ops.aten.transpose_copy.int(_reshape_alias_copy, 1, 0)
+    view_copy_1 = torch.ops.aten.view_copy.default(view_copy, [2, 4]);  view_copy = None
+    transpose_copy = torch.ops.aten.transpose_copy.int(view_copy_1, 1, 0)
     unsqueeze_copy = torch.ops.aten.unsqueeze_copy.default(transpose_copy, 0);  transpose_copy = None
     squeeze_copy = torch.ops.aten.squeeze_copy.default(unsqueeze_copy);  unsqueeze_copy = None
     split_copy = torch.ops.aten.split_copy.Tensor(squeeze_copy, 2);  squeeze_copy = None
     getitem = split_copy[0]
     getitem_1 = split_copy[1];  split_copy = None
     add_1 = torch.ops.aten.add.Tensor(getitem, ones);  getitem = ones = None
-    select_copy = torch.ops.aten.select_copy.int(_reshape_alias_copy, 0, 0);  _reshape_alias_copy = None
-    _reshape_alias_copy_1 = torch.ops.aten._reshape_alias_copy.default(add_1, [4], [1])
-    view_copy_1 = torch.ops.aten.view_copy.default(add, [8]);  add = None
-    _reshape_alias_copy_2 = torch.ops.aten._reshape_alias_copy.default(view_copy_1, [2, 4], [4, 1]);  view_copy_1 = None
-    transpose_copy_1 = torch.ops.aten.transpose_copy.int(_reshape_alias_copy_2, 1, 0);  _reshape_alias_copy_2 = None
+    select_copy = torch.ops.aten.select_copy.int(view_copy_1, 0, 0);  view_copy_1 = None
+    view_copy_2 = torch.ops.aten.view_copy.default(add_1, [4])
+    view_copy_3 = torch.ops.aten.view_copy.default(add, [8]);  add = None
+    view_copy_4 = torch.ops.aten.view_copy.default(view_copy_3, [2, 4]);  view_copy_3 = None
+    transpose_copy_1 = torch.ops.aten.transpose_copy.int(view_copy_4, 1, 0);  view_copy_4 = None
     unsqueeze_copy_1 = torch.ops.aten.unsqueeze_copy.default(transpose_copy_1, 0);  transpose_copy_1 = None
     squeeze_copy_1 = torch.ops.aten.squeeze_copy.default(unsqueeze_copy_1);  unsqueeze_copy_1 = None
     slice_scatter = torch.ops.aten.slice_scatter.default(squeeze_copy_1, add_1, 0, 0, 2);  squeeze_copy_1 = None
     unsqueeze_copy_2 = torch.ops.aten.unsqueeze_copy.default(slice_scatter, 0);  slice_scatter = None
     squeeze_copy_2 = torch.ops.aten.squeeze_copy.dim(unsqueeze_copy_2, 0);  unsqueeze_copy_2 = None
     transpose_copy_2 = torch.ops.aten.transpose_copy.int(squeeze_copy_2, 1, 0);  squeeze_copy_2 = None
-    _reshape_alias_copy_3 = torch.ops.aten._reshape_alias_copy.default(transpose_copy_2, [8], [1]);  transpose_copy_2 = None
-    view_copy_2 = torch.ops.aten.view_copy.default(_reshape_alias_copy_3, [4, 2]);  _reshape_alias_copy_3 = None
-    view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [8])
-    _reshape_alias_copy_4 = torch.ops.aten._reshape_alias_copy.default(view_copy_3, [2, 4], [4, 1]);  view_copy_3 = None
-    select_copy_1 = torch.ops.aten.select_copy.int(_reshape_alias_copy_4, 0, 0);  _reshape_alias_copy_4 = None
-    view_copy_4 = torch.ops.aten.view_copy.default(view_copy_2, [8]);  view_copy_2 = None
-    _reshape_alias_copy_5 = torch.ops.aten._reshape_alias_copy.default(view_copy_4, [2, 4], [4, 1]);  view_copy_4 = None
-    transpose_copy_3 = torch.ops.aten.transpose_copy.int(_reshape_alias_copy_5, 1, 0);  _reshape_alias_copy_5 = None
+    view_copy_5 = torch.ops.aten.view_copy.default(transpose_copy_2, [8]);  transpose_copy_2 = None
+    view_copy_6 = torch.ops.aten.view_copy.default(view_copy_5, [4, 2]);  view_copy_5 = None
+    view_copy_7 = torch.ops.aten.view_copy.default(view_copy_6, [8])
+    view_copy_8 = torch.ops.aten.view_copy.default(view_copy_7, [2, 4]);  view_copy_7 = None
+    select_copy_1 = torch.ops.aten.select_copy.int(view_copy_8, 0, 0);  view_copy_8 = None
+    view_copy_9 = torch.ops.aten.view_copy.default(view_copy_6, [8]);  view_copy_6 = None
+    view_copy_10 = torch.ops.aten.view_copy.default(view_copy_9, [2, 4]);  view_copy_9 = None
+    transpose_copy_3 = torch.ops.aten.transpose_copy.int(view_copy_10, 1, 0);  view_copy_10 = None
     unsqueeze_copy_3 = torch.ops.aten.unsqueeze_copy.default(transpose_copy_3, 0);  transpose_copy_3 = None
     squeeze_copy_3 = torch.ops.aten.squeeze_copy.default(unsqueeze_copy_3);  unsqueeze_copy_3 = None
     split_copy_1 = torch.ops.aten.split_copy.Tensor(squeeze_copy_3, 2);  squeeze_copy_3 = None
     getitem_2 = split_copy_1[0]
     getitem_3 = split_copy_1[1];  split_copy_1 = None
-    _reshape_alias_copy_6 = torch.ops.aten._reshape_alias_copy.default(getitem_2, [4], [1]);  getitem_2 = None
-    add_2 = torch.ops.aten.add.Tensor(select_copy_1, _reshape_alias_copy_6);  select_copy_1 = _reshape_alias_copy_6 = None
+    view_copy_11 = torch.ops.aten.view_copy.default(getitem_2, [4]);  getitem_2 = None
+    add_2 = torch.ops.aten.add.Tensor(select_copy_1, view_copy_11);  select_copy_1 = view_copy_11 = None
     return add_1
     """)  # noqa: B950
 
@@ -756,30 +756,30 @@ def forward(self, a_1):
     ones = torch.ops.aten.ones.default([2, 2], device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
     view = torch.ops.aten.view.default(add, [8])
-    _reshape_alias = torch.ops.aten._reshape_alias.default(view, [2, 4], [4, 1]);  view = None
-    transpose = torch.ops.aten.transpose.int(_reshape_alias, 1, 0)
+    view_1 = torch.ops.aten.view.default(view, [2, 4]);  view = None
+    transpose = torch.ops.aten.transpose.int(view_1, 1, 0)
     unsqueeze = torch.ops.aten.unsqueeze.default(transpose, 0);  transpose = None
     squeeze = torch.ops.aten.squeeze.default(unsqueeze);  unsqueeze = None
     split = torch.ops.aten.split.Tensor(squeeze, 2);  squeeze = None
     getitem = split[0]
     getitem_1 = split[1];  split = None
     add_1 = torch.ops.aten.add_.Tensor(getitem, ones);  ones = None
-    select = torch.ops.aten.select.int(_reshape_alias, 0, 0);  _reshape_alias = None
+    select = torch.ops.aten.select.int(view_1, 0, 0);  view_1 = None
     clone = torch.ops.aten.clone.default(getitem, memory_format = torch.contiguous_format)
     _unsafe_view = torch.ops.aten._unsafe_view.default(clone, [4]);  clone = None
-    view_1 = torch.ops.aten.view.default(add, [8]);  add = None
-    _reshape_alias_1 = torch.ops.aten._reshape_alias.default(view_1, [2, 4], [4, 1]);  view_1 = None
-    transpose_1 = torch.ops.aten.transpose.int(_reshape_alias_1, 1, 0);  _reshape_alias_1 = None
+    view_2 = torch.ops.aten.view.default(add, [8]);  add = None
+    view_3 = torch.ops.aten.view.default(view_2, [2, 4]);  view_2 = None
+    transpose_1 = torch.ops.aten.transpose.int(view_3, 1, 0);  view_3 = None
     unsqueeze_1 = torch.ops.aten.unsqueeze.default(transpose_1, 0);  transpose_1 = None
     squeeze_1 = torch.ops.aten.squeeze.default(unsqueeze_1);  unsqueeze_1 = None
     unsqueeze_2 = torch.ops.aten.unsqueeze.default(squeeze_1, 0);  squeeze_1 = None
     squeeze_2 = torch.ops.aten.squeeze.dim(unsqueeze_2, 0);  unsqueeze_2 = None
     transpose_2 = torch.ops.aten.transpose.int(squeeze_2, 1, 0);  squeeze_2 = None
-    _reshape_alias_2 = torch.ops.aten._reshape_alias.default(transpose_2, [8], [1]);  transpose_2 = None
-    view_2 = torch.ops.aten.view.default(_reshape_alias_2, [4, 2]);  _reshape_alias_2 = None
-    view_3 = torch.ops.aten.view.default(view_2, [8]);  view_2 = None
-    _reshape_alias_3 = torch.ops.aten._reshape_alias.default(view_3, [2, 4], [4, 1]);  view_3 = None
-    select_1 = torch.ops.aten.select.int(_reshape_alias_3, 0, 0);  _reshape_alias_3 = None
+    view_4 = torch.ops.aten.view.default(transpose_2, [8]);  transpose_2 = None
+    view_5 = torch.ops.aten.view.default(view_4, [4, 2]);  view_4 = None
+    view_6 = torch.ops.aten.view.default(view_5, [8]);  view_5 = None
+    view_7 = torch.ops.aten.view.default(view_6, [2, 4]);  view_6 = None
+    select_1 = torch.ops.aten.select.int(view_7, 0, 0);  view_7 = None
     add_2 = torch.ops.aten.add.Tensor(select_1, _unsafe_view);  select_1 = _unsafe_view = None
     return getitem
     """)
