@@ -34,7 +34,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     return {};
 
   // std::move(grads[0]) to avoid bumping up refcount
-  at::Tensor new_grad = std::move(grads[0]);
+  at::Tensor new_grad = callHooks(variable, std::move(grads[0]));
 
   // Acquire lock to here protect thread safety on variable, this ensures
   // AccumulateGrad does not race to shared variable from different threads

@@ -742,13 +742,7 @@ void GraphTask::set_exception(
 }
 
 static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
-  // We order it this way because retains_grad hooks are registered as
-  // tensor_pre_hooks and we want that to observe the result of modifications by
-  // all pre_hooks
   for (const auto& hook : fn.pre_hooks()) {
-    inputs = (*hook)(inputs);
-  }
-  for (const auto& hook : fn.tensor_pre_hooks()) {
     inputs = (*hook)(inputs);
   }
   return inputs;
@@ -942,19 +936,12 @@ void Engine::evaluate_function(
   auto& exec_info_ = graph_task->exec_info_;
   if (!exec_info_.empty()) {
     auto& fn_info = exec_info_.at(func);
-    variable_list new_inputs = inputs.buffer;
-    if (!fn_info.needed_ && fn_info.captures_) {
-      // call the prehooks of the next node
-      new_inputs =
-          call_pre_hooks(*func, InputBuffer::variables(std::move(inputs)));
-    }
     if (auto* capture_vec = fn_info.captures_.get()) {
-      const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
       // Lock mutex for writing to graph_task->captured_vars_.
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
       for (const auto& capture : *capture_vec) {
         auto& captured_grad = graph_task->captured_vars_[capture.output_idx_];
-        captured_grad = new_inputs[capture.input_idx_];
+        captured_grad = inputs[capture.input_idx_];
         for (auto& hook : capture.hooks_) {
           captured_grad = (*hook)(captured_grad);
         }
@@ -965,7 +952,7 @@ void Engine::evaluate_function(
       }
     }
     if (!fn_info.needed_) {
-      // Skip execution if we don't need to execute the function
+      // Skip execution if we don't need to execute the function.
       return;
     }
   }
