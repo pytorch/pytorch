@@ -187,7 +187,7 @@ struct ConvolutionParams
 };
 // ConvolutionParams must be a POD because we read out its memory
 // contenst as char* when hashing
-static_assert(std::is_pod<ConvolutionParams>::value, "ConvolutionParams not POD");
+static_assert(c10::is_pod_v<ConvolutionParams>, "ConvolutionParams not POD");
 
 void setConvolutionParams(
     ConvolutionParams* params, miopenHandle_t handle,

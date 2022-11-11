@@ -127,8 +127,8 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   using detail::CPUGeneratorImplState;
   using detail::CPUGeneratorImplStateLegacy;
 
-  static_assert(std::is_pod<CPUGeneratorImplStateLegacy>::value, "CPUGeneratorImplStateLegacy is not a PODType");
-  static_assert(std::is_pod<CPUGeneratorImplState>::value, "CPUGeneratorImplState is not a PODType");
+  static_assert(c10::is_pod_v<CPUGeneratorImplStateLegacy>, "CPUGeneratorImplStateLegacy is not a PODType");
+  static_assert(c10::is_pod_v<CPUGeneratorImplState>, "CPUGeneratorImplState is not a PODType");
 
   static const size_t size_legacy = sizeof(CPUGeneratorImplStateLegacy);
   static const size_t size_current = sizeof(CPUGeneratorImplState);
@@ -207,7 +207,7 @@ c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::get_state() const {
   using detail::CPUGeneratorImplState;
 
   static const size_t size = sizeof(CPUGeneratorImplState);
-  static_assert(std::is_pod<CPUGeneratorImplState>::value, "CPUGeneratorImplState is not a PODType");
+  static_assert(c10::is_pod_v<CPUGeneratorImplState>, "CPUGeneratorImplState is not a PODType");
 
   auto state_tensor = at::detail::empty_cpu({(int64_t)size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
   auto rng_state = state_tensor.data_ptr();

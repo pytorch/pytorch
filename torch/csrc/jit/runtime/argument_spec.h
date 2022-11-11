@@ -66,7 +66,7 @@ struct ArgumentInfo {
 };
 
 static_assert(
-    std::is_pod<ArgumentInfo>::value,
+    c10::is_pod_v<ArgumentInfo>,
     "ArgumentInfo is to be a POD struct");
 static_assert(
     sizeof(ArgumentInfo) == sizeof(ArgumentInfo::plain_data_type),
