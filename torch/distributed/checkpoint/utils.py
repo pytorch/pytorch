@@ -20,7 +20,7 @@ from .metadata import (
     MetadataIndex,
 )
 
-__all__: List[str] = []
+__all__ = ["find_tensor_shard", "find_state_dict_object"]
 
 T = TypeVar("T")
 R = TypeVar("R")

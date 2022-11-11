@@ -11,9 +11,6 @@ __all__ = [
     "ChunkStorageMetadata",
     "TensorStorageMetadata",
     "BytesStorageMetadata",
-    "TENSOR_TYPE",
-    "STORAGE_TYPES",
-    "STATE_DICT_TYPE",
     "Metadata",
     "MetadataIndex",
 ]
