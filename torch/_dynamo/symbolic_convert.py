@@ -179,10 +179,15 @@ def break_graph_if_unsupported(*, push):
             reason = None
             try:
                 return inner_fn(self, inst)
-            except Unsupported as exc:
+            except Unsupported as excp:
+                if self.has_backedge():
+                    msg = "Skipping frame because there is a graph break in a for/while loop"
+                    log.debug(msg)
+                    raise exc.SkipFrame(msg)
+
                 if not self.should_compile_partial_graph():
                     raise
-                user_stack = [self.frame_summary()] + list(reversed(exc.real_stack))
+                user_stack = [self.frame_summary()] + list(reversed(excp.real_stack))
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
@@ -193,12 +198,12 @@ def break_graph_if_unsupported(*, push):
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
                     log.warning(
-                        f"Graph break: {exc} from user code at {user_stack_formatted}"
+                        f"Graph break: {excp} from user code at {user_stack_formatted}"
                     )
 
-                exc.remove_from_stats()
-                exc.add_to_stats("graph_break")
-                reason = GraphCompileReason(exc.msg, user_stack)
+                excp.remove_from_stats()
+                excp.add_to_stats("graph_break")
+                reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
             self.output.compile_subgraph(self, reason=reason)
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
@@ -237,6 +242,15 @@ def break_graph_if_unsupported(*, push):
 
 
 class InstructionTranslatorBase(object):
+    def has_backedge(self):
+        cur_offset = self.current_instruction.offset
+        for inst in self.instructions[self.instruction_pointer :]:
+            if inst.opname == "JUMP_ABSOLUTE":
+                jump_offset = inst.arg
+                if jump_offset < cur_offset:
+                    return True
+        return False
+
     def cell_and_freevars(self):
         if not hasattr(self, "_cell_and_freevars"):
             self._cell_and_freevars = tuple(
