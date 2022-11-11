@@ -162,7 +162,7 @@ class VecISA(object):
     # avx512 check in CMake - FindAVX.cmake. But TorchInductor install the latest
     # gcc/g++ compiler by default while it could support the AVX512 compilation.
     # Therefore, there would be a conflict sleef version between PyTorch and
-    # TorchInductor. Hence, we dry-run the following code to check whether current
+    # TorchInductor. Hence, we dry-compile the following code to check whether current
     # HW platform and PyTorch both could support AVX512 or AVX2. And suppose ARM
     # also needs the logic
     _avx_code = """
@@ -272,37 +272,37 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa = [VecAVX512(), VecAVX2()]
+supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
 # might have too much redundant content that is useless for ISA check. Hence,
 # we only cache some key isa information.
 @functools.lru_cache(None)
-def valid_vec_isa():
+def valid_vec_isa_list():
     if sys.platform != "linux":
         return []
 
     isa_list = []
     with open("/proc/cpuinfo") as _cpu_info:
         _cpu_info_content = _cpu_info.read()
-        for isa in supported_vec_isa:
+        for isa in supported_vec_isa_list:
             if str(isa) in _cpu_info_content and isa:
                 isa_list.append(isa)
         return isa_list
 
 
 def pick_vec_isa():
-    _valid_vec_isa: List[VecISA] = valid_vec_isa()
-    if not _valid_vec_isa:
+    _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
+    if not _valid_vec_isa_list:
         return invalid_vec_isa
 
     # If the simdlen is None, it indicates determin the vectroization length automatically
     if config.cpp.simdlen is None:
-        assert _valid_vec_isa
-        return _valid_vec_isa[0]
+        assert _valid_vec_isa_list
+        return _valid_vec_isa_list[0]
 
-    for isa in _valid_vec_isa:
+    for isa in _valid_vec_isa_list:
         if config.cpp.simdlen == isa.bit_width():
             return isa
 
@@ -346,6 +346,7 @@ def cpp_compile_command(
             {cpp_compiler()} {input} {shared_lib} {warning_all_flag} -std=c++14 -Wno-unused-variable
             {ipaths} {lpaths} {libs} {macros}
             -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
+            -D C10_USING_CUSTOM_GENERATED_MACROS
             -o{output}
         """,
     ).strip()
@@ -354,6 +355,18 @@ def cpp_compile_command(
 class CppCodeCache:
     cache = dict()
     clear = staticmethod(cache.clear)
+
+    @staticmethod
+    def _load_library(path):
+        try:
+            return cdll.LoadLibrary(path)
+        except OSError as e:
+            if "gomp" in str(e) and os.path.exists("/usr/lib64/libgomp.so.1"):
+                # hacky workaround for fbcode/buck
+                global _libgomp
+                _libgomp = cdll.LoadLibrary("/usr/lib64/libgomp.so.1")
+                return cdll.LoadLibrary(path)
+            raise
 
     @classmethod
     def load(cls, source_code):
@@ -379,7 +392,7 @@ class CppCodeCache:
                     except subprocess.CalledProcessError as e:
                         raise exc.CppCompileError(cmd, e.output)
 
-                cls.cache[key] = cdll.LoadLibrary(output_path)
+                cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
 
         return cls.cache[key]
