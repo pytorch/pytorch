@@ -30,7 +30,7 @@ _all__ = [
     # Top level API for graph mode quantization on GraphModule(torch.fx)
     # 'fuse_fx', 'quantize_fx',  # TODO: add quantize_dynamic_fx
     # 'prepare_fx', 'prepare_dynamic_fx', 'convert_fx',
-    'QuantType', 'quant_type_to_str',  # quantization type
+    'QuantType',  # quantization type
     # custom module APIs
     'get_default_static_quant_module_mappings', 'get_static_quant_module_class',
     'get_default_dynamic_quant_module_mappings',
