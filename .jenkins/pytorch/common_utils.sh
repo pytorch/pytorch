@@ -101,6 +101,29 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
+function install_torchaudio() {
+  local commit
+  commit=$(get_pinned_commit audio)
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
+}
+
+# TODO: figure out why pip install torchaudio does not work
+function checkout_install_torchaudio() {
+  local commit
+  commit=$(get_pinned_commit audio)
+  git clone https://github.com/pytorch/audio
+  pushd audio
+  git checkout "${commit}"
+  time python setup.py install
+  popd
+}
+
+function install_torchtext() {
+  local commit
+  commit=$(get_pinned_commit text)
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/text.git@${commit}"
+}
+
 function install_torchvision() {
   local commit
   commit=$(get_pinned_commit vision)
