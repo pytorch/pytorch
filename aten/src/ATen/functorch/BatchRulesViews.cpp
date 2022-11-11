@@ -443,8 +443,9 @@ std::tuple<Tensor,optional<int64_t>> view_copy_batch_rule(
     optional<int64_t> self_bdim,
     c10::SymIntArrayRef size) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
-  SymDimVector view_size(size);
-  view_size.insert(view_size.begin(), self_.size(0));
+  SymDimVector view_size(size.size() + 1);
+  view_size[0] = self_.size(0);
+  std::copy(size.cbegin(), size.cend(), view_size.begin() + 1);
 
   return std::make_tuple(at::view_copy_symint(self_, view_size), 0);
 }
