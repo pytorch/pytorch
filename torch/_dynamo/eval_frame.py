@@ -671,11 +671,17 @@ class TorchPatcher:
                 DistributedDataParallel._inside_ddp_forward
             )
 
+        from torch.optim import adam
+
+        adam._compute_bias_corrections = disable(adam._compute_bias_corrections)
+
         # disable profile hook
         for opt in optimizers:
             opt._cuda_graph_capture_health_check = disable(
                 opt._cuda_graph_capture_health_check
             )
+            opt.zero_grad = disable(opt.zero_grad)
+
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook
             # which is the *last* hook applied, we want to keep the no_grad hook
@@ -684,6 +690,9 @@ class TorchPatcher:
                 unwrapped_step = getattr(opt.step, "__wrapped__", None)
                 if unwrapped_step:
                     opt.step = unwrapped_step
+
+            if opt == torch.optim.Adam:
+                opt._init_group = disable(opt._init_group)
 
             # disable future hooking
             opt.step.hooked = True

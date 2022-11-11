@@ -382,8 +382,6 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             model.eval()
 
-        self.init_optimizer(device, model.parameters())
-
         self.validate_model(model, example_inputs)
         return device, model_name, model, example_inputs, batch_size
 

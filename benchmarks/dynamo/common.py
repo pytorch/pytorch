@@ -17,8 +17,8 @@ from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
-import torch
 
+import torch
 import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
@@ -864,6 +864,7 @@ class BenchmarkRunner:
         self.use_amp = False
         self.grad_scaler = DummyGradScaler()
         self.autocast = NullContext
+        self.optimizer = None
         self._args = None
 
     def setup_amp(self):
@@ -886,15 +887,13 @@ class BenchmarkRunner:
             self.autocast = torch.cuda.amp.autocast
 
     def init_optimizer(self, device, params):
-        self.optimizer = None
-        # TODO - Currently, optimizers are used incorrectly. Fix optimizers with
-        # https://github.com/pytorch/pytorch/pull/87492
-        # param_list = list(params)
-        # if device == "cuda" and len(param_list) != 0:
-        #     # capturable is only supported on cuda at the moment
-        #     self.optimizer = torch.optim.Adam(param_list, capturable=True)
-        # else:
-        #     self.optimizer = None
+        if device == "cuda":
+            # capturable is only supported on cuda at the moment
+            # foreach needs to be True because we are prohibitively slow at tracing loops
+            # over 1000s of parameters
+            self.optimizer = torch.optim.Adam(params, capturable=True, foreach=True)
+        else:
+            self.optimizer = None
 
     @property
     def args(self):
@@ -1094,12 +1093,16 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             # Get results of native pytorch
             reset_rng_state()
+            model_copy = copy.deepcopy(model)
+            self.init_optimizer(current_device, model_copy.parameters())
             correct_result = self.run_n_iterations(
                 deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
             )
 
             # Rerun native pytorch
             reset_rng_state()
+            model_copy = copy.deepcopy(model)
+            self.init_optimizer(current_device, model_copy.parameters())
             correct_rerun_result = self.run_n_iterations(
                 deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
             )
@@ -1117,6 +1120,7 @@ class BenchmarkRunner:
             reset_rng_state()
             torch._dynamo.reset()
             try:
+                self.init_optimizer(current_device, model.parameters())
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
 
                 new_result = optimized_model_iter_fn(
@@ -1169,6 +1173,7 @@ class BenchmarkRunner:
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
+        self.init_optimizer(current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
