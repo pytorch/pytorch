@@ -11,9 +11,9 @@ import warnings
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
-
 import onnx
 import onnx.numpy_helper
+import pytorch_test_common
 
 import torch
 import torch.nn.functional as F
@@ -74,7 +74,7 @@ def export_to_onnx(
     return onnx_model
 
 
-class TestONNXExport(common_utils.TestCase):
+class TestONNXExport(pytorch_test_common.ExportTestCase):
     def test_fuse_addmm(self):
         class AddmmModel(torch.nn.Module):
             def forward(self, x):
