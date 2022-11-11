@@ -32,8 +32,10 @@ c10::IValue preprocess(
     const Module& mod,
     const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
     const BackendDebugHandleGenerator& generate_debug_handles) {
-  auto output_min = -std::numeric_limits<float>::infinity();
-  auto output_max = std::numeric_limits<float>::infinity();
+
+  auto eval_mod = mod.clone();
+  eval_mod.eval();
+  eval_mod = torch::jit::freeze(eval_mod);
 
   c10::Dict<IValue, IValue> compiled(StringType::get(), TensorType::get());
 
@@ -62,28 +64,26 @@ c10::IValue preprocess(
       "method_compile_spec does not contain either a Tensor or TensorList, under it's \"outputs\" key.");
 
   // Graph preprocessing
-  const auto& forward_method = mod.get_method("forward");
+  const auto& forward_method = eval_mod.get_method("forward");
 
   auto graph = toGraphFunction(forward_method.function()).graph()->copy();
-  graph = tensorexpr::removeUnusedSelfArgument(graph);
+    graph = tensorexpr::removeUnusedSelfArgument(graph);
   std::vector<c10::IValue> example_inputs;
   if (inp.isTensorList()) {
     c10::List<at::Tensor> inp_list = inp.toTensorList();
-    TORCH_CHECK(
+        TORCH_CHECK(
         graph->inputs().size() == inp_list.size(),
         "method_compile_spec inputs do not match expected number of forward inputs");
 
     example_inputs.reserve(inp_list.size());
     for (const auto i : c10::irange(inp_list.size())) {
-      graph->inputs()[i]->setType(TensorType::create(inp_list[i]));
       example_inputs.emplace_back(inp_list[i]);
     }
   } else {
-    TORCH_CHECK(
+        TORCH_CHECK(
         graph->inputs().size() == 1,
         "method_compile_spec inputs do not match expected number of forward inputs");
 
-    graph->inputs()[0]->setType(TensorType::create(inp.toTensor()));
     example_inputs.emplace_back(inp.toTensor());
   }
 
