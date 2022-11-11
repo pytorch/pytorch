@@ -79,14 +79,18 @@ def meta_randperm(n, *, generator=None, out):
 def meta_randint(
     high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
 ):
-    return torch.empty(size, dtype=dtype, device=device)
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 @register_meta(aten.randint.low)
 def meta_randint_low(
     low, high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
 ):
-    return torch.empty(size, dtype=dtype, device=device)
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
@@ -103,17 +107,21 @@ def meta_copy_(self, src, non_blocking=False):
     return self
 
 
+def inferUnsqueezeGeometry(tensor, dim):
+    result_sizes = list(tensor.size())
+    result_strides = list(tensor.stride())
+    new_stride = 1 if dim >= tensor.dim() else result_sizes[dim] * result_strides[dim]
+    result_sizes.insert(dim, 1)
+    result_strides.insert(dim, new_stride)
+    return result_sizes, result_strides
+
+
 @register_meta(aten.unsqueeze_.default)
 def meta_unsqueeze_(self, dim):
-    wrapped_dim = maybe_wrap_dim(dim, self.dim())
-    # new strides
-    new_stride = 1 if dim >= self.dim() else self.size(dim) * self.stride(dim)
-    strides = list(self.stride())
-    strides.insert(dim, new_stride)
-    # new size
-    size = list(self.size())
-    size.insert(dim, 1)
-    return torch.ops.aten.as_strided_(self, size, strides)
+    dim = maybe_wrap_dim(dim, self.dim() + 1)
+    g_sizes, g_strides = inferUnsqueezeGeometry(self, dim)
+    self.as_strided_(g_sizes, g_strides)
+    return self
 
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
@@ -261,20 +269,22 @@ def meta_pad2d(self, padding):
         return self.new_empty((nbatch, nplane, output_h, output_w))
 
 
+@register_meta([aten.bernoulli.default, aten.bernoulli.out])
+@out_wrapper()
+def meta_bernoulli(self, *, generator=None):
+    # https://github.com/pytorch/pytorch/issues/88612
+    return torch.empty_like(self).contiguous()
+
+
 @register_meta(aten.bernoulli_.float)
 def meta_bernoulli_(self, p=0.5, generator=None):
     return self
 
 
 @register_meta(aten.bernoulli.p)
-def meta_bernoulli(self, p=0.5, generator=None):
-    return torch.empty_like(self)
-
-
-@register_meta(aten.bernoulli.out)
-def meta_bernoulli_out(self, *, generator=None, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out
+def meta_bernoulli_p(self, p=0.5, generator=None):
+    # https://github.com/pytorch/pytorch/issues/88612
+    return torch.empty_like(self).contiguous()
 
 
 @register_meta(aten._fused_moving_avg_obs_fq_helper.default)
@@ -868,22 +878,6 @@ def meta_index_Tensor(self, indices):
     return self.new_empty(before_shape + replacement_shape + after_shape)
 
 
-# TODO: this shouldn't be necessary
-# @register_meta([aten.add.Tensor])
-# def meta_add(self, other, *, alpha=1):
-#     check(
-#         torch.is_tensor(self),
-#         lambda: f"expected self to be tensor but got {type(self)}",
-#     )
-#     out_shape = self.shape
-#     if torch.is_tensor(other):
-#         out_shape = _broadcast_shapes(self.shape, other.shape)
-#     _, out_dtype = elementwise_dtypes(
-#         self, other, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-#     )
-#     return self.new_empty(out_shape, dtype=out_dtype)
-
-
 @register_meta([aten.convolution_backward.default])
 def meta_convolution_backward(
     grad_output_,
@@ -1168,12 +1162,8 @@ def meta_zero_(self):
 
 @register_meta(
     [
-        aten.add_.Scalar,
-        aten.sub_.Scalar,
         aten.mul_.Scalar,
         aten.div_.Scalar,
-        aten.add_.Tensor,
-        aten.sub_.Tensor,
         aten.mul_.Tensor,
         aten.div_.Tensor,
         aten.logical_and_.default,
@@ -1182,6 +1172,18 @@ def meta_zero_(self):
     ],
 )
 def meta_binop_inplace(self, other, alpha=None):
+    return self
+
+
+@register_meta(
+    [
+        aten.add_.Scalar,
+        aten.sub_.Scalar,
+        aten.add_.Tensor,
+        aten.sub_.Tensor,
+    ],
+)
+def meta_binop_inplace_alpha(self, other, alpha=1):
     return self
 
 
@@ -1494,12 +1496,6 @@ def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
 
 
-@register_meta(aten.scatter.value)
-def scatter_value(self, dim, index, value):
-    scatter_meta_impl(self, dim, index)
-    return self.new_empty(self.shape)
-
-
 # hacky: Please remove after math.ceil works with arange
 @register_meta(aten.arange.default)
 def arange(end, **kwargs):
@@ -1579,13 +1575,14 @@ def _to_copy(
     )
 
 
+# TODO: Deduplicate this with canonicalize_dim
 def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     if dim_post_expr <= 0:
         assert wrap_scalar
         dim_post_expr = 1
     min = -dim_post_expr
     max = dim_post_expr - 1
-    assert not (dim < min or dim > max)
+    assert not (dim < min or dim > max), f"dim {dim} out of bounds ({min}, {max})"
     if dim < 0:
         dim += dim_post_expr
     return dim
@@ -1728,53 +1725,10 @@ def scatter_meta_impl(self, dim, index, src=None, reduce_=None, use_new_options=
         get_operator_enum(reduce_, use_new_options)
 
 
-@register_meta([aten.scatter.src, aten.scatter_.src])
-def scatter__src_meta(self, dim, index, src):
-    wrapped_dim = maybe_wrap_dim(dim, self.dim())
-    scatter_gather_dtype_check("scatter", self, index, src)
-    scatter_shape_check(self, wrapped_dim, index, src)
-    return self.new_empty(self.shape)
-
-
 @register_meta(aten.scatter_add.default)
 def meta_scatter_add(self, dim, index, src):
     scatter_meta_impl(self, dim, index, src, "add")
     return self.new_empty(self.shape)
-
-
-@register_meta(aten.upsample_nearest2d.vec)
-def upsample_nearest2d_vec(input, output_size, scale_factors):
-    mem_format = utils.suggest_memory_format(input)
-    spatial_dimensions = input.dim() - 2
-
-    input_shape = input.shape
-    if output_size is not None:
-        assert scale_factors is None
-        out_size = output_size
-    elif scale_factors is not None:
-        assert output_size is None
-        out_size = []
-        for i in range(spatial_dimensions):
-            sym_float = (input_shape[i + 2] / 1) * scale_factors[i]
-            assert sym_float >= 0
-            out_size.append(math.floor(sym_float))
-
-    output_height = out_size[0]
-    output_width = out_size[1]
-    nbatch = input_shape[0]
-    channels = input_shape[1]
-    return input.new_empty((nbatch, channels, output_height, output_width)).to(
-        memory_format=mem_format
-    )
-
-
-@register_meta(aten.upsample_nearest2d_backward.vec)
-def upsample_nearest2d_backward_vec_meta(
-    grad_output, output_size, input_size, scale_factors
-):
-    mem_format = utils.suggest_memory_format(grad_output)
-    return grad_output.new_empty(input_size).to(memory_format=mem_format)
-
 
 def rnn_cell_checkSizes(
     input_gates, hidden_gates, input_bias, hidden_bias, factor, prev_hidden
@@ -1905,17 +1859,6 @@ def infer_dense_strides(tensor_sizes, tensor_strides):
     return out_strides
 
 
-@register_meta(aten.sort.default)
-def sort_meta(self, dim=-1, descending=False):
-    if utils.is_non_overlapping_and_dense(self):
-        strides = self.stride()
-    else:
-        strides = infer_dense_strides(self.shape, self.stride())
-    values = self.new_empty_strided(self.shape, strides)
-    indices = self.new_empty_strided(self.shape, strides, dtype=torch.long)
-    return (values, indices)
-
-
 @register_meta(aten.grid_sampler_2d_backward.default)
 def grid_sample_2d_backward_meta(
     grad_output,
@@ -1933,14 +1876,6 @@ def grid_sample_2d_backward_meta(
         grad_input = None
     grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
     return (grad_input, grad_grid)
-
-
-@register_meta(aten.upsample_bilinear2d_backward.vec)
-def upsample_bilinear2d_backward_vec_meta(
-    grad_output, output_size, input_size, align_corners, scale_factors
-):
-    mem_format = utils.suggest_memory_format(grad_output)
-    return grad_output.new_empty(input_size).to(memory_format=mem_format)
 
 
 @register_meta(aten.topk.default)
@@ -1964,6 +1899,70 @@ def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
     return torch.empty(
         (), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
+
+@register_meta(aten.scatter_add_)
+def meta_scatter_add_(self, dim, index, src):
+    scatter_meta_impl(self, dim, index, src, "add")
+    return self
+
+
+@register_meta(aten.scatter)
+@out_wrapper()
+def meta_scatter(self, dim, index, src_or_value, reduce=None):
+    src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
+    scatter_meta_impl(self, dim, index, src, reduce)
+    return self.new_empty(self.shape)
+
+
+@register_meta(aten.scatter_)
+def meta_scatter_(self, dim, index, src_or_value, reduce=None):
+    src = src_or_value if isinstance(src_or_value, torch.Tensor) else None
+    scatter_meta_impl(self, dim, index, src, reduce)
+    return self
+
+
+@register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
+@out_wrapper()
+def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
+    scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
+    return self.new_empty(self.shape)
+
+
+@register_meta(aten.scatter_reduce_.two)
+def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
+    scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
+    return self
+
+
+@register_meta(aten.upsample_nearest2d.vec)
+def upsample_nearest2d_vec(input, output_size, scale_factors):
+    mem_format = utils.suggest_memory_format(input)
+    spatial_dimensions = input.dim() - 2
+
+    input_shape = input.shape
+    if output_size is not None:
+        assert scale_factors is None
+        out_size = output_size
+    elif scale_factors is not None:
+        assert output_size is None
+        out_size = []
+        for i in range(spatial_dimensions):
+            sym_float = (input_shape[i + 2] / 1) * scale_factors[i]
+            assert sym_float >= 0
+            out_size.append(math.floor(sym_float))
+
+    output_height = out_size[0]
+    output_width = out_size[1]
+    nbatch = input_shape[0]
+    channels = input_shape[1]
+    return input.new_empty((nbatch, channels, output_height, output_width)).to(
+        memory_format=mem_format
+    )
+
+
+@register_meta([aten.sort.default, aten.sort.stable])
+def meta_sort(self, stable=None, dim=-1, descending=False):
+    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
 
 
 # We must also trigger meta registrations from PrimTorch ref
@@ -1999,10 +1998,7 @@ def activate_meta():
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
             pass
-        elif any(
-            a.alias_info is not None and not a.alias_info.is_write
-            for a in op_overload._schema.arguments
-        ):
+        elif op_overload.is_view:
             # Attempting to register a python meta kernel for a view operator.
             # We shouldn't do this, because the output will report as not having aliased storages.
             # All view ops have meta kernels in C++ today, so we should use those instead.
@@ -2011,7 +2007,6 @@ def activate_meta():
             "aten::empty_strided",  # causing infinite recursion, test_meta.py
             "aten::clone",  # causing infinite recursion
             "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
-            "aten::randn",  # pin_memory parameter is not supported!, test_proxy_tensor.py -k test_make_fx_symbolic_exhaustive_randn_cpu_float32  # noqa: B950
             "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
             "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
             "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950

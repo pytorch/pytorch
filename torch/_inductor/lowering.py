@@ -9,6 +9,7 @@ import sympy
 
 import torch
 import torch.fx
+import torch.utils._pytree as pytree
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -130,7 +131,7 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
         if isinstance(inp, Number):
             return inp
         else:
-            assert hasattr(inp, "get_dtype")
+            assert hasattr(inp, "get_dtype"), type(inp)
             dim = len(inp.get_size())
             # construct a tmp tensor to feed into torch.result_type
             return torch.zeros([1] * dim, dtype=inp.get_dtype())
@@ -965,11 +966,9 @@ def fallback_handler(kernel):
     fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
-        result = ir.FallbackKernel.create(kernel, *args, **kwargs)
-        if isinstance(result, (list, tuple)):
-            return list(map(TensorBox.create, result))
-        else:
-            return TensorBox.create(result)
+        return pytree.tree_map(
+            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
+        )
 
     return handler
 
@@ -993,12 +992,10 @@ def native_dropout(x, p, train):
         config.fallback_random
     ), "this should be handled in decomps unless config.fallback_random"
     if train:
-        return list(
-            map(
-                TensorBox.create,
-                ir.FallbackKernel.create(aten.native_dropout, x, p, train),
-            )
+        return pytree.tree_map(
+            TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
         )
+
     return x, ones_like(x, dtype=torch.bool)
 
 
@@ -1143,7 +1140,6 @@ if has_torchvision_roi_align():
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
-make_fallback(aten.as_strided_scatter)
 make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
@@ -1893,6 +1889,14 @@ def index_put_(self, indices, values, accumulate=False):
     return self
 
 
+@register_lowering(aten.as_strided_scatter, type_promotion_kind=None)
+def as_strided_scatter(self, src, size, stride, storage_offset=None):
+    output = clone(self)
+    output_view = as_strided(output, size, stride, storage_offset)
+    copy_(output_view, src)
+    return output
+
+
 @register_lowering(aten.scatter, type_promotion_kind=None)
 def scatter(x, dim: int, index, src, **kwargs):
     return scatter_(clone(x), dim, index, src, **kwargs)
@@ -2021,20 +2025,20 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     return self
 
 
-def upsample_nearestnd(x, output_size=None, scale_factors=None, n=2):
+def upsample_nearestnd(x, output_size, scales_x: Tuple[float] = None, n: int = 2):
     x.realize_hint()  # elements are reused
     x_loader = x.make_loader()
     i_sizes = x.get_size()[-n:]
     batch = x.get_size()[:-n]
     i_sizes = [V.graph.sizevars.guard_static_shape(i) for i in i_sizes]
 
-    if scale_factors:
-        assert not output_size
-        o_sizes = [int(i * s) for i, s in zip(i_sizes, scale_factors)]
-    else:
-        o_sizes = output_size
+    assert len(scales_x) == n
+    o_sizes = output_size
 
     scales = [i / o for i, o in zip(i_sizes, o_sizes)]
+    for i, scale in enumerate(scales):
+        if scale:
+            scales[i] = scale
 
     def scale(x, scale):
         x = ops.index_expr(x, torch.float32)
@@ -2055,9 +2059,27 @@ def upsample_nearestnd(x, output_size=None, scale_factors=None, n=2):
     )
 
 
-register_lowering(aten.upsample_nearest1d)(functools.partial(upsample_nearestnd, n=1))
-register_lowering(aten.upsample_nearest2d)(functools.partial(upsample_nearestnd, n=2))
-register_lowering(aten.upsample_nearest3d)(functools.partial(upsample_nearestnd, n=3))
+@register_lowering(aten.upsample_nearest1d.default)
+def upsample_nearest1d(x, output_size, scales: Optional[float] = None):
+    return upsample_nearestnd(x, output_size, (scales,), n=1)
+
+
+@register_lowering(aten.upsample_nearest2d.default)
+def upsample_nearest2d(
+    x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
+):
+    return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2)
+
+
+@register_lowering(aten.upsample_nearest3d.default)
+def upsample_nearest3d(
+    x,
+    output_size,
+    scales_d: Optional[float] = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+):
+    return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
 
 
 @register_lowering(aten.upsample_bicubic2d.default)
@@ -2173,26 +2195,6 @@ def upsample_bicubic2d_default(
         inner_fn=fn,
         ranges=[N, C, sympy.Integer(oH), sympy.Integer(oW)],
     )
-
-
-@register_lowering(aten.upsample_bicubic2d.vec)
-def upsample_bicubic2d_vec(
-    a,
-    output_size,
-    align_corners: bool,
-    scale_factors: Optional[Tuple[float, float]] = None,
-):
-    _, _, iH, iW = a.get_size()
-    iH = V.graph.sizevars.guard_static_shape(iH)
-    iW = V.graph.sizevars.guard_static_shape(iW)
-
-    if bool(output_size) + bool(scale_factors) != 1:
-        raise RuntimeError("Must specify exactly one of output_size and scale_factor.")
-    if output_size is None:
-        assert scale_factors is not None
-        output_size = (int(iH * scale_factors[0]), int(iW * scale_factors[1]))
-    scale_h, scale_w = scale_factors if scale_factors else (None, None)
-    return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
 @register_lowering(aten.reflection_pad2d)
@@ -2712,9 +2714,9 @@ def _adaptive_avg_pool2d(x, output_size):
     return rv
 
 
-@register_lowering(aten.upsample_nearest2d_backward.vec)
+@register_lowering(aten.upsample_nearest2d_backward.default)
 def upsample_nearest2d_backward(
-    x, output_size=None, input_size=None, scale_factors=None
+    x, output_size=None, input_size=None, scales_h=None, scales_w=None
 ):
     x.realize_hint()
 
@@ -2995,7 +2997,7 @@ def _validate_reduction_axis(x, axis):
     axis = list(axis)
     for i in range(len(axis)):
         if axis[i] < 0:
-            axis[i] += len(size)
+            axis[i] += len(size) if len(size) else 1
         assert 0 <= axis[i] < len(size) or (len(size) == 0 and axis[i] == 0)
     assert len(set(axis)) == len(axis), "reduction axis not unique"
     return axis
@@ -3292,6 +3294,23 @@ def div_prim(a, b):
         return div(a, b)
 
 
+@register_lowering([aten.fmod, prims.fmod])
+def fmod(a, b):
+    is_integral = is_boolean_type(a) or is_integer_type(a)
+
+    if is_integral:
+
+        def fn(a, b):
+            return ops.mod(a, b)
+
+    else:
+
+        def fn(a, b):
+            return ops.fmod(a, b)
+
+    return make_pointwise(fn)(a, b)
+
+
 # TODO - enable builtin and disable decomp to lower to ptx instruction
 # Causes compilation to not complete on timm_vision_transformers inference
 # @register_lowering(aten.rsqrt)
@@ -3384,7 +3403,6 @@ register_pointwise(
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
-register_pointwise(aten.fmod)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
 register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)

@@ -1,157 +1,30 @@
-import copy
-import functools
 import itertools
-import math
-import numbers
 import operator
 from typing import Dict, List
 
 import torch.fx
 import torch.random
 
-from ..utils import fake_tensors_available
-
-if fake_tensors_available:
-    from torch._subclasses import FakeTensor
-    from torch._subclasses.fake_tensor import (
-        DataDependentOutputException,
-        DynamicOutputShapeException,
-    )
-    from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor_and_record
-
-from torch._dispatch.python import enable_python_dispatcher
-from torch.fx.immutable_collections import immutable_list
-from torch.utils._pytree import tree_map
-
 from .. import config, variables
-from ..exc import TorchRuntimeError, unimplemented, Unsupported
+from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
+
 from ..utils import (
-    clone_input,
-    is_lazy_module,
-    istype,
-    preserve_rng_state,
+    fake_tensors_available,
+    get_fake_value,
+    get_real_value,
     product,
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import MutableLocal, typestr, VariableTracker
+from .base import VariableTracker, wrap_fx_proxy
 from .constant import ConstantVariable
 from .lists import ShapeVariable, SizeVariable
 
 
 class _missing:
     pass
-
-
-def _run_node(output_graph, node, args, kwargs, nnmodule):
-    op = node.op
-    try:
-        if op == "call_function":
-            return node.target(*args, **kwargs)
-        elif op == "call_method":
-            return getattr(args[0], node.target)(*args[1:], **kwargs)
-        elif op == "call_module":
-            assert nnmodule is not None
-            return nnmodule(*args, **kwargs)
-        elif op == "get_attr":
-            return output_graph.get_submodule(node.target)
-    except Exception as e:
-        raise RuntimeError(
-            f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
-        ) from e
-    raise AssertionError(op)
-
-
-def _get_real_value(node, output_graph):
-    """
-    Run the actual computation represented by `node` and return the result.
-    This will execute any dependent nodes in the graph as well.
-    """
-    cache = output_graph.real_value_cache
-    if node in cache:
-        return cache[node]
-
-    op = node.op
-    args, kwargs = torch.fx.node.map_arg(
-        (node.args, node.kwargs),
-        lambda n: _get_real_value(n, output_graph),
-    )
-
-    if op == "call_module":
-        nn_module = output_graph.nn_modules[node.target]
-        if not is_lazy_module(nn_module):
-            nn_module = copy.deepcopy(nn_module)
-        else:
-            # In the case of a lazy module, we want to run
-            # the pre-hooks which initialize it
-            nn_module(*args, **kwargs)
-    else:
-        nn_module = None
-
-    try:
-        real_value = _run_node(output_graph, node, args, kwargs, nn_module)
-        cache[node] = real_value
-    except RuntimeError as e:
-        raise TorchRuntimeError() from e
-    return real_value
-
-
-def _get_fake_value(node, tx):
-    """
-    Run the computation represented by `node` using fake tensors and return the result.
-    """
-    op = node.op
-    fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
-    from ..utils import wrap_fake_exception
-
-    def visit(n: torch.fx.Node):
-        return n.meta["example_value"]
-
-    args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
-    args = tree_map(fake_wrapper, args)
-    kwargs = tree_map(fake_wrapper, kwargs)
-
-    nnmodule = None
-    if op == "call_module":
-        nnmodule = tx.output.nn_modules[node.target]
-
-        if not is_lazy_module(nnmodule):
-            nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
-
-    if op == "call_module" and is_lazy_module(nnmodule):
-        assert nnmodule is not None
-        # In the case of a lazy module, we want to run
-        # the pre-hooks which initialize it
-        nnmodule(*args, **kwargs)
-    try:
-        with tx.fake_mode, enable_python_dispatcher():
-            return wrap_fake_exception(
-                lambda: _run_node(tx.output, node, args, kwargs, nnmodule)
-            )
-    except Unsupported:
-        raise
-    except RuntimeError as e:
-        if isinstance(e, DataDependentOutputException):
-            if config.capture_scalar_outputs and node.target == "item":
-                return torch.zeros(size=(), dtype=args[0].dtype).item()
-            else:
-                unimplemented(f"data dependent operator: {e.func}")
-        elif isinstance(e, DynamicOutputShapeException):
-            unimplemented(f"dynamic shape operator: {e.func}")
-        raise
-
-
-def _clone_input(value):
-    if isinstance(value, torch.Tensor):
-        use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
-        # tensor subclasses will not be converted to FakeTensors and need to be cloned
-        if not use_fake_tensors or not isinstance(value, FakeTensor):
-            # NB: ensure strides are preserved
-            value = clone_input(value)
-
-    return value
 
 
 class TensorVariable(VariableTracker):
@@ -176,172 +49,7 @@ class TensorVariable(VariableTracker):
         NOTE: this runs actual tensor computation and may be
         slow and memory-intensive.
         """
-        return _get_real_value(self.proxy.node, self.proxy.tracer)
-
-    @classmethod
-    def create(cls, tx, proxy, example_value=None, **options):
-        if "guards" in options and options["guards"] is not None:
-            tx.output.guards.update(options["guards"])
-
-        assert "example_value" not in proxy.node.meta
-        if not config.dynamic_propagation:
-            if isinstance(example_value, torch.Tensor):
-                options.update(cls.specialize(example_value))
-            return cls(proxy, **options)
-
-        use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
-
-        initial_example_value = example_value
-
-        with preserve_rng_state():
-            if example_value is None:
-                if use_fake_tensors:
-                    example_value = _get_fake_value(proxy.node, tx)
-                else:
-                    example_value = _get_real_value(proxy.node, tx.output)
-
-            else:
-                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
-                if use_fake_tensors:
-                    fake_wrapper = functools.partial(
-                        wrap_to_fake_tensor_and_record, tx=tx
-                    )
-                    example_value = fake_wrapper(example_value)
-
-        if isinstance(example_value, torch.Tensor):
-            is_parameter = isinstance(example_value, torch.nn.Parameter)
-            should_specialize = options.pop("should_specialize", False)
-            if is_parameter or should_specialize:
-                specialized_value = initial_example_value
-            else:
-                specialized_value = None
-
-            example_value = _clone_input(example_value)
-            proxy.node.meta["example_value"] = example_value
-            specialized_props = cls.specialize(example_value)
-            if use_fake_tensors and isinstance(example_value, FakeTensor):
-                specialized_props["class_type"] = (
-                    torch.nn.Parameter if is_parameter else torch.Tensor
-                )
-
-            specialized_props["specialized_value"] = specialized_value
-
-            options.update(specialized_props)
-            return cls(proxy, **options)
-        elif (
-            hasattr(proxy.node.target, "__name__")
-            and proxy.node.target.__name__ == "set_state"
-            and isinstance(proxy.node.target.__self__, torch._C.Generator)
-            or proxy.node.target == torch.random.set_rng_state
-        ):
-            from . import TorchVariable
-
-            return TorchVariable(proxy.node.target)
-        elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
-            proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable.create(tx, proxy, example_value, **options)
-        elif istype(example_value, torch.Size) and config.dynamic_shapes:
-            proxy.node.meta["example_value"] = example_value
-            sizes = []
-            for i, v in enumerate(example_value):
-                proxy_i = proxy[i]
-                sizes.append(DynamicShapeVariable.create(tx, proxy_i, v, **options))
-            return SizeVariable(sizes, proxy, **options)
-        elif istype(example_value, int) and proxy.node.target in (
-            torch.seed,
-            operator.mod,
-            # some mac builds are missing torch.distributed.get_rank()
-            getattr(torch.distributed, "get_rank", _missing),
-            getattr(torch.distributed, "get_world_size", _missing),
-        ):
-            proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable.create(tx, proxy, example_value, **options)
-        elif istype(example_value, torch.Size) and all(
-            [isinstance(x, int) for x in example_value]
-        ):
-            sizes = [variables.ConstantVariable(x) for x in example_value]
-            return SizeVariable(sizes, **options)
-        elif isinstance(example_value, (tuple, list)):
-            unpacked = []
-            for i, val in enumerate(example_value):
-                if val is None:
-                    # nn.MultiheadAttention() can return None, see issue #175
-                    unpacked.append(
-                        variables.ConstantVariable(None, **options),
-                    )
-                else:
-                    unpacked.append(
-                        cls.create(
-                            tx,
-                            proxy.tracer.create_proxy(
-                                "call_function", operator.getitem, (proxy, i), {}
-                            ),
-                            example_value=val,
-                            **options,
-                        )
-                    )
-            if istype(example_value, tuple):
-                return variables.TupleVariable(unpacked, **options)
-            elif istype(example_value, (list, immutable_list)):
-                return variables.ListVariable(
-                    unpacked, mutable_local=MutableLocal(), **options
-                )
-            else:
-                assert (
-                    example_value.__class__.__module__ == "torch.return_types"
-                    or hasattr(example_value, "_fields")
-                ), "namedtuple?"
-                return variables.NamedTupleVariable(
-                    unpacked, example_value.__class__, **options
-                )
-        elif example_value is None or proxy.node.target is torch.manual_seed:
-            return variables.ConstantVariable(None, **options)
-        elif (
-            isinstance(example_value, int)
-            and proxy.node.target is torch._utils._element_size
-        ):
-            proxy.node.meta["example_value"] = example_value
-            return variables.ConstantVariable(example_value, **options)
-        elif (
-            isinstance(example_value, numbers.Number)
-            and (
-                proxy.node.target == "item"
-                or proxy.node.target in {math.sqrt, math.pow}
-            )
-            and config.capture_scalar_outputs
-        ):
-            if use_fake_tensors:
-                # item raw value should not be accessed
-                return FakeItemVariable.create(
-                    tx=tx,
-                    proxy=proxy,
-                    example_value=torch.tensor(example_value),
-                    **options,
-                )
-            else:
-                return UnspecializedPythonVariable.create(
-                    tx=tx,
-                    proxy=proxy,
-                    example_value=torch.tensor(example_value),
-                    raw_value=None if use_fake_tensors else example_value,
-                    need_unwrap=False,
-                    **options,
-                )
-        elif (
-            proxy.node.target == torch._C._DisableFuncTorch
-            or proxy.node.target == torch.cuda._is_in_bad_fork
-        ):
-            from . import UserDefinedObjectVariable
-
-            return UserDefinedObjectVariable(example_value)
-        elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
-            proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable(proxy, example_value, **options)
-        else:
-            raise AssertionError(
-                "torch.* op returned non-Tensor "
-                + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
-            )
+        return get_real_value(self.proxy.node, self.proxy.tracer)
 
     def __init__(
         self,
@@ -565,10 +273,10 @@ class TensorVariable(VariableTracker):
                     fake_tensors_available and config.fake_tensor_propagation
                 )
                 if use_fake_tensors:
-                    example_value = _get_fake_value(self.proxy.node, tx)
+                    example_value = get_fake_value(self.proxy.node, tx)
                 else:
-                    example_value = _get_real_value(self.proxy.node, tx.output).item()
-                return self.__class__.create(
+                    example_value = get_real_value(self.proxy.node, tx.output).item()
+                return wrap_fx_proxy(
                     tx,
                     tx.output.create_proxy(
                         "call_method", "item", (self.as_proxy(),), {}, current_tx=tx
@@ -583,7 +291,7 @@ class TensorVariable(VariableTracker):
                 assert not config.dynamic_shapes
                 return ConstantVariable(self.size[0], **options)
             else:
-                return self.__class__.create(
+                return wrap_fx_proxy(
                     tx,
                     tx.output.create_proxy(
                         "call_function", len, (self.as_proxy(),), {}, current_tx=tx
@@ -609,7 +317,7 @@ class TensorVariable(VariableTracker):
                 and not config.dynamic_shapes
             ):
                 name = "new_empty"
-            return self.__class__.create(
+            return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
                     "call_method",
@@ -631,7 +339,7 @@ class DynamicShapeVariable(VariableTracker):
         if "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == dyn_shape
         if dyn_shape is None:
-            dyn_shape = _get_fake_value(proxy.node, tx)
+            dyn_shape = get_fake_value(proxy.node, tx)
         proxy.node.meta["example_value"] = dyn_shape
         return DynamicShapeVariable(proxy, dyn_shape, **options)
 
@@ -650,8 +358,7 @@ class DynamicShapeVariable(VariableTracker):
         return self.proxy
 
     def evaluate_expr(self, output_graph):
-        if isinstance(self.dyn_shape, bool):
-            # Bool and 0/1 case fallthrough
+        if not isinstance(self.dyn_shape, torch.SymInt):
             return self.dyn_shape
         return output_graph.shape_env.evaluate_expr(self.dyn_shape.get_pyobj().expr)
 
@@ -664,7 +371,7 @@ class DynamicShapeVariable(VariableTracker):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        return self.__class__.create(
+        return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
                 "call_method",
@@ -672,7 +379,6 @@ class DynamicShapeVariable(VariableTracker):
                 *proxy_args_kwargs([self] + list(args), kwargs),
                 current_tx=tx,
             ),
-            dyn_shape=None,
             **options,
         )
 

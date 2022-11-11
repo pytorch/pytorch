@@ -295,55 +295,20 @@ CHECK_STRIDES_SKIPS = {
     aten._fft_r2c.default,
     aten._linalg_svd.default,
     aten._scaled_dot_product_attention_forward.default,
-    aten.add.Tensor,
-    aten.atan2.default,
     aten.binary_cross_entropy.default,
-    aten.bitwise_and.Tensor,
-    aten.bitwise_left_shift.Tensor,
-    aten.bitwise_or.Tensor,
-    aten.bitwise_right_shift.Tensor,
-    aten.bitwise_xor.Tensor,
-    aten.clamp_max.Tensor,
-    aten.clamp_min.Tensor,
     aten.complex.default,
     aten.copysign.Tensor,
     aten.div.Tensor_mode,
-    aten.div.Tensor,
-    aten.eq.Tensor,
     aten.floor_divide.default,
-    aten.fmax.default,
-    aten.fmin.default,
-    aten.fmod.Tensor,
-    aten.gcd.default,
-    aten.ge.Tensor,
-    aten.gt.Tensor,
     aten.heaviside.default,
-    aten.hypot.default,
-    aten.igamma.default,
-    aten.igammac.default,
-    aten.lcm.default,
-    aten.le.Tensor,
     aten.lerp.Scalar,
     aten.lerp.Tensor,
     aten.logical_and.default,
     aten.logical_or.default,
     aten.logical_xor.default,
-    aten.lt.Tensor,
-    aten.maximum.default,
-    aten.minimum.default,
-    aten.mul.Tensor,
-    aten.ne.Tensor,
-    aten.nextafter.default,
     aten.pow.Scalar,
-    aten.pow.Tensor_Scalar,
-    aten.pow.Tensor_Tensor,
     aten.prelu.default,
-    aten.remainder.Tensor,
-    aten.rsub.Tensor,
     aten.special_xlog1py.default,
-    aten.special_zeta.default,
-    aten.sub.Tensor,
-    aten.where.self,
     aten.xlogy.Tensor,
 
     # channel_last and channel_last_3d related failures
@@ -784,7 +749,6 @@ meta_function_device_expected_failures_only_outplace['cuda'] = {
 }
 
 meta_function_device_skips['cpu'] = {
-    torch.narrow_copy: {b8, bf16, c128, c32, c64, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.native_batch_norm: {f32, f64},
 }
 
@@ -1380,6 +1344,4 @@ if __name__ == "__main__":
                 print_op_str_if_not_supported(op_str.strip())
         sys.exit(0)
 
-    import torch._dispatch.python as d
-    with d.enable_python_dispatcher():
-        run_tests()
+    run_tests()

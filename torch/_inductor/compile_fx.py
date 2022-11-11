@@ -171,7 +171,8 @@ def align_inputs(model, inputs, static_input_idxs=()):
     check_inputs = [
         i
         for i in range(len(inputs))
-        if (i not in static_input_idxs or (inputs[i].data_ptr() % ALIGNMENT) != 0)
+        # TODO: static inputs should not be passed in as fake tensor
+        if (i not in static_input_idxs or isinstance(inputs[i], FakeTensor) or (isinstance(inputs[i], torch.Tensor) and inputs[i].data_ptr() % ALIGNMENT) != 0)
         and inputs[i].device.type == "cuda"
     ]
 

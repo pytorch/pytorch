@@ -8,6 +8,7 @@
 
 from unittest.mock import patch
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64, IS_WINDOWS
+import os
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -967,7 +968,6 @@ aot_autograd_failures = {
     xfail('linalg.eig'),
     xfail('scatter_reduce', 'prod'),
 
-    # non-deterministic
     skip('as_strided_scatter'),
 
     # Too annoying to generate random inputs
@@ -986,6 +986,9 @@ aot_autograd_failures = {
     skip('linalg.householder_product'),  # flaky
     decorate('matmul', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
     decorate('__rmatmul__', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
+
+    # SEGFAULTS
+    skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
 }
 
 symbolic_aot_autograd_failures = {
@@ -995,7 +998,6 @@ symbolic_aot_autograd_failures = {
     xfail('amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
-    xfail('bernoulli', ''),  # aten.bernoulli.default - couldn't find symbolic meta function/decomposition
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cartesian_prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('cdouble'),  # RuntimeError: aten.view_as_real.default - couldn't find symbolic meta function/decomposition
@@ -1121,7 +1123,6 @@ symbolic_aot_autograd_failures = {
     xfail('mvlgamma', 'mvlgamma_p_5'),  # aten.digamma_.default - couldn't find symbolic meta function/decom...
 
     # Deleting this in a followup
-    xfail('nn.functional.feature_alpha_dropout', 'with_train'),
     xfail('nn.functional.poisson_nll_loss', ''),
 
     xfail('nn.functional._scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
@@ -1130,7 +1131,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbo...
     xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2...
     xfail('nn.functional.avg_pool3d', ''),  # aten.avg_pool3d.default - couldn't find symbolic meta function/...
-    skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail('nn.functional.bilinear', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
     xfail('nn.functional.cosine_embedding_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/st...
@@ -1143,7 +1143,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.grid_sample', ''),  # prims::arange() Expected a value of type 'number' for argument...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.hinge_embedding_loss', ''),  # aten.zeros_like.default - couldn't find symbolic meta...
-    xfail('nn.functional.huber_loss', ''),  # Unable to cast Python instance to C++ type (#define PYBIND11_DE...
     xfail('nn.functional.interpolate', 'area'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'bicubic'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1197,14 +1196,9 @@ symbolic_aot_autograd_failures = {
     xfail('round', 'decimals_0'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
     xfail('round', 'decimals_3'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
     xfail('round', 'decimals_neg_3'),  # aten.round.decimals - couldn't find symbolic meta function/decompos...
-    xfail('scatter_reduce', 'amax'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decom...
-    xfail('scatter_reduce', 'amin'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decom...
-    xfail('scatter_reduce', 'mean'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decom...
-    xfail('scatter_reduce', 'sum'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decomp...
     xfail('segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('sort', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
     xfail('std', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
@@ -1299,6 +1293,10 @@ def _test_aot_autograd_helper(self, device, dtype, op):
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
 
+combined_symbolic_aot_autograd_failures = aot_autograd_failures
+if not os.environ.get('SUPPRESS_XFAILS', False):
+    combined_symbolic_aot_autograd_failures |= symbolic_aot_autograd_failures
+
 class TestEagerFusionOpInfo(AOTTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', aot_autograd_failures)
@@ -1311,7 +1309,7 @@ class TestEagerFusionOpInfo(AOTTestCase):
     @patch("functorch.compile.config.use_fake_tensor", True)
     @patch("functorch.compile.config.use_functionalize", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
-             aot_autograd_failures | symbolic_aot_autograd_failures)
+             combined_symbolic_aot_autograd_failures)
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 

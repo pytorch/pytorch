@@ -158,7 +158,7 @@ at::_ops::${unambiguous_name}::call(${unpacked_args})"""
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate(
     """\
 std::function<at::Tensor(const at::Tensor&)> func=nullptr;
-if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided() || true) {
+if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided()) {
   ${replay_view_func}
 }
 """

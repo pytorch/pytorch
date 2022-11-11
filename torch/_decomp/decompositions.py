@@ -717,7 +717,7 @@ def _softmax_backward_data(
     grad_input = new_grad_output - output * torch.sum(
         new_grad_output, dim=dim, keepdim=True
     )
-    return _cast_grad_to_input_dtype(grad_output, grad_input, input_dtype)
+    return _cast_grad_to_input_dtype(grad_output, grad_input, input_dtype).contiguous()
 
 
 @register_decomposition(aten._log_softmax_backward_data)

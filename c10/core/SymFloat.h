@@ -35,10 +35,10 @@ class C10_API SymFloat {
     return data_;
   }
 
-  SymFloat operator+(SymFloat) const;
-  SymFloat operator-(SymFloat) const;
-  SymFloat operator*(SymFloat) const;
-  SymFloat operator/(SymFloat) const;
+  SymFloat operator+(const SymFloat&) const;
+  SymFloat operator-(const SymFloat&) const;
+  SymFloat operator*(const SymFloat&) const;
+  SymFloat operator/(const SymFloat&) const;
 
   // Insert a guard for the float to be its concrete value, and then return
   // that value.  This operation always works, even if the float is symbolic,
@@ -67,5 +67,5 @@ class C10_API SymFloat {
   SymNode ptr_;
 };
 
-C10_API std::ostream& operator<<(std::ostream& os, SymFloat s);
+C10_API std::ostream& operator<<(std::ostream& os, const SymFloat& s);
 } // namespace c10

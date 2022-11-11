@@ -73,22 +73,6 @@ unittest.expectedFailure(
     # Cannot call sizes() on tensor with symbolic sizes/strides
 )
 
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_reformer_sorting_dynamic_shapes
-    # Unable to cast Python instance to C++ type
-)
-
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_guard_fail_tensor_bool_dynamic_shapes
-    # RuntimeError: aten.allclose.default - couldn't find symbolic meta function/decomposition
-)
-
-# DynamicShapesMiscTests
-unittest.expectedFailure(
-    DynamicShapesMiscTests.test_unsupported_fake_tensor_dynamic_shapes
-    # aten.quantize_per_tensor.default - couldn't find symbolic meta function/decomposition
-)
-
 # DynamicShapesExportTests
 unittest.expectedFailure(
     DynamicShapesExportTests.test_export_with_constant_list_nonzero_dynamic_shapes
@@ -99,12 +83,39 @@ unittest.expectedFailure(
 unittest.expectedFailure(
     DynamicShapesExportTests.test_export_with_constant_tuple_nonzero_dynamic_shapes
 )
+unittest.expectedFailure(
+    DynamicShapesExportTests.test_export_with_constant_tuple_nonzero_dynamic_shapes
+)
+
 
 # DynamicShapesSubGraphTests
 unittest.expectedFailure(
     DynamicShapesSubGraphTests.test_enumerate_not_break_graph_dynamic_shapes
 )
 unittest.expectedFailure(DynamicShapesSubGraphTests.test_restore_state_dynamic_shapes)
+
+# DynamicShapesUnspecTests
+# Missing decomp
+# RuntimeError: Failed running call_function <function batch_norm at 0x7f7d1ce38310>
+# (*(FakeTensor(FakeTensor(..., device='meta', size=(5, 1, 28, 28)), cpu),
+# FakeTensor(FakeTensor(..., device='meta', size=(1,)), cpu),
+#  FakeTensor(FakeTensor(..., device='meta', size=(1,)), cpu),
+#  FakeTensor(Parameter(FakeTensor(..., device='meta', size=(1,),
+#  requires_grad=True)), cpu),
+#  FakeTensor(Parameter(FakeTensor(..., device='meta', size=(1,),
+#  requires_grad=True)), cpu), False, 0.1,
+# FakeTensor(FakeTensor(..., device='meta', size=()), cpu)), **{}):
+# aten._local_scalar_dense.default
+unittest.expectedFailure(test_unspec.UnspecReproTests.test_batch_norm_act_unspec)
+
+unittest.expectedFailure(
+    test_no_fake_tensors.NoFakeTensorsMiscTests.test_onnx_shape_as_tensor_no_fake_tensors
+)
+
+# SymIntArrayRef expected to contain only concrete integers
+unittest.expectedFailure(
+    DynamicShapesUnspecTests.test_unspec_float_precision_dynamic_shapes
+)
 
 
 if __name__ == "__main__":

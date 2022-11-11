@@ -341,3 +341,4 @@ venv/
 
 # Log files
 *.log
+*.csv
