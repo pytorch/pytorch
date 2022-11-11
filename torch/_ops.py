@@ -246,6 +246,19 @@ class OpOverload(PyOperatorABC):
         # NB: This name is hard-coded in torch/csrc/autograd/python_variable.cpp
         self._dispatch_cache = {}
 
+        # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
+        is_write = None
+        for a in self._schema.arguments:
+            if a.alias_info is None:
+                continue
+            if is_write is None:
+                is_write = a.alias_info.is_write
+            else:
+                # We will conservatively call mixed mutable/non-mutable
+                # aliased inputs as NOT a view
+                is_write = a.alias_info.is_write or is_write
+        self.is_view = is_write is not None and not is_write
+
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
@@ -338,8 +351,8 @@ class OpOverload(PyOperatorABC):
             self._dispatch_cache[key] = handler
             return handler
 
-        key = resolve_key(self, key)
-        r = self.py_kernels.get(key, key)
+        final_key = resolve_key(self, key)
+        r = self.py_kernels.get(final_key, final_key)
         self._dispatch_cache[key] = r
         return r
 

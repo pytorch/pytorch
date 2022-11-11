@@ -14,7 +14,11 @@ from torch.distributed.fsdp._common_utils import (
     _is_composable,
     TrainingState,
 )
-from torch.distributed.fsdp._utils import _apply_to_tensors, p_assert
+from torch.distributed.fsdp._utils import (
+    _apply_to_tensors,
+    _no_dispatch_record_stream,
+    p_assert,
+)
 from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.fsdp.flat_param import (
     _HandlesKey,
@@ -533,8 +537,12 @@ def _post_backward_hook(
                 numel_to_pad = (
                     state.world_size * chunks[0].numel() - unsharded_grad.numel()
                 )
-                padded_unsharded_grad = F.pad(unsharded_grad, [0, numel_to_pad])
-                new_sharded_grad = torch.zeros_like(chunks[0])  # padded
+                padded_unsharded_grad = (
+                    F.pad(unsharded_grad, [0, numel_to_pad])
+                    if numel_to_pad > 0
+                    else unsharded_grad
+                )
+                new_sharded_grad = torch.empty_like(chunks[0])  # padded
                 state._communication_hook(
                     state._communication_hook_state,
                     padded_unsharded_grad,
@@ -572,12 +580,16 @@ def _post_backward_hook(
                 # Since the sharded gradient is produced in the post-backward
                 # stream and consumed later in the computation stream, inform
                 # the caching allocator
-                sharded_grad.data.record_stream(torch.cuda.current_stream())
+                _no_dispatch_record_stream(
+                    sharded_grad.data, torch.cuda.current_stream()
+                )
 
             # Since the unsharded gradient is produced in the computation
             # stream and consumed in the post-backward stream, inform the
             # caching allocator (before it goes out of scope)
-            unsharded_grad_data.record_stream(state._streams["post_backward"])
+            _no_dispatch_record_stream(
+                unsharded_grad_data, state._streams["post_backward"]
+            )
 
             if handle._use_orig_params:
                 # Since the handle's `FlatParameter` completed its gradient
@@ -630,7 +642,7 @@ def _cast_grad_to_param_dtype(
         # caching allocator; for the sharded strategies, the gradient is
         # produced in the post-backward stream, so this `record_stream()`
         # should be a no-op
-        low_prec_grad_data.record_stream(torch.cuda.current_stream())
+        _no_dispatch_record_stream(low_prec_grad_data, torch.cuda.current_stream())
 
 
 def _check_comm_hook(
