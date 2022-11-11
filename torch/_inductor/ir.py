@@ -3490,14 +3490,12 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
     def __init__(
         self,
         kernel_layout,
-        inputs_layout,
         inputs,
         constant_args=(),
         kernel="torch.ops.mkldnn._convolution_pointwise_.binary",
     ):
         super().__init__(kernel_layout, inputs, constant_args)
         self.kernel = kernel
-        self.inputs_layout = inputs_layout
 
     def codegen(self, wrapper):
         wrapper.writeline(
@@ -3526,7 +3524,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         unary_algorithm: Optional[str],
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise_.binary"
-        (inputs, constant_args, inputs_layout, _) = _prepare_convolution_fusion_create(
+        (inputs, constant_args, _, _) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
         other = cls.realize_input(other)
@@ -3541,7 +3539,6 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         ]
         return ConvolutionBinaryInplace(
             kernel_layout=MutationLayout(inputs[1]),
-            inputs_layout=inputs_layout,
             inputs=inputs,
             constant_args=constant_args,
             kernel=kernel,
