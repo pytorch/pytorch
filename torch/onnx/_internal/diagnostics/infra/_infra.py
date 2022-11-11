@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-from typing import Any, FrozenSet, List, Optional, Sequence, Set, Tuple, Type, TypeVar
+from typing import FrozenSet, List, Optional, Sequence, Tuple, Type, TypeVar
 
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
 
@@ -32,6 +32,21 @@ class Tag(enum.Enum):
     pass
 
 
+class PatchedPropertyBag(sarif.PropertyBag):
+    """Key/value pairs that provide additional information about the object.
+
+    The definition of PropertyBag via SARIF spec is "A property bag is an object (§3.6)
+    containing an unordered set of properties with arbitrary names." However it is not
+    reflected in the json file, and therefore not captured by the python representation.
+    This patch adds additional **kwargs to the `__init__` method to allow recording
+    arbitrary key/value pairs.
+    """
+
+    def __init__(self, tags: Optional[List[str]] = None, **kwargs):
+        super().__init__(tags=tags)
+        self.__dict__.update(kwargs)
+
+
 @dataclasses.dataclass(frozen=True)
 class Rule:
     id: str
@@ -43,7 +58,7 @@ class Rule:
     help_uri: Optional[str] = None
 
     @classmethod
-    def from_sarif(cls, **kwargs) -> Rule:
+    def from_sarif(cls, **kwargs):
         """Returns a rule from the SARIF reporting descriptor."""
         short_description = kwargs.get("short_description", {}).get("text")
         full_description = kwargs.get("full_description", {}).get("text")
@@ -69,7 +84,9 @@ class Rule:
             else None
         )
         full_description = (
-            sarif.MultiformatMessageString(text="", markdown=self.full_description)
+            sarif.MultiformatMessageString(
+                text=self.full_description, markdown=self.full_description_markdown
+            )
             if self.full_description is not None
             else None
         )
@@ -80,6 +97,15 @@ class Rule:
             full_description=full_description,
             help_uri=self.help_uri,
         )
+
+    def format_message(self, *args, **kwargs) -> str:
+        """Returns the formatted default message of this Rule.
+
+        This method should be overridden (with code generation) by subclasses to reflect
+        the exact arguments needed by the message template. This is a helper method to
+        create the default message for a diagnostic.
+        """
+        return self.message_default_template.format(*args, **kwargs)
 
 
 @dataclasses.dataclass
@@ -143,20 +169,39 @@ _Diagnostic = TypeVar("_Diagnostic", bound="Diagnostic")
 
 
 @dataclasses.dataclass
+class Graph:
+    """A graph of diagnostics.
+
+    This class stores the string representation of a model graph.
+    The `nodes` and `edges` fields are unused in the current implementation.
+    """
+
+    graph_str: str
+    name: str
+    description: Optional[str] = None
+
+    def sarif(self) -> sarif.Graph:
+        """Returns the SARIF representation of this graph."""
+        return sarif.Graph(
+            description=sarif.Message(text=self.graph_str),
+            properties=PatchedPropertyBag(name=self.name, description=self.description),
+        )
+
+
+@dataclasses.dataclass
 class Diagnostic:
     rule: Rule
     level: Level
-    message_args: Optional[Tuple[Any, ...]]
+    message: Optional[str] = None
     locations: List[Location] = dataclasses.field(default_factory=list)
     stacks: List[Stack] = dataclasses.field(default_factory=list)
+    graphs: List[Graph] = dataclasses.field(default_factory=list)
     additional_message: Optional[str] = None
     tags: List[Tag] = dataclasses.field(default_factory=list)
 
     def sarif(self) -> sarif.Result:
         """Returns the SARIF Result representation of this diagnostic."""
-        if self.message_args is None:
-            self.message_args = tuple()
-        message = self.rule.message_default_template.format(*self.message_args)
+        message = self.message or self.rule.message_default_template
         if self.additional_message is not None:
             message = f"{message}\n{self.additional_message}"
         sarif_result = sarif.Result(
@@ -166,6 +211,7 @@ class Diagnostic:
         )
         sarif_result.locations = [location.sarif() for location in self.locations]
         sarif_result.stacks = [stack.sarif() for stack in self.stacks]
+        sarif_result.graphs = [graph.sarif() for graph in self.graphs]
         sarif_result.properties = sarif.PropertyBag(
             tags=[tag.value for tag in self.tags]
         )
@@ -179,6 +225,11 @@ class Diagnostic:
     def with_stack(self: _Diagnostic, stack: Stack) -> _Diagnostic:
         """Adds a stack to the diagnostic."""
         self.stacks.append(stack)
+        return self
+
+    def with_graph(self: _Diagnostic, graph: Graph) -> _Diagnostic:
+        """Adds a graph to the diagnostic."""
+        self.graphs.append(graph)
         return self
 
     def with_additional_message(self: _Diagnostic, message: str) -> _Diagnostic:
@@ -226,61 +277,6 @@ class RuleCollection:
         )()
 
 
-@dataclasses.dataclass(frozen=True)
-class DiagnosticTool:
-    name: str
-    version: str
-    rules: RuleCollection
-    diagnostic_type: Type[Diagnostic] = dataclasses.field(default=Diagnostic)
-    _triggered_rules: Set[Rule] = dataclasses.field(init=False, default_factory=set)
-
-    def __post_init__(self) -> None:
-        if not issubclass(self.diagnostic_type, Diagnostic):
-            raise TypeError(
-                "Expected diagnostic_type to be a subclass of Diagnostic, "
-                f"but got {self.diagnostic_type}"
-            )
-
-    def sarif(self) -> sarif.Tool:
-        """Returns the SARIF Tool representation."""
-        return sarif.Tool(
-            driver=sarif.ToolComponent(
-                name=self.name,
-                version=self.version,
-                rules=[rule.sarif() for rule in self._triggered_rules],
-            )
-        )
-
-    def create_diagnostic(
-        self,
-        rule: Rule,
-        level: Level,
-        message_args: Optional[Tuple[Any, ...]],
-        **kwargs,
-    ) -> Diagnostic:
-        """Creates a diagnostic for the given arguments.
-
-        Args:
-            rule: The rule that triggered the diagnostic.
-            level: The level of the diagnostic.
-            message_args: The arguments to format the rule's message template.
-            **kwargs: Additional arguments to pass to the Diagnostic constructor.
-
-        Returns:
-            The created diagnostic.
-
-        Raises:
-            ValueError: If the rule is not supported by the tool.
-        """
-        if rule not in self.rules:
-            raise ValueError(
-                f"Rule '{rule.id}:{rule.name}' is not supported by this tool '{self.name} {self.version}'."
-                f" Supported rules are: {self.rules._rule_id_name_set}"
-            )
-        self._triggered_rules.add(rule)
-        return self.diagnostic_type(rule, level, message_args, **kwargs)
-
-
 class Invocation:
     # TODO: Implement this.
     def __init__(self) -> None:
@@ -296,9 +292,11 @@ class DiagnosticOptions:
 
 @dataclasses.dataclass
 class DiagnosticContext:
-    tool: DiagnosticTool
+    name: str
+    version: str
     options: Optional[DiagnosticOptions] = None
-    _diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
+    diagnostic_type: Type[Diagnostic] = dataclasses.field(default=Diagnostic)
+    diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
     _invocation: Invocation = dataclasses.field(init=False)
 
     def __enter__(self):
@@ -310,15 +308,34 @@ class DiagnosticContext:
     def sarif(self) -> sarif.Run:
         """Returns the SARIF Run object."""
         return sarif.Run(
-            tool=self.tool.sarif(),
-            results=[diagnostic.sarif() for diagnostic in self._diagnostics],
+            tool=sarif.Tool(
+                driver=sarif.ToolComponent(
+                    name=self.name,
+                    version=self.version,
+                    rules=[diagnostic.rule.sarif() for diagnostic in self.diagnostics],
+                )
+            ),
+            results=[diagnostic.sarif() for diagnostic in self.diagnostics],
         )
+
+    def add_diagnostic(self, diagnostic: Diagnostic) -> None:
+        """Adds a diagnostic to the context.
+
+        Use this method to add diagnostics that are not created by the context.
+        Args:
+            diagnostic: The diagnostic to add.
+        """
+        if not isinstance(diagnostic, self.diagnostic_type):
+            raise TypeError(
+                f"Expected diagnostic of type {self.diagnostic_type}, got {type(diagnostic)}"
+            )
+        self.diagnostics.append(diagnostic)
 
     def diagnose(
         self,
         rule: Rule,
         level: Level,
-        message_args: Optional[Tuple[Any, ...]] = None,
+        message: Optional[str] = None,
         **kwargs,
     ) -> Diagnostic:
         """Creates a diagnostic for the given arguments.
@@ -326,7 +343,7 @@ class DiagnosticContext:
         Args:
             rule: The rule that triggered the diagnostic.
             level: The level of the diagnostic.
-            message_args: The arguments to format the rule's message template.
+            message: The message of the diagnostic.
             **kwargs: Additional arguments to pass to the Diagnostic constructor.
 
         Returns:
@@ -335,6 +352,6 @@ class DiagnosticContext:
         Raises:
             ValueError: If the rule is not supported by the tool.
         """
-        diagnostic = self.tool.create_diagnostic(rule, level, message_args, **kwargs)
-        self._diagnostics.append(diagnostic)
+        diagnostic = self.diagnostic_type(rule, level, message, **kwargs)
+        self.add_diagnostic(diagnostic)
         return diagnostic

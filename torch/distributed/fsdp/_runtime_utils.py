@@ -1,6 +1,6 @@
 import functools
 import warnings
-from typing import Any, Callable, List, no_type_check, Optional, Tuple
+from typing import Any, Callable, Iterable, List, no_type_check, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -10,11 +10,15 @@ from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _all_handles,
     _assert_in_training_states,
+    _FSDPState,
     _is_composable,
-    _State,
     TrainingState,
 )
-from torch.distributed.fsdp._utils import _apply_to_tensors, p_assert
+from torch.distributed.fsdp._utils import (
+    _apply_to_tensors,
+    _no_dispatch_record_stream,
+    p_assert,
+)
 from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.fsdp.flat_param import (
     _HandlesKey,
@@ -28,9 +32,9 @@ from torch.distributed.utils import _to_kwargs
 
 @no_type_check
 def _lazy_init(
-    state: _State,
+    state: _FSDPState,
     root_module: nn.Module,
-) -> _State:
+) -> _FSDPState:
     """
     Performs initialization lazily, typically right before the first forward
     pass. The laziness is needed to ensure that the parameter device/dtype and
@@ -56,7 +60,7 @@ def _lazy_init(
     _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, state.compute_device)
     for handle in state._handles:
         handle.init_flat_param_attributes()
-    state._exec_order_data.init(state, state.process_group)
+    state._exec_order_data.init(state, root_module, state.process_group)
     if _is_composable(state):
         # Return early since there is no need to share data structures
         return state
@@ -98,8 +102,8 @@ def _lazy_init(
 
 @no_type_check
 def _init_streams(
-    state: _State,
-) -> _State:
+    state: _FSDPState,
+) -> _FSDPState:
     """
     Initializes CUDA streams for overlapping communication, computation, and
     data transfers. The streams should be shared across FSDP instances.
@@ -119,7 +123,7 @@ def _init_streams(
 
 @no_type_check
 def _unshard(
-    state: _State,
+    state: _FSDPState,
     handles: List[FlatParamHandle],
     unshard_stream: torch.cuda.Stream,
     pre_unshard_stream: torch.cuda.Stream,
@@ -153,7 +157,7 @@ def _unshard(
 
 @no_type_check
 def _reshard(
-    state: _State,
+    state: _FSDPState,
     handles: List[FlatParamHandle],
     free_unsharded_flat_params: List[bool],
 ):
@@ -203,7 +207,7 @@ def _reshard_grads(
 
 @no_type_check
 def _pre_forward(
-    state: _State,
+    state: _FSDPState,
     handles: List[FlatParamHandle],
     unshard_fn: Callable,
     module: nn.Module,
@@ -219,7 +223,8 @@ def _pre_forward(
             the current forward.
         unshard_fn (Optional[Callable]): A callable to unshard any currently
             sharded parameters or ``None`` to not do any unsharding.
-        module (nn.Module): Module whose forward this method runs right before.
+        module (nn.Module): Module whose forward this method runs right before;
+            expected by the hook signature.
         input (Any): Unused; expected by the hook signature.
     """
     state.training_state = TrainingState.FORWARD_BACKWARD
@@ -236,7 +241,7 @@ def _pre_forward(
 
 @no_type_check
 def _pre_forward_unshard(
-    state: _State,
+    state: _FSDPState,
     handles: List[FlatParamHandle],
 ) -> None:
     """Unshards parameters in the pre-forward."""
@@ -251,7 +256,7 @@ def _pre_forward_unshard(
 
 @no_type_check
 def _post_forward(
-    state: _State,
+    state: _FSDPState,
     handles: List[FlatParamHandle],
     reshard_fn: Callable,
     module: nn.Module,
@@ -291,7 +296,7 @@ def _post_forward(
 
 @no_type_check
 def _post_forward_reshard(
-    state: _State,
+    state: _FSDPState,
     handles: List[FlatParamHandle],
 ) -> None:
     """Reshards parameters in the post-forward."""
@@ -309,9 +314,9 @@ def _post_forward_reshard(
 
 
 @no_type_check
-def _fsdp_root_pre_forward(
-    state: _State,
-    root_module: nn.Module,
+def _root_pre_forward(
+    state: _FSDPState,
+    module: nn.Module,
     *args,
     **kwargs,
 ):
@@ -321,8 +326,12 @@ def _fsdp_root_pre_forward(
     lazy initialization (which only runs non-vacuously once). Otherwise, if
     this is called on a non-root FSDP instance, then the forward inputs are
     returned directly.
+
+    Args:
+        module (nn.Module): Module for which this logic tries to run. It may or
+            may not be the root. If not, then this method does not do anything.
     """
-    _lazy_init(state, root_module)
+    _lazy_init(state, module)
     p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
     if not state._is_root:
         return args, kwargs
@@ -398,7 +407,7 @@ def _cast_fp_inputs_to_dtype(
 
 @no_type_check
 def _pre_backward_hook(
-    state: _State,
+    state: _FSDPState,
     _handles: List[FlatParamHandle],
     *unused: Any,
 ) -> Any:
@@ -419,7 +428,10 @@ def _pre_backward_hook(
             _register_post_backward_final_callback(state)
             _clear_grads_if_needed(_all_handles(state))
         elif _handles_key:
-            _assert_in_training_states(state, [TrainingState.IDLE])
+            allowed_states = [TrainingState.IDLE]
+            if _is_composable(state):
+                allowed_states.append(TrainingState.FORWARD_BACKWARD)
+            _assert_in_training_states(state, allowed_states)
         state.training_state = TrainingState.FORWARD_BACKWARD
         # Queueing the post-backward callback is the only logic that is not
         # per-handle in the pre-backward hook, so we can return early here if
@@ -448,7 +460,7 @@ def _pre_backward_hook(
 @no_type_check
 @torch.no_grad()
 def _post_backward_hook(
-    state: _State,
+    state: _FSDPState,
     handle: FlatParamHandle,
     *unused: Any,
 ):
@@ -470,7 +482,6 @@ def _post_backward_hook(
         "FullyShardedDataParallel._post_backward_hook"
     ):
         _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
-        state.training_state = TrainingState.FORWARD_BACKWARD
         p_assert(
             handle._training_state == HandleTrainingState.BACKWARD_PRE,
             f"Expects `BACKWARD_PRE` state but got {handle._training_state}",
@@ -526,8 +537,12 @@ def _post_backward_hook(
                 numel_to_pad = (
                     state.world_size * chunks[0].numel() - unsharded_grad.numel()
                 )
-                padded_unsharded_grad = F.pad(unsharded_grad, [0, numel_to_pad])
-                new_sharded_grad = torch.zeros_like(chunks[0])  # padded
+                padded_unsharded_grad = (
+                    F.pad(unsharded_grad, [0, numel_to_pad])
+                    if numel_to_pad > 0
+                    else unsharded_grad
+                )
+                new_sharded_grad = torch.empty_like(chunks[0])  # padded
                 state._communication_hook(
                     state._communication_hook_state,
                     padded_unsharded_grad,
@@ -565,12 +580,16 @@ def _post_backward_hook(
                 # Since the sharded gradient is produced in the post-backward
                 # stream and consumed later in the computation stream, inform
                 # the caching allocator
-                sharded_grad.data.record_stream(torch.cuda.current_stream())
+                _no_dispatch_record_stream(
+                    sharded_grad.data, torch.cuda.current_stream()
+                )
 
             # Since the unsharded gradient is produced in the computation
             # stream and consumed in the post-backward stream, inform the
             # caching allocator (before it goes out of scope)
-            unsharded_grad_data.record_stream(state._streams["post_backward"])
+            _no_dispatch_record_stream(
+                unsharded_grad_data, state._streams["post_backward"]
+            )
 
             if handle._use_orig_params:
                 # Since the handle's `FlatParameter` completed its gradient
@@ -583,7 +602,7 @@ def _post_backward_hook(
 
 @no_type_check
 def _should_free_in_backward(
-    state: _State,
+    state: _FSDPState,
     handle: FlatParamHandle,
 ) -> bool:
     """
@@ -597,7 +616,7 @@ def _should_free_in_backward(
 
 @no_type_check
 def _cast_grad_to_param_dtype(
-    state: _State,
+    state: _FSDPState,
     handle: FlatParamHandle,
     sharded_grad: torch.Tensor,
     param: FlatParameter,
@@ -623,7 +642,7 @@ def _cast_grad_to_param_dtype(
         # caching allocator; for the sharded strategies, the gradient is
         # produced in the post-backward stream, so this `record_stream()`
         # should be a no-op
-        low_prec_grad_data.record_stream(torch.cuda.current_stream())
+        _no_dispatch_record_stream(low_prec_grad_data, torch.cuda.current_stream())
 
 
 def _check_comm_hook(
@@ -655,14 +674,14 @@ def _check_grad_to_accumulate(
 
 
 @no_type_check
-def _low_precision_hook_enabled(state: _State) -> bool:
+def _low_precision_hook_enabled(state: _FSDPState) -> bool:
     return state._communication_hook in LOW_PRECISION_HOOKS
 
 
 @no_type_check
 @torch.no_grad()
 def _post_backward_final_callback(
-    state: _State,
+    state: _FSDPState,
 ):
     """
     This waits for the post-backward to finish and performs some final cleanup.
@@ -698,7 +717,7 @@ def _post_backward_final_callback(
 
 @no_type_check
 def _catch_all_reshard(
-    state: _State,
+    state: _FSDPState,
 ) -> None:
     """
     Reshards the parameters that may not have been resharded in the
@@ -735,7 +754,7 @@ def _catch_all_reshard(
 
 @no_type_check
 def _finalize_params(
-    state: _State,
+    state: _FSDPState,
 ) -> None:
     """Finalizes the parameters before the next iteration."""
     for handle in state._handles:
@@ -764,7 +783,7 @@ def _finalize_params(
 
 @no_type_check
 def _prefetch_handles(
-    state: _State,
+    state: _FSDPState,
     current_handles_key: _HandlesKey,
 ) -> None:
     """
@@ -785,7 +804,7 @@ def _prefetch_handles(
 
 @no_type_check
 def _get_handles_to_prefetch(
-    state: _State,
+    state: _FSDPState,
     current_handles_key: _HandlesKey,
 ) -> List[_HandlesKey]:
     """
@@ -850,8 +869,89 @@ def _get_training_state(
 
 
 @no_type_check
+def _register_pre_forward_hooks(
+    state: _FSDPState,
+    modules: Iterable[nn.Module],
+) -> None:
+    """
+    Registers pre-forward hooks on all modules in ``modules``. The pre-forward
+    hooks are partially applied based on the current ``FlatParamHandle``
+    construction, meaning that they must be re-registered if the construction
+    changes.
+    """
+    for forward_handle in state._pre_forward_handles:
+        forward_handle.remove()
+    state._pre_forward_handles.clear()
+    for module in modules:
+        module_param_handles = state._module_to_handles[module]
+        if module_param_handles:
+            unshard_fn = functools.partial(
+                _pre_forward_unshard,
+                state,
+                module_param_handles,
+            )
+            hook = functools.partial(
+                _pre_forward, state, module_param_handles, unshard_fn
+            )
+            state._pre_forward_handles.append(module.register_forward_pre_hook(hook))
+
+
+@no_type_check
+def _register_post_forward_hooks(
+    state: _FSDPState,
+    modules: Iterable[nn.Module],
+) -> None:
+    """
+    Registers post-forward hooks on all modules in ``modules``. The
+    post-forward hooks are partially applied based on the current
+    ``FlatParamHandle`` construction, meaning that they must be re-registered
+    if the construction changes.
+    """
+    for forward_handle in state._post_forward_handles:
+        forward_handle.remove()
+    state._post_forward_handles.clear()
+    for module in modules:
+        module_param_handles = state._module_to_handles[module]
+        if module_param_handles:
+            reshard_fn = functools.partial(
+                _post_forward_reshard,
+                state,
+                module_param_handles,
+            )
+            hook = functools.partial(
+                _post_forward,
+                state,
+                module_param_handles,
+                reshard_fn,
+            )
+            state._post_forward_handles.append(module.register_forward_hook(hook))
+
+
+@no_type_check
+def _register_root_pre_forward_hooks(
+    state: _FSDPState,
+    modules: Iterable[nn.Module],
+):
+    """
+    # TODO (awgu): This requires kwarg support for hooks registered by
+    ``register_forward_pre_hook()``. ``_root_pre_forward()`` does not have the
+    supported hook signature right now.
+    """
+    for forward_handle in state._root_pre_forward_handles:
+        forward_handle.remove()
+    state._root_pre_forward_handles.clear()
+    for module in modules:
+        module_param_handles = state._module_to_handles[module]
+        if module_param_handles:
+            hook = functools.partial(_root_pre_forward, state, module)
+            state._root_pre_forward_handles.append(
+                module.register_forward_pre_hook(hook)
+            )
+
+
+@no_type_check
 def _register_pre_backward_hooks(
-    state: _State,
+    state: _FSDPState,
     outputs: Any,
     handles: List[FlatParamHandle],
 ) -> None:
@@ -888,7 +988,7 @@ def _register_pre_backward_hooks(
 
 
 def _register_post_backward_hooks(
-    state: _State,
+    state: _FSDPState,
     handles: List[FlatParamHandle],
 ) -> None:
     """
@@ -927,7 +1027,7 @@ def _register_post_backward_hooks(
 
 
 @no_type_check
-def _register_post_backward_final_callback(state: _State) -> None:
+def _register_post_backward_final_callback(state: _FSDPState) -> None:
     """
     Registers the post-backward final callback that runs at the end of the
     backward pass. This should be called from the root FSDP instance at the
@@ -978,7 +1078,7 @@ def _clear_grads_if_needed(
 
 @no_type_check
 def _get_buffers_and_dtypes_for_computation(
-    state: _State,
+    state: _FSDPState,
     root_module: nn.Module,
 ) -> Tuple[List[torch.Tensor], List[Optional[torch.dtype]]]:
     """
@@ -1013,28 +1113,23 @@ def _get_buffers_and_dtypes_for_computation(
 
 
 @no_type_check
-def _get_buffers_and_dtypes_for_checkpoint(
-    state: _State,
-    root_module: nn.Module,
-) -> Tuple[List[torch.Tensor], List[torch.dtype]]:
+def _get_buffer_dtypes(
+    state: _FSDPState,
+    buffer_names: List[str],
+) -> List[torch.dtype]:
     """
-    Returns all buffers in the module tree rooted at ``root_module`` and a
-    corresponding list of the buffer dtypes for checkpointing. Each buffer
-    dtype is the original buffer dtype ignoring any buffer mixed precision.
+    Returns the original buffer types of the given buffer names.
     """
-    p_assert(state._is_root, "Expects the root to cast buffers")
-    buffers: List[torch.Tensor] = []
-    buffer_dtypes: List[Optional[torch.dtype]] = []
-    for buffer_name, buffer in root_module.named_buffers():
+    buffer_dtypes: List[torch.dtype] = []
+    for buffer_name in buffer_names:
         p_assert(
             buffer_name in state._buffer_name_to_orig_dtype,
             f"{buffer_name} is missing from pre-computed dict on rank "
             f"{state.rank}, which only has keys "
             f"{state._buffer_name_to_orig_dtype.keys()}",
         )
-        buffers.append(buffer)
         buffer_dtypes.append(state._buffer_name_to_orig_dtype[buffer_name])
-    return buffers, buffer_dtypes
+    return buffer_dtypes
 
 
 def _cast_buffers_to_dtype_and_device(

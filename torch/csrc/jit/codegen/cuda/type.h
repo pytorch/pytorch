@@ -101,10 +101,14 @@ int getVectorSizeFromType(DataType dtype);
 DataType getTypeFromVectorType(DataType dtype);
 // Return the corresponding scalar of a complex type
 DataType getTypeFromComplexType(DataType dtype);
+// Return if the datatype is supported on the current device
+TORCH_CUDA_CU_API bool isSupportedTypeByDevice(DataType dtype);
 
 enum class ExprType {
   Invalid,
+  FullOp,
   ARangeOp,
+  EyeOp,
   UnaryOp,
   BinaryOp,
   TernaryOp,
@@ -244,7 +248,8 @@ enum class BinaryOpType {
 };
 
 enum class RNGOpType {
-  Uniform,
+  Uniform, // Uniform in [0, 1)
+  UniformRange, // Uniform in [low, high]
 };
 
 // Return if output of operator should be a boolean

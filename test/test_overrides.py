@@ -387,6 +387,10 @@ class TestTorchFunctionOverride(TestCase):
         self.assertEqual(torch.mean(t3), 4.0)
         self.assertEqual(bar(t3), 0)
 
+    def test_has_torch_function_non_sequence(self):
+        with self.assertRaisesRegex(TypeError, "expected a sequence"):
+            has_torch_function(object())
+
     def test_mm_semantics(self):
         """Test that a function with multiple arguments can be overrided"""
         t1 = DiagonalTensor(5, 2)
@@ -1444,10 +1448,31 @@ class TestTorchFunctionMode(TestCase):
 
         x = B(torch.randn(5))
         with A():
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 self.assertNotIsInstance(torch.sum(x), B)
 
         self.assertTrue(called)
+
+    def test_disable_subclass_mode(self):
+        called = False
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                nonlocal called
+                if kwargs is None:
+                    kwargs = {}
+                called = True
+                return func(*args, **kwargs)
+
+        class B(torch.Tensor):
+            pass
+
+        x = B(torch.randn(5))
+        with A():
+            with torch._C.DisableTorchFunction():
+                self.assertNotIsInstance(torch.sum(x), B)
+
+        self.assertFalse(called)
 
     def test_disable_enable_subclass(self):
         called = False
@@ -1456,7 +1481,7 @@ class TestTorchFunctionMode(TestCase):
             pass
 
         x = A(torch.randn(5))
-        with torch._C.DisableTorchFunction():
+        with torch._C.DisableTorchFunctionSubclass():
             g = torch._C._EnableTorchFunction()
             try:
                 self.assertIsInstance(torch.sum(x), A)
