@@ -84,16 +84,15 @@ def _is_tangent(node):
     return node.op == "placeholder" and "tangents" in node.target
 
 
-def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule):
-    num_fwd_outputs = joint_module._out_spec.children_specs[0].num_leaves
+def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
     outputs = pytree.tree_flatten([node.args for node in joint_module.graph.nodes if node.op == 'output'])[0]
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
     return fwd_outputs, bwd_outputs
 
 
-def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_sym_nodes=()):
-    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module)
+def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs):
+    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
     # Construct the forward module
@@ -125,7 +124,7 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
 
 
 def default_partition(
-    joint_module: fx.GraphModule, _joint_inputs
+    joint_module: fx.GraphModule, _joint_inputs, *, num_fwd_outputs
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the :attr:`joint_module` in a manner that closely resembles the
@@ -151,7 +150,7 @@ def default_partition(
         Returns the generated forward and backward Fx graph modules.
     """
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module)
+    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
     forward_node_names = {node.name for node in forward_only_graph.nodes if node.op != 'output'}
     saved_values = []
@@ -178,7 +177,7 @@ def default_partition(
     saved_values = list(set(saved_values))
     saved_sym_nodes = list(set(saved_sym_nodes))
 
-    return _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes)
+    return _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
 
 
 def _prod(x):
@@ -249,6 +248,7 @@ def _count_ops(graph):
 
 def min_cut_rematerialization_partition(
     joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser", recomputable_ops=None,
+    *, num_fwd_outputs
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -270,6 +270,7 @@ def min_cut_rematerialization_partition(
         recomputable_ops: This is an optional set of recomputable ops. If this
             is not None, then this set of ops will be used instead of the
             default set of ops.
+        num_fwd_outputs: The number of outputs from the forward graph.
 
     Returns:
         Returns the generated forward and backward Fx graph modules.
@@ -302,7 +303,7 @@ def min_cut_rematerialization_partition(
                     required_bw_nodes.add(user)
 
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-        fwd_outputs, _ = _extract_fwd_bwd_outputs(joint_module)
+        fwd_outputs, _ = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
         forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
         required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
                              if node.op != 'output'}
@@ -443,7 +444,7 @@ def min_cut_rematerialization_partition(
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(lambda n: is_sym_node(n), saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
-    fw_module, bw_module = _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes)
+    fw_module, bw_module = _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
         fw_module_nodes = set([node.name for node in fw_module.graph.nodes if node.op == 'call_function'])
