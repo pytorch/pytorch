@@ -6,6 +6,7 @@ from typing import Dict, List
 import numpy
 
 import torch._C
+import torch._inductor.config as inductor_config
 import torch.nn
 import torch.onnx.operators
 
@@ -171,6 +172,11 @@ class TorchVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import ConstantVariable, GradModeVariable, TensorVariable
+
+        if inductor_config.triton.cudagraphs and self.value.__name__ in [
+            "embedding_bag"
+        ]:
+            unimplemented(f"Skipping {self.value.__name__}")
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
