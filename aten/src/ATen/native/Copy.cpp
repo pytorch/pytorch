@@ -193,18 +193,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return self;
   }
 
-  // Exit early if self and src are views of the same data
-  const bool is_same_data = (
-      self.is_alias_of(src) &&
-      self.storage_offset() == src.storage_offset() &&
-      self.strides().equals(src.strides()) &&
-      self.sizes().equals(src.sizes()) &&
-      self.scalar_type() == src.scalar_type()
-    );
-  if (is_same_data) {
-    return self;
-  }
-
   if (self.is_quantized() && !src.is_quantized()) {
     return quantized_copy_from_float_(self, src);
   }
@@ -230,6 +218,18 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
   if (self.device().type() == at::kMetal || src.device().type() == at::kMetal) {
     return at::metal::metal_copy_(self, src);
+  }
+
+  // Exit early if self and src are views of the same data
+  const bool is_same_data = (
+      self.is_alias_of(src) &&
+      self.storage_offset() == src.storage_offset() &&
+      self.strides().equals(src.strides()) &&
+      self.sizes().equals(src.sizes()) &&
+      self.scalar_type() == src.scalar_type()
+    );
+  if (is_same_data) {
+    return self;
   }
 
 
