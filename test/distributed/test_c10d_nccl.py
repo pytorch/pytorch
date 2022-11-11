@@ -2953,6 +2953,11 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
     def test_collectives(self):
         self._test_collectives(backend="nccl")
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_allreduce_coalesced(self):
+        self._test_allreduce_coalesced(backend="nccl")
+
 if __name__ == "__main__":
     assert (
         not torch.cuda._initialized
