@@ -19,7 +19,12 @@ from sympy import Expr, Integer
 
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._prims_common import is_boolean_dtype, is_float_dtype
+from torch._prims_common import (
+    is_boolean_dtype,
+    is_float_dtype,
+    make_channels_last_strides_for,
+    make_contiguous_strides_for,
+)
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from . import config, dependencies
@@ -133,7 +138,7 @@ def ir_node_to_tensor(x, guard_shape=True):
     if is_storage_and_layout(x):
         stride = [shape_fn(s) for s in x.get_layout().stride]
     else:
-        stride = torch._prims_common.make_contiguous_strides_for(size)
+        stride = make_contiguous_strides_for(size)
     dtype = x.get_dtype()
     device = x.get_device()
     t = torch.empty_strided(
@@ -2426,6 +2431,9 @@ class ExternKernel(InputsKernel):
                 x.get_layout(), FixedLayout
             ) and x.get_layout().is_stride_ordered(order):
                 return x
+        # TODO - Storage to InputBuffer
+        if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):
+            return x
         x = cls.copy_input(x)
         as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
         assert is_stride_order_storage_and_layout(x, order)
@@ -3035,8 +3043,13 @@ class Convolution(ExternKernelAlloc):
             )
             req_stride_order = get_stride_order(output.stride())
 
-        weight = cls.require_stride_order(weight, req_stride_order)
-        x = cls.require_stride_order(x, req_stride_order)
+        if config.triton.convolution == "aten":
+            weight = cls.require_stride_order(weight, req_stride_order)
+            x = cls.require_stride_order(x, req_stride_order)
+        else:
+            x = cls.require_stride1(cls.realize_input(x))
+            weight = cls.require_stride1(cls.realize_input(weight))
+
         stride = tuple(stride_)
         padding = tuple(padding_)
         dilation = tuple(dilation_)
@@ -3088,6 +3101,7 @@ class Convolution(ExternKernelAlloc):
         # for conv2d or conv3d, prefer channels last format
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
+
         elif config.tune_layout and len(x.get_size()) == 4:
             from .codegen.autotuner import tuned_conv_layout
 
@@ -3117,14 +3131,19 @@ class Convolution(ExternKernelAlloc):
             if len(stride_order) < len(output_size):
                 # add batch dim if it exists
                 stride_order = [len(stride_order)] + stride_order
+            strides = make_channels_last_strides_for(output_size)
         else:
             stride_order = list(reversed(range(len(output_size))))
+            strides = make_contiguous_strides_for(output_size)
+
+        if kernel != "aten.convolution":
+            x = cls.require_stride_order(x, stride_order)
 
         output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
-            output.stride(),
+            strides,
         )
 
         if bias is not None:
