@@ -3043,6 +3043,10 @@ class Convolution(ExternKernelAlloc):
             )
             req_stride_order = get_stride_order(output.stride())
 
+        # cpu kernels convert weight within conv kernel
+        if output.device.type == "cpu":
+            weight = cls.require_stride1(cls.realize_input(weight))
+            x = cls.require_stride_order(x, req_stride_order)
         if config.triton.convolution == "aten":
             weight = cls.require_stride_order(weight, req_stride_order)
             x = cls.require_stride_order(x, req_stride_order)
