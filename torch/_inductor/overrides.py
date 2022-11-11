@@ -393,6 +393,19 @@ def check_node_is_binary(node):
     )
 
 
+def check_binary_op_kwargs_is_default(node):
+    # For binary op, we hope the kwargs values are the default value:
+    # torch.sub(add)(input, other, *, alpha=1, out=None).
+    if len(node.args) > 2:
+        return False
+    if len(node.kwargs) > 0:
+        if "out" in node.kwargs and node.kwargs["out"] is not None:
+            return False
+        if "alpha" in node.kwargs and node.kwargs["alpha"] != 1.0:
+            return False
+    return True
+
+
 def check_node_is_add_inplace(node):
     return (node.op == "call_function" and node.target in [operator.iadd]) or (
         node.op == "call_method" and node.target in ["add_"]
@@ -525,9 +538,7 @@ def binary_inputs_meta_is_same(binary_node):
 def fuse_binary(gm: torch.fx.GraphModule):
     modules = dict(gm.named_modules())
     for node in gm.graph.nodes:
-        if check_node_is_binary(node) and (
-            len(node.kwargs) != 2 or node.kwargs["alpha"] == 1.0
-        ):
+        if check_node_is_binary(node) and check_binary_op_kwargs_is_default(node):
             for node_kind, fuse_func in computation_op_binary_op_fusion_map.items():
                 if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
                     node.args[1], torch.fx.Node
@@ -571,9 +582,7 @@ def fuse_binary(gm: torch.fx.GraphModule):
 def fuse_binary_inplace(gm: torch.fx.GraphModule):
     modules = dict(gm.named_modules())
     for node in gm.graph.nodes:
-        if check_node_is_add_inplace(node) and (
-            len(node.kwargs) != 2 or node.kwargs["alpha"] == 1.0
-        ):
+        if check_node_is_add_inplace(node) and check_binary_op_kwargs_is_default(node):
             for (
                 node_kind,
                 fuse_func,
