@@ -1261,6 +1261,32 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
 
+    def test_is_tensor_like2(self):
+        class MyTensor(object):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                if func is torch.max:
+                    return torch.tensor(123)
+                return func(*args, **kwargs)
+
+        def fn(x):
+            if torch.overrides.is_tensor_like(x):
+                return torch.max(x)
+            else:
+                return torch.zeros(1)
+
+        x = MyTensor()
+        ref0 = fn(x)
+        ref1 = fn(4)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res0 = opt_fn(x)
+        res1 = opt_fn(4)
+        self.assertTrue(same(ref0, res0))
+        self.assertTrue(same(ref1, res1))
+
     def test_version_ci(self):
         # temporary test to check that the ci torch version is set correctly
         self.assertTrue(hasattr(torch, "_subclasses"))

@@ -206,7 +206,10 @@ class TorchVariable(VariableTracker):
                 unimplemented(f"construct nn.Module: {self.value.__name__}")
         elif self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
             assert len(args) == 1
-            if isinstance(args[0], TensorVariable):
+            if isinstance(args[0], TensorVariable) or (
+                self.value is torch.overrides.is_tensor_like
+                and hasattr(args[0].as_python_constant(), "__torch_function__")
+            ):
                 return ConstantVariable(True, **options)
             else:
                 return ConstantVariable(False, **options)
