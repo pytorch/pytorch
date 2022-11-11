@@ -90,18 +90,18 @@ from torch.ao.quantization.backend_config.native import (
 
 from torch.ao.quantization.qconfig_mapping import (
     _get_symmetric_qnnpack_qconfig_mapping,
-    _GLOBAL_DICT_KEY,
-    _MODULE_NAME_DICT_KEY,
-    _MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY,
-    _MODULE_NAME_REGEX_DICT_KEY,
-    _OBJECT_TYPE_DICT_KEY,
+    GLOBAL_DICT_KEY,
+    MODULE_NAME_DICT_KEY,
+    MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY,
+    MODULE_NAME_REGEX_DICT_KEY,
+    OBJECT_TYPE_DICT_KEY,
     QConfigMapping,
 )
 
 from torch.ao.quantization.qconfig_mapping_utils import (
-    _get_object_type_qconfig,
-    _get_module_name_qconfig,
-    _get_module_name_regex_qconfig,
+    get_object_type_qconfig,
+    get_module_name_qconfig,
+    get_module_name_regex_qconfig,
 )
 
 from torch.ao.quantization.fx.pattern_utils import (
@@ -1876,9 +1876,9 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_mapping.set_object_type(torch.nn.Linear, qconfig3)
         self.assertEqual(qconfig_mapping.object_type_qconfigs[torch.nn.Linear], qconfig3)
         self.assertEqual(qconfig_mapping.object_type_qconfigs[torch.nn.ReLU], qconfig2)
-        self.assertEqual(_get_object_type_qconfig(qconfig_mapping, torch.nn.Linear, None), qconfig3)
-        self.assertEqual(_get_object_type_qconfig(qconfig_mapping, torch.nn.ReLU, None), qconfig2)
-        self.assertEqual(_get_object_type_qconfig(qconfig_mapping, "nomatch", None), None)
+        self.assertEqual(get_object_type_qconfig(qconfig_mapping, torch.nn.Linear, None), qconfig3)
+        self.assertEqual(get_object_type_qconfig(qconfig_mapping, torch.nn.ReLU, None), qconfig2)
+        self.assertEqual(get_object_type_qconfig(qconfig_mapping, "nomatch", None), None)
 
     def test_qconfig_mapping_set_module_name_regex(self):
         qconfig1 = get_default_qconfig()
@@ -1898,11 +1898,11 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_mapping.set_module_name_regex("foo.*bar", qconfig3)
         self.assertEqual(qconfig_mapping.module_name_regex_qconfigs["foo.*bar"], qconfig3)
         self.assertEqual(qconfig_mapping.module_name_regex_qconfigs["foo.*"], qconfig2)
-        self.assertEqual(_get_module_name_regex_qconfig(qconfig_mapping, "foo123bar", None), qconfig3)
-        self.assertEqual(_get_module_name_regex_qconfig(qconfig_mapping, "foobar", None), qconfig3)
-        self.assertEqual(_get_module_name_regex_qconfig(qconfig_mapping, "foobaz", None), qconfig2)
-        self.assertEqual(_get_module_name_regex_qconfig(qconfig_mapping, "foo", None), qconfig2)
-        self.assertEqual(_get_module_name_regex_qconfig(qconfig_mapping, "nomatch", None), None)
+        self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "foo123bar", None), qconfig3)
+        self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "foobar", None), qconfig3)
+        self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "foobaz", None), qconfig2)
+        self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "foo", None), qconfig2)
+        self.assertEqual(get_module_name_regex_qconfig(qconfig_mapping, "nomatch", None), None)
 
     def test_qconfig_mapping_set_module_name(self):
         qconfig1 = get_default_qconfig()
@@ -1922,9 +1922,9 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_mapping.set_module_name("mod1", qconfig3)
         self.assertEqual(qconfig_mapping.module_name_qconfigs["mod1"], qconfig3)
         self.assertEqual(qconfig_mapping.module_name_qconfigs["mod2"], qconfig2)
-        self.assertEqual(_get_module_name_qconfig(qconfig_mapping, "mod1", None), qconfig3)
-        self.assertEqual(_get_module_name_qconfig(qconfig_mapping, "mod2", None), qconfig2)
-        self.assertEqual(_get_module_name_qconfig(qconfig_mapping, "nomatch", None), None)
+        self.assertEqual(get_module_name_qconfig(qconfig_mapping, "mod1", None), qconfig3)
+        self.assertEqual(get_module_name_qconfig(qconfig_mapping, "mod2", None), qconfig2)
+        self.assertEqual(get_module_name_qconfig(qconfig_mapping, "nomatch", None), None)
 
     def test_qconfig_mapping_set_module_name_object_type_order(self):
         qconfig1 = get_default_qconfig()
@@ -1972,20 +1972,20 @@ class TestQuantizeFx(QuantizationTestCase):
         Return a dummy qconfig_dict to test QConfigMapping's to_dict and from_dict methods.
         """
         return {
-            _GLOBAL_DICT_KEY: global_qconfig,
-            _OBJECT_TYPE_DICT_KEY: [
+            GLOBAL_DICT_KEY: global_qconfig,
+            OBJECT_TYPE_DICT_KEY: [
                 (torch.nn.Linear, qconfig1),
                 (torch.nn.ReLU, qconfig2),
             ],
-            _MODULE_NAME_REGEX_DICT_KEY: [
+            MODULE_NAME_REGEX_DICT_KEY: [
                 ("foo.*bar", qconfig1),
                 ("foo.*", qconfig2),
             ],
-            _MODULE_NAME_DICT_KEY: [
+            MODULE_NAME_DICT_KEY: [
                 ("bazbaz", qconfig1),
                 ("borbor", qconfig2),
             ],
-            _MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY: [
+            MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY: [
                 ("bazbaz", torch.nn.Linear, 0, qconfig1),
                 ("foofoo", torch.nn.ReLU, 1, qconfig2),
             ],
@@ -5294,49 +5294,6 @@ class TestQuantizeFx(QuantizationTestCase):
             example_inputs=(torch.randn(1, 2, 3, 4),),
             backend_config=backend_config
         )
-
-    def test_channel_shuffle_lowering(self):
-        # Three versions of channel shuffle
-        class M1(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.op = torch.nn.ChannelShuffle(2)
-
-            def forward(self, x):
-                return self.op(x + x) + x
-
-        class M2(torch.nn.Module):
-            def forward(self, x):
-                return torch.channel_shuffle(x + x, 2) + x
-
-        class M3(torch.nn.Module):
-            def forward(self, x):
-                return torch.nn.functional.channel_shuffle(x + x, 2) + x
-
-        x = torch.randn(4, 4, 4, 4)
-        # torch.channel_shuffle is equivalent to torch.nn.functional.channel_shuffle
-        model_node_pairs = [
-            (M1().eval(), ns.call_module(torch.nn.ChannelShuffle)),
-            (M2().eval(), ns.call_function(torch.channel_shuffle)),
-            (M3().eval(), ns.call_function(torch.channel_shuffle))
-        ]
-        for m, node in model_node_pairs:
-            m = prepare_fx(m, {"": default_qconfig}, example_inputs=(x,))
-            m_copy = copy.deepcopy(m)
-            m = convert_fx(m)
-            m_ref = convert_to_reference_fx(m_copy)
-            node_occurrence = {
-                node: 1,
-                ns.call_function(torch.quantize_per_tensor): 1,
-                ns.call_method("dequantize"): 1
-            }
-            node_occurrence_ref = {
-                node: 1,
-                ns.call_function(torch.quantize_per_tensor): 4,
-                ns.call_method("dequantize"): 4
-            }
-            self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
-            self.checkGraphModuleNodes(m_ref, expected_node_occurrence=node_occurrence_ref)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

@@ -33,7 +33,7 @@ import torch
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
 import torch.utils.data.graph_settings
-from torch.testing._internal.common_utils import TestCase, run_tests, suppress_warnings, skipIfTorchDynamo
+from torch.testing._internal.common_utils import TestCase, run_tests, suppress_warnings
 from torch.utils.data import (
     DataLoader,
     DataChunk,
@@ -220,7 +220,6 @@ class TestStreamWrapper(TestCase):
         for api in ['open', 'read', 'close']:
             self.assertTrue(api in s)
 
-    @skipIfTorchDynamo
     def test_api(self):
         fd = TestStreamWrapper._FakeFD("")
         wrap_fd = StreamWrapper(fd)

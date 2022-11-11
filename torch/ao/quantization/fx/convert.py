@@ -24,7 +24,7 @@ from ..qconfig import (
 )
 from ..qconfig_mapping import QConfigMapping
 from ..qconfig_mapping_utils import (
-    _update_qconfig_for_qat,
+    update_qconfig_for_qat,
 )
 from .qconfig_mapping_utils import (
     generate_node_name_to_qconfig,
@@ -563,7 +563,7 @@ def convert(
         modules_copy = copy.deepcopy(modules)
 
         if model._is_qat:
-            _update_qconfig_for_qat(qconfig_mapping, {})
+            update_qconfig_for_qat(qconfig_mapping, {})
         update_qconfig_for_fusion(model, qconfig_mapping)
 
         compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]

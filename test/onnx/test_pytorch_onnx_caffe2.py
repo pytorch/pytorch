@@ -12,7 +12,6 @@ import model_defs.dcgan as dcgan
 import model_defs.word_language_model as word_language_model
 import numpy as np
 import onnx
-import pytorch_test_common
 import torch.onnx
 import torch.onnx.operators
 import torch.utils.model_zoo as model_zoo
@@ -130,9 +129,17 @@ model_urls = {
 }
 
 
-class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
+class TestCaffe2Backend_opset9(common_utils.TestCase):
     opset_version = 9
     embed_params = False
+
+    def setUp(self):
+        # the following should ideally be super().setUp(), https://github.com/pytorch/pytorch/issues/79630
+        common_utils.TestCase.setUp(self)
+        torch.manual_seed(0)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(0)
+        np.random.seed(seed=0)
 
     def convert_cuda(self, model, input):
         cuda_model = model.cuda()
@@ -3191,44 +3198,44 @@ setup_rnn_tests()
 # to embed_params=True
 TestCaffe2BackendEmbed_opset9 = type(
     "TestCaffe2BackendEmbed_opset9",
-    (pytorch_test_common.ExportTestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True),
 )
 
 # opset 7 tests
 TestCaffe2Backend_opset7 = type(
     "TestCaffe2Backend_opset7",
-    (pytorch_test_common.ExportTestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, opset_version=7),
 )
 TestCaffe2BackendEmbed_opset7 = type(
     "TestCaffe2BackendEmbed_opset7",
-    (pytorch_test_common.ExportTestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True, opset_version=7),
 )
 
 # opset 8 tests
 TestCaffe2Backend_opset8 = type(
     "TestCaffe2Backend_opset8",
-    (pytorch_test_common.ExportTestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, opset_version=8),
 )
 TestCaffe2BackendEmbed_opset8 = type(
     "TestCaffe2BackendEmbed_opset8",
-    (pytorch_test_common.ExportTestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True, opset_version=8),
 )
 
 # opset 10 tests
 TestCaffe2Backend_opset10 = type(
     "TestCaffe2Backend_opset10",
-    (pytorch_test_common.ExportTestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, opset_version=10),
 )
 
 TestCaffe2BackendEmbed_opset10 = type(
     "TestCaffe2BackendEmbed_opset10",
-    (pytorch_test_common.ExportTestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True, opset_version=10),
 )
 
@@ -3236,7 +3243,7 @@ TestCaffe2BackendEmbed_opset10 = type(
 # to embed_params=True
 TestCaffe2BackendEmbed_opset9_new_jit_API = type(
     "TestCaffe2BackendEmbed_opset9_new_jit_API",
-    (pytorch_test_common.ExportTestCase,),
+    (common_utils.TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True),
 )
 

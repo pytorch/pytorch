@@ -48,7 +48,6 @@ static const std::unordered_set<NodeKind> standardOps = {
     onnx::Div,
     onnx::Gemm,
     onnx::Min,
-    onnx::Max,
     onnx::Mod,
     onnx::Mul,
     onnx::Pow,

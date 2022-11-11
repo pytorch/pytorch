@@ -219,60 +219,6 @@ reduce_scatter_cuda_(
       output_tensors, work);
 }
 
-c10::intrusive_ptr<Work> gather_cpu_(
-    const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const std::vector<at::Tensor>& input_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t root_rank,
-    int64_t timeout) {
-  return process_group->gather(
-      const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
-      const_cast<std::vector<at::Tensor>&>(input_tensors),
-      GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
-}
-
-c10::intrusive_ptr<Work> gather_cuda_(
-    const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const std::vector<at::Tensor>& input_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t root_rank,
-    int64_t timeout) {
-  return process_group->gather(
-      const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
-      const_cast<std::vector<at::Tensor>&>(input_tensors),
-      GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
-}
-
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_cpu_(
-    const std::vector<at::Tensor>& output_tensors,
-    const std::vector<std::vector<at::Tensor>>& input_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t root_rank,
-    int64_t timeout) {
-  auto work = process_group->scatter(
-      const_cast<std::vector<at::Tensor>&>(output_tensors),
-      const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
-      ScatterOptions{root_rank, std::chrono::milliseconds(timeout)});
-
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-      output_tensors, work);
-}
-
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_cuda_(
-    const std::vector<at::Tensor>& output_tensors,
-    const std::vector<std::vector<at::Tensor>>& input_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t root_rank,
-    int64_t timeout) {
-  auto work = process_group->scatter(
-      const_cast<std::vector<at::Tensor>&>(output_tensors),
-      const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
-      ScatterOptions{root_rank, std::chrono::milliseconds(timeout)});
-
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-      output_tensors, work);
-}
-
 c10::intrusive_ptr<Work> alltoall_cpu_(
     at::TensorList output_tensors,
     at::TensorList input_tensors,
@@ -381,22 +327,6 @@ TORCH_LIBRARY_IMPL(c10d, CPU, m) {
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("reduce_scatter_", reduce_scatter_cuda_);
-}
-
-TORCH_LIBRARY_IMPL(c10d, CPU, m) {
-  m.impl("gather_", gather_cpu_);
-}
-
-TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
-  m.impl("gather_", gather_cuda_);
-}
-
-TORCH_LIBRARY_IMPL(c10d, CPU, m) {
-  m.impl("scatter_", scatter_cpu_);
-}
-
-TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
-  m.impl("scatter_", scatter_cuda_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {

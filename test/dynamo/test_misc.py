@@ -1409,18 +1409,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
 
-    def test_tensor_is_contiguous(self):
-        def fn(x):
-            input = torch.randn((1, 16, 1, 1))
-            weight = torch.randn((8, 16, 3, 3))
-            weight = weight.to(memory_format=x)
-            output = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
-            return output.is_contiguous(memory_format=x)
-
-        opt_fn = torch._dynamo.optimize("eager")(fn)
-        for x in [torch.contiguous_format, torch.channels_last]:
-            self.assertEqual(fn(x), opt_fn(x))
-
     def test_python_slice(self):
         def f1(input):
             y = 0
@@ -2810,22 +2798,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Detected that you are using FX"):
             gm = torch.fx.symbolic_trace(optimized)
-
-    @patch.object(torch._dynamo.config, "error_on_nested_fx_trace", False)
-    def test_no_error_on_nested_fx_trace(self):
-        input = torch.rand(2, 3)
-
-        def f(x):
-            x + x
-
-        real = f(input)
-
-        optimized = torch._dynamo.optimize("eager")(f)
-        self.assertTrue(same(optimized(input), real))
-
-        # should not error
-        gm = torch.fx.symbolic_trace(optimized)
-        self.assertTrue(same(gm(input), real))
 
     def test_inference_mode(self):
         @torch.inference_mode()

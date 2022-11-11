@@ -356,82 +356,6 @@ _nvfuser_impls["var_mean"] = _var_mean_nvfuser
 _nvfuser_impls["amax"] = _amax_nvfuser
 _nvfuser_impls["amin"] = _amin_nvfuser
 
-# functorch.compile.min_cut_rematerialization_partition accepts a list of
-# operators that can be recomputed in the backward pass. This list is used to
-# determine which operators can be recomputed. If an operator is not in this
-# list, it will not be recomputed.
-_nvfuser_is_recomputable: Dict[str, bool] = {
-    # Reductions are not allowed to be recomputed
-    "amax": False,
-    "amin": False,
-    "sum": False,
-    "var": False,
-    "var_mean": False,
-    # Normalizations are not allowed to be recomputed
-    "native_batch_norm": False,
-    # Random ops are not allowed to be recomputed
-    "rand_like": False,
-    # Everything else is allowed to be recomputed
-    "abs": True,
-    "acos": True,
-    "add": True,
-    "asin": True,
-    "atan": True,
-    "atan2": True,
-    "atanh": True,
-    "bitwise_and": True,
-    "bitwise_not": True,
-    "bitwise_or": True,
-    "bitwise_xor": True,
-    "broadcast_in_dim": True,
-    "ceil": True,
-    "clone": True,
-    "convert_element_type": True,
-    "cos": True,
-    "cosh": True,
-    "div": True,
-    "eq": True,
-    "erf": True,
-    "erfc": True,
-    "exp": True,
-    "expm1": True,
-    "floor": True,
-    "fmod": True,
-    "ge": True,
-    "gt": True,
-    "imag": True,
-    "isfinite": True,
-    "le": True,
-    "lgamma": True,
-    "log": True,
-    "log10": True,
-    "log1p": True,
-    "log2": True,
-    "lt": True,
-    "mul": True,
-    "ne": True,
-    "neg": True,
-    "pow": True,
-    "real": True,
-    "reciprocal": True,
-    "remainder": True,
-    "round": True,
-    "rsqrt": True,
-    "sign": True,
-    "sin": True,
-    "sinh": True,
-    "sqrt": True,
-    "squeeze": True,
-    "sub": True,
-    "tan": True,
-    "tanh": True,
-    "transpose": True,
-    "trunc": True,
-    "view": True,
-    "view_of": True,
-    "where": True,
-}
-
 
 def register_native_batch_norm():
     """This function is used to register the native_batch_norm function in torch.ops.nvprims module."""
@@ -508,7 +432,6 @@ def register_native_batch_norm():
     for p in (prim_packet, prim):
         p.__doc__ = "Computes batch normalization."
         p.impl_nvfuser = _nvfuser_impls["native_batch_norm"]
-        p.is_recomputable = _nvfuser_is_recomputable["native_batch_norm"]
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
@@ -567,7 +490,6 @@ def register_rand_like():
     for p in (prim_packet, prim):
         p.__doc__ = "Computes rand_like"
         p.impl_nvfuser = _nvfuser_impls["rand_like"]
-        p.is_recomputable = _nvfuser_is_recomputable["rand_like"]
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
@@ -666,7 +588,6 @@ def register_var_mean():
     for p in (prim_packet, prim):
         p.__doc__ = "Computes the variance and mean of x over the list of dimensions specified in the dim argument"
         p.impl_nvfuser = _nvfuser_impls["var_mean"]
-        p.is_recomputable = _nvfuser_is_recomputable["var_mean"]
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
@@ -704,7 +625,6 @@ def register_view():
     for p in (prim_packet, prim):
         p.__doc__ = "Creates a tensor with the specified shape containing a copy of the data in a."
         p.impl_nvfuser = _nvfuser_impls["view"]
-        p.is_recomputable = _nvfuser_is_recomputable["view"]
         p.return_type = torch._prims_common.RETURN_TYPE.VIEW  # type: ignore[attr-defined]
         p.impl_aten = _nvprims_view_impl_aten
 
@@ -731,6 +651,5 @@ def register_nvprims():
         for p in (prim_packet, prim):
             p.__doc__ = main_prim.__doc__
             p.impl_nvfuser = _nvfuser_impls[name]
-            p.is_recomputable = _nvfuser_is_recomputable.get(name, False)
             p.return_type = main_prim.return_type  # type: ignore[attr-defined]
             p.impl_aten = main_prim.impl_aten

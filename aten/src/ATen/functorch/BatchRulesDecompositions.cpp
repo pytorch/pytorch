@@ -45,7 +45,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(adaptive_max_pool1d);
   OP_DECOMPOSE(adaptive_avg_pool1d);
   m.impl("adaptive_avg_pool2d", native::adaptive_avg_pool2d_symint);
-  m.impl("adaptive_avg_pool3d", native::adaptive_avg_pool3d_symint);
+  OP_DECOMPOSE(adaptive_avg_pool3d);
   OP_DECOMPOSE(adjoint);
   OP_DECOMPOSE(arccos);
   OP_DECOMPOSE(arccosh);

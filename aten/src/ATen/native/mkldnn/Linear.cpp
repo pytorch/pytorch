@@ -215,9 +215,8 @@ Tensor mkldnn_linear_pointwise(
   }
   const ideep::tensor w = itensor_from_tensor(weight_t);
 
-  auto it = fusion_unary_attr_map().find(attr);
-  TORCH_CHECK(
-      it != fusion_unary_attr_map().end(), "Fusion behavior undefined.");
+  auto it = fx_fusion_attr_map().find(attr);
+  TORCH_CHECK(it != fx_fusion_attr_map().end(), "Fusion behavior undefined.");
   ideep::attr_t op_attr = it->second(scalars, algorithm);
 
   if (mkldnn_bias.has_value()) {

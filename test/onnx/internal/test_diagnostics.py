@@ -176,7 +176,7 @@ class TestOnnxDiagnostics(common_utils.TestCase):
             sample_rule,
             sample_level,
         ):
-            diagnostics.context.diagnose(sample_rule, sample_level)
+            diagnostics.context.diagnose(sample_rule, sample_level, ("foo",))
 
 
 @dataclasses.dataclass
@@ -196,17 +196,31 @@ class TestDiagnosticsInfra(common_utils.TestCase):
     def setUp(self):
         self.engine = infra.DiagnosticEngine()
         self.rules = _RuleCollectionForTest()
+        self.diagnostic_tool = infra.DiagnosticTool("test_tool", "1.0.0", self.rules)
         with contextlib.ExitStack() as stack:
             self.context = stack.enter_context(
-                self.engine.create_diagnostic_context("test", "1.0.0")
+                self.engine.create_diagnostic_context(self.diagnostic_tool)
             )
             self.addCleanup(stack.pop_all().close)
         return super().setUp()
 
+    def test_diagnose_raises_value_error_when_rule_not_supported(self):
+        rule_id = "0"
+        rule_name = "nonexistent-rule"
+        with self.assertRaisesRegex(
+            ValueError,
+            f"Rule '{rule_id}:{rule_name}' is not supported by this tool "
+            f"'{self.diagnostic_tool.name} {self.diagnostic_tool.version}'.",
+        ):
+            self.context.diagnose(
+                infra.Rule(id=rule_id, name=rule_name, message_default_template=""),
+                infra.Level.WARNING,
+            )
+
     def test_diagnostics_engine_records_diagnosis_reported_in_nested_contexts(
         self,
     ):
-        with self.engine.create_diagnostic_context("inner_test", "1.0.1") as context:
+        with self.engine.create_diagnostic_context(self.diagnostic_tool) as context:
             context.diagnose(self.rules.rule_without_message_args, infra.Level.WARNING)
             sarif_log = self.engine.sarif_log()
             self.assertEqual(len(sarif_log.runs), 2)
@@ -236,7 +250,9 @@ class TestDiagnosticsInfra(common_utils.TestCase):
         )
 
         with self.engine.create_diagnostic_context(
-            "custom_rules", "1.0"
+            tool=infra.DiagnosticTool(
+                name="custom_tool", version="1.0", rules=custom_rules
+            )
         ) as diagnostic_context:
             with assert_all_diagnostics(
                 self,
@@ -252,6 +268,20 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 diagnostic_context.diagnose(
                     custom_rules.custom_rule_2, infra.Level.ERROR  # type: ignore[attr-defined]
                 )
+
+    def test_diagnostic_tool_raises_type_error_when_diagnostic_type_is_invalid(
+        self,
+    ):
+        with self.assertRaisesRegex(
+            TypeError,
+            "Expected diagnostic_type to be a subclass of Diagnostic, but got",
+        ):
+            _ = infra.DiagnosticTool(
+                "custom_tool",
+                "1.0",
+                self.rules,
+                diagnostic_type=int,
+            )
 
 
 if __name__ == "__main__":

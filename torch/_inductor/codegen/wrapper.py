@@ -255,8 +255,8 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{name} = get_cuda_stream({index})")
         return name
 
-    def next_kernel_suffix(self):
-        return f"{next(self._names_iter)}"
+    def next_kernel_name(self):
+        return f"kernel{next(self._names_iter)}"
 
     def codegen_allocation(self, buffer):
         name = buffer.get_name()

@@ -447,7 +447,7 @@ class TestFSDPStateDict(FSDPTest):
     )
     @parametrize("fp16", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
-    @parametrize("use_orig_params", [True, False])
+    @parametrize("use_orig_params", [False, True])
     def test_basic_save_and_load_state_dict(
         self,
         state_dict_type: StateDictType,

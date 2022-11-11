@@ -151,8 +151,8 @@ def _detect_and_normalize_assert_statement(
     if sys.version_info < (3, 9):
         if (
             inst.opname != "LOAD_GLOBAL"
-            or inst.arg != 0
-            or inst.argval != "AssertionError"
+            and inst.arg != 0
+            and inst.argval != "AssertionError"
         ):
             return False
     else:
