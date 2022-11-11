@@ -904,7 +904,6 @@ class MultiheadAttention(Module):
     - inputs are batched (3D) with ``batch_first==True``
     - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
-    - dropout is 0
     - ``add_bias_kv`` is ``False``
     - ``add_zero_attn`` is ``False``
     - ``batch_first`` is ``True`` and the input is batched
