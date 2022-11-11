@@ -132,14 +132,9 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        import inspect
-
         from triton.testing import do_bench
 
-        if "fast_flush" in inspect.signature(do_bench).parameters.keys():
-            return do_bench(kernel_call, rep=40, fast_flush=True)
-        else:
-            return do_bench(kernel_call, rep=40)
+        return do_bench(kernel_call, rep=40, fast_flush=True)
 
     @dynamo_utils.dynamo_timed
     def autotune_to_one_config(self, *args, **kwargs):
