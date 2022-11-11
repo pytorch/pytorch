@@ -74,10 +74,13 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
         (*interpreter)->dispatch(op, stack);
         return;
       }
-    } else if (ivalue.isTensorList() || (ivalue.isOptionalTensorList() && !ivalue.isNone())) {
+    } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
       // NB: use toListRef as it doesn't induce refcount bumps (toTensorListRef
       // is not a thing)
       for (const auto& nv : ivalue.toListRef()) {
+        if (nv.isNone()) {
+          continue;
+        }
         auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
         if (interpreter) {
           (*interpreter)->dispatch(op, stack);
