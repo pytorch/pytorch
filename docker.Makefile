@@ -74,9 +74,9 @@ devel-image:
 	$(DOCKER_BUILD)
 	
 .PHONY: devel-latest-image
-devel-image: BASE_IMAGE := $(BASE_DEVEL)
-devel-image: DOCKER_TAG := latest
-devel-image:
+devel-latest-image: BASE_IMAGE := $(BASE_DEVEL)
+devel-latest-image: DOCKER_TAG := latest
+devel-latest-image:
 	$(DOCKER_BUILD)
 
 .PHONY: devel-push
