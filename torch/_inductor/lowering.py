@@ -3264,7 +3264,7 @@ def div_prim(a, b):
 true_divide = register_lowering(
     [aten.true_divide, aten.div.Tensor],
     broadcast=True,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )(div_prim)
 
 
