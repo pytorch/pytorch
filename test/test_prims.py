@@ -590,6 +590,9 @@ class TestPrims(TestCase):
             torch.native_batch_norm,
             torch.ops.aten.native_batch_norm,
             torch.ops.aten.native_batch_norm.default,
+            torch.native_batch_norm_legit,
+            torch.ops.aten.native_batch_norm_legit,
+            torch.ops.aten.native_batch_norm_legit.default,
             torch.ops.nvprims.native_batch_norm.default,
         ]
         for sample, batch_norm in product(samples, batch_norms):
