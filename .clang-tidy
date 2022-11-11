@@ -1,6 +1,6 @@
 ---
 # NOTE there must be no spaces before the '-', so put the comma last.
-# This file is used for internal (Meta) clang-tidy linting. For Pytorch Github repo, use `.clang-tidy-oss`. 
+# This file is used for internal (Meta) clang-tidy linting. For Pytorch Github repo, use `.clang-tidy-oss`.
 InheritParentConfig: true
 Checks: '
 bugprone-*,
