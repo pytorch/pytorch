@@ -537,8 +537,8 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   return at::sparse_coo_tensor(new_indices, new_values, size)._coalesced_(is_coalesced);
 }
 
-Tensor broadcast_to(const Tensor& self, IntArrayRef size) {
-  return self.expand(size);
+Tensor broadcast_to_symint(const Tensor& self, SymIntArrayRef size) {
+  return self.expand_symint(size);
 }
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
