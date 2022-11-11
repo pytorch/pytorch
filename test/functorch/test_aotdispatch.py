@@ -243,13 +243,21 @@ def _outs_and_grads(fn, inps):
 
 
 class TestAOTAutograd(AOTTestCase):
-    def verify_aot_autograd(self, f, inp):
+    def verify_aot_autograd(self, f, inp, *, mutate_output: bool=False):
+        # Create a copy of inputs, so we can test input mutation correctness.
+        inp_copy = []
+        for x in inp:
+            x_copy = x.clone().detach().requires_grad_(x.requires_grad)
+            if x.requires_grad and not x.is_leaf:
+                x_copy = x_copy.clone()
+            inp_copy.append(x_copy)
+
         if isinstance(f, nn.Module):
             compiled_f = aot_module(f, nop)
         else:
             compiled_f = aot_function(f, nop)
         ref_out, ref_grad = _outs_and_grads(f, inp)
-        test_out, test_grad = _outs_and_grads(compiled_f, inp)
+        test_out, test_grad = _outs_and_grads(compiled_f, inp_copy)
         self.assertEqual(ref_out, test_out)
         self.assertEqual(ref_grad, test_grad)
 
@@ -259,6 +267,19 @@ class TestAOTAutograd(AOTTestCase):
         for ref_o, test_o in zip(ref_out, test_out):
             if isinstance(ref_o, torch.Tensor):
                 self.assertEqual(ref_o.requires_grad, test_o.requires_grad)
+                self.assertEqual(ref_o.is_leaf, test_o.is_leaf)
+                self.assertEqual(ref_o._is_view(), test_o._is_view())
+                self.assertEqual(ref_o, test_o)
+                if mutate_output:
+                    # This tests that autograd meta is set properly on the output we can
+                    # mutate it.
+                    ref_o.add_(1)
+                    test_o.add_(1)
+                    self.assertEqual(ref_o, test_o)
+        for ref_i, test_i in zip(inp, inp_copy):
+            if isinstance(ref_i, torch.Tensor):
+                self.assertEqual(ref_i.requires_grad, test_i.requires_grad)
+                self.assertEqual(ref_i, test_i)
 
     def test_single_output(self):
         def f(a, b):
@@ -277,6 +298,88 @@ class TestAOTAutograd(AOTTestCase):
             return [a + b, a - b]
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
         self.verify_aot_autograd(f, inp)
+
+    def test_input_mutation_simple(self):
+        def f(a):
+            a.add_(1)
+            return a + 2
+        inp = [torch.ones(3, 3, requires_grad=True).add(1)]
+
+        self.verify_aot_autograd(f, inp)
+
+    def test_input_mutation_is_output(self):
+        def f(a):
+            a.add_(1)
+            return a
+        inp = [torch.ones(3, 3, requires_grad=True).add(1)]
+
+        self.verify_aot_autograd(f, inp)
+
+    def test_input_mutation_multiple(self):
+        def f(a, b, c):
+            a.add_(1)
+            c.add_(1)
+            return a + b + c
+
+        inp = [
+            torch.ones(3, 3, requires_grad=True).add(1),
+            torch.ones(3, 3, requires_grad=True).add(1),
+            torch.ones(3, 3, requires_grad=True).add(1),
+        ]
+
+        self.verify_aot_autograd(f, inp)
+
+    def test_input_mutation_metadata(self):
+        def f(a):
+            a.transpose_(1, 0)
+            a.add_(1)
+            return a + 1
+        inp = [torch.ones(3, 3, requires_grad=True).add(1)]
+
+        self.verify_aot_autograd(f, inp)
+
+    def test_input_mutation_resize_smaller(self):
+        def f(a, b):
+            a.resize_(2, 2)
+            return a + b
+        # tenors that require gradients cannot be resized, so only test requires_grad=False case
+        inp = [
+            torch.ones(3, 3),
+            torch.ones(2, 2, requires_grad=True),
+        ]
+
+        self.verify_aot_autograd(f, inp)
+
+    def test_input_output_view_mutate_simple(self):
+        def f(a):
+            return a.view(-1)
+        inp = [
+            torch.ones(2, 2, requires_grad=True).add(1),
+        ]
+
+        self.verify_aot_autograd(f, inp, mutate_output=True)
+
+    def test_input_output_view_mutate_multiple(self):
+        def f(a, b, c, d):
+            return a.view(-1), b + 3, c.view(-1), d + 3
+        inp = [
+            torch.zeros(2, 2, requires_grad=True).add(1),
+            torch.zeros(2, 2, requires_grad=True).add(1),
+            torch.ones(2, 2, requires_grad=True).add(1),
+            torch.ones(2, 2, requires_grad=True).add(1),
+        ]
+
+        self.verify_aot_autograd(f, inp, mutate_output=True)
+
+    def test_input_mutation_and_output_view(self):
+        def f(a):
+            a.add_(1)
+            return a.view(-1)
+        inp = [
+            torch.ones(2, 2, requires_grad=True).add(1),
+        ]
+
+        self.verify_aot_autograd(f, inp, mutate_output=True)
 
     def test_no_grad_input_output(self):
         def f(a, b):
@@ -1093,12 +1196,20 @@ symbolic_aot_autograd_failures = {
     xfail('masked.cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('masked.cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
     xfail('masked_fill', ''),  # could not find kernel
+    xfail('masked.log_softmax', ''),  # argument 'size' (position 2) must be tuple of ints, not ...
     xfail('masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposi...
     xfail('masked.logsumexp', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('masked.mean', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=t...
     xfail('masked.median', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('masked.norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
+    xfail('masked.softmax', ''),  # argument 'size' (position 2) must be tuple of ints, not torc...
+    xfail('masked.softmin', ''),  # argument 'size' (position 2) must be tuple of ints, not torc...
+    xfail('masked.std', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=to...
+    xfail('masked.sum', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('masked.var', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=to...
     xfail('matmul', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decompo...
     xfail('median', ''),  # could not find kernel
