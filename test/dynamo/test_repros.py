@@ -1792,6 +1792,36 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(a)
         self.assertTrue(same(ref, res))
 
+    def test_tokenization(self):
+        from collections import UserDict
+
+        class BatchEncoding(UserDict):
+            """
+            Copied from tokenization
+            """
+
+            def __init__(
+                self,
+                data,
+            ):
+                super().__init__(data)
+
+            def __getattr__(self, item: str):
+                try:
+                    return self.data[item]
+                except KeyError:
+                    raise AttributeError
+
+        def tokenization(x):
+            encoding = BatchEncoding({"key": x})
+            return encoding["key"]
+
+        opt_fn = torch._dynamo.optimize("eager")(tokenization)
+        x = torch.rand((1, 4))
+        ref = tokenization(x)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
