@@ -3136,7 +3136,7 @@ class Convolution(ExternKernelAlloc):
             stride_order = list(reversed(range(len(output_size))))
             strides = make_contiguous_strides_for(output_size)
 
-        if kernel != "aten.convolution":
+        if config.triton.convolution != "aten":
             x = cls.require_stride_order(x, stride_order)
 
         output_layout = FixedLayout(
