@@ -6548,6 +6548,15 @@ def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
         yield SampleInput(make_arg(case), p=p, training=training)
     yield SampleInput(make_arg(case))
 
+def sample_inputs_dropout_backward(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_mask = partial(make_tensor, device=device, dtype=torch.bool, requires_grad=False)
+
+    cases = ((S, S, S, S), (S,), ())
+    scale_vals = [0.0, 1.0, 2.0]
+
+    for case, scale in product(cases, scale_vals):
+        yield SampleInput(make_arg(case), make_mask(case), scale)
 
 def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape):
@@ -15728,6 +15737,20 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_dropout,
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs, inplace=True)),
+    OpInfo(
+        "aten.native_dropout_backward",
+        op=torch.ops.aten.native_dropout_backward,
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=True,
+        sample_inputs_func=sample_inputs_dropout_backward,
+        skips=(
+            # RuntimeError not raised: Expected RuntimeError when calling with input.device=cpu and out.device=cuda
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+            # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit')),
+    ),
     OpInfo(
         "nn.functional.dropout2d",
         op=lambda input, *args, **kwargs:

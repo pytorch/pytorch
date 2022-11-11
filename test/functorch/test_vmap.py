@@ -3377,6 +3377,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('bernoulli', ''),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
+        xfail('aten.native_dropout_backward'),
         xfail('nn.functional.kl_div', ''),
         xfail('multinomial', ''),
         xfail('column_stack', ''),
