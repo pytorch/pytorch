@@ -39,7 +39,8 @@ class TestMatmulCuda(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = True
         super(self.__class__, self).tearDown()
 
-    @unittest.skipIf((not CUDA11OrLater) and (not (TEST_WITH_ROCM and _get_torch_rocm_version() >= (5, 2))), "Only CUDA 11+ or ROCm 5.2+ is supported")
+    @unittest.skipIf((not CUDA11OrLater) and (not (TEST_WITH_ROCM and _get_torch_rocm_version() >= (5, 2))),
+                     "Only CUDA 11+ or ROCm 5.2+ is supported")
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
                         torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
@@ -93,7 +94,8 @@ class TestMatmulCuda(TestCase):
         # Compare
         self.assertEqual(res_cpu, res_cuda)
 
-    @unittest.skipIf((not CUDA11OrLater) and (not (TEST_WITH_ROCM and _get_torch_rocm_version() >= (5, 2))), "Only CUDA 11+ or ROCm 5.2+ is supported")
+    @unittest.skipIf((not CUDA11OrLater) and (not (TEST_WITH_ROCM and _get_torch_rocm_version() >= (5, 2))),
+                     "Only CUDA 11+ or ROCm 5.2+ is supported")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1e-5)})
     @dtypes(*([torch.float32, torch.float16] +
               [torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else []))
