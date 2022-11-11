@@ -128,6 +128,7 @@ overrides.{old_fn_name} = staticmethod({new_fn_name})
 {patch_code}
 isolate_fails_code_str = \"\"\"\\
 {patch_code}
+torch._dynamo.config.debug_dir_root = "{DEBUG_DIR}"
 \"\"\"
 """
 
@@ -145,6 +146,7 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
                 DEBUG_DIR,
             )
         )
+        os.makedirs(DEBUG_DIR, exist_ok=True)
 
     @classmethod
     def tearDownClass(cls):
@@ -161,7 +163,9 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
     # Returns the completed process state and the directory containing the
     # minifier launcher script, if `code` outputted it.
     def _run_test_code(self, code):
-        proc = subprocess.run(["python3", "-c", code], capture_output=True)
+        proc = subprocess.run(
+            ["python3", "-c", code], capture_output=True, cwd=DEBUG_DIR
+        )
 
         repro_dir_match = re.search(
             r"(\S+)minifier_launcher.py", proc.stderr.decode("utf-8")

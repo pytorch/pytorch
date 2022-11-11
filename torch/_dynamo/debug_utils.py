@@ -284,6 +284,7 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
     stdout, stderr = TemporaryFile(), TemporaryFile()
     p = subprocess.Popen(
         ["python", file_name],
+        cwd=subdir,
         stdout=stdout,
         stderr=stderr,
         env=new_env,
