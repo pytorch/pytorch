@@ -72,7 +72,7 @@ def _auto_wrap(
             "instances with mixed precision disabled since some batch norm "
             "kernels do not support low precision."
         )
-        auto_wrap_kwargs["auto_wrap_policy"] = auto_wrap_policy
+    auto_wrap_kwargs["auto_wrap_policy"] = auto_wrap_policy
     _recursive_wrap(**auto_wrap_kwargs, **fsdp_kwargs)
 
 
