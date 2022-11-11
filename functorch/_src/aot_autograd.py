@@ -420,9 +420,6 @@ def _delta_to_eval_guard_func(delta, flat_args, shape_env, arg_name):
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, shape_env):
     pre_dispatch_guards = copy.deepcopy(shape_env.guards)
-    base_cache = aot_autograd_compiled_fn_cache["base"]
-    if flat_fn.mod.code in base_cache:
-        return base_cache[flat_fn.mod.code]
 
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
     if config.debug_graphs:
@@ -442,17 +439,10 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, s
     @wraps(compiled_fw)
     def new_fn(args):
         nonlocal compiled_fw
-        if compiled_guard_expr is not None and not eval(compiled_guard_expr):
-            breakpoint()
-            # Guard failure, recompile
-            with context(), track_graph_compiling("inference"):
-                compiled_fw = aot_config.fw_compiler(fw_module, args)
+        return call_func_with_args(compiled_fw, args, disable_amp=disable_amp)
+    
+    new_fn.guards = compiled_guard_expr
 
-        fw_outs = call_func_with_args(compiled_fw, args, disable_amp=disable_amp)
-
-        return fw_outs
-
-    base_cache.update({flat_fn.mod.code: new_fn})
     return new_fn
 
 # TODO(voz): DO NOT LAND LIKE THIS - DEDUP WITH DYNAMO
@@ -490,14 +480,9 @@ def disable_autocast_manager():
         del guard
 
 aot_autograd_compiled_fn_cache = {}
-aot_autograd_compiled_fn_cache["autograd"] = {}
-aot_autograd_compiled_fn_cache["base"] = {}
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, shape_env):
     pre_dispatch_guards = copy.deepcopy(shape_env.guards)
-    autograd_cache = aot_autograd_compiled_fn_cache["autograd"]
-    if flat_fn.mod.code in autograd_cache:
-        return autograd_cache[flat_fn.mod.code]
 
     # Deduplicate inputs.  Suppose you have:
     #
@@ -622,39 +607,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         num_outs = _num_outs
         num_symints = _num_symints
         flat_outs_not_requiring_grad = _flat_outs_not_requiring_grad
-
-        # Field used strict to determine recompilation
-        # NOTE: Absence of guard_expr indicates no new AOTAutograd guards
-        guard_expr = compiled_guard_expr
-
-        # Fields used stricly at recompilation
-        compiled_flat_fn = None
-        compiled_shape_env = None
-        compiled_aot_config = None
-
+        guards = compiled_guard_expr
+        
         @staticmethod
         @disable_torchdynamo
         def forward(ctx, *deduped_flat_tensor_args):
-            if CompiledFunction.guard_expr is not None:
-                Eq = sympy.Eq
-                Ne = sympy.Ne
-                Mod = sympy.Mod
-                floor = math.floor
-
-                # A guard expr is installed, which we need to evaluate before execution
-                # in case we need to recompile
-                needs_recompile = True
-                if eval(CompiledFunction.guard_expr):
-                    needs_recompile = False
-                if needs_recompile:
-                    if CompiledFunction.compiled_fw in autograd_cache:
-                        del autograd_cache[CompiledFunction.compiled_fw]
-                    aot_dispatch_autograd(
-                        CompiledFunction.compiled_flat_fn,
-                        deduped_flat_tensor_args,
-                        CompiledFunction.compiled_aot_config,
-                        CompiledFunction.compiled_shape_env)
-
             fw_outs = call_func_with_args(
                 CompiledFunction.compiled_fw, deduped_flat_tensor_args, disable_amp=disable_amp
             )
@@ -1042,7 +999,6 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
     return AOTModule()
 
-
 def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1108,12 +1064,34 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         )
 
         compiled_fn = None
-
         @wraps(fn)
         def new_func(*args):
             nonlocal compiled_fn
-            # Disabling the cache because it causes some models to fail
-            if True:
+            pre_dispatch_guards = copy.deepcopy(shape_env.guards)
+            breakpoint()
+            def inp_to_key(inp):
+                return str(inp.size()) + str(inp.stride())
+
+            key = "".join([inp_to_key(arg) for arg in args])
+            key = key + flat_fn.mod.code
+            
+            needs_recompile = True
+
+            if key in aot_autograd_compiled_fn_cache:
+                compiled_fn = aot_autograd_compiled_fn_cache[key](args)
+                if compiled_fn.guards:
+                    Eq = sympy.Eq
+                    Ne = sympy.Ne
+                    Mod = sympy.Mod
+                    floor = math.floor
+                    if eval(compiled_fn.guards):
+                        # Guards passed
+                        needs_recompile = False
+                else:
+                    # No guards, no need to recompile
+                    needs_recompile = False
+
+            if needs_recompile:
                 compiled_fn = create_aot_dispatcher_function(
                     fn,
                     args,
