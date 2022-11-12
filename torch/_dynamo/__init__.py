@@ -7,6 +7,7 @@ from .eval_frame import (
     export,
     optimize,
     optimize_assert,
+    OptimizedModule,
     reset_code,
     run,
     skip,
@@ -25,6 +26,7 @@ __all__ = [
     "reset",
     "list_backends",
     "skip",
+    "OptimizedModule",
 ]
 
 
