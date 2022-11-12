@@ -1179,7 +1179,6 @@ void initJITBindings(PyObject* module) {
       SYMNODE_UNARY(ceil)
       SYMNODE_UNARY(floor)
       SYMNODE_UNARY(neg)
-      // clang-format on
       // Intentionally don't set file line, as the
       // Python backtrace matters more here
       .def(
@@ -1208,6 +1207,7 @@ void initJITBindings(PyObject* module) {
       .def("__repr__", [](c10::SymNode a) {
         return a->str();
       });
+  // clang-format on
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
