@@ -369,7 +369,7 @@ class ProfilerContextWrapperVariable(ContextWrappingVariable):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def fn_name(self):
-        return "autograd.profiler.profile"
+        return "autograd.profiler.dummy"
 
 
 class WithExitFunctionVariable(VariableTracker):

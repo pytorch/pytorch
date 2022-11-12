@@ -441,6 +441,20 @@ class profile(object):
         return function_events
 
 
+class dummy(object):
+    """
+    A dummy context manager used by torch._dynamo.variables.misc.ProfilerContextWrapperVariable.
+    Dynamo doesn't support profiler now, so we use this dummy context manager as placeholder
+    and fallback function.
+    """
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return
+
+
 class record_function(_ContextDecorator):
     """Context manager/function decorator that adds a label to a block of
     Python code (or function) when running autograd profiler. It is
