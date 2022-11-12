@@ -46,6 +46,7 @@ class ShapeAliasingAndMutationProp(ShapeProp):
 
         input_versions1 = [obj._version for obj in tensor_args]
         result = getattr(self, n.op)(n.target, args, kwargs)
+        assert result is not NotImplemented
         input_versions2 = [obj._version for obj in tensor_args]
 
         n.meta["type"] = type(result)
