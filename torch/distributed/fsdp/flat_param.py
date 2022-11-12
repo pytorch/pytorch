@@ -838,7 +838,8 @@ class FlatParamHandle:
             return False
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         already_unsharded = (
-            unsharded_flat_param._typed_storage()._size() == unsharded_flat_param.numel()
+            unsharded_flat_param._typed_storage()._size()
+            == unsharded_flat_param.numel()
         )
         return not already_unsharded
 

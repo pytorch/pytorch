@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
-import functools
 import sys
 from typing import Any, Tuple
 
@@ -12,7 +11,7 @@ from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
 from torch.distributed.fsdp._runtime_utils import _root_pre_forward
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -62,10 +61,8 @@ class Model(nn.Module):
         return z
 
     @staticmethod
-    def auto_wrap_policy():
-        return functools.partial(
-            transformer_auto_wrap_policy, transformer_layer_cls={SubModel}
-        )
+    def policy():
+        return ModuleWrapPolicy({SubModel})
 
     def get_input(self, device=torch.device) -> Tuple[Any, ...]:
         return (torch.randn((8, 5), device=device),)
@@ -85,13 +82,13 @@ class TestFSDPInitialization(FSDPTest):
         local_model = Model(device=torch.device("cuda"))
         fsdp_wrapped_model = FSDP(
             copy.deepcopy(local_model),
-            auto_wrap_policy=Model.auto_wrap_policy(),
+            auto_wrap_policy=Model.policy(),
             use_orig_params=True,
         )
         composable_module = copy.deepcopy(local_model)
         fully_shard(
             composable_module,
-            auto_wrap_policy=Model.auto_wrap_policy(),
+            policy=Model.policy(),
         )
 
         # Check that the composable module has the same names as the local
@@ -138,7 +135,7 @@ class TestFSDPInitialization(FSDPTest):
             assert param.device == cpu_device
         fully_shard(
             composable_module,
-            auto_wrap_policy=Model.auto_wrap_policy(),
+            policy=Model.policy(),
             device_id=self.rank,
         )
         for param in composable_module.parameters():
@@ -157,12 +154,12 @@ class TestFSDPInitialization(FSDPTest):
                     param.zero_()
         fsdp_wrapped_model = FSDP(
             copy.deepcopy(local_model),
-            auto_wrap_policy=Model.auto_wrap_policy(),
+            auto_wrap_policy=Model.policy(),
             use_orig_params=True,
         )
         fully_shard(
             composable_module,
-            auto_wrap_policy=Model.auto_wrap_policy(),
+            policy=Model.policy(),
             sync_module_states=True,
         )
         for (composable_param, fsdp_wrapped_param) in zip(
@@ -197,13 +194,13 @@ class TestFSDPInitialization(FSDPTest):
         composable_module = Model(device="meta")
         fsdp_wrapped_model = FSDP(
             Model(device="meta"),
-            auto_wrap_policy=Model.auto_wrap_policy(),
+            auto_wrap_policy=Model.policy(),
             param_init_fn=_param_init_fn,
             use_orig_params=True,
         )
         fully_shard(
             composable_module,
-            auto_wrap_policy=Model.auto_wrap_policy(),
+            policy=Model.policy(),
             param_init_fn=_param_init_fn,
         )
         for (composable_param, fsdp_wrapped_param) in zip(
@@ -227,13 +224,13 @@ class TestFSDPRuntime(FSDPTest):
         local_model = Model(device=device)
         fsdp_wrapped_model = FSDP(
             copy.deepcopy(local_model),
-            auto_wrap_policy=Model.auto_wrap_policy(),
+            auto_wrap_policy=Model.policy(),
             use_orig_params=True,
         )
         composable_module = copy.deepcopy(local_model)
         fully_shard(
             composable_module,
-            auto_wrap_policy=Model.auto_wrap_policy(),
+            policy=Model.policy(),
         )
         del local_model  # not needed anymore
         LR = 1e-2
