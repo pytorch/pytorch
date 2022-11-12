@@ -154,16 +154,21 @@ class TestPoolingNN(NNTestCase):
                 self.assertEqual(output.size(), (4,) + (2,) * (numel - 1) + (4,))
 
     def test_adaptive_pooling_empty_output_size(self):
-        for numel in (2, 3):
-            for pool_type in ('Max', 'Avg'):
-                cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
-                module_cls = getattr(nn, cls_name)
-                output_size = 0
-                module = module_cls(output_size)
+        error_msg = "Expected grad_output to have non-zero size for non-batch dimensions"
 
-                input = torch.rand([1, 64, 10, 9], requires_grad=True)
-                output = module(input).sum().backward()
-                self.assertRaises(RuntimeError, lambda: output)
+        for device in ['cpu', 'cuda']:
+            input = torch.rand([1, 64, 10, 9], device=device, requires_grad=True)
+            output_size = 0
+
+            for numel in (2, 3):
+                for pool_type in ('max', 'avg'):
+                    cls_name = 'adaptive_{}_pool{}d'.format(pool_type, numel)
+                    module_cls = getattr(nn.functional, cls_name)
+                    output_size = 0
+
+                    with self.assertRaisesRegex(RuntimeError, error_msg):
+                        res = module_cls(input, output_size)
+                        res.sum().backward()
 
     @unittest.skipIf(TEST_WITH_UBSAN, "signed integer overflow error with UBSAN")
     def test_adaptive_pooling_size_overflow(self):
@@ -703,7 +708,6 @@ torch.cuda.synchronize()
         # ROCm 16GB MI25 hits OOM error. Clear caching allocator prior to running large subtest.
         if TEST_WITH_ROCM and 'cuda' in device:
             torch.cuda.empty_cache()
-        helper(200, 512, 28, 28, 2)
         helper(4, 8, 7, 7, 3, stride=1)
         helper(4, 8, 7, 7, 3, padding=2, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
@@ -804,7 +808,6 @@ torch.cuda.synchronize()
             self.assertEqual(input.grad, ref_input.grad)
 
         helper(4, 8, 8, 8, 7)
-        helper(200, 512, 28, 28, 2)
         helper(4, 8, 7, 7, 3, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)

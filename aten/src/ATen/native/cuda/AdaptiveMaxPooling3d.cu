@@ -389,6 +389,14 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cuda)
   TensorArg input_arg{input, "input", 3};
   TensorArg indices_arg{indices, "indices", 4};
 
+  int64_t ndim = gradOutput.ndimension();
+  for (const auto i : c10::irange(1, ndim)) {
+    TORCH_CHECK(gradOutput.size(i) > 0,
+      "adaptive_max_pool3d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
+      "but grad_output has sizes ", gradOutput.sizes(), " with dimension ", i,
+      " being empty");
+  }
+
   checkAllSameGPU(
       __func__,
       {grad_input_arg, grad_output_arg, input_arg, indices_arg});
