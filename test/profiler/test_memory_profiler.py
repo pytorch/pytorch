@@ -12,6 +12,28 @@ profile = functools.partial(
     torch.profiler.profile, record_shapes=True, profile_memory=True, with_stack=True
 )
 
+@skipIfTorchDynamo("TorchDynamo removes profiler altogether.")
+class TestMemoryProfiler(TestCase):
+    def test_config_check(self) -> None:
+        with torch.profiler.profile() as prof:
+            pass
+
+        pattern = r"record_shapes=True, profile_memory=True, with_stack=True"
+        with self.assertRaisesRegex(ValueError, pattern):
+            prof._memory_profile()
+
+        with torch.profiler.profile(record_shapes=True, with_stack=True) as prof:
+            pass
+
+        pattern = r"^profile_memory=True required for memory profiling\.$"
+        with self.assertRaisesRegex(ValueError, pattern):
+            prof._memory_profile()
+
+        with profile() as prof:
+            pass
+
+        self.assertIsInstance(prof._memory_profile(), _memory_profiler.MemoryProfile)
+
 
 class ScaleLayer(torch.nn.Module):
     def __init__(self) -> None:
