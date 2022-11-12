@@ -63,6 +63,10 @@ struct TORCH_API KinetoEvent {
 
   std::shared_ptr<const torch::profiler::impl::Result> result_;
   std::vector<std::string> python_stack_;
+
+  // Copy fields from result so we can return ArrayRefs.
+  std::vector<std::vector<int64_t>> shapes_;
+  std::vector<std::string> dtypes_;
 };
 
 // Consolidating events returned directly from Kineto

@@ -124,7 +124,7 @@ void compareTensorLists(
     const bool use_allclose,
     const bool use_equalnan) {
   EXPECT_TRUE(l.size() == r.size());
-  for (int i = 0; i < l.size(); ++i) {
+  for (auto i : c10::irange(l.size())) {
     ASSERT_TRUE(l[i].isTensor());
     ASSERT_TRUE(r[i].isTensor());
     VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
@@ -298,11 +298,12 @@ void testStaticRuntime(
         // 1st run: collect allocation profiles (args)
         // 2nd run: exercise memory planner and resizing with args2
         // 3rd run: run with args again
-        StaticModuleOptions opts{
-            .enable_out_variant = enable_out_variant,
-            .optimize_memory = enable_out_variant,
-            .manage_output_tensors = manage_output_tensors,
-            .enable_tensorexpr_fusion = enable_tensorexpr_fusion};
+        StaticModuleOptions opts;
+        opts.enable_out_variant = enable_out_variant;
+        opts.optimize_memory = enable_out_variant;
+        opts.manage_output_tensors = manage_output_tensors;
+        opts.enable_tensorexpr_fusion = enable_tensorexpr_fusion;
+
         auto smodule = test_context->makeStaticModule(opts);
         StaticRuntime runtime(smodule);
         auto actual = runtime(args, {});
