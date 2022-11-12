@@ -1158,7 +1158,9 @@ def _as_strided_meta(
         # as_strided to shapes with no elements are trivially valid, so it's OK
         pass
     elif isinstance(a, torch.Tensor):
-        utils.check_in_bounds_for_storage(a.storage(), size, stride, storage_offset)
+        utils.check_in_bounds_for_storage(
+            a._typed_storage(), size, stride, storage_offset
+        )
 
     return TensorMeta(a, shape=size, strides=stride)
 
@@ -1802,10 +1804,14 @@ def collapse(a: Tensor, start: int, end: int) -> Tensor:
 
 # TODO: review stride logic
 def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
-    # Tensors must have the same number of dimensions
+    # Note: cat expects a non-empty list of Tensors, but that's already checked
+    # in the ref.
     first_dims = tensors[0].ndim
-    for second in tensors[1:]:
-        second_dims = second.ndim
+    shape = tensors[0].shape
+    concat_length = 0
+    for tensor_idx, tensor in enumerate(tensors):
+        # Tensors must have the same number of dimensions
+        second_dims = tensor.ndim
         check(
             first_dims == second_dims,
             lambda: (
@@ -1813,11 +1819,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
                 f"{first_dims} and {second_dims}"
             ),
         )
-
-    # Verifies same shape (except in the concat dimension)
-    shape = tensors[0].shape
-    concat_length = 0
-    for tensor_idx, tensor in enumerate(tensors):
+        # Verifies same shape (except in the concat dimension)
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
                 concat_length = concat_length + length
