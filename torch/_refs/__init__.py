@@ -2800,9 +2800,10 @@ def _unsqueeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeT
         x = torch.unsqueeze(x, dim)
     return x
 
+
 def _squeeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
-    for idx in reversed(sorted(dimensions)):
-        x = torch.squeeze(x, idx)
+    for dim in reversed(sorted(dimensions)):
+        x = torch.squeeze(x, dim)
     return x
 
 
