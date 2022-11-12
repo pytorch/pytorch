@@ -1150,37 +1150,6 @@ def normalize(input, norm_dims, eps):
     return out, mean, rstd
 
 
-@register_decomposition(aten.native_group_norm.default)
-def native_group_norm(
-    input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
-    N: int,
-    C: int,
-    HxW: int,
-    group: int,
-    eps: float,
-) -> Tuple[Tensor, Tensor, Tensor]:
-    orig_shape = input.shape
-    input = input.view(N, group, C // group, HxW)
-    reduction_dims = [2, 3]
-    out, mean, rstd = normalize(input, reduction_dims, eps)
-    mean = _squeeze_multiple(mean, reduction_dims)
-    rstd = _squeeze_multiple(rstd, reduction_dims)
-    out = out.view(orig_shape)
-    if weight is not None:
-        weight = _unsqueeze_to_dim(weight, out.dim() - 1)
-        out = out * weight
-    if bias is not None:
-        bias = _unsqueeze_to_dim(bias, out.dim() - 1)
-        out = out + bias
-
-    out = out.to(dtype=input.dtype)
-    mean = mean.to(dtype=input.dtype)
-    rstd = rstd.to(dtype=input.dtype)
-    return (out, mean, rstd)
-
-
 @register_decomposition(aten.native_group_norm_backward)
 @pw_cast_for_opmath
 def native_group_norm_backward(
@@ -2329,9 +2298,7 @@ def matmul(tensor1, tensor2):
         t2_is_matrix = t2.dim() == 2
         if t2_is_matrix:
             output_shape.append(t2.shape[1])
-        # HACK: We need reshape with symint support
-        t1 = t1.contiguous()
-        t1_folded = t1.view(folded_dim1, sizes_1[-1])
+        t1_folded = t1.reshape(folded_dim1, sizes_1[-1])
         if t2_is_matrix:
             # FIXME This path always does an unnecessary copy when transpose == True as the returned
             # result from BLAS is already C-transposed
@@ -2364,15 +2331,11 @@ def matmul(tensor1, tensor2):
         expand_batch_product = prod(expand_batch_portion)
 
         # HACK: We need reshape with symint support
-        tensor1_expanded = (
-            tensor1.expand(tensor1_expand_size)
-            .contiguous()
-            .view(expand_batch_product, n, m1)
+        tensor1_expanded = tensor1.expand(tensor1_expand_size).reshape(
+            expand_batch_product, n, m1
         )
-        tensor2_expanded = (
-            tensor2.expand(tensor2_expand_size)
-            .contiguous()
-            .view(expand_batch_product, m2, p)
+        tensor2_expanded = tensor2.expand(tensor2_expand_size).reshape(
+            expand_batch_product, m2, p
         )
 
         output_shape = expand_batch_portion
