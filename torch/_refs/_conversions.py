@@ -94,7 +94,6 @@ def complex(real: TensorLikeType, imag: TensorLikeType) -> TensorLikeType:
     )
     result_dtype = utils.corresponding_complex_dtype(real.dtype)  # type: ignore[arg-type]
     common_shape = _broadcast_shapes(real.shape, imag.shape)
-    memory_format = utils.suggest_memory_format(real)
     result = real.new_empty(
         common_shape,
         dtype=result_dtype,
