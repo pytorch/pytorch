@@ -16,6 +16,7 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     OpDTypes,
     ops,
+    skipCUDAIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
@@ -39,6 +40,8 @@ except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
     raise
+
+TEST_WITH_TRITON = has_triton() and not TEST_WITH_ROCM
 
 bf16 = torch.bfloat16  # not tested
 f64 = torch.float64
@@ -454,6 +457,7 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
+    @skipCUDAIf(not TEST_WITH_TRITON, "Skipped! Triton not found")
     @_ops(op_db[START:END])
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
     def test_comprehensive(self, device, dtype, op):
@@ -598,5 +602,4 @@ class TestInductorOpInfo(TestCase):
 instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
-    if has_triton() and not TEST_WITH_ROCM:
-        run_tests()
+    run_tests()
