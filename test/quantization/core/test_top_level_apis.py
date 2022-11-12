@@ -92,8 +92,3 @@ class TestQConfig(TestCase):
 
                 fake_quantize_weight = qconfig.weight()
                 self.assertEqual(fake_quantize_weight.reduce_range, reduce_ranges[1])
-
-
-if __name__ == '__main__':
-    import unittest
-    unittest.main()
