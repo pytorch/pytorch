@@ -102,7 +102,7 @@ class TestViewOps(TestCase):
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
         if base.device.type == 'cpu' or base.device.type == 'cuda':
-            if base.storage().data_ptr() != other.storage().data_ptr():
+            if base._storage().data_ptr() != other._storage().data_ptr():
                 return False
 
         return True

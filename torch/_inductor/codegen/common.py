@@ -34,7 +34,8 @@ class ExprPrinter(Printer):
     @staticmethod
     def paren(string):
         if (
-            re.match(r"^[a-z0-9_.]+$", string, re.I)
+            isinstance(string, CSEVariable)
+            or re.match(r"^[a-z0-9_.]+$", string, re.I)
             or re.match(r"^\([^)]*\)$", string, re.I)
             or string == ""
         ):
@@ -393,6 +394,21 @@ class KernelArgs:
                     yield self.output_buffers[other], inplaced.inner_name
 
 
+class CSEVariable:
+    """A CSEVariable is just a name for an expression but it is useful to be able to annotate them on a backend dependent basis.
+    The backends can inherit from this class and overload the "create_cse_var" Kernel to do that.
+    The "update_on_args" method gives you a hook for annotations, see example of TritonCSEVariable in triton.py."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def __str__(self):
+        return self.name
+
+    def update_on_args(self, args, kwargs):
+        pass
+
+
 class CSE:
     """Common subexpression elimination"""
 
@@ -409,11 +425,11 @@ class CSE:
         self.suffix = suffix
         self.cache = {}
         self.name_prefix = name_prefix
-        self.scalar_name_prefix = name_prefix + "_scalar"
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
         self.invalidated_stores = set()
+        self.varname_map = {}
 
     def invalidate(self, keep_vars: typing.Set[str]):
         for name, tmp in list(self.store_cache.items()):
@@ -432,32 +448,24 @@ class CSE:
         )
 
     def generate(
-        self, buffer: IndentedBuffer, expr: str, is_scalar_expr: bool, write=True
-    ):
-        assert isinstance(expr, str), expr
-        if expr.startswith(self.name_prefix) and re.match(r"^[a-z0-9_]+$", expr):
+        self, buffer: IndentedBuffer, expr: typing.Union[str, CSEVariable], write=True
+    ) -> CSEVariable:
+        assert isinstance(expr, str) or isinstance(expr, CSEVariable), type(expr)
+        if isinstance(expr, CSEVariable):
             return expr
         if expr not in self.cache:
-            var = self.newvar(is_scalar_expr)
+            var = self.newvar()
             self.cache[expr] = var
             if write:
                 V.kernel.current_node.codegen_originating_info(buffer, only_once=True)
                 buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
         return self.cache[expr]
 
-    def is_scalar(self, var: str):
-        return var.startswith(self.scalar_name_prefix)
-
-    def is_output_scalar(self, args):
-        # The output is a scalar if all inputs are scalars
-        # If input is a string, it is a variable we need to check
-        # Otherwise it is an explicit number, or maybe something like a dtype
-        # which will not affect whether the output is a scalar
-        return all(type(arg) != str or self.is_scalar(arg) for arg in args)
-
-    def newvar(self, is_scalar: bool) -> str:
-        prefix = self.scalar_name_prefix if is_scalar else self.name_prefix
-        return f"{prefix}{next(self.iter_buffer_ids)}"
+    def newvar(self) -> CSEVariable:
+        var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
+        var = V.kernel.create_cse_var(var_name)
+        self.varname_map[var_name] = var
+        return var
 
 
 class CodeGen:
@@ -541,9 +549,11 @@ class Kernel(CodeGen):
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):
-                    scalar_output = self.cse.is_output_scalar(args)
-                    expr = getattr(parent_handler, name)(*args, **kwargs)
-                    return self.cse.generate(self.compute, expr, scalar_output)
+                    csevar = self.cse.generate(
+                        self.compute, getattr(parent_handler, name)(*args, **kwargs)
+                    )
+                    csevar.update_on_args(args, kwargs)
+                    return csevar
 
                 return inner
 
@@ -600,3 +610,6 @@ class Kernel(CodeGen):
             x: self.args.size(x) for x in sorted_symbols if x.name.startswith("s")
         }
         return sympy_subs(index, replacements)
+
+    def create_cse_var(self, *args, **kwargs):
+        return CSEVariable(*args, **kwargs)

@@ -16,6 +16,7 @@ from .. import config, ir, scheduler
 from ..ir import ReductionHint
 from ..utils import (
     free_symbol_startswith,
+    get_fused_kernel_name,
     instance_descriptor,
     sympy_product,
     sympy_subs,
@@ -23,6 +24,7 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from .common import (
+    CSEVariable,
     DeferredLine,
     ExprPrinter,
     IndentedBuffer,
@@ -106,6 +108,17 @@ def triton_constant(value):
     elif math.isnan(value):
         return 'float("nan")'
     return repr(value)
+
+
+class TritonCSEVariable(CSEVariable):
+    def __init__(self, name):
+        super().__init__(name)
+        self.is_scalar = False
+
+    def update_on_args(self, args, kwargs):
+        self.is_scalar = all(
+            not (isinstance(arg, TritonCSEVariable)) or arg.is_scalar for arg in args
+        )
 
 
 class TritonOverrides(OpOverrides):
@@ -240,7 +253,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def fmod(a, b):
-        return f"tl.libdevice.fmod({a}, ({b}).to(tl.float32))"
+        return f"tl.libdevice.fmod({a}, {b})"
 
     @staticmethod
     def pow(a, b):
@@ -751,10 +764,13 @@ class TritonKernel(Kernel):
             # https://github.com/openai/triton/issues/633
             mask = ["None"]
 
-        if self.cse.is_scalar(str(index)):
+        if (
+            index_str in self.cse.varname_map
+            and self.cse.varname_map[index_str].is_scalar
+        ):
             mask = ["None"]
 
-        return index_str, " & ".join(mask)
+        return index_str, " & ".join(map(str, mask))
 
     def var_ranges(self):
         return dict(
@@ -775,10 +791,7 @@ class TritonKernel(Kernel):
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
         if prior:
-            # Masks are never scalar
-            mask = self.cse.generate(
-                self.compute, f"{mask} & {prior}", is_scalar_expr=False
-            )
+            mask = self.cse.generate(self.compute, f"{mask} & {prior}")
 
         self._load_mask = mask
         with self.swap_buffers(self.compute, self.compute):
@@ -808,9 +821,7 @@ class TritonKernel(Kernel):
 
         if V.graph.is_unspec_arg(name):
             line = var
-            is_scalar_expr = False
         else:
-            is_scalar_expr = self.cse.is_scalar(index)
             line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
             if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
                 line += ".to(tl.float32)"
@@ -823,9 +834,9 @@ class TritonKernel(Kernel):
         ):
             # can lift a common load outside of reduction loop
             # One exception is when this is an indirect_load.
-            tmp = self.cse.generate(self.body, line, is_scalar_expr)
+            tmp = self.cse.generate(self.body, line)
         else:
-            tmp = self.cse.generate(self.loads, line, is_scalar_expr)
+            tmp = self.cse.generate(self.loads, line)
 
         if not self.inside_reduction or "rmask" not in mask:
             self.outside_loop_vars.add(tmp)
@@ -860,8 +871,7 @@ class TritonKernel(Kernel):
             reduction_type = "max"
 
         dim = len(self.range_trees) - 1
-        # not tracking whether result of reductions is scalar
-        result_var = self.cse.newvar(is_scalar=False)
+        result_var = self.cse.newvar()
         if (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
@@ -990,6 +1000,7 @@ class TritonKernel(Kernel):
                     import triton
                     import triton.language as tl
                     from {config.inductor_import}.ir import ReductionHint
+                    from {config.inductor_import}.ir import TileHint
                     from {config.inductor_import}.triton_ops.autotune import {heuristics}
                     from {config.inductor_import}.utils import instance_descriptor
                 """
@@ -1030,8 +1041,14 @@ class TritonKernel(Kernel):
                 @triton.jit
             """
         else:
+            tile_hint = ""
+            if len(size_hints) == 2:
+                if len(signature) == 4:  # input, output and 2 args
+                    tile_hint = "tile_hint=TileHint.SQUARE,"
+                else:
+                    tile_hint = "tile_hint=TileHint.DEFAULT,"
             heuristics_line = f"""
-                @{heuristics}(size_hints={size_hints!r}, filename=__file__, meta={triton_meta!r})
+                @{heuristics}(size_hints={size_hints!r}, {tile_hint}filename=__file__, meta={triton_meta!r})
                 @triton.jit
             """
         code.splice(heuristics_line)
@@ -1106,6 +1123,9 @@ class TritonKernel(Kernel):
         code.writeline(
             f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name})"
         )
+
+    def create_cse_var(self, *args, **kwargs):
+        return TritonCSEVariable(*args, **kwargs)
 
 
 class TritonScheduling:
@@ -1283,7 +1303,11 @@ class TritonScheduling:
         if src_code in wrapper.kernels:
             kernel_name = wrapper.kernels[src_code]
         else:
-            kernel_name = wrapper.next_kernel_name()
+            kernel_name = (
+                "triton_"
+                + get_fused_kernel_name(node_schedule)
+                + wrapper.next_kernel_suffix()
+            )
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
