@@ -515,7 +515,15 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
     """
     Check two models have same accuracy.
     """
+    from .eval_frame import OptimizedModule
+    from .testing import named_parameters_for_optimized_module
     from .utils import same
+
+    if isinstance(gm, OptimizedModule):
+        gm.named_parameters = named_parameters_for_optimized_module(gm)
+
+    if isinstance(opt_gm, OptimizedModule):
+        opt_gm.named_parameters = named_parameters_for_optimized_module(opt_gm)
 
     ref = run_fwd_maybe_bwd(gm, example_inputs, only_fwd)
 

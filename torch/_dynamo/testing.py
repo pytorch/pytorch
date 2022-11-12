@@ -32,6 +32,17 @@ def clone_me(x):
     return x.detach().clone().requires_grad_(x.requires_grad)
 
 
+def named_parameters_for_optimized_module(mod):
+    assert isinstance(mod, eval_frame.OptimizedModule)
+    return mod._orig_mod.named_parameters
+
+
+def remove_optimized_module_prefix(name):
+    prefix = "_orig_mod."
+    assert name.startswith(prefix)
+    return name[len(prefix) :]
+
+
 def collect_results(model, prediction, loss, example_inputs):
     results = []
     results.append(prediction)
@@ -44,6 +55,8 @@ def collect_results(model, prediction, loss, example_inputs):
     grads = dict()
     params = dict()
     for name, param in model.named_parameters():
+        if isinstance(model, eval_frame.OptimizedModule):
+            name = remove_optimized_module_prefix(name)
         param_copy = param
         grad = param.grad
         # Treat None and zero grad as same
