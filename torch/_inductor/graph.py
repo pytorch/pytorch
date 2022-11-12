@@ -303,8 +303,12 @@ class GraphLowering(torch.fx.Interpreter):
             # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
             if num_users > 1 and isinstance(result, TensorBox):
+
                 for user in n.users:
-                    if user.target in needs_realized_inputs:
+                    aten = torch.ops.aten
+                    if user.target == aten.convolution_backward.default and isinstance(result.data.data, (Pointwise, Reduction)):
+                         result.realize_conv()
+                    elif user.target in needs_realized_inputs:
                         result.realize_hint()
                     elif user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):

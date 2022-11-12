@@ -3061,11 +3061,20 @@ class Convolution(ExternKernelAlloc):
         groups: int,
     ):
         with torch._subclasses.FakeTensorMode():
-            x_fake = ir_node_to_tensor(x, guard_shape=True)
-            weight_fake = ir_node_to_tensor(weight, guard_shape=True)
+            x = cls.require_stride1(cls.realize_input(x))
+            weight = cls.require_stride1(cls.realize_input(weight))
+            args = []
+            for t in (x, weight):
+                if is_storage_and_layout(t):
+                    as_storage_and_layout(t, freeze=True)
+                args.append(ir_node_to_tensor(t, guard_shape=True))
+
+            # x_fake = ir_node_to_tensor(x, guard_shape=True)
+            # weight_fake = ir_node_to_tensor(weight, guard_shape=True)
             bias_fake = (
-                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
+                 ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
             )
+            x_fake, weight_fake = args
             output = torch.ops.aten.convolution(
                 x_fake,
                 weight_fake,
@@ -3678,6 +3687,28 @@ class StorageBox(MutableBox):
         self.data.name = V.graph.register_buffer(self.data)
         self.data.origins = self.origins
         return self.data.name
+
+    def realize_conv(self):
+        if isinstance(
+        self.data, (ComputedBuffer, InputsKernel, InputBuffer, ReinterpretView)
+    ):
+            return self.data.get_name()
+        assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
+        if self.num_reads() > 1:
+            cb = ComputedBuffer(
+                name=None,
+                layout=FlexibleLayout(
+                    device=self.data.get_device(),
+                    dtype=self.data.get_dtype(),
+                    size=self.data.get_size(),
+                ),
+                data=self.data,
+            )
+            cb.decide_layout()
+            self.data = cb
+            self.data.name = V.graph.register_buffer(self.data)
+            return self.data.name
+
 
     def realize_hint(self):
         """
