@@ -758,8 +758,11 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
         out = dict()
-        # print("RUNNING PY CODE", py_code)
-        exec(py_code, global_builder.scope, out)
+        try:
+            exec(py_code, global_builder.scope, out)
+        except:
+            logging.error(f"Code that failed to compile:\n{py_code}")
+            raise
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
