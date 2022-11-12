@@ -304,7 +304,7 @@ class TensorVariable(VariableTracker):
                         self.ndim = args[0].ndim
                         self.is_contiguous = (memory_format,)
 
-            return self.__class__.create(
+            return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
                     "call_method",
