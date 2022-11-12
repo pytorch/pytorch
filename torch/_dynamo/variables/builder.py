@@ -809,5 +809,5 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
     else:
         raise AssertionError(
             "torch.* op returned non-Tensor "
-            + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
+            + f"{type(example_value)} {proxy.node.op} {proxy.node.target}"
         )
