@@ -40,8 +40,6 @@ def register_backend(fn):
 def create_backend(fn):
     @functools.wraps(fn)
     def inner(model, example_inputs=None, **kwargs):
-        if hasattr(model, "_dynamo_bound_shape_env"):
-            kwargs["shape_env"] = model._dynamo_bound_shape_env
         if model is None:
             return None
 
@@ -552,6 +550,7 @@ def cudagraphs_inner(model, inputs, copy_outputs=True):
 
 @create_backend
 def aot_autograd(subgraph, **kwargs):
+    breakpoint()
     def _wrapped_bw_compiler(*args, **kwargs):
         # stop TorchDynamo from trying to compile our generated backwards pass
         return disable(disable(bw_compiler)(*args, **kwargs))

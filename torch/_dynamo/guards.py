@@ -512,31 +512,6 @@ class GuardedCode:
 from sympy.printing.str import StrPrinter
 
 
-@dataclasses.dataclass
-class TensorReference(object):
-    """
-    TensorReference objects are entirely optional. They are created to give us hints
-    into where the symbolic shape came from.
-
-    ref_id: The id of the tensor
-    kind: A string tracking where in the tensor this value came from ("size","stride", etc)
-    idx: An index in the structure
-
-    NOTE - A symbolic shape coming from tensor at id 12345's shape dim 2, would be
-    TensorReference(ref_id=12345, kind="size", idx=2)
-    """
-
-    ref_id: Optional[int] = None
-    kind: Optional[str] = None
-    idx: Optional[int] = None
-    # Note - this is untyped because of TypeError: '_SpecialForm' object does not support item assignment
-    # But it is a Optional[Union["sympy.Expr", int]]
-    expr: Optional[object] = None  # Populated after association
-
-    def __hash__(self):
-        return hash((self.ref_id, self.kind, self.idx))
-
-
 class DynamoGuardPrinter(StrPrinter):
     @staticmethod
     def tensor_ref_as_str(tensor_ref, id_to_name_map):
@@ -667,7 +642,7 @@ class CheckFunctionManager:
                 # AND was found in the shape_env
                 tensor_ref_set = self.output_graph.tensor_id_to_sym_shape_ref[tensor_id]
                 for tensor_ref in tensor_ref_set:
-                    obj_expr = tensor_ref.expr
+                    obj_expr = tensor_ref.sym_expr
                     if obj_expr not in expr_to_tensor_ref:
                         expr_to_tensor_ref[obj_expr] = {}
                     expr_to_tensor_ref[obj_expr][tensor_ref] = ""

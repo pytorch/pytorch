@@ -684,7 +684,7 @@ try:
     def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
         fake_tensor = fake_mode.from_tensor(e, static_shapes=static_shapes)
         if tx is not None:
-            from torch._dynamo.guards import TensorReference
+            from functorch._src.guards import TensorReference
 
             def _record(tensor_ref):
                 if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
@@ -750,7 +750,7 @@ try:
 
     def deepcopy_to_fake_tensor(obj, fake_mode):
         with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
-            return wrap_fake_exception(lambda: copy.deepcopy(obj))
+            return wrap_fake_exception(lambda:  copy.deepcopy(obj))
 
 except ImportError:
     fake_tensors_available = False

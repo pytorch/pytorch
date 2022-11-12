@@ -88,12 +88,12 @@ class AotAutogradStrategy(object):
     """Base class for backend strategies that use AOT Autograd"""
 
     @classmethod
-    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs):
+    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs, shape_env):
         if count_calls(gm.graph) < 2:
             return gm  # no point for tiny graphs
-        return cls(gm, example_inputs).verified_candidate()
+        return cls(gm, example_inputs, shape_env).verified_candidate()
 
-    def __init__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __init__(self, gm: torch.fx.GraphModule, example_inputs, shape_env):
         import functorch.compile
 
         functorch.compile.config.use_functionalize = True
@@ -104,6 +104,7 @@ class AotAutogradStrategy(object):
         self.use_fallback = False
         self.original_example_inputs = example_inputs
         self.gm = gm
+        self.shape_env = shape_env
 
         if not functorch.compile.config.use_functionalize and config.normalize_ir:
             try:
@@ -143,7 +144,7 @@ class AotNop(AotAutogradStrategy):
         from functorch._src.compilers import debug_nop
 
         return BACKENDS["aot_autograd"](
-            self.gm, self.example_inputs, fw_compiler=debug_nop
+            self.gm, self.example_inputs, fw_compiler=debug_nop, shape_env=self.shape_env
         )
 
 

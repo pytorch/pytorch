@@ -22,6 +22,7 @@ from torch.nn.utils import stateless
 from functorch import make_fx
 from torch._dispatch.python import enable_python_dispatcher
 from . import config
+from .guards import TensorReference
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
 import sympy
@@ -375,6 +376,19 @@ class AOTConfig:
     num_params_buffers: int
 
 
+# NOTE: [AOT Autograd Guards Plan]
+# This produces an eval func out of guards
+# Producing a string for eval is not the right way to do this going forward, 
+# the right way is to decouple shape extraction from the expression set. 
+# This will allow for a class of optimization where we can simplify the
+# expressions agressively.
+# We are keeping it eval string for now for simplicity: 
+# It is very easy to reason about the correctness of a string you can read and dump
+# that is just python. It also matches how dynamo operates. 
+# A future refactor will:
+# 1) Dedup the extraction code for tensor refs with Dynamo
+# 2) Remove the production of an eval string in favor of shape info + symbolic logic
+# 3) Unify the printers
 def _delta_to_eval_guard_func(delta, flat_args, shape_env, arg_name):
     # We saw new guards introduced here, disjoint from the ones installed
     # upstream. We need to extract the values out and write a check
@@ -382,6 +396,14 @@ def _delta_to_eval_guard_func(delta, flat_args, shape_env, arg_name):
     expr_to_tensor_ref = {}
     printer = AOTAutogradGuardPrinter(expr_to_tensor_ref, arg_name, shape_env)
 
+    # TODO(voz): Dedup with some dynamo code that is *mostly* similar
+    # but differs enough around tensor_idx that its fine to keep like this for now
+    # Consider fixing before landing, but okay for prototype.
+    # A few differences that need to be reconciled:
+    # 1) Dynamo writes to output_graph inline in its version of `_record`
+    # 2) Dynamo keys on id where this keys on sym_expr because the nature of the strings
+    # produced for guard eval differ
+    # 3) Dymamo does not care about tensor_idx
     def extract_tensor_refs(tensor_idx, tensor):
         def _record(tensor_ref):
             if tensor_ref.sym_expr not in expr_to_tensor_ref:
@@ -445,31 +467,6 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, s
 
     return new_fn
 
-# TODO(voz): DO NOT LAND LIKE THIS - DEDUP WITH DYNAMO
-@dataclasses.dataclass
-class TensorReference(object):
-    """
-    TensorReference objects are entirely optional. They are created to give us hints
-    into where the symbolic shape came from.
-
-    ref_id: The id of the tensor
-    kind: A string tracking where in the tensor this value came from ("size","stride", etc)
-    idx: An index in the structure
-
-    NOTE - A symbolic shape coming from tensor at id 12345's shape dim 2, would be
-    TensorReference(ref_id=12345, kind="size", idx=2)
-    """
-
-    ref_id: Optional[int] = None
-    kind: Optional[str] = None
-    idx: Optional[int] = None
-    # Note - this is untyped because of TypeError: '_SpecialForm' object does not support item assignment
-    # But it is a Optional[Union["sympy.Expr", int]]
-    sym_expr: Optional[object] = None  # Populated after association
-    tensor_idx: Optional[int] = None
-
-    def __hash__(self):
-        return hash((self.ref_id, self.kind, self.idx))
 
 def assert_functional_graph(fx_g: torch.fx.GraphModule):
     for n in fx_g.graph.nodes:
@@ -680,6 +677,7 @@ _enforce_shape_env_passed_in = False
 
 from sympy.printing.str import StrPrinter
 
+# See: [AOT Autograd Guards Plan]
 class AOTAutogradGuardPrinter(StrPrinter):
     @staticmethod
     def tensor_ref_as_str(tensor_ref, arg_list_name):
@@ -703,6 +701,9 @@ class AOTAutogradGuardPrinter(StrPrinter):
             return "1"
         if expr not in self.expr_to_tensor_ref:
             return f"{self.shape_env.var_to_val[expr]}"
+        # TODO(voz): Does this suffer from the same unknown symbolic issues
+        # as dynamo does? So far, we have not seen it in the test suite.
+        # See TORCHDYNAMO_IGNORE_ASSERT
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
@@ -1066,6 +1067,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         static_argnums=None,
         shape_env: Optional[ShapeEnv] = None
     ) -> Callable:
+        breakpoint()
         assert static_argnums is None
         if bw_compiler is None:
             bw_compiler = fw_compiler
@@ -1081,6 +1083,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         @wraps(fn)
         def new_func(*args):
             nonlocal compiled_fn
+            breakpoint()
             pre_dispatch_guards = copy.deepcopy(shape_env.guards)
             def inp_to_key(inp):
                 return str(inp.size()) + str(inp.stride())

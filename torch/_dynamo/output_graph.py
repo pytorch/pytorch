@@ -449,11 +449,7 @@ class OutputGraph(fx.Tracer):
                 else ""
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            if self.shape_env:
-                # TODO(voz): There's not an amazing way to bind kwargs / contextual
-                # data here atm, refactor.
-                gm._dynamo_bound_shape_env = self.shape_env
-            compiled_fn = self.compiler_fn(gm, self.example_inputs())
+            compiled_fn = self.compiler_fn(gm, self.example_inputs(), shape_env=self.shape_env)
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
