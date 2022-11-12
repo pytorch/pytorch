@@ -6,6 +6,8 @@ import operator
 import builtins
 import math
 import functools
+import threading
+from contextlib import contextmanager
 from functools import lru_cache, partial
 import traceback
 import collections
@@ -24,7 +26,7 @@ aten = torch.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "sym_float", "FloorDiv", "guard_int", "wrap_node",
+    "SymDispatchMode", "sym_int", "sym_float", "FloorDiv", "guard_int", "wrap_node",
     "sym_sqrt",
 ]
 
@@ -110,11 +112,20 @@ def sym_sqrt(a):
         return a.__sym_sqrt__()
     return math.sqrt(a)
 
+# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
+# directly usable, but this has a more relaxed type signature for mypy
+# (mypy requires SupportFloat which is too strict)
+def sym_floor(a):
+    return math.floor(a)  # type: ignore[type]
+
+def sym_ceil(a):
+    return math.ceil(a)  # type: ignore[type]
+
 def sym_int(a):
     if isinstance(a, SymInt):
         return a
-    elif hasattr(a, '__sym_int__'):
-        return a.__sym_int__()
+    elif isinstance(a, SymFloat):
+        return sym_floor(a) if a > 0 else sym_ceil(a)
     return int(a)
 
 # TODO: An incomplete list
@@ -263,8 +274,7 @@ magic_methods = {
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
     'floor': lambda a: sympy.floor(a),
-    'sym_float': lambda a: a,  # TODO: why can't I wrap with sympy.Float?
-    'sym_int': lambda a: sympy.floor(a),
+    'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
@@ -274,19 +284,15 @@ magic_methods = {
 
 unary_magic_methods = {
     'sym_float',
-    'sym_int',
     'ceil',
     'floor',
     'neg',
     'sym_sqrt',
 }
 
-# TODO: sym_int should also work on floats
-magic_methods_not_on_float = {"sym_int"}
-
 magic_methods_on_builtins = {"min", "max"}
 magic_methods_on_math = {"ceil", "floor"}
-magic_methods_on_submodule = {"sym_float", "sym_int", "sym_sqrt"}
+magic_methods_on_submodule = {"sym_float", "sym_sqrt"}
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
 always_int_magic_methods = {"ceil", "floor"}
@@ -396,10 +402,6 @@ def _make_user_magic(method, user_type):
 
 for method, func in magic_methods.items():
     _make_user_magic(method, SymInt)
-
-for method, func in magic_methods.items():
-    if method in magic_methods_not_on_float:
-        continue
     _make_user_magic(method, SymFloat)
 
 del method
@@ -445,6 +447,18 @@ class ShapeEnv(object):
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
+        self.tls = threading.local()
+
+    def _suppress_guards_tls(self):
+        return getattr(self.tls, "suppress_guards", False)
+
+    @contextmanager
+    def suppress_guards(self):
+        self.tls.suppress_guards = True
+        try:
+            yield
+        finally:
+            self.tls.suppress_guards = False
 
     def _get_key(self):
         """
@@ -684,11 +698,12 @@ class ShapeEnv(object):
         # TODO: optimize this; avoid formatting traces until we need them
         # NB: drop two frames; evaluate_expr and the Sym* function that
         # actually called us
-        stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
-        if concrete_val is sympy.true:
-            self.guards.append((expr, stack))
-        elif concrete_val is sympy.false:
-            self.guards.append((sympy.Not(expr), stack))
-        else:
-            self.guards.append((sympy.Eq(expr, concrete_val), stack))
+        if not self._suppress_guards_tls():
+            stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
+            if concrete_val is sympy.true:
+                self.guards.append((expr, stack))
+            elif concrete_val is sympy.false:
+                self.guards.append((sympy.Not(expr), stack))
+            else:
+                self.guards.append((sympy.Eq(expr, concrete_val), stack))
         return concrete_val

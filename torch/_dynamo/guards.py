@@ -647,13 +647,16 @@ class CheckFunctionManager:
                         expr_to_tensor_ref[obj_expr] = {}
                     expr_to_tensor_ref[obj_expr][tensor_ref] = ""
 
-        guard_expression = self.output_graph.shape_env.get_guard_expr()
-        expr_as_str = guard_printer.doprint(guard_expression)
+        expr_as_str = " and\n".join(
+            [guard_printer.doprint(g) for g, _ in self.output_graph.shape_env.guards]
+        )
         # We may get into a state where symbolic shape keys (all should be found in replacements)
         # Have not been removed from the expression. This is a serious enough error state that we need to assert.
+        # TODO: this is very suspicious string matching
         for key in self.output_graph.shape_env.var_to_val.keys():
             assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
-        finished_expressions.append(expr_as_str)
+        if self.output_graph.shape_env.guards:
+            finished_expressions.append(expr_as_str)
 
         for expr in expr_to_tensor_ref.keys():
             tensor_refs = expr_to_tensor_ref[expr].keys()
@@ -670,7 +673,7 @@ class CheckFunctionManager:
         if len(finished_expressions) == 0:
             return None
 
-        expression = " and ".join(finished_expressions)
+        expression = " and \n".join(finished_expressions)
         return f"({expression})"
 
     def compile_check_fn(self, local_builder, global_builder, guards_out):
@@ -752,14 +755,17 @@ class CheckFunctionManager:
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}):
-    return lambda {args}: {code}
+    return (lambda {args}: {code})
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
         out = dict()
-        # print("RUNNING PY CODE", py_code)
-        exec(py_code, global_builder.scope, out)
+        try:
+            exec(py_code, global_builder.scope, out)
+        except:
+            logging.error(f"Code that failed to compile:\n{py_code}")
+            raise
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both

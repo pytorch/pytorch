@@ -393,6 +393,13 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     return new_fn
 
 
+def assert_functional_graph(fx_g: torch.fx.Graph):
+    for n in fx_g.nodes:
+        if isinstance(n.target, torch._ops.OpOverload):
+            assert not n.target._schema.is_mutable, \
+                f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
+
+
 @contextmanager
 def disable_autocast_manager():
     guard = torch._C._DisableAutocast()
@@ -486,6 +493,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             fx_g = make_fx(
                 detach_and_functionalize_pure(joint_forward_backward), aot_config.decompositions
             )(*joint_inputs)
+        # There should be *NO* mutating ops in the graph at this point.
+        assert_functional_graph(fx_g.graph)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
