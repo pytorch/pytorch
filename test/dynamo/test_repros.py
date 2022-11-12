@@ -1813,6 +1813,19 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(AssertionError, ""):
             exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
 
+    @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
+    def test_not_rewrite_assert_for_other_errors(self):
+        def f(x):
+            b = x.sin()
+            if not x.sum() <= 3:
+                raise ValueError("input sum needs to be 3")
+            return x.cos() + b
+
+        args = (torch.Tensor([3, 4, 5]),)
+        opt_fn = torch._dynamo.optimize("eager")(f)
+        with self.assertRaisesRegex(ValueError, "input sum needs to be 3"):
+            opt_fn(*args)
+
     # TODO (tmanlaibaatar) handle data-dependent fstring in assert statement.
     @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_fstring_msg(self):

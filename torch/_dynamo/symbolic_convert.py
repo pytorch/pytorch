@@ -148,12 +148,8 @@ def _detect_and_normalize_assert_statement(
     current_instruction_pointer = self.instruction_pointer
     inst = self.instructions[current_instruction_pointer]
     # Detect LOAD_ASSERTION_ERROR or LOAD_GLOBAL 0
-    if sys.version_info < (3, 9):
-        if (
-            inst.opname != "LOAD_GLOBAL"
-            and inst.arg != 0
-            and inst.argval != "AssertionError"
-        ):
+    if sys.version_info < (3, 8):
+        if inst.opname != "LOAD_GLOBAL" or inst.argval != "AssertionError":
             return False
     else:
         if inst.opname != "LOAD_ASSERTION_ERROR":
