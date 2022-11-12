@@ -5679,9 +5679,9 @@ def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=Fals
 
     if list_args:
         cases = (
-            ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],)),
-            ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], 2),),
-            ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], -2),)
+            ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]),)),
+            ((S, S, S), (torch.Size([int(S / 2), S - int(S / 2) * 2, int(S / 2)]), 2),),
+            ((S, S, S), (torch.Size([int(S / 2), S - int(S / 2) * 2, int(S / 2)]), -2),)
         )
     else:
         cases = (  # type: ignore[assignment]
@@ -5696,10 +5696,10 @@ def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=Fals
 def sample_inputs_split_with_sizes(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    cases = (((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],)),
-             ((S, S, S), ([int(S / 3), S - int(S / 3), 0],)),
-             ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)], 2)),
-             ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)], -2)),
+    cases = (((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]),)),
+             ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3), 0]),)),
+             ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]), 2)),
+             ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]), -2)),
              )
 
     for shape, args in cases:
@@ -8318,7 +8318,7 @@ op_db: List[OpInfo] = [
            variant_test_name='decomposed',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16] if(CUDA11OrLater or TEST_WITH_ROCM) else []),
+                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,

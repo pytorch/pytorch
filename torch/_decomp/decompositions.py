@@ -1802,20 +1802,33 @@ def norm(
 def upsample_compute_output_size(input_size, output_size, scale_factors):
     spatial_dimensions = len(input_size) - 2
     if output_size is not None:
-        utils.check(scale_factors is None, lambda: "Must specify exactly one of output_size and scale_factors")
+        utils.check(
+            scale_factors is None,
+            lambda: "Must specify exactly one of output_size and scale_factors",
+        )
         utils.check(len(output_size) == spatial_dimensions, lambda: "")
         return output_size
     if scale_factors is not None:
         # NB: this isn't necessary lol
-        utils.check(output_size is None, lambda: "Must specify exactly one of output_size and scale_factors")
+        utils.check(
+            output_size is None,
+            lambda: "Must specify exactly one of output_size and scale_factors",
+        )
         utils.check(len(scale_factors) == spatial_dimensions, lambda: "")
-        return [sym_int(input_size[i+2] * scale_factors[i]) for i in range(spatial_dimensions)]
-    utils.check(False, lambda: "Must specify exactly one of output_size and scale_factors")
+        return [
+            sym_int(input_size[i + 2] * scale_factors[i])
+            for i in range(spatial_dimensions)
+        ]
+    utils.check(
+        False, lambda: "Must specify exactly one of output_size and scale_factors"
+    )
+
 
 def get_scale_value(scales, idx):
     if scales is None:
         return None
     return scales[idx]
+
 
 @torch.ops.aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
@@ -1823,10 +1836,15 @@ def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
     # TODO: don't directly dispatch like this
-    return torch.ops.aten.upsample_bilinear2d.default(input, osize, align_corners, scale_h, scale_w)
+    return torch.ops.aten.upsample_bilinear2d.default(
+        input, osize, align_corners, scale_h, scale_w
+    )
+
 
 @register_decomposition(torch.ops.aten.upsample_bilinear2d.default)
-@torch.ops.aten.upsample_bilinear2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@torch.ops.aten.upsample_bilinear2d.default.py_impl(
+    DispatchKey.CompositeImplicitAutograd
+)
 @torch.ops.aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def upsample_bilinear2d(
