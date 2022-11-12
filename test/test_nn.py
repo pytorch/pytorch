@@ -6159,19 +6159,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
 
-    def test_poisson_nll_loss_reduction_modes(self):
-        input = torch.tensor([0.5, 1.5, 2.5])
-        target = torch.tensor([1., 2., 3.])
-        component_wise_loss = torch.exp(input) - target * input
-        self.assertEqual(component_wise_loss,
-                         F.poisson_nll_loss(input, target, reduction='none'))
-        self.assertEqual(torch.sum(component_wise_loss),
-                         F.poisson_nll_loss(input, target, reduction='sum'))
-        self.assertEqual(torch.mean(component_wise_loss),
-                         F.poisson_nll_loss(input, target, reduction='mean'))
-        with self.assertRaisesRegex(ValueError, 'is not valid'):
-            F.poisson_nll_loss(input, target, reduction='total')
-
     def test_gaussian_nll_loss_broadcasting(self):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
         target_full = torch.tensor([[1., 2., 3.], [1., 2., 3.]])
