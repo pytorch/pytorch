@@ -1790,25 +1790,6 @@ def zero_numel_check_dims(self, dim, fn_name):
         )
 
 
-def check_argmax_argmin(name, self, dim):
-    if dim is not None:
-        dim = maybe_wrap_dim(dim, self.dim())
-        zero_numel_check_dims(self, dim, name)
-    else:
-        check(
-            self.numel() != 0,
-            lambda: f"{name}: Expected reduction dim to be specified for input.numel() == 0.",
-        )
-
-
-@register_meta(aten.argmax.default)
-def argmax_meta(self, dim=None, keepdim=False):
-    check_argmax_argmin("argmax", self, dim)
-    dims = utils.reduction_dims(self.shape, (dim,) if dim is not None else None)
-    shape = _compute_reduction_shape(self, dims, keepdim)
-    return self.new_empty(shape, dtype=torch.int64)
-
-
 # Pulled directly from aten/src/ATen/ExpandUtils.cpp
 def infer_dense_strides(tensor_sizes, tensor_strides):
     check(
@@ -1877,28 +1858,6 @@ def grid_sample_2d_backward_meta(
     grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
     return (grad_input, grad_grid)
 
-
-@register_meta(aten.topk.default)
-def topk_meta(self, k, dim=-1, largest=True, sorted=True):
-    dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
-    check(
-        k >= 0 and k <= (self.size(dim) if self.dim() > 0 else 1),
-        lambda: "selected index k out of range",
-    )
-    sliceSize = 1 if self.dim() == 0 else self.size(dim)
-    check(k >= 0 and k <= sliceSize, lambda: "k not in range for dimension")
-
-    topKSize = list(self.shape)
-    if len(topKSize) > 0:
-        topKSize[dim] = k
-    return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
-
-
-@register_meta(aten.scalar_tensor.default)
-def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
-    return torch.empty(
-        (), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
-    )
 
 @register_meta(aten.scatter_add_)
 def meta_scatter_add_(self, dim, index, src):
