@@ -1832,6 +1832,8 @@ def get_scale_value(scales, idx):
     return scales[idx]
 
 
+@register_decomposition(torch.ops.aten.upsample_bilinear2d.vec)
+@torch.ops.aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @torch.ops.aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
 def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
