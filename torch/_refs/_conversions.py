@@ -77,11 +77,9 @@ short = _make_conversion_method("short", torch.short)
 # exact_dtype is for compat with complex_check_dtype from core.
 @out_wrapper(exact_dtype=True)
 def complex(real: TensorLikeType, imag: TensorLikeType) -> TensorLikeType:
-    def _allowed_dtypes():
-        return {torch.float32, torch.float64, torch.float16}
-
+    allowed_dtypes = (torch.float32, torch.float64, torch.float16)
     check(
-        real.dtype in _allowed_dtypes() and imag.dtype in _allowed_dtypes(),
+        real.dtype in allowed_dtypes and imag.dtype in allowed_dtypes,
         lambda: (
             f"Expected both inputs to be Half, Float or Double tensors but got "
             f"{real.dtype} and {imag.dtype}"
@@ -97,20 +95,12 @@ def complex(real: TensorLikeType, imag: TensorLikeType) -> TensorLikeType:
     result_dtype = utils.corresponding_complex_dtype(real.dtype)  # type: ignore[arg-type]
     common_shape = _broadcast_shapes(real.shape, imag.shape)
     memory_format = utils.suggest_memory_format(real)
-    # Note: cannot use torch.empty here because this results in non-FakeTensor
-    # inputs being used in FakeTensorMode, which is not yet supported.
-    result = (
-        torch.empty_like(
-            real,
-            dtype=result_dtype,
-            layout=real.layout,
-            device=real.device,
-            # pin_memory=real.is_pinned(),  # NYI
-            requires_grad=real.requires_grad,
-            memory_format=memory_format,
-        )
-        .expand(common_shape)
-        .clone()
+    result = real.new_empty(
+        common_shape,
+        dtype=result_dtype,
+        layout=real.layout,
+        device=real.device,
+        # pin_memory=real.is_pinned(),  # NYI
     )
     result.real = real
     result.imag = imag

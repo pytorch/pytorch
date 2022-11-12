@@ -237,6 +237,7 @@ __all__ = [
     "movedim",
     "narrow",
     "narrow_copy",
+    "native_group_norm",
     "native_layer_norm",
     "permute",
     "ravel",
@@ -320,7 +321,7 @@ def _broadcast_shapes(*_shapes):
     common_shape = [
         1,
     ] * reduce(max, (len(shape) for shape in shapes))
-    for shape in shapes:
+    for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
             if common_shape[idx] == 1:
                 if shape[idx] < 0:
@@ -331,9 +332,9 @@ def _broadcast_shapes(*_shapes):
             elif shape[idx] != 1:
                 if common_shape[idx] != shape[idx]:
                     raise RuntimeError(
-                        "Attempting to broadcast a dimension of length ",
-                        str(shape[idx]),
-                        "!",
+                        f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
+                        f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
+                        f"should be broadcastable to {common_shape}"
                     )
 
     return common_shape
@@ -2780,6 +2781,7 @@ def _normalize(
         mean (Tensor): mean of the tensor along norm_dims.
         rstd (Tensor): 1/std of the tensor along norm_dims.
     """
+    norm_dims = utils.canonicalize_dims(a.ndim, norm_dims)
     computation_dtype = utils.get_computation_dtype(a.dtype)
     a_acc = _maybe_convert_to_dtype(a, computation_dtype)
     assert isinstance(a_acc, TensorLike)  # to avoid mypy error for var_mean
@@ -2789,6 +2791,66 @@ def _normalize(
     rstd = torch.rsqrt(biased_var + eps)
     out = (a - mean) * rstd
     return out, mean, rstd
+
+
+# add all specified dimensions
+def _unsqueeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
+    for dim in sorted(dimensions):
+        x = torch.unsqueeze(x, dim)
+    return x
+
+
+@register_decomposition(torch.ops.aten.native_group_norm.default)
+def native_group_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    batch_size: int,
+    num_channels: int,
+    flattened_inner_size: int,
+    num_groups: int,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    utils.check(
+        input.ndim >= 2,
+        lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
+    )
+    utils.check(
+        num_channels % num_groups == 0,
+        lambda: "Expected number of channels in input to be divisible by num_groups, "
+        + f"but got input of shape {input.shape} and num_groups = {num_groups}",
+    )
+
+    # num_channels / num_groups and flattened inner dimension are the reduction axes
+    reduction_dims = [2, 3]
+    input_reshaped = torch.reshape(
+        input,
+        [batch_size, num_groups, num_channels // num_groups, flattened_inner_size],
+    )
+    out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
+    out = out.view(input.shape)
+
+    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
+    unsqueeze_bias = None
+    if bias is not None:
+        unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
+    unsqueeze_weight = None
+    if weight is not None:
+        unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
+
+    if unsqueeze_weight is not None:
+        out = out * unsqueeze_weight
+    if unsqueeze_bias is not None:
+        out = out + unsqueeze_bias
+
+    out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
+    mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
+    rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
+
+    # remove broadcast dimensions from mean and rstd
+    mean = prims.squeeze(mean, reduction_dims)
+    rstd = prims.squeeze(rstd, reduction_dims)
+    return (out, mean, rstd)
 
 
 @register_decomposition(torch.ops.aten.native_layer_norm)
@@ -4432,6 +4494,7 @@ def eye(
     # result.requires_grad_(requires_grad)
 
 
+@register_decomposition(torch.ops.aten.full)
 @out_wrapper()
 def full(
     shape: ShapeType,
@@ -4443,6 +4506,12 @@ def full(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
+    utils.check_layout(layout)
+    utils.check_pin_memory(pin_memory)
+
+    dtype = dtype if dtype is not None else utils.type_to_dtype(type(fill_value))
+    device = device if device is not None else torch.device("cpu")
+
     e = empty(
         shape,
         dtype=dtype,
@@ -4451,7 +4520,7 @@ def full(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return fill(e, fill_value)
+    return torch.fill(e, fill_value)  # type: ignore[arg-type]
 
 
 def full_like(
