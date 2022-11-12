@@ -54,8 +54,8 @@ from .utils import (
     graph_break_dup_warning_checker,
     istype,
 )
-from .variables.base import MutableLocal, typestr, VariableTracker, wrap_fx_proxy
-from .variables.builder import VariableBuilder
+from .variables.base import MutableLocal, typestr, VariableTracker
+from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.dicts import ConstDictVariable
@@ -1037,8 +1037,7 @@ class InstructionTranslatorBase(object):
         seq = self.pop()
         options = VariableTracker.propagate([seq])
         if isinstance(seq, BaseListVariable):
-            if len(seq.items) != inst.argval:
-                unimplemented(f"UNPACK_SEQUENCE {seq}")
+            assert len(seq.items) == inst.argval
             self.output.guards.update(seq.guards)
             for i in reversed(seq.items):
                 self.push(i)

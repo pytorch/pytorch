@@ -218,8 +218,23 @@ class SymInt:
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
+    def __eq__(self, other: object) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __lt__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __gt__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __le__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
     def __sym_float__(self):
-        raise NotImplementedError("NYI")
+        raise AssertionError("type stub not overridden")
 
     def __repr__(self):
         return self.node.str()
@@ -247,8 +262,20 @@ class SymFloat:
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
-    def __sym_int__(self):
-        raise NotImplementedError("NYI")
+    def __eq__(self, other: object) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __lt__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __gt__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __le__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
 
     def __repr__(self):
         return self.node.str()
@@ -500,7 +527,6 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
           ``mode='max'``
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
-        * :func:`torch.Tensor.scatter` when ``src`` is a tensor and ``reduce=None``
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor

@@ -204,7 +204,7 @@ class TestPythonAutograd(TestCase):
         args1 = [torch.randn(10), torch.randn(10)]
         args2 = [torch.randn(10), torch.randn(10)]
         cnt = CompileCounter()
-        fn_dynamo = torch._dynamo.optimize(cnt)(fn)
+        fn_dynamo = torch._dynamo.optimize_assert(cnt)(fn)
         reset_tape()
         res1 = fn_dynamo(*args1)
         reset_tape()

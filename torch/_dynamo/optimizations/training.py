@@ -140,7 +140,7 @@ class AotNop(AotAutogradStrategy):
     """Useful for debugging purpose"""
 
     def candidate(self):
-        from functorch._src.compilers import debug_nop, nop
+        from functorch._src.compilers import debug_nop
 
         return BACKENDS["aot_autograd"](
             self.gm, self.example_inputs, fw_compiler=debug_nop

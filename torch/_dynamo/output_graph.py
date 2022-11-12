@@ -15,6 +15,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from . import config, logging as torchdynamo_logging, variables
 from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
+from .exc import BackendCompilerFailed
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
@@ -26,8 +27,7 @@ from .utils import (
     fake_tensors_available,
     format_graph_tabular,
 )
-from .variables.base import wrap_fx_proxy
-from .variables.builder import VariableBuilder
+from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     DynamicShapeVariable,
@@ -35,7 +35,6 @@ from .variables.tensor import (
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
-from .exc import BackendCompilerFailed
 
 log = logging.getLogger(__name__)
 

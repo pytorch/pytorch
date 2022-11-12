@@ -101,13 +101,38 @@ class Guard:
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
 
+    @staticmethod
+    def weakref_to_str(obj_weakref):
+        """
+        This is a workaround of a Python weakref bug.
+
+        `obj_weakref` is instance returned by `weakref.ref`,
+        `str(obj_weakref)` is buggy if the original obj overrides __getattr__, e.g:
+
+            class MyConfig(dict):
+                def __getattr__(self, x):
+                    return self[x]
+
+            obj = MyConfig(offset=5)
+            obj_weakref = weakref.ref(obj)
+            str(obj_weakref)  # raise error: KeyError: '__name__'
+        """
+        if isinstance(obj_weakref, weakref.ReferenceType):
+            obj = obj_weakref()
+            if obj is not None:
+                return f"<weakref at {hex(id(obj_weakref))}; to '{obj.__class__.__name__}' at {hex(id(obj))}>"
+            else:
+                return f"<weakref at {hex(id(obj_weakref))}; dead>"
+        else:
+            return str(obj_weakref)
+
     def __str__(self):
         s = f"""
             {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
             {{
                 'guard_types': {self.guard_types},
                 'code': {self.code_list},
-                'obj_weakref': {self.obj_weakref}
+                'obj_weakref': {self.weakref_to_str(self.obj_weakref)}
                 'guarded_class': {self.guarded_class_weakref}
             }}
             """
@@ -413,6 +438,9 @@ class GuardBuilder:
             code = "not ___is_grad_enabled()"
         self._produce_guard_code(guard, [code])
 
+    # This is a bit of a crutch for export case for symbolic shape guards.
+    # SYMBOL_MATCH is only ever, and must only ever, be used for setting this value on
+    # the create_fn field for tracking guards in export.
     @staticmethod
     def SYMBOL_MATCH():
         pass
@@ -526,23 +554,18 @@ class DynamoGuardPrinter(StrPrinter):
         self.intermediary_symbols = intermediary_symbols
 
     def _print_Symbol(self, expr) -> str:
-        assert isinstance(expr, sympy.core.symbol.Symbol)
+        assert isinstance(expr, sympy.Symbol)
         if expr == 0:
             return "0"
         if expr == 1:
             return "1"
-        if expr not in self.expr_to_tensor_ref:
-            # Please keep these 2 lines here for debugging
-            # if expr not in self.intermediary_symbols:
-            # log.warning(f"DROPPING GUARD SYMBOL: {expr}")
-            # This is an intermediary symbol with no tensor association, skip it
-            # If we did not make the symbol, it came from something dynamo does not know about
-            # So either: (A) skipping the guard is safe because something else (like module id check)
-            # Cover it. This happens for things like channel in/out on conv2d,
-            # Where changing those will break
-            # other guards - or (B) it is not and we made a mistake, hence the warning above.
-            return f"{self.shape_env.var_to_val[expr]}"
-        # f"Unknown expression {expr}"
+        expr_found = expr in (self.expr_to_tensor_ref) or (
+            expr in self.intermediary_symbols
+        )
+        if not expr_found:
+            if config.dynamic_shapes_ignore_assert:
+                return f"{self.shape_env.var_to_val[expr]}"
+        assert expr_found, f"Failed to find {expr}"
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
@@ -649,13 +672,16 @@ class CheckFunctionManager:
                         expr_to_tensor_ref[obj_expr] = {}
                     expr_to_tensor_ref[obj_expr][tensor_ref] = ""
 
-        guard_expression = self.output_graph.shape_env.get_guard_expr()
-        expr_as_str = guard_printer.doprint(guard_expression)
+        expr_as_str = " and\n".join(
+            [guard_printer.doprint(g) for g, _ in self.output_graph.shape_env.guards]
+        )
         # We may get into a state where symbolic shape keys (all should be found in replacements)
         # Have not been removed from the expression. This is a serious enough error state that we need to assert.
+        # TODO: this is very suspicious string matching
         for key in self.output_graph.shape_env.var_to_val.keys():
             assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
-        finished_expressions.append(expr_as_str)
+        if self.output_graph.shape_env.guards:
+            finished_expressions.append(expr_as_str)
 
         for expr in expr_to_tensor_ref.keys():
             tensor_refs = expr_to_tensor_ref[expr].keys()
@@ -672,7 +698,7 @@ class CheckFunctionManager:
         if len(finished_expressions) == 0:
             return None
 
-        expression = " and ".join(finished_expressions)
+        expression = " and \n".join(finished_expressions)
         return f"({expression})"
 
     def compile_check_fn(self, local_builder, global_builder, guards_out):
@@ -754,14 +780,17 @@ class CheckFunctionManager:
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}):
-    return lambda {args}: {code}
+    return (lambda {args}: {code})
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
         out = dict()
-        # print("RUNNING PY CODE", py_code)
-        exec(py_code, global_builder.scope, out)
+        try:
+            exec(py_code, global_builder.scope, out)
+        except:
+            logging.error(f"Code that failed to compile:\n{py_code}")
+            raise
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both

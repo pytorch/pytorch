@@ -5,7 +5,7 @@ import torch
 
 from .. import variables
 from ..exc import unimplemented
-from ..utils import istype, proxy_args_kwargs
+from ..utils import istype
 from .base import typestr, VariableTracker
 
 

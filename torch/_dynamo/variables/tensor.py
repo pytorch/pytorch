@@ -18,7 +18,7 @@ from ..utils import (
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import VariableTracker, wrap_fx_proxy
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import ShapeVariable, SizeVariable
 
@@ -114,7 +114,13 @@ class TensorVariable(VariableTracker):
         if not config.dynamic_shapes:
             props["size"] = tuple(value.size())
             props["stride"] = tuple(value.stride())
-            props["is_contiguous"] = value.is_contiguous()
+            props["is_contiguous"] = tuple(
+                [
+                    x
+                    for x in torch._prims_common._memory_formats
+                    if value.is_contiguous(memory_format=x)
+                ]
+            )
         return props
 
     def var_getattr(self, tx, name):
@@ -143,6 +149,9 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
             result = self.call_method(tx, "dim", [], {})
+        elif name == "T":
+            args = [variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)]
+            result = self.call_method(tx, "permute", args, {})
 
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
@@ -178,9 +187,9 @@ class TensorVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, TupleVariable
+        from .builder import wrap_fx_proxy
 
         kwargs = dict(kwargs)
-        # print("CALLING TENSOR OP", name)
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
@@ -188,47 +197,16 @@ class TensorVariable(VariableTracker):
             sizes = [variables.ConstantVariable(x) for x in self.size]
             constant_result = SizeVariable(sizes, **options)
         elif name == "size" and self.size is None and config.dynamic_shapes:
-            example_size = self.proxy.node.meta["example_value"].size()
-            pure_size_proxy = tx.output.create_proxy(
-                "call_method",
-                name,
-                *proxy_args_kwargs([self], kwargs),
-                current_tx=tx,
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self] + args, kwargs),
+                    current_tx=tx,
+                ),
+                **options,
             )
-            if len(args) == 1 and isinstance(args[0], ConstantVariable):
-                assert isinstance(args[0].value, int)
-                proxy = tx.output.create_proxy(
-                    "call_function",
-                    operator.getitem,
-                    (pure_size_proxy, args[0].as_proxy()),
-                    {},
-                )
-                value = example_size[args[0].value]
-                proxy.node.meta["example_value"] = value
-                return DynamicShapeVariable.create(tx, proxy, value)
-            items = []
-            for i, element in enumerate(example_size):
-                if isinstance(element, int):
-                    items.append(variables.ConstantVariable(element))
-                else:
-                    proxy = tx.output.create_proxy(
-                        "call_function",
-                        operator.getitem,
-                        (pure_size_proxy, i),
-                        {},
-                    )
-                    proxy.node.meta["example_value"] = element
-                    items.append(DynamicShapeVariable.create(tx, proxy, element))
-
-            def extract(item):
-                if isinstance(item, ConstantVariable):
-                    return item.value
-                return item.proxy.node.meta["example_value"]
-
-            pure_size_proxy.node.meta["example_value"] = torch.Size(
-                [extract(item) for item in items]
-            )
-            return SizeVariable(items, pure_size_proxy, **options)
         elif name == "numel" and self.size is not None:
             constant_result = ConstantVariable(product(self.size), **options)
         elif name in ("ndimension", "dim") and self.ndim is not None:
@@ -236,13 +214,13 @@ class TensorVariable(VariableTracker):
         elif name == "is_floating_point" and self.dtype is not None:
             constant_result = ConstantVariable(self.dtype.is_floating_point, **options)
         elif name == "is_contiguous" and self.is_contiguous is not None:
-            if (
-                "memory_format" in kwargs
-                and kwargs["memory_format"].as_python_constant()
-                == torch.contiguous_format
-            ):
-                kwargs.pop("memory_format")
-            constant_result = ConstantVariable(self.is_contiguous, **options)
+            if "memory_format" in kwargs:
+                memory_format = kwargs.pop("memory_format").as_python_constant()
+            else:
+                memory_format = torch.contiguous_format
+            constant_result = ConstantVariable(
+                memory_format in self.is_contiguous, **options
+            )
         else:
             constant_result = None
 
@@ -307,6 +285,39 @@ class TensorVariable(VariableTracker):
                 current_tx=tx,
             )
             return ConstantVariable(None, **options)
+        elif name in ("resize_", "resize_as_"):
+            if "memory_format" in kwargs:
+                memory_format = kwargs["memory_format"].as_python_constant()
+            else:
+                memory_format = torch.contiguous_format
+
+            if name == "resize_":
+                self.size = args[0].as_python_constant()
+                self.is_contiguous = (memory_format,)
+            else:
+                assert isinstance(args[0], TensorVariable)
+                if self.size and args[0].size:
+                    if (
+                        self.size == args[0].size
+                        or memory_format is torch.preserve_format
+                    ):
+                        self.is_contiguous = args[0].is_contiguous
+                    else:
+                        self.size = args[0].size
+                        self.stride = args[0].stride
+                        self.ndim = args[0].ndim
+                        self.is_contiguous = (memory_format,)
+
+            return self.__class__.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self] + args, kwargs),
+                    current_tx=tx,
+                ),
+                **options,
+            )
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
@@ -369,6 +380,8 @@ class DynamicShapeVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         return wrap_fx_proxy(

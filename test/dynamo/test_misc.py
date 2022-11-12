@@ -116,7 +116,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return o
 
         torch._dynamo.testing.standard_test(
-            self, unpack4, 2, expected_ops=5, expected_ops_dynamic=7
+            self, unpack4, 2, expected_ops=5, expected_ops_dynamic=8
         )
 
     def test_unpack5(self):
@@ -129,7 +129,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return o
 
         torch._dynamo.testing.standard_test(
-            self, unpack5, 2, expected_ops=5, expected_ops_dynamic=7
+            self, unpack5, 2, expected_ops=5, expected_ops_dynamic=8
         )
 
     def test_matmul1(self):
@@ -579,8 +579,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(cnts.op_count, 0)
 
-    # KeyError: '__name__'
-    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_user_getattr1(self):
         class MyConfig(dict):
             def __getattr__(self, name):
@@ -1409,6 +1407,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
+
+    def test_tensor_is_contiguous(self):
+        def fn(x):
+            input = torch.randn((1, 16, 1, 1))
+            weight = torch.randn((8, 16, 3, 3))
+            weight = weight.to(memory_format=x)
+            output = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
+            return output.is_contiguous(memory_format=x)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        for x in [torch.contiguous_format, torch.channels_last]:
+            self.assertEqual(fn(x), opt_fn(x))
 
     def test_python_slice(self):
         def f1(input):
