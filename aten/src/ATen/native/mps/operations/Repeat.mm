@@ -6,6 +6,7 @@
 
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Repeat.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <torch/library.h>
 
@@ -13,7 +14,10 @@
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #endif
 
-namespace at::native {
+template <typename index_t>
+
+namespace at {
+namespace native {
 
 Tensor permute_mps(const Tensor& self, IntArrayRef dims) {
   auto nDims = self.dim();
@@ -125,35 +129,6 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
-static inline Tensor repeat_interleave_common(
-    const Tensor& repeats,
-    c10::optional<int64_t> output_size) {
-  TORCH_CHECK(
-      repeats.dim() == 1, "repeat_interleave only accept 1D vector as repeat");
-  TORCH_CHECK(
-      repeats.scalar_type() == at::kLong || repeats.scalar_type() == at::kInt,
-      "repeats has to be Long or Int tensor");
-  if (repeats.size(0) == 0) {
-    return at::empty_like(repeats, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  Tensor repeats_ = repeats.contiguous();
-  Tensor cumsum = repeats.cumsum(0);
-  int64_t total;
-  if (output_size.has_value()) {
-    total = output_size.value();
-  } else {
-    total = cumsum[-1].item<int64_t>();
-    TORCH_CHECK(
-        (repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
-  }
-
-  Tensor result = at::empty({total}, repeats.options());
-  index_t* repeat_ptr = repeats_.data_ptr<index_t>();
-  int64_t* cumsum_ptr = cumsum.data_ptr<int64_t>();
-  index_t* result_ptr = result.data_ptr<index_t>();
-  compute(repeat_ptr, cumsum_ptr, result_ptr, repeats.size(0), total);
-  return result;
-}
 
 Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optional<int64_t> output_size) {
 
@@ -162,7 +137,7 @@ Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optio
 
   Tensor output;
 
-  AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_cpu", [&]() {
+  AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_mps", [&]() {
     output = repeat_interleave_common<index_t, compute_cpu<index_t>>(
         repeat, output_size);
   });
@@ -170,7 +145,7 @@ Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optio
  struct CachedGraph : public MPSCachedGraph
   {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* intpuTensor_ = nil;
+    MPSGraphTensor* inputTensor_ = nil;
     MPSGraphTensor* outputTensor_ = nil;
   };
 
@@ -178,7 +153,7 @@ Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optio
 
   @autoreleasepool {
     // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types etc match the earlier created MPSGraph
-    string key = "repeat_interleave_mps:" + getMPSTypeString({self});
+    string key = "repeat_interleave_mps:" + getMPSTypeString(self.scalar_type()) + ":" + getMPSShape(repeat);
                                
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
@@ -191,7 +166,7 @@ Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optio
 
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
           MPSGraphTensor* outputTensor = [mpsGraph tileTensor:inputTensor
-                                               withMultiplier:output_size
+                                               withMultiplier:getMPSShape(repeat)
                                                          name:nil];
 
           newCachedGraph->inputTensor_ = inputTensor;
