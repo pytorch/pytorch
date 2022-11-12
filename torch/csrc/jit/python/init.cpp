@@ -1160,7 +1160,6 @@ void initJITBindings(PyObject* module) {
       SYMNODE_UNARY(is_float)
       SYMNODE_UNARY(bool_)
       SYMNODE_UNARY(int_)
-      SYMNODE_UNARY(sym_int)  // TODO: remove me
       SYMNODE_UNARY(sym_float)
       SYMNODE_BINARY(add)
       SYMNODE_BINARY(sub)
