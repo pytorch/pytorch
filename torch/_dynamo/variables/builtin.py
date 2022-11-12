@@ -489,13 +489,8 @@ class BuiltinVariable(VariableTracker):
 
             args = [guard_if_dyn(arg) for arg in args]
             value = self.fn(*args)
-            return DynamicShapeVariable.create(
-                tx,
-                tx.output.create_proxy(
-                    "call_function", self.fn, *proxy_args_kwargs(args, kwargs)
-                ),
-                value,
-                **options,
+            return variables.RangeVariable(
+                value=value
             )
         # None no-ops this handler and lets the driving function proceed
         return None
