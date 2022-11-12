@@ -1839,7 +1839,7 @@ def upsample_compute_output_size(input_size, output_size, scale_factors):
         # NB: this isn't necessary lol
         utils.check(output_size is None, lambda: "Must specify exactly one of output_size and scale_factors")
         utils.check(len(scale_factors) == spatial_dimensions, lambda: "")
-        return [input_size[i+2] * scale_factors[i] for i in range(spatial_dimensions)]
+        return [sym_int(input_size[i+2] * scale_factors[i]) for i in range(spatial_dimensions)]
     utils.check(False, lambda: "Must specify exactly one of output_size and scale_factors")
 
 def get_scale_value(scales, idx):
