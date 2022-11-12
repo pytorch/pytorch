@@ -93,7 +93,7 @@ def has_bf16_support():
 
 unary_list = [
     torch.nn.ReLU(),
-    torch.nn.Sigmoid(),
+    # torch.nn.Sigmoid(),
     torch.nn.Tanh(),
     torch.nn.Hardswish(),
     torch.nn.LeakyReLU(0.1, inplace=False),
@@ -974,12 +974,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
-    def test_sigmoid(self):
-        def fn(a, b):
-            return (torch.sigmoid(a), torch.sigmoid(a + b))
-
-        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
-
     def test_round(self):
         def fn(a, b):
             return torch.round(a), torch.round(b + 1), torch.round(a, decimals=2)
@@ -1278,7 +1272,6 @@ class CommonTemplate:
     def test_linear1(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 16),
-            torch.nn.Sigmoid(),
             ToTuple(),
         )
         self.common(mod, (torch.randn(2, 8),))
@@ -3106,27 +3099,6 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
-    @patch.object(functorch_config, "use_fake_tensor", True)
-    def test_input_mutation3(self):
-        def fn(a):
-            a += 1
-            a *= 2
-            aten.sigmoid_(a)
-            a = a.view(64)
-            a += 3
-            a *= 4
-            aten.relu_(a)
-            return a
-
-        arg1 = torch.randn([1, 64], device=self.device)
-        arg2 = arg1.clone()
-        correct1 = fn(arg1)
-        opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
-        actual1 = opt_fn(arg2)
-
-        self.assertTrue(same(actual1, correct1))
-        self.assertTrue(same(arg1, arg2))
-
     def test_input_mutation4(self):
         def fn(a):
             torch.relu_(a)
@@ -4527,7 +4499,6 @@ if HAS_CPU:
                 x = torch.sin(x)
                 x = torch.neg(x)
                 x = torch.square(x)
-                x = torch.sigmoid(x)
                 x = torch.relu(x)
                 x = torch.cos(x)
                 x = torch.exp(x)
