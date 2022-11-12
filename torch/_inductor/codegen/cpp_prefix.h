@@ -16,22 +16,6 @@
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
 
-void flag_to_float(const bool* src, float* dst, int64_t n) {
-#pragma unroll
-  for (int64_t i = 0; i < n; i++) {
-    uint32_t* dst_u32 = (uint32_t*)dst;
-    dst_u32[i] = *(src + i) ? 0xFFFFFFFF : 0;
-  }
-}
-
-void flag_to_float(const unsigned char* src, float* dst, int64_t n) {
-#pragma unroll
-  for (int64_t i = 0; i < n; i++) {
-    uint32_t* dst_u32 = (uint32_t*)dst;
-    dst_u32[i] = *(src + i) ? 0xFFFFFFFF : 0;
-  }
-}
-
 template <typename T> inline T mod(T a, T b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }
 template <> inline double mod(double a, double b) { return std::fmod(a, b); }
@@ -72,4 +56,13 @@ template <typename T> void atomic_add(volatile T *addr, T offset) {
     reinterpret_cast<T *>(&desired)[0] = val + offset;
   } while (!atomic_addr->compare_exchange_weak(expected, desired,
                                                std::memory_order_relaxed));
+}
+
+template <typename T>
+void flag_to_float(const T* src, float* dst, int64_t n) {
+#pragma unroll
+  for (int64_t i = 0; i < n; i++) {
+    uint32_t* dst_u32 = (uint32_t*)dst;
+    dst_u32[i] = *(src + i) ? 0xFFFFFFFF : 0;
+  }
 }
