@@ -1161,23 +1161,45 @@ class FullyShardedDataParallel(nn.Module):
             self._streams["unshard"],
             self._streams["pre_unshard"],
         )
-
         max_norm = float(max_norm)
         norm_type = float(norm_type)
-        # Compute the local gradient norm (only including this rank's shard
-        # of the gradients)
-        local_norm = _get_grad_norm(self.parameters(), norm_type).to(
+        # Perform local gradient norm computation, where sharded and
+        # non-sharded parameters must be handled separately
+        sharded_params = set()
+        nonsharded_params = set()  # `NO_SHARD` or not FSDP-managed
+        for handle in FullyShardedDataParallel._fsdp_handles(self):
+            target_set = (
+                sharded_params if handle.uses_sharded_strategy else nonsharded_params
+            )
+            if handle._use_orig_params:
+                for param in handle.flat_param._params:
+                    target_set.add(param)
+            else:
+                target_set.add(handle.flat_param)
+        for param in self.parameters():
+            not_fsdp_managed = (
+                param not in sharded_params and param not in nonsharded_params
+            )
+            if not_fsdp_managed:
+                nonsharded_params.add(param)
+        local_sharded_norm = _get_grad_norm(sharded_params, norm_type).to(
+            self.compute_device
+        )
+        local_nonsharded_norm = _get_grad_norm(nonsharded_params, norm_type).to(
             self.compute_device
         )
         # Reconstruct the total gradient norm depending on the norm type
         if norm_type == math.inf:
-            total_norm = local_norm
+            total_norm = torch.maximum(local_sharded_norm, local_nonsharded_norm)
             dist.all_reduce(
                 total_norm, op=torch.distributed.ReduceOp.MAX, group=self.process_group
             )
         else:
-            total_norm = local_norm**norm_type
+            total_norm = local_sharded_norm**norm_type
             dist.all_reduce(total_norm, group=self.process_group)
+            # All-reducing the local non-sharded norm would count it an extra
+            # world-size-many times
+            total_norm += local_nonsharded_norm**norm_type
             total_norm = total_norm ** (1.0 / norm_type)
         if self.cpu_offload.offload_params:
             total_norm = total_norm.cpu()
@@ -1789,7 +1811,7 @@ class FullyShardedDataParallel(nn.Module):
 
 
 def _get_grad_norm(
-    params: List[nn.Parameter],
+    params: Iterable[nn.Parameter],
     norm_type: float,
 ) -> torch.Tensor:
     """
