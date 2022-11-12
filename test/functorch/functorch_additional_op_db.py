@@ -445,7 +445,8 @@ additional_op_db.extend([
            sample_inputs_func=sample_inputs_conversion,
            skips=(
                # autograd tests don't handle operators that change dtype
-               DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients'),
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -511,7 +512,8 @@ additional_op_db.extend([
            sample_inputs_func=sample_inputs_conversion,
            skips=(
                # autograd tests don't handle operators that change dtype
-               DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients'),
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -524,7 +526,8 @@ additional_op_db.extend([
            sample_inputs_func=sample_inputs_conversion,
            skips=(
                # autograd tests don't handle operators that change dtype
-               DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients'),
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),

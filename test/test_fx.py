@@ -57,7 +57,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     find_library_location,
     run_tests,
-    skipIfSlowGradcheckEnv,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -3926,7 +3925,6 @@ class TestFunctionalTracing(JitTestCase):
         "max_pool2d": PROXY_ITERABLE,
         "max_pool3d": PROXY_ITERABLE,
 
-        "group_norm": PROXY_ITERATED,
         "lp_pool2d": PROXY_ITERATED,
         "max_unpool1d": PROXY_ITERATED,
         "max_unpool2d": PROXY_ITERATED,
@@ -3960,6 +3958,7 @@ class TestFunctionalTracing(JitTestCase):
         "gaussian_nll_loss": CONTROL_FLOW,
         "glu": CONTROL_FLOW,
         "grid_sample": CONTROL_FLOW,
+        "group_norm": CONTROL_FLOW,
         "gumbel_softmax": CONTROL_FLOW,
         "hardsigmoid": CONTROL_FLOW,
         "hardswish": CONTROL_FLOW,
@@ -4030,7 +4029,7 @@ class TestFunctionalTracing(JitTestCase):
         "max_pool2d": PROXY_ITERATED,
         "max_pool3d": PROXY_ITERATED,
 
-        "group_norm": LEN_ERROR
+        "group_norm": CONTROL_FLOW
     }
 
     @classmethod
@@ -4110,7 +4109,6 @@ TestFunctionalTracing.generate_tests()
 instantiate_device_type_tests(TestOperatorSignatures, globals())
 
 @skipIfNoTorchVision
-@skipIfSlowGradcheckEnv
 class TestVisionTracing(JitTestCase):
     def setUp(self):
         # Checking for mutable operations while tracing is feature flagged
