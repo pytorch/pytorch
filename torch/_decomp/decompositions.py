@@ -4,7 +4,7 @@ import sys
 from enum import Enum
 from functools import partial, reduce
 from itertools import product
-from typing import Callable, cast, Iterable, List, Optional, Tuple
+from typing import Callable, cast, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch._prims_common as utils
@@ -1816,7 +1816,9 @@ def upsample_compute_output_size(input_size, output_size, scale_factors):
         )
         utils.check(len(scale_factors) == spatial_dimensions, lambda: "")
         return [
-            sym_int(input_size[i + 2] * scale_factors[i])
+            # Returning output_size as float. We cannot convert it to int directly,
+            # as latter computation of scale_factor is relying output size being float
+            sym_float(input_size[i + 2] * scale_factors[i])
             for i in range(spatial_dimensions)
         ]
     utils.check(
@@ -1830,26 +1832,23 @@ def get_scale_value(scales, idx):
     return scales[idx]
 
 
-@torch.ops.aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@torch.ops.aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
 def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
-    # TODO: don't directly dispatch like this
-    return torch.ops.aten.upsample_bilinear2d.default(
-        input, osize, align_corners, scale_h, scale_w
-    )
+
+    # NB: osize could be a list of float when scale_factors is float
+    # so we cannot redispatch to aten.upsample_bilinear2d.default here
+    return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)
 
 
 @register_decomposition(torch.ops.aten.upsample_bilinear2d.default)
-@torch.ops.aten.upsample_bilinear2d.default.py_impl(
-    DispatchKey.CompositeImplicitAutograd
-)
 @torch.ops.aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def upsample_bilinear2d(
     input: Tensor,
-    output_size: List[int],
+    output_size: List[Union[int, float]],
     align_corners: bool,
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
