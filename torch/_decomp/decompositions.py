@@ -1853,10 +1853,11 @@ def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
     # TODO: don't directly dispatch like this
-    return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)
+    return torch.ops.aten.upsample_bilinear2d.default(input, osize, align_corners, scale_h, scale_w)
 
-#@register_decomposition(torch.ops.aten.upsample_bilinear2d.default)
+@register_decomposition(torch.ops.aten.upsample_bilinear2d.default)
 @torch.ops.aten.upsample_bilinear2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@torch.ops.aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def upsample_bilinear2d(
     input: Tensor,
