@@ -1095,7 +1095,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked_fill', ''),  # could not find kernel
     xfail('masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposi...
     xfail('masked.logsumexp', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked.median', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
