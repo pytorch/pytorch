@@ -31,6 +31,7 @@ from torch._prims_common import (
 )
 from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import sym_float
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
@@ -392,8 +393,16 @@ def _elementwise_meta(
     # Number case
     # NOTE: this case is not currently exercised
     # TODO: fix number type promotion (bool, complex->float)
-    assert not isinstance(number, torch.SymInt), "NYI"
-    assert not isinstance(number, torch.SymFloat), "NYI"
+
+    # For now for symint/float, just implementing the common / simple cases of (int,float,symint,symfloat)
+    seen_float = False
+    if isinstance(number, (torch.SymInt, torch.SymFloat)):
+        for a in args:
+            assert isinstance(a, (int, float, torch.SymInt, torch.SymFloat)), "NYI"
+            seen_float = seen_float or isinstance(a, (float, torch.SymFloat))
+        if seen_float:
+            number = sym_float(number)
+
     return TensorMeta(number)
 
 

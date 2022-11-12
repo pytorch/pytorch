@@ -13,8 +13,8 @@ TensorBase expand_slow_path(const TensorBase &self, IntArrayRef size) {
 
 namespace {
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed
-template <typename Container>
-Container infer_size_impl(IntArrayRef a, IntArrayRef b) {
+template <typename Container, typename ArrayType>
+Container infer_size_impl(ArrayType a, ArrayType b) {
   size_t dimsA = a.size();
   size_t dimsB = b.size();
   size_t ndim = dimsA > dimsB ? dimsA : dimsB;
@@ -25,8 +25,8 @@ Container infer_size_impl(IntArrayRef a, IntArrayRef b) {
     ptrdiff_t offset = ndim - 1 - i;
     ptrdiff_t dimA = dimsA - 1 - offset;
     ptrdiff_t dimB = dimsB - 1 - offset;
-    int64_t sizeA = (dimA >= 0) ? a[dimA] : 1;
-    int64_t sizeB = (dimB >= 0) ? b[dimB] : 1;
+    auto sizeA = (dimA >= 0) ? a[dimA] : 1;
+    auto sizeB = (dimB >= 0) ? b[dimB] : 1;
 
     TORCH_CHECK(
         sizeA == sizeB || sizeA == 1 || sizeB == 1,
