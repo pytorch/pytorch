@@ -1654,9 +1654,11 @@ def _export_file(
             for k, v in export_map.items():
                 z.writestr(k, v)
     elif export_type == _exporter_states.ExportTypes.DIRECTORY:
-        if os.path.exists(f):  # type: ignore[arg-type]
-            assert os.path.isdir(f)  # type: ignore[arg-type]
-        else:
+        if isinstance(io.BytesIO, f) or not os.path.isdir(f):  # type: ignore[arg-type]
+            raise ValueError(
+                f"f should be directory when export_type is set to DIRECTORY, instead get type(f): {type(f)}"
+            )
+        if not os.path.exists(f):  # type: ignore[arg-type]
             os.makedirs(f)  # type: ignore[arg-type]
 
         model_proto_file = os.path.join(f, _constants.ONNX_ARCHIVE_MODEL_PROTO_NAME)  # type: ignore[arg-type]
@@ -1699,7 +1701,7 @@ def _add_onnxscript_fn(
     # calling other ONNXFunction scenario, neither does it here
     onnx_function_list = list()  # type: ignore[var-annotated]
     included_node_func = set()  # type: Set[str]
-    _find_onnxscript_op_recursively(
+    _find_onnxscript_op_recursive(
         model_proto.graph, included_node_func, custom_opsets, onnx_function_list
     )
 
@@ -1710,7 +1712,7 @@ def _add_onnxscript_fn(
 
 
 @_beartype.beartype
-def _find_onnxscript_op_recursively(
+def _find_onnxscript_op_recursive(
     graph_proto,
     included_node_func: Set[str],
     custom_opsets: Mapping[str, int],
@@ -1725,7 +1727,7 @@ def _find_onnxscript_op_recursively(
                 (
                     onnx_function_list,
                     included_node_func,
-                ) = _find_onnxscript_op_recursively(
+                ) = _find_onnxscript_op_recursive(
                     attr.g, included_node_func, custom_opsets, onnx_function_list
                 )
         # Only custom Op with ONNX function and aten with symbolic_fn should be found in registry
