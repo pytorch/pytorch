@@ -1686,7 +1686,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
             extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib", "x64")}')
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
-                extra_ldflags.append(os.path.join(CUDNN_HOME, "lib", "x64"))
+                extra_ldflags.append(f'/LIBPATH:{os.path.join(CUDNN_HOME, "lib", "x64")}')
         elif not IS_HIP_EXTENSION:
             extra_ldflags.append(f'-L{_join_cuda_home("lib64")}')
             extra_ldflags.append('-lcudart')
