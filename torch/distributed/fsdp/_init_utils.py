@@ -3,6 +3,7 @@ import warnings
 from typing import (
     Callable,
     Dict,
+    Generator,
     Iterable,
     Iterator,
     List,
@@ -21,10 +22,9 @@ import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
-    _apply_to_modules,
-    _get_param_to_unflat_param_names,
+    _FSDPState,
+    _get_param_to_fqns,
     _is_fsdp_flattened,
-    _State,
     clean_tensor_name,
     TrainingState,
 )
@@ -34,8 +34,11 @@ from torch.distributed.fsdp._wrap_utils import _get_submodule_to_states
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
+    FullStateDictConfig,
     MixedPrecision,
     ShardingStrategy,
+    StateDictConfig,
+    StateDictType,
 )
 from torch.distributed.fsdp.flat_param import (
     _HandlesKey,
@@ -70,9 +73,9 @@ SHARDING_STRATEGY_MAP = {
 
 @no_type_check
 def _init_process_group_state(
-    state: _State,
+    state: _FSDPState,
     process_group: Optional[dist.ProcessGroup],
-) -> _State:
+) -> _FSDPState:
     state.process_group = process_group or _get_default_group()
     state.rank = state.process_group.rank()
     state.world_size = state.process_group.size()
@@ -81,10 +84,10 @@ def _init_process_group_state(
 
 @no_type_check
 def _init_ignored_module_states(
-    state: _State,
+    state: _FSDPState,
     module: nn.Module,
     ignored_modules: Optional[Iterable[torch.nn.Module]],
-) -> _State:
+) -> _FSDPState:
     state._ignored_modules = _get_ignored_modules(module, ignored_modules)
     state._ignored_params, state._ignored_param_names = _get_ignored_params(
         module,
@@ -100,21 +103,25 @@ def _init_ignored_module_states(
 
 @no_type_check
 def _init_buffer_state(
-    state: _State,
+    state: _FSDPState,
     module: nn.Module,
-) -> _State:
+) -> _FSDPState:
     state._buffer_names = _get_buffer_names(module)
-    # Save a mapping from fully prefixed buffer name to its original dtype
-    # since when buffer mixed precision is enabled, buffers are restored to
-    # their original dtype for model checkpointing
+    # Save a mapping from clean fully-qualified buffer name (starting from
+    # `module`) to its original dtype for restoring that dtype during model
+    # checkpointing when buffer mixed precision is enabled. The names should
+    # be clean since the casting happens in a `summon_full_params()` context.
     _buffer_name_to_orig_dtype: Dict[str, torch.dtype] = {}
+    for buffer_name, buffer in module.named_buffers():
+        buffer_name = clean_tensor_name(buffer_name)
+        _buffer_name_to_orig_dtype[buffer_name] = buffer.dtype
     state._buffer_name_to_orig_dtype = _buffer_name_to_orig_dtype
     return state
 
 
 @no_type_check
 def _init_core_state(
-    state: _State,
+    state: _FSDPState,
     sharding_strategy: Optional[ShardingStrategy],
     mixed_precision: Optional[MixedPrecision],
     cpu_offload: Optional[CPUOffload],
@@ -122,7 +129,7 @@ def _init_core_state(
     use_orig_params: bool,
     backward_prefetch_limit: int,
     forward_prefetch_limit: int,
-) -> _State:
+) -> _FSDPState:
     # We clamp the strategy to `NO_SHARD` for world size of 1 since they are
     # currently functionally equivalent. This may change if/when we integrate
     # FSDP with MoE.
@@ -144,6 +151,10 @@ def _init_core_state(
         backward_prefetch_limit,
         forward_prefetch_limit,
     )
+    _module_to_handles: Dict[
+        nn.Module, List[FlatParamHandle]
+    ] = collections.defaultdict(list)
+    state._module_to_handles = _module_to_handles
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handles`
     _handles: List[FlatParamHandle] = []
@@ -155,8 +166,10 @@ def _init_core_state(
 
 @no_type_check
 def _init_runtime_state(
-    state: _State,
-) -> _State:
+    state: _FSDPState,
+) -> _FSDPState:
+    _root_pre_forward_handles: List[RemovableHandle] = []
+    state._root_pre_forward_handles = _root_pre_forward_handles
     _pre_forward_handles: List[RemovableHandle] = []
     state._pre_forward_handles = _pre_forward_handles
     _post_forward_handles: List[RemovableHandle] = []
@@ -177,10 +190,10 @@ def _init_runtime_state(
 
 @no_type_check
 def _init_prefetching_state(
-    state: _State,
+    state: _FSDPState,
     backward_prefetch: BackwardPrefetch,
     forward_prefetch: bool,
-) -> _State:
+) -> _FSDPState:
     state.backward_prefetch = backward_prefetch
     state.forward_prefetch = forward_prefetch
     _handles_prefetched: Dict[_HandlesKey, bool] = {}
@@ -196,20 +209,24 @@ def _init_prefetching_state(
     return state
 
 
-def _init_state_dict_state(state: _State) -> _State:
-    # TODO: after rebase
+def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
+    state._state_dict_type = StateDictType.FULL_STATE_DICT
+    state_dict_config: StateDictConfig = FullStateDictConfig()
+    state._state_dict_config = state_dict_config
+    unshard_params_ctx: Dict[nn.Module, Generator] = {}
+    state._unshard_params_ctx = unshard_params_ctx
     return state
 
 
 @no_type_check
 def _init_param_handle_from_module(
-    state: _State,
+    state: _FSDPState,
     root_module: nn.Module,
     device_id: Optional[Union[int, torch.device]],
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
     module_wrapper_cls: Type,
-) -> _State:
+) -> _FSDPState:
     """
     Initializes a ``FlatParamHandle`` from a module ``root_module``. This is
     the module wrapper code path.
@@ -243,13 +260,13 @@ def _init_param_handle_from_module(
 
 @no_type_check
 def _init_param_handles_from_module(
-    state: _State,
+    state: _FSDPState,
     root_module: nn.Module,
     auto_wrap_policy: Callable,
     device_id: Optional[Union[int, torch.device]],
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
-) -> _State:
+) -> _FSDPState:
     """
     Initializes all ``FlatParamHandle`` s from a module ``root_module``. This
     is the non-module-wrapper code path.
@@ -302,7 +319,7 @@ def _init_param_handles_from_module(
 
 @no_type_check
 def _init_param_handle_from_params(
-    state: _State,
+    state: _FSDPState,
     params: List[nn.Parameter],
     root_module: nn.Module,
 ):
@@ -328,30 +345,11 @@ def _init_param_handle_from_params(
     assert handle not in state._handles
     state.params.append(handle.flat_param)
     state._handles.append(handle)
+    for module in handle.flat_param._modules:
+        state._module_to_handles[module].append(handle)
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
         handle.flat_param_to(cpu_device)
-
-
-@no_type_check
-def _init_streams(
-    state: _State,
-) -> _State:
-    """
-    Initializes CUDA streams for overlapping communication, computation, and
-    data transfers. The streams should be shared across FSDP instances.
-    """
-    assert state._is_root
-    assert torch.cuda.is_available()
-    # Stream for unshard logic, including allocating the all-gather destination
-    # tensors and the all-gathers themselves.
-    state._streams["unshard"] = torch.cuda.Stream()
-    # Stream for overlapping gradient reduction with the backward pass gradient
-    # computation.
-    state._streams["post_backward"] = torch.cuda.Stream()
-    # Stream for pre-unshard logic, namely allocations and writes for CPU
-    # offloading (H2D copy) and mixed precision (low precision cast).
-    state._streams["pre_unshard"] = torch.cuda.Stream()
 
 
 def _get_ignored_modules(
@@ -410,7 +408,7 @@ def _get_ignored_params(
         p for m in ignored_modules for p in m.parameters() if not _is_fsdp_flattened(p)
     )
     # Conservatively include all shared parameters' names
-    param_to_unflat_param_names = _get_param_to_unflat_param_names(
+    param_to_unflat_param_names = _get_param_to_fqns(
         root_module,
         dedup_shared_params=False,
     )
@@ -430,22 +428,8 @@ def _get_buffer_names(root_module: nn.Module) -> Set[str]:
     Returns the fully prefixed names of all buffers in the module hierarchy
     rooted at ``root_module`` as a class:`set`.
     """
-
-    def module_fn(module: nn.Module, prefix: str, buffer_names: Set[str]):
-        for buffer_name, _ in module.named_buffers(recurse=False):
-            # Clean module wrapper prefixes in case of nested wrapping
-            prefixed_buffer_name = clean_tensor_name(prefix + buffer_name)
-            buffer_names.add(prefixed_buffer_name)
-
-    def return_fn(buffer_names: Set[str], *args):
-        return buffer_names
-
-    buffer_names: Set[str] = set()
-    return _apply_to_modules(
-        root_module,
-        module_fn,
-        return_fn,
-        buffer_names,
+    return set(
+        clean_tensor_name(buffer_name) for buffer_name, _ in root_module.named_buffers()
     )
 
 
@@ -584,9 +568,8 @@ def _move_module_to_device(
                     isinstance(submodule, fsdp_file.FullyShardedDataParallel)
                     and submodule.cpu_offload.offload_params
                 ):
-                    with torch.no_grad():
-                        for handle in submodule._handles:
-                            handle.flat_param_to(torch.device("cpu"))
+                    for handle in submodule._handles:
+                        handle.flat_param_to(torch.device("cpu"))
     elif param.device == cpu_device:
         _warn_cpu_init()
 

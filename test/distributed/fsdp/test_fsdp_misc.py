@@ -110,7 +110,7 @@ class TestFSDPMisc(FSDPTest):
         def _check_equal(local, fsdp):
             with FSDP.summon_full_params(fsdp):
                 for p1, p2 in zip(fsdp.parameters(), local.parameters()):
-                    torch.testing.assert_allclose(p1, p2)
+                    torch.testing.assert_close(p1, p2)
 
         for sharding_strategy in [
             ShardingStrategy.FULL_SHARD,
