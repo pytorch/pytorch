@@ -5239,6 +5239,28 @@ def sample_inputs_view_as_real(op_info, device, dtype, requires_grad, **kwargs):
     sizes = ((S, S), ())
     return (SampleInput(make_arg(size)) for size in sizes)
 
+def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
+    make_arg = partial(make_tensor, dtype=torch.float32, device=device)
+
+    if is_ref:
+        error_float = "Expected both inputs to be Half, Float or Double tensors but got torch.float32 and torch.int32"
+        error_dtype = "Expected object of scalar type torch.float32 but got scalar type torch.float64 for second argument"
+        error_out = "Expected out tensor to have dtype torch.complex128 but got torch.complex64 instead"
+    else:
+        error_float = "Expected both inputs to be Half, Float or Double tensors but got Float and Int"
+        error_dtype = "Expected object of scalar type Float but got scalar type Double for second argument"
+        error_out = "Expected object of scalar type ComplexDouble but got scalar type ComplexFloat for argument 'out'"
+
+    yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=torch.int)),
+                     error_type=RuntimeError, error_regex=error_float)
+
+    yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=torch.float64)),
+                     error_type=RuntimeError, error_regex=error_dtype)
+
+    yield ErrorInput(SampleInput(make_arg(M, S, dtype=torch.float64), make_arg(M, S, dtype=torch.float64),
+                                 out=make_arg(M, S, dtype=torch.complex64)),
+                     error_type=RuntimeError, error_regex=error_out)
+
 def sample_inputs_prod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
         # shrink values to be in the interval [-1, +1] for better precision in gradgradcheck
@@ -9097,6 +9119,7 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False,
+                    error_inputs_func=error_inputs_complex,
                     skips=(
                         # Test doesn't account for complex's type promotion semantics
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
@@ -17931,6 +17954,17 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
+        )
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs._conversions.complex",
+        torch_opinfo_name="complex",
+        error_inputs_func=partial(error_inputs_complex, is_ref=True),
+        # prims.empty_strided.default does not support nvfuser
+        supports_nvfuser=False,
+        skips=(
+            # Test doesn't account for complex's type promotion semantics
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
         )
     ),
     ElementwiseUnaryPythonRefInfo(
