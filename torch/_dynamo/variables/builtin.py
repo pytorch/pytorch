@@ -489,9 +489,7 @@ class BuiltinVariable(VariableTracker):
 
             args = [guard_if_dyn(arg) for arg in args]
             value = self.fn(*args)
-            return variables.RangeVariable(
-                value=value
-            )
+            return variables.RangeVariable(value=value)
         # None no-ops this handler and lets the driving function proceed
         return None
 
@@ -615,15 +613,8 @@ class BuiltinVariable(VariableTracker):
 
     def call_isinstance(self, tx, arg, isinstance_type):
         arg_type = arg.python_type()
-        try:
-            isinstance_type = isinstance_type.as_python_constant()
-        except NotImplementedError:
-            try:
-                isinstance_type = isinstance_type.python_type()
-            except NotImplementedError:
-                unimplemented(
-                    f"isinstance called with unknown instance type {isinstance_type}"
-                )
+
+        isinstance_type = isinstance_type.as_python_constant()
 
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
             return variables.ConstantVariable(arg.call_isinstance(isinstance_type))
