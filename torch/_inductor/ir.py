@@ -3072,7 +3072,7 @@ class Convolution(ExternKernelAlloc):
             # x_fake = ir_node_to_tensor(x, guard_shape=True)
             # weight_fake = ir_node_to_tensor(weight, guard_shape=True)
             bias_fake = (
-                 ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
+                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
             )
             x_fake, weight_fake = args
             output = torch.ops.aten.convolution(
@@ -3690,8 +3690,8 @@ class StorageBox(MutableBox):
 
     def realize_conv(self):
         if isinstance(
-        self.data, (ComputedBuffer, InputsKernel, InputBuffer, ReinterpretView)
-    ):
+            self.data, (ComputedBuffer, InputsKernel, InputBuffer, ReinterpretView)
+        ):
             return self.data.get_name()
         assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
         if self.num_reads() > 1:
@@ -3708,7 +3708,6 @@ class StorageBox(MutableBox):
             self.data = cb
             self.data.name = V.graph.register_buffer(self.data)
             return self.data.name
-
 
     def realize_hint(self):
         """

@@ -306,8 +306,10 @@ class GraphLowering(torch.fx.Interpreter):
 
                 for user in n.users:
                     aten = torch.ops.aten
-                    if user.target == aten.convolution_backward.default and isinstance(result.data.data, (Pointwise, Reduction)):
-                         result.realize_conv()
+                    if user.target == aten.convolution_backward.default and isinstance(
+                        result.data.data, (Pointwise, Reduction)
+                    ):
+                        result.realize_conv()
                     elif user.target in needs_realized_inputs:
                         result.realize_hint()
                     elif user.op == "output":
