@@ -339,13 +339,12 @@ class Loops(IRNode):
 
     @cache_on_self
     def inner_fn_str(self):
-        try:
-            with V.set_ops_handler(V.MockHandler()), patch.object(
-                FlexibleLayout, "allow_indexing", True
-            ):
-                return str(self.inner_fn(self._index(self.ranges)))
-        except Exception as e:
-            return f"inner_fn(): {e}"
+        builder = V.KernelBuilder()
+        with V.set_ops_handler(builder), patch.object(
+            FlexibleLayout, "allow_indexing", True
+        ):
+            result = self.inner_fn(self._index(self.ranges))
+            return builder.compile(result)
 
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
@@ -461,18 +460,15 @@ class Reduction(Loops):
 
     @cache_on_self
     def inner_fn_str(self):
-        try:
-            with V.set_ops_handler(V.MockHandler()), patch.object(
-                FlexibleLayout, "allow_indexing", True
-            ):
-                return str(
-                    self.inner_fn(
-                        self._index(self.ranges),
-                        self._index(self.reduction_ranges, "r"),
-                    )
-                )
-        except Exception as e:
-            return f"inner_fn(): {e}"
+        builder = V.KernelBuilder()
+        with V.set_ops_handler(builder), patch.object(
+            FlexibleLayout, "allow_indexing", True
+        ):
+            result = self.inner_fn(
+                self._index(self.ranges),
+                self._index(self.reduction_ranges, "r"),
+            )
+            return builder.compile(result)
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""

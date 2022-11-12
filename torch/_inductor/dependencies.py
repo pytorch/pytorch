@@ -9,7 +9,7 @@ import sympy
 
 from . import config
 from .codegen.common import index_prevent_reordering
-from .utils import sympy_product, sympy_str, sympy_subs, sympy_symbol, VarRanges
+from .utils import sympy_product, sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -138,7 +138,7 @@ class ReadWrites:
         )
 
 
-class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
+class RecordLoadStore(V.KernelBuilder):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
         super(RecordLoadStore, self).__init__()
         self._reads: Set[MemoryDep] = set()
@@ -146,15 +146,6 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         self._index_exprs: Set[IndexExprDep] = set()
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
-
-    # Truncate the expr str by a threshold to prevent it's too long
-    # and cause process hanging. The result is not used.
-    # https://github.com/pytorch/torchdynamo/issues/1352
-    @staticmethod
-    def truncate_expr(expr):
-        if len(expr) > config.realize_bytes_threshold:
-            expr = f"{expr[:config.realize_bytes_threshold]}..."
-        return expr
 
     def canonicalize(
         self, index: sympy.Expr
@@ -185,22 +176,25 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
     def load(self, name: str, index: sympy.Expr) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._reads.add(MemoryDep(name, canonicalized_index, canonicalized_size))
-        return f"load({name}, {sympy_str(index)})"
+        return self._Expr(format_string="load({}, {})", inputs=[name, index])
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._writes.add(MemoryDep(name, canonicalized_index, canonicalized_size))
-        return f"store({name}, {sympy_str(index)}, {value}, {mode})"
+        return self._Expr(
+            format_string="store({}, {}, {}, {})", inputs=[name, index, value, mode]
+        )
 
     def reduction(
         self, name: str, dtype, src_dtype, reduction_type, index, value
     ) -> str:
-        return self.store(name, index, f"reduce_{reduction_type})({value})")
+        r0 = self._Expr(format_string=f"reduce_{reduction_type})({{}})", inputs=[value])
+        return self.store(name, index, r0)
 
     def index_expr(self, index: sympy.Expr, dtype) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._index_exprs.add(IndexExprDep(canonicalized_index, canonicalized_size))
-        return f"index_expr({sympy_str(index)}, {dtype})"
+        return self._Expr(format_string="index_expr({}, {})", args=[index, dtype])
 
 
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
