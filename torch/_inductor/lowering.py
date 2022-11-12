@@ -23,6 +23,7 @@ from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
+    get_stride_order,
     IndexingConstant,
     IndexingDiv,
     PermuteView,
@@ -935,11 +936,27 @@ def register_onednn_fusion_ops():
             stride,
             dilation,
             groups,
-            attr,
+            binary_attr,
+            binary_alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
         ):
             return TensorBox.create(
                 ir.ConvolutionBinary.create(
-                    x, other, weight, bias, padding, stride, dilation, groups, attr
+                    x,
+                    other,
+                    weight,
+                    bias,
+                    padding,
+                    stride,
+                    dilation,
+                    groups,
+                    binary_attr,
+                    binary_alpha,
+                    unary_attr,
+                    unary_scalars,
+                    unary_algorithm,
                 )
             )
 
@@ -962,10 +979,12 @@ def register_onednn_fusion_ops():
 register_onednn_fusion_ops()
 
 
-def fallback_handler(kernel):
+def fallback_handler(kernel, inps_hook=None):
     fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
+        if inps_hook is not None:
+            args, kwargs = inps_hook(*args, **kwargs)
         return pytree.tree_map(
             TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
@@ -973,7 +992,7 @@ def fallback_handler(kernel):
     return handler
 
 
-def make_fallback(kernel):
+def make_fallback(kernel, inps_hook=None):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
@@ -983,7 +1002,9 @@ def make_fallback(kernel):
         )
 
     add_needs_realized_inputs(kernel)
-    return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
+    return register_lowering(kernel, type_promotion_kind=None)(
+        fallback_handler(kernel, inps_hook)
+    )
 
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
@@ -1134,29 +1155,101 @@ def philox_rand_like(x, seed, offset):
     )
 
 
+def conv_backward(*args, **kwargs):
+    # output striding complex and has a lot of build dependent options,
+    # take the output strides to determine what to set the inputs
+    with torch._subclasses.FakeTensorMode():
+        args_fake, kwargs_fake = pytree.tree_map_only(
+            ir.IRNode,
+            lambda t: ir.ir_node_to_tensor(t, guard_shape=False),
+            (args, kwargs),
+        )
+        output = aten.convolution_backward(*args_fake, **kwargs_fake)
+
+    def constraints(
+        grad_output,
+        input,
+        weight,
+        bias_sizes,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+        output_mask,
+    ):
+        out = (
+            output[0]
+            if output[0] is not None
+            else output[1]
+            if output[1] is not None
+            else output[2]
+        )
+        if out is not None:
+            stride_order = get_stride_order(out.stride())
+            grad_output = ir.ExternKernel.require_stride_order(
+                grad_output, stride_order
+            )
+            weight = ir.ExternKernel.require_stride_order(weight, stride_order)
+            # Only make input contiguous when it is necessary for the backwards computation
+            if output_mask[1]:
+                input = ir.ExternKernel.require_stride_order(input, stride_order)
+
+        return (
+            grad_output,
+            input,
+            weight,
+            bias_sizes,
+            stride,
+            padding,
+            dilation,
+            transposed,
+            output_padding,
+            groups,
+            output_mask,
+        ), {}
+
+    return constraints(*args, **kwargs)
+
+
+def require_dense(*args, **kwargs):
+    args, kwargs = pytree.tree_map_only(
+        ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs)
+    )
+    return args, kwargs
+
+
+def require_contiguous(*args, **kwargs):
+    args, kwargs = pytree.tree_map_only(
+        ir.IRNode, lambda t: ir.ExternKernel.require_contiguous(t), (args, kwargs)
+    )
+    return args, kwargs
+
+
 if has_torchvision_roi_align():
     make_fallback(torch.ops.torchvision.roi_align)
 
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
-make_fallback(aten._adaptive_avg_pool2d_backward)
-make_fallback(aten.convolution_backward)
-make_fallback(aten._cudnn_rnn)
-make_fallback(aten._cudnn_rnn_backward)
-make_fallback(aten.cumsum)
-make_fallback(aten._embedding_bag)
-make_fallback(aten._embedding_bag_forward_only)
+make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
+make_fallback(aten.convolution_backward, inps_hook=conv_backward)
+make_fallback(aten._cudnn_rnn, require_dense)
+make_fallback(aten._cudnn_rnn_backward, inps_hook=require_contiguous)
+make_fallback(aten.cumsum, inps_hook=require_dense)
+make_fallback(aten._embedding_bag, inps_hook=require_contiguous)
+make_fallback(aten._embedding_bag_forward_only, inps_hook=require_contiguous)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
-make_fallback(aten.grid_sampler_2d_backward)
+make_fallback(aten.grid_sampler_2d_backward, inps_hook=require_dense)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
-make_fallback(aten._thnn_fused_lstm_cell)
+make_fallback(aten._thnn_fused_lstm_cell, inps_hook=require_dense)
 make_fallback(aten.topk)
-make_fallback(aten.upsample_bicubic2d_backward)
-make_fallback(aten.upsample_bilinear2d_backward)
+make_fallback(aten.upsample_bicubic2d_backward, inps_hook=require_contiguous)
+make_fallback(aten.upsample_bilinear2d_backward, inps_hook=require_dense)
 
 
 @register_lowering(aten.convolution)
