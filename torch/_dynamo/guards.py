@@ -647,13 +647,16 @@ class CheckFunctionManager:
                         expr_to_tensor_ref[obj_expr] = {}
                     expr_to_tensor_ref[obj_expr][tensor_ref] = ""
 
-        guard_expression = self.output_graph.shape_env.get_guard_expr()
-        expr_as_str = guard_printer.doprint(guard_expression)
+        expr_as_str = " and\n".join(
+            [guard_printer.doprint(g) for g, _ in self.output_graph.shape_env.guards]
+        )
         # We may get into a state where symbolic shape keys (all should be found in replacements)
         # Have not been removed from the expression. This is a serious enough error state that we need to assert.
+        # TODO: this is very suspicious string matching
         for key in self.output_graph.shape_env.var_to_val.keys():
             assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
-        finished_expressions.append(expr_as_str)
+        if self.output_graph.shape_env.guards:
+            finished_expressions.append(expr_as_str)
 
         for expr in expr_to_tensor_ref.keys():
             tensor_refs = expr_to_tensor_ref[expr].keys()
@@ -670,7 +673,7 @@ class CheckFunctionManager:
         if len(finished_expressions) == 0:
             return None
 
-        expression = " and ".join(finished_expressions)
+        expression = " and \n".join(finished_expressions)
         return f"({expression})"
 
     def compile_check_fn(self, local_builder, global_builder, guards_out):
