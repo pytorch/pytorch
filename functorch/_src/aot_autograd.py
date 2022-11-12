@@ -393,8 +393,8 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     return new_fn
 
 
-def assert_functional_graph(fx_g: torch.fx.Graph):
-    for n in fx_g.nodes:
+def assert_functional_graph(fx_g: torch.fx.GraphModule):
+    for n in fx_g.graph.nodes:
         if isinstance(n.target, torch._ops.OpOverload):
             if n.target._schema.is_mutable:
                 print("====== Buggy post-functionalization graph ======")
@@ -496,7 +496,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 detach_and_functionalize_pure(joint_forward_backward), aot_config.decompositions
             )(*joint_inputs)
         # There should be *NO* mutating ops in the graph at this point.
-        assert_functional_graph(fx_g.graph)
+        assert_functional_graph(fx_g)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
