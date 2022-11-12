@@ -3666,13 +3666,24 @@ class CommonTemplate:
         torch.manual_seed(1234)
 
         @torch._dynamo.optimize("inductor")
-        def fn(a):
-            return torch.nn.functional.dropout(a, 0.5, True)
+        def fn1(a):
+            return torch.nn.functional.dropout(a)
 
         x = torch.ones(1000, device=self.device, dtype=torch.float32)
-        result = fn(x)
-        self.assertTrue(400 < result.nonzero().shape[0] < 600)
-        self.assertTrue(0.9 < result.mean().item() < 1.1)
+        result1 = fn1(x)
+        self.assertTrue(400 < result1.nonzero().shape[0] < 600)
+        self.assertTrue(0.9 < result1.mean().item() < 1.1)
+
+        random.seed(1234)
+        torch.manual_seed(1234)
+
+        @torch._dynamo.optimize("inductor")
+        def fn2(a):
+            return torch.nn.functional.dropout(a, 0.5, True)
+
+        result2 = fn2(x)
+        self.assertTrue(400 < result2.nonzero().shape[0] < 600)
+        self.assertTrue(0.9 < result2.mean().item() < 1.1)
 
     def test_dropout_deterministic(self):
         @torch._dynamo.optimize("inductor")
@@ -4213,6 +4224,27 @@ class CommonTemplate:
         ]
         self.common(forward, args)
 
+    def test_zero_dim_reductions(self):
+        for kd in [True, False]:
+            inps0 = (torch.zeros(2, 0, device=self.device, dtype=torch.float16), 1, kd)
+            failed_ops = [aten.argmin, aten.argmax, aten.max, aten.min]
+            for fo in failed_ops:
+                with self.assertRaisesRegex(
+                    IndexError, "Expected reduction dim 1 to have non-zero size"
+                ):
+                    mod = make_fx(fo)(*inps0)
+                    _ = compile_fx_inner(mod, inps0)
+
+            pass_ops = [
+                lambda *x: fn(*x) for fn in [aten.sum, aten.prod, aten.any, aten.all]
+            ]
+            for po in pass_ops:
+                compiled = torch._dynamo.optimize("inductor")(po)
+                expected = po(*inps0)
+                actual = compiled(*inps0)
+
+            self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
+
     @requires_cuda()
     def test_unspec_inputs(self):
         def fn(x, y):
@@ -4569,6 +4601,8 @@ if HAS_CUDA:
     CommonTemplate.install(CudaTests, "cuda")
 
     class CudaReproTests(TestCase):
+        common = check_model_cuda
+
         def test_index_put_issue(self):
             def forward(
                 self,
@@ -4604,6 +4638,30 @@ if HAS_CUDA:
             mod = make_fx(forward)(*inps)
             compiled = compile_fx_inner(mod, inps)
             compiled(inps)
+
+        @requires_cuda()
+        def test_input_channels_last(self):
+            m = torch.nn.Sequential(
+                torch.nn.Conv2d(3, 3, 1, 1),
+                ToTuple(),
+            ).cuda()
+            inp = (
+                torch.randn([2, 3, 16, 16]).to(memory_format=torch.channels_last).cuda()
+            )
+
+            self.common(
+                m,
+                (inp,),
+                check_lowp=False,
+            )
+
+            @torch._dynamo.optimize()
+            def foo(m, inp):
+                return m(inp)
+
+            self.assertTrue(
+                foo(m, inp)[0].is_contiguous(memory_format=torch.channels_last)
+            )
 
         # https://github.com/pytorch/torchdynamo/issues/1681#issuecomment-1283433527
         @requires_cuda()
@@ -4893,14 +4951,13 @@ if HAS_CUDA:
             with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
                 graph.run(*(cxt.example_args))
                 mod = graph.compile_to_module()
-                i = 0
-                while True:
-                    attribute = f"kernel{i}"
-                    if not hasattr(mod, attribute):
-                        break
-                    else:
-                        kernels.append(getattr(mod, attribute))
-                        i = i + 1
+
+                for val in mod.__dict__.values():
+                    if isinstance(
+                        val, torch._inductor.triton_ops.autotune.CachingAutotuner
+                    ):
+                        kernels.append(val)
+
             return kernels
 
         def test_divisibile_by_16_covers_numel_args(self):

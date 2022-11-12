@@ -25,7 +25,7 @@ from torch.distributed.fsdp import (
     StateDictType,
 )
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
-from torch.distributed.fsdp.fully_sharded_data_parallel import FLAT_PARAM
+from torch.distributed.fsdp._unshard_param_utils import FLAT_PARAM
 from torch.distributed.fsdp.wrap import enable_wrap, ModuleWrapPolicy, wrap
 from torch.nn import Linear, Module, TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel import DistributedDataParallel
@@ -445,7 +445,7 @@ class TestFSDPStateDict(FSDPTest):
     )
     @parametrize("fp16", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
-    @parametrize("use_orig_params", [False, True])
+    @parametrize("use_orig_params", [True, False])
     def test_basic_save_and_load_state_dict(
         self,
         state_dict_type: StateDictType,
