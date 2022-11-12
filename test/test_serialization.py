@@ -896,24 +896,6 @@ class TestSerialization(TestCase, SerializationMixin):
 
         self.assertEqual(state['weight'].size(), big_model.weight.size())
 
-    def test_serialization_python_attr(self):
-        def _test_save_load_attr(t):
-            t.foo = 'foo'
-            t.pi = 3.14
-
-            with BytesIOContext() as f:
-                torch.save(t, f)
-                f.seek(0)
-                loaded_t = torch.load(f)
-
-            self.assertEqual(t, loaded_t)
-            self.assertEqual(t.foo, loaded_t.foo)
-            self.assertEqual(t.pi, loaded_t.pi)
-
-        t = torch.zeros(3, 3)
-        _test_save_load_attr(t)
-        _test_save_load_attr(torch.nn.Parameter(t))
-
     def test_weights_only_assert(self):
         class HelloWorld:
             def __reduce__(self):
@@ -928,6 +910,48 @@ class TestSerialization(TestCase, SerializationMixin):
             # Safe load should assert
             with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported class"):
                 torch.load(f, weights_only=True)
+
+    @parametrize('weights_only', (False, True))
+    def test_serialization_math_bits(self, weights_only):
+        t = torch.randn(1, dtype=torch.cfloat)
+
+        def _save_load_check(t):
+            with BytesIOContext() as f:
+                torch.save(t, f)
+                f.seek(0)
+                # Unsafe load should work
+                self.assertEqual(torch.load(f, weights_only=weights_only), t)
+
+        t_conj = torch.conj(t)
+        _save_load_check(t_conj)
+
+        t_neg = torch._neg_view(t)
+        _save_load_check(t_neg)
+
+        t_n_c = torch._neg_view(torch.conj(t))
+        _save_load_check(t_n_c)
+
+    @parametrize('weights_only', (False, True))
+    def test_serialization_efficient_zerotensor(self, weights_only):
+        # We don't support serializing `ZeroTensor` as it is not public
+        # facing yet.
+        # If in future, `ZeroTensor` serialization is supported, this test
+        # should start failing!
+        t = torch._efficientzerotensor((4, 5))
+
+        def _save_load_check(t):
+            with BytesIOContext() as f:
+                torch.save(t, f)
+                f.seek(0)
+                # Unsafe load should work
+                self.assertEqual(torch.load(f, weights_only=weights_only), t)
+
+        # NOTE: `torch.save` fails before we hit the TORCH_CHECK in `getTensoMetadata`
+        #       as nullptr storage is disabled.
+        err_msg = (r'python bindings to nullptr storage \(e.g., from torch.Tensor._make_wrapper_subclass\)'
+                   ' are currently unsafe and thus disabled')
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            _save_load_check(t)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
