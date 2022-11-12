@@ -126,6 +126,18 @@ def sym_int(a):
         return sym_floor(a) if a > 0 else sym_ceil(a)
     return int(a)
 
+def to_node(self, num):
+    if isinstance(num, (SymInt, SymFloat)):
+        return num.node
+    elif isinstance(num, int):
+        return self.wrap_int(num)
+    elif isinstance(num, float):
+        return self.wrap_float(num)
+    else:
+        # NotImplemented is important so that Python tries the
+        # other magic method
+        return NotImplemented
+
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
 # 2. Specialize on 0/1 when we do subtraction
@@ -147,18 +159,6 @@ class SymNode:
 
     def _update_expr(self):
         self._expr = self.shape_env.replace(self._expr)
-
-    def to_node(self, num):
-        if isinstance(num, (SymInt, SymFloat)):
-            return num.node
-        elif isinstance(num, int):
-            return self.wrap_int(num)
-        elif isinstance(num, float):
-            return self.wrap_float(num)
-        else:
-            # NotImplemented is important so that Python tries the
-            # other magic method
-            return NotImplemented
 
     def is_int(self):
         return self.pytype is int
@@ -297,16 +297,15 @@ always_int_magic_methods = {"ceil", "floor"}
 always_bool_magic_methods = {"eq", "gt", "lt", "le", "ge"}
 
 def wrap_node(x):
-    if not isinstance(x, SymNode):
-        return x
-    if x.constant is not None:
+    # TODO: let C++ also take advantage of this
+    if isinstance(x, SymNode) and x.constant is not None:
         return x.constant
-    if x.pytype is int:
+    if x.is_int():
         return SymInt(x)
-    elif x.pytype is float:
+    elif x.is_float():
         return SymFloat(x)
     else:
-        raise AssertionError(f"unrecognized return type {x.pytype}")
+        raise AssertionError(f"unrecognized return type {x}")
 
 def _make_node_magic(method, func):
     func = lru_cache(256)(func)
@@ -378,13 +377,13 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method)())
 
     def binary_magic_impl(self, other):
-        other_node = self.node.to_node(other)
+        other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
         return wrap_node(getattr(self.node, method)(other_node))
 
     def rbinary_magic_impl(self, other):
-        other_node = self.node.to_node(other)
+        other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
         return wrap_node(getattr(other_node, method)(self.node))
