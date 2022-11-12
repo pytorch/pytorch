@@ -82,7 +82,7 @@ void calculateUniqueTensorIDs(
           },
           [&](ExtraFields<EventType::PyCall>& py_call) {
             // torch.nn.Module
-            if (py_call.module_.has_value()&&
+            if (py_call.module_.has_value() &&
                 seen_modules.insert(py_call.module_->self_).second) {
               for (auto& p : py_call.module_->parameters_) {
                 raw_tensors(p.metadata_);
