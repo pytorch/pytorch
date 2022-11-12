@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: profiler"]
 import functools
-from typing import Iterator, Optional
+from typing import Iterator, List, Optional, Tuple
 
 import torch
 from torch._C._profiler import _EventType
@@ -11,6 +11,7 @@ from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, T
 profile = functools.partial(
     torch.profiler.profile, record_shapes=True, profile_memory=True, with_stack=True
 )
+
 
 @skipIfTorchDynamo("TorchDynamo removes profiler altogether.")
 class TestMemoryProfiler(TestCase):
@@ -239,6 +240,108 @@ class TestIdentifyGradients(TestCase):
 
         self.assertGradientDetected(
             "weight", prof, _EventType.PyCall, model[0].weight.grad, model[0].weight
+        )
+
+
+class TestDataFlow(TestCase):
+    @staticmethod
+    def formatSchemas(
+        prof: torch.profiler.profile, indent: int = 12
+    ) -> Tuple[Tuple[str, Tuple[bool, ...]], ...]:
+        tree = prof.profiler.kineto_results.experimental_event_tree()
+        out: List[Tuple[str, Tuple[bool, ...]]] = []
+        for node in _utils.traverse_dfs(tree):
+            if node.tag == _EventType.TorchOp:
+                e = node.extra_fields
+                schemas = _memory_profiler.SchemaMatcher.match_schemas(e)
+                name = node.name
+                if len(schemas) == 1:
+                    name = f"{name}.{schemas[0].overload_name}"
+                elif len(schemas) > 1:
+                    name = f"{name}.{{{', '.join(s.overload_name for s in schemas)}}}"
+
+                out.append((name, _memory_profiler.SchemaMatcher.inputs_are_mutable(e)))
+        return tuple(out)
+
+    def test_match_schemas(self) -> None:
+        with profile() as prof:
+            x = torch.ones((1,)).mul(2).add_(2)
+            _ = torch.sin(x, out=torch.empty_like(x))
+
+        self.assertEqual(
+            self.formatSchemas(prof),
+            (
+                ("aten::ones.", (False,) * 5),
+                ("aten::empty.memory_format", (False,) * 6),
+                #
+                # fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
+                ("aten::fill_.Scalar", (True, False)),
+                ("aten::mul.Tensor", (False, False)),
+                ("aten::to.dtype", (False,) * 5),
+                ("aten::_to_copy.", (False,) * 7),
+                ("aten::empty_strided.", (False,) * 6),
+                #
+                # copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
+                ("aten::copy_.", (True, False, False)),
+                #
+                # add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
+                ("aten::add_.Tensor", (True, False, False)),
+                ("aten::to.dtype", (False,) * 5),
+                ("aten::_to_copy.", (False,) * 7),
+                ("aten::empty_strided.", (False,) * 6),
+                #
+                # copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
+                ("aten::copy_.", (True, False, False)),
+                ("aten::empty_like.", (False,) * 6),
+                ("aten::empty_strided.", (False,) * 6),
+                #
+                # sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+                ("aten::sin.out", (False, True)),
+            ),
+        )
+
+    def test_match_schemas_backward(self) -> None:
+        x = torch.ones((1,))
+        w = torch.ones((1,), requires_grad=True)
+        with profile() as prof:
+            torch.mul(x, w).backward()
+
+        self.assertEqual(
+            self.formatSchemas(prof),
+            (
+                ("aten::mul.Tensor", (False, False)),
+                ("aten::ones_like.", (False,) * 6),
+                ("aten::empty_like.", (False,) * 6),
+                ("aten::empty_strided.", (False,) * 6),
+                #
+                # fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
+                ("aten::fill_.Scalar", (True, False)),
+                ("autograd::engine::evaluate_function: MulBackward0", ()),
+                #
+                # Cannot find schema, all inputs presumed mutable
+                ("MulBackward0", (True,)),
+                ("aten::mul.Tensor", (False, False)),
+                (
+                    "autograd::engine::evaluate_function: torch::autograd::AccumulateGrad",
+                    (),
+                ),
+                #
+                # Cannot find schema, all inputs presumed mutable
+                ("torch::autograd::AccumulateGrad", (True,)),
+                ("aten::detach.", (False,)),
+                ("detach", (True,)),
+            ),
+        )
+
+    def test_match_schemas_tensorlist(self) -> None:
+        x = torch.ones((1,))
+        y = torch.ones((1,))
+        with profile() as prof:
+            torch.cat([x, y], axis=0)
+
+        self.assertEqual(
+            self.formatSchemas(prof),
+            (("aten::cat.", (False, False)),),
         )
 
 
