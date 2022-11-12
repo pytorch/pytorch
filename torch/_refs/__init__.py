@@ -2800,6 +2800,11 @@ def _unsqueeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeT
         x = torch.unsqueeze(x, dim)
     return x
 
+def _squeeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
+    for idx in reversed(sorted(dimensions)):
+        x = torch.squeeze(x, idx)
+    return x
+
 
 @register_decomposition(torch.ops.aten.native_group_norm.default)
 def native_group_norm(
@@ -2849,8 +2854,8 @@ def native_group_norm(
     rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
 
     # remove broadcast dimensions from mean and rstd
-    mean = prims.squeeze(mean, reduction_dims)
-    rstd = prims.squeeze(rstd, reduction_dims)
+    mean = _squeeze_multiple(mean, reduction_dims)
+    rstd = _squeeze_multiple(rstd, reduction_dims)
     return (out, mean, rstd)
 
 
