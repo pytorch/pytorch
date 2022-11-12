@@ -396,8 +396,10 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 def assert_functional_graph(fx_g: torch.fx.Graph):
     for n in fx_g.nodes:
         if isinstance(n.target, torch._ops.OpOverload):
-            assert not n.target._schema.is_mutable, \
-                f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
+            if n.target._schema.is_mutable:
+                print("====== Buggy post-functionalization graph ======")
+                fx_g.print_readable()
+                raise AssertionError(f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}')
 
 
 @contextmanager
