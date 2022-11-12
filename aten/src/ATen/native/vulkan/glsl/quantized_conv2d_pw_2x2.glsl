@@ -3,6 +3,12 @@
 #define FORMAT $format
 
 /*
+ * TILE_SIZE = (2, 2, 1)
+ * WEIGHT_STORAGE = TEXTURE_3D
+ * BIAS_STORAGE = TEXTURE_3D
+ */
+
+/*
  * Output Image
  */
 layout(set = 0, binding = 0, rgba8ui) uniform PRECISION restrict writeonly uimage3D uOutput;

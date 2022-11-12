@@ -154,14 +154,14 @@ class TORCH_CUDA_CU_API ComplexDouble : public Val {
 //! the compute at position to maximum possible through traversal.
 enum class ComputeAtMode { Standard, BestEffort, MostInlined };
 
-class InlinePropagator;
-class MaxProducerPosUpdater;
 class TransformPropagator;
 struct MostInlinedTransformPropagator;
 class TransformIter;
 class TransformReplay;
 class OptOutMutator;
 class TensorDomain;
+
+class MaxPosCalculator;
 
 namespace ir_utils {
 class TVDomainGuard;
@@ -492,20 +492,29 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   friend TORCH_CUDA_CU_API MostInlinedTransformPropagator;
   friend TORCH_CUDA_CU_API TransformReplay;
   friend TORCH_CUDA_CU_API OptOutMutator;
-  friend TORCH_CUDA_CU_API InlinePropagator;
-  friend TORCH_CUDA_CU_API MaxProducerPosUpdater;
+  friend class InlineBatchingGuard;
   friend class ir_utils::TVDomainGuard;
-  friend TORCH_CUDA_CU_API void groupReductions(
-      const std::vector<TensorView*>&);
+
+  // Inline the computation of this tensor into its consumer at the given
+  // position. If this tensor is already inlined in a higher position, then this
+  // call is a no-op. If the right most dimensions before `pos` are
+  // broadcasting, then will not inline into these broadcastings. If
+  // best_effort, then will inline into the highest allowed position that is <=
+  // `pos`.
+  void inlineAt(
+      int64_t pos,
+      bool best_effort = false,
+      MaxPosCalculator* calc = nullptr);
+
+  // Update the max producer position of the current tensor. This is required
+  // when we modify producer-consumer relationship of a scheduled tensor, for
+  // example, grouping multiple reductions.
+  void updateMaxProducerPosition();
 
  protected:
   void setDomain(TensorDomain* td) {
     domain_ = td;
   }
-
-  void setComputeAt(unsigned int this_pos, bool decrease = false);
-
-  void setMaxProducer(unsigned int this_pos, bool decrease = false);
 
  private:
   int normalizeAxisPos(int pos) const {
