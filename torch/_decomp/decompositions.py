@@ -1150,37 +1150,6 @@ def normalize(input, norm_dims, eps):
     return out, mean, rstd
 
 
-@register_decomposition(aten.native_group_norm.default)
-def native_group_norm(
-    input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
-    N: int,
-    C: int,
-    HxW: int,
-    group: int,
-    eps: float,
-) -> Tuple[Tensor, Tensor, Tensor]:
-    orig_shape = input.shape
-    input = input.view(N, group, C // group, HxW)
-    reduction_dims = [2, 3]
-    out, mean, rstd = normalize(input, reduction_dims, eps)
-    mean = _squeeze_multiple(mean, reduction_dims)
-    rstd = _squeeze_multiple(rstd, reduction_dims)
-    out = out.view(orig_shape)
-    if weight is not None:
-        weight = _unsqueeze_to_dim(weight, out.dim() - 1)
-        out = out * weight
-    if bias is not None:
-        bias = _unsqueeze_to_dim(bias, out.dim() - 1)
-        out = out + bias
-
-    out = out.to(dtype=input.dtype)
-    mean = mean.to(dtype=input.dtype)
-    rstd = rstd.to(dtype=input.dtype)
-    return (out, mean, rstd)
-
-
 @register_decomposition(aten.native_group_norm_backward)
 @pw_cast_for_opmath
 def native_group_norm_backward(
@@ -1829,26 +1798,52 @@ def norm(
     return torch.linalg.vector_norm(self, p, dim, keepdim, dtype=dtype)
 
 
-@register_decomposition(torch.ops.aten.upsample_bilinear2d.vec)
-@register_decomposition(torch.ops.aten.upsample_bilinear2d.vec, type="pre_autograd")
+# aten/src/ATen/native/UpSample.cpp compute_output_size
+def upsample_compute_output_size(input_size, output_size, scale_factors):
+    spatial_dimensions = len(input_size) - 2
+    if output_size is not None:
+        utils.check(scale_factors is None, lambda: "Must specify exactly one of output_size and scale_factors")
+        utils.check(len(output_size) == spatial_dimensions, lambda: "")
+        return output_size
+    if scale_factors is not None:
+        # NB: this isn't necessary lol
+        utils.check(output_size is None, lambda: "Must specify exactly one of output_size and scale_factors")
+        utils.check(len(scale_factors) == spatial_dimensions, lambda: "")
+        return [sym_int(input_size[i+2] * scale_factors[i]) for i in range(spatial_dimensions)]
+    utils.check(False, lambda: "Must specify exactly one of output_size and scale_factors")
+
+def get_scale_value(scales, idx):
+    if scales is None:
+        return None
+    return scales[idx]
+
+@torch.ops.aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+    # TODO: don't directly dispatch like this
+    return torch.ops.aten.upsample_bilinear2d.default(input, osize, align_corners, scale_h, scale_w)
+
+@register_decomposition(torch.ops.aten.upsample_bilinear2d.default)
+@torch.ops.aten.upsample_bilinear2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@torch.ops.aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
-def upsample_bilinear2d_vec(
+def upsample_bilinear2d(
     input: Tensor,
-    output_size: Optional[List[int]],
+    output_size: List[int],
     align_corners: bool,
-    scale_factors: Optional[List[float]],
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
 ) -> Tensor:
     # get dimensions of original image
     n_batch, n_channels, in_h, in_w = input.shape
 
-    if output_size is not None:
-        out_h = sym_float(output_size[0])
-        out_w = sym_float(output_size[1])
-    elif scale_factors is not None:
-        out_h = in_h * scale_factors[0]
-        out_w = in_w * scale_factors[1]
+    out_h = sym_float(output_size[0])
+    out_w = sym_float(output_size[1])
 
     # Calculate horizontal and vertical scaling factor
+    # TODO: Figure out if scales_h/scales_w matters here
     if out_h > 1:
         if align_corners:
             h_scale_factor = (in_h - 1) / (sym_int(out_h) - 1)
