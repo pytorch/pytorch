@@ -10,7 +10,6 @@ from torch.testing._internal.common_cuda import SM53OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-    onlyCUDA,
     tol as xtol,
     toleranceOverride,
 )
