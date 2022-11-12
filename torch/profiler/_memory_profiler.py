@@ -36,6 +36,7 @@ class Category(enum.Enum):
     TEMPORARY = enum.auto()
     ACTIVATION = enum.auto()
     GRADIENT = enum.auto()
+    AUTOGRAD_DETAIL = enum.auto()
     PARAMETER = enum.auto()
     OPTIMIZER_STATE = enum.auto()
 
@@ -564,6 +565,7 @@ class MemoryProfile:
         self._set_parameters_using_data_flow()
         self._set_activations()
         self._set_optimizer_state()
+        self._set_autograd_detail()
 
     def _is_gradient(self, *args, **kwargs) -> bool:
         return self._categories.get(*args, **kwargs) == Category.GRADIENT
@@ -793,3 +795,13 @@ class MemoryProfile:
                     key = TensorKey.from_tensor(t)
                     assert key is not None
                     self._categories.set_by_id(key, Category.OPTIMIZER_STATE)
+
+    def _set_autograd_detail(self):
+        prior = {None, Category.AUTOGRAD_DETAIL}
+        for node in self._data_flow_graph.flow_nodes:
+            if RecordScope.BACKWARD_FUNCTION in get_scopes(node._event):
+                for key, version in node.outputs.items():
+                    if version == 0 or self._categories.get(key, version - 1) in prior:
+                        self._categories.setdefault_by_version(
+                            key, version, Category.AUTOGRAD_DETAIL
+                        )
