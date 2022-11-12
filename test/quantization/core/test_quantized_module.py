@@ -90,11 +90,13 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             'none': nnq.Linear,
             'relu': nniq.LinearReLU,
             'leaky_relu': nniq.LinearLeakyReLU,
+            'tanh': nniq.LinearTanh,
         }
         q_module_name_map = {
             'none': 'QuantizedLinear',
             'relu': 'QuantizedLinearReLU',
             'leaky_relu': 'QuantizedLinearLeakyReLU',
+            'tanh': 'QuantizedLinearTanh',
         }
 
         W = torch.rand(out_features, in_features).float()
@@ -143,6 +145,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         elif post_op == 'leaky_relu':
             Z_ref = torch.ops.quantized.linear_leaky_relu(
                 X_q, W_pack, scale, zero_point, **post_ops_kwargs)
+        elif post_op == 'tanh':
+            Z_ref = torch.ops.quantized.linear_tanh(X_q, W_pack, scale, zero_point)
         else:
             Z_ref = torch.ops.quantized.linear(X_q, W_pack, scale, zero_point)
 
@@ -1089,6 +1093,23 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 self._test_linear_api_impl(
                     batch_size, in_features, out_features, use_bias, post_op,
                     per_channel, negative_slope=neg_slope)
+
+    @skipIfNoONEDNN
+    def test_linear_tanh(self):
+        """test API functionality for nn.intrinsic.quantized.linear_tanh"""
+        with override_quantized_engine('onednn'):
+            options = itertools.product(
+                [1, 5],  # batch size
+                [16, 32],  # in_features
+                [4, 8],  # out_features
+                [True, False],  # use_bias
+                [True, False])  # negative slope
+            post_op = 'tanh'
+            for (batch_size, in_features, out_features, use_bias,
+                 per_channel) in options:
+                self._test_linear_api_impl(
+                    batch_size, in_features, out_features, use_bias, post_op,
+                    per_channel)
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
     def _test_qconv_impl(self, q_mod, dq_mod, dim, dtype, bias):
