@@ -19,7 +19,12 @@ from sympy import Expr, Integer
 
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._prims_common import is_boolean_dtype, is_float_dtype
+from torch._prims_common import (
+    is_boolean_dtype,
+    is_float_dtype,
+    make_channels_last_strides_for,
+    make_contiguous_strides_for,
+)
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from . import config, dependencies
@@ -133,7 +138,7 @@ def ir_node_to_tensor(x, guard_shape=True):
     if is_storage_and_layout(x):
         stride = [shape_fn(s) for s in x.get_layout().stride]
     else:
-        stride = torch._prims_common.make_contiguous_strides_for(size)
+        stride = make_contiguous_strides_for(size)
     dtype = x.get_dtype()
     device = x.get_device()
     t = torch.empty_strided(
@@ -729,6 +734,42 @@ class Reduction(Loops):
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
+
+        if reduction_numel == 0:
+
+            # N.B. This is a hack to generate the literal of the given type
+            # Ideally, we should be fixing `def constant` in triton.py
+            # but it breaks due to hardcoded dtypes in other places
+            def py_cnst(val):
+                return (
+                    bool(val)
+                    if dst_dtype == torch.bool
+                    else float(val)
+                    if dst_dtype.is_floating_point
+                    else int(val)
+                )
+
+            rtypes_to_inits = {
+                "sum": py_cnst(0),
+                "prod": py_cnst(1),
+                "any": py_cnst(0),
+                # "all" is desugared to `!any(!val)`
+            }
+
+            assert (
+                reduction_type in rtypes_to_inits.keys()
+            ), f"{reduction_type} not supported for zero-dimension tensors!"
+
+            def const_fn(index):
+                return ops.constant(rtypes_to_inits[reduction_type], dst_dtype)
+
+            return Pointwise.create(
+                device=device,
+                dtype=src_dtype,
+                inner_fn=const_fn,
+                ranges=list(ranges),
+            )
+
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
             if reduction_type in ("argmin", "argmax"):
@@ -2426,6 +2467,9 @@ class ExternKernel(InputsKernel):
                 x.get_layout(), FixedLayout
             ) and x.get_layout().is_stride_ordered(order):
                 return x
+        # TODO - Storage to InputBuffer
+        if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):
+            return x
         x = cls.copy_input(x)
         as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
         assert is_stride_order_storage_and_layout(x, order)
@@ -3016,31 +3060,38 @@ class Convolution(ExternKernelAlloc):
         output_padding_: List[int],
         groups: int,
     ):
+        with torch._subclasses.FakeTensorMode():
+            x_fake = ir_node_to_tensor(x, guard_shape=True)
+            weight_fake = ir_node_to_tensor(weight, guard_shape=True)
+            bias_fake = (
+                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
+            )
+            output = torch.ops.aten.convolution(
+                x_fake,
+                weight_fake,
+                bias_fake,
+                stride_,
+                padding_,
+                dilation_,
+                transposed,
+                output_padding_,
+                groups,
+            )
+            req_stride_order = get_stride_order(output.stride())
 
-        weight = cls.require_stride1(cls.realize_input(weight))
-        x = cls.require_stride_order(x, get_stride_order(weight.get_stride()))
+        if config.triton.convolution == "aten":
+            weight = cls.require_stride_order(weight, req_stride_order)
+            x = cls.require_stride_order(x, req_stride_order)
+        else:
+            x = cls.require_stride1(cls.realize_input(x))
+            weight = cls.require_stride1(cls.realize_input(weight))
+
         stride = tuple(stride_)
         padding = tuple(padding_)
         dilation = tuple(dilation_)
         assert isinstance(transposed, bool)
         output_padding = tuple(output_padding_)
         assert isinstance(groups, int)
-
-        # TODO - enable FakeTensorMode for propagation more globally. incorrect stride metas for fallback
-        # kernels will lead to runtime failures
-        with FakeTensorMode():
-            output, *_ = cls.process_kernel(
-                torch.ops.aten.convolution,
-                x,
-                weight,
-                bias,
-                stride,
-                padding,
-                dilation,
-                transposed,
-                output_padding,
-                groups,
-            )
 
         output_size = output.shape
 
@@ -3086,6 +3137,7 @@ class Convolution(ExternKernelAlloc):
         # for conv2d or conv3d, prefer channels last format
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
+
         elif config.tune_layout and len(x.get_size()) == 4:
             from .codegen.autotuner import tuned_conv_layout
 
@@ -3115,14 +3167,19 @@ class Convolution(ExternKernelAlloc):
             if len(stride_order) < len(output_size):
                 # add batch dim if it exists
                 stride_order = [len(stride_order)] + stride_order
+            strides = make_channels_last_strides_for(output_size)
         else:
             stride_order = list(reversed(range(len(output_size))))
+            strides = make_contiguous_strides_for(output_size)
 
-        output_layout = FlexibleLayout(
+        if config.triton.convolution != "aten":
+            x = cls.require_stride_order(x, stride_order)
+
+        output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
-            stride_order,
+            strides,
         )
 
         if bias is not None:
@@ -3141,13 +3198,6 @@ class Convolution(ExternKernelAlloc):
                 stride_order,
                 kernel,
             )
-
-    def apply_constraint(self):
-        x = self.inputs[0]
-        # FixedLayout of input
-        x = self.require_stride_order(x, self.layout.preferred_stride_order)
-        self.inputs[0] = x
-        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
     def map_args(self):
         # x, w, bias
@@ -3425,7 +3475,11 @@ class ConvolutionBinary(ExternKernelAlloc):
         stride_: List[int],
         dilation_: List[int],
         groups: int,
-        attr,
+        binary_attr: str,
+        binary_alpha: Optional[float],
+        unary_attr: Optional[str],
+        unary_scalars: Optional[List],
+        unary_algorithm: Optional[str],
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
         (inputs, constant_args, kernel_layout,) = _prepare_convolution_fusion_create(
@@ -3433,7 +3487,13 @@ class ConvolutionBinary(ExternKernelAlloc):
         )
         other = cls.require_stride1(cls.realize_input(other))
         inputs.insert(1, other)
-        constant_args = constant_args + [attr]
+        constant_args = constant_args + [
+            binary_attr,
+            binary_alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ]
         return ConvolutionBinary(
             layout=kernel_layout,
             inputs=inputs,
@@ -3616,6 +3676,7 @@ class StorageBox(MutableBox):
             data=self.data,
         )
         self.data.name = V.graph.register_buffer(self.data)
+        self.data.origins = self.origins
         return self.data.name
 
     def realize_hint(self):
