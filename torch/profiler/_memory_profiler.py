@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import enum
+import itertools as it
 from typing import (
     Any,
     cast,
@@ -36,6 +37,7 @@ class Category(enum.Enum):
     ACTIVATION = enum.auto()
     GRADIENT = enum.auto()
     PARAMETER = enum.auto()
+    OPTIMIZER_STATE = enum.auto()
 
 
 @dataclasses.dataclass
@@ -561,6 +563,7 @@ class MemoryProfile:
         self._set_inputs()
         self._set_parameters_using_data_flow()
         self._set_activations()
+        self._set_optimizer_state()
 
     def _is_gradient(self, *args, **kwargs) -> bool:
         return self._categories.get(*args, **kwargs) == Category.GRADIENT
@@ -781,3 +784,12 @@ class MemoryProfile:
             ):
                 for i in node.outputs.items():
                     self._categories.setdefault_by_version(*i, Category.ACTIVATION)
+
+    def _set_optimizer_state(self) -> None:
+        for event in self._op_tree.dfs():
+            if event.typed[0] == _EventType.PyCall and event.typed[1].optimizer:
+                parameters = event.typed[1].optimizer.parameters
+                for _, t in it.chain(*[state for _, _, state in parameters]):
+                    key = TensorKey.from_tensor(t)
+                    assert key is not None
+                    self._categories.set_by_id(key, Category.OPTIMIZER_STATE)
