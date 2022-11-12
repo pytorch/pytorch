@@ -51,7 +51,7 @@ DEFAULT_SUFIX = ".distcp"
 
 def _trim(tensor: torch.Tensor) -> torch.Tensor:
     tensor = tensor.detach().cpu()
-    if tensor.storage().size() != tensor.numel():
+    if tensor._typed_storage()._size() != tensor.numel():
         tensor = tensor.clone()
     return tensor
 
