@@ -3,18 +3,20 @@
 #include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
 
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Repeat.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <torch/library.h>
+#include <c10/util/irange.h>
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #endif
 
-template <typename index_t>
 
 namespace at {
 namespace native {
@@ -129,7 +131,7 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
-
+template <typename index_t>
 Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optional<int64_t> output_size) {
 
   using namespace mps;
@@ -154,7 +156,7 @@ Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optio
   @autoreleasepool {
     // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types etc match the earlier created MPSGraph
     string key = "repeat_interleave_mps:" + getMPSTypeString(self.scalar_type()) + ":" + getMPSShape(repeat);
-                               
+
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
