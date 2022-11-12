@@ -4,6 +4,7 @@ import logging
 import operator
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
+import math
 
 import sympy
 
@@ -3235,30 +3236,50 @@ def pow_recursive(x, y, dtype):
 def pow_native(a, b):
     return ops.pow(a, b)
 
+def pow_integer(a, b, a_dtype, b_dtype):
+    max_exponent = torch.iinfo(b_dtype).max
+    num_loops = math.log2((max_exponent + 1))
+    assert int(num_loops) == num_loops
+    num_loops = int(num_loops)
 
-def _is_ir_node_and_cuda(x):
-    if isinstance(x, ir.IRNode) and decode_device(x.get_device()).type == "cuda":
-        return True
+    x = a
+    result = ops.constant(1, a_dtype)
+    for i in range(num_loops):
+        result = ops.where(ops.bitwise_and(b, "1"), ops.mul(result, x), result)
+        b = ops.truncdiv(b, "2")
+        x = ops.mul(x, x)
 
-    return False
+    b_negative = ops.lt(b, "0")
+    neg_res = ops.where(ops.logical_and(op.eq(a, "1"), b_negative), "1", result)
+    neg_b_odd = ops.mod(ops.neg(b), "2")
+    neg_res = ops.where(neg_b_odd, "-1", "1")
+    ops.where()
+    result = ops.where(ops.logical_and(op.eq(a, "-1"), b_negative), "1", result)
+    ops.where()
+    result = ops.where(ops.logical_and(op.eq(a, "1"), b_negative), "1", result)
+    result = ops.where(ops.logical_and(op.eq(a, "-1"), b_negative), "1", result)
+    return ops.where(ops.lt(b, "0"), "0", result)
 
-
-@register_lowering(aten.pow, broadcast=True)
+@register_lowering(
+    aten.pow,
+    broadcast=True,
+    type_promotion_kind=None,
+)
 def pow(a, b):
-    if _is_ir_node_and_cuda(a) and _is_ir_node_and_cuda(b):
-        assert a.get_dtype() in (
-            torch.float16,
-            torch.float32,
-            torch.float64,
-        ), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
-        return pow(a, int(b))
-    elif isinstance(b, float) and b == 0.5:
-        return sqrt(a)
-    elif isinstance(b, int) and b == 1:
-        return a
-    elif isinstance(b, int) and -32 < b < 32:
-        # Optimize away small fixed powers
+        b = int(b)
+
+    promoted_dtype = get_promoted_dtype(
+        a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    )
+    a = to_dtype(a, promoted_dtype)
+
+    is_integer_pow = is_integer_dtype(promoted_dtype)
+    embed_exponent = (
+        isinstance(b, int) and
+        (-32 < b < 32 or is_integer_pow)
+    )
+    if embed_exponent:
         loader = a.make_loader()
 
         def fn(idx):
@@ -3270,8 +3291,29 @@ def pow(a, b):
             inner_fn=fn,
             ranges=a.get_size(),
         )
-    else:
-        return pow_native(a, b)
+
+    if isinstance(b, float) and b == 0.5:
+        return sqrt(a)
+
+    if is_integer_pow:
+        # Unroll powi loop for fixed width integer types
+        a_loader = a.make_loader()
+        b_loader = b.make_loader()
+
+        def fn(idx):
+            return pow_integer(
+                a_loader(idx), b_loader(idx), a.get_dtype(), b.get_dtype())
+
+        return Pointwise.create(
+            device=a.get_device(),
+            dtype=a.get_dtype(),
+            inner_fn=fn,
+            ranges=a.get_size(),
+        )
+
+
+    b = to_dtype(b, promoted_dtype)
+    return pow_native(a, b)
 
 
 def mutate_to(changed, val):
