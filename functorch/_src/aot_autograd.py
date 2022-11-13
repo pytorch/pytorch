@@ -382,11 +382,11 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, s
         pre_dispatch_guards = shape_env.guards
 
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
-    
+
     if config.debug_graphs:
         print("====== Forward (only) graph ======")
         fw_module.print_readable()
-    
+
     compiled_guard_expr = None
     if shape_env:
         delta = shape_env.guards_not_overlapping(pre_dispatch_guards)
@@ -425,8 +425,6 @@ def disable_autocast_manager():
         yield
     finally:
         del guard
-
-aot_autograd_compiled_fn_cache = {}
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, shape_env):
     if shape_env:
@@ -645,6 +643,7 @@ def create_aot_dispatcher_function(
     # This is the main entry point.
     # TODO: Chillee argues that dynamo itself should pass in fake tensors to
     # the list of arguments when compiling; at the moment we do not do this
+    # NOTE: see note [On the state of aot_autograd caching]
 
     if aot_config.decompositions is None:
         aot_config.decompositions = {}
@@ -749,7 +748,7 @@ def _produce_or_verify_shape_env(shape_env):
         global _enforce_shape_env_passed_in
         assert (_enforce_shape_env_passed_in == False), "Shape env must be passed in"
         shape_env = ShapeEnv() if config.use_dynamic_shapes else None
-    
+
     return shape_env
 
 def aot_function(
@@ -991,20 +990,53 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             decompositions=decompositions,
             num_params_buffers=params_len,
         )
-        
+
         compiled_fn = None
         @wraps(fn)
         def new_func(*args):
             nonlocal compiled_fn
-            def inp_to_key(inp):
-                return str(inp.size()) + str(inp.stride())
-
-            key = "".join([inp_to_key(arg) for arg in args])
-            key = key + fn.mod.code
-
             needs_compile = True
-            if key in aot_autograd_compiled_fn_cache:
-                compiled_fn = aot_autograd_compiled_fn_cache[key]
+
+            # Note - [On the state of aot_autograd caching]
+
+            # A single, unified cache at the dynamo layer is much simpler in theory, much harder in practice.
+            # This is because the dynamo cache is accessed at interpreter frame time,
+            # which means that the frame is "done", and dynamo is over, by the time you have called make_fx
+            # (which is the source of new guards). So, we need to either do some complex stuff at
+            # the interpreter level to keep a pointer to that frame around to append guards to it
+            # (recompiling a new check_fn, or having 2 check_fns for guards), or we need to move
+            # the order around of when we call make_fx and when we finish the frame / end the dynamo logic,
+            # which makes either aot_autograd behave very differently from other backends w/r/t lifecycle...
+            # or change our when-we-call-backends lifecycle for all of dynamo
+
+            # To reiterate the options in a nice list:
+
+            # (1) Unified forward cache by refactor dynamo backend eval_frame / convert_frame lifecycle
+            # w/r/t when we call a backend vs finish up a frame. This is a huge refactor, and will change
+            # the entire lifecycle.
+
+            # (2) Unified forward cache by piping back guards in the event they appear, re-opening the
+            # frame-associated compiled check_fn, and recompiling it with new guards. This is brittle and
+            # a major refactor, and also difficult to debug.
+
+            # (3) Fold aot_autograd forward into dynamo, unify the interpreter passes and guard architecture
+            # make make_fx calls for forward, the fake_tensor conversion, and most of the logic in aot_autograd
+            # today that is not handling backwards. THIS IS PROBABLY THE CORRECT LONG TERM STATE OF THINGS.
+
+            # (4) Give aot_autograd its own set of guards, deduped from dynamo, with its own cache and cache invalidation
+            # This is the easiest thing to do now w/r/t refactors vs desired behavior. THIS IS THE CURRENT STATE OF CODE.
+
+            # If we take (3) as long term, and (4) as this, the reconciliation story is partially found in the note
+            # [AOT Autograd Guards Plan]. The shape of things interpret->guard->compile guards->check will be philosophically the same.
+            # After [AOT Autograd Guards Plan], they will be identical and share an implementation. This in turns
+            # opens up a path towards unifying it, most likely by having a world where we have a back compat aot_autograd backend
+            # and a dynamo config to call the equivalent of aot_autograd forward in its primary interpretation loop. We can
+            # then have the entire make_fx logic finished before we call our backend. For guards, this means that there are no more
+            # dual guard caches, as a single interpeter is run against a frame, a single check_fn is produced.
+
+            # A further hot take is that in this world, if aot_autograd forward is pulled up into dynamo, can we potentially
+            # push down aot_autograd backward into inductor, and remove aot_autograd as a layer altogether?
+            if compiled_fn:
                 if compiled_fn.guards:
                     Eq = sympy.Eq
                     Ne = sympy.Ne
@@ -1024,9 +1056,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
                     aot_config,
                     shape_env,
                 )
-                aot_autograd_compiled_fn_cache[key] = compiled_fn
             return compiled_fn(args)
-
         return new_func
 
     fn_call = functional_call
@@ -1034,7 +1064,6 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
     compiled_f = aot_function_simplified(fn_call, *top_args, **top_kwargs)
 
     if top_kwargs:
-
         def forward(*args, **kwargs):
             return compiled_f(
                 *params_flat,
