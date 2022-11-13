@@ -16,6 +16,7 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     OpDTypes,
     ops,
+    skipCPUIf,
     skipCUDAIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db
@@ -444,7 +445,7 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
     @skipIfTorchDynamo("Test uses dynamo already")
-    @skipIfCrossRef()
+    @skipIfCrossRef
     @_ops(op_db[START:END])
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
     def test_comprehensive(self, device, dtype, op):
