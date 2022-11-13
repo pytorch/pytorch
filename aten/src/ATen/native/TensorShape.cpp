@@ -1588,7 +1588,7 @@ Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_sha
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
 
   if (self.is_mkldnn()) {
-    TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tesnors");
+    TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tensors");
   }
 
   if (self.is_contiguous()) {
