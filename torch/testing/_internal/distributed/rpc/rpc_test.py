@@ -30,6 +30,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     captured_output,
     tp_transports,
+    skip_if_rocm,
 )
 from torch.testing._internal.common_utils import (
     IS_MACOS,
@@ -5076,6 +5077,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     # Dynamic RPC existing ranks can communicate with new ranks using CUDA rpc
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     @dist_init(setup_rpc=False)
     def test_dynamic_rpc_existing_rank_can_communicate_with_new_rank_cuda(self):
         initialize_pg(self.file_init_method, self.rank, self.world_size)

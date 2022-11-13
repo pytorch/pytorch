@@ -303,6 +303,9 @@ if(HIP_FOUND)
   find_package_and_print_version(rocsolver REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
 
+  # Enabling HIP language support
+  enable_language(HIP)
+
   if(HIP_COMPILER STREQUAL clang)
     set(hip_library_name amdhip64)
   else()

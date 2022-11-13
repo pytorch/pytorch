@@ -11,7 +11,6 @@ from torch.testing._internal.common_distributed import (
     requires_gloo,
     requires_nccl,
     skip_if_lt_x_gpu,
-    skip_if_rocm,
 )
 from torch.distributed.pipeline.sync import Pipe
 
@@ -23,56 +22,48 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     @dist_init
-    @skip_if_rocm
     def test_basic_nccl_ckpt_never(self):
         self._run_basic_test("nccl", "never")
 
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     @dist_init
-    @skip_if_rocm
     def test_basic_nccl_ckpt_never_find_unused(self):
         self._run_basic_test("nccl", "never", find_unused_parameters=True)
 
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     @dist_init
-    @skip_if_rocm
     def test_basic_nccl_ckpt_always(self):
         self._run_basic_test("nccl", "always", static_graph=True)
 
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     @dist_init
-    @skip_if_rocm
     def test_basic_nccl_ckpt_except_last(self):
         self._run_basic_test("nccl", "except_last", static_graph=True)
 
     @skip_if_lt_x_gpu(4)
     @requires_gloo()
     @dist_init
-    @skip_if_rocm
     def test_basic_gloo_ckpt_never(self):
         self._run_basic_test("gloo", "never")
 
     @skip_if_lt_x_gpu(4)
     @requires_gloo()
     @dist_init
-    @skip_if_rocm
     def test_basic_gloo_ckpt_never_find_unused(self):
         self._run_basic_test("gloo", "never", find_unused_parameters=True)
 
     @skip_if_lt_x_gpu(4)
     @requires_gloo()
     @dist_init
-    @skip_if_rocm
     def test_basic_gloo_ckpt_always(self):
         self._run_basic_test("gloo", "always", static_graph=True)
 
     @skip_if_lt_x_gpu(4)
     @requires_gloo()
     @dist_init
-    @skip_if_rocm
     def test_basic_gloo_ckpt_except_last(self):
         self._run_basic_test("gloo", "except_last", static_graph=True)
 
