@@ -7,7 +7,6 @@ from typing import Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
-from . import config
 from .codegen.common import index_prevent_reordering
 from .utils import sympy_product, sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V

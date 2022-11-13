@@ -2,7 +2,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import chain
 from threading import local
-from typing import Sequence, Union, List
+from typing import List, Sequence, Union
 
 import sympy
 
@@ -113,15 +113,19 @@ class KernelBuilder:
 
     def __init__(self):
         self.var_counter = 0
-        self.program  = []
+        self.program = []
 
     def _Expr(self, format_string, inputs):
         # Assign unique variable name
         var_name = f"tmp{self.var_counter}"
         self.var_counter += 1
-        inputs = [i if isinstance(i, (KernelBuilder.Expr, str)) else _arg_str(i)
-                  for i in inputs]
-        expr = KernelBuilder.Expr(var_name=var_name, format_string=format_string, inputs=inputs)
+        inputs = tuple(
+            i if isinstance(i, (KernelBuilder.Expr, str)) else _arg_str(i)
+            for i in inputs
+        )
+        expr = KernelBuilder.Expr(
+            var_name=var_name, format_string=format_string, inputs=inputs
+        )
         self.program.append(expr)
         return expr
 
@@ -168,7 +172,9 @@ class KernelBuilder:
             expr = stack.pop()
 
             unseen_inputs = set(
-                i for i in expr.inputs if isinstance(i, KernelBuilder.Expr) and i not in live_exprs
+                i
+                for i in expr.inputs
+                if isinstance(i, KernelBuilder.Expr) and i not in live_exprs
             )
             live_exprs.update(unseen_inputs)
             stack += unseen_inputs
@@ -177,7 +183,10 @@ class KernelBuilder:
         live_program = [e for e in self.program if e in live_exprs]
 
         # Output the final string
-        return ''.join(e.format_line() for e in live_program) + f"return {result.var_name}\n"
+        return (
+            "".join(e.format_line() for e in live_program)
+            + f"return {result.var_name}\n"
+        )
 
 
 class WrapperHandler:
