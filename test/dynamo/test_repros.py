@@ -11,6 +11,8 @@ from copy import deepcopy
 from typing import List
 from unittest.mock import patch
 
+import functorch._src.config
+
 import numpy as np
 import torch
 
@@ -803,7 +805,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
 
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 3)
-        # Graph break because of dynamic slicing
         self.assertEqual(
             torch._dynamo.utils.counters["frames"]["total"],
             torch._dynamo.utils.counters["frames"]["ok"] + 1,
@@ -961,7 +962,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, ifdyn(3, 2))
         # TODO(jansel): figure out why op count depends on imports
-        self.assertIn(cnt.op_count, (36, 35, 29, 28))
+        self.assertIn(cnt.op_count, (36, 35, 34, 29, 28, 27))
 
     # see: https://github.com/pytorch/pytorch/issues/80067
     @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
@@ -980,7 +981,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, ifdyn(5, 4))
         # TODO(jansel): figure out why op count depends on imports
-        self.assertIn(cnt.op_count, (31, 36, 35, 29, 28))
+        self.assertIn(cnt.op_count, (31, 36, 35, 34, 29, 28))
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -1316,6 +1317,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 3)
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 3)
 
+    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
         @torch._dynamo.skip
         def fn():
@@ -1402,8 +1404,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref1, res1))
 
     @unittest.skipIf(not HAS_REFS, "requires recent PT version")
-    @unittest.expectedFailure
     def test_primtorch(self):
+        @torch._dynamo.optimize("eager")
+        def fn(x):
+            torch._refs.abs(x)
+
+        fn(torch.randn(3))
+
+    @unittest.skipIf(not HAS_REFS, "requires recent PT version")
+    @unittest.expectedFailure
+    # inline_call [('inline in skipfiles: bind ...python3.10/inspect.py', 1)]
+    def test_primtorch_no_graph_break(self):
         @torch._dynamo.optimize("eager", nopython=True)
         def fn(x):
             torch._refs.abs(x)
@@ -1456,14 +1467,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
-    # AssertionError: ABCMeta
+    # Bug with storage meta - torch.BoolStorage is becoming torch.storage._LegacyStorageMeta
     @unittest.expectedFailure
     def test_isinstance_storage(self):
         @torch._dynamo.optimize("eager")
         def fn(x):
             f = bytearray([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x40])
             bools = torch.BoolStorage.from_buffer(f, "big")
-            self.assertTrue(isinstance(bools, torch.BoolStorage))
+            assert isinstance(bools, torch.BoolStorage)
             return x
 
         fn(torch.randn(3))
@@ -1661,6 +1672,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
+
+    @patch.object(functorch._src.config, "use_dynamic_shapes", True)
+    def test_bigbird_unsqueeze_inplace(self):
+        def fn(reshape_2):
+            view_2 = reshape_2.clone()
+            view_2.unsqueeze_(2)
+            cat_11 = torch.cat([view_2], dim=2)
+            view_13 = cat_11.view((2, 12, 64, -1))
+            return (view_13,)
+
+        x = torch.randn(2, 12, 64, 64, requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
 
     # This doesn't work without fake tensors but I don't care
     @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
