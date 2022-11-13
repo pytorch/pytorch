@@ -53,25 +53,10 @@ except (ImportError, AssertionError) as e:
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-HAS_CPU = False
-try:
-    from subprocess import CalledProcessError
-
-    from torch._inductor.codecache import CppCodeCache
-
-    CppCodeCache.load("")
-    HAS_CPU = not IS_FBCODE
-except (
-    CalledProcessError,
-    OSError,
-    torch._inductor.exc.InvalidCxxCompiler,
-    torch._inductor.exc.CppCompileError,
-):
-    pass
+from .common import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
 
-HAS_CUDA = has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 torch._inductor.config.triton.autotune = False  # too slow
