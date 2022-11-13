@@ -14,6 +14,15 @@ __all__ = [
     "allow_mutation_on_saved_tensors",
 ]
 
+def _get_tid(t) -> Tuple[int, int, int]:
+    return (id(t), t.data_ptr(), t._version)
+
+def _get_sid(t) -> Tuple[int, int]:
+    return (t.data_ptr(), t._version)
+
+class _Handle():
+    pass
+
 class saved_tensors_hooks():
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
 
@@ -127,21 +136,39 @@ class save_on_cpu(saved_tensors_hooks):
 
     """
     def __init__(self, pin_memory=False):
-        def pack_to_cpu(tensor):
-            if not pin_memory:
-                return (tensor.device, tensor.cpu())
+        unwrapped_copies: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+        tid_to_weakhandle: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
-            packed = torch.empty(
-                tensor.size(),
-                dtype=tensor.dtype,
-                layout=tensor.layout,
-                pin_memory=(torch.cuda.is_available() and not tensor.is_sparse))
-            packed.copy_(tensor)
-            return (tensor.device, packed)
+        def pack_to_cpu(tensor):
+            unwrapped, rewrap_fn = torch.unwrap(tensor)
+            tid = _get_tid(unwrapped)
+            device = unwrapped.device
+
+            if tid not in tid_to_weakhandle:
+                if not pin_memory:
+                    unwrapped_copy = unwrapped.cpu()
+                else:
+                    unwrapped_copy = torch.empty(
+                        unwrapped.size(),
+                        dtype=unwrapped.dtype,
+                        layout=unwrapped.layout,
+                        pin_memory=(torch.cuda.is_available() and not unwrapped.is_sparse))
+                    unwrapped_copy.copy_(unwrapped)
+
+                handle = _Handle()
+                unwrapped_copies[handle] = unwrapped_copy
+                tid_to_weakhandle[tid] = handle
+            else:
+                # Store an additional strong reference to the handle
+                handle = tid_to_weakhandle[tid]
+            return (device, handle, rewrap_fn)
 
         def unpack_from_cpu(packed):
-            device, tensor = packed
-            return tensor.to(device, non_blocking=pin_memory)
+            device, handle, rewrap_fn = packed
+            unwrapped = unwrapped_copies[handle]
+            # FIXME: calling .to automatically wraps this tensor for some reason
+            ret = rewrap_fn(torch.unwrap(unwrapped.to(device, non_blocking=pin_memory))[0])
+            return ret
 
         super().__init__(pack_to_cpu, unpack_from_cpu)
 
@@ -288,15 +315,6 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
 # 3. during backward
 #    - if the clone exists, the tensor must've been modified in-place
 _allow_mutation_on_saved_tensors_enabled = False
-
-def _get_tid(t) -> Tuple[int, int, int]:
-    return (id(t), t.data_ptr(), t._version)
-
-def _get_sid(t) -> Tuple[int, int]:
-    return (t.data_ptr(), t._version)
-
-class _Handle():
-    pass
 
 class _swap_with_cloned(saved_tensors_hooks):
     def __init__(self, ctx):

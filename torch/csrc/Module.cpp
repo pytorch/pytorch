@@ -22,6 +22,7 @@
 #include <libshm.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/functional.h>
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
@@ -1434,6 +1435,26 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("transposed"),
       py::arg("output_padding"),
       py::arg("groups"));
+
+  py_module.def(
+      "unwrap",
+      [](const at::Tensor& input) {
+        c10::optional<c10::intrusive_ptr<at::TensorImpl>> maybe_unwrapped_impl;
+        std::function<c10::intrusive_ptr<at::TensorImpl>(c10::intrusive_ptr<at::TensorImpl>)> rewrap_fn;
+        std::tie(maybe_unwrapped_impl, rewrap_fn) = input.unsafeGetTensorImpl()->unwrap();
+        at::Tensor unwrapped;
+        if (maybe_unwrapped_impl.has_value()) {
+          unwrapped = at::Tensor(maybe_unwrapped_impl.value());
+        } else {
+          unwrapped = input;
+        }
+        return std::tuple<at::Tensor, std::function<at::Tensor(at::Tensor)>>(unwrapped, [=](at::Tensor new_unwrapped) -> at::Tensor {
+          // Maybe do some checks here
+          c10::intrusive_ptr<at::TensorImpl> new_unwrapped_impl = new_unwrapped.getIntrusivePtr();
+          return at::Tensor(rewrap_fn(new_unwrapped_impl));
+        });
+      }
+  );
 
   // overload for bias_sizes_opt/backward TODO: figure out default value
   py_module.def(

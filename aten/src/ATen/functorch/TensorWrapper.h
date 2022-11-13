@@ -71,6 +71,23 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
       bool allow_tensor_metadata_change) const override;
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override;
 
+  std::tuple<c10::optional<c10::intrusive_ptr<TensorImpl>>, std::function<c10::intrusive_ptr<TensorImpl>(c10::intrusive_ptr<TensorImpl>)>> unwrap() override {
+    c10::optional<c10::intrusive_ptr<TensorImpl>> unwrapped;
+    c10::DispatchKeySet key_set = this->key_set();
+    std::function<c10::intrusive_ptr<TensorImpl>(c10::intrusive_ptr<TensorImpl>)> inner_rewrap = nullptr;
+
+    std::tie(unwrapped, inner_rewrap) = this->value_.unsafeGetTensorImpl()->unwrap();
+    if (!unwrapped.has_value()) {
+      unwrapped = this->value_.getIntrusivePtr();
+    }
+    return std::tuple<c10::optional<c10::intrusive_ptr<TensorImpl>>, std::function<c10::intrusive_ptr<TensorImpl>(c10::intrusive_ptr<TensorImpl>)>>(unwrapped, [=](c10::intrusive_ptr<TensorImpl> t){
+      auto ret = c10::make_intrusive<TensorWrapper>(t->key_set(), Tensor(inner_rewrap(t)), this->level_, this->is_alive_, this->is_immutable_, true);
+      // Restore key_set
+      ret->key_set_ = key_set;
+      return ret;
+    });
+  }
+
  private:
   const char* tensorimpl_type_name() const override;
   Tensor value_;

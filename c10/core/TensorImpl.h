@@ -1952,6 +1952,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_contiguous();
   }
 
+  virtual std::tuple<c10::optional<c10::intrusive_ptr<TensorImpl>>, std::function<c10::intrusive_ptr<TensorImpl>(c10::intrusive_ptr<TensorImpl>)>> unwrap() {
+    auto fn = [=](c10::intrusive_ptr<TensorImpl> t) -> c10::intrusive_ptr<TensorImpl> {
+      return t;
+    };
+    return std::tuple<c10::optional<c10::intrusive_ptr<TensorImpl>>, std::function<c10::intrusive_ptr<TensorImpl>(c10::intrusive_ptr<TensorImpl>)>>(c10::nullopt, fn);
+  }
+
   // Inference tensor doesn't have version counter,
   // set_version_counter is no-op for them.
   void set_version_counter(const c10::VariableVersion& version_counter) {
@@ -2988,6 +2995,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Call into Python for layout()
   bool python_custom_layout_ : 1;
 
+ public:
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
   // not anymore!)
