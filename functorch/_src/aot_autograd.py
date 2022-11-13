@@ -378,16 +378,20 @@ class AOTConfig:
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, shape_env):
-    pre_dispatch_guards = copy.deepcopy(shape_env.guards)
+    if shape_env:
+        pre_dispatch_guards = shape_env.guards
 
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
+    
     if config.debug_graphs:
         print("====== Forward (only) graph ======")
         fw_module.print_readable()
-    delta = shape_env.guards_not_overlapping(pre_dispatch_guards)
+    
     compiled_guard_expr = None
-    if len(delta) > 0:
-        compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env, "args")
+    if shape_env:
+        delta = shape_env.guards_not_overlapping(pre_dispatch_guards)
+        if len(delta) > 0:
+            compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env, "args")
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
@@ -425,7 +429,8 @@ def disable_autocast_manager():
 aot_autograd_compiled_fn_cache = {}
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, shape_env):
-    pre_dispatch_guards = copy.deepcopy(shape_env.guards)
+    if shape_env:
+        pre_dispatch_guards = shape_env.guards
 
     # Deduplicate inputs.  Suppose you have:
     #
@@ -543,9 +548,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         with track_graph_compiling("forward"):
             compiled_fw_func = aot_config.fw_compiler(fw_module, deduped_flat_args)
             compiled_fw_func.chained = None
-            delta = shape_env.guards_not_overlapping(pre_dispatch_guards)
-            if len(delta) > 0:
-                compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env, "args")
+            if shape_env:
+                delta = shape_env.guards_not_overlapping(pre_dispatch_guards)
+                if len(delta) > 0:
+                    compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env, "args")
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
@@ -609,7 +615,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     compiled_function.guards = compiled_guard_expr
     return compiled_function
 
-
+# NOTE: This is here temporarily until we unify dynamo and functorch configs
+# This value acts as a proxy for dynamo configs "dynamic_shapes" setting,
+# without violating hierarchy by having aot_autograd (lower) know about dynamo
 _enforce_shape_env_passed_in = False
 
 @dynamo_timed
@@ -728,6 +736,7 @@ class PytreeThunk:
 KNOWN_TYPES = [torch.Tensor, int, str, float, bool, torch.SymInt, torch.SymFloat]
 
 
+# NOTE: This is here temporarily until we unify dynamo and functorch configs
 def _produce_or_verify_shape_env(shape_env):
     if shape_env is not None:
         # TODO(voz): Merge this config w/ dynamo config?

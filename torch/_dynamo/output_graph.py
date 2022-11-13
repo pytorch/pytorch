@@ -36,7 +36,7 @@ from .variables.tensor import (
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
-
+from functorch._src import aot_autograd
 log = logging.getLogger(__name__)
 
 
@@ -109,9 +109,9 @@ class OutputGraph(fx.Tracer):
         self.unspec_variable_map = {}
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
         if self.shape_env:
-            from functorch._src import aot_autograd
-
             aot_autograd._enforce_shape_env_passed_in = True
+        else:
+            aot_autograd._enforce_shape_env_passed_in = False
         self.tensor_id_to_sym_shape_ref = {}
         self.intermediary_symbols = {}
 
