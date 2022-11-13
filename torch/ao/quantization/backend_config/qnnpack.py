@@ -121,16 +121,16 @@ def get_qnnpack_backend_config() -> BackendConfig:
         qnnpack_default_dynamic_float16_dtype_config,
     ]
     binary_op_dtype_configs = [
-        qnnpack_weighted_op_qint8_symmetric_dtype_config,
-        qnnpack_weighted_op_quint8_dtype_config,
+        qnnpack_default_op_qint8_symmetric_dtype_config,
+        qnnpack_default_op_quint8_dtype_config,
     ]
     default_op_dtype_configs = [
         qnnpack_default_op_qint8_symmetric_dtype_config,
         qnnpack_default_op_quint8_dtype_config,
     ]
     fixed_qparams_op_dtype_configs = [
-        qnnpack_weighted_op_qint8_symmetric_dtype_config,
-        qnnpack_weighted_op_quint8_dtype_config,
+        qnnpack_default_op_qint8_symmetric_dtype_config,
+        qnnpack_default_op_quint8_dtype_config,
     ]
     share_qparams_op_dtype_configs = [
         qnnpack_default_op_qint8_symmetric_dtype_config,

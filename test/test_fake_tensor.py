@@ -194,6 +194,12 @@ class FakeTensorTest(TestCase):
             y1 = torch.randperm(5, device="cpu")
             prims.utils.compare_tensor_meta(y, y1)
 
+    def test_print_in_fake_mode(self):
+        x = torch.zeros(2)
+        # does not fail
+        with FakeTensorMode():
+            out = str(x)
+        assert "FakeTensor" not in out
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cpu_fallback(self):
@@ -394,6 +400,14 @@ class FakeTensorTest(TestCase):
             self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
             b = torch.rand([4, 4], device='cuda')
             self.checkType(b.new(device='cuda'), "cuda", [0])
+            self.checkType(a.new(torch.rand([1])), "cpu", [1])
+
+    def test_scalar_inputs(self):
+        with FakeTensorMode():
+            self.checkType(torch.div(3, 2), "cpu", [])
+            ten = torch.zeros(2, dtype=torch.int32) * 2.0
+            self.assertEqual(ten.dtype, torch.float)
+            self.checkType(ten, "cpu", [2])
 
 
 class FakeTensorConstHandling(TestCase):
@@ -456,6 +470,15 @@ class FakeTensorConstHandling(TestCase):
                 inputs = [a, b]
                 ref = fn(inputs)
 
+    def test_fake_tensor_batch_norm_cpu(self):
+        with torch._subclasses.CrossRefFakeMode():
+            m = torch.nn.Sequential(
+                torch.nn.BatchNorm2d(10),
+                torch.nn.ReLU(),
+            )
+            m.eval()
+            out = m(torch.randn([2, 10, 8, 8]))
+
     def test_shared_storage_invalidation(self):
         with FakeTensorMode():
             x = torch.tensor([1.])
@@ -488,7 +511,7 @@ class FakeTensorConverterTest(TestCase):
         x = torch.rand(2, 2).to(device="meta")
         mode = FakeTensorMode()
         converter = mode.fake_tensor_converter
-        self.assertTrue(converter(mode, x, "cpu") is converter(mode, x, "cpu"))
+        self.assertTrue(converter.from_meta_and_device(mode, x, "cpu") is converter.from_meta_and_device(mode, x, "cpu"))
 
     def test_separate_tensor_storages_view(self):
         x = torch.rand(2, 2, 2)
@@ -537,10 +560,10 @@ class FakeTensorConverterTest(TestCase):
         converter = FakeTensorConverter()
         x_conv = converter(mode, x)
         self.assertEqual(len(converter.tensor_memo), 1)
-        self.assertEqual(len(converter.meta_converter.tensor_memo), 1)
+        x_conv2 = converter(mode, x)
+        assert x_conv2 is x_conv
         del x
         self.assertEqual(len(converter.tensor_memo), 0)
-        self.assertEqual(len(converter.meta_converter.tensor_memo), 0)
 
     def test_no_active_mode(self):
         with FakeTensorMode() as mode:

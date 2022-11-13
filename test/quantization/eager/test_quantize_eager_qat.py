@@ -6,12 +6,12 @@ import torch
 import torch.nn as nn
 import torch.backends.mkldnn
 from torch.nn import Conv2d, BatchNorm2d, ReLU, init
-from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
+from torch.ao.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.qat as nnqat
-import torch.nn.intrinsic.qat as nniqat
+import torch.ao.nn.intrinsic.qat as nniqat
 import torch.ao.nn.qat.dynamic as nnqatd
 from torch.ao.quantization import (
     prepare,
@@ -594,6 +594,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
         eps = 1e-5
         self.assertTrue(torch.abs(mq.quant.scale * 2 - res.q_scale()) < eps)
 
+    @override_qengines
     def test_qat_embedding_bag_errors(self):
         default_qat_qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
 
@@ -819,9 +820,9 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
 
         qat_op.apply(torch.ao.quantization.disable_fake_quant)
         if freeze_bn:
-            qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+            qat_op.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
         else:
-            qat_op.apply(torch.nn.intrinsic.qat.update_bn_stats)
+            qat_op.apply(torch.ao.nn.intrinsic.qat.update_bn_stats)
 
         # align inputs and internal parameters
         input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
@@ -992,7 +993,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             input_clone = input.clone().detach().requires_grad_()
 
             if i > 2:
-                qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                qat_op.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
                 qat_ref_op.freeze_bn_stats()
 
             if i > 3:

@@ -189,6 +189,7 @@ supported:
   # after functionalization,
   # but their implementations call view operators (which we need to functionalize away).
   - block_diag
+  - diag_embed
   - diagonal_backward
   - slice_backward
   - new_empty_strided
@@ -206,11 +207,14 @@ symint:
   - view_copy
   - as_strided_copy
   - as_strided_scatter
+  - diagonal_backward
   - slice_backward
   - slice_copy.Tensor
   - slice_scatter
   - empty_strided
   - new_empty_strided
+  - _reshape_alias_copy
+  - select_backward
 autograd:
   - max_pool3d
   - native_group_norm
@@ -223,33 +227,10 @@ non_native:
       - ShapeCompute
       - TreatScalarsAsConstants
       - CanBeReusedDeclOnly
+  # Even we have removed all the other view ops in favor of the *_copy version, expand
+  # is still kept because it's used in copy_.
   - func: expand(Tensor input, int[] size, bool is_scalar_expand) -> Tensor
-  - func: view(Tensor input, int[] output_size) -> Tensor
-    properties:
-      - ShapeCompute
   - func: cast(Tensor input, ScalarType dtype, ScalarType? stype) -> Tensor
     opkind: ltc_cast
     properties:
       - ShapeCompute
-
-  # View ops only required until proper functionalization pass is introduced into LTC
-  - func: as_strided_view_update(Tensor target, Tensor input, int[] size, int[] stride, int storage_offset) -> Tensor
-    opkind: ltc_as_strided_view_update
-  - func: as_strided(Tensor input, int[] size, int[] stride, int storage_offset) -> Tensor
-  - func: diagonal_view_update(Tensor target, Tensor input, int offset, int dim1, int dim2) -> Tensor
-    opkind: ltc_diagonal_view_update
-    properties:
-      - ShapeCompute
-  - func: diagonal(Tensor input, int offset, int dim1, int dim2) -> Tensor
-  - func: narrow_view_update(Tensor input, Tensor source, int[] base_indices) -> Tensor
-    opkind: ltc_narrow_view_update
-  - func: narrow(Tensor input, int[] base_indices, int[] sizes) -> Tensor
-  - func: permute(Tensor input, int[] dims) -> Tensor
-  - func: resize(Tensor input, int[] size) -> Tensor
-  - func: select_view_update(Tensor target, Tensor source, int dim, int start, int end, int stride) -> Tensor
-    opkind: ltc_select_view_update
-    properties:
-      - ShapeCompute
-  - func: select(Tensor input, int dim, int start, int end, int stride) -> Tensor
-  - func: squeeze(Tensor input, int dim) -> Tensor
-  - func: unsqueeze(Tensor input, int dim) -> Tensor

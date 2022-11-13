@@ -2,7 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/ATen.h>
+#include <c10/util/Exception.h>
+#include <utility>
 
 #include <ATen/native/vulkan/api/vk_api.h>
 
@@ -19,6 +20,12 @@
   ::at::native::vulkan::api::ShaderSource {                     \
     CONCAT_LITERALS(vulkan., name), name##_spv, name##_spv_len, \
         name##_spv_layout                                       \
+  }
+#define VK_SHADER(name)                                                        \
+  ::at::native::vulkan::api::ShaderInfo {                                      \
+    CONCAT_LITERALS(vulkan., name), name##_spv, name##_spv_len,                \
+        name##_spv_layout, name##_spv_tile_size, name##_spv_bias_storage_type, \
+        name##_spv_weight_storage_type,                                        \
   }
 #endif /* USE_VULKAN_SHADERC_RUNTIME */
 

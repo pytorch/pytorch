@@ -39,7 +39,7 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+
 | gather         | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
+| scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
 | reduce_scatter | ✘   | ✘   | ✘   | ✘   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
@@ -349,6 +349,10 @@ as they should never be created manually, but they are guaranteed to support two
 .. autofunction:: isend
 
 .. autofunction:: irecv
+
+.. autofunction:: batch_isend_irecv
+
+.. autoclass:: P2POp
 
 Synchronous and asynchronous collective operations
 --------------------------------------------------
@@ -828,6 +832,13 @@ following matrix shows how the log level can be adjusted via the combination of 
 | ``INFO``                | ``DETAIL``                  | Trace (a.k.a. All)     |
 +-------------------------+-----------------------------+------------------------+
 
+Distributed has a custom Exception type derived from `RuntimeError` called `torch.distributed.DistBackendError`. This exception is thrown when a backend-specific error occurs. For example, if
+the `NCCL` backend is used and the user attempts to use a GPU that is not available to the `NCCL` library.
+
+.. autoclass:: torch.distributed.DistBackendError
+
+.. warning::
+    The DistBackendError exception type is an experimental feature is subject to change.
 
 .. Distributed modules that are missing specific entries.
 .. Adding them here for tracking purposes until they are more permanently fixed.

@@ -10,6 +10,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/Fill.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
@@ -1222,8 +1223,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::narrow_copy, aten_narrow_copy, [](Node* n) -> SR
     return nullptr;
   }
   return [](ProcessedNode* p_node) {
-    const auto& self = p_node->Input(0).toTensor(); // self
-    const auto dim = p_node->Input(1).toInt(); // dim
+    auto& self = p_node->Input(0).toTensor(); // self
+    auto dim = p_node->Input(1).toInt(); // dim
     int64_t start = 0;
     if (p_node->Input(2).isScalar()) {
       start = p_node->Input(2).toInt();
@@ -1235,12 +1236,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::narrow_copy, aten_narrow_copy, [](Node* n) -> SR
 
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) =
-          at::native::narrow_copy_dense_cpu(self, dim, start, length);
+          at::native::narrow_copy_dense_symint(self, dim, start, length);
       return;
     }
     auto& output = p_node->Output(0).toTensor();
     fastResizeToZero(output);
-    at::native::narrow_copy_dense_cpu_out(self, dim, start, length, output);
+    at::narrow_copy_out(output, self, dim, start, length);
   };
 });
 REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {

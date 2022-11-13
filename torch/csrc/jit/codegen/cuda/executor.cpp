@@ -1251,9 +1251,9 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (measure_kernel_time_ ||
       isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth) ||
       isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
-    cudaEventCreate(&start_event);
-    cudaEventCreate(&finish_event);
-    cudaEventRecord(start_event);
+    C10_CUDA_CHECK(cudaEventCreate(&start_event));
+    C10_CUDA_CHECK(cudaEventCreate(&finish_event));
+    C10_CUDA_CHECK(cudaEventRecord(start_event));
   }
 
   if (execute_kernel_) {
@@ -1309,12 +1309,13 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (measure_kernel_time_ ||
       isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth) ||
       isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
-    cudaEventRecord(finish_event);
-    cudaEventSynchronize(start_event);
-    cudaEventSynchronize(finish_event);
-    cudaEventElapsedTime(&kernel_time_ms_, start_event, finish_event);
-    cudaEventDestroy(start_event);
-    cudaEventDestroy(finish_event);
+    C10_CUDA_CHECK(cudaEventRecord(finish_event));
+    C10_CUDA_CHECK(cudaEventSynchronize(start_event));
+    C10_CUDA_CHECK(cudaEventSynchronize(finish_event));
+    C10_CUDA_CHECK(
+        cudaEventElapsedTime(&kernel_time_ms_, start_event, finish_event));
+    C10_CUDA_CHECK(cudaEventDestroy(start_event));
+    C10_CUDA_CHECK(cudaEventDestroy(finish_event));
 
     bytes_processed_ = 0;
     // Figure how many bytes are inputs, outputs, and temporary buffers

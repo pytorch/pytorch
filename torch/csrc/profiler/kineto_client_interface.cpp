@@ -1,6 +1,14 @@
 #ifdef USE_KINETO
 #include <libkineto.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
+#include <cstdlib>
+
+// Ondemand tracing is not supported on Apple or edge platform
+#if defined(__APPLE__) || defined(EDGE_PROFILER_USE_KINETO)
+#define ENABLE_GLOBAL_OBSERVER (0)
+#else
+#define ENABLE_GLOBAL_OBSERVER (1)
+#endif
 
 namespace torch {
 namespace profiler {
@@ -53,14 +61,24 @@ class LibKinetoClient : public libkineto::ClientInterface {
 } // namespace impl
 } // namespace profiler
 
-#ifdef ENABLE_LIBKINETO_CLIENT
+#if ENABLE_GLOBAL_OBSERVER
+namespace {
+
 struct RegisterLibKinetoClient {
   RegisterLibKinetoClient() {
     static profiler::impl::LibKinetoClient client;
+
+    if (std::getenv("KINETO_USE_DAEMON") != nullptr) {
+      libkineto_init(/*cpuOnly=*/false, /*logOnError=*/true);
+      libkineto::api().suppressLogMessages();
+    }
+
     libkineto::api().registerClient(&client);
   }
 } register_libkineto_client;
-#endif // ENABLE_LIBKINETO_CLIENT
+
+} // namespace
+#endif
 
 } // namespace torch
 #endif // USE_KINETO

@@ -1,10 +1,12 @@
+from typing import Any, Dict, List, Tuple
+
 import torch
 import torch.distributed as dist
 from torch.nn.parallel._functions import _get_stream
 from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
-    _is_namedtuple
+    _is_namedtuple,
 )
-from typing import Any, Dict, List, Tuple
+from torch.nn.utils.rnn import PackedSequence
 
 __all__ = []  # type: ignore[var-annotated]
 
@@ -51,8 +53,9 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     """
 
     def to_map(obj):
-        if isinstance(obj, torch.Tensor):
-            if obj.device == torch.device("cuda", target_gpu):
+        if isinstance(obj, torch.Tensor) or isinstance(obj, PackedSequence):
+            device = obj.data.device if isinstance(obj, PackedSequence) else obj.device
+            if device == torch.device("cuda", target_gpu):
                 return (obj,)
             if not use_side_stream_for_tensor_copies:
                 return (obj.to(target_gpu),)
@@ -69,7 +72,10 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
                     current_stream.wait_stream(stream)
                     # Ensure tensor memory is not reused until work on
                     # main stream is complete
-                    output.record_stream(current_stream)  # type: ignore[arg-type]
+                    if isinstance(obj, PackedSequence):
+                        output.data.record_stream(current_stream)  # type: ignore[arg-type]
+                    else:
+                        output.record_stream(current_stream)  # type: ignore[arg-type]
                 return (output,)
         if _is_namedtuple(obj):
             return [type(obj)(*args) for args in zip(*map(to_map, obj))]

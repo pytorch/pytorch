@@ -81,13 +81,12 @@ class TestPrintCommits(TestCase):
 
     @mock.patch('fetch_latest_green_commit.get_commit_results', return_value=TestChecks().make_test_checks())
     def test_skippable_failed(self, mock_get_commit_results: Any) -> None:
-        "Test with skippable job (ex: docker-release-builds) failing"
+        "Test with failing skippable jobs (ex: docker-release-builds) should pass"
         workflow_checks = mock_get_commit_results()
         workflow_checks = set_workflow_job_status(workflow_checks, "periodic", "skipped")
         workflow_checks = set_workflow_job_status(workflow_checks, "docker-release-builds", "failed")
         result = isGreen("sha", workflow_checks)
-        self.assertFalse(result[0])
-        self.assertEqual(result[1], "docker-release-builds checks were not successful")
+        self.assertTrue(result[0])
 
     @mock.patch('fetch_latest_green_commit.get_commit_results', return_value={})
     def test_no_workflows(self, mock_get_commit_results: Any) -> None:

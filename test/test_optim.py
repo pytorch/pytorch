@@ -15,7 +15,7 @@ from torch.optim import SGD
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, StepLR, \
     MultiStepLR, ConstantLR, LinearLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
-    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, PolynomialLR, \
+    LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, PolynomialLR, \
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
@@ -157,7 +157,7 @@ class TestOptim(TestCase):
             else:
                 self.assertLess(fn().item(), initial_value)
 
-    def _test_state_dict(self, weight, bias, input, constructor):
+    def _test_state_dict(self, weight, bias, input, constructor, atol=None, rtol=None):
         weight = Parameter(weight)
         bias = Parameter(bias)
         with torch.no_grad():
@@ -255,7 +255,7 @@ class TestOptim(TestCase):
             optimizer.step(fn)
             optimizer_cuda.step(fn_cuda)
             self.assertEqual(weight, weight_cuda)
-            self.assertEqual(bias, bias_cuda)
+            self.assertEqual(bias, bias_cuda, atol=atol, rtol=rtol)
 
         # validate deepcopy() copies all public attributes
         def getPublicAttr(obj):
@@ -263,7 +263,8 @@ class TestOptim(TestCase):
         self.assertEqual(getPublicAttr(optimizer), getPublicAttr(deepcopy(optimizer)))
 
     def _test_basic_cases(self, constructor, scheduler_constructors=None,
-                          ignore_multidevice=False, constructor_accepts_maximize=False, constructor_accepts_foreach=False):
+                          ignore_multidevice=False, constructor_accepts_maximize=False, constructor_accepts_foreach=False,
+                          atol=None, rtol=None):
         if scheduler_constructors is None:
             scheduler_constructors = []
 
@@ -285,6 +286,7 @@ class TestOptim(TestCase):
                 torch.randn(10),
                 torch.randn(5),
                 make_two_arg_constructor(constructor, maximize, foreach),
+                atol=atol, rtol=rtol
             )
         self._test_basic_cases_template(
             torch.randn(10, 5),
@@ -1006,6 +1008,7 @@ class TestOptim(TestCase):
 
     @skipIfRocm
     def test_rprop(self):
+        is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
         for foreach in (False, True):
             self._test_basic_cases(
                 lambda weight, bias, maximize, foreach: optim.Rprop(
@@ -1018,6 +1021,7 @@ class TestOptim(TestCase):
                     self._build_params_dict(weight, bias, lr=1e-2), lr=2e-4, maximize=maximize, foreach=foreach),
                 constructor_accepts_maximize=True,
                 constructor_accepts_foreach=True,
+                atol=4e-5 if is_cuda_sm86 else None, rtol=3e-5 if is_cuda_sm86 else None
             )
             self._test_complex_2d(lambda param: optim.Rprop(param, foreach=foreach))
             self._test_complex_optimizer(
@@ -1127,6 +1131,27 @@ class TestOptim(TestCase):
                 [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)],
             )
 
+    def test_empty_grad(self):
+        optimizers = [torch.optim.Adadelta, torch.optim.Adagrad, torch.optim.Adam, torch.optim.AdamW,
+                      torch.optim.Adamax, torch.optim.ASGD, torch.optim.NAdam, torch.optim.RAdam,
+                      torch.optim.RMSprop, torch.optim.Rprop, torch.optim.SGD, torch.optim.SparseAdam]
+
+        for optimizer in optimizers:
+            net = torch.nn.Embedding(5, 1, padding_idx=0, sparse=optimizer is torch.optim.SparseAdam)
+            original_params = (param.detach().clone() for param in net.parameters())
+            # Simulate a batch that only indexes the embedding at padding_idx
+            x = torch.tensor([[0, 0]]).int()
+            y = torch.tensor([[[3.0], [4.0]]])
+            opt = optimizer(net.parameters(), lr=1e-5)
+            torch.nn.MSELoss()(net.forward(x), y).backward()
+
+            opt.step()
+
+            for original_param, param in zip(original_params, net.parameters()):
+                # assert that the parameters have not changed
+                self.assertEqual(original_param, param)
+
+
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
@@ -1174,7 +1199,7 @@ class TestLRScheduler(TestCase):
             self.assertEqual(warning.message.args[0], EPOCH_DEPRECATION_WARNING)
 
     def test_error_when_getlr_has_epoch(self):
-        class MultiStepLR(torch.optim.lr_scheduler._LRScheduler):
+        class MultiStepLR(torch.optim.lr_scheduler.LRScheduler):
             def __init__(self, optimizer, gamma, milestones, last_epoch=-1):
                 self.init_lr = [group['lr'] for group in optimizer.param_groups]
                 self.gamma = gamma
@@ -1216,6 +1241,28 @@ class TestLRScheduler(TestCase):
         del optim
         self.assertEqual(
             gc.collect(), 0, msg="Optimizer should be garbage-collected on __del__")
+
+    def test_no_cyclic_references_in_step(self):
+        import gc
+        import weakref
+
+        def run():
+            param = torch.empty(10, requires_grad=True)
+            optim = SGD(params=[param], lr=0.5)
+            scheduler = LambdaLR(optim, lambda epoch: 1.0)
+            param.sum().backward()
+            optim.step()
+            scheduler.step()
+
+            return weakref.ref(scheduler)
+
+        # To ensure that there are no reference cycles in scheduler,
+        # we need to turn off the garbage collector. Since gc will
+        # automatically collect unreachable objects.
+        gc.disable()
+        ref = run()
+        assert ref() is None
+        gc.enable()  # restore
 
     def test_old_pattern_warning(self):
         epochs = 35
@@ -1492,6 +1539,18 @@ class TestLRScheduler(TestCase):
         scheduler = LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
         self._test(scheduler, targets, epochs)
 
+    def test_linearlr_start_factor_limits1(self):
+        start_factor = 0.
+        iters = 4
+        with self.assertRaises(ValueError):
+            LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
+
+    def test_linearlr_start_factor_limits2(self):
+        start_factor = 1.1
+        iters = 4
+        with self.assertRaises(ValueError):
+            LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
+
     def test_constantlr_with_epoch(self):
         # lr = 0.025     if epoch < 5
         # lr = 0.005    if 5 <= epoch
@@ -1591,7 +1650,7 @@ class TestLRScheduler(TestCase):
         new_scheduler = CosineAnnealingLR(
             self.opt, T_max=T_max, eta_min=eta_min, last_epoch=0)
         new_lrs = new_scheduler._last_lr
-        torch.testing.assert_allclose(original_lrs, new_lrs, rtol=1e-4, atol=1e-5)
+        torch.testing.assert_close(original_lrs, new_lrs, rtol=1e-4, atol=1e-5)
 
     def test_reduce_lr_on_plateau1(self):
         epochs = 10
@@ -2513,7 +2572,7 @@ class TestLRScheduler(TestCase):
         self.assertEqual(scheduler.get_last_lr(), scheduler_copy.get_last_lr())
 
     def _test_get_last_lr(self, schedulers, targets, epochs=10):
-        if isinstance(schedulers, _LRScheduler):
+        if isinstance(schedulers, LRScheduler):
             schedulers = [schedulers]
         optimizers = {scheduler.optimizer for scheduler in schedulers}
         for epoch in range(epochs):
@@ -2527,7 +2586,7 @@ class TestLRScheduler(TestCase):
                                      epoch, t, r), atol=1e-5, rtol=0)
 
     def _test_with_epoch(self, schedulers, targets, epochs=10):
-        if isinstance(schedulers, _LRScheduler):
+        if isinstance(schedulers, LRScheduler):
             schedulers = [schedulers]
         optimizers = {scheduler.optimizer for scheduler in schedulers}
         for epoch in range(epochs):
@@ -2541,7 +2600,7 @@ class TestLRScheduler(TestCase):
                                      epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test(self, schedulers, targets, epochs=10):
-        if isinstance(schedulers, _LRScheduler):
+        if isinstance(schedulers, LRScheduler):
             schedulers = [schedulers]
         for epoch in range(epochs):
             for param_group, target in zip(self.opt.param_groups, targets):
@@ -2586,7 +2645,7 @@ class TestLRScheduler(TestCase):
                                      epoch, targets[epoch][i], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test_reduce_lr_on_plateau(self, schedulers, targets, metrics, epochs=10, verbose=False):
-        if isinstance(schedulers, _LRScheduler) or isinstance(schedulers, ReduceLROnPlateau):
+        if isinstance(schedulers, LRScheduler) or isinstance(schedulers, ReduceLROnPlateau):
             schedulers = [schedulers]
         for epoch in range(epochs):
             self.opt.step()
@@ -2774,6 +2833,7 @@ class TestSWAUtils(TestCase):
         # Test AveragedModel with EMA as avg_fn
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.BatchNorm2d(5, momentum=0.3),
             torch.nn.Linear(5, 10)
         )
         alpha = 0.9
@@ -2792,11 +2852,17 @@ class TestSWAUtils(TestCase):
                 else:
                     updated_averaged_params.append((p_avg * alpha +
                                                    p * (1 - alpha)).clone())
+            for b in dnn.buffers():
+                if b.size() != torch.Size([]):
+                    b.detach_().add_(torch.randn_like(b))
+
             averaged_dnn.update_parameters(dnn)
             averaged_params = updated_averaged_params
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertEqual(p_avg, p_swa)
+        for b_avg, b_swa in zip(dnn.buffers(), averaged_dnn.module.buffers()):
+            self.assertEqual(b_avg, b_swa)
 
     def test_averaged_model_exponential_buffers(self):
         # Test AveragedModel with EMA as avg_fn and use_buffers as True.
@@ -2952,7 +3018,7 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     opt.state[p].update(opt_differentiable_state)
     opt.step()
     return (p,) + tuple(
-        v for v in opt_differentiable_state.values() if isinstance(v, torch.Tensor) and v.requires_grad)
+        v for v in opt.state[p].values() if isinstance(v, torch.Tensor) and v.requires_grad)
 
 
 class TestDifferentiableOptimizer(TestCase):
@@ -2995,6 +3061,134 @@ class TestDifferentiableOptimizer(TestCase):
             (p, grad, state, torch.optim.RMSprop,
              {'lr': 0.9, 'maximize': True, 'momentum': 0.9, 'differentiable': True, 'centered': True, 'weight_decay': 0.1},
              *state.values()))
+
+    def test_adadelta(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['square_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['acc_delta'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Adadelta,
+             {'lr': 0.9, 'weight_decay': 0.1, 'differentiable': True}, *state.values())
+        )
+
+    def test_adagrad(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['sum'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Adagrad,
+             {'lr': 0.9, 'weight_decay': 0.1, 'differentiable': True}, *state.values())
+        )
+
+    def test_adamax(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['exp_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['exp_inf'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Adamax,
+             {'lr': 0.9, 'weight_decay': 0.1, 'differentiable': True}, *state.values())
+        )
+
+    def test_asgd(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` `eta` & `mu` are not continuous variables (even though we define them as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['eta'] = torch.tensor(0.9, requires_grad=False, dtype=torch.float64)
+        state['mu'] = torch.tensor(1.0, requires_grad=False, dtype=torch.float64)
+        state['ax'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.ASGD,
+             {'lr': 0.9, 'differentiable': True}, *state.values())
+        )
+
+    def test_rprop(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['prev'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['step_size'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Rprop,
+             {'lr': 0.9, 'differentiable': True}, *state.values())
+        )
+
+
+    def test_adamw(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['exp_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['max_exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.AdamW,
+             {'lr': 0.9, 'differentiable': True, 'amsgrad': True}, *state.values())
+        )
+
+    def test_nadam(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['exp_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['mu_product'] = torch.tensor(1.0, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.NAdam,
+             {'lr': 0.9, 'differentiable': True}, *state.values())
+        )
+
+    def test_radam(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['exp_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.RAdam,
+             {'lr': 0.9, 'differentiable': True}, *state.values())
+        )
 
 
 if __name__ == '__main__':

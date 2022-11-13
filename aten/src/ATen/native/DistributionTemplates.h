@@ -1,8 +1,9 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Generator.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Tensor.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
@@ -11,6 +12,15 @@
 #include <c10/util/Optional.h>
 #include <limits>
 #include <cmath>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/view_as_real.h>
+#endif
 
 namespace at {
 namespace native {

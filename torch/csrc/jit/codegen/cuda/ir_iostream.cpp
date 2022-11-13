@@ -266,7 +266,7 @@ void IrPrinter::handle(const FullOp* fop) {
     if (i == fop->inputs().size() - 1) {
       os_ << "}";
     }
-    if (i >= 0) {
+    if (i > 0) {
       os_ << ", ";
     }
     handle(fop->input(i));

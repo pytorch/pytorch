@@ -1935,26 +1935,27 @@ void HeuristicSummary::validate() const {
       // TODO: need to cache the dynamically zero inputs?
       break;
     }
+    case ScheduleHeuristic::Transpose:
     case ScheduleHeuristic::PointWise: {
-      TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::DOMAIN_MAP));
-      TORCH_INTERNAL_ASSERT(
-          entry_type_map_.count(EntryType::REFERENCE_TENSORS));
-      TORCH_INTERNAL_ASSERT(
-          entry_type_map_.count(EntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS));
-      TORCH_INTERNAL_ASSERT(
-          entry_type_map_.count(EntryType::BROADCAST_BYTE_MULTIPLES));
-      TORCH_INTERNAL_ASSERT(
-          entry_type_map_.count(EntryType::CAN_SCHEDULE_TRANSPOSE));
-      auto can_schedule_transpose =
-          entry_type_map_.at(EntryType::CAN_SCHEDULE_TRANSPOSE)
-              ->as<
-                  CompileTimeInfo<HeuristicCompileTime::CanScheduleTranspose>>()
-              ->get();
-      if (!*can_schedule_transpose) {
-        break;
+      if (heuristic_ == ScheduleHeuristic::PointWise) {
+        TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::DOMAIN_MAP));
+        TORCH_INTERNAL_ASSERT(
+            entry_type_map_.count(EntryType::REFERENCE_TENSORS));
+        TORCH_INTERNAL_ASSERT(
+            entry_type_map_.count(EntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS));
+        TORCH_INTERNAL_ASSERT(
+            entry_type_map_.count(EntryType::BROADCAST_BYTE_MULTIPLES));
+        TORCH_INTERNAL_ASSERT(
+            entry_type_map_.count(EntryType::CAN_SCHEDULE_TRANSPOSE));
+        auto can_schedule_transpose =
+            entry_type_map_.at(EntryType::CAN_SCHEDULE_TRANSPOSE)
+                ->as<CompileTimeInfo<
+                    HeuristicCompileTime::CanScheduleTranspose>>()
+                ->get();
+        if (!*can_schedule_transpose) {
+          break;
+        }
       }
-    }
-    case ScheduleHeuristic::Transpose: {
       TORCH_INTERNAL_ASSERT(
           entry_type_map_.count(EntryType::TRANSPOSE_DOMAIN_MAP));
       TORCH_INTERNAL_ASSERT(entry_type_map_.count(

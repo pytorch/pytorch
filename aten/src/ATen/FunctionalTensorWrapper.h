@@ -100,6 +100,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // used to determine if it's up-to-date with its alias. The act of syncing a
   // tensor will set a tensor's generation equal to its alias's generation.
   bool is_up_to_date() const;
+  // Freezes the storage of this tensor, preventing subsequent mutations
+  void freeze_storage() const;
   // Every FunctionalTensorWrapper contains a vector<ViewMeta> objects
   // describing the series of view ops that ran to generate the current tensor
   // from the base tensor. This method is used by inplace-view ops like
@@ -143,7 +145,10 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   int64_t numel_custom() const override;
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
+  c10::SymInt sym_size_custom(int64_t d) const override;
   c10::SymIntArrayRef sym_strides_custom() const override;
+  c10::SymInt sym_storage_offset_custom() const override;
+  c10::Device device_custom() const override;
 
  private:
   const char* tensorimpl_type_name() const override;
@@ -194,6 +199,8 @@ TORCH_API c10::optional<Tensor> to_functional_tensor(
 TORCH_API c10::List<c10::optional<Tensor>> to_functional_tensor(
     const c10::List<c10::optional<Tensor>>& t_list);
 TORCH_API std::vector<Tensor> to_functional_tensor(ITensorListRef t_list);
+
+TORCH_API void freeze_functional_tensor(const Tensor& tensor);
 
 TORCH_API Tensor
 from_functional_tensor(const Tensor& tensor, bool assert_functional = true);
@@ -271,18 +278,21 @@ TORCH_API void functionalize_op_helper(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack);
 
-template <class Op, class ReturnType, class... ParameterTypes>
+template <class Op, bool symint, class ReturnType, class... ParameterTypes>
 struct _functionalize_aten_op final {};
 
-template <class Op, class ReturnType, class... ParameterTypes>
-struct _functionalize_aten_op<Op, ReturnType(ParameterTypes...)> final {
-  static ReturnType call(ParameterTypes... args) {
+template <class Op, bool symint, class ReturnType, class... ParameterTypes>
+struct _functionalize_aten_op<Op, symint, ReturnType(ParameterTypes...)> final {
+  static ReturnType call(
+      typename c10::maybe_keep_symint<symint, ParameterTypes>::type... args) {
+    using FuncType = ReturnType(
+        typename c10::maybe_keep_symint<symint, ParameterTypes>::type...);
     auto op = c10::Dispatcher::singleton()
                   .findSchemaOrThrow(
                       (const char*)Op::name, (const char*)Op::overload_name)
-                  .typed<ReturnType(ParameterTypes...)>();
+                  .typed<FuncType>();
 
-    return c10::impl::BoxedKernelWrapper<ReturnType(ParameterTypes...)>::call(
+    return c10::impl::BoxedKernelWrapper<FuncType>::call(
         c10::BoxedKernel::makeFromFunction<functionalize_op_helper>(),
         op,
         // BoxedKernelWrapper knows to ignore this keyset argument,
@@ -293,7 +303,12 @@ struct _functionalize_aten_op<Op, ReturnType(ParameterTypes...)> final {
 };
 
 template <class Op>
-using functionalize_aten_op = _functionalize_aten_op<Op, typename Op::schema>;
+using functionalize_aten_op =
+    _functionalize_aten_op<Op, false, typename Op::schema>;
+
+template <class Op>
+using functionalize_aten_op_symint =
+    _functionalize_aten_op<Op, true, typename Op::schema>;
 
 } // namespace functionalization
 } // namespace at

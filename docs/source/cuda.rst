@@ -87,6 +87,8 @@ Graphs (beta)
     graph
     make_graphed_callables
 
+.. _cuda-memory-management-api:
+
 Memory management
 -----------------
 .. autosummary::
@@ -111,6 +113,7 @@ Memory management
      reset_peak_memory_stats
      caching_allocator_alloc
      caching_allocator_delete
+     get_allocator_backend
 .. FIXME The following doesn't seem to exist. Is it supposed to?
    https://github.com/pytorch/pytorch/issues/27785
    .. autofunction:: reset_max_memory_reserved

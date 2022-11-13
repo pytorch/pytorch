@@ -1716,9 +1716,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(torch.sparse.sum(x, dim=0), torch.sparse.sum(x, dim=-2))
         self.assertEqual(torch.sum(x.to_dense(), dim=0), torch.sparse.sum(x, dim=0).to_dense())
 
-        # not support SparseTensor.sum()
         S = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
-        self.assertRaises(RuntimeError, lambda: S.sum())
 
         # dim out of range
         self.assertRaises(IndexError, lambda: torch.sparse.sum(S, 5))
@@ -2186,16 +2184,7 @@ class TestSparse(TestSparseBase):
             with self.assertRaisesRegex(RuntimeError, "log1p_ requires coalesced input"):
                 sparse_tensor.log1p_()
 
-        if not is_integral_dtype:
-            sparse_tensor.requires_grad_()
-            self.assertTrue(sparse_tensor.requires_grad)
-
-            # test autograd
-            x = sparse_tensor.clone()
-            y = sparse_tensor.log1p()
-            with self.assertRaisesRegex(RuntimeError, "log1p of a sparse tensor is made to be non-differentiable"):
-                y.backward(x)
-        else:
+        if is_integral_dtype:
             with self.assertRaisesRegex(RuntimeError, "only Tensors of floating point dtype can require gradients"):
                 sparse_tensor.requires_grad_()
 
@@ -3021,7 +3010,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(list(t.coalesce().indices().size()), [2, 1])
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
-    @skipIfRocm
     @coalescedonoff
     @dtypes(torch.double)
     def test_pickle(self, device, dtype, coalesced):
@@ -3817,6 +3805,20 @@ class TestSparse(TestSparseBase):
         # even if there are no duplicates
         self.assertFalse(torch.sparse_coo_tensor([[0, 1], [0, 1]], [1, 2], (2, 2)).is_coalesced())
 
+    @coalescedonoff
+    @dtypes(*all_types_and_complex_and(torch.bool))
+    def test_sum(self, device, dtype, coalesced):
+        def run_test(shape, nnz):
+            a = self._gen_sparse(2, nnz, shape, dtype, device, coalesced)[0]
+            self.assertEqual(a.sum(), a._values().sum())
+            if dtype.is_floating_point or dtype.is_complex:
+                a.requires_grad_(True)
+                a.sum().backward()
+                self.assertEqual(a.grad, torch.ones(shape, dtype=dtype, device=device))
+        for shape in [(10, 5), (10, 10)]:
+            run_test(shape, 0)
+            run_test(shape, max(shape))
+            run_test(shape, shape[0] * shape[1])
 
 
 class TestSparseOneOff(TestCase):

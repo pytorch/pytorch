@@ -221,7 +221,7 @@ inline bool has_torch_function_attr(PyObject* obj) {
 
 namespace torch {
 auto check_has_torch_function(PyObject* obj, bool ignore_mode) -> bool {
-  if (!ignore_mode && at::impl::PythonTorchFunctionTLS::get_mode())
+  if (!ignore_mode && at::impl::torch_function_mode_enabled())
     return true;
   PyTypeObject* tp = Py_TYPE(obj);
   return (
@@ -263,6 +263,9 @@ PyObject* THPModule_has_torch_function(PyObject*, PyObject* arg) {
   } else {
     auto args = py::reinterpret_steal<py::object>(
         PySequence_Fast(arg, "expected a sequence"));
+    if (!args) {
+      return nullptr;
+    }
     result = sequence_has_torch_function(args.ptr());
   }
 

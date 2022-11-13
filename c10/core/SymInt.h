@@ -1,43 +1,31 @@
 #pragma once
 
-#include <c10/core/SymIntNodeImpl.h>
+#include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 
 #include <memory>
 #include <numeric>
+#include <utility>
 
 namespace c10 {
 
 class SymFloat;
 
-// `SymInt` is a C++ wrapper class around int64_t data_ which  and is used to
-// represent concrete dimension values.
+// SymInt represents either a regular int64_t, or a symbolic integer
+// (represented in a type erased way as SymNode).  The intention is for SymInt
+// to represent symbolic sizes that arise when doing shape computation in
+// operator kernels. This allows for tracing through programs without baking in
+// concrete sizes into kernel calls.
 //
-// `SymInt` is also a data type in Pytorch that can be used in function schemas
-// to enable tracing.
+// SymInt has an API equivalent to int64_t.  In particular, it is a value type.
+// Internally, SymInt is represented in a clever packed way, so that it only
+// occupies one word of space; but morally, it is a union between an int64_t
+// and an intrusive pointer to SymNodeImpl.
 //
-// `SymInt` is introduced to enable tracing arithmetic
-// operations on symbolic integers (e.g. sizes). Tracing symbolic sizes will
-// allow LTC and AOTAutograd representing dynamic shapes in expression graphs
-// faithfully without baking in concrete dimension values.
-//
-// To trace the operations, SymInt will overload arithmetic operators (e.g. +,
-// -, *) and will provide overloads taking SymInt for commonly used math
-// functions.
-//
-// SymInt will be extenteded to represent a union structure Union[int64_t,
-// SymIntNodeImpl*] which will be implemented as a single packed int64_t field
-// named data_.
-
-#ifdef C10_MOBILE
-#define SKIP_IS_SYMBOLIC_ON_MOBILE(_) \
-  do {                                \
-  } while (0)
-#else
-#define SKIP_IS_SYMBOLIC_ON_MOBILE(X) TORCH_CHECK(X)
-#endif
+// Invariant: the referenced SymNodeImpl is guaranteed to be a SymNode where
+// is_int() returns true
 
 class C10_API SymInt {
  public:
@@ -46,9 +34,13 @@ class C10_API SymInt {
   };
 
   /*implicit*/ SymInt(int64_t d) : data_(d) {
-    SKIP_IS_SYMBOLIC_ON_MOBILE(!is_symbolic());
+    // NB: this relies on exception in constructor inhibiting
+    // destructor; otherwise we would attempt to deallocate
+    // the garbage data!
+    TORCH_CHECK(!is_symbolic());
   };
   SymInt() : data_(0) {}
+  SymInt(SymNode n);
 
   // unchecked c-tor accepting raw `data_`
   // One appropriate use for this is when you are constructing a symint
@@ -60,28 +52,28 @@ class C10_API SymInt {
   // temporary and then use the move constructor/assignment
   SymInt(const SymInt& s) : data_(0) {
     if (s.is_symbolic()) {
-      *this = SymInt::toSymInt(s.toSymIntNodeImpl());
+      *this = SymInt(s.toSymNodeImpl());
     } else {
       data_ = s.data_;
     }
   }
-  SymInt(SymInt&& s) : data_(s.data_) {
+  SymInt(SymInt&& s) noexcept : data_(s.data_) {
     s.data_ = 0;
   }
 
   SymInt& operator=(const SymInt& s) {
     if (this != &s) {
       if (s.is_symbolic()) {
-        *this = SymInt::toSymInt(s.toSymIntNodeImpl());
+        *this = SymInt(s.toSymNodeImpl());
       } else {
         data_ = s.data_;
       }
     }
     return *this;
   }
-  SymInt& operator=(SymInt&& s) {
+  SymInt& operator=(SymInt&& s) noexcept {
     if (this != &s) {
-      release_(); // release the current SymIntNode if any
+      release_(); // release the current SymNode if any
       data_ = s.data_;
       if (s.is_symbolic())
         s.data_ = 0;
@@ -90,48 +82,40 @@ class C10_API SymInt {
   }
 
   SymInt clone() const {
-#ifndef C10_MOBILE
     if (is_symbolic()) {
-      return toSymIntNodeImplUnowned()->clone()->toSymInt();
+      return SymInt(toSymNodeImplUnowned()->clone());
     }
-#else
-    TORCH_INTERNAL_ASSERT(!is_symbolic());
-#endif
     return *this;
   }
 
-#ifndef C10_MOBILE
-  SymIntNodeImpl* toSymIntNodeImplUnowned() const {
+  SymNodeImpl* toSymNodeImplUnowned() const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(is_symbolic());
     uint64_t unextended_bits = static_cast<uint64_t>(data_) & ~MASK;
     uint64_t sign_bit_mask = 1ULL << (62 - 1);
     // https://stackoverflow.com/questions/42534749/signed-extension-from-24-bit-to-32-bit-in-c
     uint64_t extended_bits = (unextended_bits ^ sign_bit_mask) - sign_bit_mask;
-    return static_cast<SymIntNodeImpl*>(
+    return static_cast<SymNodeImpl*>(
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
   void release_() {
     if (is_symbolic()) {
-      SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
+      SymNode::reclaim(toSymNodeImplUnowned()); // steal
     }
   }
 
-  SymIntNodeImpl* release() && {
+  SymNodeImpl* release() && {
+#ifndef C10_MOBILE
     TORCH_INTERNAL_ASSERT(is_symbolic());
-    auto* r = toSymIntNodeImplUnowned();
+    auto* r = toSymNodeImplUnowned();
     data_ = 0; // transfer ownership
     return r;
-  }
 #else
-  void release_() {}
-
-  SymIntNodeImpl* release() && {
     TORCH_INTERNAL_ASSERT(false);
-  }
 #endif
+  }
 
-  SymIntNode toSymIntNodeImpl() const;
-  static c10::SymInt toSymInt(SymIntNode sin);
+  SymNode toSymNodeImpl() const;
 
   ~SymInt() {
     release_();
@@ -142,7 +126,7 @@ class C10_API SymInt {
   // shapes, and you don't have time to fix it immediately, as if we
   // try to trigger the path in C++ you'll appropriately get an error
   int64_t expect_int() const {
-    SKIP_IS_SYMBOLIC_ON_MOBILE(!is_symbolic());
+    TORCH_CHECK(!is_symbolic());
     return data_;
   }
 
@@ -159,28 +143,32 @@ class C10_API SymInt {
 
   // N.B. It's important to keep this definition in the header
   // as we expect if checks to be folded for mobile builds
-  // where `is_symbolic` is always false
+  // where `is_symbolic` is always false and optimize dead code paths
   C10_ALWAYS_INLINE bool is_symbolic() const {
 #ifdef C10_MOBILE
     return false;
 #else
-    return (MASK & static_cast<uint64_t>(this->data_)) == IS_SYM;
+    return !check_range(data_);
 #endif
   }
 
-  SymInt operator+(SymInt sci) const;
-  SymInt operator-(SymInt sci) const;
-  SymInt operator*(SymInt sci) const;
-  SymInt operator/(SymInt sci) const;
-  SymInt operator%(SymInt sci) const;
-  bool operator==(SymInt sci) const;
-  bool operator!=(SymInt p2) const;
-  bool operator<(SymInt sci) const;
-  bool operator<=(SymInt sci) const;
-  bool operator>(SymInt sci) const;
-  bool operator>=(SymInt sci) const;
-  void operator*=(SymInt sci);
-  void operator+=(SymInt sci);
+  SymInt operator+(const SymInt& sci) const;
+  SymInt operator-(const SymInt& sci) const;
+  SymInt operator*(const SymInt& sci) const;
+  SymInt operator/(const SymInt& sci) const;
+  SymInt operator%(const SymInt& sci) const;
+  bool operator==(const SymInt& sci) const;
+  bool operator!=(const SymInt& p2) const;
+  bool operator<(const SymInt& sci) const;
+  bool operator<=(const SymInt& sci) const;
+  bool operator>(const SymInt& sci) const;
+  bool operator>=(const SymInt& sci) const;
+  void operator*=(const SymInt& sci);
+  void operator+=(const SymInt& sci);
+  void operator/=(const SymInt& sci);
+
+  SymInt min(const SymInt& sci) const;
+  SymInt max(const SymInt& sci) const;
 
   SymInt operator*(int64_t sci) const;
   bool operator<(int64_t sci) const;
@@ -193,40 +181,45 @@ class C10_API SymInt {
   operator SymFloat() const;
 
   int64_t as_int_unchecked() const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!is_symbolic());
     return data_;
   }
 
   // Return whether the integer is representable as a SymInt.
   static bool check_range(int64_t i) {
-    return i > MIN_INT;
+    return i > MAX_UNREPRESENTABLE_INT;
   }
 
  private:
   // Constraints on the internal representation:
-  // - Should represent positive and small negative ints
-  // - No conversion necessary for operations on ints.
-  // - Must represent valid 64-bit pointers
   //
-  // So, the scheme is to reserve large negative numbers:
-  // - 0b0.... means we are a positive int (following two's complement)
-  // - 0b11... means we are a negative int (following two's complement)
+  // - Should represent positive and small negative ints
+  // - No conversion necessary for operations on ints
+  // - Must represent valid 64-bit pointers
+  // - Is symbolic test should be FAST (two arithmetic instructions is too
+  // much).
+  //   This code being a hotpath is based on Strobelight profiles of
+  //   is_symbolic().  FB only: https://fburl.com/strobelight/5l50ncxd
+  //   (you will need to change the time window).
+  //
+  // So, the scheme is to reserve large negative numbers (asssuming
+  // two's complement):
+  //
+  // - 0b0.... means we are a positive int
+  // - 0b11... means we are a small negative int
   // - 0b10... means we are are a pointer. This means that
   //           [-2^63, -2^62-1] are not representable as ints.
   //           We don't actually need all of this space as on x86_64
   //           as the top 16bits aren't used for anything
-  static constexpr uint64_t MASK = 1ULL << 63 | 1ULL << 62;
-  static constexpr uint64_t IS_SYM = 1ULL << 63;
-  // Since we use the top two bits to determine whether something is symbolic,
-  // we cannot represent symbolic indices that are large enough to use those
-  // bits. This will probably never happen.
-  static constexpr uint64_t MAX_SYM_IDX = 1ULL << 62;
-  // Since 0b10... is reserved for symbolic indices, any integers lower than
-  // this value would collide with our representation.
-  static constexpr int64_t MIN_INT = -1LL & static_cast<int64_t>(~(1ULL << 62));
+  static constexpr uint64_t MASK = 1ULL << 63 | 1ULL << 62 | 1ULL << 61;
+  static constexpr uint64_t IS_SYM = 1ULL << 63 | 1ULL << 61;
+  // We must manually translate the bit pattern test into a greater
+  // than test because compiler doesn't figure it out:
+  // https://godbolt.org/z/356aferaW
+  static constexpr int64_t MAX_UNREPRESENTABLE_INT =
+      -1LL & static_cast<int64_t>(~(1ULL << 62));
   int64_t data_;
 };
-
-#undef SKIP_IS_SYMBOLIC_ON_MOBILE
 
 /// Sum of a list of SymInt; accumulates into the c10::SymInt expression
 template <
@@ -239,8 +232,9 @@ inline c10::SymInt multiply_integers(const C& container) {
       container.begin(),
       container.end(),
       c10::SymInt(1),
-      [](c10::SymInt a, c10::SymInt b) { return a * b; });
+      [](const c10::SymInt& a, const c10::SymInt& b) { return a * b; });
 }
 
-C10_API std::ostream& operator<<(std::ostream& os, SymInt s);
+C10_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
+C10_API SymInt operator-(const SymInt& s);
 } // namespace c10

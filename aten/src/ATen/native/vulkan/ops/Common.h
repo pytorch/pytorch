@@ -2,7 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/ATen.h>
+#include <ATen/core/List.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/ops/Tensor.h>
 
@@ -57,6 +58,33 @@ struct Dim4D {
 };
 
 /*
+ * Semantic dimension names for a 1D tensor
+ */
+struct Dim1D {
+  static constexpr uint32_t Length = 1u;
+};
+
+/*
+ * Semantic dimension names for a 2D Convolution kernel.
+ */
+struct DimConv2DKernel {
+  static constexpr uint32_t Width = 1u;
+  static constexpr uint32_t Height = 2u;
+  static constexpr uint32_t InChannels = 3u;
+  static constexpr uint32_t OutChannels = 4u;
+};
+
+/*
+ * The same as the above, except for a 2D Transposed Convolution kernel.
+ */
+struct DimTConv2DKernel {
+  static constexpr uint32_t Width = 1u;
+  static constexpr uint32_t Height = 2u;
+  static constexpr uint32_t OutChannels = 3u;
+  static constexpr uint32_t InChannels = 4u;
+};
+
+/*
  * The functions below safely return the size of the dimension at the N-th
  * innermost index. If the dimensionality of the size array is not sufficient
  * then 1 will be returned. The structs above are intended to be used with
@@ -65,7 +93,7 @@ struct Dim4D {
 template <uint32_t N>
 uint32_t get_dim(const IntArrayRef sizes) {
   const uint32_t dims = sizes.size();
-  return dims < N ? 1 : sizes[dims - N];
+  return dims < N ? 1 : api::utils::safe_downcast<uint32_t>(sizes[dims - N]);
 }
 
 template <uint32_t N>
