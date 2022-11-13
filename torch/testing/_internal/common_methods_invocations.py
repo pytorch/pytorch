@@ -2925,6 +2925,7 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         'nn.functional.max_pool1d': _TestParamsMaxPool1d,
         'nn.functional.max_pool2d': _TestParamsMaxPool2d,
         'nn.functional.max_pool3d': _TestParamsMaxPool3d,
+        'max_pool2d_with_indices_backward': _TestParamsMaxPool2d,
     }
 
     params_generator = params_generator_type_dict[op_info.name]()
@@ -2932,6 +2933,15 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
         yield SampleInput(arg, kwargs=kwargs)
 
+def max_pool2d_backward(*args, kernel_size=(), stride=(), padding=(0,), dilation=(1,), ceil_mode=False, **kwargs):
+    out, indices = torch.nn.functional.max_pool2d_with_indices(
+        *args, kernel_size=kernel_size, stride=stride, padding=padding, dilation=dilation, ceil_mode=ceil_mode, return_indices=True)
+    grad_out = torch.ones_like(out)
+    if stride is None:
+        stride = kernel_size
+    out_b = torch.ops.aten.max_pool2d_with_indices_backward.default(
+        grad_out, *args, kernel_size, stride, padding, dilation, ceil_mode, indices)
+    return out_b
 
 def error_inputs_max_pool1d(op_info, device, **kwargs):
     # Toggle requires_grad because `max_pool1d` has different path
@@ -11567,6 +11577,31 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_max_pool2d,
            sample_inputs_func=sample_inputs_max_pool),
+    OpInfo('max_pool2d_with_indices_backward',
+           op=max_pool2d_backward,
+           # We've defined a custom op, so there's no corresponding aten op
+           aten_name=None,
+           method_variant=None,
+           inplace_variant=None,
+           operator_variant=None,
+           inplace_operator_variant=None,
+           check_batched_gradgrad=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           check_batched_forward_grad=False,
+           assert_jit_shape_analysis=False,
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_max_pool,
+           skips=(
+               # We've defined a custom op here, and we don't handle the case where we receive an out kwarg
+               DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # object has no attribute max_pool2d_with_indices_backward (It's not available on torch -- so expected)
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit')
+           )),
     OpInfo('nn.functional.max_pool3d',
            aten_name='max_pool3d',
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
