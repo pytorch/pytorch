@@ -7,6 +7,7 @@ import re
 import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Union
+from inspect import signature
 
 import torch.nn
 from torch import fx
@@ -109,6 +110,7 @@ class OutputGraph(fx.Tracer):
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
         if self.shape_env:
             from functorch._src import aot_autograd
+
             aot_autograd._enforce_shape_env_passed_in = True
         self.tensor_id_to_sym_shape_ref = {}
         self.intermediary_symbols = {}
@@ -449,7 +451,14 @@ class OutputGraph(fx.Tracer):
                 else ""
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            compiled_fn = self.compiler_fn(gm, self.example_inputs(), shape_env=self.shape_env)
+            if "shape_env" in signature(self.compiler_fn).parameters.keys():
+                compiled_fn = self.compiler_fn(
+                    gm, self.example_inputs(), shape_env=self.shape_env
+                )
+            else:
+                compiled_fn = self.compiler_fn(
+                    gm, self.example_inputs()
+                )
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:

@@ -88,7 +88,7 @@ class AotAutogradStrategy(object):
     """Base class for backend strategies that use AOT Autograd"""
 
     @classmethod
-    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs, shape_env):
+    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs, shape_env=None):
         if count_calls(gm.graph) < 2:
             return gm  # no point for tiny graphs
         return cls(gm, example_inputs, shape_env).verified_candidate()
@@ -144,7 +144,10 @@ class AotNop(AotAutogradStrategy):
         from functorch._src.compilers import debug_nop
 
         return BACKENDS["aot_autograd"](
-            self.gm, self.example_inputs, fw_compiler=debug_nop, shape_env=self.shape_env
+            self.gm,
+            self.example_inputs,
+            fw_compiler=debug_nop,
+            shape_env=self.shape_env,
         )
 
 

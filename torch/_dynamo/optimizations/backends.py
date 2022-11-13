@@ -550,7 +550,6 @@ def cudagraphs_inner(model, inputs, copy_outputs=True):
 
 @create_backend
 def aot_autograd(subgraph, **kwargs):
-    breakpoint()
     def _wrapped_bw_compiler(*args, **kwargs):
         # stop TorchDynamo from trying to compile our generated backwards pass
         return disable(disable(bw_compiler)(*args, **kwargs))
