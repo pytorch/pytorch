@@ -101,13 +101,38 @@ class Guard:
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
 
+    @staticmethod
+    def weakref_to_str(obj_weakref):
+        """
+        This is a workaround of a Python weakref bug.
+
+        `obj_weakref` is instance returned by `weakref.ref`,
+        `str(obj_weakref)` is buggy if the original obj overrides __getattr__, e.g:
+
+            class MyConfig(dict):
+                def __getattr__(self, x):
+                    return self[x]
+
+            obj = MyConfig(offset=5)
+            obj_weakref = weakref.ref(obj)
+            str(obj_weakref)  # raise error: KeyError: '__name__'
+        """
+        if isinstance(obj_weakref, weakref.ReferenceType):
+            obj = obj_weakref()
+            if obj is not None:
+                return f"<weakref at {hex(id(obj_weakref))}; to '{obj.__class__.__name__}' at {hex(id(obj))}>"
+            else:
+                return f"<weakref at {hex(id(obj_weakref))}; dead>"
+        else:
+            return str(obj_weakref)
+
     def __str__(self):
         s = f"""
             {self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__}
             {{
                 'guard_types': {self.guard_types},
                 'code': {self.code_list},
-                'obj_weakref': {self.obj_weakref}
+                'obj_weakref': {self.weakref_to_str(self.obj_weakref)}
                 'guarded_class': {self.guarded_class_weakref}
             }}
             """
