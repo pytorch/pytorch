@@ -789,6 +789,7 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
     "doctests": run_doctests,
+    "inductor/test_torchinductor_opinfo": run_test_ops,
     "test_ops": run_test_ops,
     "test_ops_gradients": run_test_ops,
     "test_ops_fwd_gradients": run_test_ops,
