@@ -16190,13 +16190,14 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_grid_sample,
         supports_gradgrad=False,
         gradcheck_nondet_tol=1e-15),
+    # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
         "grid_sampler_2d",
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sampler_2d,
-        supports_gradgrad=True,
+        supports_gradgrad=False,
         gradcheck_nondet_tol=1e-15),
     OpInfo(
         "argwhere",
