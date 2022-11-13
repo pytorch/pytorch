@@ -1838,6 +1838,61 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 5)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_for_loop_graph_break(self):
+        def inner(x):
+            return torch.sin(x)
+
+        def fn(x):
+            for _ in range(100):
+                inner(x)
+                torch._dynamo.graph_break()
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        x = torch.randn(4)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    def test_for_loop_graph_break_before(self):
+        # Checks that the backedge is calculated correctly
+        def inner(x):
+            return torch.sin(x)
+
+        def fn(x):
+            torch._dynamo.graph_break()
+            for _ in range(100):
+                inner(x)
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        x = torch.randn(4)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 100)
+
+    def test_while_loop_graph_break(self):
+        # Repro of tacotron2 cache_size_recompilation
+        def inner(x):
+            return torch.sin(x)
+
+        def fn(x):
+            i = 20
+            while i > 10:
+                x = inner(x)
+                i -= 1
+                torch._dynamo.graph_break()
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        x = torch.randn(4)
+        opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
