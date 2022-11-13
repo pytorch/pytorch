@@ -1792,6 +1792,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(a)
         self.assertTrue(same(ref, res))
 
+
     def test_tokenization(self):
         from collections import UserDict
 
@@ -1821,6 +1822,27 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref = tokenization(x)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+
+    def test_modules(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(4, 3)
+
+            def forward(self, inp):
+                res = torch.zeros(3, 3)
+                for mod in self.modules():
+                    res += self.fc(inp)
+                return res
+
+        mod = Foo()
+        args = (torch.ones(3, 4),)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt, nopython=True)(mod)
+        self.assertTrue(same(mod(*args), opt_mod(*args)))
+        self.assertEqual(cnt.op_count, 5)
+        self.assertEqual(cnt.frame_count, 1)
+
 
 
 if __name__ == "__main__":
