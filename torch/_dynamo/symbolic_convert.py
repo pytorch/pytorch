@@ -257,7 +257,7 @@ class InstructionTranslatorBase(object):
                 "POP_JUMP_IF_TRUE",
                 "POP_JUMP_IF_FALSE",
             ):
-                jump_offset = inst.arg
+                jump_offset = inst.argval
                 if jump_offset < cur_offset:
                     return True
         return False
