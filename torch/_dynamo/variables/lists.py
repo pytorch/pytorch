@@ -330,6 +330,7 @@ class SizeVariable(TupleVariable):
 
     def get_item_dyn(self, tx, arg: VariableTracker):
         from .tensor import DynamicShapeVariable
+        unimplemented("TODO: this logic cause jx_nest_base to fail")
 
         index = arg.as_python_constant()
         if isinstance(index, slice):
