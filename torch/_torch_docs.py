@@ -11595,9 +11595,11 @@ Example::
     torch.return_types.topk(values=tensor([5., 4., 3.]), indices=tensor([4, 3, 2]))
     >>> x = torch.tensor([0, 1] * 9)
     >>> torch.topk(x, 18)
-    torch.return_types.topk(values=tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]), indices=tensor([17,  3,  1,  5,  7, 11, 13, 15,  9,  8,  6, 16,  2, 14,  4, 10,  0, 12]))
+    torch.return_types.topk(values=tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+                            indices=tensor([17,  3,  1,  5,  7, 11, 13, 15,  9,  8,  6, 16,  2, 14,  4, 10,  0, 12]))
     >>> torch.topk(x, 18, stable=True)
-    torch.return_types.topk(values=tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]), indices=tensor([ 1,  3,  5,  7,  9, 11, 13, 15, 17,  0,  2,  4,  6,  8, 10, 12, 14, 16]))
+    torch.return_types.topk(values=tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+                            indices=tensor([ 1,  3,  5,  7,  9, 11, 13, 15, 17,  0,  2,  4,  6,  8, 10, 12, 14, 16]))
 """.format(
         **common_args
     ),
