@@ -28,8 +28,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TestCase,
 )
-
-from .common import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 try:
     try:
