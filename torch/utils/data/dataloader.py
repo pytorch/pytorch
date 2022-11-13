@@ -217,7 +217,7 @@ class DataLoader(Generic[T_co]):
     timeout: float
     sampler: Union[Sampler, Iterable]
     pin_memory_device: str
-    prefetch_factor: int
+    prefetch_factor: Optional[int]
     _iterator : Optional['_BaseDataLoaderIter']
     __initialized = False
 
@@ -228,7 +228,7 @@ class DataLoader(Generic[T_co]):
                  pin_memory: bool = False, drop_last: bool = False,
                  timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
                  multiprocessing_context=None, generator=None,
-                 *, prefetch_factor: int = 2,
+                 *, prefetch_factor: Optional[int] = None,
                  persistent_workers: bool = False,
                  pin_memory_device: str = ""):
         torch._C._log_api_usage_once("python.data_loader")
@@ -240,10 +240,15 @@ class DataLoader(Generic[T_co]):
         if timeout < 0:
             raise ValueError('timeout option should be non-negative')
 
-        if num_workers == 0 and prefetch_factor != 2:
-            raise ValueError('prefetch_factor option could only be specified in multiprocessing.'
-                             'let num_workers > 0 to enable multiprocessing.')
-        assert prefetch_factor > 0
+        if num_workers > 0:
+            if prefetch_factor is None:
+                prefetch_factor = 2
+            elif prefetch_factor < 0:
+                raise ValueError('prefetch_factor option should be non-negative')
+        else:
+            if prefetch_factor is not None:
+                raise ValueError('prefetch_factor option could only be specified in multiprocessing.'
+                                'let num_workers > 0 to enable multiprocessing, otherwise set prefetch_factor to None.')
 
         if persistent_workers and num_workers == 0:
             raise ValueError('persistent_workers option needs num_workers > 0')
