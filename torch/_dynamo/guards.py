@@ -543,7 +543,7 @@ class DynamoGuardPrinter(StrPrinter):
         self.id_to_name_map = id_to_name_map
 
     def _print_Symbol(self, expr) -> str:
-        assert isinstance(expr, sympy.core.symbol.Symbol)
+        assert isinstance(expr, sympy.Symbol)
         if expr == 0:
             return "0"
         if expr == 1:
