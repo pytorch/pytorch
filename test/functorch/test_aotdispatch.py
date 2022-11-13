@@ -973,6 +973,9 @@ aot_autograd_failures = {
     xfail('cholesky'),
     xfail('linalg.cholesky'),
 
+    # Given input size: (s0xs1x2). Calculated output size: ...
+    skip('max_pool2d_with_indices_backward'),
+
     # Misc
     xfail('to_sparse'),
     xfail('corrcoef'),
