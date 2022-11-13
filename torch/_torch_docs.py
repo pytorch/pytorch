@@ -11552,7 +11552,7 @@ Alias for :func:`torch.nn.functional.softmax`.
 add_docstr(
     torch.topk,
     r"""
-topk(input, k, dim=None, largest=True, sorted=True, *, out=None) -> (Tensor, LongTensor)
+topk(input, k, dim=None, largest=True, sorted=True, stable=False, *, out=None) -> (Tensor, LongTensor)
 
 Returns the :attr:`k` largest elements of the given :attr:`input` tensor along
 a given dimension.
@@ -11560,6 +11560,9 @@ a given dimension.
 If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
 If :attr:`largest` is ``False`` then the `k` smallest elements are returned.
+
+If :attr:`stable` is ``True`` then the sorting routine becomes stable, preserving
+the order of equivalent elements.
 
 A namedtuple of `(values, indices)` is returned with the `values` and
 `indices` of the largest `k` elements of each row of the `input` tensor in the
@@ -11576,6 +11579,8 @@ Args:
            smallest elements
     sorted (bool, optional): controls whether to return the elements
            in sorted order
+    stable (bool, optional): makes the sorting routine stable, which guarantees that the order
+       of equivalent elements is preserved.
 
 Keyword args:
     out (tuple, optional): the output tuple of (Tensor, LongTensor) that can be
@@ -11588,6 +11593,11 @@ Example::
     tensor([ 1.,  2.,  3.,  4.,  5.])
     >>> torch.topk(x, 3)
     torch.return_types.topk(values=tensor([5., 4., 3.]), indices=tensor([4, 3, 2]))
+    >>> x = torch.tensor([0, 1] * 9)
+    >>> torch.topk(x, 18)
+    torch.return_types.topk(values=tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]), indices=tensor([17,  3,  1,  5,  7, 11, 13, 15,  9,  8,  6, 16,  2, 14,  4, 10,  0, 12]))
+    >>> torch.topk(x, 18, stable=True)
+    torch.return_types.topk(values=tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]), indices=tensor([ 1,  3,  5,  7,  9, 11, 13, 15, 17,  0,  2,  4,  6,  8, 10, 12, 14, 16]))
 """.format(
         **common_args
     ),
