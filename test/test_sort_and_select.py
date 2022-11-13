@@ -795,24 +795,28 @@ class TestSortAndSelect(TestCase):
                 x = torch.tensor([0, 1] * ncopies, dtype=dtype)
                 if partial_sort:
                     x = torch.unsqueeze(x, 0)
-                    k = int(ncopies/32)
+                    k = int(ncopies / 32)
                 else:
-                    k = ncopies*2
+                    k = ncopies * 2
                 val, idx = torch.topk(x, k=k, largest=largest, stable=True)
                 if largest:
                     if partial_sort:
                         expected_val = torch.ones((1, k), dtype=dtype)
-                        expected_idx = torch.unsqueeze(torch.arange(start=1, end=k*2, step=2, dtype=torch.int64), 0)
+                        expected_idx = torch.unsqueeze(torch.arange(start=1, end=k * 2, step=2, dtype=torch.int64), 0)
                     else:
-                        expected_val = torch.cat((torch.tensor([1] * int(k/2), dtype=dtype), torch.tensor([0] * int(k/2), dtype=dtype)))
-                        expected_idx = torch.cat((torch.arange(start=1, end=k, step=2, dtype=torch.int64), torch.arange(start=0, end=k, step=2, dtype=torch.int64)))
+                        expected_val = torch.cat((torch.tensor([1] * int(k / 2), dtype=dtype),
+                                                  torch.tensor([0] * int(k / 2), dtype=dtype)))
+                        expected_idx = torch.cat((torch.arange(start=1, end=k, step=2, dtype=torch.int64),
+                                                  torch.arange(start=0, end=k, step=2, dtype=torch.int64)))
                 else:
                     if partial_sort:
                         expected_val = torch.zeros((1, k), dtype=dtype)
-                        expected_idx = torch.unsqueeze(torch.arange(start=0, end=k*2, step=2, dtype=torch.int64), 0)
+                        expected_idx = torch.unsqueeze(torch.arange(start=0, end=k * 2, step=2, dtype=torch.int64), 0)
                     else:
-                        expected_val = torch.cat((torch.tensor([0] * int(k/2), dtype=dtype), torch.tensor([1] * int(k/2), dtype=dtype)))
-                        expected_idx = torch.cat((torch.arange(start=0, end=k, step=2, dtype=torch.int64), torch.arange(start=1, end=k, step=2, dtype=torch.int64)))
+                        expected_val = torch.cat((torch.tensor([0] * int(k / 2), dtype=dtype),
+                                                  torch.tensor([1] * int(k / 2), dtype=dtype)))
+                        expected_idx = torch.cat((torch.arange(start=0, end=k, step=2, dtype=torch.int64),
+                                                  torch.arange(start=1, end=k, step=2, dtype=torch.int64)))
                 self.assertEqual(val, expected_val)
                 self.assertEqual(idx, expected_idx)
 
