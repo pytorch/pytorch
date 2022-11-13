@@ -32,6 +32,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     captured_output,
     tp_transports,
+    skip_if_rocm,
 )
 from torch.testing._internal.common_utils import (
     IS_MACOS,

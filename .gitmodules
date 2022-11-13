@@ -82,10 +82,6 @@
     ignore = dirty
     path = third_party/fmt
     url = https://github.com/fmtlib/fmt.git
-[submodule "third_party/tensorpipe"]
-    ignore = dirty
-    path = third_party/tensorpipe
-    url = https://github.com/pytorch/tensorpipe.git
 [submodule "third_party/cudnn_frontend"]
 	path = third_party/cudnn_frontend
 	url = https://github.com/NVIDIA/cudnn-frontend.git
@@ -133,3 +129,8 @@
 [submodule "third_party/flash-attention"]
 	path = third_party/flash-attention
 	url = https://github.com/Dao-AILab/flash-attention.git
+[submodule "third_party/tensorpipe"]
+	ignore = dirty
+	path = third_party/tensorpipe
+	url = https://github.com/ROCm/tensorpipe.git
+	branch = tp_rocm_60
