@@ -273,11 +273,13 @@ class WrapperBackend:
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
         needs_shape_env = False
-        # This is temporary, hopefully, while we decide if we want the 
+        # This is temporary, hopefully, while we decide if we want the
         # user provided compiler signature to have a **kwargs
         if shape_env and "shape_env" in signature(self.backend).parameters.keys():
             needs_shape_env = True
-            self.candidate = self.backend(copy_gm, self.original_example_inputs, shape_env)
+            self.candidate = self.backend(
+                copy_gm, self.original_example_inputs, shape_env
+            )
         else:
             self.candidate = self.backend(copy_gm, self.original_example_inputs)
 
@@ -290,7 +292,7 @@ class WrapperBackend:
         # if verify_correctness=True
         try:
             correct = self.gm.forward(*self.example_inputs)
-            # This is temporary, hopefully, while we decide if we want the 
+            # This is temporary, hopefully, while we decide if we want the
             # user provided compiler signature to have a **kwargs
             if needs_shape_env:
                 breakpoint()

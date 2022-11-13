@@ -6,8 +6,10 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Union
 from inspect import signature
+from typing import Any, Callable, Dict, List, Optional, Union
+
+from functorch._src import aot_autograd
 
 import torch.nn
 from torch import fx
@@ -36,7 +38,7 @@ from .variables.tensor import (
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
-from functorch._src import aot_autograd
+
 log = logging.getLogger(__name__)
 
 
@@ -456,9 +458,7 @@ class OutputGraph(fx.Tracer):
                     gm, self.example_inputs(), shape_env=self.shape_env
                 )
             else:
-                compiled_fn = self.compiler_fn(
-                    gm, self.example_inputs()
-                )
+                compiled_fn = self.compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
