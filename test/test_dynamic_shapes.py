@@ -21,7 +21,7 @@ import os
 from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, sym_float, guard_int, SymNode, sym_sqrt, sym_int
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, sym_float, guard_int, SymNode, sym_sqrt, sym_int, to_node
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch import SymInt
 
@@ -497,9 +497,9 @@ class TestSymNumberMagicMethods(TestCase):
 
         def get_sym_inp(inp):
             if isinstance(inp, int):
-                return torch.SymInt(seed_node.to_node(inp))
+                return torch.SymInt(to_node(seed_node, inp))
             else:
-                return torch.SymFloat(seed_node.to_node(inp))
+                return torch.SymFloat(to_node(seed_node, inp))
 
         def maybe_xfail(inp1, inp2):
             key = (fn, type(inp1).__name__, type(inp2).__name__)

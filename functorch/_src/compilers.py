@@ -145,36 +145,6 @@ def debug_nop(fx_g: fx.GraphModule, _) -> Callable:
     """
     return DebugInterpreter(fx_g).run
 
-class DebugInterpreter(fx.Interpreter):
-    def run_node(self, n):
-        # TODO: This will fail once we start caching in AOTAutograd
-        # again, because we need to remap SymInts to their new values
-        # in the presence of dynamism
-        r = super().run_node(n)
-        if 'val' in n.meta:
-            n_vals, n_spec = pytree.tree_flatten(n.meta['val'])
-            r_vals, r_spec = pytree.tree_flatten(r)
-            assert n_spec == r_spec, f"{n_spec} != {r_spec}"
-            assert len(n_vals) == len(r_vals), f"{len(n_vals)} != {len(r_vals)}"
-            for i, nv, rv in zip(range(len(n_vals)), n_vals, r_vals):
-                if not isinstance(rv, torch.Tensor):
-                    continue
-                assert nv.size() == rv.size(), f"output {i}: {nv.size()} != {rv.size()}"
-                assert nv.dtype == rv.dtype, f"output {i}: {nv.dtype} != {rv.dtype}"
-                assert torch._prims_common.check_significant_strides(nv, rv), f"output {i}: {nv.stride()} != {rv.stride()}"
-        return r
-
-
-@make_boxed_compiler
-def debug_nop(fx_g: fx.GraphModule, _) -> Callable:
-    """
-    Returns a (slow) interpreter over the FX graph module that also checks
-    various debugging properties (e.g., that tracing strides matched real
-    strides.)
-    """
-    return DebugInterpreter(fx_g).run
-
-
 @make_boxed_compiler
 def simple_ts_compile(fx_g, _):
     strip_overloads(fx_g)
