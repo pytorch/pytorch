@@ -194,7 +194,7 @@ class RecordLoadStore(V.KernelBuilder):  # type: ignore[name-defined]
     def index_expr(self, index: sympy.Expr, dtype) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._index_exprs.add(IndexExprDep(canonicalized_index, canonicalized_size))
-        return self._Expr(format_string="index_expr({}, {})", args=[index, dtype])
+        return self._Expr(format_string="index_expr({}, {})", inputs=[index, dtype])
 
 
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:

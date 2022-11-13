@@ -133,13 +133,16 @@ class KernelBuilder:
 
         return inner
 
-    @classmethod
-    def masked(cls, mask, body, other):
+    def masked(self, mask, body, other):
         body = body()
         return self._Expr(
             format_string="masked({}, {}, {})",
             inputs=[mask, body, other],
         )
+
+    @staticmethod
+    def indirect_indexing(index_var):
+        return sympy_symbol(str(index_var))
 
     @classmethod
     def _init_cls(cls):
