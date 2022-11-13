@@ -406,6 +406,21 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     # running_mean and running_var are required in evaluation mode (training: False) but not in training mode
     yield SampleInput(make_arg((1, 2, 3)), args=(None, None, None, None), kwargs={'training': True})
 
+def sample_inputs_softmax_backward_data(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    cases = [
+        ((S,), 0),
+        ((S, S), 0),
+        ((S, M, S), -1),
+    ]
+    input_dtypes = [dtype]
+    if dtype == torch.float and device == 'cuda':
+        input_dtypes += [torch.float16]
+
+    for (shape, dim), input_dtype in product(cases, input_dtypes):
+        yield SampleInput(make_arg(shape), make_arg(shape), dim, input_dtype)
 
 def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
@@ -1173,7 +1188,7 @@ def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
     cases = ((), (S, S, S), (S,))
 
     for shape in cases:
-        yield(SampleInput(make_arg(shape)))
+        yield SampleInput(make_arg(shape))
 
 # TODO: add reduction kwargs
 def sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
@@ -3745,8 +3760,8 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
 
     def shape(size, rank, with_batch_channel=True):
         if with_batch_channel:
-            return tuple([N, C] + ([size] * rank))
-        return tuple([size] * rank)
+            return torch.Size([N, C] + ([size] * rank))
+        return torch.Size([size] * rank)
 
     make_arg = partial(make_tensor, device=device, dtype=dtype,
                        requires_grad=requires_grad, low=-1, high=1)
@@ -4401,29 +4416,127 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), rep_dim)
 
 
-def sample_inputs_narrow_copy(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, *, is_narrow, **kwargs):
     shapes_and_args = (
-        ((S, S, S), (1, 2, 2)),
-        ((S, S, S), (-1, 2, 2)),
-        ((S, S, S), (1, 0, 0)),
-        ((S, S, S), (-1, 0, 0)),
-        ((S, S, S), (2, 1, 2)),
+        ((S, S, S), 1, 2, 2),
+        ((S, S, S), -1, 2, 2),
+        ((S, S, S), 1, 0, 0),
+        ((S, S, S), -1, 0, 0),
+        ((S, S, S), 2, 1, 2),
     )
 
-    for shape, args in shapes_and_args:
+    for shape, dim, start, length in shapes_and_args:
         tensor = make_tensor(shape, dtype=dtype, device=device, low=None, high=None,
                              requires_grad=requires_grad)
-        yield SampleInput(tensor, args=args)
+        yield SampleInput(tensor, dim, start, length)
+        # narrow also accepts the start argument being a Tensor
+        if is_narrow:
+            yield SampleInput(tensor, dim, torch.tensor(start), length)
 
+def reference_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, *, is_narrow, **kwargs):
+    yield from sample_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, is_narrow=is_narrow, **kwargs)
 
-def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
-    '''
-    sample_inputs_narrow accepts the same inputs as narrow_copy, in addition
-    narrow also accepts `start` argument to be a Tensor.
-    '''
-    for sample in sample_inputs_narrow_copy(op_info, device, dtype, requires_grad, **kwargs):
-        yield sample
-        yield SampleInput(sample.input, args=(sample.args[0], torch.tensor(sample.args[1]), sample.args[2]))
+    shapes_and_args = (
+        # 1-dim
+        ((M,), 0, 0, 0),    # 0 elems from the left
+        ((M,), -1, -1, 0),  # 0 elems from the right
+        ((M,), 0, 5, 3),    # 3 elems from the left
+        ((M,), 0, -5, 2),   # 2 elems from the right
+        ((M,), -1, 0, M),   # M elems from the left
+        ((M,), 0, -M, M),   # M elems from the right
+
+        # 2-dim
+        ((M, S), 1, 0, 0),    # dim 1, 0 elems from the left
+        ((S, M), -2, -1, 0),  # dim 0, 0 elems from the right
+        ((L, S), 1, 2, 3),    # dim 1, 3 elems from the left
+        ((L, S), -1, 3, 2),   # dim 1, 2 elems from the left
+        ((M, L), 0, 0, M),    # dim 0, M elems from the left
+        ((M, L), -1, -L, L),  # dim 1, L elems from the right
+
+        # 3-dim
+        ((L, M, S), 2, 0, 0),    # dim 2, 0 elems from the left
+        ((M, S, L), -1, -1, 0),  # dim 2, 0 elems from the right
+        ((S, L, M), 2, 0, M),    # dim 2, M elems from the left
+        ((L, S, M), -1, -M, M),  # dim 2, M elems from the right
+        ((S, L, M), 1, 0, 0),    # dim 1, 0 elems from the left
+        ((S, L, M), 0, 2, 1),    # dim 0, 1 elem from the left
+        ((M, S, M), -1, -5, 4),  # dim 2, 4 elems from the right
+    )
+
+    for shape, dim, start, length in shapes_and_args:
+        tensor = make_tensor(shape, dtype=dtype, device=device, low=None, high=None,
+                             requires_grad=requires_grad)
+        yield SampleInput(tensor, dim, start, length)
+        # narrow also accepts the start argument being a Tensor
+        if is_narrow:
+            yield SampleInput(tensor, dim, torch.tensor(start), length)
+
+def error_inputs_narrow_narrow_copy(op_info, device, *, is_narrow, is_ref):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # 0-dim
+    yield ErrorInput(SampleInput(make_arg(()), 0, 0, 1),
+                     error_type=RuntimeError,
+                     error_regex=r"narrow\(\) cannot be applied to a 0-dim tensor\.")
+
+    # out of bounds dim
+    if not is_narrow and not is_ref and torch.device(device).type == 'cpu':
+        # narrow_copy_dense_cpu_out
+        yield ErrorInput(SampleInput(make_arg((M, S, L)), 3, 0, 0),
+                         error_type=RuntimeError,
+                         error_regex=r"Expected dim < static_cast<int64_t>\(self_sizes.size\(\)\) to be true, but got false\.")
+    else:
+        yield ErrorInput(SampleInput(make_arg((M, S, L)), 3, 0, 0),
+                         error_type=IndexError,
+                         error_regex=r"Dimension out of range \(expected to be in range of \[-3, 2\], but got 3\)")
+    # out of bounds dim (negative)
+    yield ErrorInput(SampleInput(make_arg((L, S, M)), -4, 0, 0),
+                     error_type=IndexError,
+                     error_regex=r"Dimension out of range \(expected to be in range of \[-3, 2\], but got -4\)")
+
+    # out of bounds start
+    if not is_narrow and not is_ref and torch.device(device).type == 'cpu':
+        # narrow_copy_dense_cpu_out
+        yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, M + 1, 0),
+                         error_type=RuntimeError,
+                         error_regex=r"start \(11\) \+ length \(0\) exceeds dimension size \(10\)\.")
+    else:
+        yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, M + 1, 0),
+                         error_type=IndexError,
+                         error_regex=r"Dimension out of range \(expected to be in range of \[-10, 9\], but got 11\)")
+    # out of bounds start (negative)
+    yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, -M - 1, 0),
+                     error_type=IndexError,
+                     error_regex=r"Dimension out of range \(expected to be in range of \[-10, 9\], but got -11\)")
+
+    # out of bounds length
+    yield ErrorInput(SampleInput(make_arg((S, L, M)), 2, 0, M + 1),
+                     error_type=RuntimeError,
+                     error_regex=r"start \(0\) \+ length \(11\) exceeds dimension size \(10\)\.")
+    # out of bounds length (negative)
+    if not is_narrow and not is_ref and torch.device(device).type == 'cpu':
+        # narrow_copy_dense_cpu_out
+        yield ErrorInput(SampleInput(make_arg((M,)), 0, 0, -1),
+                         error_type=RuntimeError,
+                         error_regex=r"start \(0\) \+ length \(-1\) exceeds dimension size \(10\)\.")
+    else:
+        yield ErrorInput(SampleInput(make_arg((M,)), 0, 0, -1),
+                         error_type=RuntimeError,
+                         error_regex=r"narrow\(\): length must be non-negative\.")
+
+    # Test Tensor overload that was added for XLA. Start must be an 0-dim
+    # integral Tensor. narrow_copy doesn't have this overload.
+    # https://github.com/pytorch/pytorch/issues/31558
+    if is_narrow:
+        # *1-dim* integral Tensor
+        yield ErrorInput(SampleInput(make_arg((L, M, S)), 1, make_arg(S, dtype=torch.int), 2),
+                         error_type=RuntimeError,
+                         error_regex=r"start must be an 0-dim integral Tensor\.")
+
+        # 0-dim *bool* Tensor (bools are not allowed)
+        yield ErrorInput(SampleInput(make_arg((L, M, S)), -3, make_arg((), dtype=torch.bool), 3),
+                         error_type=RuntimeError,
+                         error_regex=r"start must be an 0-dim integral Tensor\.")
 
 
 def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
@@ -5141,6 +5254,28 @@ def sample_inputs_view_as_real(op_info, device, dtype, requires_grad, **kwargs):
     sizes = ((S, S), ())
     return (SampleInput(make_arg(size)) for size in sizes)
 
+def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
+    make_arg = partial(make_tensor, dtype=torch.float32, device=device)
+
+    if is_ref:
+        error_float = "Expected both inputs to be Half, Float or Double tensors but got torch.float32 and torch.int32"
+        error_dtype = "Expected object of scalar type torch.float32 but got scalar type torch.float64 for second argument"
+        error_out = "Expected out tensor to have dtype torch.complex128 but got torch.complex64 instead"
+    else:
+        error_float = "Expected both inputs to be Half, Float or Double tensors but got Float and Int"
+        error_dtype = "Expected object of scalar type Float but got scalar type Double for second argument"
+        error_out = "Expected object of scalar type ComplexDouble but got scalar type ComplexFloat for argument 'out'"
+
+    yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=torch.int)),
+                     error_type=RuntimeError, error_regex=error_float)
+
+    yield ErrorInput(SampleInput(make_arg(M, S), make_arg(M, S, dtype=torch.float64)),
+                     error_type=RuntimeError, error_regex=error_dtype)
+
+    yield ErrorInput(SampleInput(make_arg(M, S, dtype=torch.float64), make_arg(M, S, dtype=torch.float64),
+                                 out=make_arg(M, S, dtype=torch.complex64)),
+                     error_type=RuntimeError, error_regex=error_out)
+
 def sample_inputs_prod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
         # shrink values to be in the interval [-1, +1] for better precision in gradgradcheck
@@ -5674,9 +5809,9 @@ def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=Fals
 
     if list_args:
         cases = (
-            ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],)),
-            ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], 2),),
-            ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], -2),)
+            ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]),)),
+            ((S, S, S), (torch.Size([int(S / 2), S - int(S / 2) * 2, int(S / 2)]), 2),),
+            ((S, S, S), (torch.Size([int(S / 2), S - int(S / 2) * 2, int(S / 2)]), -2),)
         )
     else:
         cases = (  # type: ignore[assignment]
@@ -5691,10 +5826,10 @@ def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=Fals
 def sample_inputs_split_with_sizes(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    cases = (((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],)),
-             ((S, S, S), ([int(S / 3), S - int(S / 3), 0],)),
-             ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)], 2)),
-             ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)], -2)),
+    cases = (((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]),)),
+             ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3), 0]),)),
+             ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]), 2)),
+             ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]), -2)),
              )
 
     for shape, args in cases:
@@ -6070,7 +6205,7 @@ def sample_inputs_resize_ops(op_info, device, dtype, requires_grad, **kwargs):
         else:
             raise ValueError("sample_inputs_resize_ops is being used with incorrect operator")
 
-        yield(SampleInput(make_arg(shape, requires_grad=requires_grad), args=args))
+        yield SampleInput(make_arg(shape, requires_grad=requires_grad), args=args)
 
 def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -6326,7 +6461,7 @@ def sample_inputs_expand(op_info, device, dtype, requires_grad, **kwargs):
 
     for case in cases:
         shape, args = case
-        yield(SampleInput(make_arg(shape), args=(args, )))
+        yield SampleInput(make_arg(shape), args=(args,))
 
 def sample_inputs_conversion(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -6349,8 +6484,8 @@ def sample_inputs_expand_as(op_info, device, dtype, requires_grad, **kwargs):
              )
 
     for shape, shape_other in cases:
-        yield(SampleInput(make_arg(shape, requires_grad=requires_grad),
-                          args=(make_arg(shape_other, requires_grad=False), )))
+        yield SampleInput(make_arg(shape, requires_grad=requires_grad),
+                          args=(make_arg(shape_other, requires_grad=False),))
 
 
 def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
@@ -6468,8 +6603,8 @@ def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
         inputs.append(mixed)
 
     for input_t, as_tuple in product(inputs, [False, True]):
-        yield(SampleInput(input_t.clone().requires_grad_(requires_grad),
-                          kwargs=dict(as_tuple=as_tuple)))
+        yield SampleInput(input_t.clone().requires_grad_(requires_grad),
+                          kwargs=dict(as_tuple=as_tuple))
 
 def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -6480,7 +6615,7 @@ def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
 
     for case in cases:
         shape, args = case
-        yield(SampleInput(make_arg(shape), args=args))
+        yield SampleInput(make_arg(shape), args=args)
 
 def reference_inputs_chunk(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_chunk(op, device, dtype, requires_grad, **kwargs)
@@ -6558,6 +6693,15 @@ def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
         yield SampleInput(make_arg(case), p=p, training=training)
     yield SampleInput(make_arg(case))
 
+def sample_inputs_dropout_backward(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_mask = partial(make_tensor, device=device, dtype=torch.bool, requires_grad=False)
+
+    cases = ((S, S, S, S), (S,), ())
+    scale_vals = [0.0, 1.0, 2.0]
+
+    for case, scale in product(cases, scale_vals):
+        yield SampleInput(make_arg(case), make_mask(case), scale)
 
 def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape):
@@ -7997,7 +8141,7 @@ def reference_flatten(input, start_dim=0, end_dim=-1):
     in_shape = input.shape
     in_rank = len(in_shape)
     for d in start_dim, end_dim:
-        if not((in_rank == 0 and d in (-1, 0)) or -in_rank <= d < in_rank):
+        if not ((in_rank == 0 and d in (-1, 0)) or -in_rank <= d < in_rank):
             raise IndexError(f"Dimension out of range (expected to be in range of [{-in_rank}, {in_rank-1}], but got {d}")
     end_dim = end_dim if end_dim >= 0 else in_rank + end_dim
     start_dim = start_dim if start_dim >= 0 else in_rank + start_dim
@@ -8326,7 +8470,7 @@ op_db: List[OpInfo] = [
            variant_test_name='decomposed',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16] if(CUDA11OrLater or TEST_WITH_ROCM) else []),
+                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -9021,6 +9165,7 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False,
+                    error_inputs_func=error_inputs_complex,
                     skips=(
                         # Test doesn't account for complex's type promotion semantics
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
@@ -10455,6 +10600,22 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=True),
+    OpInfo(
+        '_softmax_backward_data',
+        op=torch.ops.aten._softmax_backward_data,
+        aten_name='_softmax_backward_data',
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        sample_inputs_func=sample_inputs_softmax_backward_data,
+        assert_autodiffed=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+        ),
+    ),
     # `softmin` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     # https://github.com/pytorch/pytorch/issues/68752
@@ -11510,8 +11671,8 @@ op_db: List[OpInfo] = [
            operator_variant=None,
            inplace_operator_variant=None,
            check_batched_gradgrad=False,
-           supports_forward_ad=False,
-           supports_fwgrad_bwgrad=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types_and(torch.bfloat16),
@@ -11523,7 +11684,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # FX failed to normalize op - add the op to the op_skip list.
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-
+               # object has no attribute max_pool2d_with_indices_backward (It's not available on torch -- so expected)
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit')
            )),
     OpInfo('nn.functional.max_pool3d',
            aten_name='max_pool3d',
@@ -12463,7 +12625,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_narrow,
+           sample_inputs_func=partial(sample_inputs_narrow_narrow_copy, is_narrow=True),
+           reference_inputs_func=partial(reference_inputs_narrow_narrow_copy, is_narrow=True),
+           error_inputs_func=partial(error_inputs_narrow_narrow_copy, is_narrow=True, is_ref=False),
            skips=(
                # Use of .item()
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
@@ -12479,15 +12643,16 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=False,
            supports_autograd=False,
            # https://github.com/pytorch/pytorch/issues/86931
-           sample_inputs_func=sample_inputs_narrow_copy,
+           sample_inputs_func=partial(sample_inputs_narrow_narrow_copy, is_narrow=False),
+           reference_inputs_func=partial(reference_inputs_narrow_narrow_copy, is_narrow=False),
+           error_inputs_func=partial(error_inputs_narrow_narrow_copy, is_narrow=False, is_ref=False),
            skips=(
                # https://github.com/pytorch/pytorch/issues/84577
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # Not implemented
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace', device_type='cuda'),
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace', device_type='cuda'),
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta', device_type='cuda'),
+               # Lazy tensor failures: mutating and aliasing ops should all have codegen'd kernels
+               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
+               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
            )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
@@ -15825,6 +15990,22 @@ op_db: List[OpInfo] = [
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs, inplace=True)),
     OpInfo(
+        "native_dropout_backward",
+        op=torch.ops.aten.native_dropout_backward.default,
+        aten_name="native_dropout_backward",
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_dropout_backward,
+        skips=(
+            DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+            # Lazy tensor failures
+            DecorateInfo(unittest.skip('Skipped!'), 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+            DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
+            DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
+        ),
+    ),
+    OpInfo(
         "nn.functional.dropout2d",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs),
@@ -17861,6 +18042,17 @@ python_ref_db = [
             DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )
     ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs._conversions.complex",
+        torch_opinfo_name="complex",
+        error_inputs_func=partial(error_inputs_complex, is_ref=True),
+        # prims.empty_strided.default does not support nvfuser
+        supports_nvfuser=False,
+        skips=(
+            # Test doesn't account for complex's type promotion semantics
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+        )
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.double",
         torch_opinfo_name="double",
@@ -18125,22 +18317,20 @@ python_ref_db = [
         "_refs.narrow",
         torch_opinfo_name="narrow",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
-    ),
-    PythonRefInfo(
-        "_refs.nn.functional.group_norm",
-        torch_opinfo_name="nn.functional.group_norm",
-        supports_nvfuser=False,
-        validate_view_consistency=False,
+        error_inputs_func=partial(error_inputs_narrow_narrow_copy, is_narrow=True, is_ref=True),
     ),
     PythonRefInfo(
         "_refs.narrow_copy",
         torch_opinfo_name="narrow_copy",
         supports_out=True,
         supports_nvfuser=False,
+        error_inputs_func=partial(error_inputs_narrow_narrow_copy, is_narrow=False, is_ref=True),
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.group_norm",
+        torch_opinfo_name="nn.functional.group_norm",
+        supports_nvfuser=False,
+        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",
