@@ -4,9 +4,9 @@ import re
 import subprocess
 
 from .constants import (API_BLAS, API_C10, API_CAFFE2, API_DRIVER, API_FFT,
-                        API_PYTORCH, API_RAND, API_ROCTX, API_RTC, API_RUNTIME,
-                        API_SPARSE, CONV_CACHE, CONV_CONTEXT, CONV_D3D9,
-                        CONV_D3D10, CONV_D3D11, CONV_DEF, CONV_DEVICE,
+                        API_PYTORCH, API_PYT_EXT, API_RAND, API_ROCTX, API_RTC,
+                        API_RUNTIME, API_SPARSE, CONV_CACHE, CONV_CONTEXT,
+                        CONV_D3D9, CONV_D3D10, CONV_D3D11, CONV_DEF, CONV_DEVICE,
                         CONV_DEVICE_FUNC, CONV_EGL, CONV_ERROR, CONV_EVENT,
                         CONV_EXEC, CONV_GL, CONV_GRAPHICS, CONV_INCLUDE,
                         CONV_INCLUDE_CUDA_MAIN_H, CONV_INIT, CONV_JIT,
@@ -634,6 +634,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("cub/device/device_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_scan.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("nvToolsExt.h", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
+        ("tensorpipe/tensorpipe_cuda.h", ("tensorpipe/tensorpipe_hip.h", CONV_INCLUDE, API_PYT_EXT)),
     ]
 )
 

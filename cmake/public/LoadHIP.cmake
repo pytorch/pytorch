@@ -299,6 +299,9 @@ if(HIP_FOUND)
     message("ROCm version < 4.1; disablng asserts")
   endif()
 
+  # Enabling HIP language support
+  enable_language(HIP)
+
   if(HIP_COMPILER STREQUAL clang)
     set(hip_library_name amdhip64)
   else()
