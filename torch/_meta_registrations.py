@@ -1984,6 +1984,36 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
 
 
+legacy_contiguous_memory_format = torch.contiguous_format
+
+
+# From aten/src/ATen/native/cuda/RNN.cu
+def checkLSTMBackwardSizes(grad_hy, grad_cy, cx, cy, workspace):
+    defined_grad = grad_hy if grad_hy is not None else grad_cy
+    check(defined_grad.dim() == 2, lambda: "")
+    exp_size = defined_grad.size()
+    if grad_hy is not None:
+        check(grad_hy.size() == exp_size, lambda: "")
+    if grad_cy is not None:
+        check(grad_cy.size() == exp_size, lambda: "")
+    check(cx.size() == exp_size, lambda: "")
+    check(cy.size() == exp_size, lambda: "")
+    check(workspace.dim() == 2, lambda: "")
+    check(workspace.numel() == exp_size[0] * exp_size[1] * 4, lambda: "")
+
+
+# From aten/src/ATen/native/cuda/RNN.cu
+@register_meta(aten._thnn_fused_lstm_cell_backward_impl.default)
+def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has_bias):
+    if grad_hy is None and grad_cy is None:
+        return None, None, None
+    checkLSTMBackwardSizes(grad_hy, grad_cy, cx, cy, workspace)
+    grad_gates = torch.empty_like(workspace, memory_format=legacy_contiguous_memory_format)
+    grad_cx = torch.empty_like(cx, memory_format=legacy_contiguous_memory_format)
+    grad_bias = grad_gates.sum(0, keepdim=False) if has_bias else None
+    return grad_gates, grad_cx, grad_bias
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
