@@ -248,7 +248,7 @@ class DataLoader(Generic[T_co]):
         else:
             if prefetch_factor is not None:
                 raise ValueError('prefetch_factor option could only be specified in multiprocessing.'
-                                'let num_workers > 0 to enable multiprocessing, otherwise set prefetch_factor to None.')
+                                 'let num_workers > 0 to enable multiprocessing, otherwise set prefetch_factor to None.')
 
         if persistent_workers and num_workers == 0:
             raise ValueError('persistent_workers option needs num_workers > 0')
