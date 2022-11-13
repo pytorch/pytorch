@@ -373,11 +373,6 @@ class BuiltinVariable(VariableTracker):
             )
         return super().call_function(tx, args, kwargs)
 
-    def _dynamic_args(self, *args, **kwargs):
-        return any([isinstance(x, DynamicShapeVariable) for x in args]) or any(
-            [isinstance(x, DynamicShapeVariable) for x in kwargs.values()]
-        )
-
     def _call_min_max(self, tx, a, b):
         if self.tensor_args(a, b):
             if not isinstance(a, variables.TensorVariable):
