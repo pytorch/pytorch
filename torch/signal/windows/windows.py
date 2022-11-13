@@ -398,7 +398,7 @@ Computes the Hamming window.
 The Hamming window is defined as follows:
 
 .. math::
-    w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right),
+    w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{M - 1} \right),
     """,
     r"""
 
@@ -472,8 +472,8 @@ Computes the Hann window.
 The Hann window is defined as follows:
 
 .. math::
-    w[n] = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{N - 1} \right)\right] =
-    \sin^2 \left( \frac{\pi n}{N - 1} \right),
+    w[n] = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{M - 1} \right)\right] =
+    \sin^2 \left( \frac{\pi n}{M - 1} \right),
     """,
     r"""
 
