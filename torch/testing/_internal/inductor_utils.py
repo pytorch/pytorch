@@ -6,6 +6,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     TEST_WITH_ROCM,
 )
+import torch
 
 HAS_CPU = False
 try:
