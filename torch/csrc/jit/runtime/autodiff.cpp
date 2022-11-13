@@ -37,7 +37,7 @@ void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
 bool needTrimGrad(Node* n) {
   static OperatorSet need_trim_grad_ops = {
       "aten::kthvalue(Tensor self, int k, int dim, bool keepdim) -> (Tensor, Tensor)",
-      "aten::topk(Tensor self, int k, int dim, bool largest, bool sorted) -> (Tensor, Tensor)",
+      "aten::topk(Tensor self, int k, int dim, bool largest, bool sorted, bool stable) -> (Tensor, Tensor)",
       "aten::max_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
       "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)"};
   if (n->isMemberOf(need_trim_grad_ops)) {
