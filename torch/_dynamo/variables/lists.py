@@ -329,34 +329,14 @@ class SizeVariable(TupleVariable):
         return super(SizeVariable, self).call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
-        from .tensor import DynamicShapeVariable
-        unimplemented("TODO: this logic cause jx_nest_base to fail")
-
+        """
+        Almost identical to getitem_const but bypasses clone
+        As we want to produce SizeVariable or an item's variable directly vs
+        another TupleVariable
+        """
         index = arg.as_python_constant()
         if isinstance(index, slice):
-
-            def _dynamo_get_item_lambda(target, index):
-                return torch.Size.__getitem__(target, index)
-
-            parent_proxy = self.as_proxy()
-            proxy = tx.output.create_proxy(
-                "call_function",
-                _dynamo_get_item_lambda,
-                *proxy_args_kwargs([self, arg], {}),
-                current_tx=tx,
-            )
-            items = self.items[index]
-
-            def _unpack_into_example(item):
-                if isinstance(item, DynamicShapeVariable):
-                    return item.dyn_shape
-                return item.as_python_constant()
-
-            # Mirror the indexing into example_value for downstream correctness
-            proxy.node.meta["example_value"] = parent_proxy.node.meta["example_value"][
-                index
-            ]
-            return SizeVariable(items, proxy=proxy).add_options(arg, self)
+            return SizeVariable(self.items[index]).add_options(arg, self)
         else:
             assert isinstance(index, int)
             return self.items[index].add_options(arg, self)
