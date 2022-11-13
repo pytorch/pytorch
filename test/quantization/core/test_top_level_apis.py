@@ -73,7 +73,6 @@ class TestQConfig(TestCase):
     def test_reduce_range_qat(self) -> None:
         for backend, reduce_ranges in self.REDUCE_RANGE_DICT.items():
             for version in range(2):
-                print(backend)
                 qconfig = torch.ao.quantization.get_default_qat_qconfig(backend, version)
 
                 fake_quantize_activ = qconfig.activation()
