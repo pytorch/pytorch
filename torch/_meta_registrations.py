@@ -1893,30 +1893,31 @@ def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
     return self
 
 
-@register_meta(aten.upsample_nearest2d.vec)
-def upsample_nearest2d_vec(input, output_size, scale_factors):
-    mem_format = utils.suggest_memory_format(input)
-    spatial_dimensions = input.dim() - 2
+def multiply_integers(vs):
+    r = 1
+    for v in vs:
+        r *= v
+    return r
 
-    input_shape = input.shape
-    if output_size is not None:
-        assert scale_factors is None
-        out_size = output_size
-    elif scale_factors is not None:
-        assert output_size is None
-        out_size = []
-        for i in range(spatial_dimensions):
-            sym_float = (input_shape[i + 2] / 1) * scale_factors[i]
-            assert sym_float >= 0
-            out_size.append(math.floor(sym_float))
 
-    output_height = out_size[0]
-    output_width = out_size[1]
-    nbatch = input_shape[0]
-    channels = input_shape[1]
-    return input.new_empty((nbatch, channels, output_height, output_width)).to(
-        memory_format=mem_format
-    )
+def upsample_2d_common_check(input_size, output_size):
+    check(len(output_size) == 2, lambda: f"It is expected output_size equals to 2, but got size {len(output_size)}")
+    check(len(input_size) == 4, lambda: f"It is expected input_size equals to 4, but got size {len(input_size)}")
+
+    output_height, output_width = output_size
+    nbatch, channels, input_height, input_width = input_size
+
+    check(input_height > 0 and input_width > 0 and output_height > 0 and output_width > 0, f"Input and output sizes should be greater than 0, but got input (H: {input_height}, W: {input_width}), output (H: {output_height}), W: {output_width})")
+
+    return (nbatch, channels, output_height, output_width)
+
+
+@register_meta(aten.upsample_nearest2d.default)
+def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
+    full_output_size = upsample_2d_common_check(input.size(), output_size)
+    check(input.numel() != 0 or multiply_integers(input.size()[1:]),
+        lambda: "Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}")
+    return input.new_empty(full_output_size).to(memory_format=utils.suggest_memory_format(input))
 
 
 @register_meta([aten.sort.default, aten.sort.stable])

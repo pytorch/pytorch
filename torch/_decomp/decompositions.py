@@ -1816,12 +1816,18 @@ def get_scale_value(scales, idx):
         return None
     return scales[idx]
 
+@torch.ops.aten.upsample_nearest2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+def upsample_nearest2d_vec(input, output_size, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+    return torch.ops.aten.upsample_nearest2d.default(input, osize, scale_h, scale_w)
+
 @torch.ops.aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
-    # TODO: don't directly dispatch like this
     return torch.ops.aten.upsample_bilinear2d.default(input, osize, align_corners, scale_h, scale_w)
 
 @register_decomposition(torch.ops.aten.upsample_bilinear2d.default)
