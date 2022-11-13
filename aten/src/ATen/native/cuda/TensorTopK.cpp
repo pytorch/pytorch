@@ -1,3 +1,4 @@
+#include <iostream>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/TensorTopK.h>
 
@@ -48,9 +49,13 @@ bool should_use_sort(const Tensor& self, int64_t dim) {
 
 TORCH_IMPL_FUNC(topk_out_cuda)
   (const Tensor& self,
-   int64_t k, int64_t dim, bool largest, bool sorted,
+   int64_t k, int64_t dim, bool largest, bool sorted, bool stable,
    const Tensor& values,
    const Tensor& indices) {
+
+  std::cout << "================ stable: " << stable << std::endl;
+  TORCH_CHECK(!stable, "stable=True is not implemented on CUDA yet.");
+
   TensorArg topK_arg{values, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{self, "self", 3};
   checkAllSameGPU(__func__, {topK_arg, indices_arg, input_arg});
 

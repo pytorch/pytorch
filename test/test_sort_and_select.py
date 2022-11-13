@@ -780,10 +780,17 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(val.size(), torch.Size([2, 0]))
         self.assertEqual(idx.size(), torch.Size([2, 0]))
 
+    @onlyCUDA
+    @dtypes(*all_types())
+    def test_stable_topk_fails_on_CUDA(self, device, dtype):
+        x = torch.tensor([1, 0, 1, 0], dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "stable=True is not implemented on CUDA yet."):
+            torch.topk(x, k=1, stable=True)
+
     @onlyCPU
     @dtypes(*all_types())
     def test_topk_stable(self, dtype):
-        def test_topk_stable(largest, partial_sort):
+        def topk_stable_(largest, partial_sort):
             for ncopies in ([128, 1280, 12800]):
                 x = torch.tensor([0, 1] * ncopies, dtype=dtype)
                 if partial_sort:
@@ -812,7 +819,7 @@ class TestSortAndSelect(TestCase):
         use_largest = [True, False]
         use_partial_sort = [True, False]
         for largest, partial_sort in product(use_largest, use_partial_sort):
-            test_topk_stable(largest, partial_sort)
+            topk_stable_(largest, partial_sort)
 
     def _test_unique_scalar_empty(self, dtype, device, f):
         # test scalar
