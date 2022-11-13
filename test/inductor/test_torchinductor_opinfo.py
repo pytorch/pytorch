@@ -127,35 +127,12 @@ inductor_skips["cpu"] = {
 }
 
 inductor_skips["cuda"] = {
-    # flaky
-    "__rdiv__": {b8, f16, f32, f64, i32, i64},
-    "masked.prod": {f16, f32, f64},
-    "linalg.vander": {f32, f64},
-    "sparse.sampled_addmm": {f32, f64},
-    "broadcast_tensors": {f16, f32, f64},
-    "dsplit": {f16, f32, f64},
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
     "jiterator_4inputs_with_extra_args": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
-    # Disabled on migration to core
-    "linalg.pinv.singular": {f32, f64},
-    "linalg.householder_product": {f32},
-    # These might be passing now?
-    "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.conv_transpose3d": {f16},
-    "max.reduction_with_dim": {i32, i64},
-    "min.reduction_with_dim": {i32, i64},
-    "linalg.lu": {f32, f64},
-    "lu_unpack": {f32, f64},
-    "native_batch_norm": {f16, f32, f64},
-    "native_layer_norm": {f16, f32, f64},
-    # Issues on sm86 periodic job (complex numbers)
-    "cdouble": {b8, f16, f32, f64, i32, i64},
-    "cfloat": {b8, f16, f32, f64, i32, i64},
-    "randint": {b8, f16, f32, f64, i32, i64},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -278,6 +255,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "mH": {b8, f16, f32, f64, i32, i64},
     "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
+    "__rdiv__": {b8, f16, f32, f64, i32, i64},
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
@@ -285,6 +263,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
     "chalf": {b8, f16, f32, f64, i32, i64},
+    "cfloat": {b8, f16, f32, f64, i32, i64},
+    "cdouble": {b8, f16, f32, f64, i32, i64},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
     "complex": {f16, f32, f64},
@@ -316,17 +296,20 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
     "linalg.eigvalsh": {f32, f64},
+    "linalg.householder_product": {f32},
+    "linalg.lu": {f32, f64},
     "linalg.lstsq": {f32, f64},
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
+    "linalg.pinv.singular": {f32, f64},
     "lu_unpack": {f32, f64},
     "masked.argmax": {f16, f32, f64, i32},
     "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
-    "max.reduction_with_dim": {b8, i32, i64},
-    "min.reduction_with_dim": {b8, i32, i64},
+    "max.reduction_with_dim": {b8},
+    "min.reduction_with_dim": {b8},
     "multinomial": {f16, f32, f64},
     "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
@@ -349,6 +332,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64},
     "sgn": {f16, f32, f64},
+    "sparse.sampled_addmm": {f32, f64},
     "stft": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
