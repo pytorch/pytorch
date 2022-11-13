@@ -23,14 +23,15 @@ from torch.testing._internal.common_utils import (
     dtype_abbrs,
     run_tests,
     skipCUDAMemoryLeakCheckIf,
+    skipIfCrossRef,
+    skipIfTorchDynamo,
     suppress_warnings,
-    TEST_WITH_ROCM,
     TestCase,
 )
 
-try:
-    from torch._inductor.utils import has_triton
+from .common import HAS_CPU, HAS_CUDA
 
+try:
     try:
         from .test_torchinductor import check_model, check_model_cuda
     except ImportError:
@@ -40,8 +41,6 @@ except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
     raise
-
-TEST_WITH_TRITON = has_triton() and not TEST_WITH_ROCM
 
 bf16 = torch.bfloat16  # not tested
 f64 = torch.float64
@@ -123,6 +122,7 @@ inductor_skips = defaultdict(dict)
 
 inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
+    "linalg.ldl_factor": {f32, f64},  # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
 }
 
@@ -191,6 +191,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
+    "linalg.pinv.singular": {f32, f64},
     "logdet": {f32, f64},
     "masked.norm": {f16},
     "masked.normalize": {f16},
@@ -357,7 +358,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "kron": {f16},
     "nanquantile": {f32, f64},
     "native_batch_norm": {f16, f32, f64},
-    "native_layer_norm": {f16, f32, f64},
     "nn.functional._scaled_dot_product_attention": {f16},
     "nn.functional.avg_pool2d": {f16, f32, f64},
     "nn.functional.batch_norm.without_cudnn": {f16},
@@ -442,7 +442,10 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-    @skipCUDAIf(not TEST_WITH_TRITON, "Skipped! Triton not found")
+    @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
+    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipIfTorchDynamo("Test uses dynamo already")
+    @skipIfCrossRef()
     @_ops(op_db[START:END])
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
     def test_comprehensive(self, device, dtype, op):
