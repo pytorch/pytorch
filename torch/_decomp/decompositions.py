@@ -1111,7 +1111,14 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     out = alpha * torch.mm(mat1, mat2)
     if beta == 0:
         return out
-    return beta * self + out
+
+    # The output of aten.addmm is contiguous, we need to match this behavior in the decomposition.
+    # The original implementation 'beta * self + out' would return a strided tensor if `self` is strided.
+    # We thus use `out`, the output of torch.mm, which is always contiguous, as the first argument for addition.
+    # This is relying on TensorIterator's behavior that it takes higher precedence on the stride of first input.
+    # Alternative, we can write `(beta * self + out).contiguous()`, but it introduces another copy in some cases.
+    # This implementation is not ideal, and we should revisit this when we have a better solution.
+    return out + beta * self
 
 
 # This computes the mean and variance along the specifized normalization dims,
@@ -1129,37 +1136,6 @@ def normalize(input, norm_dims, eps):
 
     out = (input - mean) * rstd
     return out, mean, rstd
-
-
-@register_decomposition(aten.native_group_norm.default)
-def native_group_norm(
-    input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
-    N: int,
-    C: int,
-    HxW: int,
-    group: int,
-    eps: float,
-) -> Tuple[Tensor, Tensor, Tensor]:
-    orig_shape = input.shape
-    input = input.view(N, group, C // group, HxW)
-    reduction_dims = [2, 3]
-    out, mean, rstd = normalize(input, reduction_dims, eps)
-    mean = _squeeze_multiple(mean, reduction_dims)
-    rstd = _squeeze_multiple(rstd, reduction_dims)
-    out = out.view(orig_shape)
-    if weight is not None:
-        weight = _unsqueeze_to_dim(weight, out.dim() - 1)
-        out = out * weight
-    if bias is not None:
-        bias = _unsqueeze_to_dim(bias, out.dim() - 1)
-        out = out + bias
-
-    out = out.to(dtype=input.dtype)
-    mean = mean.to(dtype=input.dtype)
-    rstd = rstd.to(dtype=input.dtype)
-    return (out, mean, rstd)
 
 
 @register_decomposition(aten.native_group_norm_backward)
@@ -1879,6 +1855,11 @@ def upsample_bilinear2d_vec(
     q1 = torch.mul(v1, xscale1) + torch.mul(v2, xscale2)
     q2 = torch.mul(v3, xscale1) + torch.mul(v4, xscale2)
     result = torch.mul(q1, yscale1) + torch.mul(q2, yscale2)
+
+    # convert output to correct memory format, if necessary
+    input_memory_format = utils.suggest_memory_format(input)
+    result = result.contiguous(memory_format=input_memory_format)
+
     return result
 
 
@@ -2280,9 +2261,7 @@ def matmul(tensor1, tensor2):
         t2_is_matrix = t2.dim() == 2
         if t2_is_matrix:
             output_shape.append(t2.shape[1])
-        # HACK: We need reshape with symint support
-        t1 = t1.contiguous()
-        t1_folded = t1.view(folded_dim1, sizes_1[-1])
+        t1_folded = t1.reshape(folded_dim1, sizes_1[-1])
         if t2_is_matrix:
             # FIXME This path always does an unnecessary copy when transpose == True as the returned
             # result from BLAS is already C-transposed
@@ -2315,15 +2294,11 @@ def matmul(tensor1, tensor2):
         expand_batch_product = prod(expand_batch_portion)
 
         # HACK: We need reshape with symint support
-        tensor1_expanded = (
-            tensor1.expand(tensor1_expand_size)
-            .contiguous()
-            .view(expand_batch_product, n, m1)
+        tensor1_expanded = tensor1.expand(tensor1_expand_size).reshape(
+            expand_batch_product, n, m1
         )
-        tensor2_expanded = (
-            tensor2.expand(tensor2_expand_size)
-            .contiguous()
-            .view(expand_batch_product, m2, p)
+        tensor2_expanded = tensor2.expand(tensor2_expand_size).reshape(
+            expand_batch_product, m2, p
         )
 
         output_shape = expand_batch_portion

@@ -143,7 +143,7 @@ class MetaConverter:
         if t.is_sparse:
             weak_st = None
         else:
-            weak_st = StorageWeakRef(t.storage())
+            weak_st = StorageWeakRef(t._typed_storage())
         tensor_ref_key = WeakTensorRefKey(t)
 
         def del_ten():
@@ -179,13 +179,9 @@ class MetaConverter:
         # Use a Weak Ref to s in order to not leak memory
         swr = StorageWeakRef(s)
         if swr not in self.storage_memo:
-            self.storage_memo[swr] = (
-                callback(
-                    lambda: torch.empty(s.size(), dtype=torch.uint8, device="meta")
-                )
-                .storage()
-                .untyped()
-            )
+            self.storage_memo[swr] = callback(
+                lambda: torch.empty(s.size(), dtype=torch.uint8, device="meta")
+            )._storage()
         return self.storage_memo[swr]
 
     # This function assumes that it's possible to do the conversion
@@ -362,7 +358,7 @@ class MetaConverter:
                                 # format here
                                 r = r.clone(memory_format=torch.preserve_format)
 
-                    s = t.storage().untyped()
+                    s = t._storage()
                     swr = StorageWeakRef(s)
                     if (
                         swr not in self.storage_memo
@@ -370,7 +366,7 @@ class MetaConverter:
                         and r.storage_offset() == storage_offset
                     ):
                         # You're normal and happy, install the fresh storage into the memo
-                        self.storage_memo[swr] = r.storage().untyped()
+                        self.storage_memo[swr] = r._storage()
                     else:
                         # You're in crazy town; somehow you gave us a tensor
                         # that wasn't a view, but had nonzero storage offset,
