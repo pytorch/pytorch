@@ -312,6 +312,24 @@ class TestPrims(TestCase):
         out = execute(gm, a, b, executor=executor)
         self.assertEqual(out, func(a, b))
 
+    # Verifying fix for
+    # https://github.com/pytorch/pytorch/issues/87236
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_nvprims_div_fake_cpu_scalar(self, device):
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        meta_scalar = torch.zeros((), device="meta")
+        meta_tensor = torch.zeros((3, 3), device="meta")
+
+        with torch._subclasses.fake_tensor.FakeTensorMode() as fake_mode:
+            fake_cpu_scalar = FakeTensor(fake_mode, meta_scalar, torch.device("cpu"))
+            fake_cuda_tensor = FakeTensor(fake_mode, meta_tensor, torch.device("cuda"))
+
+        # This was failing before because nvprims didn't support fake tensors
+        # properly
+        gm = make_fx(lambda a, b: torch.ops.nvprims.div(a, b))(fake_cuda_tensor, fake_cpu_scalar)
+
     @onlyCUDA
     @skipCUDAIfRocm
     @parametrize("mode", ["real", "fake", "symbolic"])
