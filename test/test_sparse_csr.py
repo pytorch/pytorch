@@ -711,7 +711,7 @@ class TestSparseCompressed(TestCase):
                shape((2, 3)),
                'compressed_indices must have dimensionality >= 1 but got 0')
 
-        yield ('compressed/plain_indices mismatch of dimensionalites',
+        yield ('compressed/plain_indices mismatch of dimensionalities',
                tensor([[0, 2, 4]]),
                tensor([0, 1, 0, 2]),
                values([1, 2, 3, 4]),
@@ -719,14 +719,14 @@ class TestSparseCompressed(TestCase):
                'compressed_indices and plain_indices dimensionalities must be equal but got 2 and 1, respectively')
 
         if layout in {torch.sparse_csr, torch.sparse_csc}:
-            yield ('indices and values mismatch of dimensionalites',
+            yield ('indices and values mismatch of dimensionalities',
                    tensor([[0, 2, 4]]),
                    tensor([[0, 1, 0, 2]]),
                    values([1, 2, 3, 4]),
                    shape((2, 3)),
                    r'values must have dimensionality > sum of batch and block dimensionalities \(=1 \+ 0\) but got 1')
         else:
-            yield ('indices and values mismatch of dimensionalites',
+            yield ('indices and values mismatch of dimensionalities',
                    tensor([[0, 2, 4]]),
                    tensor([[0, 1, 0, 2]]),
                    values([1, 2, 3, 4]),
@@ -738,7 +738,7 @@ class TestSparseCompressed(TestCase):
                tensor([0, 1, 0, 2]),
                values([1, 2, 3, 4]),
                (2,),
-               r'tensor dimensionality must be sum of batch, base, and dense dimensionalites \(=0 \+ 2 \+ 0\) but got 1')
+               r'tensor dimensionality must be sum of batch, base, and dense dimensionalities \(=0 \+ 2 \+ 0\) but got 1')
 
         yield ('invalid batchsize',
                tensor([[0, 2, 4]]),

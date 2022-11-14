@@ -1195,8 +1195,10 @@
   device_check: NoCheck
   device_guard: False
 
-- func: broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
+- func: broadcast_to(Tensor(a) self, SymInt[] size) -> Tensor(a)
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: broadcast_to_symint
 
 - func: _sparse_broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
   variants: function
