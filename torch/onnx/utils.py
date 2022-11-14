@@ -1701,7 +1701,8 @@ def _add_onnxscript_fn(
     # calling other ONNXFunction scenario, neither does it here
     onnx_function_list = list()  # type: ignore[var-annotated]
     included_node_func = set()  # type: Set[str]
-    _find_onnxscript_op_recursive(
+    # onnx_function_list and included_node_func are expanded in-place
+    _find_onnxscript_op(
         model_proto.graph, included_node_func, custom_opsets, onnx_function_list
     )
 
@@ -1712,7 +1713,7 @@ def _add_onnxscript_fn(
 
 
 @_beartype.beartype
-def _find_onnxscript_op_recursive(
+def _find_onnxscript_op(
     graph_proto,
     included_node_func: Set[str],
     custom_opsets: Mapping[str, int],
@@ -1721,13 +1722,10 @@ def _find_onnxscript_op_recursive(
     """Recursively iterate ModelProto to find ONNXFunction op as it may contain control flow Op."""
     for node in graph_proto.node:
         node_kind = node.domain + "::" + node.op_type
-        # Recursive needed for control flow nodes: IF/Loop which has inner graph_proto
+        # Recursive is needed for control flow nodes: IF/Loop which has inner graph_proto
         for attr in node.attribute:
             if attr.g is not None:
-                (
-                    onnx_function_list,
-                    included_node_func,
-                ) = _find_onnxscript_op_recursive(
+                _find_onnxscript_op(
                     attr.g, included_node_func, custom_opsets, onnx_function_list
                 )
         # Only custom Op with ONNX function and aten with symbolic_fn should be found in registry
@@ -1848,10 +1846,21 @@ def _should_aten_fallback(
     )
     is_caffe2_build = _C_onnx._CAFFE2_ATEN_FALLBACK
 
-    return name.startswith("aten::") and (
-        ((is_onnx_aten_export or is_aten_fallback_export) and not is_caffe2_build)
-        or (not is_exportable_aten_op and is_aten_fallback_export)
-    )
+    if not name.startswith("aten::"):
+        return False
+
+    if is_caffe2_build:
+        if (
+            is_onnx_aten_export or is_aten_fallback_export
+        ) and not is_exportable_aten_op:
+            return True
+    else:
+        if is_onnx_aten_export or (
+            is_aten_fallback_export and not is_exportable_aten_op
+        ):
+            return True
+
+    return False
 
 
 @_beartype.beartype
