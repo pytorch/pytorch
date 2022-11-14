@@ -767,7 +767,7 @@ std::tuple<Tensor, Tensor> mem_eff_helper(
       compute_log_sumexp,
       is_causal);
   attention = attention.transpose(1,2);
-  return std::make_tuple(std::move(attention), std::move(log_sumexp));
+  return std::make_tuple(std::move(attention), Tensor());
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
