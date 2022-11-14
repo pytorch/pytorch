@@ -3853,12 +3853,12 @@ class TestNLLLoss(TestCase):
 
     # Test softplus
     def test_softplus(self):
-        def helper(shape):
+        def helper(shape, beta=0.5, threshold=0.5):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
-            softplus_result = torch.nn.Softplus(beta=0.5, threshold=0.5)(x)
-            softplus_result_cpu = torch.nn.Softplus(beta=0.5, threshold=0.5)(cpu_x)
+            softplus_result = torch.nn.Softplus(beta=beta, threshold=threshold)(x)
+            softplus_result_cpu = torch.nn.Softplus(beta=beta, threshold=threshold)(cpu_x)
 
             cpu_grad = torch.randn(softplus_result.shape)
             grad = cpu_grad.to('mps')
@@ -3872,6 +3872,8 @@ class TestNLLLoss(TestCase):
         # Test empty shape too
         for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
             helper(shape)
+            helper(shape, beta=0.6, threshold=0.6)  # relu path
+            helper(shape, beta=1, threshold=20)  # softplus path
 
     # Test silu
 
@@ -4278,33 +4280,35 @@ class TestNLLLoss(TestCase):
         helper((2, 3, 3), -1, [1, 2])
 
     def test_embedding_dense_backward(self):
-        def helper(n, d, m):
+        def helper(n, d, m, idx):
             embeddingMPS = nn.Embedding(n, d, max_norm=True, device='mps')
+            emedding_weight = embeddingMPS.weight.detach().cpu()
             W_MPS = torch.randn((m, d), requires_grad=True, device='mps')
-            idx_MPS = torch.tensor([0, 1, 2]).to('mps')
+            idx_MPS = torch.tensor(idx, device='mps')
             a_MPS = embeddingMPS.weight.clone() @ W_MPS.t()  # weight must be cloned for this to be differentiable
             a_MPS.retain_grad()
             b_MPS = embeddingMPS(idx_MPS) @ W_MPS.t()  # modifies weight in-place
             b_MPS.retain_grad()
-            out_MPS = (a_MPS.unsqueeze(0) + b_MPS.unsqueeze(1))
+            out_MPS = (a_MPS.unsqueeze(0) + b_MPS)
             loss_MPS = out_MPS.sigmoid().prod()
             loss_MPS.backward()
 
-            embeddingCPU = nn.Embedding(n, d, max_norm=True, scale_grad_by_freq=True)
+            embeddingCPU = nn.Embedding(n, d, max_norm=True, _weight=emedding_weight)
             W_CPU = W_MPS.to('cpu')
-            idx_CPU = torch.tensor([0, 1, 2])
+            idx_CPU = torch.tensor(idx)
             a_CPU = embeddingCPU.weight.clone() @ W_CPU.t()  # weight must be cloned for this to be differentiable
             a_CPU.retain_grad()
             b_CPU = embeddingCPU(idx_CPU) @ W_CPU.t()  # modifies weight in-place
             b_CPU.retain_grad()
-            out_CPU = (a_CPU.unsqueeze(0) + b_CPU.unsqueeze(1))
+            out_CPU = (a_CPU.unsqueeze(0) + b_CPU)
             loss_CPU = out_CPU.sigmoid().prod()
             loss_CPU.backward()
 
             self.assertEqual(b_CPU.grad, b_MPS.grad)
             self.assertEqual(a_CPU.grad, a_MPS.grad)
 
-        helper(3, 5, 7)
+        helper(3, 5, 7, [0, 1, 2])
+        helper(3, 5, 7, 2)  # test scalar index
 
     # Test pytorch gather
     def test_gather(self):
@@ -6592,8 +6596,7 @@ class TestAdvancedIndexing(TestCase):
             # lots of duplicates interleaved with each other
             delta = torch.empty(i, dtype=torch.float32, device=device).uniform_(-1, 1)
 
-            # cumsum not supported on 'mps', fallback on 'cpu'
-            indices = delta.cpu().cumsum(0).long().to("mps")
+            indices = delta.cumsum(0).long().to("mps")
 
             # abs for int64 is not supported on mps, fallback on 'cpu' to calculate it
             input = torch.randn(indices.cpu().abs().max().to("mps") + 1, device=device)
@@ -7001,7 +7004,7 @@ class TestFallbackWarning(TestCase):
             # On Windows, opening the subprocess with the default CWD makes `import torch`
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
-        self.assertEquals(out, "")
+        self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
         # This can be changed once we actually implement `torch.bincount`
@@ -7220,6 +7223,7 @@ class TestConsistency(TestCase):
         'cos': ['f32', 'i16', 'i32', 'u8', 'i64'],
         'cosh': ['f32', 'i16', 'i32', 'u8', 'i64'],
         'cov': ['f32'],
+        'cumsum': ['f16', 'f32', 'int16', 'int32'],
         'deg2rad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'diag': ['f32', 'i32'],
         'diag_embed': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
@@ -7321,6 +7325,7 @@ class TestConsistency(TestCase):
         'nn.functional.smooth_l1_loss': ['f16', 'f32'],
         'nn.functional.soft_margin_loss': ['f32'],
         'nn.functional.softmin': ['f32'],
+        'nn.functional.softplus': ['f32'],
         'nn.functional.softsign': ['f16', 'f32', 'i16', 'u8'],
         'nn.functional.tanhshrink': ['f32', 'i16', 'i32', 'u8'],
         'nn.functional.threshold': ['f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7447,6 +7452,7 @@ class TestConsistency(TestCase):
         'corrcoef': ['f32'],
         'cos': ['f32'],
         'cosh': ['f32'],
+        'cumsum': ['f16', 'f32'],
         'deg2rad': ['f16', 'f32'],
         'diag': ['f32'],
         'diag_embed': ['f16', 'f32'],
@@ -7520,6 +7526,7 @@ class TestConsistency(TestCase):
         'nn.functional.silu': ['f32'],
         'nn.functional.soft_margin_loss': ['f32'],
         'nn.functional.softmin': ['f32'],
+        'nn.functional.softplus': ['f32'],
         'nn.functional.softsign': ['f16', 'f32'],
         'nn.functional.threshold': ['f32'],
         'nn.functional.triplet_margin_loss': ['f32'],
@@ -7612,7 +7619,6 @@ class TestConsistency(TestCase):
         'nn.functional.huber_loss': [torch.float16],
         'nn.functional.local_response_norm': [torch.int64],
         'nn.functional.padcircular': [torch.uint8],
-        'nn.functional.softplus': [torch.float32],
         'pow': [torch.int64],
         'select_scatter': [torch.uint8],
         'sigmoid': [torch.int64],

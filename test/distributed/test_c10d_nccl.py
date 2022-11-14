@@ -1025,6 +1025,16 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             with self.assertRaisesRegex(RuntimeError, 'Tensors must be contiguous'):
                 dist.send(send_tensor_view, 1)
 
+    @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 1, "NCCL test requires 1 GPU")
+    @skip_if_lt_x_gpu(1)
+    def test_nccl_dist_backend_error(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+
+        # Both rank 0 and 1 will use the same CUDA device resulting in ncclInvalidUsage
+        with self.assertRaises(dist.DistBackendError):
+            dist.broadcast(torch.tensor([1, 2, 3]).cuda(), 0)
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
@@ -2942,6 +2952,28 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
     @skip_if_lt_x_gpu(1)
     def test_collectives(self):
         self._test_collectives(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_allreduce_coalesced(self):
+        self._test_allreduce_coalesced(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_allgather_base(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda"
+        tensor = torch.ones(10, 10, device=torch.device(device))
+        output_tensor = torch.zeros(10, 10, device=torch.device(device))
+        dist.all_gather_into_tensor(output_tensor, tensor)
+        self.assertEqual(output_tensor, tensor)
+
 
 if __name__ == "__main__":
     assert (
