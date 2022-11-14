@@ -222,22 +222,22 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
                         _mm256_permute2f128_ps(a_grouped, b_grouped, 0b0110001)); // 1, 3.   4 bits apart
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ PERMUTE MIRROR ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FLIP ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 static const __m256i mask_float = _mm256_set_epi32(0, 1, 2, 3, 4, 5, 6, 7);
 
 template<>
-inline Vectorized<float> permute_mirror(const Vectorized<float> & v) {
+inline Vectorized<float> flip(const Vectorized<float> & v) {
   return _mm256_permutevar8x32_ps(v, mask_float);
 }
 
 template<>
-inline Vectorized<double> permute_mirror(const Vectorized<double> & v) {
+inline Vectorized<double> flip(const Vectorized<double> & v) {
   return _mm256_permute4x64_pd(v, 27);
 }
 
 template<>
-inline Vectorized<int64_t> permute_mirror(const Vectorized<int64_t> & v) {
+inline Vectorized<int64_t> flip(const Vectorized<int64_t> & v) {
   return _mm256_permute4x64_epi64(v, 27);  // 27 == _MM_SHUFFLE(0, 1, 2, 3)
 }
 
@@ -247,7 +247,7 @@ static const __m256i mask_int8 = _mm256_set_epi8(
 );
 
 template<>
-inline Vectorized<int8_t> permute_mirror(const Vectorized<int8_t> & v) {
+inline Vectorized<int8_t> flip(const Vectorized<int8_t> & v) {
   auto reversed = _mm256_shuffle_epi8(v, mask_int8);
   return _mm256_permute2x128_si256(reversed, reversed, 1);
 }

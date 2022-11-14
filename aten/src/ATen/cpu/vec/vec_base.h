@@ -989,7 +989,7 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 }
 
 template <typename T>
-inline Vectorized<T> permute_mirror(const Vectorized<T> & data) {
+inline Vectorized<T> flip(const Vectorized<T> & data) {
   static constexpr int size = Vectorized<T>::size();
   T output[size];
   T buffer[size];

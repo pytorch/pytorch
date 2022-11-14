@@ -489,9 +489,9 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
       for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
         auto out1 = Vec::loadu(data[1] + i * strides[1]);
         auto out2 = Vec::loadu(data[1] + (i + Vec::size()) * strides[1]);
-        // permute data: 1234 -> 4321
-        out1 = permute_mirror(out1);
-        out2 = permute_mirror(out2);
+        // flip the vector: 1234 -> 4321
+        out1 = flip(out1);
+        out2 = flip(out2);
         out1.store(data[0] - (i + Vec::size() - 1) * stride0);
         out2.store(data[0] - (i + 2 * Vec::size() - 1) * stride0);
       }
@@ -524,18 +524,14 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
         });
     });
   } else {
-    // Special case: horizontal flip with vectorization and input is contiguous
+    // Special case: horizontal flip with vectorization and input is contiguous and uint8
     // Context: horizontal flip leads to strides[0] < 0 and
     // thus is_contiguous condition is not satisfied and non-vectorized code path is taken
+    // However, manual vectorization is slower auto-vectorization for large dtypes like double, long
     auto output_strides = iter.strides(0);
     auto input_strides = iter.strides(1);
-    if (iter.ndim() > 1 && output_strides[0] < 0 && input_strides[0] == iter.element_size(1)) {
-
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
-        [&iter] {
-          cpu_hflip_vec<scalar_t>(iter);
-      });
-
+    if (iter.ndim() > 1 && output_strides[0] < 0 && input_strides[0] == iter.element_size(1) && iter.dtype() == kByte) {
+      cpu_hflip_vec<uint8_t>(iter);
     } else {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
           [&iter] { cpu_kernel_vec(iter,
