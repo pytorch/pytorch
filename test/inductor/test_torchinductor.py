@@ -11,6 +11,7 @@ import typing
 import unittest
 import weakref
 from unittest.mock import patch
+
 import numpy as np
 
 import torch
@@ -653,7 +654,7 @@ class CommonTemplate:
 
     def test_sgn_extremal(self):
         def fn(a):
-            return torch.sgn(a),
+            return (torch.sgn(a),)
 
         self.common(fn, [torch.tensor([np.nan, np.inf, -np.inf, 0])])
 
