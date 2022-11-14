@@ -6578,7 +6578,7 @@
     CPU: dense_to_mkldnn
   autogen: to_mkldnn.out
 
-- func: mkldnn_reorder_conv2d_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1) -> Tensor
+- func: mkldnn_reorder_conv2d_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1, int[]? input_size=None) -> Tensor
   variants: function
   python_module: nn
   dispatch:

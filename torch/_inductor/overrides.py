@@ -73,6 +73,7 @@ class ConvUnary2d(nn.Conv2d):
         self,
         conv: nn.Module,
         unary: nn.Module,
+        input_size: list,
     ):
         super(ConvUnary2d, self).__init__(
             conv.in_channels,
@@ -87,12 +88,23 @@ class ConvUnary2d(nn.Conv2d):
             conv.weight.device,
             conv.weight.dtype,
         )
-        self._update_module_params(conv, unary)
+        self._update_module_params(conv, unary, input_size)
 
-    def _update_module_params(self, conv, unary):
+    def _update_module_params(self, conv, unary, input_size):
         self.__dict__ = copy.deepcopy(conv.__dict__)
         self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
             unary
+        )
+        self.weight = torch.nn.Parameter(
+            torch._C._nn.mkldnn_reorder_conv2d_weight(
+                self.weight.to_mkldnn(),
+                self.padding,
+                self.stride,
+                self.dilation,
+                self.groups,
+                input_size,
+            ),
+            requires_grad=self.weight.requires_grad,
         )
 
     def _conv_forward(self, input, weight, bias):
@@ -133,6 +145,7 @@ class ConvBinary2d(nn.Conv2d):
         self,
         conv: nn.Module,
         binary_op_name: str,
+        input_size: list,
     ):
         super(ConvBinary2d, self).__init__(
             conv.in_channels,
@@ -147,15 +160,26 @@ class ConvBinary2d(nn.Conv2d):
             conv.weight.device,
             conv.weight.dtype,
         )
-        self._update_module_params(conv, binary_op_name)
+        self._update_module_params(conv, binary_op_name, input_size)
 
-    def _update_module_params(self, conv, binary_op_name):
+    def _update_module_params(self, conv, binary_op_name, input_size):
         self.__dict__ = copy.deepcopy(conv.__dict__)
         self.binary_attr = binary_op_name
         self.binary_alpha = None
         self.unary_attr = None
         self.unary_scalars = []
         self.unary_algorithm = None
+        self.weight = torch.nn.Parameter(
+            torch._C._nn.mkldnn_reorder_conv2d_weight(
+                self.weight.to_mkldnn(),
+                self.padding,
+                self.stride,
+                self.dilation,
+                self.groups,
+                input_size,
+            ),
+            requires_grad=self.weight.requires_grad,
+        )
 
     def _update_unary_params(self, unary):
         self.unary_attr, self.unary_scalars, self.unary_algorithm = unary_modules_map[
@@ -206,6 +230,7 @@ class ConvBinaryInplace2d(nn.Conv2d):
         self,
         conv: nn.Module,
         binary_op_name: str,
+        input_size: list,
     ):
         super(ConvBinaryInplace2d, self).__init__(
             conv.in_channels,
@@ -220,15 +245,26 @@ class ConvBinaryInplace2d(nn.Conv2d):
             conv.weight.device,
             conv.weight.dtype,
         )
-        self._update_module_params(conv, binary_op_name)
+        self._update_module_params(conv, binary_op_name, input_size)
 
-    def _update_module_params(self, conv, binary_op_name):
+    def _update_module_params(self, conv, binary_op_name, input_size):
         self.__dict__ = copy.deepcopy(conv.__dict__)
         self.binary_attr = binary_op_name
         self.binary_alpha = None
         self.unary_attr = None
         self.unary_scalars = []
         self.unary_algorithm = None
+        self.weight = torch.nn.Parameter(
+            torch._C._nn.mkldnn_reorder_conv2d_weight(
+                self.weight.to_mkldnn(),
+                self.padding,
+                self.stride,
+                self.dilation,
+                self.groups,
+                input_size,
+            ),
+            requires_grad=self.weight.requires_grad,
+        )
 
     def _update_unary_params(self, unary):
         self.unary_attr, self.unary_scalars, self.unary_algorithm = unary_modules_map[
@@ -325,31 +361,36 @@ class LinearBinary(nn.Linear):
         return y
 
 
-def fused_conv_unary_eval(conv: nn.Module, unary: nn.Module):
+def fused_conv_unary_eval(conv: nn.Module, unary: nn.Module, input_size: list):
     assert not (conv.training), "Fusion only for eval!"
     return ConvUnary2d(
         conv,
         unary,
+        input_size,
     )
 
 
-def fused_conv_binary_eval(conv: nn.Module, binary_op_name: str):
+def fused_conv_binary_eval(conv: nn.Module, binary_op_name: str, input_size: list):
     assert not (conv.training), "Fusion only for eval!"
     return ConvBinary2d(
         conv,
         binary_op_name,
+        input_size,
     )
 
 
-def fused_conv_binary_inplace_eval(conv: nn.Module, binary_op_name: str):
+def fused_conv_binary_inplace_eval(
+    conv: nn.Module, binary_op_name: str, input_size: list
+):
     assert not (conv.training), "Fusion only for eval!"
     return ConvBinaryInplace2d(
         conv,
         binary_op_name,
+        input_size,
     )
 
 
-def fused_binary_unary_eval(conv_binary: nn.Module, unary: nn.Module):
+def fused_binary_unary_eval(conv_binary: nn.Module, unary: nn.Module, input_size: list):
     assert not (conv_binary.training), "Fusion only for eval!"
     # reuse origin conv module, and just update its' unary attr.
     conv_binary._update_unary_params(unary)
@@ -362,7 +403,7 @@ def is_bfloat16_module(m):
     return weight_is_bf16 and bias_is_bf16
 
 
-def fused_linear_unary_eval(linear: nn.Module, unary: nn.Module):
+def fused_linear_unary_eval(linear: nn.Module, unary: nn.Module, input_size: list):
     assert not (linear.training), "Fusion only for eval!"
     return LinearUnary(
         linear,
@@ -370,7 +411,7 @@ def fused_linear_unary_eval(linear: nn.Module, unary: nn.Module):
     )
 
 
-def fused_linear_binary_eval(linear: nn.Module, attr: str):
+def fused_linear_binary_eval(linear: nn.Module, attr: str, input_size: list):
     assert not (linear.training), "Fusion only for eval!"
     linear_binary = LinearBinary(
         linear,
@@ -509,7 +550,12 @@ def fuse_unary(gm: torch.fx.GraphModule):
                     computation_node
                 ):
                     continue
-                fused_module = fuse_func(computation_node, unary_node)
+                computation_node_input_size = (
+                    node.args[0].args[0].meta.get("tensor_meta").shape
+                )
+                fused_module = fuse_func(
+                    computation_node, unary_node, computation_node_input_size
+                )
                 replace_node_module(node.args[0], modules, fused_module)
 
                 node.replace_all_uses_with(node.args[0])
@@ -531,7 +577,10 @@ def _philox_rand_like(input, seed, offset):
 def replace_and_fuse_for_binary(
     computation_node, node, fuse_func, attr, modules, index_node, index_pointwise
 ):
-    fused_module = fuse_func(computation_node, attr)
+    computation_node_input_size = (
+        node.args[index_node].args[0].meta.get("tensor_meta").shape
+    )
+    fused_module = fuse_func(computation_node, attr, computation_node_input_size)
     replace_node_module(node.args[index_node], modules, fused_module)
     node.args[index_node].args = node.args[index_node].args + (
         node.args[index_pointwise],

@@ -102,7 +102,8 @@ class MkldnnConv2d(_MkldnnConvNd):
             self.padding,
             self.stride,
             self.dilation,
-            self.groups)
+            self.groups,
+            None)
         self.bias = state[1].to_mkldnn()
         self.training = state[2]
 

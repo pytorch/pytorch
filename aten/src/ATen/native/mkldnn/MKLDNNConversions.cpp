@@ -88,7 +88,8 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    c10::OptionalArrayRef<int64_t> input_size) {
   if (self.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
@@ -106,16 +107,28 @@ Tensor mkldnn_reorder_conv2d_weight(
     w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});
   }
 
-  auto desc =
-      ideep::convolution_forward::expected_weights_desc(
-          w.get_dims(),
-          w.get_data_type(),
-          {stride.begin(), stride.end()},
-          {padding.begin(), padding.end()},
-          {padding.begin(), padding.end()},
-          {dilation.begin(), dilation.end()},
-          groups,
-          ideep::algorithm::convolution_direct);
+  ideep::dims src_dims = ideep::dims();
+  bool is_channels_last = false;
+  if (input_size.has_value()) {
+    src_dims = input_size.value().vec();
+    // if has input size, we always use channels last.
+    is_channels_last = true;
+  }
+
+  auto desc = ideep::convolution_forward::expected_weights_desc(
+      w.get_dims(),
+      w.get_data_type(),
+      {stride.begin(), stride.end()},
+      {padding.begin(), padding.end()},
+      {padding.begin(), padding.end()},
+      {dilation.begin(), dilation.end()},
+      groups,
+      ideep::algorithm::convolution_direct,
+      ideep::prop_kind::forward,
+      w.get_data_type(),
+      src_dims,
+      ideep::attr_t(),
+      is_channels_last);
   ideep::tensor result;
   result.init(desc);
   result.feed_from(w);

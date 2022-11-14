@@ -38,13 +38,15 @@ void check_mkldnn_binary_fusion_inputs(
     const Tensor& other,
     const Tensor& weight,
     const Tensor& bias) {
-  TORCH_CHECK(
-      input.options().type_equal(weight.options()),
-      "Input type (",
-      input.toString(),
-      ") and weight type (",
-      weight.toString(),
-      ") should be the same");
+  if (!weight.is_mkldnn()) {
+    TORCH_CHECK(
+        input.options().type_equal(weight.options()),
+        "Input type (",
+        input.toString(),
+        ") and weight type (",
+        weight.toString(),
+        ") should be the same");
+  }
   TORCH_CHECK(
       input.options().type_equal(other.options()),
       "Input type (",
