@@ -565,7 +565,7 @@ def aot_autograd(subgraph, **kwargs):
 
     from .. import disable
 
-    return aot_module_simplified(subgraph.model, **kwargs)
+    return aot_module_simplified(subgraph.model, subgraph.example_inputs, **kwargs)
 
 
 def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):

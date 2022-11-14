@@ -493,7 +493,7 @@ def raw_aot_autograd_cudagraphs(model, inputs):
 
     from .. import disable
 
-    return aot_module_simplified(model, **kwargs)
+    return aot_module_simplified(model, inputs, **kwargs)
 
 
 class AotAutogradCudaGraphs(AotAutogradStrategy):

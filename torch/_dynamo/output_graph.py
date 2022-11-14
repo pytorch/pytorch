@@ -429,6 +429,7 @@ class OutputGraph(fx.Tracer):
         name = unique_id("__compiled_fn")
 
         compiled_fn = self.call_user_compiler(gm)
+        
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1

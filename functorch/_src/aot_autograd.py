@@ -22,7 +22,6 @@ from torch.nn.utils import stateless
 from functorch import make_fx
 from torch._dispatch.python import enable_python_dispatcher
 from . import config
-from .guards import _delta_to_eval_guard_func
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
 import sympy
@@ -377,21 +376,12 @@ class AOTConfig:
 
 
 
-def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, shape_env):
-    if shape_env:
-        pre_dispatch_guards = shape_env.guards
-
+def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
 
     if config.debug_graphs:
         print("====== Forward (only) graph ======")
         fw_module.print_readable()
-
-    compiled_guard_expr = None
-    if shape_env:
-        delta = shape_env.guards_not_overlapping(pre_dispatch_guards)
-        if len(delta) > 0:
-            compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env, "args")
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
@@ -403,8 +393,6 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, s
     def new_fn(args):
         nonlocal compiled_fw
         return call_func_with_args(compiled_fw, args, disable_amp=disable_amp)
-
-    new_fn.guards = compiled_guard_expr
 
     return new_fn
 
@@ -426,10 +414,7 @@ def disable_autocast_manager():
     finally:
         del guard
 
-def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, shape_env):
-    if shape_env:
-        pre_dispatch_guards = shape_env.guards
-
+def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     # Deduplicate inputs.  Suppose you have:
     #
     #   [a, b, a, c]
@@ -542,14 +527,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             print("====== Backward graph ======")
             bw_module.print_readable()
 
-        compiled_guard_expr = None
         with track_graph_compiling("forward"):
             compiled_fw_func = aot_config.fw_compiler(fw_module, deduped_flat_args)
-            compiled_fw_func.chained = None
-            if shape_env:
-                delta = shape_env.guards_not_overlapping(pre_dispatch_guards)
-                if len(delta) > 0:
-                    compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env, "args")
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
@@ -610,7 +589,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     def compiled_function(*args):
         return CompiledFunction.apply(*remove_dupe_args(args))
 
-    compiled_function.guards = compiled_guard_expr
     return compiled_function
 
 # NOTE: This is here temporarily until we unify dynamo and functorch configs
@@ -698,12 +676,11 @@ def create_aot_dispatcher_function(
         # crappy version of dispatcher
         # TODO: Do this properly
         if needs_autograd:
-            fn = aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config, shape_env)
+            fn = aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config)
             boxed_fn = make_boxed_func(fn)
-            boxed_fn.guards = fn.guards
             return boxed_fn
         else:
-            return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config, shape_env)
+            return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config)
 
 
 # Inspired by autodidax (thanks!)
@@ -927,7 +904,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
     return AOTModule()
 
-def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
+def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
     like TorchDynamo, the input functions/modules to AOT are static and have
@@ -991,72 +968,19 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             num_params_buffers=params_len,
         )
 
-        compiled_fn = None
+        def compile(fn, *args):
+            return create_aot_dispatcher_function(
+                fn,
+                args,
+                aot_config,
+                shape_env,
+            )
+
+        compiled_fn = compile(fn, *params_flat, *inputs)
+
         @wraps(fn)
         def new_func(*args):
-            nonlocal compiled_fn
-            needs_compile = True
-
-            # Note - [On the state of aot_autograd caching]
-
-            # A single, unified cache at the dynamo layer is much simpler in theory, much harder in practice.
-            # This is because the dynamo cache is accessed at interpreter frame time,
-            # which means that the frame is "done", and dynamo is over, by the time you have called make_fx
-            # (which is the source of new guards). So, we need to either do some complex stuff at
-            # the interpreter level to keep a pointer to that frame around to append guards to it
-            # (recompiling a new check_fn, or having 2 check_fns for guards), or we need to move
-            # the order around of when we call make_fx and when we finish the frame / end the dynamo logic,
-            # which makes either aot_autograd behave very differently from other backends w/r/t lifecycle...
-            # or change our when-we-call-backends lifecycle for all of dynamo
-
-            # To reiterate the options in a nice list:
-
-            # (1) Unified forward cache by refactor dynamo backend eval_frame / convert_frame lifecycle
-            # w/r/t when we call a backend vs finish up a frame. This is a huge refactor, and will change
-            # the entire lifecycle.
-
-            # (2) Unified forward cache by piping back guards in the event they appear, re-opening the
-            # frame-associated compiled check_fn, and recompiling it with new guards. This is brittle and
-            # a major refactor, and also difficult to debug.
-
-            # (3) Fold aot_autograd forward into dynamo, unify the interpreter passes and guard architecture
-            # make make_fx calls for forward, the fake_tensor conversion, and most of the logic in aot_autograd
-            # today that is not handling backwards. THIS IS PROBABLY THE CORRECT LONG TERM STATE OF THINGS.
-
-            # (4) Give aot_autograd its own set of guards, deduped from dynamo, with its own cache and cache invalidation
-            # This is the easiest thing to do now w/r/t refactors vs desired behavior. THIS IS THE CURRENT STATE OF CODE.
-
-            # If we take (3) as long term, and (4) as this, the reconciliation story is partially found in the note
-            # [AOT Autograd Guards Plan]. The shape of things interpret->guard->compile guards->check will be philosophically the same.
-            # After [AOT Autograd Guards Plan], they will be identical and share an implementation. This in turns
-            # opens up a path towards unifying it, most likely by having a world where we have a back compat aot_autograd backend
-            # and a dynamo config to call the equivalent of aot_autograd forward in its primary interpretation loop. We can
-            # then have the entire make_fx logic finished before we call our backend. For guards, this means that there are no more
-            # dual guard caches, as a single interpeter is run against a frame, a single check_fn is produced.
-
-            # A further hot take is that in this world, if aot_autograd forward is pulled up into dynamo, can we potentially
-            # push down aot_autograd backward into inductor, and remove aot_autograd as a layer altogether?
-            if compiled_fn:
-                if compiled_fn.guards:
-                    Eq = sympy.Eq
-                    Ne = sympy.Ne
-                    Mod = sympy.Mod
-                    floor = math.floor
-                    if eval(compiled_fn.guards):
-                        # Guards passed
-                        needs_compile = False
-                else:
-                    # No guards, no need to recompile
-                    needs_compile = False
-
-            if needs_compile:
-                compiled_fn = create_aot_dispatcher_function(
-                    fn,
-                    args,
-                    aot_config,
-                    shape_env,
-                )
-            return compiled_fn(args)
+            return compiled_fn(*args)
         return new_func
 
     fn_call = functional_call
@@ -1072,7 +996,6 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             )
 
     else:
-
         def forward(*args):
             return compiled_f(
                 *params_flat,
