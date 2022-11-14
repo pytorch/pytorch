@@ -1554,7 +1554,7 @@ Node* insertQuantDequantNodes<QuantOpParams>(
 void checkCalculateQParamsResultTypes(const Node* out) {
   TORCH_CHECK(
       out->outputs().size() == 2,
-      "cacluate_qparams should produce output of size 2 (scale, zero_point).");
+      "calculate_qparams should produce output of size 2 (scale, zero_point).");
   Value* scale = out->output(0);
   Value* zp = out->output(1);
   TORCH_CHECK(

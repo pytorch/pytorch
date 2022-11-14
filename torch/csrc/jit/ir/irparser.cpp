@@ -237,7 +237,7 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       auto text = L.expect(TK_NUMBER);
       if (!parse_tensor_constants_) {
         throw ErrorReport(token.range)
-            << "Single-element tensor constant encoutered but "
+            << "Single-element tensor constant encountered but "
             << "`parse_tensor_constants` is set to false " << token.text();
       }
       L.expect('}');

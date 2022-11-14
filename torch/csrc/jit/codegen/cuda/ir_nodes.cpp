@@ -600,7 +600,7 @@ BroadcastOp::BroadcastOp(
           id->isReduction() || id->isStride(),
           "Invalid broadcast op: ",
           id,
-          ". Non-reduction input dim does't match to output.");
+          ". Non-reduction input dim doesn't match to output.");
     }
   }
 
@@ -2060,7 +2060,7 @@ TensorDomain::TensorDomain(
                              : std::move(contiguity)) {
   TORCH_CHECK(
       contiguity_.size() == getMaybeRFactorDomain().size(),
-      "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
+      "Invalid contiguity information provided, incorrect size. Received vector of size ",
       contiguity_.size(),
       " but needed one of size ",
       root_domain_.size());
@@ -2084,7 +2084,7 @@ TensorDomain::TensorDomain(
                              : std::move(contiguity)) {
   TORCH_CHECK(
       contiguity_.size() == getMaybeRFactorDomain().size(),
-      "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
+      "Invalid contiguity information provided, incorrect size. Received vector of size ",
       contiguity_.size(),
       " but needed one of size ",
       root_domain_.size());
@@ -2124,7 +2124,7 @@ TensorDomain::TensorDomain(
                              : std::move(contiguity)) {
   TORCH_CHECK(
       contiguity_.size() == getMaybeRFactorDomain().size(),
-      "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
+      "Invalid contiguity information provided, incorrect size. Received vector of size ",
       contiguity_.size(),
       " but needed one of size ",
       getMaybeRFactorDomain().size());

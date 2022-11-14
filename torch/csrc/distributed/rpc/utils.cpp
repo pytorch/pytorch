@@ -38,7 +38,7 @@ void processRemoteProfiledEvents(
   TORCH_CHECK(
       enabled,
       "Profiler was expected to be enabled. This can happen in callback "
-      " continutations that run in different threads, and the TLS of the "
+      " continuations that run in different threads, and the TLS of the "
       " profiler was not propagated.");
   std::vector<LegacyEvent> events = rpcWithProfilingResp.getProfiledEvents();
   const auto& profilingId = rpcWithProfilingResp.getProfilingId();

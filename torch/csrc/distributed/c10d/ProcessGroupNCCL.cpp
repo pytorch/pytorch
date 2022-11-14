@@ -1120,7 +1120,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
           "[",
           rank_,
           "] is setting up NCCL communicator and "
-          "retreiving ncclUniqueId from [0] via c10d key-value store by key '",
+          "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
           storeKey,
           "', but store->get('",
           storeKey,
@@ -1133,7 +1133,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
               "Unknown exception while [",
               rank_,
               "] is setting up NCCL communicator and "
-              "retreiving ncclUniqueId from [0] via c10d key-value store by key '",
+              "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
               storeKey,
               "'"));
     }

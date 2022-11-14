@@ -466,7 +466,7 @@ Tensor TransformerImpl::generate_square_subsequent_mask(int64_t sz) {
   // Treat 0 dim valid here
   TORCH_CHECK(
       sz >= 0,
-      "Input size must be non-negative to genearte a valid square subsequent mask, but got ",
+      "Input size must be non-negative to generate a valid square subsequent mask, but got ",
       sz);
 
   // check IEEE754 support here since -inf is not guaranteed to be valid on non
@@ -479,7 +479,7 @@ Tensor TransformerImpl::generate_square_subsequent_mask(int64_t sz) {
   // platform
   else {
     TORCH_WARN_ONCE(
-        "IEEE754 is not supporetd on this platform, generate_square_subsequent_mask will fill "
+        "IEEE754 is not supported on this platform, generate_square_subsequent_mask will fill "
         "the mask with smallest float number on this platform instead of -inf");
     return torch::triu(
         torch::full({sz, sz}, std::numeric_limits<float>::lowest()), 1);

@@ -925,7 +925,7 @@ bool PredicateElimination::setReductionInitValue(
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
-        "Incosistent setting of initialization value for t",
+        "Inconsistent setting of initialization value for t",
         tv->name(),
         ". Prev: ",
         existing_val->toString(),

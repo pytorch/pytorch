@@ -95,7 +95,7 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
  *         ]
  *     ]"
  *
- * @param compilation_unit Jit compilcation unit to look up function schema.
+ * @param compilation_unit Jit compilation unit to look up function schema.
  * @param type_ptr A type pointer and it can be possibly any type.
  * @param default_type_str The default string representation. The string can
  * either from type_ptr->str(), type_ptr->annotation_str(), or
