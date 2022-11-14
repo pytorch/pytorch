@@ -27,7 +27,7 @@ namespace tracer {
 std::vector<StackEntry> _pythonCallstack() {
   pybind11::gil_scoped_acquire gil;
   PyFrameObject* frame = PyEval_GetFrame();
-  Py_INCREF(frame);
+  Py_XINCREF(frame);
   std::vector<StackEntry> entries;
 
   while (nullptr != frame) {
