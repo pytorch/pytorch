@@ -1403,7 +1403,8 @@ class ReinterpretView(BaseView):
     layout: "Layout"
 
     def __post_init__(self):
-        self.data = self.data.unwrap_view()
+        if isinstance(self.data, BaseView):
+            self.data = self.data.unwrap_view()
 
     def __str__(self):
         return self.str_helper(
