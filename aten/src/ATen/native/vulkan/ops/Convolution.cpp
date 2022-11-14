@@ -125,7 +125,7 @@ at::Tensor rearrange_weights_dw(const Tensor& weight_in) {
   // reshape to stack the resulting batches vertically
   weight = weight.permute({1, 0, 2, 3}).reshape({4, N4 * C, H * W});
 
-  return weight;
+  return weight.contiguous();
 }
 
 /*
@@ -228,7 +228,7 @@ at::Tensor rearrange_weights_2d(const Tensor& weight_in, bool tconv) {
   // Collapse the outermost dim so that each group of 4 is stacked vertically
   weight = weight.permute({1, 0, 2, 3}).reshape({4, N4 * H, C_aligned * W});
 
-  return weight;
+  return weight.contiguous();
 }
 
 /*
@@ -272,7 +272,7 @@ at::Tensor rearrange_bias(
   bias = bias.reshape({L4, 4}).permute({1, 0});
   bias = bias.reshape({4, 1, L4});
 
-  return bias;
+  return bias.contiguous();
 }
 
 //
@@ -287,7 +287,7 @@ static api::ShaderSource get_shader(
     const Conv2dMethod method,
     const bool transposed,
     const bool quantized) {
-  api::ShaderSource shader;
+  api::ShaderInfo shader;
 
   if (quantized) {
     if (transposed) {
@@ -296,39 +296,36 @@ static api::ShaderSource get_shader(
 
     switch (method) {
       case Conv2dSlidingWindow:
-        shader = VK_KERNEL(quantized_conv2d);
-        return shader;
+        shader = VK_SHADER(quantized_conv2d);
+        break;
       case Conv2dDepthwise:
-        shader = VK_KERNEL(quantized_conv2d_dw);
-        return shader;
+        shader = VK_SHADER(quantized_conv2d_dw);
+        break;
       case Conv2dPointwise:
-        shader = VK_KERNEL(quantized_conv2d_pw_2x2);
-        // Set explicitly for now. In the future, this will be set automatically
-        // by shader codegen.
-        shader.out_tile_size = {2u, 2u, 1u};
-        return shader;
+        shader = VK_SHADER(quantized_conv2d_pw_2x2);
+        break;
+        // todo fail for quantized transposed conv
     }
+    return shader.shader_src;
   }
 
   if (transposed) {
-    shader = VK_KERNEL(conv_transpose2d);
-    return shader;
+    shader = VK_SHADER(conv_transpose2d);
+    return shader.shader_src;
   }
 
   switch (method) {
     case Conv2dSlidingWindow:
-      shader = VK_KERNEL(conv2d);
-      return shader;
+      shader = VK_SHADER(conv2d);
+      break;
     case Conv2dDepthwise:
-      shader = VK_KERNEL(conv2d_dw);
-      return shader;
+      shader = VK_SHADER(conv2d_dw);
+      break;
     case Conv2dPointwise:
-      shader = VK_KERNEL(conv2d_pw_2x2);
-      // Set explicitly for now. In the future, this will be set automatically
-      // by shader codegen.
-      shader.out_tile_size = {2u, 2u, 1u};
-      return shader;
+      shader = VK_SHADER(conv2d_pw_2x2);
+      break;
   }
+  return shader.shader_src;
 }
 
 //
@@ -520,8 +517,8 @@ vTensor pack_weights(
   vTensor v_weight{
       api::context(),
       weight_rearranged.sizes(),
-      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
       weight_arg.options(),
+      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
   if (quantized) {
@@ -545,8 +542,8 @@ vTensor pack_biases(
   vTensor v_bias{
       api::context(),
       bias_rearranged.sizes(),
-      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
       weight.options(),
+      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
   if (quantized) {

@@ -135,7 +135,7 @@ at::Storage createStorageGetType(
     TORCH_INTERNAL_ASSERT(THPDtype_Check(dtype_obj));
     scalar_type = reinterpret_cast<THPDtype*>(dtype_obj)->scalar_type;
 
-    untyped_storage_obj = PyObject_GetAttrString(obj, "_storage");
+    untyped_storage_obj = PyObject_GetAttrString(obj, "_untyped_storage");
     TORCH_INTERNAL_ASSERT(untyped_storage_obj);
     Py_DECREF(untyped_storage_obj);
 
