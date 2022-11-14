@@ -131,18 +131,11 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
-template <typename index_t>
 Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optional<int64_t> output_size) {
 
+  Tensor output;
   using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
-
-  Tensor output;
-
-  AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_mps", [&]() {
-    output = repeat_interleave_common<index_t, compute_cpu<index_t>>(
-        repeat, output_size);
-  });
 
  struct CachedGraph : public MPSCachedGraph
   {
@@ -153,9 +146,11 @@ Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optio
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
+
   @autoreleasepool {
     // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types etc match the earlier created MPSGraph
-    string key = "repeat_interleave_mps:" + getMPSTypeString(self.scalar_type()) + ":" + getMPSShape(repeat);
+    string key = "repeat_interleave_mps:" + getTensorsStringKey({self});
+                               + ":" + getTensorsStringKey({repeat});
 
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
@@ -166,9 +161,10 @@ Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optio
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()), getMPSShape(self));
           MPSGraphTensor* outputTensor = [mpsGraph tileTensor:inputTensor
-                                               withMultiplier:getMPSShape(repeat)
+                                               withMultiplier:repeat
                                                          name:nil];
 
           newCachedGraph->inputTensor_ = inputTensor;
@@ -180,7 +176,7 @@ Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optio
       cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, output_size);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, repeat);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
