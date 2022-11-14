@@ -1060,7 +1060,7 @@ class MultiheadAttention(Module):
         .. note::
             `batch_first` argument is ignored for unbatched inputs.
         """
-        def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
+    def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
                 need_weights: bool = True, attn_mask: Optional[Tensor] = None,
                 average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
         r"""

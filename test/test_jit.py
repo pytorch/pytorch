@@ -15106,8 +15106,8 @@ dedent """
         with torch.no_grad():
             fn_out = torch.nn.functional.multi_head_attention_forward(query, key, value,
                                                                       embed_size, nhead,
-                                                                      None,
-                                                                      None,
+                                                                      multi_head_attn_nn.in_proj_weight,
+                                                                      multi_head_attn_nn.in_proj_bias,
                                                                       multi_head_attn_nn.bias_k,
                                                                       multi_head_attn_nn.bias_v,
                                                                       multi_head_attn_nn.add_zero_attn,
