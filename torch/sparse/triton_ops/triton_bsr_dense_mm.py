@@ -279,24 +279,23 @@ def _run_sparse_rowspace_kernel(
     n_nnz_block_rows = row_idx.size(-1)
     n_block_cols = dense.size(-3)
     max_n_nnz_block_rows, max_n_block_cols = max_grid[:2]
-    grid = (n_nnz_block_rows, n_block_cols)
 
-    for r_start in range(0, n_nnz_block_rows, max_n_nnz_block_rows):
-        r_batch_idx, r_row_idx, r_nnz_per_row, r_nnz_per_row_cumsum = slicer(
-            0,
-            slice(r_start, r_start + max_n_nnz_block_rows),
-            batch_idx,
-            row_idx,
-            nnz_per_row,
-            nnz_per_row_cumsum,
+    for c_start in range(0, n_block_cols, max_n_block_cols):
+        c_dense, c_output = slicer(
+            -3, slice(c_start, c_start + max_n_block_cols), dense, output
         )
-        r_grid = min(n_nnz_block_rows - r_start, max_n_nnz_block_rows)
+        c_grid = min(n_block_cols - c_start, max_n_block_cols)
 
-        for c_start in range(0, n_block_cols, max_n_block_cols):
-            c_dense, c_output = slicer(
-                -3, slice(c_start, c_start + max_n_block_cols), dense, output
+        for r_start in range(0, n_nnz_block_rows, max_n_nnz_block_rows):
+            r_batch_idx, r_row_idx, r_nnz_per_row, r_nnz_per_row_cumsum = slicer(
+                0,
+                slice(r_start, r_start + max_n_nnz_block_rows),
+                batch_idx,
+                row_idx,
+                nnz_per_row,
+                nnz_per_row_cumsum,
             )
-            c_grid = min(n_block_cols - c_start, max_n_block_cols)
+            r_grid = min(n_nnz_block_rows - r_start, max_n_nnz_block_rows)
 
             _bsr_strided_sparse_rowspace_kernel[(r_grid, c_grid)](
                 *blocksize,
