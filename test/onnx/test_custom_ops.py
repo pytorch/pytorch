@@ -4,6 +4,7 @@ import caffe2.python.onnx.backend as c2
 import numpy as np
 import onnx
 import onnx_test_common
+import pytorch_test_common
 import torch
 import torch.utils.cpp_extension
 from test_pytorch_onnx_caffe2 import do_export
@@ -11,7 +12,7 @@ from torch.onnx import symbolic_helper
 from torch.testing._internal import common_utils
 
 
-class TestCustomOps(common_utils.TestCase):
+class TestCustomOps(pytorch_test_common.ExportTestCase):
     def test_custom_add(self):
         op_source = """
         #include <torch/script.h>
@@ -56,7 +57,7 @@ class TestCustomOps(common_utils.TestCase):
         np.testing.assert_array_equal(caffe2_out[0], model(x, y).cpu().numpy())
 
 
-class TestCustomAutogradFunction(common_utils.TestCase):
+class TestCustomAutogradFunction(pytorch_test_common.ExportTestCase):
     opset_version = 9
     keep_initializers_as_inputs = False
     onnx_shape_inference = True
@@ -130,7 +131,7 @@ class TestCustomAutogradFunction(common_utils.TestCase):
         onnx_test_common.run_model_test(self, model, input_args=(x,))
 
 
-class TestExportAsContribOps(common_utils.TestCase):
+class TestExportAsContribOps(pytorch_test_common.ExportTestCase):
     opset_version = 14
     keep_initializers_as_inputs = False
     onnx_shape_inference = True
