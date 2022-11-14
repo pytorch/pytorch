@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import textwrap
 import unittest
 
@@ -104,7 +105,7 @@ def triton_accuracy_error(x):
     return f"{x} + 1"
 """
 
-DEBUG_DIR = "/tmp/_torchdynamo_debug_/"
+DEBUG_DIR = os.path.join(tempfile.gettempdir(), "_torchdynamo_debug_")
 
 # Search for the name of the first function defined in a code string.
 def get_fn_name(code):
@@ -167,6 +168,8 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
             ["python3", "-c", code], capture_output=True, cwd=DEBUG_DIR
         )
 
+        print(proc.stderr.decode("utf-8"))
+
         repro_dir_match = re.search(
             r"(\S+)minifier_launcher.py", proc.stderr.decode("utf-8")
         )
@@ -202,6 +205,7 @@ torch._dynamo.config.debug_dir_root = "{DEBUG_DIR}"
             capture_output=True,
             cwd=repro_dir,
         )
+        print(launch_proc.stderr.decode("utf-8"))
 
         return launch_proc, launch_code
 
@@ -215,6 +219,7 @@ torch._dynamo.config.debug_dir_root = "{DEBUG_DIR}"
         repro_proc = subprocess.run(
             ["python3", repro_file], capture_output=True, cwd=repro_dir
         )
+        print(repro_proc.stderr.decode("utf-8"))
 
         return repro_proc, repro_code
 
