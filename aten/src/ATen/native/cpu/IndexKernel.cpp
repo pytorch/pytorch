@@ -530,19 +530,29 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
     // However, manual vectorization is slower auto-vectorization for large dtypes like double, long
     auto output_strides = iter.strides(0);
     auto input_strides = iter.strides(1);
-    if (iter.ndim() > 1 && output_strides[0] < 0 && input_strides[0] == iter.element_size(1) && iter.dtype() == kByte) {
-      cpu_hflip_vec<uint8_t>(iter);
-    } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
-          [&iter] { cpu_kernel_vec(iter,
-            [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {
-              return a;
-          },
-            [](Vectorized<scalar_t> a, Vectorized<scalar_t> /*dummy input*/) -> Vectorized<scalar_t> {
-              return a;
-          });
-      });
+    if (iter.ndim() > 1 && output_strides[0] < 0 && input_strides[0] == iter.element_size(1)) {
+      auto iter_dtype = iter.dtype();
+      if (iter_dtype == kByte) {
+        cpu_hflip_vec<uint8_t>(iter);
+        return;
+      } else if (iter_dtype == kFloat) {
+        cpu_hflip_vec<float>(iter);
+        return;
+      } else if (iter_dtype == kInt) {
+        cpu_hflip_vec<int32_t>(iter);
+        return;
+      }
     }
+
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
+        [&iter] { cpu_kernel_vec(iter,
+          [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {
+            return a;
+        },
+          [](Vectorized<scalar_t> a, Vectorized<scalar_t> /*dummy input*/) -> Vectorized<scalar_t> {
+            return a;
+        });
+    });
   }
 }
 
