@@ -1187,7 +1187,7 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
 
     """
     if get_rank() == dst:
-        raise RuntimeError(
+        raise ValueError(
             "Invalid destination rank: destination rank should not be the same as "
             "the rank of the current process."
         )
