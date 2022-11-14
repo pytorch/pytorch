@@ -18,13 +18,12 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64, parametrize, IS_SANDCASTLE, TEST_OPT_EINSUM)
+     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
-     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, dtypesIfMPS,
-     tol as xtol, toleranceOverride)
+     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, dtypesIfMPS)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
@@ -1541,7 +1540,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.cfloat, torch.cdouble)
-    @precisionOverride({torch.cfloat: 2e-4})
+    @precisionOverride({torch.cfloat: 5e-4})
     def test_norm_complex(self, device, dtype):
         def gen_error_message(input_size, ord, keepdim, dim=None):
             return "complex norm failed for input size %s, ord=%s, keepdim=%s, dim=%s" % (
@@ -2476,28 +2475,6 @@ class TestLinalg(TestCase):
         S = torch.linalg.svdvals(a)
         result = torch.linalg.svd(a, full_matrices=False)
         self.assertEqual(result.S, S)
-
-    # This test doesn't work with MAGMA backend https://github.com/pytorch/pytorch/issues/72106
-    @skipMeta
-    @skipCUDAIfRocm
-    @skipCUDAIfNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_svd_nan_error(self, device, dtype):
-        for svd in [torch.svd, torch.linalg.svd]:
-            # if input contains NaN then an error is triggered for svd
-            # When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
-            # When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.
-            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|The algorithm failed to converge)'
-            a = torch.full((3, 3), float('nan'), dtype=dtype, device=device)
-            a[0] = float('nan')
-            with self.assertRaisesRegex(torch.linalg.LinAlgError, error_msg):
-                svd(a)
-            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|\(Batch element 1\): The algorithm failed to converge)'
-            a = torch.randn(3, 33, 33, dtype=dtype, device=device)
-            a[1, 0, 0] = float('nan')
-            with self.assertRaisesRegex(torch.linalg.LinAlgError, error_msg):
-                svd(a)
 
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
@@ -7391,66 +7368,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(out_ref, out1.cpu())
         self.assertEqual(out1, out2)
 
-    @onlyCUDA
-    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
-    # imported 'tol' as 'xtol' to avoid aliasing in code above
-    @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
-                        torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
-                        torch.float32: xtol(atol=1e-1, rtol=1e-1)})
-    @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    @parametrize("size", [100, 1000, 10000])
-    def test_cublas_addmm(self, size: int, dtype: torch.dtype):
-        #
-        # Check for catastrophic cuBLAS inaccuracy by measuring the deviation between
-        # results from the CUDA invocation of torch.addmm and the CPU invocation
-        # (which does not use CUDA backend).
-        #
-        # Get dims
-        n, m, p = (size + 1, size, size + 2)
-        # Make random tensors on CPU (seed set on common_utils.py import)
-        # (Not using numpy because it does not support bfloat16)
-        make_arg = partial(make_tensor, dtype=dtype, device="cpu")
-        m_beta = make_arg(1)
-        m_input = make_arg((n, p))
-        m_1 = make_arg((n, m))
-        m_2 = make_arg((m, p))
-        # *(B)FLOAT16 Special Handling*
-        # Backend does not tensorize float16 on CPU,
-        # and bloat16 may present accuracy issues,
-        # so convert to float32 for these cases
-        # (but keep same for other types, e.g. float32 and int*)
-        if dtype == torch.float16 or dtype == torch.bfloat16:
-            m_beta = m_beta.to(dtype=torch.float32)
-            m_input = m_input.to(dtype=torch.float32)
-            m_1 = m_1.to(dtype=torch.float32)
-            m_2 = m_2.to(dtype=torch.float32)
-        # Get CPU result
-        res_cpu = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
-        # *(B)FLOAT16 Special Handling*``
-        # Convert back to (b)float16
-        if dtype == torch.float16 or dtype == torch.bfloat16:
-            m_beta = m_beta.to(dtype=dtype)
-            m_input = m_input.to(dtype=dtype)
-            m_1 = m_1.to(dtype=dtype)
-            m_2 = m_2.to(dtype=dtype)
-            res_cpu = res_cpu.to(dtype=dtype)
-        # Move arg tensors to CUDA
-        m_beta = m_beta.to("cuda")
-        m_input = m_input.to("cuda")
-        m_1 = m_1.to("cuda")
-        m_2 = m_2.to("cuda")
-        # Get CUDA result
-        res_cuda = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
-        # Move to CPU for comparison
-        res_cuda = res_cuda.to("cpu")
-        # Compare
-        self.assertEqual(res_cpu, res_cuda)
-
     def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])
         b = torch.ones([3, 2, 5, 24, 24])
         c = a.permute(0, 1, 3, 2).matmul(b)
         self.assertEqual([c.min(), c.max(), c.sum()], [24, 24, 414720])
+
 
 instantiate_device_type_tests(TestLinalg, globals())
 

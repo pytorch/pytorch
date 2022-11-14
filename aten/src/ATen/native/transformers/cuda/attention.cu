@@ -9,6 +9,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
@@ -16,16 +17,16 @@
 
 #include <c10/cuda/CUDAMathCompat.h>
 
-#include <ATen/native/NonSymbolicBC.h>
+#include <ATen/native/transformers/attention.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
+#include <ATen/native/transformers/cuda/sdp_utils.h>
 
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h>
 #endif
-
-#include <ATen/native/transformers/cuda/sdp_utils.h>
 
 namespace at {
 
@@ -368,8 +369,8 @@ __global__ void transform_bias_rescale_qkv_add_padding_kernel(
 }
 
 Tensor collapse_dims_1_and_2(const Tensor& sizes) {
-  auto sizes_dim1 = at::native::narrow(sizes, 1, 0, 1);
-  auto sizes_dim2 = at::native::narrow(sizes, 1, 1, 1);
+  auto sizes_dim1 = at::native::narrow_symint(sizes, 1, 0, 1);
+  auto sizes_dim2 = at::native::narrow_symint(sizes, 1, 1, 1);
 
   return (sizes_dim1 * sizes_dim2).contiguous();
 }
@@ -451,7 +452,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
           auto sizes = collapse_dims_1_and_2(nt_qkv->get_nested_size_tensor());
           auto offsets =
               NestedTensor_batch_offsets_from_size_tensor(sizes, sizes.numel());
-          at::native::narrow(offsets, 0, sizes.numel() + 1, sizes.numel())
+          at::native::narrow_symint(offsets, 0, sizes.numel() + 1, sizes.numel())
               .copy_(sizes.reshape({-1}));
           auto metadata = offsets.to(at::Device(kCUDA), at::kInt, true, true);
           const auto offsets_ptr = metadata.data_ptr<int>();
@@ -477,6 +478,204 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
   auto q_k_v_s =
       at::native::split(q_k_v.view({3 * B, num_head, T, dim_per_head}), B, 0);
   return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
+}
+
+std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const int64_t embed_dim,
+    const int64_t num_head,
+    const Tensor& qkv_weight,
+    const Tensor& qkv_bias,
+    const Tensor& proj_weight,
+    const Tensor& proj_bias,
+    const c10::optional<Tensor>& mask,
+    bool need_weights,
+    bool average_attn_weights,
+    const c10::optional<int64_t> mask_type) {
+  // query shape: [B, T, D]
+  // qkv_weight shape: [3 * D, D]
+
+  TORCH_CHECK(
+      !mask || !query.is_nested(),
+      "NestedTensor with mask is not supported yet");
+  const auto D = embed_dim;
+  TORCH_CHECK(
+      query.dim() == 3,
+      "expected 3-D `query`, got ",
+      query.dim(),
+      "-D tensor");
+  TORCH_CHECK(
+      query.is_nested() || query.sizes()[2] == embed_dim,
+      "passed-in embed_dim ",
+      embed_dim,
+      " didn't match last dim of query ",
+      query.sizes()[2]);
+  TORCH_CHECK(
+      key.dim() == 3,
+      "expected 3-D `key`, got ",
+      key.dim(),
+      "-D tensor");
+  TORCH_CHECK(
+      value.dim() == 3,
+      "expected 3-D `value`, got ",
+      value.dim(),
+      "-D tensor");
+  TORCH_CHECK(
+      query.is_nested() || key.is_nested() || value.is_nested() ||
+          (query.sizes() == key.sizes() && key.sizes() == value.sizes()),
+      "expected `query`/`key`/`value` shapes to match");
+  TORCH_CHECK(
+      qkv_weight.dim() == 2,
+      "expected 2-D `qkv_weight`, got ",
+      qkv_weight.dim(),
+      "-D tensor");
+  TORCH_CHECK(
+      D * 3 == qkv_weight.sizes()[0],
+      "expected `qkv_weight` first dim to be 3x embed_dim");
+  TORCH_CHECK(
+      D == qkv_weight.sizes()[1],
+      "expected `qkv_weight` second dim to be embed_Dim");
+  TORCH_CHECK(
+      qkv_bias.dim() == 1,
+      "expected 2-D `qkv_bias`, got ",
+      qkv_bias.dim(),
+      "-D tensor");
+  TORCH_CHECK(
+      qkv_bias.sizes()[0] == 3 * D,
+      "expected `qkv_bias` first dim and first dim of query to be equal");
+  TORCH_CHECK(D % num_head == 0, "`embed_dim` must divide evenly by `num_heads`");
+
+#ifndef NDEBUG
+  const auto B = query.is_nested()
+      ? get_nested_tensor_impl(query)->get_nested_size_tensor().size(0)
+      : query.sizes()[0];
+  auto T = query.is_nested() ? 0 : query.sizes()[1];
+
+#endif
+  const auto dim_per_head = D / num_head;
+  if ((query.is_same(key) && key.is_same(value)) && dim_per_head % 8 == 0 ) {
+
+    // We have not done linear projection yet but the input for SDP
+    // Is expected to be 4 dimensional. We "cheaply" create view tensors
+    // That will then be used for checking hot path conditions with select_sd_backend
+    auto q = query.view({query.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
+    auto k = key.view({key.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
+    auto v = value.view({value.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
+
+    sdp::sdp_params kernel_params{q, k, v, mask.has_value(), 0.0, need_weights, false};
+    auto backend = select_sdp_backend(kernel_params);
+    if (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention) {
+      auto x = at::linear(query, qkv_weight, qkv_bias);
+      auto chunks = x.chunk(3, -1);
+      auto x_size_0 = x.size(0);
+
+      chunks[0] = (chunks[0].view({x_size_0, -1, num_head, dim_per_head}))
+                      .transpose(1, 2);
+      chunks[1] = (chunks[1].view({x_size_0, -1, num_head, dim_per_head}))
+                      .transpose(1, 2);
+      chunks[2] = (chunks[2].view({x_size_0, -1, num_head, dim_per_head}))
+                      .transpose(1, 2);
+
+      auto y = at::_scaled_dot_product_attention(
+          chunks[0], chunks[1], chunks[2], mask, 0.0, need_weights, false);
+      auto past_sdp =
+          std::get<0>(y).transpose(1, 2).reshape({x_size_0, -1, embed_dim});
+      return std::make_tuple(
+          at::linear(past_sdp, proj_weight, proj_bias), Tensor());
+    }
+    // Returned math or error lets not use it
+  }
+
+  // shape: [B, T, 3 x D]
+  auto qkv = qkv_projection(query, key, value, embed_dim, qkv_weight);
+
+  if (!qkv.is_nested() && qkv.numel() == 0) {
+    if (query.is_nested()) {
+      return std::make_tuple(Tensor(), Tensor());
+    }
+    return std::make_tuple(at::empty_like(query), Tensor());
+  }
+
+#ifndef NDEBUG
+  if (!query.is_nested() || !qkv.is_nested()) {
+    if (query.is_nested()) {
+      T = qkv.size(1);
+    }
+    debug_assert_shape(__LINE__, qkv, {B, T, 3 * D});
+  }
+#endif
+
+#ifdef DEBUG_PRINT_EACH_STEP
+  if (!qkv.is_nested()) {
+    std::cerr << "qkv: " << qkv << std::endl;
+  }
+#endif
+  // shape: 3 x [B, num_head, T, dim_per_head]
+  auto q_k_v = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
+  qkv = Tensor(); // Not used any more, allow free
+  auto& q = std::get<0>(q_k_v);
+  const auto& k = std::get<1>(q_k_v);
+  const auto& v = std::get<2>(q_k_v);
+#ifndef NDEBUG
+  debug_assert_shape(__LINE__, q, {B, num_head, T, dim_per_head});
+  debug_assert_shape(__LINE__, k, {B, num_head, T, dim_per_head});
+  debug_assert_shape(__LINE__, v, {B, num_head, T, dim_per_head});
+#endif
+#ifdef DEBUG_PRINT_EACH_STEP
+  std::cerr << "q: " << q << std::endl;
+  std::cerr << "k: " << k << std::endl;
+  std::cerr << "v: " << v << std::endl;
+#endif
+
+  // shape: [B, num_head, T, T]
+  auto qkt = bmm_nt(q, k);
+  // q & k are dead but cannot be freed because they were packed with v
+#ifndef NDEBUG
+  debug_assert_shape(__LINE__, qkt, {B, num_head, T, T});
+#endif
+#ifdef DEBUG_PRINT_EACH_STEP
+  std::cerr << "qkt: " << qkt << std::endl;
+#endif
+
+  // shape: [B, num_head, T, T]
+  // TODO: long-term, have a kernel that works with
+  // NestedTensor directly if there is no mask passed
+  qkt = masked_softmax(qkt, mask, query, mask_type);
+#ifdef DEBUG_PRINT_EACH_STEP
+  std::cerr << "qkt after softmax: " << qkt << std::endl;
+#endif
+
+  // shape: [B, num_head, T, dim_per_head]
+  // reuse storage for q; we're done with it
+  auto attn_ctx = bmm_nn(q, qkt, v);
+  // qkv is not dead; we just reused storage for q!
+  if (!need_weights) {
+    qkt = Tensor();
+  }
+#ifndef NDEBUG
+  debug_assert_shape(__LINE__, attn_ctx, {B, num_head, T, dim_per_head});
+#endif
+#ifdef DEBUG_PRINT_EACH_STEP
+  std::cerr << "attn_ctx: " << attn_ctx << std::endl;
+#endif
+
+  // shape: [B, T, D]
+  // Fuse transform_0213 inside
+  auto proj = transform0213_gemm_nt_bias(
+      attn_ctx, proj_weight, proj_bias, query);
+#ifndef NDEBUG
+  debug_assert_shape(__LINE__, proj, {B, T, D});
+#endif
+  if (need_weights && average_attn_weights) {
+    // weights are not needed for full transformer, so don't worry too
+    // much about performance -- we implement this just to make use
+    // cases that don't disable need_weights still get some speedup.
+    qkt = qkt.sum(1);
+    qkt /= num_head;
+  }
+  return std::make_tuple(std::move(proj), std::move(qkt));
 }
 
 std::tuple<Tensor, Tensor> flash_attention_helper_dense_unpacked(
@@ -586,7 +785,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
     }
 }
 
-std::tuple<Tensor, Tensor> flash_scaled_dot_product_attention(
+Tensor flash_scaled_dot_product_attention(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -595,7 +794,6 @@ std::tuple<Tensor, Tensor> flash_scaled_dot_product_attention(
     const int64_t max_seqlen_batch_q,
     const int64_t max_seqlen_batch_k,
     double dropout_p,
-    bool need_attn_weights,
     bool is_causal) {
 #if defined(USE_FLASH_ATTENTION)
   auto softmax_scale = std::pow(query.size(-1), -0.5);
@@ -611,12 +809,12 @@ std::tuple<Tensor, Tensor> flash_scaled_dot_product_attention(
       softmax_scale,
       false,
       is_causal,
-      need_attn_weights,
+      false,
       c10::nullopt);
-  return need_attn_weights? std::make_tuple(output[0], output[2]): std::make_tuple(output[0], Tensor{});
+  return output[0];
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return std::make_tuple(Tensor{}, Tensor{});
+  return Tensor();
 }
 
 std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
@@ -637,7 +835,6 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
 // TODO In theory it is possible to compile with _CUDA_ARCH < 5.0 and run on a
 // machine that is >= 5.0. In practice, this is not a problem but since
 // this would avoid runtime architecture checks, we should look into it
-
   TORCH_CHECK(query.dim() == 4);
   TORCH_CHECK(key.dim() == 4);
   TORCH_CHECK(value.dim() == 4);
@@ -769,7 +966,7 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
           kernel_fn, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_bytes));
     }
     Kernel::check_supported(p);
-    kernel_fn<<<p.getBlocksGrid(), p.getThreadsGrid(), smem_bytes>>>(p);
+    kernel_fn<<<p.getBlocksGrid(), p.getThreadsGrid(), smem_bytes, stream>>>(p);
   };
   // Dispatch to the right kernel
   DISPATCH_KERNEL(query, key, value, ([&]() {

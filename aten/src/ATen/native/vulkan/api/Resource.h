@@ -6,7 +6,8 @@
 #include <ATen/native/vulkan/api/Utils.h>
 
 #include <c10/core/ScalarType.h>
-#include <c10/util/hash.h>
+#include <c10/util/flat_hash_map.h>
+#include <c10/util/typeid.h>
 
 #include <stack>
 
@@ -17,7 +18,7 @@ namespace api {
 
 typedef uint8_t MemoryAccessFlags;
 
-VkFormat vk_format(const caffe2::TypeMeta dtype);
+VkFormat vk_format(const at::ScalarType dtype);
 
 c10::ScalarType c10_scalartype(const VkFormat image_format);
 
@@ -385,11 +386,13 @@ class MemoryAllocator final {
   VmaAllocator allocator_;
 
  public:
-  VulkanImage create_image3d(
+  VulkanImage create_image(
       const VkExtent3D&,
+      const VkFormat,
+      const VkImageType,
+      const VkImageViewType,
       const VulkanImage::SamplerProperties&,
       const VkSampler,
-      const caffe2::TypeMeta dtype,
       const bool allow_transfer = false);
 
   VulkanBuffer create_storage_buffer(
@@ -398,6 +401,14 @@ class MemoryAllocator final {
 
   VulkanBuffer create_staging_buffer(const VkDeviceSize);
 
+  /*
+   * Create a uniform buffer with a specified size
+   */
+  VulkanBuffer create_uniform_buffer(const VkDeviceSize);
+
+  /*
+   * Create a uniform buffer containing the data in an arbitrary struct
+   */
   template <typename Block>
   VulkanBuffer create_params_buffer(const Block& block);
 };
@@ -483,16 +494,7 @@ struct FencePool final {
 
 template <typename Block>
 inline VulkanBuffer MemoryAllocator::create_params_buffer(const Block& block) {
-  const VulkanBuffer::MemoryProperties mem_props{
-      DEFAULT_ALLOCATION_STRATEGY |
-          VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
-      VMA_MEMORY_USAGE_AUTO,
-      0u,
-      0u,
-      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-  };
-
-  VulkanBuffer uniform_buffer(allocator_, sizeof(Block), mem_props);
+  VulkanBuffer uniform_buffer = create_uniform_buffer(sizeof(Block));
 
   // Fill the uniform buffer with data in block
   {

@@ -199,7 +199,7 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
   for (const auto i : c10::irange(wt_numel)) {
     qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
   }
-  bcsr_matrix_ = qnnpack::generateBlockCSRMatrix(
+  bcsr_matrix_ = qnnpack::generateBlockCSRMatrix<uint32_t>(
       reinterpret_cast<uint8_t*>(qnnp_w_data),
       output_channels_,
       input_channels_,

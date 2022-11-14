@@ -7,6 +7,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/Exception.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/util/Logging.h>
 
 #include <numeric>
 #include <functional>
@@ -170,8 +171,9 @@ NestedTensorImpl::NestedTensorImpl(
     : TensorImpl(std::move(storage), key_set, data_type),
       nested_size_tensor_(std::move(nested_size_tensor)),
       nested_stride_tensor_(std::move(nested_stride_tensor)),
-      offsets_(std::move(offsets)),
+      storage_offsets_(std::move(offsets)),
       opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
+  C10_LOG_API_USAGE_ONCE("torch.NestedTensor");
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
       "in the near future.");
@@ -180,7 +182,7 @@ NestedTensorImpl::NestedTensorImpl(
       storage_device.is_cpu() || storage_device.is_cuda(),
       "NestedTensorImpl storage must be either CUDA or CPU but got ",
       storage_device);
-  validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, offsets_);
+  validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, storage_offsets_);
   refresh_dim();
   set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
@@ -226,9 +228,9 @@ NestedTensorImpl::NestedTensorImpl(
     : TensorImpl(impl_type, Storage(base_tensor.storage()), get_view_key_set(base_tensor), base_tensor.dtype()),
       nested_size_tensor_(std::move(nested_size_tensor)),
       nested_stride_tensor_(std::move(nested_stride_tensor)),
-      offsets_(std::move(offsets)),
+      storage_offsets_(std::move(offsets)),
       opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
-  validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, offsets_);
+  validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, storage_offsets_);
   refresh_dim();
   set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
@@ -317,7 +319,7 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
       data_type_,
       nested_size_tensor_,
       nested_stride_tensor_,
-      std::vector<int64_t>(offsets_));
+      std::vector<int64_t>(storage_offsets_));
 
       copy_tensor_metadata(
           /*src_impl=*/this,

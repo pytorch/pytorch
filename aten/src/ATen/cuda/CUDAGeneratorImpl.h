@@ -19,10 +19,10 @@ namespace at {
  *
  * A CUDA graph containing multiple RNG ops behaves like a
  * single giant kernel from the perspective of ops external
- * to the graph.  During graph capture, logic below records
- * the total of all offset increments that occur in the graphed
- * region, and records the final total as the offset for the
- * entire graph.
+ * to the graph.  During graph capture, logic in CUDAGeneratorImpl
+ * records the total of all offset increments that occur in the
+ * graphed region, and records the final total as the offset for
+ * the entire graph.
  *
  * When the graph reruns, the logic that reruns it
  * increments this device's CUDA generator's offset
@@ -30,8 +30,8 @@ namespace at {
  *
  * Meanwhile, within the graph, at capture time, instead of
  * populating PhiloxCudaStates with the uint64_t offset pulled
- * directly from the global state, PhiloxCudaState instead
- * holds a pointer to one-element stream-local int64_t device tensor
+ * directly from the global state, PhiloxCudaState uses a pointer
+ * to a one-element stream-local int64_t device tensor
  * holding an initial offset value, and a uint64_t holding an
  * intra-graph offset. (The intra-graph offset starts from zero
  * when capture begins.)  In each consumer kernel,
