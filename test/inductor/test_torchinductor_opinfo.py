@@ -174,6 +174,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "combinations": {b8, f16, f32, f64, i32, i64},
     "complex": {f16, f32, f64},
     "constant_pad_nd": {f16, f32, f64},
+    "copysign": {f16},
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},

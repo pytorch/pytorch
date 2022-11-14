@@ -473,7 +473,7 @@ def register_pointwise(
     return fn
 
 
-@register_lowering([aten.where, prims.where], broadcast=False, type_promotion_kind=None)
+@register_lowering(aten.where, broadcast=False, type_promotion_kind=None)
 def where(cond, a, b):
     def fn(*args):
         return ops.where(*args)
@@ -575,7 +575,7 @@ def ceil(x):
     return make_pointwise(fn)(x)
 
 
-@register_lowering([aten.floor, prims.floor])
+@register_lowering(aten.floor)
 def floor(x):
     if is_integer_type(x):
         return x
@@ -1533,7 +1533,7 @@ def _unwrap(x):
     return x
 
 
-@register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
+@register_lowering([torch.tensor, aten.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     assert layout in (None, torch.strided)
     assert pin_memory is False
@@ -3183,7 +3183,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
     denom = sympy_product(size[i] for i in axis)
     denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
-    return to_dtype(true_divide(sum_result, denom), output_dtype)
+    return to_dtype(div(sum_result, denom), output_dtype)
 
 
 @register_lowering([aten.var, prims.var])
@@ -3198,7 +3198,7 @@ def var_(x, axis, correction=1, keepdim=False):
         denom = denom - correction
     denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
-    return true_divide(sum_result, denom)
+    return div(sum_result, denom)
 
 
 @register_lowering(aten.var_mean)
@@ -3320,6 +3320,32 @@ def copy_(dst, src, non_blocking=False):
     return mutate_to(dst, src)
 
 
+@make_pointwise
+def floordiv(a, b):
+    return ops.floordiv(a, b)
+
+
+@make_pointwise
+def truncdiv(a, b):
+    return ops.truncdiv(a, b)
+
+
+@register_lowering(aten.div.Tensor_mode, broadcast=True)
+def div_mode(a, b, rounding_mode=None):
+    both_integer = is_integer_type(a) and is_integer_type(b)
+    both_boolean = is_boolean_type(a) and is_boolean_type(b)
+
+    # floordiv and truncdiv need special handling for integer tensors on Triton,
+    # see the discussion at https://github.com/openai/triton/issues/605
+    if rounding_mode == "floor":
+        assert not both_boolean, "floordiv operands can not be boolean at the same time"
+        return floordiv(a, b) if both_integer else floor(div(a, b))
+    if rounding_mode == "trunc":
+        assert not both_boolean, "truncdiv operands can not be boolean at the same time"
+        return truncdiv(a, b) if both_integer else trunc(div(a, b))
+    return div(a, b)
+
+
 @register_lowering([aten.mul], broadcast=True)
 def mul(a, b):
     both_bool = is_boolean_type(a) and is_boolean_type(b)
@@ -3337,24 +3363,19 @@ def div_prim(a, b):
     is_integral = is_boolean_type(a) or is_integer_type(a)
 
     if is_integral:
+        return truncdiv(a, b)
 
-        def fn(*args):
-            return ops.truncdiv(*args)
-
-    else:
-
-        def fn(*args):
-            return ops.div(*args)
+    def fn(*args):
+        return ops.div(*args)
 
     return make_pointwise(fn)(a, b)
 
 
-true_divide = register_lowering(
+div = register_lowering(
     [aten.true_divide, aten.div.Tensor],
     broadcast=True,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )(div_prim)
-
 
 @register_lowering([aten.fmod, prims.fmod], broadcast=True)
 def fmod(a, b):
@@ -3502,7 +3523,8 @@ def register_inplace(aten_op, outplace_op):
 
 register_inplace(aten.add_, add)
 register_inplace(aten.mul_, mul)
-register_inplace(aten.div_.Tensor, true_divide)
+register_inplace(aten.div_.Tensor, div)
+register_inplace(aten.div_.Tensor_mode, div_mode)
 register_inplace(aten.sub_, sub)
 register_inplace(aten.relu_, relu)
 register_inplace(aten.sigmoid_, sigmoid)
