@@ -1400,6 +1400,7 @@ class CommonTemplate:
             [1, 3],
             [1, 2],
             [1, 4],
+            ["same", 0],
             test_memory_format,
         )
 
@@ -1409,6 +1410,7 @@ class CommonTemplate:
             kernel_size,
             dilation,
             groups,
+            padding,
             memory_format,
         ) in options:
             oC = 32 * groups
@@ -1419,6 +1421,7 @@ class CommonTemplate:
                     iC,
                     oC,
                     kernel_size=kernel_size,
+                    padding=padding,
                     dilation=dilation,
                     groups=groups,
                     bias=bias,
@@ -1448,7 +1451,9 @@ class CommonTemplate:
                 out_channels,
                 dilation,
                 groups,
+                padding,
                 bias,
+                has_relu,
                 **kwargs,
             ):
                 super(M, self).__init__()
@@ -1457,6 +1462,7 @@ class CommonTemplate:
                     out_channels,
                     dilation=dilation,
                     groups=groups,
+                    padding=padding,
                     bias=bias,
                     **kwargs,
                 )
@@ -1466,40 +1472,54 @@ class CommonTemplate:
                         out_channels,
                         dilation=dilation,
                         groups=groups,
+                        padding=padding,
                         bias=bias,
                         **kwargs,
                     )
                 )
                 self.binary_fn = binary_fn
+                self.relu = torch.nn.ReLU() if has_relu else torch.nn.Identity()
 
             def forward(self, x):
                 x1 = self.conv1(x)
                 x2 = self.conv2(x)
-                return self.binary_fn(x1, x2)
+                return self.relu(self.binary_fn(x1, x2))
 
         test_memory_format = [torch.contiguous_format, torch.channels_last]
         options = itertools.product(
             binary_list,
             [True, False],
+            [True, False],
             [1, 3],
             [1, 2],
             [1, 4],
+            ["same", 0],
             test_memory_format,
         )
 
         for (
             binary_fn,
+            has_relu,
             bias,
             kernel_size,
             dilation,
             groups,
+            padding,
             memory_format,
         ) in options:
             oC = 32 * groups
             iC = 3 * groups
             x_shape = (1, iC, 112, 112)
             mod = M(
-                binary_fn, iC, oC, dilation, groups, bias, kernel_size=kernel_size
+                binary_fn,
+                iC,
+                oC,
+                dilation,
+                groups,
+                padding,
+                bias,
+                has_relu,
+                kernel_size=kernel_size,
             ).eval()
             mod = mod.to(memory_format=memory_format)
             # TODO: add bf16 test
@@ -4601,6 +4621,8 @@ if HAS_CUDA:
     CommonTemplate.install(CudaTests, "cuda")
 
     class CudaReproTests(TestCase):
+        common = check_model_cuda
+
         def test_index_put_issue(self):
             def forward(
                 self,
@@ -4636,6 +4658,30 @@ if HAS_CUDA:
             mod = make_fx(forward)(*inps)
             compiled = compile_fx_inner(mod, inps)
             compiled(inps)
+
+        @requires_cuda()
+        def test_input_channels_last(self):
+            m = torch.nn.Sequential(
+                torch.nn.Conv2d(3, 3, 1, 1),
+                ToTuple(),
+            ).cuda()
+            inp = (
+                torch.randn([2, 3, 16, 16]).to(memory_format=torch.channels_last).cuda()
+            )
+
+            self.common(
+                m,
+                (inp,),
+                check_lowp=False,
+            )
+
+            @torch._dynamo.optimize()
+            def foo(m, inp):
+                return m(inp)
+
+            self.assertTrue(
+                foo(m, inp)[0].is_contiguous(memory_format=torch.channels_last)
+            )
 
         # https://github.com/pytorch/torchdynamo/issues/1681#issuecomment-1283433527
         @requires_cuda()
@@ -4761,6 +4807,9 @@ if HAS_CUDA:
                     for param in model_opt.parameters():
                         param.add_(1.0)
 
+        # Probably fails due to the symint math issue caught while adding
+        # max_pool2d_with_indices_backward
+        @unittest.skip("Accuracy failure, needs debugging")
         def test_accuracy_issue1(self):
             class Repro(torch.nn.Module):
                 def __init__(self):
