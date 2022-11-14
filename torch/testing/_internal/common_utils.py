@@ -775,11 +775,10 @@ def run_tests(argv=UNITTEST_ARGS):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print(f'Test results will be stored in {test_report_path}')
-        exit_code = unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
             output=test_report_path,
             verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose),
-            exit=False)
+            resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
