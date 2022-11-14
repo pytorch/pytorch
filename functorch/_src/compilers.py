@@ -121,7 +121,6 @@ class DebugInterpreter(fx.Interpreter):
         # TODO: This will fail once we start caching in AOTAutograd
         # again, because we need to remap SymInts to their new values
         # in the presence of dynamism
-        # Check that inputs are consistent
         def check(nv, rv, desc):
             assert callable(desc)
             assert nv.size() == rv.size(), f"{desc()}: {nv.size()} != {rv.size()}"
@@ -129,6 +128,9 @@ class DebugInterpreter(fx.Interpreter):
             same_strides, idx = torch._prims_common.check_significant_strides(nv, rv, only_cuda=False)
             assert same_strides, f"{desc()}: {nv.stride()} != {rv.stride()} (mismatch at index {idx})"
 
+        # Check that inputs are consistent
+        # NB: I don't think this is actually necessary.
+        """
         a_vals, _ = pytree.tree_flatten((n.args, n.kwargs))
         for i, a in enumerate(a_vals):
             if not isinstance(a, fx.Node):
@@ -140,6 +142,7 @@ class DebugInterpreter(fx.Interpreter):
             r = self.env[a]
             # TODO: make this more descriptive
             check(a.meta['val'], r, lambda: f"input {i}")
+        """
 
         r = super().run_node(n)
         # Check that outputs are consistent
