@@ -493,7 +493,7 @@ class FlatParamHandle:
                 flat_param.storage_offset() == 0,
                 "The `FlatParameter` is not the sole occupant of its storage",
             )
-            orig_storage = flat_param.storage()
+            orig_storage = flat_param._typed_storage()
             sharded_flat_param, numel_padded = FlatParamHandle._get_shard(
                 flat_param, self.rank, self.world_size
             )
@@ -501,8 +501,8 @@ class FlatParamHandle:
             start = sharded_flat_param.numel() * self.rank
             end = sharded_flat_param.numel() * (self.rank + 1) - 1  # inclusive
             self._init_shard_metadata(numel_padded, start, end)
-            if orig_storage.size() > 0:
-                orig_storage.resize_(0)
+            if orig_storage._size() > 0:
+                orig_storage._resize_(0)
         if self._use_orig_params:
             self._use_sharded_views()
 
@@ -838,7 +838,8 @@ class FlatParamHandle:
             return False
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         already_unsharded = (
-            unsharded_flat_param.storage().size() == unsharded_flat_param.numel()
+            unsharded_flat_param._typed_storage()._size()
+            == unsharded_flat_param.numel()
         )
         return not already_unsharded
 
@@ -1141,9 +1142,9 @@ class FlatParamHandle:
         # the padded unsharded flattened parameter as expected
         # NOTE: This check is not strictly needed for correctness but is a
         # useful sanity check since the tensor should only be used internally.
-        unpadded_storage_ptr = self.flat_param.storage().data_ptr()
+        unpadded_storage_ptr = self.flat_param._typed_storage()._data_ptr()
         padded_storage_ptr = (
-            self._get_padded_unsharded_flat_param().storage().data_ptr()
+            self._get_padded_unsharded_flat_param()._typed_storage()._data_ptr()
         )
         p_assert(
             unpadded_storage_ptr == padded_storage_ptr,
@@ -1306,6 +1307,8 @@ class FlatParamHandle:
                         assert tensor is not None  # mypy
                         param_var = tensor
                 setattr(module, param_name, param_var)
+                if self._use_orig_params and self._training_state == HandleTrainingState.FORWARD:
+                    module._parameters[param_name] = param_var  # type: ignore[assignment]
         for i, (
             param_name,
             module,
@@ -1336,6 +1339,8 @@ class FlatParamHandle:
                 module.register_parameter(param_name, prim_param)
             else:
                 setattr(module, param_name, prim_param)
+                if self._use_orig_params and self._training_state == HandleTrainingState.FORWARD:
+                    module._parameters[param_name] = prim_param  # type: ignore[assignment]
 
     def _use_unsharded_grad_views(self) -> None:
         """
@@ -1824,7 +1829,7 @@ class FlatParamHandle:
 
     @staticmethod
     def _check_storage_freed(tensor: Tensor):
-        storage_size: int = tensor.storage().size()
+        storage_size: int = tensor._typed_storage()._size()
         p_assert(
             storage_size == 0,
             f"Expects storage to be freed but got storage with size {storage_size}",
@@ -1832,7 +1837,7 @@ class FlatParamHandle:
 
     @staticmethod
     def _check_storage_allocated(tensor: Tensor):
-        storage_size: int = tensor.storage().size()
+        storage_size: int = tensor._typed_storage()._size()
         p_assert(storage_size > 0, "Expects storage to be allocated")
 
     def _check_low_precision_shard(self):
