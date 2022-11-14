@@ -737,7 +737,7 @@ def _unique_impl(input: Tensor, sorted: bool = True,
     Args:
         input (Tensor): the input tensor
         sorted (bool): Whether to sort the unique elements in ascending order
-            before returning as output.
+            before returning as output. If ``False``, the `output` tensor will be in any order.
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
         return_counts (bool): Whether to also return the counts for each unique
