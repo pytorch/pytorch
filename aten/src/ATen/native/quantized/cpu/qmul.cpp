@@ -40,7 +40,7 @@ inline void check_inputs(const Tensor& qa, const Tensor& qb) {
   TORCH_CHECK(qa.scalar_type() == qb.scalar_type(),
               "Mul operands should have same data type.");
   TORCH_CHECK(qa.qscheme() == qb.qscheme(),
-              "Both inputs to Mul must have the same quantization shceme.");
+              "Both inputs to Mul must have the same quantization scheme.");
 }
 
 // Note: out is assumed to be the same size as self and other.
@@ -314,7 +314,7 @@ class QMulScalarTensor final {
   static Tensor run(Tensor qa, Tensor b) {
     TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
-              "Only per tensor quantization is suported in Mul.");
+              "Only per tensor quantization is supported in Mul.");
     auto qc = at::empty_like(qa, qa.suggest_memory_format());
     return _mul_scalar_out<ReLUFused>(qc, qa, b.item());
   }
