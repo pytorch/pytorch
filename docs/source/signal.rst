@@ -23,6 +23,8 @@ torch.signal.windows
     cosine
     exponential
     gaussian
+    general_cosine
+    general_hamming
     hamming
     hann
     kaiser
