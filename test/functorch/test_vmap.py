@@ -3219,6 +3219,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.rrelu'),  # randomness
         xfail('nn.functional.dropout2d', ''),  # randomness
         xfail('nn.functional.dropout3d', ''),  # randomness
+        xfail('nn.functional.alpha_dropout', ''),  # randomness
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         xfail('as_strided'),  # Our test runner can't handle this; manual test exists
         skip('new_empty_strided'),  # empty tensor data is garbage so it's hard to make comparisons with it

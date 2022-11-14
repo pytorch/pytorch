@@ -1906,7 +1906,7 @@ Example::
         Returns:
             A ``Work`` object which is associated with the completion of
             the ``torch.futures.Future``.
-        This is the prefered way of constructing Work objects when writing a custom ProcessGroup
+        This is the preferred way of constructing Work objects when writing a custom ProcessGroup
         in python.
         Example::
             >>> class SingleRankProcessGroup(torch.distributed.ProcessGroup):
