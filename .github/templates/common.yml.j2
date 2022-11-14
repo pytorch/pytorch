@@ -77,8 +77,8 @@ concurrency:
         if: always()
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
+          if [[ $ngpu -lt 2 ]]; then
+              echo "Failed to detect at least 2 GPUs on the runner"
               exit 1
           fi
       - name: Runner health check disconnect on failure
