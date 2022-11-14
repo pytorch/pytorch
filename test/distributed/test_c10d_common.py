@@ -1426,6 +1426,8 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         input_tensor = torch.zeros(2, 2)
         dist.send(input_tensor, (self.rank + 1) % self.world_size)
         self.assertEqual(input_tensor, torch.zeros(2, 2) + 1)
+        with self.assertRaises(ValueError):
+            dist.send(input_tensor, dist.get_rank())
 
         # test recv
         input_tensor = torch.zeros(2, 2)
