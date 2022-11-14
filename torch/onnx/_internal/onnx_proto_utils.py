@@ -41,7 +41,7 @@ def _export_file(
             for k, v in export_map.items():
                 z.writestr(k, v)
     elif export_type == _exporter_states.ExportTypes.DIRECTORY:
-        if isinstance(io.BytesIO, f) or not os.path.isdir(f):  # type: ignore[arg-type]
+        if isinstance(io.BytesIO, type(f)) or not os.path.isdir(f):  # type: ignore[arg-type]
             raise ValueError(
                 f"f should be directory when export_type is set to DIRECTORY, instead get type(f): {type(f)}"
             )
