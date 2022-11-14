@@ -705,7 +705,6 @@ class CheckFunctionManager:
             symbolic_shape_expression = self._parse_symbolic_shape_expressions(
                 tensor_check_names, tensor_check_ids
             )
-            # breakpoint()
             tensor_check_examples = (
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples

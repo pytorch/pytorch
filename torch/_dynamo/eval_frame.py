@@ -295,7 +295,6 @@ class WrapperBackend:
             # This is temporary, hopefully, while we decide if we want the
             # user provided compiler signature to have a **kwargs
             if needs_shape_env:
-                breakpoint()
                 result = self.candidate(*self.example_inputs, shape_env=shape_env)
             else:
                 result = self.candidate(*self.example_inputs)

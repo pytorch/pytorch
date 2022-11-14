@@ -676,9 +676,9 @@ def create_aot_dispatcher_function(
         # crappy version of dispatcher
         # TODO: Do this properly
         if needs_autograd:
-            fn = aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config)
-            boxed_fn = make_boxed_func(fn)
-            return boxed_fn
+            return make_boxed_func(
+                aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config)
+            )
         else:
             return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config)
 
@@ -980,7 +980,8 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
 
         @wraps(fn)
         def new_func(*args):
-            return compiled_fn(*args)
+            # compiled_fn = compile(fn, *args)
+            return compiled_fn(args)
         return new_func
 
     fn_call = functional_call
