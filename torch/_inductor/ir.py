@@ -2490,9 +2490,9 @@ class ExternKernel(InputsKernel):
                 return x
             elif isinstance(x.get_layout(), MutationLayout):
                 if isinstance(x.get_layout().real_layout(), FlexibleLayout):
-                    assert (
-                        False
-                    ), "the MutationLayout's real layout shouldn't be FlexibleLayout"
+                    raise AssertionError(
+                        "the MutationLayout's real layout shouldn't be FlexibleLayout"
+                    )
                 elif isinstance(
                     x.get_layout().real_layout(), FixedLayout
                 ) and x.get_layout().real_layout().is_stride_ordered(order):
