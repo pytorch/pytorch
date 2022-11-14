@@ -13,7 +13,7 @@ import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
 
 from . import config, overrides
-from .debug import DebugContext, enable_aot_logging
+from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
 from .utils import (
