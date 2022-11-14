@@ -168,6 +168,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "addr": {f16},
     "allclose": {f16, f32, f64},
+    "amax": {f16},
+    "amin": {f16},
     "angle": {f16, f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
     "bernoulli": {f32, f64},
@@ -204,7 +206,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.rfft2": {f32, f64},
     "fft.rfftn": {f32, f64},
     "index_add": {f16},
-    "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
     "linalg.eig": {f32, f64},
@@ -311,7 +312,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.rfft": {f16, f32, f64},
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
-    "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
     "linalg.eig": {f32, f64},
@@ -441,13 +441,14 @@ inductor_override_kwargs = {
 inductor_all_samples = {
     "softmax.with_dtype",
     "index_add",
-    "index_put",
     "index_copy",
     "scatter_reduce.sum",
     "select_scatter",
     "squeeze",
     "unsqueeze",
     "sum",
+    "amax",
+    "all",
 }
 
 
@@ -549,7 +550,6 @@ class TestInductorOpInfo(TestCase):
                         "check_gradient": requires_grad,
                     }
                     adjusted_kwargs.update(overridden_kwargs)
-
                     self.check_model_cuda(
                         fn,
                         args,
