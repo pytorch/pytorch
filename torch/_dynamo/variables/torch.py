@@ -1,4 +1,6 @@
 import logging
+
+import math
 import re
 import types
 from typing import Dict, List
@@ -170,7 +172,15 @@ class TorchVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ConstantVariable, GradModeVariable, TensorVariable
+        from . import (
+            ConstantVariable,
+            DynamicShapeVariable,
+            GradModeVariable,
+            TensorVariable,
+        )
+
+        # print("CALLING ON TORCH", self.value)
+        from .builder import wrap_fx_proxy
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
@@ -302,7 +312,7 @@ class TorchVariable(VariableTracker):
             def get_state_from_generator():
                 return self.value()
 
-            return TensorVariable.create(
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -338,7 +348,7 @@ class TorchVariable(VariableTracker):
                 example_value = args[0].proxy.node.meta["example_value"]
 
             self.value.__module__ = self.__module__
-            return TensorVariable.create(
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -357,7 +367,7 @@ class TorchVariable(VariableTracker):
         ):
             # TODO(voz): This is rewritten as a call_method because
             # torch.numel(x) w/ sym shapes raises a RuntimeError and x.numel() does not
-            return TensorVariable.create(
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method",
@@ -380,11 +390,21 @@ class TorchVariable(VariableTracker):
                     if isinstance(x.value, numpy.generic):
                         x.value = x.value.item()
 
-            tensor_variable = TensorVariable.create(
+            # TODO(voz): Replace w/ dynamic shape rewrite table.
+            # Ideally, we would be able to do this at ctor time, but alas we need a combination
+            # of value + args to determine this.
+            fn_ = self.value
+            if any([isinstance(x, DynamicShapeVariable) for x in args]):
+                if self.value == math.sqrt:
+                    from torch.fx.experimental.symbolic_shapes import sym_sqrt
+
+                    fn_ = sym_sqrt
+
+            tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    self.value,
+                    fn_,
                     *proxy_args_kwargs(args, kwargs),
                     current_tx=tx,
                 ),
@@ -450,7 +470,9 @@ class TorchVariable(VariableTracker):
         dim = args[0] if args else kwargs.get("dim", variables.ConstantVariable(None))
 
         def fake_softmax(input):
-            return variables.TensorVariable.create(
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -502,7 +524,9 @@ class TorchVariable(VariableTracker):
         ) = normalize_args(*args, **kwargs)
 
         def fake_cross_entropy_loss(input, target):
-            return variables.TensorVariable.create(
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -577,6 +601,7 @@ class TorchPyOperator(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import ListVariable, TensorVariable, UserFunctionVariable
+        from .builder import wrap_fx_proxy
 
         assert kwargs is None or len(kwargs) == 0, "kwargs are not supported, yet"
 
@@ -688,7 +713,7 @@ class TorchPyOperator(VariableTracker):
             p_args[2] = false_node
 
         # Store the invocation as a call
-        return variables.TensorVariable.create(
+        return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
