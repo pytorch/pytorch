@@ -130,7 +130,7 @@ at::SmallVector<int64_t, kSpatialDim + 2> MakeDeConvOutputShape(
                 ", output padding: ", output_padding[idx],
                 ", dilation: ", dilation[idx])
     TORCH_CHECK(output_shape[idx + 2] < kReasonableMaxDim,
-                "Output dimension is beyound reasonable maximum for ", idx,
+                "Output dimension is beyond reasonable maximum for ", idx,
                 " axis;"
                 " kernel: ", kernel[idx],
                 ", stride: ", stride[idx],

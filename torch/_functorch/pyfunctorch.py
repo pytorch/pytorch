@@ -7,7 +7,8 @@ from torch._C._functorch import (
     CInterpreter,
     CGradInterpreterPtr,
     CVmapInterpreterPtr,
-    WithoutTop,
+    pop_dynamic_layer_stack,
+    push_dynamic_layer_stack,
 )
 
 """
@@ -37,12 +38,12 @@ interpreter then invokes.
 """
 
 
-# FunctorchInterpreter is the Python version of Interpreter (recall that
+# FuncTorchInterpreter is the Python version of Interpreter (recall that
 # the DynamicLayerStack is a stack of interpreters).
 # It is a wrapper around the actual C++ Interpreter object.
 #
 # Keep the methods in sync with aten/src/ATen/functorch/Interpreter.h
-class FunctorchInterpreter(ABC):
+class FuncTorchInterpreter(ABC):
     # Process an operation. eg for vmap, this is invoking a batching rule.
     # Conceptually this is analogous to Interpreter::process in C++
     @abstractmethod
@@ -52,14 +53,8 @@ class FunctorchInterpreter(ABC):
     # lower an operation from this Interpreter to the next Interpreter on the stack.
     # Concretely, this involves temporarily popping the current Interpreter.
     # Conceptually this is analogous to Interpreter::sendToNextInterpreter in C++
-    @contextlib.contextmanager
     def lower(self):
-        # TODO: RAII in Python is sketch, replace it with actual context manager
-        try:
-            guard = WithoutTop()
-            yield
-        finally:
-            del guard
+        return temporarily_pop_interpreter_stack()
 
     def level(self):
         return self._cptr.level()
@@ -68,7 +63,16 @@ class FunctorchInterpreter(ABC):
         return self._cptr.key()
 
 
-class VmapInterpreter(FunctorchInterpreter):
+@contextlib.contextmanager
+def temporarily_pop_interpreter_stack():
+    try:
+        saved = pop_dynamic_layer_stack()
+        yield
+    finally:
+        push_dynamic_layer_stack(saved)
+
+
+class VmapInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter):
         assert cdata.key() == TransformType.Vmap
         # NOTE: [Interpreter cdata vs cptr]
@@ -85,7 +89,7 @@ class VmapInterpreter(FunctorchInterpreter):
         return self._cptr.batchSize()
 
 
-class GradInterpreter(FunctorchInterpreter):
+class GradInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter):
         assert cdata.key() == TransformType.Grad
         # See NOTE: [Interpreter cdata vs cptr]
@@ -96,16 +100,25 @@ class GradInterpreter(FunctorchInterpreter):
         args, kwargs = pytree.tree_map_only(torch.Tensor, self._cptr.lift, [args, kwargs])
         return args, kwargs
 
-    # TODO: needs custom lower() for GradMode interaction (In c++ functorch
-    # restores the previous grad mode on Interpreter::sendToNextInterpreter).
-
     def process(self, op, args, kwargs):
         kernel = op.functorch_table[TransformType.Grad]
         args, kwargs = self.lift(args, kwargs)
         return kernel(self, *args, **kwargs)
 
+    # GradInterpreter has custom lower because of the no_grad interaction
+    # See NOTE [grad and vjp interaction with no_grad]
+    # This logic is mirrored from C++ GradInterpreterPtr::sendToNextInterpreter
+    def lower(self):
+        prev_grad_mode = self.prev_grad_mode()
+        if not self.prev_grad_mode:
+            return contextlib.nested(torch.no_grad(), super().lower())
+        return super().lower()
 
-def coerce_cinterpreter(cinterpreter: CInterpreter) -> FunctorchInterpreter:
+    def prev_grad_mode(self):
+        return self._cptr.prevGradMode()
+
+
+def coerce_cinterpreter(cinterpreter: CInterpreter) -> FuncTorchInterpreter:
     key = cinterpreter.key()
     if key == TransformType.Grad:
         return GradInterpreter(cinterpreter)

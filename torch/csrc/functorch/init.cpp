@@ -388,18 +388,6 @@ static void dump_local_tls() {
   std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
 }
 
-static std::tuple<Tensor, optional<int64_t>> unwrapTensorAtCurrentLevel(const Tensor& tensor) {
-  auto level = currentLevel();
-  auto* batched = maybeGetBatchedImpl(tensor);
-  if (!batched) {
-    return std::make_tuple(tensor, nullopt);
-  }
-  if (batched->level() == level) {
-    return std::make_tuple(batched->value(), batched->bdim());
-  }
-  return std::make_tuple(tensor, nullopt);
-}
-
 void initFuncTorchBindings(PyObject* module) {
   auto _C = py::handle(module).cast<py::module>();
   auto m = _C.def_submodule("_functorch");
@@ -462,7 +450,6 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("reshape_dim_into", &at::functorch::reshape_dim_into);
   m.def("reshape_dim_outof", &at::functorch::reshape_dim_outof);
   m.def("are_transforms_active", &at::functorch::areTransformsActive);
-  m.def("unwrap_batchedtensor", unwrapTensorAtCurrentLevel);
   // various debugging things. Maybe we should offer these as first-class APIs
   // on Tensors?
   m.def("is_batchedtensor", &is_batchedtensor);
@@ -489,11 +476,17 @@ void initFuncTorchBindings(PyObject* module) {
     auto result = stack.back().interpreter();
     return result;
   });
-  py::class_<at::functorch::WithoutTop>(m, "WithoutTop")
-    .def(py::init<>());
+  m.def("pop_dynamic_layer_stack", &popDynamicLayer);
+  m.def("push_dynamic_layer_stack", [](DynamicLayer layer) -> int64_t {
+    return pushDynamicLayer(std::move(layer));
+  });
+  py::class_<DynamicLayer>(m, "DynamicLayer");
 
   py::enum_<TransformType>(m, "TransformType")
+    .value("Torch", TransformType::Torch)
     .value("Grad", TransformType::Grad)
+    .value("Jvp", TransformType::Jvp)
+    .value("Functionalize", TransformType::Functionalize)
     .value("Vmap", TransformType::Vmap);
   py::class_<Interpreter>(m, "CInterpreter")
     .def("key", &Interpreter::key)

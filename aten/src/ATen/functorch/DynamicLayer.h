@@ -124,11 +124,8 @@ TORCH_API bool getAutogradFunctionAllowed();
 TORCH_API void setInplaceRequiresGradAllowed(bool allowed);
 TORCH_API bool getInplaceRequiresGradAllowed();
 
-struct TORCH_API WithoutTop {
-  WithoutTop();
-  ~WithoutTop();
-  DynamicLayer layer_;
-};
+TORCH_API DynamicLayer popDynamicLayer();
+TORCH_API int64_t pushDynamicLayer(DynamicLayer&& layer);
 
 }
 } // namespace at

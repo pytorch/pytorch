@@ -37,6 +37,8 @@ from functorch._src.make_functional import (
 )
 from functorch._src.eager_transforms import enable_fwd_grad, _slice_argnums
 from functorch.experimental import functionalize
+from torch._ops import PyOperator
+from torch._functorch.utils import enable_autograd_function
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -3507,6 +3509,98 @@ def forward(self, x_1):
     return None
     """)
 
+
+def construct_sum_pyop():
+    mysum = PyOperator("mysum")
+
+    @mysum.py_impl(torch._C._functorch.TransformType.Vmap)
+    def mysum_batch_rule(interpreter, x, dim):
+        if not torch._C._functorch.is_batchedtensor(x):
+            with interpreter.lower():
+                x = x.view_as(x)  # unnecessary, just here to test the dispatch
+                return mysum(x, dim)
+
+        bdim = torch._C._functorch.maybe_get_bdim(x)
+        value = torch._C._functorch.get_unwrapped(x)
+
+        with interpreter.lower():
+            value = value.movedim(bdim, 0)
+            result = mysum(value, dim + 1)
+
+        return torch._C._functorch._add_batch_dim(result, 0, interpreter.level())
+
+    @mysum.py_impl(torch._C._functorch.TransformType.Grad)
+    def mysum_grad_rule(interpreter, x, dim):
+        level = interpreter.level()
+
+        class MySum(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, dim):
+                ctx.x_shape = x.shape
+                ctx.dim = dim
+                x = torch._C._functorch._unwrap_for_grad(x, level)
+                with torch.enable_grad(), interpreter.lower():
+                    x = x.view_as(x)  # unnecessary, just here to test the dispatch
+                    y = mysum(x, dim)
+
+                y = torch._C._functorch._wrap_for_grad(y, level)
+                return y
+
+            @staticmethod
+            def backward(ctx, gy):
+                return gy.unsqueeze(ctx.dim).expand(ctx.x_shape), None
+
+        with enable_autograd_function():
+            return MySum.apply(x, dim)
+
+    @mysum.py_impl(torch._C.DispatchKey.AutogradCPU)
+    def mysum_autograd(x, dim):
+        return torch.sum(x, dim)
+
+    return mysum
+
+class TestPyOperatorInteraction(TestCase):
+
+    def test_basic_sum(self):
+        mysum = construct_sum_pyop()
+        x = torch.randn(2, 3, 4)
+        result = mysum(x, 1)
+        self.assertEqual(result, torch.sum(x, 1))
+
+    def test_vmap_sum(self):
+        mysum = construct_sum_pyop()
+        x = torch.randn(2, 3, 4)
+        result = vmap(mysum, (0, None))(x, 0)
+        self.assertEqual(result, torch.sum(x, 1))
+
+        result = vmap(vmap(mysum, (0, None)), (0, None))(x, 0)
+        self.assertEqual(result, torch.sum(x, 2))
+
+    def test_grad_sum(self):
+        mysum = construct_sum_pyop()
+        x = torch.randn(3)
+        gx = grad(mysum)(x, 0)
+        self.assertEqual(gx, torch.ones_like(x))
+
+    def test_grad_grad_sum(self):
+        mysum = construct_sum_pyop()
+        x = torch.randn(3, requires_grad=True)
+
+        def f(x):
+            # higher order grad. Requires a non-linearity
+            return mysum(x.sin(), 0)
+
+        def grad_f_sum(x):
+            return grad(f)(x).sum()
+
+        ggx = grad(grad_f_sum)(x)
+        self.assertEqual(ggx, -x.sin())
+
+    def test_vmap_grad_sum(self):
+        mysum = construct_sum_pyop()
+        x = torch.randn(2, 3)
+        gx = vmap(grad(mysum), (0, None))(x, 0)
+        self.assertEqual(gx, torch.ones_like(x))
 
 
 only_for = ("cpu", "cuda")
