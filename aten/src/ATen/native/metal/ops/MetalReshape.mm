@@ -62,7 +62,8 @@ Tensor view(const Tensor& input, c10::SymIntArrayRef sym_size) {
   return output;
 }
 
-Tensor reshape(const Tensor& input, IntArrayRef shape) {
+Tensor reshape(const Tensor& input, IntArrayRef shape, bool copy) {
+  TORCH_INTERNAL_ASSERT(!copy);
   TORCH_CHECK(input.is_metal());
   return view(input, c10::fromIntArrayRefSlow(shape));
 }
