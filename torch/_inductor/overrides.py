@@ -157,6 +157,11 @@ class ConvBinary2d(nn.Conv2d):
         self.unary_scalars = []
         self.unary_algorithm = None
 
+    def _update_unary_params(self, unary):
+        self.unary_attr, self.unary_scalars, self.unary_algorithm = unary_modules_map[
+            unary.__class__
+        ](unary)
+
     def _conv_forward(self, input, other, weight, bias):
         if self.padding_mode != "zeros":
             return torch.ops.mkldnn._convolution_pointwise(
@@ -177,6 +182,79 @@ class ConvBinary2d(nn.Conv2d):
                 self.unary_algorithm,
             )
         return torch.ops.mkldnn._convolution_pointwise(
+            input,
+            other,
+            weight,
+            bias,
+            self.padding,
+            self.stride,
+            self.dilation,
+            self.groups,
+            self.binary_attr,
+            self.binary_alpha,
+            self.unary_attr,
+            self.unary_scalars,
+            self.unary_algorithm,
+        )
+
+    def forward(self, input, other):
+        return self._conv_forward(input, other, self.weight, self.bias)
+
+
+class ConvBinaryInplace2d(nn.Conv2d):
+    def __init__(
+        self,
+        conv: nn.Module,
+        binary_op_name: str,
+    ):
+        super(ConvBinaryInplace2d, self).__init__(
+            conv.in_channels,
+            conv.out_channels,
+            conv.kernel_size,
+            conv.stride,
+            conv.padding,
+            conv.dilation,
+            conv.groups,
+            conv.bias is not None,
+            conv.padding_mode,
+            conv.weight.device,
+            conv.weight.dtype,
+        )
+        self._update_module_params(conv, binary_op_name)
+
+    def _update_module_params(self, conv, binary_op_name):
+        self.__dict__ = copy.deepcopy(conv.__dict__)
+        self.binary_attr = binary_op_name
+        self.binary_alpha = None
+        self.unary_attr = None
+        self.unary_scalars = []
+        self.unary_algorithm = None
+
+    def _update_unary_params(self, unary):
+        self.unary_attr, self.unary_scalars, self.unary_algorithm = unary_modules_map[
+            unary.__class__
+        ](unary)
+
+    def _conv_forward(self, input, other, weight, bias):
+        if self.padding_mode != "zeros":
+            return torch.ops.mkldnn._convolution_pointwise_(
+                F.pad(
+                    input, self._reversed_padding_repeated_twice, mode=self.padding_mode
+                ),
+                other,
+                weight,
+                bias,
+                _pair(0),
+                self.stride,
+                self.dilation,
+                self.groups,
+                self.binary_attr,
+                self.binary_alpha,
+                self.unary_attr,
+                self.unary_scalars,
+                self.unary_algorithm,
+            )
+        return torch.ops.mkldnn._convolution_pointwise_(
             input,
             other,
             weight,
@@ -263,6 +341,21 @@ def fused_conv_binary_eval(conv: nn.Module, binary_op_name: str):
     )
 
 
+def fused_conv_binary_inplace_eval(conv: nn.Module, binary_op_name: str):
+    assert not (conv.training), "Fusion only for eval!"
+    return ConvBinaryInplace2d(
+        conv,
+        binary_op_name,
+    )
+
+
+def fused_binary_unary_eval(conv_binary: nn.Module, unary: nn.Module):
+    assert not (conv_binary.training), "Fusion only for eval!"
+    # reuse origin conv module, and just update its' unary attr.
+    conv_binary._update_unary_params(unary)
+    return conv_binary
+
+
 def is_bfloat16_module(m):
     weight_is_bf16 = m.weight.dtype == torch.bfloat16
     bias_is_bf16 = m.bias is None or m.bias.dtype == torch.bfloat16
@@ -312,6 +405,25 @@ def check_node_is_binary(node):
     )
 
 
+def check_binary_op_kwargs_is_default(node):
+    # For binary op, we hope the kwargs values are the default value:
+    # torch.sub(add)(input, other, *, alpha=1, out=None).
+    if len(node.args) > 2:
+        return False
+    if len(node.kwargs) > 0:
+        if "out" in node.kwargs and node.kwargs["out"] is not None:
+            return False
+        if "alpha" in node.kwargs and node.kwargs["alpha"] != 1.0:
+            return False
+    return True
+
+
+def check_node_is_add_inplace(node):
+    return (node.op == "call_function" and node.target in [operator.iadd]) or (
+        node.op == "call_method" and node.target in ["add_"]
+    )
+
+
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # make sure the autograd is disabled.
     if torch.is_grad_enabled():
@@ -328,7 +440,11 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # the binary inputs have same tensor info(device, dtype, and layout).
     ShapeProp(gm).propagate(*example_inputs)
     gm = fuse_unary(gm)
+    gm = fuse_binary_inplace(gm)
     gm = fuse_binary(gm)
+    # why re-run fuse_unary? we want to enable conv+binary+unary fusion,
+    # such as conv+add+relu for vision model.
+    gm = fuse_unary(gm)
 
     return gm
 
@@ -419,26 +535,31 @@ def replace_and_fuse_for_binary(
     node.replace_all_uses_with(node.args[index_node])
 
 
+def binary_inputs_meta_is_same(binary_node):
+    tensor0_meta = binary_node.args[0].meta.get("tensor_meta")
+    tensor1_meta = binary_node.args[1].meta.get("tensor_meta")
+    if not tensor0_meta or not tensor1_meta:
+        return False
+    if (
+        tensor0_meta.shape != tensor1_meta.shape
+        or tensor0_meta.stride != tensor1_meta.stride
+        or tensor0_meta.dtype != tensor1_meta.dtype
+    ):
+        return False
+
+    return True
+
+
 def fuse_binary(gm: torch.fx.GraphModule):
     modules = dict(gm.named_modules())
     for node in gm.graph.nodes:
-        if check_node_is_binary(node) and (
-            len(node.kwargs) != 2 or node.kwargs["alpha"] == 1.0
-        ):
+        if check_node_is_binary(node) and check_binary_op_kwargs_is_default(node):
             for node_kind, fuse_func in computation_op_binary_op_fusion_map.items():
                 if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
                     node.args[1], torch.fx.Node
                 ):
                     continue
-                tensor0_meta = node.args[0].meta.get("tensor_meta")
-                tensor1_meta = node.args[1].meta.get("tensor_meta")
-                if not tensor0_meta or not tensor1_meta:
-                    continue
-                if (
-                    tensor0_meta.shape != tensor1_meta.shape
-                    or tensor0_meta.stride != tensor1_meta.stride
-                    or tensor0_meta.dtype != tensor1_meta.dtype
-                ):
+                if not binary_inputs_meta_is_same(node):
                     continue
                 attr = binary_attr[node.target]
                 index_list = supported_index_list[attr]
@@ -468,6 +589,46 @@ def fuse_binary(gm: torch.fx.GraphModule):
                         gm.graph.erase_node(node)
                         gm.graph.lint()
                         break
+
+    gm.recompile()
+    return gm
+
+
+def fuse_binary_inplace(gm: torch.fx.GraphModule):
+    modules = dict(gm.named_modules())
+    for node in gm.graph.nodes:
+        if check_node_is_add_inplace(node) and check_binary_op_kwargs_is_default(node):
+            for (
+                node_kind,
+                fuse_func,
+            ) in computation_op_binary_op_fusion_inplace_map.items():
+                if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
+                    node.args[1], torch.fx.Node
+                ):
+                    continue
+                if not binary_inputs_meta_is_same(node):
+                    continue
+                if check_node_kind(node.args[1], modules, node_kind):
+                    if len(node.args[1].users) > 1:
+                        continue
+                    # make sure the output and input are not same tensor.
+                    if node.args[1].args[0] == node.args[0]:
+                        continue
+                    computation_node = modules[node.args[1].target]
+                    replace_and_fuse_for_binary(
+                        computation_node,
+                        node,
+                        fuse_func,
+                        "add",
+                        modules,
+                        1,  # conv module index
+                        0,  # binary op index
+                    )
+                    # Make sure the fused node is post node of node's inputs nodes.
+                    node.append(node.args[1])
+                    gm.graph.erase_node(node)
+                    gm.graph.lint()
+                    break
 
     gm.recompile()
     return gm
@@ -595,6 +756,8 @@ replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: ra
 computation_op_unary_op_fusion_map = {
     nn.Conv2d: fused_conv_unary_eval,
     nn.Linear: fused_linear_unary_eval,
+    ConvBinary2d: fused_binary_unary_eval,
+    ConvBinaryInplace2d: fused_binary_unary_eval,
 }
 
 
@@ -628,6 +791,10 @@ computation_op_binary_op_fusion_map = {
     nn.Linear: fused_linear_binary_eval,
 }
 
+
+computation_op_binary_op_fusion_inplace_map = {
+    nn.Conv2d: fused_conv_binary_inplace_eval,
+}
 
 # For add: we support conv/linear + other and other + conv
 # For sub/add_/sub_, we only support conv/linear - other
