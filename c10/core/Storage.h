@@ -76,7 +76,7 @@ struct C10_API Storage {
   }
 
   void set_nbytes(c10::SymInt size_bytes) const {
-    storage_impl_.get()->set_nbytes(size_bytes);
+    storage_impl_.get()->set_nbytes(std::move(size_bytes));
   }
 
   bool resizable() const {
