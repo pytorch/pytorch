@@ -40,6 +40,19 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_(
       std::move(tensor_vec), work);
 }
 
+c10::intrusive_ptr<Work> allreduce_coalesced_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  AllreduceCoalescedOptions opts = AllreduceCoalescedOptions{};
+  opts.reduceOp = *reduce_op.get();
+  opts.timeout = std::chrono::milliseconds(timeout);
+
+  return process_group->allreduce_coalesced(tensor_vec, opts);
+}
+
 c10::intrusive_ptr<Work> reduce_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -73,6 +86,13 @@ allgather_(
   return std::
       tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>(
           output_tensors, work);
+}
+
+c10::intrusive_ptr<Work> _allgather_base_(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const c10::intrusive_ptr<ProcessGroup>& process_group) {
+  return process_group->_allgather_base(output_tensor, input_tensor);
 }
 
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> reduce_scatter_(
@@ -178,8 +198,15 @@ TORCH_LIBRARY(c10d, m) {
       "allreduce_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, allreduce_));
   m.def(
+      "allreduce_coalesced_",
+      dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, allreduce_coalesced_));
+  m.def(
       "allgather_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, allgather_));
+  m.def(
+      "_allgather_base_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, _allgather_base_));
   m.def(
       "reduce_scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
@@ -249,6 +276,25 @@ c10::intrusive_ptr<Work> allreduce(
       opts.timeout.count()));
 }
 
+c10::intrusive_ptr<Work> allreduce_coalesced(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::TensorList tensors,
+    const AllreduceCoalescedOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::allreduce_coalesced_", "")
+                       .typed<c10::intrusive_ptr<::c10d::Work>(
+                           at::TensorList,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                           int64_t)>();
+
+  return op.call(
+      tensors,
+      process_group,
+      c10::make_intrusive<ReduceOp>(opts.reduceOp),
+      opts.timeout.count());
+}
+
 c10::intrusive_ptr<Work> allgather(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<std::vector<at::Tensor>>& output_tensors,
@@ -265,6 +311,21 @@ c10::intrusive_ptr<Work> allgather(
                            int64_t)>();
   return std::get<1>(op.call(
       output_tensors, input_tensors, process_group, opts.timeout.count()));
+}
+
+c10::intrusive_ptr<Work> _allgather_base(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const AllgatherOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::_allgather_base_", "")
+                       .typed<c10::intrusive_ptr<Work>(
+                           at::Tensor&,
+                           at::Tensor&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
+
+  return op.call(output_tensor, input_tensor, process_group);
 }
 
 c10::intrusive_ptr<Work> reduce_scatter(
