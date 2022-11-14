@@ -3404,7 +3404,7 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
     if x.ndim == 0:
         # Treat scalars as elements of \R^1
         # We cannot use x[idx] here as it accesses item() (??), hence this awkward construction
-        return torch.empty_like(x).index_copy(0, index, x.expand_as(index))
+        return torch.empty_like(x).index_copy_(0, index, x.expand_as(index))
 
     idx = (slice(None),) * dim + (index,)
     return x[idx]
