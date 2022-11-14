@@ -901,9 +901,7 @@ TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
     # other libraries take up about 11% of space per process
-    # + leave some additional buffer e.g., for runtime compilation
-    # or allocations outside of the caching allocator
-    torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .15, 2))
+    torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .11, 2))
 
 
 def skipIfCrossRef(fn):
@@ -984,7 +982,7 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
 # If this is True then CUDA memory leak checks are skipped. If this is false
 #   then CUDA memory leak checks are performed.
 # See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
-TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK', '0') == '1'
+TEST_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_CUDA_MEM_LEAK_CHECK', '0') == '1'
 
 # True if CI is running TBB-enabled Pytorch
 IS_TBB = "tbb" in os.getenv("BUILD_ENVIRONMENT", "")
@@ -1822,6 +1820,31 @@ class TensorOrArrayPair(TensorLikePair):
         self.rtol = max(self.rtol, rtol_override)
         self.atol = max(self.atol, atol_override)
 
+        # This is a slow and ugly hack to allow the comparison of hybrid sparse CSR tensors with strided ones. If
+        # `check_layout=False` (default), the tensors will be converted to strided by calling `.to_dense()` on them.
+        # However, this is not yet supported for hybrid sparse CSR and thus we need to do it manually for now.
+        # FIXME: Remove this as soon as `.to_dense` is supported for hybrid sparse CSR tensors
+        if not self.check_layout:
+            self.actual, self.expected = self._handle_hybrid_sparse_csr(self.actual, self.expected)
+
+    def _handle_hybrid_sparse_csr(self, actual, expected):
+        compressed_sparse_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
+        if not ((actual.layout in compressed_sparse_layouts) ^ (expected.layout in compressed_sparse_layouts)):
+            return actual, expected
+
+        def to_dense(tensor):
+            if tensor.layout not in compressed_sparse_layouts:
+                return tensor
+
+            def partial_to_dense(tensor):
+                if tensor.layout not in compressed_sparse_layouts or tensor.values().ndim == 1:
+                    return tensor.to_dense()
+                return torch.stack([partial_to_dense(sub_tensor) for sub_tensor in tensor])
+
+            return partial_to_dense(tensor)
+
+        return [to_dense(input) for input in [actual, expected]]
+
     def _process_inputs(self, actual, expected, *, id, allow_subclasses):
         self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
 
@@ -1952,7 +1975,7 @@ class TestCase(expecttest.TestCase):
         test_method = getattr(self, method_name, None)
         if test_method is not None:
             # Wraps the tested method if we should do CUDA memory check.
-            if not TEST_SKIP_CUDA_MEM_LEAK_CHECK:
+            if TEST_CUDA_MEM_LEAK_CHECK:
                 self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
                 # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
                 if self._do_cuda_memory_leak_check and not IS_WINDOWS:
