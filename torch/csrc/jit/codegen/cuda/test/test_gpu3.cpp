@@ -6810,6 +6810,66 @@ TEST_F(NVFuserTest, FusionSqueezeOnlyWelford_CUDA) {
   ASSERT_TRUE(at::allclose(cg_outputs[2], cg_outputs[5]));
 }
 
+TEST_F(NVFuserTest, FusionIssue2163ReproInvalidAlias_CUDA) {
+  int64_t N = 10, C = 16;
+
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  FusionGuard fg(fusion_ptr.get());
+
+  // setup fusion
+  auto input = makeConcreteTensor({N, C});
+  auto weight = makeConcreteTensor({C});
+  fusion_ptr->addInput(input);
+  fusion_ptr->addInput(weight);
+
+  // This seems to confuse the alias analysis
+  auto weight_copy1 = set(weight);
+  // auto weight_copy2 = weight_copy1;
+  auto weight_copy2 = set(weight_copy1);
+
+  auto input_sum = sum(input, {0});
+  auto sub_bcast = broadcast(input_sum, {true, false});
+  auto input_sub_sum = sub(input, sub_bcast);
+  auto weight_bcast = broadcast(weight_copy2, {true, false});
+  auto output = mul(input_sub_sum, weight_bcast);
+  fusion_ptr->addOutput(output);
+
+  auto output_cache = output->cacheBefore();
+
+  auto ref = input;
+  ref->split(-1, 8);
+  ref->reorder({{0, 1}, {1, 0}, {2, 2}});
+  TransformPropagator propagator(ref);
+  MaxRootDomainInfoSpanningTree(ref).traverse(&propagator);
+
+  // Don't inline the innermost axes
+  std::unordered_set<IterDomain*> uninlinable;
+  uninlinable.insert(output->axis(-1));
+  uninlinable.insert(weight_copy1->axis(-1));
+
+  inlineMost(uninlinable);
+
+  auto options_float =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  auto at_input = at::randn({N, C}, options_float);
+  auto at_weight = at::randn({C}, options_float);
+
+  std::vector<IValue> aten_inputs({at_input, at_weight});
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion_ptr.get(), aten_inputs);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+  auto cg_output = cg_outputs.at(0);
+
+  auto ref_x_sub_mean = at_input - at_input.sum({0}).unsqueeze(0);
+  auto ref_y = ref_x_sub_mean * at_weight.unsqueeze(0);
+
+  testValidate(
+      fe.kernel(), {cg_output}, aten_inputs, {ref_y}, __LINE__, __FILE__, "");
+}
+
 // Test file size should be up to 10K LoC. Create a new file for more tests.
 
 } // namespace jit

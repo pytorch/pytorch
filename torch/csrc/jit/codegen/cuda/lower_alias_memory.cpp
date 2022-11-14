@@ -36,9 +36,30 @@ IterDomain* exactConcreteId(IterDomain* id) {
 }
 
 //! Checks that the current loop nest is realizing a serial
-//!  broadcast so that each index of producer buffer can be visited
-//!  multiple times, in which case the aggressive is not valid.
-bool isSerialBroadcastResolution(TensorView* producer, TensorView* consumer) {
+//! broadcast so that each index of producer buffer can be visited
+//! multiple times, in which case the aggressive is not valid.
+//!
+//! Need to look at all the loops at each consumer expression of the
+//! producer tensor rather than just the consumer IterDomains of the
+//! expression. Here's an example case from
+//! FusionIssue2163ReproInvalidAlias:
+//!
+//! T3_l[ iS31{( ceilDiv(16, 8) )}, iS32{8} ] ca_pos( 2 ) produce_pos( 1)
+//!  = T2_l[ iS33{( ceilDiv(16, 8) )}, iS34{8} ] ca_pos( 1 );
+//! T7_l[ iS25{( ceilDiv(16, 8) )}, bS11{1}, iS26{8} ] ca_pos( 3 ) produce_pos(
+//! 3)
+//!  = broadcast( T3_l[ iS31{( ceilDiv(16, 8) )}, iS32{8} ] ca_pos( 2 )
+//!  produce_pos( 1) )
+//!
+//! When T2 is viewed just as the consumer of T3, it doesn't look like
+//! there's a consumer IterDomain that could make T2 used multiple
+//! times, but that's actually not the case. T3 is computed at
+//! position 2 with its consumer T7, which adds a broadcast IterDomain
+//! between the two domains, and that is eventually concretized, T2 is
+//! indeed used multiple times. See also issue #2163.
+bool isSerialBroadcastResolution(
+    TensorView* producer,
+    const std::vector<kir::ForLoop*>& for_loops) {
   //! Note: see issue #1785:
   //!  serial broadcast resolution doesn't only happen to
   //! immediate outputs of broadcast ops. We can also have
@@ -68,24 +89,34 @@ bool isSerialBroadcastResolution(TensorView* producer, TensorView* consumer) {
   //!  that was derived from some root id that doesn't concretely map to T0's
   //!  domain.
 
-  // Serial concrete loop id's that cover consumer's iter domain.
-  std::vector<Val*> consumer_serial_loop_concrete_ids;
+  // Serial concrete loop ids
+  std::vector<Val*> serial_loop_concrete_ids;
 
-  for (auto consumer_leaf_id : consumer->domain()->domain()) {
+  for (auto for_loop : for_loops) {
+    // ForLoop::iter_domain() should be the concrete domain, but just
+    // in case.
     auto concrete_loop_id = GpuLower::current()->caMap()->getConcreteMappedID(
-        consumer_leaf_id, IdMappingMode::LOOP);
+        for_loop->iter_domain(), IdMappingMode::LOOP);
 
-    // Check for any serial loop id with non-trivial extent
+    // Check for any serial loop id with non-trivial extent. If the
+    // concrete ID is a broadcast, it shouldn't materialize an actual
+    // loop, so that can be ignored as well.
     if (!concrete_loop_id->isThread() &&
-        !concrete_loop_id->extent()->isOneInt()) {
-      consumer_serial_loop_concrete_ids.push_back(concrete_loop_id);
+        !concrete_loop_id->extent()->isOneInt() &&
+        !concrete_loop_id->isBroadcast()) {
+      serial_loop_concrete_ids.push_back(concrete_loop_id);
     }
   }
 
   // Collect the root id's that the serial loop iterdomain
   //  are transformed from.
-  auto serial_loop_roots = InputsOf::outputs(
-      FusionGuard::getCurFusion(), consumer_serial_loop_concrete_ids);
+  // NOTE: This does not necessarily capture the actual root domains
+  //  as the concrete domains may be post-view domains. We need to
+  //  traverse across view boundaries as we do in indexing. This
+  //  should not result in false aliasing but may miss safe aliasing
+  //  opportunities.
+  auto serial_loop_roots =
+      InputsOf::outputs(FusionGuard::getCurFusion(), serial_loop_concrete_ids);
 
   // Collect exact concrete id's in producer's root domain
   std::unordered_set<IterDomain*> producer_exact_concrete_root_ids;
@@ -749,8 +780,6 @@ class AllocationInfoMap : private kir::IrVisitor {
       return;
     }
 
-    auto out_tv = expr->outputs()[0]->as<TensorView>();
-
     const auto expr_pos = scope_map_.getExprPos(expr);
 
     // Collect all tv's that resolves broadcast in this
@@ -759,7 +788,7 @@ class AllocationInfoMap : private kir::IrVisitor {
     for (auto input_tv : ir_utils::filterByType<TensorView>(expr->inputs())) {
       auto maybe_alloc_info = getMaybeAllocInfoFromTV(input_tv);
       if (maybe_alloc_info.has_value()) {
-        if (!isSerialBroadcastResolution(input_tv, out_tv)) {
+        if (!isSerialBroadcastResolution(input_tv, for_loops_)) {
           maybe_alloc_info.value()->inner_live_interval->markRead(expr_pos);
         } else {
           // Disable inner alias info for this buffer, since line number based
