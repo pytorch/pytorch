@@ -326,7 +326,6 @@ def count_tangents(fx_g: torch.fx.GraphModule):
 _graph_counter = itertools.count(0)
 
 
-@enable_aot_logging()
 def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
 

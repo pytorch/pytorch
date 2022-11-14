@@ -130,7 +130,10 @@ class triton:
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
-    enabled = os.environ.get("TORCHINDUCTOR_TRACE", "0") == "1"
+    enabled = (
+        os.environ.get("TORCHINDUCTOR_TRACE", "0") == "1"
+        or os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
+    )
 
     # Save python logger call >=logging.DEBUG
     debug_log = True

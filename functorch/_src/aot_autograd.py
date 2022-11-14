@@ -965,7 +965,17 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
 
         compiled_fn = None
 
+        try:
+            from torch._inductor.debug import enable_aot_logging
+        except ImportError:
+            # Note: the standard nullcontext does not implement a generator context
+            @contextmanager
+            def enable_aot_logging():
+                yield
+                return
+
         @wraps(fn)
+        @enable_aot_logging()
         def new_func(*args):
             nonlocal compiled_fn
             if compiled_fn is None:

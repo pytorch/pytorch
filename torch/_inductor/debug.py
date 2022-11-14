@@ -9,15 +9,11 @@ import pstats
 import shutil
 import subprocess
 from typing import Any, List
+from unittest.mock import patch
 
 import functorch
 
-from functorch.compile import (
-    config as aot_config,
-    draw_graph,
-    get_aot_graph_name,
-    get_graph_being_compiled,
-)
+from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
 
 import torch
 from torch import fx as fx
@@ -175,27 +171,40 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
 @contextlib.contextmanager
 def enable_aot_logging():
+    if not bool(os.environ.get("TORCH_COMPILE_DEBUG", False)):
+        yield
+        return
+
+    # Enable all graphs to be logged to a file by setting the flags to True
+    # and the log level of the file logger to DEBUG
+
+    stack = contextlib.ExitStack()
+    stack.enter_context(patch("functorch._src.config.debug_fake_cross_ref", True))
+    stack.enter_context(patch("functorch._src.config.debug_partitioner", True))
+    stack.enter_context(patch("functorch._src.config.debug_graphs", True))
+    stack.enter_context(patch("functorch._src.config.debug_joint", True))
+
     log = logging.getLogger(functorch._src.aot_autograd.__name__)
-    path = os.path.join(dynamo_utils.get_debug_dir(), "aot_inductor")
+    path = os.path.join(dynamo_utils.get_debug_dir(), "aot_torchinductor")
     if not os.path.exists(path):
         os.makedirs(path)
 
     fh = logging.FileHandler(
         os.path.join(
             path,
-            f"aot_{get_aot_graph_name()}_{logging.getLevelName(aot_config.log_level)}.log",
+            f"aot_{get_aot_graph_name()}_debug.log",
         )
     )
-    fh.setLevel(aot_config.log_level)
+    fh.setLevel(logging.DEBUG)
     fh.setFormatter(
         logging.Formatter("[%(filename)s:%(lineno)d %(levelname)s] %(message)s")
     )
     log.addHandler(fh)
-    log.setLevel(aot_config.log_level)
     try:
         yield
     finally:
         log.removeHandler(fh)
+        stack.close()
 
 
 class DebugContext:
