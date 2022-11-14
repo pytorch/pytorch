@@ -470,6 +470,9 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
 
     using Vec = Vectorized<scalar_t>;
 
+    TORCH_INTERNAL_ASSERT(sizeof(scalar_t) == -strides[0]);
+    auto stride0 = sizeof(scalar_t);
+
     for (const auto j C10_UNUSED : c10::irange(size1)) {
 
       // vectorized loop with negative stride for output
@@ -482,9 +485,6 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
       }
 
       int64_t i = 0;
-
-      // stride[0] is negative
-      auto stride0 = (sizeof(scalar_t) == -strides[0]) ? sizeof(scalar_t) : -strides[0];
 
       for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
         auto out1 = Vec::loadu(data[1] + i * strides[1]);

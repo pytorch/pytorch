@@ -232,12 +232,18 @@ inline Vectorized<float> flip(const Vectorized<float> & v) {
 
 template<>
 inline Vectorized<double> flip(const Vectorized<double> & v) {
-  return _mm256_permute4x64_pd(v, 27);
+  return _mm256_permute4x64_pd(v, 27);  // 27 == _MM_SHUFFLE(0, 1, 2, 3)
 }
 
 template<>
 inline Vectorized<int64_t> flip(const Vectorized<int64_t> & v) {
   return _mm256_permute4x64_epi64(v, 27);  // 27 == _MM_SHUFFLE(0, 1, 2, 3)
+}
+
+template<>
+inline Vectorized<int32_t> flip(const Vectorized<int32_t> & v) {
+  const __m256i mask_int32 = _mm256_set_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+  return _mm256_permutevar8x32_epi32(v, mask_int32);
 }
 
 template<>
