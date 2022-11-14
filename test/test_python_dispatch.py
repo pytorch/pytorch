@@ -1700,6 +1700,5 @@ class TestPythonDispatcher(TestCase):
         python_disp_shape = torch.linalg.lstsq(a, b).solution.shape
         self.assertEqual(expected_shape, python_disp_shape)
 
-
 if __name__ == '__main__':
     run_tests()
