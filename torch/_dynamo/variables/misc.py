@@ -513,6 +513,7 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
 
         # This variable is True when it corresponds to user code such as
         #
@@ -530,7 +531,7 @@ class GetAttrVariable(VariableTracker):
         if is_original_tensor_torch_function:
             # Instead of tracing inside torch.Tensor.__torch_function__,
             # record the `call_function` or `call_method` call into the graph.
-            from . import TensorVariable, TorchVariable
+            from . import TorchVariable
 
             original_torch_or_getattr_variable = args[0]
             new_args = args[2].items
@@ -540,7 +541,7 @@ class GetAttrVariable(VariableTracker):
             # example tensor from going into the override.
             with torch._C.DisableTorchFunction():
                 if isinstance(args[0], TorchVariable):
-                    return TensorVariable.create(
+                    return wrap_fx_proxy(
                         tx=tx,
                         proxy=tx.output.create_proxy(
                             "call_function",
@@ -551,7 +552,7 @@ class GetAttrVariable(VariableTracker):
                         **options,
                     )
                 elif isinstance(args[0], GetAttrVariable):
-                    return TensorVariable.create(
+                    return wrap_fx_proxy(
                         tx=tx,
                         proxy=tx.output.create_proxy(
                             "call_method",
