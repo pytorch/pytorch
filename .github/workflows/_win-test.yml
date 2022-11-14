@@ -74,11 +74,15 @@ jobs:
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
-      - name: Activate conda
-        shell: powershell
+      - name: Setup conda
+        shell: bash
         run: |
-          C:\Jenkins\Miniconda3\shell\condabin\conda-hook.ps1
-          conda activate base
+          # Windows conda is baked into the AMI at this location
+          CONDA="C:\Jenkins\Miniconda3\condabin\conda.bat"
+
+          echo "CONDA_RUN=${CONDA} run --no-capture-output" >> "${GITHUB_ENV}"
+          echo "CONDA_BUILD=${CONDA} run conda-build" >> "${GITHUB_ENV}"
+          echo "CONDA_INSTALL=${CONDA} install" >> "${GITHUB_ENV}"
 
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -100,7 +104,7 @@ jobs:
         shell: bash
         run: |
           # Windows conda doesn't have python3 binary, only python, but it's python3
-          python -m tools.stats.monitor > usage_log.txt 2>&1 &
+          ${CONDA_RUN} python -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download PyTorch Build Artifacts
@@ -205,7 +209,7 @@ jobs:
         run: |
           set -x
           # Windows conda doesn't have python3 binary, only python, but it's python3
-          python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+          ${CONDA_RUN} python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win
