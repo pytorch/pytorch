@@ -245,7 +245,7 @@ class DataLoader(Generic[T_co]):
                              'let num_workers > 0 to enable multiprocessing, otherwise set prefetch_factor to None.')
         elif num_workers > 0 and prefetch_factor is None:
             prefetch_factor = 2
-        elif prefetch_factor < 0:
+        elif prefetch_factor is not None and prefetch_factor < 0:
             raise ValueError('prefetch_factor option should be non-negative')
 
         if persistent_workers and num_workers == 0:
@@ -584,7 +584,6 @@ class _BaseDataLoaderIter(object):
         ws, rank = _get_distributed_settings()
         self._world_size = ws
         self._rank = rank
-        self._prefetch_factor = loader.prefetch_factor
         # for other backends, pin_memory_device need to set. if not set
         # default behaviour is CUDA device. if pin_memory_device is selected
         # and pin_memory is not set, the default behaviour false.
@@ -993,6 +992,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
     def __init__(self, loader):
         super(_MultiProcessingDataLoaderIter, self).__init__(loader)
+
+        self._prefetch_factor = loader.prefetch_factor
 
         assert self._num_workers > 0
         assert self._prefetch_factor > 0
