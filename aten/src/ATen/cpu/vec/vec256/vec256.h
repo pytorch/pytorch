@@ -224,10 +224,9 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FLIP ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-static const __m256i mask_float = _mm256_set_epi32(0, 1, 2, 3, 4, 5, 6, 7);
-
 template<>
 inline Vectorized<float> flip(const Vectorized<float> & v) {
+  const __m256i mask_float = _mm256_set_epi32(0, 1, 2, 3, 4, 5, 6, 7);
   return _mm256_permutevar8x32_ps(v, mask_float);
 }
 
