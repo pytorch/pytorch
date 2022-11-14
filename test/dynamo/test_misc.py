@@ -579,8 +579,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(cnts.op_count, 0)
 
-    # KeyError: '__name__'
-    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_user_getattr1(self):
         class MyConfig(dict):
             def __getattr__(self, name):
@@ -1146,6 +1144,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.run()(fn2)(torch.randn(4))
         self.assertEqual(cnts2.frame_count, 0)
 
+    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_nested_disable_decorator(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1385,6 +1384,42 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_autograd_profiler_enabled(self):
+        def fn(x):
+            if torch.autograd._profiler_enabled():
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.randn((2, 2), requires_grad=True)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        if torch.autograd._profiler_enabled():
+            torch.autograd._disable_profiler()
+        assert not torch.autograd._profiler_enabled()
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+        with torch.autograd.profiler.profile():
+            assert torch.autograd._profiler_enabled()
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+
+    def test_tensor_is_contiguous(self):
+        def fn(x):
+            input = torch.randn((1, 16, 1, 1))
+            weight = torch.randn((8, 16, 3, 3))
+            weight = weight.to(memory_format=x)
+            output = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
+            return output.is_contiguous(memory_format=x)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        for x in [torch.contiguous_format, torch.channels_last]:
+            self.assertEqual(fn(x), opt_fn(x))
+
     def test_python_slice(self):
         def f1(input):
             y = 0
@@ -1582,6 +1617,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 1)
 
     @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
+    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_unsupported_fake_tensor(self):
         def f(x):
             return torch.quantize_per_tensor(x, 0.1, 10, torch.quint8)
@@ -2774,6 +2810,37 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Detected that you are using FX"):
             gm = torch.fx.symbolic_trace(optimized)
+
+    @patch.object(torch._dynamo.config, "error_on_nested_fx_trace", False)
+    def test_no_error_on_nested_fx_trace(self):
+        input = torch.rand(2, 3)
+
+        def f(x):
+            x + x
+
+        real = f(input)
+
+        optimized = torch._dynamo.optimize("eager")(f)
+        self.assertTrue(same(optimized(input), real))
+
+        # should not error
+        gm = torch.fx.symbolic_trace(optimized)
+        self.assertTrue(same(gm(input), real))
+
+    def test_inference_mode(self):
+        @torch.inference_mode()
+        def func(x, y):
+            return x.add(1.0) + y
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=True)
+        ref = func(x, y)
+        opt_func = torch._dynamo.optimize("eager")(func)
+
+        x1 = torch.ones(4, requires_grad=True)
+        res = opt_func(x1, y)
+        self.assertTrue(same(ref, res))
+        self.assertTrue(same(x, x1))
 
 
 class CustomFunc(torch.autograd.Function):
