@@ -2669,6 +2669,37 @@ class TestMakeFunctional(TestCase):
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         _ = combine_state_for_ensemble(models)
 
+    def test_state_correctly_returned_after_forward(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        mod = Net()
+        func, params = make_functional(mod)
+
+        # state in func.names_map
+        old_state_linear_weight = func.stateless_model.linear.weight
+        old_state_linear_bias = func.stateless_model.linear.bias
+
+        self.assertIsNotNone(old_state_linear_weight)
+        self.assertIsNotNone(old_state_linear_bias)
+
+        x = torch.randn(4, 3)
+        func(params, x)
+
+        new_state_linear_weight = func.stateless_model.linear.weight
+        new_state_linear_bias = func.stateless_model.linear.bias
+
+        self.assertIsNotNone(new_state_linear_weight)
+        self.assertIsNotNone(new_state_linear_bias)
+
+        self.assertEqual(old_state_linear_weight, new_state_linear_weight)
+        self.assertEqual(old_state_linear_bias, new_state_linear_bias)
 
 class TestExamplesCorrectness(TestCase):
     def test_maml_regression(self, device):
@@ -3013,7 +3044,11 @@ class TestExamplesCorrectness(TestCase):
         self.assertEqual(result_loss, expected_loss)
         self.assertEqual(result_weights, expected_weights)
 
-    @parametrize("dropout_layer", [nn.Dropout, nn.AlphaDropout, nn.FeatureAlphaDropout])
+    @parametrize("dropout_layer", [
+        subtest(nn.Dropout, 'Dropout'),
+        subtest(nn.AlphaDropout, 'AlphaDropout'),
+        subtest(nn.FeatureAlphaDropout, 'FeatureAlphaDropout'),
+    ])
     def test_find_learning_rate_ensembling(self, device, dropout_layer):
         # This example mimics what a user might do when trying to find the optimal learning rate. They would
         # want to run a bunch of models with the same behavior (including the same dropout!) and have them
@@ -3089,8 +3124,10 @@ class TestExamplesCorrectness(TestCase):
         func_model, weights = make_functional(model)
 
         def compute_loss(weights, image, target):
-            output = func_model(weights, images)
-            loss = criterion(output, targets)
+            image = image.unsqueeze(0)
+            target = target.unsqueeze(0)
+            output = func_model(weights, image)
+            loss = criterion(output, target)
             return loss
 
         batch_size = 3
@@ -3100,7 +3137,7 @@ class TestExamplesCorrectness(TestCase):
         result_grads = vmap(grad(compute_loss), in_dims=(None, 0, 0))(weights, images, targets)
 
         expected_grads = [
-            torch.autograd.grad(compute_loss(weights, images[i].unsqueeze(0), targets[i].unsqueeze(0)), weights)
+            torch.autograd.grad(compute_loss(weights, images[i], targets[i]), weights)
             for i in range(batch_size)
         ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
@@ -3124,13 +3161,16 @@ def normalize_devices(fx_g):
     return fx_g
 
 class TestFunctionalize(TestCase):
-    def _check_functionalize_correctness(self, f, inpt):
+    def _check_functionalize_correctness(self, f, inpt, *, skip_vmap=False):
         inpt1 = inpt.clone()
         inpt2 = inpt.clone()
         inpt3 = inpt.clone()
 
         expected_outputs = f(inpt1)
-        actual_outputs = vmap(functionalize(f))(inpt2.unsqueeze(0))[0].squeeze()
+        if skip_vmap:
+            actual_outputs = functionalize(f)(inpt2)
+        else:
+            actual_outputs = vmap(functionalize(f))(inpt2.unsqueeze(0))[0].squeeze()
         # Right now the flavor of functionalize that also removes view ops
         # isn't being used with vmap
         # That's because {view}_copy ops don't have batching rules yet
@@ -3200,7 +3240,8 @@ class TestFunctionalize(TestCase):
             z2, z3 = z1.split(2)
             z2.add_(tmp)
             return x
-        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+        # See Note [Fix vmap slice_scatter]
+        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device), skip_vmap=True)
 
     # Ensure functionalize works with List[Optional[Tensor]] arguments.
     # See the fix / discussion at https://github.com/pytorch/pytorch/pull/76085
@@ -3241,6 +3282,7 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
         self.assertEqual(out1, out2)
         self.assertEqual(inpt1, inpt2)
 
+    @unittest.skipIf(IS_FBCODE, 'fails in fbcode')
     def test_vmap_functionalize_jvp(self, device):
 
         def f(x: torch.Tensor) -> torch.Tensor:
@@ -3429,6 +3471,7 @@ def forward(self, a_1, b_1) -> torch.Tensor:
     return index
     """)
 
+    @unittest.skipIf(IS_FBCODE, 'fails in fbcode')
     def test_functionalize_optional_tensorlist2(self, device):
 
         def f(a, b) -> torch.Tensor:

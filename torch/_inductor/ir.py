@@ -6,8 +6,10 @@ import logging
 import re
 import textwrap
 from collections import OrderedDict
+from contextlib import nullcontext
 from enum import Enum
 from functools import partial
+from inspect import signature
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
@@ -17,17 +19,31 @@ from sympy import Expr, Integer
 
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._prims_common import is_boolean_dtype, is_float_dtype
+from torch._prims_common import (
+    is_boolean_dtype,
+    is_float_dtype,
+    make_channels_last_strides_for,
+    make_contiguous_strides_for,
+)
+from torch._subclasses.fake_tensor import FakeTensorMode
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .cuda_properties import get_device_properties
 from .dependencies import extract_read_writes, var_builder
-from .utils import cache_on_self, sympy_dot, sympy_product, sympy_subs, sympy_symbol
+from .utils import (
+    argsort,
+    cache_on_self,
+    sympy_dot,
+    sympy_product,
+    sympy_subs,
+    sympy_symbol,
+)
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
+aten = torch.ops.aten
 
 
 def inverse_reorder(order):
@@ -66,6 +82,17 @@ def stride_order2fill_order(order):
     return fill_order
 
 
+def get_stride_order(seq):
+    """
+    Convert strides to stride order
+    """
+    sorted_idx = argsort(seq)
+    out = [None for _ in range(len(seq))]
+    for i, elem in enumerate(sorted_idx):
+        out[elem] = i
+    return out
+
+
 def reads_from_conv(buf, var_ranges):
     """
     return:
@@ -99,6 +126,25 @@ def reads_from_conv(buf, var_ranges):
             if read_from_conv:
                 return True, addr
     return False, None
+
+
+def ir_node_to_tensor(x, guard_shape=True):
+    shape_fn = (
+        V.graph.sizevars.guard_static_shape
+        if guard_shape
+        else V.graph.sizevars.size_hint
+    )
+    size = [shape_fn(s) for s in x.get_size()]
+    if is_storage_and_layout(x):
+        stride = [shape_fn(s) for s in x.get_layout().stride]
+    else:
+        stride = make_contiguous_strides_for(size)
+    dtype = x.get_dtype()
+    device = x.get_device()
+    t = torch.empty_strided(
+        size=size, stride=stride, dtype=dtype, device=device
+    ).zero_()
+    return t
 
 
 def layout_priority_idx(reads_bufs, memory_addrs, var_ranges):
@@ -302,7 +348,7 @@ class Loops(IRNode):
             with V.set_ops_handler(V.MockHandler()), patch.object(
                 FlexibleLayout, "allow_indexing", True
             ):
-                return self.inner_fn(self._index(self.ranges))
+                return str(self.inner_fn(self._index(self.ranges)))
         except Exception as e:
             return f"inner_fn(): {e}"
 
@@ -379,6 +425,11 @@ class ReductionHint(Enum):
     DEFAULT = 3
 
 
+class TileHint(Enum):
+    SQUARE = 0
+    DEFAULT = 1
+
+
 @dataclasses.dataclass
 class Reduction(Loops):
     reduction_ranges: List[Expr]
@@ -419,8 +470,11 @@ class Reduction(Loops):
             with V.set_ops_handler(V.MockHandler()), patch.object(
                 FlexibleLayout, "allow_indexing", True
             ):
-                return self.inner_fn(
-                    self._index(self.ranges), self._index(self.reduction_ranges, "r")
+                return str(
+                    self.inner_fn(
+                        self._index(self.ranges),
+                        self._index(self.reduction_ranges, "r"),
+                    )
                 )
         except Exception as e:
             return f"inner_fn(): {e}"
@@ -680,12 +734,47 @@ class Reduction(Loops):
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
+
+        if reduction_numel == 0:
+
+            # N.B. This is a hack to generate the literal of the given type
+            # Ideally, we should be fixing `def constant` in triton.py
+            # but it breaks due to hardcoded dtypes in other places
+            def py_cnst(val):
+                return (
+                    bool(val)
+                    if dst_dtype == torch.bool
+                    else float(val)
+                    if dst_dtype.is_floating_point
+                    else int(val)
+                )
+
+            rtypes_to_inits = {
+                "sum": py_cnst(0),
+                "prod": py_cnst(1),
+                "any": py_cnst(0),
+                # "all" is desugared to `!any(!val)`
+            }
+
+            assert (
+                reduction_type in rtypes_to_inits.keys()
+            ), f"{reduction_type} not supported for zero-dimension tensors!"
+
+            def const_fn(index):
+                return ops.constant(rtypes_to_inits[reduction_type], dst_dtype)
+
+            return Pointwise.create(
+                device=device,
+                dtype=src_dtype,
+                inner_fn=const_fn,
+                ranges=list(ranges),
+            )
+
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
             if reduction_type in ("argmin", "argmax"):
 
                 def fn(index):
-                    assert len(index) <= 1
                     return 0
 
             else:
@@ -947,6 +1036,9 @@ class BaseView(IRNode):
 
     def mark_reuse(self, users):
         return self.data.mark_reuse(users)
+
+    def has_exceeded_max_reads(self):
+        return self.data.has_exceeded_max_reads()
 
     def realize(self):
         return self.data.realize()
@@ -1422,6 +1514,9 @@ class BaseConstant(IRNode):
     def mark_reuse(self, users):
         pass
 
+    def has_exceeded_max_reads(self):
+        return False
+
     def get_reads(self):
         return ()
 
@@ -1457,11 +1552,23 @@ class IndexingConstant(BaseConstant):
 
 @dataclasses.dataclass
 class Layout(IRNode):
-    device: torch.device
-    dtype: torch.dtype
-    size: List[Expr]
-    stride: List[Expr]
-    offset: Expr = Integer(0)
+    def __init__(
+        self,
+        device: torch.device,
+        dtype: torch.dtype,
+        size: List[Expr],
+        stride: List[Expr],
+        offset: Expr = Integer(0),
+    ):
+        self.device = device
+        self.dtype = dtype
+        self.size = size
+        self._stride = stride
+        self.offset = offset
+
+    @property
+    def stride(self):
+        return self._stride
 
     def __str__(self):
         offset = ""
@@ -1676,6 +1783,15 @@ class MutationLayout(Layout):
             None,  # type: ignore[arg-type]
         )
         self.target = target
+
+    @Layout.stride.getter
+    def stride(self):
+        return self.real_layout().stride
+
+    def real_layout(self):
+        if isinstance(self.target, MutationLayout):
+            return self.target.real_layout()
+        return self.target.data.layout
 
     @classmethod
     def realize_into(cls, src, dst):
@@ -2226,6 +2342,54 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
+    def process_kernel(cls, kernel, *args, **kwargs):
+        binded_args = signature(kernel).bind(*args, **kwargs).arguments
+        args_flat, args_spec = pytree.tree_flatten(binded_args)
+
+        is_arg_tensor = []
+        tensor_args = []
+        non_tensor_args = []
+        for arg in args_flat:
+            is_arg_tensor.append(isinstance(arg, IRNode))
+            if is_arg_tensor[-1]:
+                tensor_args.append(arg)
+            else:
+                non_tensor_args.append(arg)
+
+        def unflatten_args(new_tensor_args, new_non_tensor_args):
+            result = []
+            it_tensors = iter(new_tensor_args)
+            it_non_tensors = iter(new_non_tensor_args)
+            for is_tensor in is_arg_tensor:
+                if is_tensor:
+                    result.append(next(it_tensors))
+                else:
+                    result.append(next(it_non_tensors))
+            result = pytree.tree_unflatten(result, args_spec)
+            return result.get("args", []), result.get("kwargs", {})
+
+        tensor_args = [cls.realize_input(x) for x in tensor_args]
+
+        # freeze layout otherwise our output stride calculation might
+        # become incorrect
+        for x in tensor_args:
+            if is_storage_and_layout(x):
+                as_storage_and_layout(x, freeze=True)
+
+        # We don't have generic shape formulas, so just burn in the
+        # shapes and run an example input.
+        # TODO(jansel): replace this with dynamic shape formulas
+        example_args = []
+
+        for x in tensor_args:
+            example_args.append(ir_node_to_tensor(x, guard_shape=True))
+
+        new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
+        example_output = kernel(*new_args, **new_kwargs)
+
+        return example_output, tensor_args, non_tensor_args, unflatten_args
+
+    @classmethod
     def convert_to_reinterpret_view(cls, x):
         """
         In order to pass this to an extern kernel we need a
@@ -2300,42 +2464,51 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_stride1(cls, x):
-        if len(x.get_stride()) == 0:
-            return x
-        for stride in x.get_stride():
-            if stride == 1:
+        if is_storage_and_layout(x):
+            if len(x.get_stride()) == 0:
                 return x
+            for stride in x.get_stride():
+                if stride == 1:
+                    return x
         return cls.copy_input(x)
-
-    @classmethod
-    def require_contiguous(cls, x):
-        if is_contiguous_storage_and_layout(x):
-            as_contiguous_storage_and_layout(x, freeze=True)
-            return x
-        x = cls.copy_input(x)
-        assert is_contiguous_storage_and_layout(x)
-        as_contiguous_storage_and_layout(x, freeze=True)
-        return x
 
     @classmethod
     def require_stride_order(cls, x, order):
         # require x to have the layout as strided_ordered as order
-        if isinstance(
-            x.get_layout(), FlexibleLayout
-        ) and is_stride_order_storage_and_layout(x, order):
-            # fix flexiblelayout to be FixedLayout with stride_order
-            as_storage_and_layout(
-                x, freeze=True, want_contiguous=False, stride_order=order
-            )
-            return x
-        elif isinstance(x.get_layout(), FixedLayout) and x.layout.is_stride_ordered(
-            order
-        ):
+        if is_storage_and_layout(x):
+            if isinstance(
+                x.get_layout(), FlexibleLayout
+            ) and is_stride_order_storage_and_layout(x, order):
+                # fix flexiblelayout to be FixedLayout with stride_order
+                as_storage_and_layout(
+                    x, freeze=True, want_contiguous=False, stride_order=order
+                )
+                return x
+            elif isinstance(
+                x.get_layout(), FixedLayout
+            ) and x.get_layout().is_stride_ordered(order):
+                return x
+            elif isinstance(x.get_layout(), MutationLayout):
+                if isinstance(x.get_layout().real_layout(), FlexibleLayout):
+                    raise AssertionError(
+                        "the MutationLayout's real layout shouldn't be FlexibleLayout"
+                    )
+                elif isinstance(
+                    x.get_layout().real_layout(), FixedLayout
+                ) and x.get_layout().real_layout().is_stride_ordered(order):
+                    return x
+
+        # TODO - Storage to InputBuffer
+        if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):
             return x
         x = cls.copy_input(x)
         as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
         assert is_stride_order_storage_and_layout(x, order)
         return x
+
+    @classmethod
+    def require_contiguous(cls, x):
+        return cls.require_stride_order(x, list(reversed(range(len(x.get_size())))))
 
     def apply_constraint(self):
         pass
@@ -2752,43 +2925,6 @@ class DynamicScalar(IRNode):
         return ()
 
 
-class AdaptiveAvgPool2d(ExternKernelAlloc):
-    kernel = "aten._adaptive_avg_pool2d"
-
-    @classmethod
-    def create(cls, x, target_size):
-        # x = cls.require_stride1(cls.realize_input(x))
-        x = cls.realize_input(x)
-        output_size = [
-            *x.get_size()[: -len(target_size)],
-            *map(sympy.Integer, target_size),
-        ]
-        # contigouse stride order
-        stride_order = list(reversed(range(len(output_size))))
-        return cls(
-            FlexibleLayout(
-                x.get_device(),
-                x.get_dtype(),
-                output_size,
-                # TODO(jansel): fix channels last case
-                # FlexibleLayout.contiguous_strides(output_size),
-                stride_order,
-            ),
-            (x,),
-            (tuple(target_size),),
-        )
-
-    def apply_constraint(self):
-        x = self.inputs[0]
-        if isinstance(x.get_layout(), FixedLayout):
-            # fix self's layout to be the same order as x
-            self.freeze_layout_with_same_order(x.get_layout().stride)
-        else:
-            x = self.require_stride_order(x, self.layout.preferred_stride_order)
-            self.inputs[0] = x
-            self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
-
-
 @dataclasses.dataclass
 class FallbackKernel(ExternKernelAlloc):
     def __init__(
@@ -2824,104 +2960,72 @@ class FallbackKernel(ExternKernelAlloc):
             def __repr__(self):
                 return self.ref
 
-        tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
-        constant_args = [Shim(repr(x)) for x in self.constant_args]
-
         def gen_kwarg(k, v):
             return f"{k}={repr(v)}"
 
-        kwargs = list(gen_kwarg(k, v) for k, v in self.kwargs.items())
-
-        return list(map(repr, self.unflatten_args(tensor_args, constant_args))) + kwargs
+        tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
+        constant_args = [Shim(repr(x)) for x in self.constant_args]
+        args, kwargs = self.unflatten_args(tensor_args, constant_args)
+        return list(map(repr, args)) + list(gen_kwarg(k, v) for k, v in kwargs.items())
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
-        args_flat, args_spec = pytree.tree_flatten(args)
+        fake_incorrect_kernels = (
+            aten._fft_r2c.default,
+            aten._fft_r2c.out,
+            aten._fft_c2r.default,
+            aten._fft_c2c.default,
+            aten._fft_c2c.out,
+            aten._linalg_svd.default,
+            aten._linalg_svd.U,
+        )
+        context = (
+            FakeTensorMode if kernel not in fake_incorrect_kernels else nullcontext
+        )
+        with context():
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+            ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        is_arg_tensor = []
-        tensor_args = []
-        non_tensor_args = []
-        for arg in args_flat:
-            is_arg_tensor.append(isinstance(arg, IRNode))
-            if is_arg_tensor[-1]:
-                tensor_args.append(arg)
-            else:
-                non_tensor_args.append(arg)
-
-        def unflatten_args(new_tensor_args, new_non_tensor_args):
-            new_args = []
-            it_tensors = iter(new_tensor_args)
-            it_non_tensors = iter(new_non_tensor_args)
-            for is_tensor in is_arg_tensor:
-                if is_tensor:
-                    new_args.append(next(it_tensors))
-                else:
-                    new_args.append(next(it_non_tensors))
-            return pytree.tree_unflatten(new_args, args_spec)
-
-        tensor_args = [
-            cls.require_contiguous(cls.realize_input(x)) for x in tensor_args
-        ]
-
-        # We don't have generic shape formulas, so just burn in the
-        # shapes and run an example input.
-        # TODO(jansel): replace this with dynamic shape formulas
-        example_args = []
-        for x in tensor_args:
-            size = [V.graph.sizevars.guard_static_shape(s) for s in x.get_size()]
-            stride = [
-                V.graph.sizevars.guard_static_shape(s) for s in x.get_layout().stride
-            ]
-            dtype = x.get_dtype()
-            device = x.get_device()
-            arg = torch.empty_strided(
-                size=size, stride=stride, dtype=dtype, device=device
-            ).zero_()
-            example_args.append(arg)
-
-        example_output = kernel(
-            *unflatten_args(example_args, non_tensor_args), **kwargs
+        assert tensor_args or isinstance(
+            example_output, torch.Tensor
+        ), "Not sure where to find device info"
+        packed = FallbackKernel(
+            MultiOutputLayout(
+                tensor_args[0].get_device() if tensor_args else example_output.device
+            ),
+            kernel,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+            kwargs,
         )
 
-        if isinstance(example_output, (list, tuple)):
-            packed = FallbackKernel(
-                MultiOutputLayout(tensor_args[0].get_device()),
-                kernel,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-            )
-            return [
-                (
-                    MultiOutput(
-                        FixedLayout(
-                            example_output[i].device,
-                            example_output[i].dtype,
-                            [sympy.Integer(s) for s in example_output[i].size()],
-                            [sympy.Integer(s) for s in example_output[i].stride()],
-                        ),
-                        packed,
-                        i,
-                    )
-                    if example_output[i] is not None
-                    else None
+        def generate_output(output, index=""):
+            if isinstance(output, (list, tuple)):
+                return type(output)(
+                    generate_output(output[i], f"{index}[{i}]")
+                    for i in range(len(output))
                 )
-                for i in range(len(example_output))
-            ]
-        else:
-            return FallbackKernel(
-                FixedLayout(
-                    example_output.device,
-                    example_output.dtype,
-                    [sympy.Integer(s) for s in example_output.size()],
-                    [sympy.Integer(s) for s in example_output.stride()],
-                ),
-                kernel,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                kwargs,
-            )
+            elif isinstance(output, torch.Tensor):
+                return MultiOutput(
+                    FixedLayout(
+                        output.device,
+                        output.dtype,
+                        [sympy.Integer(s) for s in output.size()],
+                        [sympy.Integer(s) for s in output.stride()],
+                    ),
+                    packed,
+                    index,
+                )
+            else:
+                assert output is None, "FallbackKernel output type is not supported"
+                return None
+
+        return generate_output(example_output)
 
     def apply_constraint(self):
         return super().apply_constraint()
@@ -2935,11 +3039,11 @@ class MultiOutputLayout(IRNode):
 class MultiOutput(ExternKernel):
     def codegen(self, wrapper):
         wrapper.writeline(
-            f"{self.get_name()} = {self.inputs[0].get_name()}[{self.index}]"
+            f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
         )
         self.codegen_size_asserts(wrapper)
 
-    def __init__(self, layout, input, index):
+    def __init__(self, layout, input, index: str):
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
         self.index = index
@@ -2987,8 +3091,32 @@ class Convolution(ExternKernelAlloc):
         output_padding_: List[int],
         groups: int,
     ):
-        x = cls.require_stride1(cls.realize_input(x))
-        weight = cls.require_stride1(cls.realize_input(weight))
+        with torch._subclasses.FakeTensorMode():
+            x_fake = ir_node_to_tensor(x, guard_shape=True)
+            weight_fake = ir_node_to_tensor(weight, guard_shape=True)
+            bias_fake = (
+                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
+            )
+            output = torch.ops.aten.convolution(
+                x_fake,
+                weight_fake,
+                bias_fake,
+                stride_,
+                padding_,
+                dilation_,
+                transposed,
+                output_padding_,
+                groups,
+            )
+            req_stride_order = get_stride_order(output.stride())
+
+        if config.triton.convolution == "aten":
+            weight = cls.require_stride_order(weight, req_stride_order)
+            x = cls.require_stride_order(x, req_stride_order)
+        else:
+            x = cls.require_stride1(cls.realize_input(x))
+            weight = cls.require_stride1(cls.realize_input(weight))
+
         stride = tuple(stride_)
         padding = tuple(padding_)
         dilation = tuple(dilation_)
@@ -2996,70 +3124,13 @@ class Convolution(ExternKernelAlloc):
         output_padding = tuple(output_padding_)
         assert isinstance(groups, int)
 
+        output_size = output.shape
+
         weight_shape = [
             sympy.Integer(V.graph.sizevars.guard_static_shape(s))
             for s in weight.get_size()
         ]
-
-        out_channels, in_channels1, *kernel_size = weight_shape
-        in_channels1 = in_channels1 * groups
-        if transposed:
-            out_channels, in_channels1 = in_channels1, out_channels
-
-        if bias is not None:
-            bias = cls.require_stride1(cls.realize_input(bias))
-            (bias_shape,) = [
-                sympy.Integer(V.graph.sizevars.guard_static_shape(s))
-                for s in bias.get_size()
-            ]
-            assert bias_shape == out_channels, f"{bias_shape} == {out_channels}"
-
-        if len(x.get_size()) == 1 + len(kernel_size):
-            in_channels2, *input_size = x.get_size()
-            in_channels_stride, *_ = x.get_stride()
-            output_size = []
-        else:
-            assert len(x.get_size()) == 2 + len(kernel_size)
-            batch, in_channels2, *input_size = x.get_size()
-            _, in_channels_stride, *_ = x.get_stride()
-            output_size = [batch]
-
-        V.graph.sizevars.guard_equals(in_channels1, in_channels2)
-
-        output_size.append(out_channels)
-
-        assert (
-            len(stride)
-            == len(padding)
-            == len(dilation)
-            == len(output_padding)
-            == len(kernel_size)
-            == len(input_size)
-        )
-        for i in range(len(stride)):
-            if transposed:
-                output_size.append(
-                    (input_size[i] - 1) * stride[i]
-                    - 2 * padding[i]
-                    + dilation[i] * (kernel_size[i] - 1)
-                    + output_padding[i]
-                    + 1
-                )
-            else:
-                output_size.append(
-                    IndexingDiv(
-                        input_size[i]
-                        + 2 * padding[i]
-                        - dilation[i] * (kernel_size[i] - 1)
-                        - 1
-                        + stride[i],
-                        stride[i],
-                    )
-                    + 2 * output_padding[i]
-                )
-            output_size[-1] = sympy.Integer(
-                V.graph.sizevars.guard_static_shape(output_size[-1])
-            )
+        _, _, *kernel_size = weight_shape
 
         # choose runtime kernel
         config_conv = config.triton.convolution
@@ -3097,6 +3168,7 @@ class Convolution(ExternKernelAlloc):
         # for conv2d or conv3d, prefer channels last format
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
+
         elif config.tune_layout and len(x.get_size()) == 4:
             from .codegen.autotuner import tuned_conv_layout
 
@@ -3113,44 +3185,32 @@ class Convolution(ExternKernelAlloc):
                 x.get_device(),
                 x.get_dtype(),
             )
-        else:
-            output_layout_str = "torch.contiguous_format"
-            # If x or weight have one channels_last(2d or 3d) format, it will call channels_last path,
-            # which align with aten.convolutuion path(cpu only support 2d case now).
-            # TODO: after cpu 3d convolution support channels_last path, the size check can be removed.
 
-            # CUDA channels_last path depend on cudnn version, see
-            # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/ConvUtils.h.
-            valid_device = True
-            if (
-                x.get_device() == "cuda"
-                and torch.backends.cudnn.is_available()
-                and torch.backends.cudnn.version() < 8302
-            ):
-                valid_device = False
-            if (
-                valid_device
-                and len(x.get_size()) == 4
-                and (
-                    x.get_layout().is_channels_last_stride_ordered()
-                    or weight.get_layout().is_channels_last_stride_ordered()
-                )
-            ):
-                output_layout_str = "torch.channels_last"
+        else:
+            output_layout_str = (
+                "torch.contiguous_format"
+                if output.is_contiguous()
+                else "torch.channels_last"
+            )
 
         if output_layout_str == "torch.channels_last":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
             if len(stride_order) < len(output_size):
                 # add batch dim if it exists
                 stride_order = [len(stride_order)] + stride_order
+            strides = make_channels_last_strides_for(output_size)
         else:
             stride_order = list(reversed(range(len(output_size))))
+            strides = make_contiguous_strides_for(output_size)
 
-        output_layout = FlexibleLayout(
+        if config.triton.convolution != "aten":
+            x = cls.require_stride_order(x, stride_order)
+
+        output_layout = FixedLayout(
             x.get_device(),
             x.get_dtype(),
             output_size,
-            stride_order,
+            strides,
         )
 
         if bias is not None:
@@ -3169,13 +3229,6 @@ class Convolution(ExternKernelAlloc):
                 stride_order,
                 kernel,
             )
-
-    def apply_constraint(self):
-        x = self.inputs[0]
-        # FixedLayout of input
-        x = self.require_stride_order(x, self.layout.preferred_stride_order)
-        self.inputs[0] = x
-        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
     def map_args(self):
         # x, w, bias
@@ -3276,6 +3329,373 @@ class Convolution(ExternKernelAlloc):
         )
 
 
+def _prepare_convolution_fusion_create(
+    cls,
+    x: "TensorBox",
+    weight: "TensorBox",
+    bias: "TensorBox",
+    padding_: List[int],
+    stride_: List[int],
+    dilation_: List[int],
+    groups: int,
+):
+    """
+    This function is a helper function to prepare inputs, layout and constant args
+    for convolution post-op fusion's create function, including deciding the output
+    layout (channels first or channels last), realizing inputs and make them etc. The
+    function only supports the CPU device since conv post-op fusion kernel is only
+    supported on CPU right now.
+    """
+
+    x = cls.require_stride1(cls.realize_input(x))
+    weight = cls.require_stride1(cls.realize_input(weight))
+    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
+    inputs = [x, weight]
+    stride = tuple(stride_)
+    padding = tuple(padding_)
+    dilation = tuple(dilation_)
+    assert isinstance(groups, int)
+    with FakeTensorMode():
+        output, *_ = cls.process_kernel(
+            torch.ops.aten.convolution,
+            x,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            False,
+            [0, 0],
+            groups,
+        )
+
+    output_size = output.shape
+    weight_shape = [
+        sympy.Integer(V.graph.sizevars.guard_static_shape(s)) for s in weight.get_size()
+    ]
+    _, _, *kernel_size = weight_shape
+    output_layout_str = (
+        "torch.contiguous_format" if output.is_contiguous() else "torch.channels_last"
+    )
+
+    if output_layout_str == "torch.channels_last":
+        stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
+        if len(stride_order) < len(output_size):
+            # add batch dim if it exists
+            stride_order = [len(stride_order)] + stride_order
+    else:
+        stride_order = list(reversed(range(len(output_size))))
+
+    kernel_layout = FlexibleLayout(
+        device=inputs[0].get_device(),
+        dtype=inputs[0].get_dtype(),
+        size=output_size,
+        stride_order=stride_order,
+    )
+    constant_args = [padding, stride, dilation, groups]
+
+    if bias is not None:
+        inputs.append(bias)
+    else:
+        constant_args.insert(0, bias)
+    return inputs, constant_args, kernel_layout
+
+
+class ConvolutionUnary(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._convolution_pointwise"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._convolution_pointwise",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        weight: "TensorBox",
+        bias: "TensorBox",
+        padding_: List[int],
+        stride_: List[int],
+        dilation_: List[int],
+        groups: int,
+        attr,
+        scalars,
+        algorithm,
+    ):
+        kernel = "torch.ops.mkldnn._convolution_pointwise"
+        (inputs, constant_args, kernel_layout,) = _prepare_convolution_fusion_create(
+            cls, x, weight, bias, padding_, stride_, dilation_, groups
+        )
+        constant_args = constant_args + [attr, scalars, algorithm]
+        return ConvolutionUnary(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+    def apply_constraint(self):
+        x = self.inputs[0]
+        # FixedLayout of input
+        x = self.require_stride_order(x, self.layout.preferred_stride_order)
+        self.inputs[0] = x
+        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
+
+
+class ConvolutionBinary(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._convolution_pointwise.binary",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        other: "TensorBox",
+        weight: "TensorBox",
+        bias: "TensorBox",
+        padding_: List[int],
+        stride_: List[int],
+        dilation_: List[int],
+        groups: int,
+        binary_attr: str,
+        binary_alpha: Optional[float],
+        unary_attr: Optional[str],
+        unary_scalars: Optional[List],
+        unary_algorithm: Optional[str],
+    ):
+        kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
+        (inputs, constant_args, kernel_layout,) = _prepare_convolution_fusion_create(
+            cls, x, weight, bias, padding_, stride_, dilation_, groups
+        )
+        other = cls.require_stride1(cls.realize_input(other))
+        inputs.insert(1, other)
+        constant_args = constant_args + [
+            binary_attr,
+            binary_alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ]
+        return ConvolutionBinary(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+    def apply_constraint(self):
+        x = self.inputs[0]
+        # FixedLayout of input
+        x = self.require_stride_order(x, self.layout.preferred_stride_order)
+        self.inputs[0] = x
+        other = self.inputs[1]
+        # FixedLayout of other
+        other = self.require_stride_order(other, self.layout.preferred_stride_order)
+        self.inputs[1] = other
+        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
+
+
+class ConvolutionBinaryInplace(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._convolution_pointwise_.binary"
+
+    def __init__(
+        self,
+        kernel_layout,
+        inputs_layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._convolution_pointwise_.binary",
+    ):
+        super().__init__(kernel_layout, inputs, constant_args)
+        self.kernel = kernel
+        self.inputs_layout = inputs_layout
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+
+    def get_mutation_names(self):
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        other: "TensorBox",
+        weight: "TensorBox",
+        bias: "TensorBox",
+        padding_: List[int],
+        stride_: List[int],
+        dilation_: List[int],
+        groups: int,
+        binary_attr: str,
+        binary_alpha: Optional[float],
+        unary_attr: Optional[str],
+        unary_scalars: Optional[List],
+        unary_algorithm: Optional[str],
+    ):
+        kernel = "torch.ops.mkldnn._convolution_pointwise_.binary"
+        (inputs, constant_args, inputs_layout,) = _prepare_convolution_fusion_create(
+            cls, x, weight, bias, padding_, stride_, dilation_, groups
+        )
+        other = cls.realize_input(other)
+        V.graph.realize_users_of(other.get_name())
+        inputs.insert(1, other)
+        constant_args = constant_args + [
+            binary_attr,
+            binary_alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ]
+        return ConvolutionBinaryInplace(
+            kernel_layout=MutationLayout(inputs[1]),
+            inputs_layout=inputs_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+    def apply_constraint(self):
+        x = self.inputs[0]
+        # FixedLayout of input
+        x = self.require_stride_order(x, self.inputs_layout.preferred_stride_order)
+        self.inputs[0] = x
+        self.freeze_layout_with_stride_order(self.inputs_layout.preferred_stride_order)
+
+
+class LinearUnary(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._linear_pointwise"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._linear_pointwise",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+
+    @classmethod
+    def create(cls, x, w, b, attr, scalars, algorithm):
+        kernel = "torch.ops.mkldnn._linear_pointwise"
+        x = cls.require_stride1(cls.realize_input(x))
+        w = cls.require_stride1(cls.realize_input(w))
+
+        *m, ic = x.get_size()
+        oc, ic = w.get_size()
+
+        inputs = [x, w]
+        constant_args = [attr, scalars, algorithm]
+        if b is not None:
+            b = cls.require_stride1(cls.realize_input(b))
+            inputs.append(b)
+        else:
+            constant_args.insert(0, b)
+
+        return LinearUnary(
+            layout=FlexibleLayout(
+                device=x.get_device(),
+                dtype=x.get_dtype(),
+                size=list(m) + [oc],
+            ),
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+    def apply_constraint(self):
+        pass
+
+
+class LinearBinary(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._linear_pointwise.binary"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._linear_pointwise.binary",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+
+    @classmethod
+    def create(cls, x, y, w, b, attr):
+        kernel = "torch.ops.mkldnn._linear_pointwise.binary"
+        x = cls.require_stride1(cls.realize_input(x))
+        y = cls.require_stride1(cls.realize_input(y))
+        w = cls.require_stride1(cls.realize_input(w))
+
+        *m, ic = x.get_size()
+        oc, ic = w.get_size()
+
+        inputs = [x, y, w]
+        constant_args = [attr]
+        if b is not None:
+            b = cls.require_stride1(cls.realize_input(b))
+            inputs.append(b)
+        else:
+            constant_args.insert(0, b)
+
+        return LinearBinary(
+            layout=FlexibleLayout(
+                device=x.get_device(),
+                dtype=x.get_dtype(),
+                size=list(m) + [oc],
+            ),
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+    def apply_constraint(self):
+        pass
+
+
 @dataclasses.dataclass
 class MutableBox(IRNode):
     """
@@ -3338,6 +3758,7 @@ class StorageBox(MutableBox):
             data=self.data,
         )
         self.data.name = V.graph.register_buffer(self.data)
+        self.data.origins = self.origins
         return self.data.name
 
     def realize_hint(self):
@@ -3346,6 +3767,12 @@ class StorageBox(MutableBox):
         """
         if isinstance(self.data, (Pointwise, Reduction)) and self.num_reads() > 1:
             self.realize()
+
+    def has_exceeded_max_reads(self):
+        return isinstance(self.data, Pointwise) and (
+            self.num_reads() > config.realize_acc_reads_threshold
+            or len(self.inner_fn_str()) > config.realize_bytes_threshold
+        )
 
     def mark_reuse(self, users):
         """

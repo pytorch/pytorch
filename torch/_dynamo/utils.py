@@ -3,6 +3,7 @@ import contextlib
 import copy
 import cProfile
 import dataclasses
+import datetime
 import dis
 import functools
 import gc
@@ -24,10 +25,13 @@ from functools import lru_cache
 from typing import Any, Dict
 
 import numpy as np
+import sympy
 
 import torch
 from torch import fx
+from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._pytree import tree_map
 
 from . import config, logging as torchdynamo_logging
 
@@ -197,7 +201,7 @@ def format_bytecode(prefix, name, filename, line_no, code):
 
 
 def gen_record_file_name(exc, code):
-    return f"{config.replay_record_dir_name}/\
+    return f"{get_debug_dir()}/error_recordings/\
 {code.co_name}_{type(exc).__name__}_{code.co_firstlineno}.rec"
 
 
@@ -581,7 +585,19 @@ def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
     return istype(
-        v, (types.CodeType, int, float, bool, str, bytes, type(None), slice, type(type))
+        v,
+        (
+            types.CodeType,
+            int,
+            float,
+            bool,
+            str,
+            bytes,
+            type(None),
+            slice,
+            type(type),
+            torch.device,
+        ),
     )
 
 
@@ -665,6 +681,41 @@ try:
         UnsupportedFakeTensorException,
     )
 
+    def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
+        fake_tensor = fake_mode.from_tensor(e, static_shapes=static_shapes)
+        if tx is not None:
+            from torch._dynamo.guards import TensorReference
+
+            def _record(tensor_ref):
+                if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
+                    tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
+                tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
+
+            def _extract(symbol):
+                if isinstance(symbol, int):
+                    return None
+                sym_expr = symbol.get_pyobj().expr
+                if not isinstance(sym_expr, sympy.Symbol):
+                    return None
+                return sym_expr
+
+            def _record_ref(e, index, symbol, kind):
+                sym_expr = _extract(symbol)
+                if sym_expr:
+                    tensor_ref = TensorReference(id(e), kind, index, sym_expr)
+                    _record(tensor_ref)
+
+            for index, symbol in enumerate(fake_tensor.size()):
+                _record_ref(e, index, symbol, "size")
+
+            for index, symbol in enumerate(fake_tensor.stride()):
+                _record_ref(e, index, symbol, "stride")
+
+            offset = fake_tensor.storage_offset()
+            _record_ref(e, None, offset, "storage_offset")
+
+        return fake_tensor
+
     def wrap_fake_exception(fn):
         try:
             return fn()
@@ -677,7 +728,23 @@ try:
 
     def wrap_to_fake_tensor(e, fake_mode):
         if type(e) in (torch.Tensor, torch.nn.Parameter):
-            return wrap_fake_exception(lambda: fake_mode.from_tensor(e))
+            return wrap_fake_exception(
+                lambda: make_fake_tensor(
+                    e, fake_mode, static_shapes=config.dynamic_shapes is False
+                )
+            )
+        else:
+            return e
+
+    def wrap_to_fake_tensor_and_record(e, tx):
+        if type(e) in (torch.Tensor, torch.nn.Parameter):
+            static_shapes = config.dynamic_shapes is False
+            if type(e) is torch.nn.Parameter:
+                # Always static for params
+                static_shapes = True
+            return wrap_fake_exception(
+                lambda: make_fake_tensor(e, tx.fake_mode, static_shapes, tx)
+            )
         else:
             return e
 
@@ -928,3 +995,128 @@ class CompileProfiler:
             rpt += "No cache-limited recompilations detected.\n"
 
         return rpt
+
+
+# return same dir unless user changes config between calls
+@functools.lru_cache(None)
+def _get_debug_dir(root_dir):
+    dir_name = "run_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+    return os.path.join(root_dir, dir_name)
+
+
+def get_debug_dir():
+    debug_root = config.debug_dir_root
+    return _get_debug_dir(debug_root)
+
+
+def get_fake_value(node, tx):
+    """
+    Run the computation represented by `node` using fake tensors and return the result.
+    """
+    from .exc import TorchRuntimeError, unimplemented, Unsupported
+
+    op = node.op
+    fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+
+    def visit(n: torch.fx.Node):
+        return n.meta["example_value"]
+
+    args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
+    args = tree_map(fake_wrapper, args)
+    kwargs = tree_map(fake_wrapper, kwargs)
+
+    nnmodule = None
+    if op == "call_module":
+        nnmodule = tx.output.nn_modules[node.target]
+
+        if not is_lazy_module(nnmodule):
+            nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+
+    if op == "call_module" and is_lazy_module(nnmodule):
+        assert nnmodule is not None
+        # In the case of a lazy module, we want to run
+        # the pre-hooks which initialize it
+        nnmodule(*args, **kwargs)
+    try:
+        with tx.fake_mode, enable_python_dispatcher():
+            return wrap_fake_exception(
+                lambda: run_node(tx.output, node, args, kwargs, nnmodule)
+            )
+    except Unsupported:
+        raise
+    except RuntimeError as e:
+        if isinstance(e, torch._subclasses.fake_tensor.DataDependentOutputException):
+            if config.capture_scalar_outputs and node.target == "item":
+                return torch.zeros(size=(), dtype=args[0].dtype).item()
+            else:
+                unimplemented(f"data dependent operator: {e.func}")
+        elif isinstance(e, torch._subclasses.fake_tensor.DynamicOutputShapeException):
+            unimplemented(f"dynamic shape operator: {e.func}")
+        raise TorchRuntimeError() from e
+
+
+def run_node(output_graph, node, args, kwargs, nnmodule):
+    """
+    Runs a given node, with the given args and kwargs.
+
+    Behavior is dicatated by a node's op.
+
+    run_node is useful for extracting real values out of nodes.
+    See get_real_value for more info on common usage.
+
+    Note: The output_graph arg is only used for 'get_attr' ops
+    Note: The nnmodule arg is only used for 'call_module' ops
+
+    Nodes that are not call_function, call_method, call_module, or get_attr will
+    raise an AssertionError.
+    """
+    op = node.op
+    try:
+        if op == "call_function":
+            return node.target(*args, **kwargs)
+        elif op == "call_method":
+            return getattr(args[0], node.target)(*args[1:], **kwargs)
+        elif op == "call_module":
+            assert nnmodule is not None
+            return nnmodule(*args, **kwargs)
+        elif op == "get_attr":
+            return output_graph.get_submodule(node.target)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
+        ) from e
+    raise AssertionError(op)
+
+
+def get_real_value(node, output_graph):
+    """
+    Run the actual computation represented by `node` and return the result.
+    This will execute any dependent nodes in the graph as well.
+    """
+    cache = output_graph.real_value_cache
+    if node in cache:
+        return cache[node]
+
+    op = node.op
+    args, kwargs = torch.fx.node.map_arg(
+        (node.args, node.kwargs),
+        lambda n: get_real_value(n, output_graph),
+    )
+
+    if op == "call_module":
+        nn_module = output_graph.nn_modules[node.target]
+        if not is_lazy_module(nn_module):
+            nn_module = copy.deepcopy(nn_module)
+        else:
+            # In the case of a lazy module, we want to run
+            # the pre-hooks which initialize it
+            nn_module(*args, **kwargs)
+    else:
+        nn_module = None
+
+    try:
+        real_value = run_node(output_graph, node, args, kwargs, nn_module)
+        cache[node] = real_value
+    except RuntimeError as e:
+        raise TorchRuntimeError() from e
+    return real_value

@@ -15,7 +15,7 @@ from torch.optim import SGD
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, StepLR, \
     MultiStepLR, ConstantLR, LinearLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
-    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, PolynomialLR, \
+    LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, PolynomialLR, \
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
@@ -1199,7 +1199,7 @@ class TestLRScheduler(TestCase):
             self.assertEqual(warning.message.args[0], EPOCH_DEPRECATION_WARNING)
 
     def test_error_when_getlr_has_epoch(self):
-        class MultiStepLR(torch.optim.lr_scheduler._LRScheduler):
+        class MultiStepLR(torch.optim.lr_scheduler.LRScheduler):
             def __init__(self, optimizer, gamma, milestones, last_epoch=-1):
                 self.init_lr = [group['lr'] for group in optimizer.param_groups]
                 self.gamma = gamma
@@ -1650,7 +1650,7 @@ class TestLRScheduler(TestCase):
         new_scheduler = CosineAnnealingLR(
             self.opt, T_max=T_max, eta_min=eta_min, last_epoch=0)
         new_lrs = new_scheduler._last_lr
-        torch.testing.assert_allclose(original_lrs, new_lrs, rtol=1e-4, atol=1e-5)
+        torch.testing.assert_close(original_lrs, new_lrs, rtol=1e-4, atol=1e-5)
 
     def test_reduce_lr_on_plateau1(self):
         epochs = 10
@@ -2572,7 +2572,7 @@ class TestLRScheduler(TestCase):
         self.assertEqual(scheduler.get_last_lr(), scheduler_copy.get_last_lr())
 
     def _test_get_last_lr(self, schedulers, targets, epochs=10):
-        if isinstance(schedulers, _LRScheduler):
+        if isinstance(schedulers, LRScheduler):
             schedulers = [schedulers]
         optimizers = {scheduler.optimizer for scheduler in schedulers}
         for epoch in range(epochs):
@@ -2586,7 +2586,7 @@ class TestLRScheduler(TestCase):
                                      epoch, t, r), atol=1e-5, rtol=0)
 
     def _test_with_epoch(self, schedulers, targets, epochs=10):
-        if isinstance(schedulers, _LRScheduler):
+        if isinstance(schedulers, LRScheduler):
             schedulers = [schedulers]
         optimizers = {scheduler.optimizer for scheduler in schedulers}
         for epoch in range(epochs):
@@ -2600,7 +2600,7 @@ class TestLRScheduler(TestCase):
                                      epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test(self, schedulers, targets, epochs=10):
-        if isinstance(schedulers, _LRScheduler):
+        if isinstance(schedulers, LRScheduler):
             schedulers = [schedulers]
         for epoch in range(epochs):
             for param_group, target in zip(self.opt.param_groups, targets):
@@ -2645,7 +2645,7 @@ class TestLRScheduler(TestCase):
                                      epoch, targets[epoch][i], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test_reduce_lr_on_plateau(self, schedulers, targets, metrics, epochs=10, verbose=False):
-        if isinstance(schedulers, _LRScheduler) or isinstance(schedulers, ReduceLROnPlateau):
+        if isinstance(schedulers, LRScheduler) or isinstance(schedulers, ReduceLROnPlateau):
             schedulers = [schedulers]
         for epoch in range(epochs):
             self.opt.step()
@@ -2833,6 +2833,7 @@ class TestSWAUtils(TestCase):
         # Test AveragedModel with EMA as avg_fn
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.BatchNorm2d(5, momentum=0.3),
             torch.nn.Linear(5, 10)
         )
         alpha = 0.9
@@ -2851,11 +2852,17 @@ class TestSWAUtils(TestCase):
                 else:
                     updated_averaged_params.append((p_avg * alpha +
                                                    p * (1 - alpha)).clone())
+            for b in dnn.buffers():
+                if b.size() != torch.Size([]):
+                    b.detach_().add_(torch.randn_like(b))
+
             averaged_dnn.update_parameters(dnn)
             averaged_params = updated_averaged_params
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertEqual(p_avg, p_swa)
+        for b_avg, b_swa in zip(dnn.buffers(), averaged_dnn.module.buffers()):
+            self.assertEqual(b_avg, b_swa)
 
     def test_averaged_model_exponential_buffers(self):
         # Test AveragedModel with EMA as avg_fn and use_buffers as True.

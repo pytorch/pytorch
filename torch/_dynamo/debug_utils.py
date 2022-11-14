@@ -16,13 +16,13 @@ import torch.fx as fx
 
 from . import config
 from .optimizations.backends import register_backend
-from .utils import clone_inputs
+from .utils import clone_inputs, get_debug_dir
 
 log = logging.getLogger(__name__)
 
 
 def minifier_dir():
-    path = config.repro_dir
+    path = os.path.join(get_debug_dir(), "minifier")
     if path is None:
         path = f"/tmp/minifier_{getpass.getuser()}"
     if not os.path.exists(path):
@@ -128,7 +128,7 @@ def _cuda_system_info_comment():
         )
         model_str += f"{cuda_version_out}\n"
     except FileNotFoundError:
-        model_str += "nvcc not found\n"
+        model_str += "# nvcc not found\n"
 
     gpu_names = subprocess.run(
         ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
@@ -179,11 +179,6 @@ from {config.inductor_import}.compile_fx import compile_fx_inner
 from {config.dynamo_import}.debug_utils import same_two_models
 """
 
-NVFUSER_IMPORT = """
-from torch.fx.passes.backends.nvfuser import NvFuserBackend
-nvfuser = NvFuserBackend()
-"""
-
 COMPILER_REPRO_OPTIONS = {
     "inductor": (INDUCTOR_IMPORT, "compile_fx_inner", "inductor_fails"),
     "inductor_accuracy": (
@@ -191,7 +186,6 @@ COMPILER_REPRO_OPTIONS = {
         "compile_fx_inner",
         "inductor_accuracy_fails",
     ),
-    "nvfuser": (NVFUSER_IMPORT, "nvfuser", "nvfuser_fails"),
 }
 
 
@@ -240,7 +234,7 @@ def save_graph_repro(fd, gm, args, compiler_name):
 def isolate_fails(fx_g, args, compiler_name: str, env=None):
     if env is None:
         env = {}
-    subdir = f"{minifier_dir()}/isolate"
+    subdir = os.path.join(os.getcwd(), "isolate")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
@@ -309,30 +303,18 @@ def inductor_fails(fx_g, args, check_str=None):
     return False
 
 
-def nvfuser_fails(fx_g, args, check_str=None):
-    from torch.fx.passes.backends.nvfuser import NvFuserBackend
-
-    nvfuser = NvFuserBackend()
-
-    try:
-        compile_mod = nvfuser(fx_g, args)
-        compile_mod = compile_mod(*args)
-    except Exception as e:
-        if check_str is not None and check_str not in repr(e):
-            return False
-        print(repr(e))
-        return True
-    return False
-
-
 def inductor_accuracy_fails(fx_g, args, check_str=None):
-    from torchinductor.compile_fx import compile_fx_inner
+    from torch._inductor.compile_fx import compile_fx_inner
 
     return backend_aot_accuracy_fails(fx_g, args, compile_fx_inner)
 
 
+def get_minifier_repro_path():
+    return os.path.join(minifier_dir(), "minifier_launcher.py")
+
+
 def helper_for_dump_minify(contents):
-    minified_repro_path = os.path.join(minifier_dir(), "minifier_launcher.py")
+    minified_repro_path = get_minifier_repro_path()
     log.warning(f"Writing minified repro to {minified_repro_path}")
     try:
         with open(minified_repro_path, "w") as fd:
@@ -340,15 +322,6 @@ def helper_for_dump_minify(contents):
     except OSError as e:
         log.exception(e)
         raise NotImplementedError("Could not write to {minified_repro_path}")
-
-    local_path = os.path.join(config.base_dir, "minifier_launcher.py")
-    try:
-        shutil.copyfile(minified_repro_path, local_path)
-        log.warning(
-            f"Copying minified repro from {minified_repro_path} to {local_path} for convenience"
-        )
-    except OSError:
-        log.warning(f"Don't have write permissions for {local_path}")
 
 
 def dump_to_minify(gm, args, compiler_name: str):
@@ -605,10 +578,11 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
     """
     Saves the repro to a repro.py file
     """
-    subdir = os.path.join(minifier_dir())
+    curdir = os.getcwd()
+    subdir = os.path.join(os.getcwd(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
+    file_name = os.path.join(subdir, f"minified_{len(gm.graph.nodes)}_nodes.py")
     log.warning(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
 
     model_str = NNModuleToString.convert(gm)
@@ -618,18 +592,9 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
                 model_str, args, compiler_name, check_accuracy
             )
         )
-    latest_repro = os.path.join(subdir, "repro.py")
+    latest_repro = os.path.join(curdir, "repro.py")
     log.warning(f"Copying {file_name} to {latest_repro} for convenience")
     shutil.copyfile(file_name, latest_repro)
-
-    local_path = os.path.join(config.base_dir, "repro.py")
-    try:
-        shutil.copyfile(file_name, local_path)
-        log.warning(
-            f"Copying minified repro from {file_name} to {local_path} for convenience"
-        )
-    except OSError:
-        log.warning("No write permissions for {local_path}")
 
 
 # TODO - Commented because we are assuming that nn.Modules can be safely repr'd
@@ -753,8 +718,6 @@ from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 from {config.dynamo_import}.optimizations.backends import BACKENDS
 from {config.dynamo_import}.testing import rand_strided
 
-{config.dynamo_import}.config.repro_dir = \"{minifier_dir()}\"
-
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
 args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
 
@@ -790,8 +753,6 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
     def debug_wrapper(gm, example_inputs, **kwargs):
         assert config.repro_after in ("dynamo", "aot", None)
         if config.repro_after == "dynamo":
-            # Ensure that we fail when backend fails
-            config.raise_on_backend_error = True
             if config.repro_level == 3:
                 dump_to_minify_after_dynamo(gm, example_inputs, compiler_name)
 
@@ -800,22 +761,27 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                 # Check Accuracy
                 compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
-                    log.warning("Accuracy failed for the TorchDyanmo produced graph")
+                    log.warning(
+                        "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
+                    )
                     dump_to_minify_after_dynamo(
                         fx.GraphModule(gm, copy.deepcopy(gm.graph)),
                         example_inputs,
                         compiler_name,
                     )
-                    raise ValueError("Bad accuracy detected")
+                    exc = ValueError("Bad accuracy detected.")
+                    exc.minifier_path = os.path.join(
+                        minifier_dir(), "minifier_launcher.py"
+                    )
+                    raise exc
             else:
                 try:
                     compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
-                        "Compiled Fx GraphModule failed with following error. Setting up minifier."
+                        "Compiled Fx GraphModule failed. Creating script to minify the error."
                     )
-                    log.exception(exc)
                     if config.repro_level == 1:
                         dump_state_fn = functools.partial(
                             dump_backend_state, compiler_name=compiler_name
@@ -829,7 +795,10 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                             example_inputs,
                             compiler_name,
                         )
-                    raise ValueError("Issue deteced. Repro at minifier_launcher.py.")
+                    exc.minifier_path = os.path.join(
+                        minifier_dir(), "minifier_launcher.py"
+                    )
+                    raise
         else:
             compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
 
@@ -855,9 +824,8 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     except Exception as exc:
         orig_failure = str(exc)
         log.warning(
-            "Compiled Fx GraphModule failed with following error. Starting minifier."
+            "Compiled Fx GraphModule failed. Creating script to minify the error."
         )
-        log.exception(exc)
         dump_state_fn = functools.partial(
             dump_backend_state, compiler_name=compiler_name
         )
@@ -880,10 +848,10 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
-    from torchdynamo.optimizations.backends import BACKENDS
+    from torch._dynamo.optimizations.backends import BACKENDS
 
     if compiler_name == "inductor":
-        from torchinductor.compile_fx import compile_fx
+        from torch._inductor.compile_fx import compile_fx
 
         compiler_fn = compile_fx
     else:

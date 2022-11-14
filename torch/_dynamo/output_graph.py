@@ -6,15 +6,16 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch.nn
 from torch import fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
 from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed, unimplemented
+from .exc import BackendCompilerFailed
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
@@ -26,9 +27,10 @@ from .utils import (
     fake_tensors_available,
     format_graph_tabular,
 )
-from .variables.builder import VariableBuilder
+from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
+    DynamicShapeVariable,
     TensorVariable,
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
@@ -92,7 +94,7 @@ class OutputGraph(fx.Tracer):
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions = []
-        # Node => computed real value (see TensorVariable.get_real_value)
+        # Node => computed real value (see utils.get_real_value)
         self.real_value_cache = {}
 
         # Not checkpointed
@@ -104,6 +106,9 @@ class OutputGraph(fx.Tracer):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map = {}
+        self.shape_env = ShapeEnv() if config.dynamic_shapes else None
+        self.tensor_id_to_sym_shape_ref = {}
+        self.intermediary_symbols = {}
 
     @property
     def output(self):
@@ -191,43 +196,63 @@ class OutputGraph(fx.Tracer):
                 name,
             )
 
-    def register_attr_or_module(self, mod: torch.nn.Module, *names, **options):
-        if is_dynamic_nn_module(mod):
-            return variables.UnspecializedNNModuleVariable(mod, **options)
+    def register_attr_or_module(
+        self, target: Union[torch.nn.Module, torch.Tensor, Any], *names, **options
+    ):
+        if is_dynamic_nn_module(target):
+            return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
         options["guards"] = set(options.get("guards", []))
         source: Source = options.get("source", None)
-        if isinstance(mod, torch.Tensor):
+        if isinstance(target, torch.Tensor):
             if source:
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
-                return TensorVariable.create(
+                return wrap_fx_proxy(
                     self,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
-                    example_value=mod,
+                    example_value=target,
                     **options,
                 )
 
-        elif isinstance(mod, torch.nn.Module):
-            assert isinstance(mod, torch.nn.Module)
+        elif isinstance(target, torch.nn.Module):
+            assert isinstance(target, torch.nn.Module)
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
-                return NNModuleVariable(type(mod), module_key, **options)
+                return NNModuleVariable(type(target), module_key, **options)
 
+        elif isinstance(target, (torch.SymInt, torch.SymFloat)):
+            # HACKY CODE REGION BEGIN
+            # WE ARE PIGGYBACKING ON EXISTING INFRA TO REGISTER ATTRS
+            # This ultimately gets written to self.nn_modules, which is unfortunate
+            # Attrs that are tenors and symints and such need to be migrated to have their
+            # own storage
+            # alas, this is like this for now
+            self.intermediary_symbols.update({target.get_pyobj().expr: None})
+
+            def wrap_name(module_key):
+                return DynamicShapeVariable.create(
+                    self,
+                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    dyn_shape=target,
+                    **options,
+                )
+
+            # HACKY CODE REGION END
         else:
 
             def wrap_name(module_key):
                 self.output.update_co_names(module_key)
-                self.root_globals[module_key] = mod
+                self.root_globals[module_key] = target
                 return VariableBuilder(self, ConstantSource(source_name=module_key))(
-                    mod
+                    target
                 )
 
         for k, v in self.nn_modules.items():
-            if v is mod:
+            if v is target:
                 # it already exists
                 return wrap_name(k)
 
@@ -243,7 +268,7 @@ class OutputGraph(fx.Tracer):
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
-                self.nn_modules[name] = mod
+                self.nn_modules[name] = target
                 return wrap_name(name)
             name = f"{base}_{i}"
 
@@ -323,6 +348,7 @@ class OutputGraph(fx.Tracer):
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
+
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
@@ -394,8 +420,10 @@ class OutputGraph(fx.Tracer):
         gm.recompile()
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
+
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
+
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
@@ -403,7 +431,7 @@ class OutputGraph(fx.Tracer):
             # the call to tabulate can cause a lot of memory to be allocated
             if config.log_level <= logging.INFO:
                 log.log(
-                    torchdynamo_logging.CODE,
+                    logging.CODE,
                     f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
                 )
         except ImportError:
@@ -429,13 +457,8 @@ class OutputGraph(fx.Tracer):
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
-            log.warning("-" * 40 + "\n")
-            log.warning("TORCHDYNAMO: backend compiler failed\n")
-            log.warning(e, exc_info=True)
-            log.warning("-" * 40 + "\n")
             compiled_fn = gm.forward
-            if config.raise_on_backend_error:
-                raise BackendCompilerFailed(self.compiler_fn, e) from e
+            raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
     def example_inputs(self):

@@ -18,10 +18,10 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, InputBuffer, TensorBox
+from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import lowerings, make_fallback, needs_realized_inputs
 from .sizevars import SizeVarAllocator
-from .utils import dynamo_logging, dynamo_utils
+from .utils import dynamo_utils, gather_origins
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -40,11 +40,9 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
 
-        size = [
-            i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in size
-        ]
+        size = [i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in size]
         stride = [
-            i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in stride
+            i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in stride
         ]
         return size, stride
 
@@ -210,39 +208,39 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
-        if example.dim() != 0:
-            self.device_types.add(example.device.type)
+        self.device_types.add(example.device.type)
         return tensor
 
     def call_function(self, target, args, kwargs):
-        if target is operator.getitem and isinstance(args[0], (list, tuple)):
-            return super().call_function(target, args, kwargs)
+        with ir.IRNode.current_origins(gather_origins(args, kwargs)):
+            if target is operator.getitem and isinstance(args[0], (list, tuple)):
+                return super().call_function(target, args, kwargs)
 
-        if target not in lowerings:
-            if config.implicit_fallbacks:
-                error = (
-                    MissingOperatorWithDecomp
-                    if get_decompositions([target])
-                    else MissingOperatorWithoutDecomp
-                )
-                log.warning(
-                    "Creating implicit fallback for:\n%s",
-                    error.operator_str(target, args, kwargs),
-                )
-                make_fallback(target)
-            elif get_decompositions([target]):
-                # There isn't a good way to dynamically patch this in
-                # since AOT Autograd already ran.  The error message tells
-                # the user how to fix it.
-                raise MissingOperatorWithDecomp(target, args, kwargs)
-            else:
-                raise MissingOperatorWithoutDecomp(target, args, kwargs)
+            if target not in lowerings:
+                if config.implicit_fallbacks:
+                    error = (
+                        MissingOperatorWithDecomp
+                        if get_decompositions([target])
+                        else MissingOperatorWithoutDecomp
+                    )
+                    log.warning(
+                        "Creating implicit fallback for:\n%s",
+                        error.operator_str(target, args, kwargs),
+                    )
+                    make_fallback(target)
+                elif get_decompositions([target]):
+                    # There isn't a good way to dynamically patch this in
+                    # since AOT Autograd already ran.  The error message tells
+                    # the user how to fix it.
+                    raise MissingOperatorWithDecomp(target, args, kwargs)
+                else:
+                    raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
-        try:
-            out = lowerings[target](*args, **kwargs)
-            return out
-        except Exception as e:
-            raise LoweringException(e, target, args, kwargs) from e
+            try:
+                out = lowerings[target](*args, **kwargs)
+                return out
+            except Exception as e:
+                raise LoweringException(e, target, args, kwargs) from e
 
     def get_attr(self, target, args, kwargs):
         # this is a constant
@@ -300,14 +298,27 @@ class GraphLowering(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
         with ir.IRNode.current_origins({n}):
             result = super().run_node(n)
+
+            # Realize if (1) any user need inputs realized, or (2) there is
+            # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
-                    if user.target in needs_realized_inputs or user.op == "output":
+                    if user.target in needs_realized_inputs:
                         result.realize_hint()
+                    elif user.op == "output":
+                        if isinstance(result.data.data, (Pointwise, Reduction)):
+                            result.realize()
 
                 # TODO(jansel): introduce a store vs inline choice
                 result.mark_reuse(len(n.users))
+
+            # Realize if the IRNode already has accumulated lots of reads
+            if isinstance(result, TensorBox) and result.has_exceeded_max_reads():
+                # Prevent excessive accumulation in a computed buffer, when
+                # there are multiple branches meach with small number of memory
+                # reads, but they converge to a user.
+                result.realize_hint()
         return result
 
     def codegen(self):
@@ -330,7 +341,7 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        log.log(dynamo_logging.CODE, "Output code: %s", mod.__file__)
+        log.log(logging.CODE, "Output code: %s", mod.__file__)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
@@ -345,3 +356,12 @@ class GraphLowering(torch.fx.Interpreter):
             if not isinstance(node, ir.NoneAsConstantBuffer)
             and not isinstance(node, ir.ShapeAsConstantBuffer)
         ]
+
+    def is_unspec_arg(self, name):
+        # dynamo wraps unspec variable as 0d CPU tensor,
+        # need to convert to scalar during codegen (triton only)
+        return (
+            name in self.graph_inputs.keys()
+            and self.graph_inputs[name].get_numel() == 1
+            and self.graph_inputs[name].get_device().type == "cpu"
+        )

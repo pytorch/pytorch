@@ -71,6 +71,32 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_export_shape_control_flow_1(self):
+        def func(x):
+            if x.shape[0] > 10:
+                return x.cos()
+            return x.sin()
+
+        opt_func = torch._dynamo.optimize("eager")(func)
+        real_result = opt_func(torch.ones(6, 4))
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func, torch.ones(6, 4))
+        out_graph, out_guards = exported
+
+        dynamo_result = out_graph(torch.ones(6, 4))
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        hit = False
+        for guard in out_guards:
+            if guard.name == "symbolic_shape_expression":
+                hit = True
+                self.assertTrue("x.size()[0] <= 10" in guard.code_list)
+
+        self.assertTrue(hit)
+
     def test_export_graph_bypass(self):
         inp = [
             torch.tensor([0.1, 0.1]),
@@ -930,7 +956,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(make_fx_result, export_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_method_on_module(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -957,7 +982,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_method_on_module_invoke_twice(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -984,7 +1008,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_free_function(self):
         @torch._dynamo.assume_constant_result
         def helper_fn(x):
@@ -1015,7 +1038,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_free_function_and_class_method(self):
         @torch._dynamo.assume_constant_result
         def helper_fn(x):
@@ -1042,7 +1064,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         result = graph(torch.tensor([[1, 0], [0.25, 0.25]]))
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_free_function_and_class_method_multiarg(self):
         @torch._dynamo.assume_constant_result
         def helper_fn(x):
@@ -1077,7 +1098,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         )
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_free_function_and_class_method_multiarg_diff(self):
         @torch._dynamo.assume_constant_result
         def helper_fn(x):
@@ -1109,7 +1129,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         )
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_tuple_nonzero(self):
         class MyModule(torch.nn.Module):
             @torch._dynamo.assume_constant_result
@@ -1134,7 +1153,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_list_nonzero(self):
         class MyModule(torch.nn.Module):
             @torch._dynamo.assume_constant_result
@@ -1159,7 +1177,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_list_nonzero_free_function(self):
         @torch._dynamo.assume_constant_result
         def helper_fn(x):
@@ -1184,7 +1201,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_dict_values(self):
         class MyModule(torch.nn.Module):
             @torch._dynamo.assume_constant_result
@@ -1207,7 +1223,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         result = graph(torch.tensor([[[1.0, 0], [0, 0]], [[1.0, 0], [0, 0]]]))
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_none_control_flow(self):
         class MyModule(torch.nn.Module):
             @torch._dynamo.assume_constant_result
@@ -1235,7 +1250,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # X is positive, but we compiled helper_fn to return None, so it will still return y
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_not_none_control_flow(self):
         class MyModule(torch.nn.Module):
             @torch._dynamo.assume_constant_result
@@ -1263,7 +1277,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # X is negative, but we compiled helper_fn to return x, so it will still return y * x
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_none_control_flow_free_func(self):
         @torch._dynamo.assume_constant_result
         def helper_fn(x):
@@ -1291,7 +1304,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # X is positive, but we compiled helper_fn to return None, so it will still return y
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_not_none_control_flow_pos(self):
         class MyModule(torch.nn.Module):
             @torch._dynamo.assume_constant_result
@@ -1319,7 +1331,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # X is negative, but we compiled helper_fn to return x, so it will still return y * x
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_not_none_control_flow_free_func(self):
         @torch._dynamo.assume_constant_result
         def helper_fn(x):
@@ -1347,7 +1358,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # X is negative, but we compiled helper_fn to return x, so it will still return y * x
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_export_with_constant_not_return_const(self):
         class MyModule(torch.nn.Module):
             @torch._dynamo.assume_constant_result
@@ -1460,6 +1470,22 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         real_result_2 = mod.forward(pred, x)
         dynamo_result_2 = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
+
+    def test_export_meta_val(self):
+        def f(x, y, z):
+            return x * y + z
+
+        gm, _ = torch._dynamo.export(
+            f,
+            torch.ones(3, 2),
+            torch.zeros(3, 2),
+            torch.ones(3, 2),
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                self.assertIn("val", node.meta)
 
 
 if __name__ == "__main__":

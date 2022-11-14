@@ -18,12 +18,12 @@ aten = torch.ops.aten
 
 def outputs_alias_inputs(outputs, inputs):
     input_storages = {
-        inp.storage()._cdata
+        inp._typed_storage()._cdata
         for inp in tree_flatten_only(torch.Tensor, inputs)
         if torch._C._has_storage(inp)
     }
     return any(
-        torch._C._has_storage(out) and out.storage()._cdata in input_storages
+        torch._C._has_storage(out) and out._typed_storage()._cdata in input_storages
         for out in tree_flatten_only(torch.Tensor, outputs)
     )
 
@@ -38,7 +38,7 @@ def output_alias_each_other(outputs):
     for out in tree_flatten_only(torch.Tensor, outputs):
         if not torch._C._has_storage(out):
             continue
-        stor = out.storage()._cdata
+        stor = out._typed_storage()._cdata
         if stor in storages:
             return True
         storages.add(stor)

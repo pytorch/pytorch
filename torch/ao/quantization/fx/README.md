@@ -81,7 +81,7 @@ What we did in this example are:
 
 ```
 BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear))
-    .set_fuser_method(reverse_sequential_wrapper2(nni.LinearReLU))
+    .set_fuser_method(_reverse_sequential_wrapper2(nni.LinearReLU))
     ._set_root_node_getter(my_root_node_getter)
     ._set_extra_inputs_getter(my_extra_inputs_getter)
 ```
@@ -248,7 +248,7 @@ Note: weight + FakeQuantize is a part of qat_linear_relu
 `backend_config` configurations used in this step:
 ```
 BackendConfig(nniqat.LinearReLU)
-    .set_observation_type(ObservationType.OUTPUT_USE_DIFFFERENT_OBSERVER_AS_INPUT)
+    .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)
     .set_dtype_configs([
         DTypeConfig(input_dtype=torch.quint8, output_dtype = torch.quint8, weight_dtype = torch.qint8, bias_dtype = torch.float32)]
     )
@@ -329,7 +329,7 @@ backend_config configurations used in this step:
 BackendConfig(nniqat.LinearReLU)
     .set_root_module(nn.Linear)
     .set_reference_quantized_module_for_root(nnqr.Linear)
-    .set_fused_module(nni.Linear)
+    .set_fused_module(nni.LinearReLU)
 ```
 
 Pattern in this case is the same as before, it defines the pattern for the subgraph we are dealing with
@@ -376,26 +376,5 @@ There are no configurations related to lowering in `backend_config` since it is 
 However, for some operator based backends, like the current pytorch native backends including fbgemm and qnnpack. We could interpret `backend_config` in terms of configurations for operators as well. e.g. configuring `input_dtype`=quint8, `weight_dtype`=qint8, `output_dtype`=torch.quint8 for nn.Linear is saying that the quantized linear will take a quint8 activation and qint8 weight as input and outputs a quint8 activation. But there is no guarantee that this interpretation will always work in the future, especially when we add new flavors of quantized operators.
 
 ## Extensibility
-Different backend or kernel libraries may have different support for quantization. They may have different quantized operators, and the quantized operators might work for Tensors with different dtypes, the observers may need to be placed in different places. To make quantization work for different backends, and allow maximum flexibility, we also strived to make all the parts of the flow configurable with backend_config.
 
-backend_config configures quantization behavior in terms of operator patterns. We need to define a operator pattern and specify what are the supported dtypes for input/output/weight/bias for the pattern, and also specify the qat modules, reference modules etc. for the pattern, which will be used in module swapping during the quantization passes.
-
-Quantized Backends can have different support in the following aspects:
-* Quantization Scheme (symmetric vs asymmetric, per-channel vs per-tensor)
-* Data Type (float32, float16, int8, uint8, bfloat16, etc) for input/output/weight/bias
-* Quantized (and Fused) Operators and Mapping The quantized operators supported by the backend. For example: quantized conv2d, quantized linear etc. Some quantized operators may have different numerics compared to a naive (dequant - float_op - quant) implementation For weighted operators (conv and linear) we need to define a reference module and a mapping
-* QAT Module Mapping For modules with weights, e.g. Conv2d and Linear, we need to swap them with qat (quantization aware training) module that adds fake quantization to the weights
-
-As an example, here is what fbgemm looks like:
-+-------------------------------------------+-----------------------------------------------------------------------+
-|                                           | fbgemm                                                                |
-|-------------------------------------------|-----------------------------------------------------------------------|
-| Quantization Scheme                       | activation: per tensor, weight: per tensor or per channel             |
-| Data Type                                 | activation: quint8 (with qmin/qmax range restrictions), weight: qint8 |
-| Quantized and Fused Operators and Mapping | e.g. nn.Conv2d -> torch.ao.nn.quantized.reference.Conv2d              |
-| QAT Module Mapping                        | nn.Conv -> torch.ao.nn.qat.Conv2d                                     |
-+-------------------------------------------+-----------------------------------------------------------------------+
-
-So instead of hardcoding the fusion mappings, float to quantized module mappings, fusion patterns etc. we will derive everything through `backend_config` throughout the code base. This allows PyTorch Quantization to work for all first-party or third-party backends that may differ from native backends in different aspects.
-
-For use cases, we will use TensorRT as an example use case and have a tutorial talking about `backend_config`, pytorch native backends fbgemm and qnnpack will be using this to define their behaviors as well, especially with the recent addition of xnnpack (integrated as a part of qnnpack backend in pytorch), the `backend_config` api is needed to define the new constraints from xnnpack.
+FX graph mode quantization can be extended to work with different backends, which may have different sets of supported quantized operator patterns and different requirements for each pattern. For more detail, please refer to the [BackendConfig README](/torch/ao/quantization/backend_config/README.md).

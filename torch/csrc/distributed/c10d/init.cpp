@@ -515,10 +515,14 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           R"(Sets the debug level of the torch.distributed package from the
           ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
+  // TODO(crcrpar): Hardening `ReduceOp`.
+  //    While keeping most op types as enum value,
+  //    making `PREMUL_SUM` callable, i.e., allowing for
+  //    `ReduceOp.PREMUL_SUM(scale)` might be better as per @wanchaol.
   // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
   py::class_<::c10d::ReduceOp> reduce_op(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
-``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
+``MIN``, ``MAX``, ``BAND``, ``BOR``, ``BXOR``, and ``PREMUL_SUM``.
 
 ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
 using the ``NCCL`` backend.
@@ -529,13 +533,16 @@ and only for NCCL versions 2.10 or later.
 
 ``PREMUL_SUM`` multiplies inputs by a given scalar locally before reduction.
 ``PREMUL_SUM`` is only available with the ``NCCL`` backend,
-and only available for NCCL versions 2.11 or later.
+and only available for NCCL versions 2.11 or later. Users are supposed to
+use ``torch.distributed._make_nccl_premul_sum``.
 
 Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
-:func:`reduce`, :func:`all_reduce_multigpu`, etc.)");
+:func:`reduce`, :func:`all_reduce_multigpu`, etc.
+
+This class does not support ``__members__`` property.)");
 
   reduce_op.def(py::init<::c10d::ReduceOp::RedOpType>())
       .def_readwrite("op", &::c10d::ReduceOp::op_);
@@ -555,8 +562,14 @@ They are used in specifying strategies for reduction collectives, e.g.,
           [](const ::c10d::ReduceOp& self, const ::c10d::ReduceOp& other) {
             return self == other.op_;
           })
-      .def("__hash__", [](const ::c10d::ReduceOp& self) { return self.op_; });
+      .def("__hash__", [](const ::c10d::ReduceOp& self) {
+        return static_cast<uint8_t>(self.op_);
+      });
 
+  // note(crcrpar): Deliberately skip
+  // [`export_values`](https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types)
+  // here and manually set values in Python side. See note "ReduceOp static
+  // class attributes to support `isinstance`"
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
       .value("AVG", ::c10d::ReduceOp::RedOpType::AVG)
@@ -566,10 +579,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .value("BAND", ::c10d::ReduceOp::RedOpType::BAND)
       .value("BOR", ::c10d::ReduceOp::RedOpType::BOR)
       .value("BXOR", ::c10d::ReduceOp::RedOpType::BXOR)
-      .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM)
-      .export_values();
+      .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM);
 
-  // Ref: [Implicit
+  // note(crcrpar): This could be removed because users will not pass
+  // `RedOpType` to reduce collective ops Ref: [Implicit
   // conversions](https://pybind11.readthedocs.io/en/stable/advanced/classes.html#implicit-conversions)
   // Let us skip the explicit construction of `c10d::ReduceOp` from
   // `c10d::ReduceOp::RedOpType` in Python.
@@ -1121,10 +1134,10 @@ Arguments:
 
           .def(
               "allreduce_coalesced",
-              [](::c10d::ProcessGroup& self,
-                 std::vector<at::Tensor>& xs,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& xs,
                  ::c10d::AllreduceCoalescedOptions opts) {
-                return self.allreduce_coalesced(xs, opts);
+                return ::c10d::ops::allreduce_coalesced(self, xs, opts);
               },
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceCoalescedOptions(),
@@ -1174,7 +1187,13 @@ Arguments:
 
           .def(
               "_allgather_base",
-              &::c10d::ProcessGroup::_allgather_base,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 at::Tensor& output_tensor,
+                 at::Tensor& input_tensor,
+                 const ::c10d::AllgatherOptions& opts) {
+                return ::c10d::ops::_allgather_base(
+                    self, output_tensor, input_tensor, opts);
+              },
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
@@ -1887,7 +1906,7 @@ Example::
         Returns:
             A ``Work`` object which is associated with the completion of
             the ``torch.futures.Future``.
-        This is the prefered way of constructing Work objects when writing a custom ProcessGroup
+        This is the preferred way of constructing Work objects when writing a custom ProcessGroup
         in python.
         Example::
             >>> class SingleRankProcessGroup(torch.distributed.ProcessGroup):
