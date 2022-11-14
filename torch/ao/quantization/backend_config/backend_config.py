@@ -75,8 +75,8 @@ class DTypeWithConstraints:
     quant_max_upper_bound: Union[int, float, None] = None
     scale_min_lower_bound: Union[int, float, None] = None
     scale_max_upper_bound: Union[int, float, None] = None
-    fixed_scale: Optional[float] = None
-    fixed_zero_point: Optional[int] = None
+    scale_exact_match: Optional[float] = None
+    zero_point_exact_match: Optional[int] = None
 
 
 @dataclass

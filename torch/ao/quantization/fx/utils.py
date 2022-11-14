@@ -965,6 +965,7 @@ def _qconfig_satisfies_dtype_config_constraints(
     If `is_activation` is True, we check `qconfig.activation`, else we check `qconfig.weight`.
     If `qconfig` or `dtype_with_constraints.dtype` is None, or the dtypes do not match, return True.
     """
+    # TODO: log warnings only when the user enabled a debug flag
     def _activation_post_process_satisfies_dtype_config_constraints(
             activation_post_process: Union[ObserverBase, FakeQuantizeBase],
             dtype_with_constraints: DTypeWithConstraints,
@@ -978,8 +979,8 @@ def _qconfig_satisfies_dtype_config_constraints(
         backend_quant_min = dtype_with_constraints.quant_min_lower_bound
         backend_quant_max = dtype_with_constraints.quant_max_upper_bound
         backend_scale_min = dtype_with_constraints.scale_min_lower_bound
-        backend_fixed_scale = dtype_with_constraints.fixed_scale
-        backend_fixed_zero_point = dtype_with_constraints.fixed_zero_point
+        backend_fixed_scale = dtype_with_constraints.scale_exact_match
+        backend_fixed_zero_point = dtype_with_constraints.zero_point_exact_match
         # check quantization ranges
         if backend_quant_min is not None and backend_quant_max is not None:
             if app_quant_min is None or app_quant_max is None:

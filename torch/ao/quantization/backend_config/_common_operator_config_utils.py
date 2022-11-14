@@ -8,10 +8,11 @@ import torch.ao.nn.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
 from collections import namedtuple
-from typing import List
+from typing import Callable, Dict, List, Union
 from .backend_config import (
     BackendPatternConfig,
     DTypeConfig,
+    DTypeWithConstraints,
     ObservationType,
 )
 from ..fuser_method_mappings import (
@@ -23,8 +24,6 @@ from ..fuser_method_mappings import (
     fuse_linear_bn,
     fuse_convtranspose_bn,
 )
-from ..observer import FixedQParamsObserver
-from ..qconfig_mapping import _FIXED_QPARAMS_OP_TO_OBSERVER
 
 # TODO: rename to be more explict, e.g. qat_conv_relu
 _ConvMetadata = namedtuple(
@@ -48,6 +47,38 @@ _Conv3dMetadata = _ConvMetadata(
     nni.ConvReLU3d, nni.ConvBn3d, nni.ConvBnReLU3d,
     nnqat.Conv3d, nniqat.ConvReLU3d, nniqat.ConvBn3d, nniqat.ConvBnReLU3d,
     F.conv3d)
+
+# Add constraints for fixed qparams ops like sigmoid and tanh to ensure values
+# fall within the proper ranges, e.g. [0, 1] for sigmoid, [-1, 1] for tanh
+_FIXED_QPARAM_OP_0TO1_CONSTRAINTS = DTypeWithConstraints(
+    dtype=torch.quint8,
+    quant_min_lower_bound=0,
+    quant_max_upper_bound=255,
+    scale_exact_match=1.0 / 256.0,
+    zero_point_exact_match=0,
+)
+_FIXED_QPARAM_OP_NEG1TO1_CONSTRAINTS = DTypeWithConstraints(
+    dtype=torch.quint8,
+    quant_min_lower_bound=0,
+    quant_max_upper_bound=255,
+    scale_exact_match=2.0 / 256.0,
+    zero_point_exact_match=128,
+)
+_FIXED_QPARAMS_OP_TO_CONSTRAINTS: Dict[Union[Callable, str], DTypeWithConstraints] = { 
+    torch.nn.Hardsigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    torch.nn.functional.hardsigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    "hardsigmoid": _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    "hardsigmoid_": _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    torch.nn.Sigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    torch.sigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    "sigmoid": _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    "sigmoid_": _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    torch.nn.Softmax: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    torch.nn.Tanh: _FIXED_QPARAM_OP_NEG1TO1_CONSTRAINTS,
+    torch.tanh: _FIXED_QPARAM_OP_NEG1TO1_CONSTRAINTS,
+    "tanh": _FIXED_QPARAM_OP_NEG1TO1_CONSTRAINTS,
+    "tanh_": _FIXED_QPARAM_OP_NEG1TO1_CONSTRAINTS,
+}
 
 def _get_binary_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
     binary_op_configs: List[BackendPatternConfig] = []
@@ -396,37 +427,39 @@ def _get_default_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPat
 
 def _add_fixed_qparams_to_dtype_configs(
     dtype_configs: List[DTypeConfig],
-    observer: FixedQParamsObserver,
+    constraints: DTypeWithConstraints,
 ) -> List[DTypeConfig]:
     """
-    Return a copy of the list of DTypeConfigs where activations are subject to the fixed qparams
-    constraints specified in the observer.
+    Return a copy of the list of DTypeConfigs where activations are subject to the specified
+    constraints required for fixed qparams ops.
 
-    If `scale_min_lower_bound` or `scale_max_upper_bound` is specified in the activations, throw an
-    exception since these settings are incompatible with fixed qparams ops.
+    If the data type doesn't match the one in the constraints, simply leave the corresponding
+    DTypeConfig unchanged.
+
+    If `scale_min_lower_bound` or `scale_max_upper_bound` is specified in the activations,
+    throw an exception since these settings are incompatible with fixed qparams ops.
     """
-    fixed_scale = observer.scale
-    fixed_zero_point = observer.zero_point
     new_dtype_configs = []
     for dtype_config in dtype_configs:
         dc = copy.deepcopy(dtype_config)
-        for dtype_with_constraints in [dc.input_dtype_with_constraints, dc.output_dtype_with_constraints]:
-            dtype_with_constraints.fixed_scale = float(fixed_scale)
-            dtype_with_constraints.fixed_zero_point = int(fixed_zero_point)
-            if dtype_with_constraints.scale_min_lower_bound is not None:
+        for orig_constraints in [dc.input_dtype_with_constraints, dc.output_dtype_with_constraints]:
+            if orig_constraints.dtype != constraints.dtype:
+                continue
+            if orig_constraints.scale_min_lower_bound is not None:
                 raise ValueError("scale_min_lower_bound is invalid for fixed qparams ops: %s" % dtype_config)
-            if dtype_with_constraints.scale_max_upper_bound is not None:
+            if orig_constraints.scale_max_upper_bound is not None:
                 raise ValueError("scale_max_upper_bound is invalid for fixed qparams ops: %s" % dtype_config)
+            orig_constraints.quant_min_lower_bound = constraints.quant_min_lower_bound
+            orig_constraints.quant_max_upper_bound = constraints.quant_max_upper_bound
+            orig_constraints.scale_exact_match = constraints.scale_exact_match
+            orig_constraints.zero_point_exact_match = constraints.zero_point_exact_match
         new_dtype_configs.append(dc)
     return new_dtype_configs
 
 def _get_fixed_qparams_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
     fixed_qparams_op_configs = []
-    for fixed_qparam_op, obs_ctr in _FIXED_QPARAMS_OP_TO_OBSERVER.items():
-        # Specify fixed qparams constraints through the dtype configs
-        obs = obs_ctr()
-        assert isinstance(obs, FixedQParamsObserver)
-        new_dtype_configs = _add_fixed_qparams_to_dtype_configs(dtype_configs, obs)
+    for fixed_qparam_op, constraints in _FIXED_QPARAMS_OP_TO_CONSTRAINTS.items():
+        new_dtype_configs = _add_fixed_qparams_to_dtype_configs(dtype_configs, constraints)
         fixed_qparams_op_configs.append(
             BackendPatternConfig(fixed_qparam_op)
                 .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131

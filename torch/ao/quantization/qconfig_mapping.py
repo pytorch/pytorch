@@ -39,6 +39,7 @@ _MODULE_NAME_REGEX_DICT_KEY = "module_name_regex"
 _MODULE_NAME_DICT_KEY = "module_name"
 _MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY = "module_name_object_type_order"
 
+# TODO: derive this map from the BackendConfig
 _FIXED_QPARAMS_OP_TO_OBSERVER: Dict[Union[Callable, str], _PartialWrapper] = {
     torch.nn.Hardsigmoid: default_fixed_qparams_range_0to1_observer,
     torch.nn.functional.hardsigmoid: default_fixed_qparams_range_0to1_observer,
