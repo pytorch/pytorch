@@ -877,7 +877,7 @@ std::vector<std::vector<int64_t>> matrix_chain_order(TensorList tensors) {
 /**
  * @brief Recursively multiplies the tensors i...j using the given order
  *
- * @param tensors matrices to multiply togther
+ * @param tensors matrices to multiply together
  * @param order optimal chain multiplication order from #matrix_chain_order
  * @param i index of first tensor to be multiplied
  * @param j index of last tensor to be multiplied
