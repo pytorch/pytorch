@@ -200,6 +200,14 @@ def _get_bn_configs() -> List[BackendPatternConfig]:
             .set_dtype_configs(dtype_configs))
     return bn_configs
 
+def _get_cat_configs() -> List[BackendPatternConfig]:
+    dtype_configs = [executorch_default_op_quint8_dtype_config]
+    cat_configs = []
+    cat_configs.append(
+        BackendPatternConfig(torch.cat)
+        .set_observation_type(ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT)
+        .set_dtype_configs(dtype_configs))
+    return cat_configs
 
 # =====================
 # |  BACKEND CONFIGS  |
@@ -214,4 +222,5 @@ def get_executorch_backend_config() -> BackendConfig:
         .set_backend_pattern_configs(_get_conv_configs()) \
         .set_backend_pattern_configs(_get_binary_ops_configs()) \
         .set_backend_pattern_configs(_get_share_qparams_ops_configs()) \
-        .set_backend_pattern_configs(_get_bn_configs())
+        .set_backend_pattern_configs(_get_bn_configs()) \
+        .set_backend_pattern_configs(_get_cat_configs())
