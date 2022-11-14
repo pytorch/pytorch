@@ -241,13 +241,12 @@ inline Vectorized<int64_t> flip(const Vectorized<int64_t> & v) {
   return _mm256_permute4x64_epi64(v, 27);  // 27 == _MM_SHUFFLE(0, 1, 2, 3)
 }
 
-static const __m256i mask_int8 = _mm256_set_epi8(
-  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
-);
-
 template<>
 inline Vectorized<int8_t> flip(const Vectorized<int8_t> & v) {
+  const __m256i mask_int8 = _mm256_set_epi8(
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+  );
   auto reversed = _mm256_shuffle_epi8(v, mask_int8);
   return _mm256_permute2x128_si256(reversed, reversed, 1);
 }
