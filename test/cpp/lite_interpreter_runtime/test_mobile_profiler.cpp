@@ -9,9 +9,8 @@
 
 #include <unordered_set>
 
+#include <test/cpp/lite_interpreter_runtime/resources.h>
 #include <torch/csrc/profiler/events.h>
-
-#include "test/cpp/lite_interpreter_runtime/resources.h"
 
 #ifdef EDGE_PROFILER_USE_KINETO
 namespace torch {
