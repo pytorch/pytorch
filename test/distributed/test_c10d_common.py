@@ -1464,12 +1464,19 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         # ensure supported devices (cpu, cuda) succeeds during dispatch call
         tensor = torch.zeros(2, 2, device=torch.device(device))
         # multi tensor collectives
-        if collective == dist.all_gather:
+        if collective == dist.barrier:
+            collective()
+        elif collective in (dist.all_gather, dist.gather):
             collective([tensor], tensor, *args)
-        elif collective == dist.reduce_scatter:
+        elif collective == dist.scatter:
+            collective(tensor, [tensor], *args)
+        elif collective in (dist.reduce_scatter, dist.all_to_all):
+            # gloo does not support reduce_scatter or all_to_all
             if backend != "gloo":
-                # gloo does not support reduce_scatter
-                collective(tensor, [tensor], *args)
+                if collective == dist.reduce_scatter:
+                    collective(tensor, [tensor], *args)
+                else:
+                    collective([tensor], [tensor], *args)
         else:
             collective(tensor, *args)
 
@@ -1488,10 +1495,28 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             (dist.all_reduce,),
             (dist.all_gather,),
             (dist.reduce_scatter,),
+            (dist.barrier,),
+            (dist.all_to_all,),
+            (dist.scatter,),
         ]
         for collective, *args in collectives_and_args:
             with self.subTest(collective=collective, args=args):
                 self._call_collective_with_varying_tensors(backend, collective, *args)
+
+    def _test_allreduce_coalesced(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        # TODO: this will be updated in the future to not be backend specific
+        device = "cuda" if backend == "nccl" else "cpu"
+        tensors = [torch.ones(10, 10, device=torch.device(device))]
+        dist.all_reduce_coalesced(tensors, dist.ReduceOp.SUM)
+        for tensor in tensors:
+            self.assertEqual(tensor, torch.ones(10, 10) * self.world_size)
 
 class CompilerTest(MultiProcessTestCase):
     def setUp(self):
