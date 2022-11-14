@@ -3557,38 +3557,40 @@ def construct_sum_pyop():
     def mysum_autograd(x, dim):
         return torch.sum(x, dim)
 
+    @mysum.py_impl(torch._C.DispatchKey.AutogradCUDA)
+    def mysum_autograd(x, dim):
+        return torch.sum(x, dim)
+
     return mysum
+
+sum_pyop = construct_sum_pyop()
 
 class TestPyOperatorInteraction(TestCase):
 
-    def test_basic_sum(self):
-        mysum = construct_sum_pyop()
-        x = torch.randn(2, 3, 4)
-        result = mysum(x, 1)
+    def test_basic_sum(self, device):
+        x = torch.randn(2, 3, 4, device=device)
+        result = sum_pyop(x, 1)
         self.assertEqual(result, torch.sum(x, 1))
 
-    def test_vmap_sum(self):
-        mysum = construct_sum_pyop()
-        x = torch.randn(2, 3, 4)
-        result = vmap(mysum, (0, None))(x, 0)
+    def test_vmap_sum(self, device):
+        x = torch.randn(2, 3, 4, device=device)
+        result = vmap(sum_pyop, (0, None))(x, 0)
         self.assertEqual(result, torch.sum(x, 1))
 
-        result = vmap(vmap(mysum, (0, None)), (0, None))(x, 0)
+        result = vmap(vmap(sum_pyop, (0, None)), (0, None))(x, 0)
         self.assertEqual(result, torch.sum(x, 2))
 
-    def test_grad_sum(self):
-        mysum = construct_sum_pyop()
-        x = torch.randn(3)
-        gx = grad(mysum)(x, 0)
+    def test_grad_sum(self, device):
+        x = torch.randn(3, device=device)
+        gx = grad(sum_pyop)(x, 0)
         self.assertEqual(gx, torch.ones_like(x))
 
-    def test_grad_grad_sum(self):
-        mysum = construct_sum_pyop()
-        x = torch.randn(3, requires_grad=True)
+    def test_grad_grad_sum(self, device):
+        x = torch.randn(3, requires_grad=True, device=device)
 
         def f(x):
             # higher order grad. Requires a non-linearity
-            return mysum(x.sin(), 0)
+            return sum_pyop(x.sin(), 0)
 
         def grad_f_sum(x):
             return grad(f)(x).sum()
@@ -3596,11 +3598,34 @@ class TestPyOperatorInteraction(TestCase):
         ggx = grad(grad_f_sum)(x)
         self.assertEqual(ggx, -x.sin())
 
-    def test_vmap_grad_sum(self):
-        mysum = construct_sum_pyop()
-        x = torch.randn(2, 3)
-        gx = vmap(grad(mysum), (0, None))(x, 0)
+    def test_vmap_grad_sum(self, device):
+        x = torch.randn(2, 3, device=device)
+        gx = vmap(grad(sum_pyop), (0, None))(x, 0)
         self.assertEqual(gx, torch.ones_like(x))
+
+    def test_no_grad_outside_grad(self, device):
+        x = torch.randn(3, device=device, requires_grad=True)
+        with torch.no_grad():
+            y = grad(sum_pyop)(x, 0)
+        self.assertEqual(y, torch.ones_like(x))
+        self.assertFalse(y.requires_grad)
+
+    def test_no_grad_inside_grad(self, device):
+        def f(x):
+            with torch.no_grad():
+                shift = sum_pyop(x ** 2, 0)
+            return sum_pyop(x ** 2, 0) - shift
+
+        x = torch.randn(3, device=device)
+        y = grad(f)(x)
+        self.assertEqual(y, 2 * x)
+        y = grad(lambda x: grad(f)(x).sum())(x)
+        self.assertEqual(y, torch.full_like(x, 2))
+
+        x = torch.randn(3, device=device, requires_grad=True)
+        y = grad(f)(x)
+        z, = torch.autograd.grad(y.sum(), x)
+        self.assertEqual(z, torch.full_like(x, 2))
 
 
 only_for = ("cpu", "cuda")
@@ -3641,6 +3666,11 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestExamplesCorrectness,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestPyOperatorInteraction,
     globals(),
     only_for=only_for,
 )
