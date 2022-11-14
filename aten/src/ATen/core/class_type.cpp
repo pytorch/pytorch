@@ -86,7 +86,7 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
   std::string pre_hook_schema =
       pre_hook_name + "(self, input: Tuple[" + input_types + "])";
   std::string return_string =
-      "This error occured while scripting the forward pre-hook '" +
+      "This error occurred while scripting the forward pre-hook '" +
       pre_hook_name + "' on module '" + name()->name() +
       "'. If you did not want to script this pre-hook remove it from the "
       "original NN module before scripting. Pre-hooks for module '" +
@@ -111,7 +111,7 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
   std::string hook_schema = hook_name + "(self, input: Tuple[" +
                             input_types + "], output: " + output_types + ")";
   std::string return_string =
-      "This error occured while scripting the forward hook '"
+      "This error occurred while scripting the forward hook '"
       + hook_name + "' on module " + name()->name() +
       ". If you did not want to script this hook remove it from" +
       " the original NN module before scripting. This hook was" +
