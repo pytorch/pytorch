@@ -17,6 +17,9 @@ from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
 
+import logging
+
+
 from functorch import make_fx
 from torch._dispatch.python import enable_python_dispatcher
 from . import config
@@ -30,6 +33,8 @@ except ImportError:
     def disable_torchdynamo(x):
         return x
 
+
+log = logging.getLogger(__name__)
 
 try:
     from torchdynamo.utils import dynamo_timed
@@ -215,6 +220,7 @@ def detach_and_functionalize_pure(f, preserve_requires_grad=True):
             return torch._from_functional_tensor(t)
 
         return pytree.tree_map(from_fun, outs)
+
     return inner
 
 
@@ -375,9 +381,8 @@ class AOTConfig:
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
     if config.debug_graphs:
-        print("====== Forward (only) graph ======")
-        fw_module.print_readable()
-
+        log.debug("====== Forward (only) graph ======")
+        log.debug(fw_module.print_readable(print_output=False))
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
@@ -457,15 +462,15 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
-    joint_forward_backward = create_joint_forward_backward_pure(lambda *args: flat_fn(*add_dupe_args(args)))
+    joint_forward_backward = create_joint_forward_backward_pure(
+        lambda *args: flat_fn(*add_dupe_args(args))
+    )
 
     out = flat_fn(*flat_args)
     # Collect info on which output tensors require gradients,
     # so we can mark them properly in the returned autograd.Function
     _flat_outs_not_requiring_grad, _ = pytree.tree_flatten(
-        pytree.tree_map(
-            lambda x: isinstance(x, Tensor) and not x.requires_grad, out
-        )
+        pytree.tree_map(lambda x: isinstance(x, Tensor) and not x.requires_grad, out)
     )
     out = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
@@ -484,17 +489,20 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     if config.use_functionalize:
         with enable_python_dispatcher():
             fx_g = make_fx(
-                detach_and_functionalize_pure(joint_forward_backward), aot_config.decompositions
+                detach_and_functionalize_pure(joint_forward_backward),
+                aot_config.decompositions,
             )(*joint_inputs)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
-        warnings.warn("graph partitioning without functionalization is not sound, we may introduce errors")
+        warnings.warn(
+            "graph partitioning without functionalization is not sound, we may introduce errors"
+        )
         fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
     if config.debug_joint:
-        print("====== Joint graph ======")
-        fx_g.print_readable()
+        log.debug("====== Joint graph ======")
+        log.debug(fx_g.print_readable(print_output=False))
 
     with torch.no_grad():
         with track_graph_compiling("joint"):
@@ -507,10 +515,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             _num_symints = len(symint_outs)
 
         if config.debug_graphs:
-            print("====== Forward graph ======")
-            fw_module.print_readable()
-            print("====== Backward graph ======")
-            bw_module.print_readable()
+            log.debug("====== Forward graph ======")
+            log.debug(fw_module.print_readable(print_output=False))
+            log.debug("====== Backward graph ======")
+            log.debug(bw_module.print_readable(print_output=False))
 
         with track_graph_compiling("forward"):
             compiled_fw_func = aot_config.fw_compiler(fw_module, deduped_flat_args)
@@ -526,7 +534,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         @disable_torchdynamo
         def forward(ctx, *deduped_flat_tensor_args):
             fw_outs = call_func_with_args(
-                CompiledFunction.compiled_fw, deduped_flat_tensor_args, disable_amp=disable_amp
+                CompiledFunction.compiled_fw,
+                deduped_flat_tensor_args,
+                disable_amp=disable_amp,
             )
             num_outs = CompiledFunction.num_outs
             num_symints = CompiledFunction.num_symints
@@ -539,7 +549,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 ctx.symints = []
 
             fw_outs_not_requiring_grad = [
-                x for (i, x) in enumerate(fw_outs[0:num_outs]) if CompiledFunction.flat_outs_not_requiring_grad[i]
+                x
+                for (i, x) in enumerate(fw_outs[0:num_outs])
+                if CompiledFunction.flat_outs_not_requiring_grad[i]
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
 
@@ -548,8 +560,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         @staticmethod
         @disable_torchdynamo
         def backward(ctx, *flat_args):
-            contiguous_args = [t.contiguous() if torch.is_tensor(t) else t for t in flat_args]
-            all_args = list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
+            contiguous_args = [
+                t.contiguous() if torch.is_tensor(t) else t for t in flat_args
+            ]
+            all_args = (
+                list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
+            )
             del contiguous_args
             if CompiledFunction.compiled_bw is None:
                 # TODO - pass in fake tensors ?
@@ -561,7 +577,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
             ctx.maybe_clear_saved_tensors()
             out = call_func_with_args(
-                CompiledFunction.compiled_bw, all_args, steal_args=True, disable_amp=disable_amp
+                CompiledFunction.compiled_bw,
+                all_args,
+                steal_args=True,
+                disable_amp=disable_amp,
             )
             return tuple(out)
 
@@ -605,6 +624,9 @@ def create_aot_dispatcher_function(
         **aot_autograd_decompositions,
         **aot_config.decompositions,
     }
+
+    log.setLevel(config.log_level)
+
     # NB: don't bother setting allow_fallback_kernels; this should not actually
     # be configurable in fake tensor, we should automatically do the right
     # thing
@@ -619,18 +641,28 @@ def create_aot_dispatcher_function(
         assert config.use_fake_tensor, "Dynamic shapes only works with fake tensor"
 
     shape_env = ShapeEnv() if config.use_dynamic_shapes else None
-    fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
+    fake_mode = (
+        FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
+    )
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
-    python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
+    python_dispatcher_mode = (
+        enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
+    )
 
-    with torch.autograd.set_multithreading_enabled(False), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
+    with torch.autograd.set_multithreading_enabled(
+        False
+    ), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
             if config.use_fake_tensor:
+
                 def convert(idx, x):
                     if not isinstance(x, torch.Tensor):
                         return x
-                    if idx < aot_config.num_params_buffers and config.static_weight_shapes:
+                    if (
+                        idx < aot_config.num_params_buffers
+                        and config.static_weight_shapes
+                    ):
                         return fake_mode.from_tensor(x, static_shapes=True)
                     return fake_mode.from_tensor(x, static_shapes=False)
 
@@ -685,6 +717,7 @@ class PytreeThunk:
         if self.is_simple:
             return x
         return pytree.tree_unflatten(x, self.spec)
+
 
 KNOWN_TYPES = [torch.Tensor, int, str, float, bool, torch.SymInt, torch.SymFloat]
 
@@ -750,7 +783,9 @@ def aot_function(
         >>> aot_fn(x)
     """
     if static_argnums is not None:
-        raise RuntimeError("static_argnums has been deprecated - manually wrap your function or use torchdynamo.")
+        raise RuntimeError(
+            "static_argnums has been deprecated - manually wrap your function or use torchdynamo."
+        )
 
     if bw_compiler is None:
         bw_compiler = fw_compiler
@@ -780,9 +815,7 @@ def aot_function(
                 # order that original function expects. Add static args as well.
                 # They will appear as tensor constants in the traced graph.
                 nonlocal out_spec
-                args, kwargs = pytree.tree_unflatten(
-                    flat_args, tensor_args_spec
-                )
+                args, kwargs = pytree.tree_unflatten(flat_args, tensor_args_spec)
                 tree_out = fn(*args, **kwargs)
                 flat_out, spec = pytree.tree_flatten(tree_out)
                 for i in flat_out:
@@ -847,7 +880,9 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     named_params = dict(_named_parameters(mod, remove_duplicate=False))
     named_buffers = dict(_named_buffers(mod, remove_duplicate=False))
     num_params_buffers = len(named_params) + len(named_buffers)
-    compiled_f = aot_function(functional_call, num_params_buffers=num_params_buffers, *args, **kwargs)
+    compiled_f = aot_function(
+        functional_call, num_params_buffers=num_params_buffers, *args, **kwargs
+    )
 
     class AOTModule(nn.Module):
         def __init__(self):

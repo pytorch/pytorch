@@ -85,7 +85,7 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
-replay_record_enabled = False
+replay_record_enabled = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
 
 # Show a warning on every graph break
 print_graph_breaks = False
@@ -163,7 +163,7 @@ if "torch." in dynamo_import:
 else:
     base_dir = dirname(dirname(abspath(__file__)))
 
-debug_dir_root = os.path.join(os.getcwd(), "torchdynamo_debug")
+debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
 
 
 class _AccessLimitingConfig(ModuleType):

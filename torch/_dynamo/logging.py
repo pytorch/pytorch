@@ -62,6 +62,18 @@ def init_logging(log_level, log_file_name=None):
             for logger in get_loggers():
                 logger.addHandler(log_file)
 
+        if bool(os.environ.get("TORCH_COMPILE_DEBUG")):
+            from .utils import get_debug_dir
+
+            log_path = os.path.join(get_debug_dir(), "torchdynamo", "debug.log")
+            if not os.exists(log_path):
+                os.makedirs(log_path)
+
+            log_file = logging.FileHandler(log_path)
+            log_file.setLevel(logging.DEBUG)
+            for logger in get_loggers():
+                logger.addHandler(log_file)
+
     set_loggers_level(log_level)
 
 

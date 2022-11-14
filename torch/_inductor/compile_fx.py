@@ -13,7 +13,7 @@ import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
 
 from . import config, overrides
-from .debug import DebugContext
+from .debug import DebugContext, enable_aot_logging
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
 from .utils import (
@@ -326,6 +326,7 @@ def count_tangents(fx_g: torch.fx.GraphModule):
 _graph_counter = itertools.count(0)
 
 
+@enable_aot_logging()
 def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
 

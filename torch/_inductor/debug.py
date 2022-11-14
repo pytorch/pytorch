@@ -10,7 +10,14 @@ import shutil
 import subprocess
 from typing import Any, List
 
-from functorch.compile import draw_graph, get_graph_being_compiled
+import functorch
+
+from functorch.compile import (
+    config as aot_config,
+    draw_graph,
+    get_aot_graph_name,
+    get_graph_being_compiled,
+)
 
 import torch
 from torch import fx as fx
@@ -166,6 +173,31 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     return graph
 
 
+@contextlib.contextmanager
+def enable_aot_logging():
+    log = logging.getLogger(functorch._src.aot_autograd.__name__)
+    path = os.path.join(dynamo_utils.get_debug_dir(), "aot_inductor")
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    fh = logging.FileHandler(
+        os.path.join(
+            path,
+            f"aot_{get_aot_graph_name()}_{logging.getLevelName(aot_config.log_level)}.log",
+        )
+    )
+    fh.setLevel(aot_config.log_level)
+    fh.setFormatter(
+        logging.Formatter("[%(filename)s:%(lineno)d %(levelname)s] %(message)s")
+    )
+    log.addHandler(fh)
+    log.setLevel(aot_config.log_level)
+    try:
+        yield
+    finally:
+        log.removeHandler(fh)
+
+
 class DebugContext:
     _counter = itertools.count()
 
@@ -179,12 +211,12 @@ class DebugContext:
         return dynamo_debug_utils.wrap_compiler_debug(inner, compiler_name="inductor")
 
     @staticmethod
-    def create_debug_dir():
+    def create_debug_dir(folder_name):
         for n in DebugContext._counter:
             dirname = os.path.join(
                 dynamo_utils.get_debug_dir(),
-                "torchinductor",
-                f"debug.{os.getpid()}.{n}",
+                "aot_torchinductor",
+                f"{folder_name}.{n}",
             )
             if not os.path.exists(dirname):
                 os.makedirs(dirname)
@@ -240,7 +272,7 @@ class DebugContext:
         if not config.trace.enabled:
             return
 
-        self._path = self.create_debug_dir()
+        self._path = self.create_debug_dir(get_aot_graph_name())
 
         if config.trace.debug_log:
             self._setup_log_capture("debug.log", logging.DEBUG)
