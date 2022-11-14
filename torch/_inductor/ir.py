@@ -3370,7 +3370,7 @@ def _prepare_convolution_fusion_create(
         req_stride_order = get_stride_order(output.stride())
 
     x = cls.require_stride_order(x, req_stride_order)
-    weight = cls.require_stride_order(weight, req_stride_order)
+    weight = cls.require_stride1(cls.realize_input(weight))
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
 
