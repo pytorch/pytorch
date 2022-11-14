@@ -1179,7 +1179,8 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
 
     Args:
         tensor (Tensor): Tensor to send.
-        dst (int): Destination rank.
+        dst (int): Destination rank. Destination rank should not be the same 
+        as the rank of the current process. 
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
@@ -1187,7 +1188,7 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
     """
     if get_rank() == dst:
         raise RuntimeError(
-            "Invalid destination rank: destination rank should not be the same as"
+            "Invalid destination rank: destination rank should not be the same as "
             "the rank of the current process."
         )
 
