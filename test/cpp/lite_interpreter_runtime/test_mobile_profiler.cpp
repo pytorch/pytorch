@@ -11,7 +11,7 @@
 
 #include <torch/csrc/profiler/events.h>
 
-#include "tools/cxx/Resources.h"
+#include "test/cpp/lite_interpreter_runtime/resources.h"
 
 #ifdef EDGE_PROFILER_USE_KINETO
 namespace torch {
@@ -44,8 +44,8 @@ bool checkMetaData(
 } // namespace
 
 TEST(MobileProfiler, ModuleHierarchy) {
-  auto testModelFile = build::getResourcePath(
-      "caffe2/test/cpp/lite_interpreter_runtime/to_be_profiled_module.ptl");
+  auto testModelFile = torch::testing::getResourcePath(
+      "test/cpp/lite_interpreter_runtime/to_be_profiled_module.ptl");
 
   std::vector<IValue> inputs;
   inputs.emplace_back(at::rand({64, 64}));
@@ -96,8 +96,8 @@ TEST(MobileProfiler, ModuleHierarchy) {
 }
 
 TEST(MobileProfiler, Backend) {
-  auto testModelFile = build::getResourcePath(
-      "caffe2/test/cpp/lite_interpreter_runtime/test_backend_for_profiling.ptl");
+  auto testModelFile = torch::testing::getResourcePath(
+      "test/cpp/lite_interpreter_runtime/test_backend_for_profiling.ptl");
 
   std::vector<IValue> inputs;
   inputs.emplace_back(at::rand({64, 64}));
@@ -130,8 +130,8 @@ TEST(MobileProfiler, Backend) {
 }
 
 TEST(MobileProfiler, BackendMemoryEvents) {
-  auto testModelFile = build::getResourcePath(
-      "caffe2/test/cpp/lite_interpreter_runtime/test_backend_for_profiling.ptl");
+  auto testModelFile = torch::testing::getResourcePath(
+      "test/cpp/lite_interpreter_runtime/test_backend_for_profiling.ptl");
 
   std::vector<IValue> inputs;
   inputs.emplace_back(at::rand({64, 64}));
@@ -162,8 +162,8 @@ TEST(MobileProfiler, BackendMemoryEvents) {
 }
 
 TEST(MobileProfiler, ProfilerEvent) {
-  auto testModelFile = build::getResourcePath(
-      "caffe2/test/cpp/lite_interpreter_runtime/test_backend_for_profiling.ptl");
+  auto testModelFile = torch::testing::getResourcePath(
+      "test/cpp/lite_interpreter_runtime/test_backend_for_profiling.ptl");
 
   std::vector<IValue> inputs;
   inputs.emplace_back(at::rand({64, 64}));
