@@ -4049,7 +4049,7 @@ class TestSparseMeta(TestCase):
         self.assertEqual(r.values(), torch.empty(0, 4, device='meta'))
 
 
-class TestSparseAny(TestSparseBase):
+class TestSparseAny(TestCase):
 
     def test_generate_simple_inputs(self):
         layouts = [torch.strided, torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc]

@@ -1840,7 +1840,8 @@ class TensorOrArrayPair(TensorLikePair):
             def partial_to_dense(tensor):
                 if tensor.layout not in compressed_sparse_layouts or tensor.values().ndim == 1:
                     return tensor.to_dense()
-                return torch.stack([partial_to_dense(sub_tensor) for sub_tensor in tensor])
+                lst = [partial_to_dense(sub_tensor) for sub_tensor in tensor]
+                return torch.stack(lst) if lst else tensor.to_dense()
 
             return partial_to_dense(tensor)
 
@@ -2377,8 +2378,10 @@ class TestCase(expecttest.TestCase):
                                index_dtype=None,
                                enable_batched=True,
                                enable_hybrid=True,
+                               enable_zero_sized=True,
                                enable_batched_variable_nse=False,
-                               output_tensor=True):
+                               output_tensor=True,
+                               patterns=None):
         """Generator of simple inputs for tensor constructors of the given layout.
 
         The generated tensor inputs have the following properties:
@@ -2408,8 +2411,10 @@ class TestCase(expecttest.TestCase):
 
         if output_tensor:
             for args, kwargs in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype,
-                                                            enable_batched=enable_batched,
-                                                            enable_hybrid=enable_hybrid, output_tensor=False):
+                                                            enable_batched=enable_batched, enable_hybrid=enable_hybrid,
+                                                            enable_zero_sized=enable_zero_sized,
+                                                            enable_batched_variable_nse=enable_batched_variable_nse,
+                                                            output_tensor=False):
                 if layout is torch.strided:
                     size = kwargs.pop('size', args[0].shape)  # to ensure that a zero-sized tensor has the desired shape
                     assert len(args) == 1
@@ -2494,7 +2499,8 @@ class TestCase(expecttest.TestCase):
             if indices:
                 _, row_indices, csc_values = map(list, zip(*sorted(zip(coo_indices[1], coo_indices[0], values))))
             else:
-                row_indices = csc_values = []
+                row_indices = []
+                csc_values = []
             return {torch.sparse_coo: (coo_indices, values),
                     torch.sparse_csr: (crow_indices, coo_indices[1], values),
                     torch.sparse_csc: (ccol_indices, row_indices, csc_values),
@@ -2543,12 +2549,11 @@ class TestCase(expecttest.TestCase):
                                 target[j].append(d[j])
             return batch_data
 
-        for pattern, blocksizes, densesizes in [
+        if patterns is None:
+            patterns = [
                 # a simple 3 x 2 tensor: non-hybrid, hybrid with 1 and 2 dense dimensions
                 ([[1, 2, 0],
                   [1, 0, 3]], [(2, 1), (1, 3)], [(), (2,), (4, 5)] if enable_hybrid else [()]),
-                # zero-sized tensor, non-hybrid
-                ([[], []], [(2, 1)], [()]),
                 # 2 x 3 batch of 3 x 2 tensors: non-hybrid and hybrid with 2 dense dimensions
                 ([[[[1, 2, 0],
                     [1, 0, 3]],
@@ -2576,17 +2581,55 @@ class TestCase(expecttest.TestCase):
                 ([[[1, 2],
                    [3, 4]],
                   [[1, 0],
-                   [0, 0]]], [(1, 1)], ([()] if enable_batched_variable_nse else []))]:
+                   [0, 0]]], [(1, 1)], ([()] if enable_batched_variable_nse else []))]
+
+        for pattern, blocksizes, densesizes in patterns:
             size = get_shape(pattern)
             for blocksize in blocksizes:
                 data = get_batch_sparse_data(pattern, blocksize)[layout]
                 for densesize in densesizes:
                     indices = [torch.tensor(a, device=device, dtype=index_dtype) for a in data[:-1]]
                     values = torch.tensor(expand_values(data[-1], densesize), device=device, dtype=dtype)
-                    if 0 in size and layout in {torch.sparse_bsr, torch.sparse_bsc}:
-                        desired_shape = (len(data[-1]), *blocksize, *densesize)
-                        values = values.detach().clone().reshape(desired_shape)
                     yield (*indices, values), dict(device=device, dtype=dtype, size=size + densesize)
+
+        # zero-sized tensor inputs, non-batched
+        if enable_zero_sized:
+            for basesize, blocksizes, densesizes in [
+                    ((2, 0), [(1, 2)], [(), (2,), (2, 3)] if enable_hybrid else [()]),
+                    ((0, 2), [(1, 2), (2, 1), (3, 2)], [()]),
+                    ((0, 0), [(1, 2)], [()]),
+            ]:
+                for blocksize in blocksizes:
+                    for densesize in densesizes:
+                        if layout == torch.strided:
+                            indices = ()
+                            values = torch.empty((basesize + densesize), device=device, dtype=dtype)
+                        elif layout == torch.sparse_coo:
+                            indices = (torch.empty(len(basesize), 0, device=device, dtype=index_dtype),)
+                            values = torch.empty((0, *densesize), device=device, dtype=dtype)
+                        elif layout == torch.sparse_csr:
+                            crow_indices = torch.tensor([0] * (basesize[0] + 1), device=device, dtype=index_dtype)
+                            col_indices = torch.empty(0, device=device, dtype=index_dtype)
+                            indices = (crow_indices, col_indices)
+                            values = torch.empty((0, *densesize), device=device, dtype=dtype)
+                        elif layout == torch.sparse_csc:
+                            ccol_indices = torch.tensor([0] * (basesize[1] + 1), device=device, dtype=index_dtype)
+                            row_indices = torch.empty(0, device=device, dtype=index_dtype)
+                            indices = (ccol_indices, row_indices)
+                            values = torch.empty((0, *densesize), device=device, dtype=dtype)
+                        elif layout == torch.sparse_bsr:
+                            crow_indices = torch.tensor([0] * (basesize[0] // blocksize[0] + 1), device=device, dtype=index_dtype)
+                            col_indices = torch.empty(0, device=device, dtype=index_dtype)
+                            indices = (crow_indices, col_indices)
+                            values = torch.empty((0, *blocksize, *densesize), device=device, dtype=dtype)
+                        elif layout == torch.sparse_bsc:
+                            ccol_indices = torch.tensor([0] * (basesize[1] // blocksize[1] + 1), device=device, dtype=index_dtype)
+                            row_indices = torch.empty(0, device=device, dtype=index_dtype)
+                            indices = (ccol_indices, row_indices)
+                            values = torch.empty((0, *blocksize, *densesize), device=device, dtype=dtype)
+                        else:
+                            assert 0  # unreachable
+                        yield (*indices, values), dict(device=device, dtype=dtype, size=basesize + densesize)
 
     def safeToDense(self, t):
         # coalesce is only implemented for COO
