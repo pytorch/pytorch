@@ -334,8 +334,6 @@ class SizeVariable(TupleVariable):
 
         index = arg.as_python_constant()
         if isinstance(index, slice):
-
-            breakpoint()
             def _dynamo_get_item_lambda(target, index):
                 return torch.Size.__getitem__(target, index)
 
