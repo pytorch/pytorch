@@ -113,9 +113,9 @@ TORCH_API Tensor unwrapIfDead(const Tensor& tensor);
 TORCH_API std::ostream& operator<<(std::ostream& os, const DynamicLayer& layer);
 TORCH_API std::ostream& operator<<(std::ostream& os, const std::vector<DynamicLayer>& dynamicLayerStack);
 
-// While a functorch grad transform is active, autograd.Function is disabled
-// by default. The following two APIs are debugging APIs for enabling
-// autograd.Function
+// While a functorch transform is active, autograd.Function is disabled
+// by default. The following two APIs are APIs for enabling
+// autograd.Function. These are not user-facing APIs.
 TORCH_API void setAutogradFunctionAllowed(bool allowed);
 TORCH_API bool getAutogradFunctionAllowed();
 
