@@ -1031,6 +1031,24 @@ class DashboardUpdater:
         self.output_dir = args.output_dir
         self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
         assert os.path.exists(self.lookup_file)
+        try:
+            self.update_lookup_file()
+        except subprocess.CalledProcessError:
+            print("failed to update lookup file")
+
+    def update_lookup_file(self):
+        dtype = self.args.dtypes[0]
+        day, _ = archive_data(self.args.archive_name)
+        target_dir = (
+            default_archive_name(dtype)
+            if self.args.archive_name is None
+            else self.args.archive_name
+        )
+        # Update lookup csv the folder to arhived logs
+        subprocess.check_call(
+            f'echo "{day},performance,{dtype},{target_dir}" >> {self.lookup_file}',
+            shell=True,
+        )
 
     def archive(self):
         dtype = self.args.dtypes[0]
@@ -1041,18 +1059,7 @@ class DashboardUpdater:
             self.args.archive_name,
             dtype,
         )
-        day, _ = archive_data(self.args.archive_name)
-        target_dir = (
-            default_archive_name(dtype)
-            if self.args.archive_name is None
-            else self.args.archive_name
-        )
 
-        # Update lookup csv the folder to arhived logs
-        subprocess.check_call(
-            f'echo "{day},performance,{dtype},{target_dir}" >> {self.lookup_file}',
-            shell=True,
-        )
 
     def upload_graphs(self):
         title = "## Performance graphs ##\n"
