@@ -58,7 +58,8 @@ extensions = [
     'sphinxcontrib.katex',
     'sphinx.ext.autosectionlabel',
     'sphinx_copybutton',
-    'sphinx_panels'
+    'sphinx_panels',
+    'myst_parser',
 ]
 
 # build the templated autosummary files
