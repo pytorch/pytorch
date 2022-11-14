@@ -3405,21 +3405,21 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
 @register_decomposition(torch.ops.aten.squeeze)
-def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
-    if dim is not None:
-        dim = utils.canonicalize_dim(a.ndim, dim)
-        # Short-circuits if the tensor has no dimensions
-        if len(a.shape) == 0:
-            assert dim == 0
-            return prims.view_of(a)
+def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
+    if dim is None:
+        dims = tuple(idx for idx in range(len(a.shape)) if a.shape[idx] == 1)
+        return prims.squeeze(a, dims)
 
-        # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
-        if a.shape[dim] != 1:
-            return prims.view_of(a)
-        return prims.squeeze(a, (dim,))
+    dim = utils.canonicalize_dims(a.ndim, dim)
+    dims = (dim,) if isinstance(dim, Dim) else dim
+    # Short-circuits if the tensor has no dimensions
+    if len(a.shape) == 0:
+        assert len(dims) == 0 or dims == (0,)
+        return prims.view_of(a)
 
-    dims = tuple(idx for idx in range(len(a.shape)) if a.shape[idx] == 1)
-    return prims.squeeze(a, dims)
+    # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
+    dims = tuple(d for d in dims if a.shape[d] == 1)
+    return prims.squeeze(a, dims) if dim else prims.view_of(a)
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow

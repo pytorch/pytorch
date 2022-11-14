@@ -1498,11 +1498,21 @@
     AutogradNestedTensor:
       self: grad.unsqueeze(dim)
 
+- name: squeeze.dims(Tensor(a) self, int[] dim) -> Tensor(a)
+  dispatch:
+    Default:
+      self: unsqueeze_to(grad, dim, self.sym_sizes())
+      result: auto_linear
+
 - name: squeeze_(Tensor(a!) self) -> Tensor(a!)
   self: unsqueeze_to(grad, self.sym_sizes())
   result: auto_linear
 
 - name: squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
+  self: unsqueeze_to(grad, dim, self.sym_sizes())
+  result: auto_linear
+
+- name: squeeze_.dims(Tensor(a!) self, int[] dim) -> Tensor(a!)
   self: unsqueeze_to(grad, dim, self.sym_sizes())
   result: auto_linear
 

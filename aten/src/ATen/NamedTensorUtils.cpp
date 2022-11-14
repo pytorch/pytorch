@@ -241,6 +241,20 @@ std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor) {
   return outnames;
 }
 
+std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor, std::bitset<dim_bitset_size> dims) {
+  if (!tensor.has_names()) {
+    return {};
+  }
+  std::vector<Dimname> outnames;
+  auto tensor_names = tensor.names();
+  for (const auto d : c10::irange(tensor.dim())) {
+    if (tensor.sym_sizes()[d] != 1) {
+      outnames.push_back(tensor_names[d]);
+    }
+  }
+  return outnames;
+}
+
 std::vector<Dimname> compute_diagonal_outnames(
     const Tensor& tensor,
     int64_t dim1,

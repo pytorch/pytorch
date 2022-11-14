@@ -161,6 +161,7 @@
 #include <ATen/ops/split_with_sizes_native.h>
 #include <ATen/ops/squeeze_copy_native.h>
 #include <ATen/ops/squeeze_native.h>
+#include <ATen/ops/squeeze.h>
 #include <ATen/ops/stack_native.h>
 #include <ATen/ops/sub.h>
 #include <ATen/ops/sum.h>
@@ -3073,6 +3074,22 @@ inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
   return std::make_tuple(std::move(sizes), std::move(strides));
 }
 
+std::tuple<SymDimVector, SymDimVector>
+inferSqueezeGeometry(const Tensor &tensor, std::bitset<dim_bitset_size> dim_mask) {
+  const auto ndim = tensor.dim();
+  const auto sym_sizes = tensor.sym_sizes();
+  const auto sym_strides = tensor.sym_strides();
+
+  SymDimVector out_sizes, out_strides;
+  for (const auto d: c10::irange(ndim)) {
+    if (!dim_mask.test(d) || sym_sizes[d] != 1) {
+      out_sizes.push_back(sym_sizes[d]);
+      out_strides.push_back(sym_strides[d]);
+    }
+  }
+  return std::make_tuple(std::move(out_sizes), std::move(out_strides));
+}
+
 namespace {
 // Named type instead of a pair/tuple so that we can be sure to
 // construct the vectors in place and get NRVO.
@@ -3165,6 +3182,34 @@ Tensor squeeze_quantized(const Tensor& self, int64_t dim) {
   return squeeze_qtensor(self, dim);
 }
 
+Tensor squeeze(const Tensor& self, IntArrayRef dims) {
+  auto mask = dim_list_to_bitset(dims, self.dim());
+  auto g = inferSqueezeGeometry(self, mask);
+  at::Tensor result = self.as_strided_symint(std::get<0>(g), std::get<1>(g));
+  auto maybe_outnames = namedinference::compute_squeeze_outnames(self, mask);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  return result;
+}
+
+Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
+  // Generic implementation for squeezeing multiple dims
+  // Currently used for NestedTensor and QuantizedTensor
+  const auto ndim = self.dim();
+  auto mask = dim_list_to_bitset(dims, ndim);
+  if (mask.none()) {
+    return self.as_strided_symint(self.sym_sizes(), self.sym_strides());
+  }
+
+  Tensor result = self;
+  // Iterate in reverse order so yet-to-be-squeezed dims won't change index
+  for (const auto d : c10::irange(ndim - 1, -1 -1)) {
+    if (mask.test(d)) {
+      result = at::squeeze(result, d);
+    }
+  }
+  return result;
+}
+
 Tensor & squeeze_(Tensor& self) {
   auto g = inferSqueezeGeometry(self);
   self.as_strided__symint(std::get<0>(g), std::get<1>(g));
@@ -3180,6 +3225,13 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
     return self;
   }
   auto g = inferSqueezeGeometry(self, dim);
+  self.as_strided__symint(std::get<0>(g), std::get<1>(g));
+  return self;
+}
+
+Tensor & squeeze_(Tensor &self, IntArrayRef dims) {
+  auto mask = dim_list_to_bitset(dims, self.dim());
+  auto g = inferSqueezeGeometry(self, mask);
   self.as_strided__symint(std::get<0>(g), std::get<1>(g));
   return self;
 }
@@ -3980,6 +4032,13 @@ at::Tensor& squeeze_copy_out(const at::Tensor & self, at::Tensor & out) {
 
 at::Tensor& squeeze_copy_dim_out(const at::Tensor & self, int64_t dim, at::Tensor & out) {
   auto tmp = self.squeeze(dim);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& squeeze_copy_dims_out(const at::Tensor & self, IntArrayRef dims, at::Tensor & out) {
+  auto tmp = self.squeeze(dims);
   out.copy_(tmp);
   return out;
 }

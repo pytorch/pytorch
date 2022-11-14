@@ -874,6 +874,22 @@ Tensor unsqueeze_to(
   return self;
 }
 
+Tensor unsqueeze_to(
+    const Tensor& self,
+    IntArrayRef dims,
+    c10::SymIntArrayRef sym_sizes) {
+  const auto ndim = sym_sizes.size();
+  auto mask = at::dim_list_to_bitset(dims, ndim);
+
+  Tensor result = self;
+  for (const auto d : c10::irange(ndim)) {
+    if (mask.test(d) && sym_sizes[d] == 1) {
+      result = result.unsqueeze(d);
+    }
+  }
+  return result;
+}
+
 std::vector<Tensor> cat_tensors_backward(
     const Tensor& grad,
     const std::vector<std::vector<c10::SymInt>>& sizes,

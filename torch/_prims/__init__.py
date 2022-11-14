@@ -1701,13 +1701,6 @@ def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
     return a.as_strided(new_shape, new_strides, a.storage_offset())
 
 
-def _squeeze_aten(a: Tensor, dimensions: Sequence) -> Tensor:
-    for idx in reversed(sorted(dimensions)):
-        a = torch.squeeze(a, dim=idx)
-
-    return a
-
-
 _squeeze_doc = """
   Creates a view of the tensor with the specified dimensions removed.
 
@@ -1717,7 +1710,7 @@ _squeeze_doc = """
 squeeze = _make_prim(
     schema="squeeze(Tensor(a) a, int[] dimensions) -> Tensor(a)",
     meta=_squeeze_meta,
-    impl_aten=_squeeze_aten,
+    impl_aten=torch.squeeze,
     return_type=RETURN_TYPE.VIEW,
     doc=_squeeze_doc,
 )

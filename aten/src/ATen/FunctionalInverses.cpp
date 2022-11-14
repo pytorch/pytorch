@@ -3,6 +3,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/WrapDimUtilsMulti.h>
 namespace at {
 namespace functionalization {
 
@@ -52,6 +53,22 @@ Tensor unsqueeze_copy_to(const Tensor & self, int64_t dim, IntArrayRef sizes, bo
     }
   }
   return self;
+}
+
+Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, IntArrayRef sizes, bool reapply_views) {
+  const auto ndim = sizes.size();
+  const auto mask = at::dim_list_to_bitset(dim, ndim);
+
+  Tensor result = self;
+  for (const auto d : c10::irange(ndim)) {
+    if (mask.test(d) && sizes[d] == 1) {
+      result = at::unsqueeze(self, d);
+    }
+  }
+  if (!reapply_views) {
+    result = result.clone();
+  }
+  return result;
 }
 
 // Note [Functionalization Pass: View Inverses].
@@ -210,6 +227,10 @@ Tensor FunctionalInverses::squeeze_copy_inverse(const Tensor& base, const Tensor
 
 Tensor FunctionalInverses::squeeze_copy_dim_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim) {
     return unsqueeze_copy_to(mutated_view, dim, base.sizes(), reapply_views);
+}
+
+Tensor FunctionalInverses::squeeze_copy_dims_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, IntArrayRef dim) {
+  return unsqueeze_copy_to(mutated_view, dim, base.sizes(), reapply_views);
 }
 
 Tensor FunctionalInverses::t_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
