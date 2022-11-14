@@ -54,8 +54,11 @@ class Wishart(ExponentialFamily):
 
     **References**
 
-    [1] `On equivalence of the LKJ distribution and the restricted Wishart distribution`,
-    Zhenxun Wang, Yunan Wu, Haitao Chu.
+    [1] Wang, Z., Wu, Y. and Chu, H., 2018. `On equivalence of the LKJ distribution and the restricted Wishart distribution`.
+    [2] Sawyer, S., 2007. `Wishart Distributions and Inverse-Wishart Sampling`.
+    [3] Anderson, T. W., 2003. `An Introduction to Multivariate Statistical Analysis (3rd ed.)`.
+    [4] Odell, P. L. & Feiveson, A. H., 1966. `A Numerical Procedure to Generate a SampleCovariance Matrix`. JASA, 61(313):199-203.
+    [5] Ku, Y.-C. & Bloomfield, P., 2010. `Generating Random Wishart Matrices with Fractional Degrees of Freedom in OX`.
     """
     arg_constraints = {
         'covariance_matrix': constraints.positive_definite,
@@ -216,9 +219,9 @@ class Wishart(ExponentialFamily):
     def rsample(self, sample_shape=torch.Size(), max_try_correction=None):
         r"""
         .. warning::
-            In some cases, sampling algorithn based on Bartlett decomposition may return singular matrix samples.
+            In some cases, sampling algorithm based on Bartlett decomposition may return singular matrix samples.
             Several tries to correct singular samples are performed by default, but it may end up returning
-            singular matrix samples. Sigular samples may return `-inf` values in `.log_prob()`.
+            singular matrix samples. Singular samples may return `-inf` values in `.log_prob()`.
             In those cases, the user should validate the samples and either fix the value of `df`
             or adjust `max_try_correction` value for argument in `.rsample` accordingly.
         """

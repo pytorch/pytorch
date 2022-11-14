@@ -61,7 +61,12 @@ binary_ops_with_dense_output = list(filter(lambda op: op.name in binary_function
 UNARY_EWISE_CSR_ALLOW_AUTOGRAD = [
     'abs',
     'conj_physical',
+    'deg2rad',
     'neg',
+    'positive',
+    'frac',
+    'nn.functional.relu',
+    'log1p'
 ]
 
 # This should be just an import from test_linalg instead of code duplication
@@ -587,9 +592,6 @@ class TestSparseCompressed(TestCase):
         if require_mask and layout in {torch.sparse_bsr, torch.sparse_bsc}:
             self.skipTest(f"{op.name} does not support input with {layout} layout")
 
-        if layout is torch.sparse_bsc:
-            self.skipTest(f"test requires conversion from Strided layout to {layout} layout")
-
         samples = list(op.sample_inputs(device, dtype))
 
         # Fail early to prevent silent success with this test
@@ -708,7 +710,7 @@ class TestSparseCompressed(TestCase):
                shape((2, 3)),
                'compressed_indices must have dimensionality >= 1 but got 0')
 
-        yield ('compressed/plain_indices mismatch of dimensionalites',
+        yield ('compressed/plain_indices mismatch of dimensionalities',
                tensor([[0, 2, 4]]),
                tensor([0, 1, 0, 2]),
                values([1, 2, 3, 4]),
@@ -716,14 +718,14 @@ class TestSparseCompressed(TestCase):
                'compressed_indices and plain_indices dimensionalities must be equal but got 2 and 1, respectively')
 
         if layout in {torch.sparse_csr, torch.sparse_csc}:
-            yield ('indices and values mismatch of dimensionalites',
+            yield ('indices and values mismatch of dimensionalities',
                    tensor([[0, 2, 4]]),
                    tensor([[0, 1, 0, 2]]),
                    values([1, 2, 3, 4]),
                    shape((2, 3)),
                    r'values must have dimensionality > sum of batch and block dimensionalities \(=1 \+ 0\) but got 1')
         else:
-            yield ('indices and values mismatch of dimensionalites',
+            yield ('indices and values mismatch of dimensionalities',
                    tensor([[0, 2, 4]]),
                    tensor([[0, 1, 0, 2]]),
                    values([1, 2, 3, 4]),
@@ -735,7 +737,7 @@ class TestSparseCompressed(TestCase):
                tensor([0, 1, 0, 2]),
                values([1, 2, 3, 4]),
                (2,),
-               r'tensor dimensionality must be sum of batch, base, and dense dimensionalites \(=0 \+ 2 \+ 0\) but got 1')
+               r'tensor dimensionality must be sum of batch, base, and dense dimensionalities \(=0 \+ 2 \+ 0\) but got 1')
 
         yield ('invalid batchsize',
                tensor([[0, 2, 4]]),
@@ -1576,7 +1578,7 @@ class TestSparseCSR(TestCase):
                 return res
 
         def ref_half_bfloat16(c, a, b, alpha=None, beta=None, out=None):
-            res = alpha * (a.to_dense() @ b.to_dense()) + beta * c
+            res = alpha * (a.to_dense().to(torch.float32) @ b.to_dense().to(torch.float32)).to(a.dtype) + beta * c
             if out is not None:
                 out.copy_(res)
                 return out
@@ -2477,6 +2479,9 @@ class TestSparseCSR(TestCase):
             raise ValueError("Expected at least one 2D tensor in samples.")
 
         for sample in samples:
+            # We must skip samples of low dimensionality, we can't covert them to sparsed compressed layouts
+            if sample.input.ndim < 2:
+                continue
             sparse_input = sample.input.to_sparse_csr().requires_grad_(True)
 
             def fn(input):

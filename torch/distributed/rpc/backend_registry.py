@@ -11,6 +11,9 @@ from ._utils import _group_membership_management, _update_group_membership
 from . import api
 from . import constants as rpc_constants
 
+__all__ = ["backend_registered", "register_backend", "construct_rpc_backend_options", "init_backend",
+           "BackendValue", "BackendType"]
+
 BackendValue = collections.namedtuple(
     "BackendValue", ["construct_rpc_backend_options_handler", "init_backend_handler"]
 )

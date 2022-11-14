@@ -10,6 +10,8 @@
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
+#include <utility>
+
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
     true,
@@ -270,6 +272,9 @@ bool_is_contiguous _compute_contiguous(
              sizes_and_strides_.strides_arrayref()))
 
 bool_is_contiguous TensorImpl::compute_contiguous() const {
+  if (is_sparse()) {
+    return bool_is_contiguous(false);
+  }
   return COMPUTE_WITH_SIZES_STRIDES_NUMEL(_compute_contiguous);
 }
 
@@ -304,6 +309,9 @@ bool_is_channels_last_contiguous _compute_channels_last_contiguous_2d(
 
 bool_is_channels_last_contiguous TensorImpl::
     compute_channels_last_contiguous_2d() const {
+  if (is_sparse()) {
+    return bool_is_channels_last_contiguous(false);
+  }
   return COMPUTE_WITH_SIZES_STRIDES(_compute_channels_last_contiguous_2d);
 }
 
@@ -338,17 +346,26 @@ bool_is_channels_last_3d_contiguous _compute_channels_last_contiguous_3d(
 
 bool_is_channels_last_3d_contiguous TensorImpl::
     compute_channels_last_contiguous_3d() const {
+  if (is_sparse()) {
+    return bool_is_channels_last_3d_contiguous(false);
+  }
   return COMPUTE_WITH_SIZES_STRIDES(_compute_channels_last_contiguous_3d);
 }
 
 bool_is_channels_last TensorImpl::compute_strides_like_channels_last_2d()
     const {
+  if (is_sparse()) {
+    return bool_is_channels_last(false);
+  }
   return bool_is_channels_last(
       COMPUTE_WITH_SIZES_STRIDES(is_channels_last_strides_2d));
 }
 
 bool_is_channels_last_3d TensorImpl::compute_strides_like_channels_last_3d()
     const {
+  if (is_sparse()) {
+    return bool_is_channels_last_3d(false);
+  }
   return bool_is_channels_last_3d(
       COMPUTE_WITH_SIZES_STRIDES(is_channels_last_strides_3d));
 }
@@ -391,6 +408,9 @@ bool_is_non_overlapping_and_dense _compute_non_overlapping_and_dense(
 
 bool_is_non_overlapping_and_dense TensorImpl::
     compute_non_overlapping_and_dense() const {
+  if (is_sparse()) {
+    return bool_is_non_overlapping_and_dense(false);
+  }
   return COMPUTE_WITH_SIZES_STRIDES(_compute_non_overlapping_and_dense);
 }
 
@@ -611,12 +631,13 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
     VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   c10::intrusive_ptr<TensorImpl> r;
-  const auto& maybe_torch_dispatch_mode_state =
-      c10::impl::TorchDispatchModeTLS::get_mode();
+  const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
   // TODO: do we have to exclude after Python dispatch key set?
-  if (maybe_torch_dispatch_mode_state &&
+  if (mode_stack_len > 0 &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    r = maybe_torch_dispatch_mode_state->pyinterpreter()->detach(this);
+    const auto& cur_torch_dispatch_mode_state =
+        c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
+    r = cur_torch_dispatch_mode_state->pyinterpreter()->detach(this);
   } else if (
       key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
@@ -785,7 +806,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
           sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
   auto oldData = std::move(storage_.data_ptr());
   auto oldSize = numel_;
-  Resize(newCapacity);
+  Resize(std::move(newCapacity));
   auto* newData = raw_mutable_data(data_type_);
   if (data_type_.copy()) {
     TORCH_CHECK(
@@ -837,7 +858,7 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
   auto oldSize = numel_;
   SmallVector<int64_t, 5> oldDims(
       sizes_and_strides.begin(), sizes_and_strides.end());
-  Resize(newCapacity);
+  Resize(std::move(newCapacity));
   // Allocate new memory but don't copy over the data
   raw_mutable_data(data_type_);
   sizes_and_strides_.set_sizes(oldDims);

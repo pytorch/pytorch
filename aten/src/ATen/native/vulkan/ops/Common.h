@@ -2,7 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/ATen.h>
+#include <ATen/core/List.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/ops/Tensor.h>
 
@@ -104,6 +105,12 @@ template <uint32_t N>
 uint32_t get_dim(const vTensor& v_in) {
   return get_dim<N>(v_in.sizes());
 }
+
+/*
+ * Given an IntArrayRef of up to 4 elements, constructs a uvec4 containing those
+ * elements in reverse order.
+ */
+api::utils::uvec4 make_nchw_uvec4(const IntArrayRef arr);
 
 inline c10::optional<Tensor> get_optional_tensor(
     const c10::impl::GenericList& gen_list,

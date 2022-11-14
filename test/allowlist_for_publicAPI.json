@@ -35,95 +35,6 @@
     "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
     "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
   },
-  "torch.ao.quantization.backend_config.native": [
-    "Any",
-    "Dict",
-    "FixedQParamsFakeQuantize",
-    "List",
-    "ObservationType",
-    "default_fixed_qparams_range_0to1_observer",
-    "default_fixed_qparams_range_neg1to1_observer",
-    "default_affine_fixed_qparams_observer",
-    "default_symmetric_fixed_qparams_observer",
-    "fuse_conv_bn",
-    "fuse_conv_bn_relu",
-    "fuse_convtranspose_bn",
-    "fuse_linear_bn",
-    "namedtuple",
-    "reverse2",
-    "reverse3",
-    "reverse_sequential_wrapper2"
-  ],
-  "torch.ao.quantization.quantization_types": [
-      "Any",
-      "Node",
-      "NodePattern",
-      "Pattern",
-      "QuantizerCls",
-      "Tuple",
-      "Union"
-  ],
-  "torch.ao.quantization.fx.graph_module": [
-    "Any",
-    "Dict",
-    "Graph",
-    "GraphModule",
-    "Set",
-    "Union"
-  ],
-  "torch.ao.quantization.fx.pattern_utils": [
-    "Any",
-    "Dict",
-    "FixedQParamsFakeQuantize",
-    "List",
-    "MatchResult",
-    "Node",
-    "ObserverBase",
-    "Optional",
-    "OrderedDict",
-    "Pattern",
-    "QConfigAny",
-    "QuantizeHandler",
-    "Tuple"
-  ],
-  "torch.ao.quantization.fx.quantization_patterns": [
-    "ABC",
-    "Any",
-    "Callable",
-    "Dict",
-    "Node",
-    "NodePattern",
-    "Optional",
-    "Pattern",
-    "all_node_args_have_no_tensors"
-  ],
-  "torch.ao.quantization.fx.quantization_types": [
-    "Any",
-    "Node",
-    "NodePattern",
-    "Pattern",
-    "QuantizerCls",
-    "Tuple",
-    "Union"
-  ],
-  "torch.ao.quantization.fx.backend_config_utils": [
-    "Any",
-    "Callable",
-    "DefaultFuseHandler",
-    "Dict",
-    "NodePattern",
-    "ObservationType",
-    "Optional",
-    "Pattern",
-    "QuantizeHandler",
-    "QuantizerCls",
-    "activation_dtype",
-    "get_combined_dict",
-    "get_default_quant_patterns",
-    "get_native_backend_config_dict",
-    "sorted_patterns_dict",
-    "get_quantize_handler_cls"
-  ],
   "torch.autograd": [
     "NestedIOFunction",
     "detect_anomaly",
@@ -141,20 +52,6 @@
   "torch.backends": [
     "contextmanager"
   ],
-  "torch.cpu.amp.autocast_mode": [
-    "Any"
-  ],
-  "torch.cuda": [
-    "Any",
-    "Device",
-    "Dict",
-    "List",
-    "Optional",
-    "Set",
-    "Tuple",
-    "Union",
-    "classproperty"
-  ],
   "torch.cuda.comm": [
     "broadcast",
     "broadcast_coalesced",
@@ -162,12 +59,6 @@
     "reduce_add_coalesced",
     "scatter",
     "gather"
-  ],
-  "torch.cuda.amp.autocast_mode": [
-    "Any"
-  ],
-  "torch.cuda.amp.common": [
-    "find_spec"
   ],
   "torch.cuda.nccl": [
     "init_rank",
@@ -292,47 +183,7 @@
   "torch.distributed.optim.utils": [
     "Type"
   ],
-  "torch.distributed.pipeline.sync.checkpoint": [
-    "Checkpoint",
-    "Checkpointing",
-    "Context",
-    "Function",
-    "Recompute",
-    "ThreadLocal",
-    "checkpoint",
-    "enable_checkpointing",
-    "enable_recomputing",
-    "restore_rng_states",
-    "save_rng_states"
-  ],
-  "torch.distributed.pipeline.sync.copy": [
-    "Context",
-    "Copy",
-    "Wait"
-  ],
-  "torch.distributed.pipeline.sync.dependency": [
-    "Fork",
-    "Join",
-    "fork",
-    "join"
-  ],
-  "torch.distributed.pipeline.sync.microbatch": [
-    "Batch",
-    "NoChunk",
-    "check",
-    "gather",
-    "scatter"
-  ],
-  "torch.distributed.pipeline.sync.phony": [
-    "get_phony"
-  ],
   "torch.distributed.pipeline.sync.pipe": [
-    "BalanceError",
-    "PipeSequential",
-    "Pipeline",
-    "WithDevice"
-  ],
-  "torch.distributed.pipeline.sync.pipeline": [
     "Pipeline"
   ],
   "torch.distributed.pipeline.sync.skip.layout": [
@@ -356,25 +207,6 @@
     "current_skip_tracker",
     "use_skip_tracker"
   ],
-  "torch.distributed.pipeline.sync.stream": [
-    "CPUStreamType",
-    "as_cuda",
-    "current_stream",
-    "default_stream",
-    "get_device",
-    "is_cuda",
-    "new_stream",
-    "record_stream",
-    "use_device",
-    "use_stream",
-    "wait_stream"
-  ],
-  "torch.distributed.pipeline.sync.worker": [
-    "Task",
-    "create_workers",
-    "spawn_workers",
-    "worker"
-  ],
   "torch.distributed.remote_device": [
     "Optional",
     "Union"
@@ -395,69 +227,6 @@
     "urlunparse"
   ],
   "torch.distributed.rpc": [
-    "Any",
-    "Dict",
-    "Future",
-    "Generator",
-    "Generic",
-    "GenericWithOneTypeVar",
-    "PyRRef",
-    "RemoteProfilerManager",
-    "RpcAgent",
-    "RpcBackendOptions",
-    "Set",
-    "Store",
-    "TensorPipeAgent",
-    "Tuple",
-    "TypeVar",
-    "WorkerInfo",
-    "enable_gil_profiling",
-    "get_rpc_timeout",
-    "method",
-    "timedelta",
-    "urlparse"
-  ],
-  "torch.distributed.rpc.api": [
-    "Any",
-    "Dict",
-    "Future",
-    "Generic",
-    "GenericWithOneTypeVar",
-    "PyRRef",
-    "PythonUDF",
-    "RPCExecMode",
-    "RemoteProfilerManager",
-    "Set",
-    "TypeVar",
-    "WorkerInfo",
-    "get_rpc_timeout",
-    "method"
-  ],
-  "torch.distributed.rpc.backend_registry": [
-    "Dict",
-    "List",
-    "Set",
-    "Tuple"
-  ],
-  "torch.distributed.rpc.constants": [
-    "timedelta"
-  ],
-  "torch.distributed.rpc.internal": [
-    "Enum"
-  ],
-  "torch.distributed.rpc.options": [
-    "DeviceType",
-    "Dict",
-    "List",
-    "Optional",
-    "Union"
-  ],
-  "torch.distributions.utils": [
-    "Any",
-    "Dict",
-    "Number",
-    "is_tensor_like",
-    "update_wrapper"
   ],
   "torch.fft": [
     "Tensor",
@@ -756,6 +525,7 @@
     "Optional"
   ],
   "torch.nested": [
+    "nested_tensor",
     "to_padded_tensor"
   ],
   "torch.nn.common_types": [
@@ -853,7 +623,7 @@
     "OrderedDict"
   ],
   "torch.nn.qat.dynamic.modules.linear": [
-    "activation_is_memoryless"
+    "_activation_is_memoryless"
   ],
   "torch.nn.qat.modules.conv": [
     "Tuple",
@@ -966,10 +736,10 @@
     "QuantType",
     "QuantWrapper",
     "RecordingObserver",
-    "add_module_to_qconfig_obs_ctr",
+    "_add_module_to_qconfig_obs_ctr",
     "add_observer_",
     "add_quant_dequant",
-    "assert_valid_qconfig",
+    "_assert_valid_qconfig",
     "convert",
     "convert_dynamic_jit",
     "convert_jit",
@@ -1096,8 +866,8 @@
     "QConfig",
     "QConfigAny",
     "QConfigDynamic",
-    "add_module_to_qconfig_obs_ctr",
-    "assert_valid_qconfig",
+    "_add_module_to_qconfig_obs_ctr",
+    "_assert_valid_qconfig",
     "get_default_qat_qconfig",
     "get_default_qconfig",
     "qconfig_equals"

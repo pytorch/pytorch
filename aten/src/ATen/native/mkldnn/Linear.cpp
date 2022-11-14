@@ -1,12 +1,15 @@
-#define TORCH_ONLY_METHOD_OPERATORS
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+#include <ATen/core/Tensor.h>
+#include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/mkldnn_linear_backward_input.h>
 #include <ATen/ops/mkldnn_linear_backward_input_native.h>
 #include <ATen/ops/mkldnn_linear_backward_native.h>
@@ -171,6 +174,162 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
     std::tie(grad_weight, grad_bias) = at::mkldnn_linear_backward_weights(grad_output, input, weight, output_mask[2]);
   }
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
+}
+
+Tensor mkldnn_linear_pointwise(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    c10::string_view attr,
+    torch::List<c10::optional<at::Scalar>> scalars,
+    c10::optional<c10::string_view> algorithm) {
+  auto input = input_t.contiguous();
+  auto input_size = input.sizes();
+
+  const int64_t dim = input.dim();
+  auto input_reshaped =
+      dim == 2 ? input : input.reshape({-1, input.size(input.dim() - 1)});
+
+  std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
+  output_size.push_back(weight_t.size(0));
+  auto output = at::empty(output_size, input.options());
+
+  if (dim != 2) {
+    std::vector<int64_t> output_size_reshaped = {input_reshaped.size(0),
+                                                 weight_t.size(0)};
+    output = output.reshape(output_size_reshaped);
+  }
+
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  ideep::tensor mkldnn_output = itensor_from_tensor(output);
+
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  const ideep::tensor mkldnn_input = itensor_view_from_dense(input_reshaped);
+
+  c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
+  if (bias.defined()) {
+    mkldnn_bias = itensor_from_tensor(bias);
+  }
+  const ideep::tensor w = itensor_from_tensor(weight_t);
+
+  auto it = fusion_unary_attr_map().find(attr);
+  TORCH_CHECK(
+      it != fusion_unary_attr_map().end(), "Fusion behavior undefined.");
+  ideep::attr_t op_attr = it->second(scalars, algorithm);
+
+  if (mkldnn_bias.has_value()) {
+    ideep::inner_product_forward::compute(
+        mkldnn_input,
+        w,
+        mkldnn_bias.value(),
+        mkldnn_output,
+        ideep::scale_t(),
+        ideep::scale_t(),
+        ideep::scale_t(),
+        op_attr);
+  } else {
+    ideep::inner_product_forward::compute(
+        mkldnn_input,
+        w,
+        mkldnn_output,
+        ideep::scale_t(),
+        ideep::scale_t(),
+        ideep::scale_t(),
+        op_attr);
+  }
+
+  if (dim != 2) {
+    output = output.reshape(output_size);
+  }
+
+  return output;
+}
+
+Tensor mkldnn_linear_pointwise_binary(
+    const Tensor& input_t,
+    const Tensor& other_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    c10::string_view attr) {
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+  // Make sure inputs have same type(device, layout, dtype), device is cpu and
+  // dtype is float or bfloat16.
+  check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
+
+  auto input = input_t.contiguous();
+
+  auto it_binary = fusion_binary_alg_map().find(attr);
+  TORCH_CHECK(
+      it_binary != fusion_binary_alg_map().end(), "Fusion behavior undefined.");
+
+  auto input_size = input.sizes();
+
+  const int64_t dim = input.dim();
+  auto input_reshaped =
+      dim == 2 ? input : input.reshape({-1, input.size(input.dim() - 1)});
+
+  std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
+  output_size.push_back(weight_t.size(0));
+  auto output = at::empty(output_size, input.options());
+  auto other_reshaped = other_t.contiguous();
+
+  if (dim != 2) {
+    std::vector<int64_t> output_size_reshaped = {
+        input_reshaped.size(0), weight_t.size(0)};
+    output = output.reshape(output_size_reshaped);
+    other_reshaped = other_reshaped.reshape(output_size_reshaped);
+  }
+
+  TORCH_CHECK(
+      output.sizes() == other_reshaped.sizes(),
+      "linear_binary_run expects the size of output and other tensor to be the same");
+
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  ideep::tensor mkldnn_output = itensor_from_tensor(output);
+  const ideep::tensor mkldnn_other = itensor_from_tensor(other_reshaped);
+  const ideep::tensor mkldnn_input = itensor_view_from_dense(input_reshaped);
+
+  c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
+  if (bias.defined()) {
+    mkldnn_bias = itensor_from_tensor(bias);
+  }
+  const ideep::tensor w = itensor_from_tensor(weight_t);
+
+  auto other_desc = mkldnn_other.get_desc();
+  auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
+
+  if (mkldnn_bias.has_value()) {
+    ideep::inner_product_forward::compute_binary(
+        mkldnn_input,
+        mkldnn_other,
+        w,
+        mkldnn_bias.value(),
+        mkldnn_output,
+        op_attr);
+  } else {
+    ideep::inner_product_forward::compute_binary(
+        mkldnn_input, mkldnn_other, w, mkldnn_output, op_attr);
+  }
+
+  if (dim != 2) {
+    output = output.reshape(output_size);
+  }
+
+  return output;
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise"),
+      TORCH_FN(mkldnn_linear_pointwise));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise.binary"),
+      TORCH_FN(mkldnn_linear_pointwise_binary));
 }
 
 } // namespace native

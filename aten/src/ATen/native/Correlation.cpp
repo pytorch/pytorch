@@ -1,6 +1,23 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/complex.h>
+#include <ATen/ops/corrcoef_native.h>
+#include <ATen/ops/cov.h>
+#include <ATen/ops/cov_native.h>
+#include <ATen/ops/imag.h>
+#include <ATen/ops/mm.h>
+#include <ATen/ops/real.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/sqrt.h>
+#include <ATen/ops/true_divide.h>
+#endif
 
 namespace at {
 namespace native {
@@ -122,7 +139,7 @@ Tensor corrcoef(const Tensor& self) {
   }
 
   // normalize covariance
-  const auto d = c.diag();
+  const auto d = c.diagonal();
   const auto stddev = at::sqrt(d.is_complex() ? at::real(d) : d);
   c = c / stddev.view({-1, 1});
   c = c / stddev.view({1, -1});

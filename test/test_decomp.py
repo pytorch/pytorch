@@ -1,4 +1,4 @@
-# Owner(s): ["module: primTorch"]
+# Owner(s): ["module: primTorch", "module: decompositions"]
 
 from collections import defaultdict
 from torch import Tensor
@@ -15,7 +15,6 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
-    skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
@@ -199,7 +198,9 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         (torch.float32, torch.ops.aten.grid_sampler_2d.default) : (7e-6, 3e-5),
         # Exceeds tolerances on CUDA, likely due to fma
         (torch.float32, torch.ops.aten.mv.default) : (1e-5, 3e-5),
-        (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 1e-6),
+        (torch.complex64, torch.ops.aten.mv.default): (5e-5, 5e-5),
+        (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 5e-4),
+        (torch.float64, torch.ops.aten.upsample_bicubic2d.default) : (1e-5, 5e-4),
     }
     if (test_dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
@@ -282,6 +283,7 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.bfloat16, "nn.functional.dropout"),
     ("cuda", torch.float64, "nn.functional.dropout"),
     ("cuda", torch.float32, "nn.functional.dropout"),
+    (None, None, "special.ndtr"),  # aten.special_ndtr was not decomposed
     (None, None, "new_empty"),
     (None, None, "empty_like"),
     (None, None, "empty"),
@@ -290,11 +292,16 @@ CROSS_REF_EXCLUDE_SET = {
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
     (None, None, "meshgrid"),
+    # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
+    (None, None, "diag"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
-    # Backward formula is not as precise as the custom CUDA kernel
+    # Decomposed backward formula is not as precise
+    ("cuda", torch.float16, "nn.functional.embedding"),
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
+    ("cpu", torch.bfloat16, "nn.functional.hardswish"),
+    ("cuda", torch.float16, "nn.functional.cross_entropy"),
 }
 
 all_decomposed = set()
@@ -346,7 +353,6 @@ def any_unsupported(args, kwargs):
     return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
 
 
-@skipIfSlowGradcheckEnv
 class TestDecomp(TestCase):
     longMessage = True
 

@@ -4,22 +4,12 @@
 # LICENSE file in the root directory of this source tree.
 
 import contextlib
-from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generator,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    cast,
-)
+import functools
+from abc import ABC, abstractmethod
+from typing import Any, Callable, cast, Dict, Generator, Optional, Set, Tuple, Type
 
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
-
 
 __all__ = [
     "always_wrap_policy",
@@ -28,24 +18,84 @@ __all__ = [
     "size_based_auto_wrap_policy",
     "enable_wrap",
     "wrap",
-    "ParamExecOrderWrapPolicy",
+    "ModuleWrapPolicy",
 ]
 
 
 def always_wrap_policy(*args, **kwargs) -> bool:
     """
-    A simple wrapper policy that always returns ``True``,
-    i.e. when passed as the `auto_wrap_policy` into FSDP,
-    this will result in all submodules being wrapped as
-    distinct FSDP instances.
+    A simple recursive wrap policy that always returns ``True``. This means
+    that every submodule is wrapped by the wrapper class in
+    :func:`_recursive_wrap`.
     """
     return True
 
-def lambda_auto_wrap_policy(
+
+class _FSDPPolicy(ABC):
+    """
+    This defines an abstract base class that represents an FSDP policy for
+    constructing ``FlatParameter`` s.
+    """
+
+    # The motivation for this abstract base class is to hide the interface
+    # expected by `_recursive_wrap()` from users (i.e. the `recurse` argument).
+    def __init__(self):
+        ...
+
+    @property
+    @abstractmethod
+    def policy(self) -> Callable:
+        ...
+
+
+def _module_wrap_policy(
     module: nn.Module,
     recurse: bool,
-    unwrapped_params: int,
-    lambda_fn: Callable
+    nonwrapped_numel: int,
+    module_classes: Set[Type[nn.Module]],
+) -> bool:
+    """
+    This auto wrap policy wraps every module that is an instance of any type in
+    ``module_classes`` as its own FSDP instance. The root module given by
+    ``module`` is always wrapped as an FSDP instance regardless. Since the
+    wrapping proceeds bottom up, each FSDP instance manages the parameters in
+    its subtree excluding any already managed by a child FSDP instance.
+
+    Args:
+        module (nn.Module): Current module being considered.
+        recurse (bool): If ``False``, then this function must decide whether
+            ``module`` should be wrapped as an FSDP instance or not. If
+            ``True``, then the function is still recursing down the module
+            tree as a part of the DFS.
+        nonwrapped_numel (int): Parameter numel not yet wrapped.
+        module_classes (Set[Type[nn.Module]]): Set of module classes that are
+            wrapped as FSDP instances.
+
+    Returns:
+        ``True`` if ``recurse=True``, and whether ``module`` should be wrapped
+        if ``recurse=False``.
+    """
+    if recurse:
+        return True  # always recurse
+    return isinstance(module, tuple(module_classes))
+
+
+class ModuleWrapPolicy(_FSDPPolicy):
+    """This is a wrapper around :func:`_module_wrap_policy`."""
+
+    def __init__(self, module_classes: Set[Type[nn.Module]]):
+        self._policy: Callable = functools.partial(
+            _module_wrap_policy,
+            module_classes=module_classes,
+        )
+
+    @property
+    def policy(self):
+        return self._policy
+
+
+def lambda_auto_wrap_policy(
+    module: nn.Module, recurse: bool, nonwrapped_numel: int, lambda_fn: Callable
 ) -> bool:
     """
     A convenient auto wrap policy to wrap submodules based on an arbitrary user
@@ -57,69 +107,35 @@ def lambda_auto_wrap_policy(
     The first three parameters are required by :func:`_recursive_wrap`.
 
     Args:
-       module (nn.Module):
-           The module to be considered in this decision.
-       recurse (bool):
-           Indicate if this is called to make a decision on whether we
-           should recurse down a subgraph of the module structure.
-           If False, it means this function is called to make a decision
-           on whether we should wrap the said module.
-       unwrapped_params (int):
-           The number of parameters yet to be wrapped in this module.
+        module (nn.Module): Current module being considered.
+        recurse (bool): If ``False``, then this function must decide whether
+            ``module`` should be wrapped as an FSDP instance or not. If
+            ``True``, then the function is still recursing down the module
+            tree as a part of the DFS.
+        nonwrapped_numel (int): Parameter numel not yet wrapped.
 
-       lambda_fn (Callable[nn.Module] -> bool):
-           If this returns ``True``, this module will be wrapped by
-           wrapper_cls individually.
+        lambda_fn (Callable[[nn.Module], bool]): If this returns ``True``, then
+            this module will be wrapped.
     """
     if recurse:
-        # always recurse
-        return True
-    else:
-        # if not recursing, decide whether we should wrap for the leaf node or reminder
-        return lambda_fn(module)
+        return True  # always recurse
+    return lambda_fn(module)
+
 
 def transformer_auto_wrap_policy(
     module: nn.Module,
     recurse: bool,
-    unwrapped_params: int,
+    nonwrapped_numel: int,
     transformer_layer_cls: Set[Type[nn.Module]],
 ) -> bool:
     """
-    A convenient auto wrap policy for transformer models. If the submodule
-    is an instance of transformer_layer_cls, the submodule will be wrapped
-    as a FSDP unit. Otherwise, all the other remainder submodules are wrapped
-    by the outermost FSDP unit. Right now, FSDP requires submodules that share
-    weights to be wrapped in the same FSDP unit, this auto wrap policy can
-    conviniently wrap the shared embeddings into the same FSDP unit for transformer
-    models. In the near future, FSDP will support submodules that share weights
-    to be wrapped in the separated FSDP units.
-
-    Return if a module should be wrapped during FSDP auto wrapping.
-
-    The first three parameters are required by :func:`_recursive_wrap`.
-
-
-    Args:
-       module (nn.Module):
-           The module to be considered in this decision.
-       recurse (bool):
-           Indicate if this is called to make a decision on whether we
-           should recurse down a subgraph of the module structure.
-           If False, it means this function is called to make a decision
-           on whether we should wrap the said module.
-       unwrapped_params (int):
-           The number of parameters yet to be wrapped in this module.
-
-       transformer_layer_cls (int):
-           Submodules with one of the `transformer_layer_cls` names
-           will be wrapped as separated FSDP units
+    See :func:`_module_wrap_policy`, where ``transformer_layer_cls`` is the
+    same as ``module_classes``. Note that shared parameters must be wrapped in
+    the same FSDP instance, so this auto wrap policy can help wrap shared
+    embeddings into the same FSDP instance for transformer models.
     """
-    if recurse:
-        # always recurse
-        return True
-    else:
-        # if not recursing, decide whether we should wrap for the leaf node or reminder
-        return isinstance(module, tuple(transformer_layer_cls))
+    return _module_wrap_policy(module, recurse, nonwrapped_numel, transformer_layer_cls)
+
 
 def _wrap_batchnorm_individually(
     module: nn.Module,
@@ -128,7 +144,7 @@ def _wrap_batchnorm_individually(
     **kwargs,
 ) -> bool:
     """
-    A policy that wraps ``BatchNorm`` instances in their own FSDP unit.
+    A policy that wraps ``BatchNorm`` instances in their own FSDP instance.
     """
     if recurse:
         # always recurse
@@ -138,57 +154,50 @@ def _wrap_batchnorm_individually(
         # BN layer or not.
         return isinstance(module, _BatchNorm)
 
+
 def _or_policy(
     module: nn.Module,
     recurse: bool,
-    unwrapped_params: int,
+    nonwrapped_numel: int,
     policies,
 ) -> bool:
     """
     A policy that wraps ``module`` if any policy in the passed in iterable of
     ``policies`` returns ``True``.
     """
-    return any(
-        policy(module, recurse, unwrapped_params) for policy in policies
-    )
+    return any(policy(module, recurse, nonwrapped_numel) for policy in policies)
 
 
 def size_based_auto_wrap_policy(
     module: nn.Module,
     recurse: bool,
-    unwrapped_params: int,
-    # These are customizable for this policy function.
+    nonwrapped_numel: int,
+    # Additional custom arguments
     min_num_params: int = int(1e8),
     force_leaf_modules: Optional[Set[Type[nn.Module]]] = None,
     exclude_wrap_modules: Optional[Set[Type[nn.Module]]] = None,
 ) -> bool:
-    """A size based auto_wrap_policy function for FSDP API.
-
-       Return if a module should be wrapped during FSDP auto wrapping.
-
-       The first three parameters are used by :func:`_recursive_wrap`. If
-       you write a custom version of this policy function, your version
-       needs to at least accept the first three parameters and free
-       to do whatever you want in the function.
+    """
+    A size-based auto wrap policy.
 
     Args:
-       module (nn.Module):
-           The module to be considered in this decision.
-       recurse (bool):
-           Indicate if this is called to make a decision on whether we
-           should recurse down a subgraph of the module structure.
-           If False, it means this function is called to make a decision
-           on whether we should wrap the said module.
-       unwrapped_params (int):
-           The number of parameters yet to be wrapped in this module.
+        module (nn.Module): Current module being considered.
+        recurse (bool): If ``False``, then this function must decide whether
+            ``module`` should be wrapped as an FSDP instance or not. If
+            ``True``, then the function is still recursing down the module
+            tree as a part of the DFS.
+        nonwrapped_numel (int): Parameter numel not yet wrapped.
 
-       min_num_params (int):
-           Customizable policy input. It controls the size threshold
-           on how big should a module be to be considered wrapped.
-       force_leaf_modules (Set[Type[nn.Module]]): set of module types to
-           keep as leaves, i.e., their children will never be wrapped.
-       exclude_wrap_modules (Set[Type[nn.Module]]):
-           Customizable set of module types to be excluded in wrapping.
+        min_num_params (int): Customizable policy input that controls the size
+            threshold over which a module is ready to be wrapped. This is in
+            units of numel.
+        force_leaf_modules (Set[Type[nn.Module]]): Set of module types to keep
+            as leaves, i.e. their children will never be wrapped.
+        exclude_wrap_modules (Set[Type[nn.Module]]): Set of module types to be
+            excluded in wrapping.
+
+    Returns:
+        Whether ``module`` should be wrapped.
     """
     force_leaf_modules = (
         size_based_auto_wrap_policy.FORCE_LEAF_MODULES  # type: ignore[attr-defined]
@@ -201,7 +210,10 @@ def size_based_auto_wrap_policy(
         else exclude_wrap_modules
     )
 
-    is_large = unwrapped_params >= min_num_params
+    # Keep the argument `min_num_params` for BC for now, but it represents the
+    # minimum non-wrapped *numel* before triggering a wrapping
+    min_nonwrapped_numel = min_num_params
+    is_large = nonwrapped_numel >= min_nonwrapped_numel
     if recurse:
         # We should recurse if the module is big enough but not in force_leaf_modules list.
         return is_large and not isinstance(module, tuple(force_leaf_modules))
@@ -288,58 +300,9 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
     return module
 
 
-@dataclass
-class ParamExecOrderWrapPolicy:
-    """
-    This is the class used for the wrapping policy that wraps parameters and performs
-    the communication scheduling based on the parameter execution order in the forward pass
-    (also called non-recursive wrapping policy).
-
-    The policy contains multiple wraps. Each wrap contains original parameters that will be executed together,
-    and the wrap transfers these parameters into one ``FlattenParameter``. In both forward and the backward passes,
-    the sharded parameters in each wrap will be gathered just before these parameters are used in the passes.
-    These parameters will then be reshaded once they have been used.
-
-    TODO (linjianma): For now, the parameters contained in each wrap of ``ParamExecOrderWrapPolicy``
-    are the parameters in each wrap of the ``init_policy`` (a recursive wrapping policy).
-    Later we will wrap parameters based on bucket size.
-
-    Args:
-        init_policy (Callable):
-            The initial recursive wrapping policy used to guide the wrapping of
-            this policy. If tracing_config is none, in the first forward and
-            backward iteration, ``init_policy`` is used to record parameter
-            execution order. Otherwise, init_policy is only used in FSDP
-            constructor for module level wrapping.
-
-            The default ``always_wrap_policy`` might not be the best choice for every model. For example, for
-            transformer based models, setting ``transformer_auto_wrap_policy`` as the ``init_policy`` will guarantee
-            wrapping each transformer layer into one FSDP unit, and can be easily combined with checkpointing
-            within each transformer layer.
-
-        tracing_config (Optional[TracingConfig]):
-            The configuration used to perform symbolic tracing at FSDP
-            constructor to get the module and parameter execution order. The
-            type of ``tracing_config`` needs to be either ``None`` or
-            ``TracingConfig``. If set as ``None``, then symbolic tracing is not
-            enabled, and one forward as well as backward iteration are needed to
-            get the parameter execution order.
-
-    ..warning :: Note that not all modules can be successfully traced when
-    ``tracing_config`` is not None and symbolic tracing is enabled. The two
-    cases below may be unable to trace: 1. when there is a data-dependent
-    branch, 2. when the forward pass contains operators that don't support
-    ``torch.fx.Proxy`` as the input type (e.g. ``arange``, ``zeros``, ``ones``,
-    ``full``, ``full_like``, ``eye``, ``empty``, ``tensor``). For those cases,
-    users can set ``tracing_config = None`` to disable symbolic tracing.
-    """
-    init_policy: Callable = always_wrap_policy
-    tracing_config: Any = None
-
-
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
     assert wrapper_cls is not None
-    if hasattr(module, '_wrap_overrides'):
+    if hasattr(module, "_wrap_overrides"):
         # If module has a _wrap_overrides attribute, we force overriding the
         # FSDP config with these attributes for this module. Currently this
         # is only used to disable mixed precision for BatchNorm when
@@ -357,16 +320,16 @@ def _recursive_wrap(
     ignored_modules: Set[nn.Module],
     ignored_params: Set[nn.Parameter],
     only_wrap_children: bool = False,
-    **kwargs: Any
+    **kwargs: Any,
 ) -> Tuple[nn.Module, int]:
     """
-    Automatically wrap child modules of *module* that meet the given
-    criteria with :func:`auto_wrap`. Does not rely on _ConfigAutoWrap.
+    Wraps submodules of ``module`` for which ``auto_wrap_policy`` returns
+    ``True`` with ``wrapper_cls``.
+
     Args:
-        module (nn.Module):
-            module to recursively wrap
-        auto_wrap_policy (Callable):
-            A callable specifying a policy to recursively wrap layers with FSDP.
+        module (nn.Module): Module to recursively wrap.
+        auto_wrap_policy (Callable): A callable representing a policy that
+            determines which modules to recursively wrap with ``wrapper_cls``.
         ignored_modules (Set[torch.nn.Module]): Modules to ignore when
             wrapping.
         ignored_params (Set[torch.nn.Parameter]): Parameters to ignore when
@@ -374,7 +337,7 @@ def _recursive_wrap(
             in ``ignored_modules``.
     Returns:
         (nn.Module, int):
-            Wrapped module and the number parameters wrapped recursively.
+            ``module`` after wrapping and the numel recursively wrapped.
     """
     assert auto_wrap_policy is not None, "Must specify auto_wrap_policy."
     assert wrapper_cls is not None, "Must specify wrapper_cls"
@@ -389,13 +352,13 @@ def _recursive_wrap(
             pass
 
     # We count all params, assuming none of them are already wrapped.
-    num_params = sum(
+    nonwrapped_numel = sum(
         p.numel() for p in module.parameters() if p not in ignored_params
     )
 
     assert auto_wrap_policy is not None
-    if auto_wrap_policy(module=module, recurse=True, unwrapped_params=num_params):
-        total_wrapped_params = 0
+    if auto_wrap_policy(module=module, recurse=True, nonwrapped_numel=nonwrapped_numel):
+        total_wrapped_numel = 0
         # Iterate through the children, recursively wrap if necessary
         for name, child in module.named_children():
             if child in ignored_modules:
@@ -410,17 +373,17 @@ def _recursive_wrap(
             )
             setattr(module, name, wrapped_child)
             # Keep track of how many parameters have been wrapped
-            total_wrapped_params += num_wrapped_params
+            total_wrapped_numel += num_wrapped_params
         # decide if we need to wrap the current module,
         # since the left over parameters exceed the number of params to wrap
-        remainder = num_params - total_wrapped_params
+        remainder = nonwrapped_numel - total_wrapped_numel
         if not only_wrap_children and auto_wrap_policy(
-            module=module, recurse=False, unwrapped_params=remainder
+            module=module, recurse=False, nonwrapped_numel=remainder
         ):
             # Leaf node or final wrapping of the remainder both happen here.
-            return _wrap(module, wrapper_cls, **kwargs), num_params
+            return _wrap(module, wrapper_cls, **kwargs), nonwrapped_numel
         else:
-            return module, total_wrapped_params
+            return module, total_wrapped_numel
     return module, 0
 
 
