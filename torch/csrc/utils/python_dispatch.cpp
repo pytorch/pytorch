@@ -479,15 +479,14 @@ void initDispatchBindings(PyObject* module) {
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
 
-  py::enum_<c10::DispatchKey>(m, "DispatchKey") DEF_ONE(Undefined)
-      DEF_ONE(CompositeExplicitAutogradNonFunctional)
-          DEF_ONE(CompositeExplicitAutograd)
-              DEF_ONE(CompositeImplicitAutogradNestedTensor)
-                  DEF_ONE(CompositeImplicitAutograd) DEF_ONE(AutogradOther)
-                      DEF_ONE(Autograd) DEF_ONE(BackendSelect)
-                          DEF_ONE(ADInplaceOrView) DEF_ONE(PythonTLSSnapshot)
-                              DEF_ONE(Python)
-                              DEF_ONE(FuncTorchDynamicLayerFrontMode)
+  py::enum_<c10::DispatchKey>(m, "DispatchKey") DEF_ONE(Undefined) DEF_ONE(
+      CompositeExplicitAutogradNonFunctional) DEF_ONE(CompositeExplicitAutograd)
+      DEF_ONE(CompositeImplicitAutogradNestedTensor)
+          DEF_ONE(CompositeImplicitAutograd) DEF_ONE(AutogradOther)
+              DEF_ONE(Autograd) DEF_ONE(BackendSelect) DEF_ONE(ADInplaceOrView)
+                  DEF_ONE(PythonTLSSnapshot) DEF_ONE(Python)
+                      DEF_ONE(FuncTorchDynamicLayerFrontMode)
+                          DEF_ONE(FuncTorchDynamicLayerBackMode)
 
 #define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
 #define DEF_MULTIPLE(fullname, prefix)              \
@@ -496,11 +495,11 @@ void initDispatchBindings(PyObject* module) {
   C10_FORALL_BACKEND_COMPONENTS(DEF_SINGLE, prefix) \
   DEF_SINGLE(, EndOf##fullname##Backends)
 
-                                  C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
+                              C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
 
 #undef DEF_MULTIPLE
 #undef DEF_SINGLE
-                                      ;
+                                  ;
 
   py::class_<c10::DispatchKeySet>(m, "DispatchKeySet")
       .def(py::init<c10::DispatchKey>())

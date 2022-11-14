@@ -83,18 +83,6 @@ static DynmetaData& getGlobalDynmetaData() {
   return kDynMetaDataSingleton;
 }
 
-namespace {
-thread_local bool kIsAutogradFunctionAllowed = false;
-}
-
-void setAutogradFunctionAllowed(bool allowed) {
-  kIsAutogradFunctionAllowed = allowed;
-}
-
-bool getAutogradFunctionAllowed() {
-  return kIsAutogradFunctionAllowed;
-}
-
 // functorch stores some TLS. Inside the TLS is the stack of transforms.
 // Unfortunately, since functorch isn't a part of libtorch, we have
 // a level of indirection. FuncTorchTLSBase is the interface that lives in libtorch,
@@ -140,6 +128,7 @@ class FuncTorchTLS : public FuncTorchTLSBase {
 
   std::vector<DynamicLayer> dynamicLayerStack;
   bool allow_inplace_requires_grad_ = false;
+  bool allow_autograd_function_ = false;
 };
 
 static FuncTorchTLS* getRawFunctorchTLS() {
@@ -161,6 +150,16 @@ void setInplaceRequiresGradAllowed(bool allowed) {
 bool getInplaceRequiresGradAllowed() {
   auto* functorch_tls = getRawFunctorchTLS();
   return functorch_tls->allow_inplace_requires_grad_;
+}
+
+void setAutogradFunctionAllowed(bool allowed) {
+  auto* functorch_tls = getRawFunctorchTLS();
+  functorch_tls->allow_autograd_function_ = allowed;
+}
+
+bool getAutogradFunctionAllowed() {
+  auto* functorch_tls = getRawFunctorchTLS();
+  return functorch_tls->allow_autograd_function_;
 }
 
 static std::vector<DynamicLayer>& dynamicLayerStackAccessor() {

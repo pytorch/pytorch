@@ -12,11 +12,11 @@
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/functorch/DynamicLayer.h>
+#include <ATen/functorch/Interpreter.h>
 #include <ATen/functorch/LegacyVmapTransforms.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
-#include <ATen/functorch/Interpreter.h>
 
 // This file contains functorch's Python bindings.
 
@@ -483,25 +483,25 @@ void initFuncTorchBindings(PyObject* module) {
   py::class_<DynamicLayer>(m, "DynamicLayer");
 
   py::enum_<TransformType>(m, "TransformType")
-    .value("Torch", TransformType::Torch)
-    .value("Grad", TransformType::Grad)
-    .value("Jvp", TransformType::Jvp)
-    .value("Functionalize", TransformType::Functionalize)
-    .value("Vmap", TransformType::Vmap);
+      .value("Torch", TransformType::Torch)
+      .value("Grad", TransformType::Grad)
+      .value("Jvp", TransformType::Jvp)
+      .value("Functionalize", TransformType::Functionalize)
+      .value("Vmap", TransformType::Vmap);
   py::class_<Interpreter>(m, "CInterpreter")
-    .def("key", &Interpreter::key)
-    .def("level", &Interpreter::level);
+      .def("key", &Interpreter::key)
+      .def("level", &Interpreter::level);
   py::class_<GradInterpreterPtr>(m, "CGradInterpreterPtr")
-    .def(py::init<const Interpreter*>())
-    .def("key", &GradInterpreterPtr::key)
-    .def("level", &GradInterpreterPtr::level)
-    .def("lift", &GradInterpreterPtr::lift)
-    .def("prevGradMode", &GradInterpreterPtr::prevGradMode);
+      .def(py::init<const Interpreter*>())
+      .def("key", &GradInterpreterPtr::key)
+      .def("level", &GradInterpreterPtr::level)
+      .def("lift", &GradInterpreterPtr::lift)
+      .def("prevGradMode", &GradInterpreterPtr::prevGradMode);
   py::class_<VmapInterpreterPtr>(m, "CVmapInterpreterPtr")
-    .def(py::init<const Interpreter*>())
-    .def("key", &VmapInterpreterPtr::key)
-    .def("level", &VmapInterpreterPtr::level)
-    .def("batchSize", &VmapInterpreterPtr::batchSize);
+      .def(py::init<const Interpreter*>())
+      .def("key", &VmapInterpreterPtr::key)
+      .def("level", &VmapInterpreterPtr::level)
+      .def("batchSize", &VmapInterpreterPtr::batchSize);
 }
 
 } // namespace impl

@@ -127,15 +127,18 @@ class PyOperator(PyOperatorABC):
     def py_impl(self, dispatch_key_or_mode_or_transform):
         def inner(fn):
             if inspect.isclass(dispatch_key_or_mode_or_transform) and issubclass(
-                dispatch_key_or_mode, torch.utils._python_dispatch.TorchDispatchMode
+                dispatch_key_or_mode_or_transform,
+                torch.utils._python_dispatch.TorchDispatchMode,
             ):
-                mode = dispatch_key_or_mode
+                mode = dispatch_key_or_mode_or_transform
                 assert mode not in self.python_key_mode_table
                 # TODO(voz): Should we replace setting torch._C.DispatchKey.Python entirely with setting mode keys?
                 self.python_key_mode_table[mode] = fn
                 return fn
 
-            if isinstance(dispatch_key_or_mode_or_transform, torch._C._functorch.TransformType):
+            if isinstance(
+                dispatch_key_or_mode_or_transform, torch._C._functorch.TransformType
+            ):
                 transform = dispatch_key_or_mode_or_transform
                 self.functorch_table[transform] = fn
                 return fn

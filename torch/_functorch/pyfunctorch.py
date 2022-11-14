@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import contextlib
+from typing import Any
 import torch
 import torch.utils._pytree as pytree
 from torch._C._functorch import (
@@ -44,6 +45,9 @@ interpreter then invokes.
 #
 # Keep the methods in sync with aten/src/ATen/functorch/Interpreter.h
 class FuncTorchInterpreter(ABC):
+    def __init__(self, cptr: Any):
+        self._cptr = cptr
+
     # Process an operation. eg for vmap, this is invoking a batching rule.
     # Conceptually this is analogous to Interpreter::process in C++
     @abstractmethod
