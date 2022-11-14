@@ -466,8 +466,6 @@ def hamming(M: int,
 
     return general_hamming(M, sym=sym, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
-    # return alpha - beta * torch.cos(k)
-
 
 @_add_docstr(
     r"""
@@ -589,26 +587,7 @@ def blackman(M: int,
     if M == 1:
         return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
-    constant_1 = 2 * torch.pi / (M if not sym and M > 1 else M - 1)
-    constant_2 = 2 * constant_1
-
-    k_1 = torch.linspace(start=0,
-                         end=(M - 1) * constant_1,
-                         steps=M,
-                         dtype=dtype,
-                         layout=layout,
-                         device=device,
-                         requires_grad=requires_grad)
-
-    k_2 = torch.linspace(start=0,
-                         end=(M - 1) * constant_2,
-                         steps=M,
-                         dtype=dtype,
-                         layout=layout,
-                         device=device,
-                         requires_grad=requires_grad)
-
-    return 0.42 - 0.5 * torch.cos(k_1) + 0.08 * torch.cos(k_2)
+    return general_cosine(M, a=[0.42, 0.5, 0.08], sym=sym, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
 
 @_add_docstr(
