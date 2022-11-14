@@ -11562,7 +11562,7 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 If :attr:`largest` is ``False`` then the `k` smallest elements are returned.
 
 If :attr:`stable` is ``True`` then the sorting routine becomes stable, preserving
-the order of equivalent elements.
+the order of equivalent elements. Currently `stable` is supported for CPU only, and error on CUDA tensors.
 
 A namedtuple of `(values, indices)` is returned with the `values` and
 `indices` of the largest `k` elements of each row of the `input` tensor in the
