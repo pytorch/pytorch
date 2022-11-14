@@ -185,7 +185,8 @@ void OptOutMutator::mutate(BinaryOp* bop) {
   Val* lhs = maybeMutated(bop->lhs());
   Val* rhs = maybeMutated(bop->rhs());
 
-  if (out == bop->out() && lhs == bop->lhs() && rhs == bop->rhs()) {
+  if (out->sameAs(bop->out()) && lhs->sameAs(bop->lhs()) &&
+      rhs->sameAs(bop->rhs())) {
     return;
   }
 
@@ -201,8 +202,8 @@ void OptOutMutator::mutate(TernaryOp* top) {
   Val* in2 = maybeMutated(top->in2());
   Val* in3 = maybeMutated(top->in3());
 
-  if (out == top->out() && in1 == top->in1() && in2 == top->in2() &&
-      in3 == top->in3()) {
+  if (out->sameAs(top->out()) && in1->sameAs(top->in1()) &&
+      in2->sameAs(top->in2()) && in3->sameAs(top->in3())) {
     return;
   }
 
@@ -214,13 +215,20 @@ void OptOutMutator::mutate(TernaryOp* top) {
 
 void OptOutMutator::mutate(RNGOp* rop) {
   Val* out = maybeMutated(rop->output(0));
+  Val* philox_idx = maybeMutated(rop->getPhiloxIndex());
+
   auto& parameters = rop->getParameters();
   std::vector<Val*> mutated_parameters;
+  bool all_mutated_same = true;
   for (auto v : parameters) {
     mutated_parameters.emplace_back(maybeMutated(v));
+    all_mutated_same = all_mutated_same && mutated_parameters.back()->sameAs(v);
   }
 
-  if (out == rop->output(0) && mutated_parameters == parameters) {
+  if (out->sameAs(rop->output(0)) &&
+      ((philox_idx == nullptr && rop->getPhiloxIndex() == nullptr) ||
+       philox_idx->sameAs(rop->getPhiloxIndex())) &&
+      all_mutated_same) {
     return;
   }
 
@@ -234,7 +242,7 @@ void OptOutMutator::mutate(RNGOp* rop) {
       rop->dtype(),
       mutated_parameters,
       rop->getRNGOffset(),
-      rop->getPhiloxIndex());
+      philox_idx);
 }
 
 void OptOutMutator::mutate(ReductionOp* rop) {
@@ -508,15 +516,19 @@ void OptOutMutator::mutate(GatherOp* op) {
 void OptOutMutator::mutate(ViewAsScalar* vop) {
   TensorView* out = maybeMutated(vop->out())->as<TensorView>();
   TensorView* in = maybeMutated(vop->in())->as<TensorView>();
+  IterDomain* vid = maybeMutated(vop->vector_id())->as<IterDomain>();
+  Val* idx = maybeMutated(vop->index());
 
-  if (out->sameAs(vop->out()) && in->sameAs(vop->in())) {
+  if (out->sameAs(vop->out()) && in->sameAs(vop->in()) &&
+      vid->sameAs(vop->vector_id()) &&
+      ((idx == nullptr && vop->index() == nullptr) ||
+       idx->sameAs(vop->index()))) {
     return;
   }
 
   auto container = vop->container();
   container->removeExpr(vop);
-  IrBuilder::create<ViewAsScalar>(
-      container, out, in, vop->vector_id(), vop->index());
+  IrBuilder::create<ViewAsScalar>(container, out, in, vid, idx);
 }
 
 void OptOutMutator::mutate(ViewOp* vop) {
