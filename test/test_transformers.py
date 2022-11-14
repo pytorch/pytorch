@@ -1110,7 +1110,7 @@ class TestTransformers(NNTestCase):
             value = value.contiguous()
 
         # Normally we would transpose the inputs but the fused kernels expect
-        # (batch, seq_len, num_heads, head_dim) bump teh tolerance since we can only run kernel
+        # (batch, seq_len, num_heads, head_dim) bump the tolerance since we can only run kernel
         # in fp32
         assert gradcheck(lambda *args, **kwargs:
                          wrapper_set_seed(torch.ops.aten._efficient_attention_forward, *args, **kwargs),
