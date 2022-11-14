@@ -860,6 +860,15 @@ class FakeTensorMode(TorchDispatchMode):
         # and do device logic, we dont need do anything but run them
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
+        if (
+            "prims::" in func._schema.name
+            and len(flat_arg_fake_tensors) != 0
+            and not hasattr(func, "prim_meta_impl")
+        ):
+            raise RuntimeError(
+                f"{func._schema.name} does not have a meta implementation"
+            )
+
         # TODO - we should be use the prim aten impl
         if (
             "prims::" in func._schema.name
@@ -867,6 +876,8 @@ class FakeTensorMode(TorchDispatchMode):
             and hasattr(func, "prim_meta_impl")
         ):
             with self:
+                # Using func(*args, **kwargs) here would cause an infinite recursion
+                # prim_meta_impl is used to avoid that
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
