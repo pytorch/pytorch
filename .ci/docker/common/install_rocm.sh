@@ -70,6 +70,17 @@ install_ubuntu() {
       DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENKERNELS}
     fi
 
+    if [[ $(ver $ROCM_VERSION) -ge $(ver 5.4) ]]; then
+        MIOPENHIPGFX=$(apt-cache search --names-only miopen-hip-gfx | awk '{print $1}' | grep -F -v . || true)
+        if [[ "x${MIOPENHIPGFX}" = x ]]; then
+          echo "miopen-hip-gfx package not available"
+        else
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENHIPGFX}
+        fi
+    fi
+
+    install_magma
+
     # Cleanup
     apt-get autoclean && apt-get clean
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -138,6 +149,7 @@ install_centos() {
                    roctracer-dev
   fi
 
+  # precompiled miopen kernels; search for all unversioned packages
   # if search fails it will abort this script; use true to avoid case where search fails
   MIOPENKERNELS=$(yum -q search miopenkernels | grep miopenkernels- | awk '{print $1}'| grep -F kdb. || true)
   if [[ "x${MIOPENKERNELS}" = x ]]; then
@@ -145,6 +157,17 @@ install_centos() {
   else
     yum install -y ${MIOPENKERNELS}
   fi
+
+  if [[ $(ver $ROCM_VERSION) -ge $(ver 5.4) ]]; then
+      MIOPENHIPGFX=$(yum -q search miopen-hip-gfx | grep miopen-hip-gfx | awk '{print $1}'| grep -F kdb. || true)
+      if [[ "x${MIOPENHIPGFX}" = x ]]; then
+        echo "miopen-hip-gfx package not available"
+      else
+        yum install -y ${MIOPENHIPGFX}
+      fi
+  fi
+
+  install_magma
 
   # Cleanup
   yum clean all
