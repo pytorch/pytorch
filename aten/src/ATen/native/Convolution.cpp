@@ -1,16 +1,17 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Config.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/ConvolutionMM3d.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
-#include <ATen/Config.h>
 #include <c10/macros/Macros.h>
 
 #include <limits>
@@ -21,6 +22,60 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/Utils.h>
+#endif
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_conv_depthwise2d.h>
+#include <ATen/ops/_convolution.h>
+#include <ATen/ops/_convolution_double_backward_native.h>
+#include <ATen/ops/_convolution_mode.h>
+#include <ATen/ops/_convolution_mode_native.h>
+#include <ATen/ops/_convolution_native.h>
+#include <ATen/ops/_mps_convolution.h>
+#include <ATen/ops/_mps_convolution_transpose.h>
+#include <ATen/ops/_nnpack_available.h>
+#include <ATen/ops/_nnpack_spatial_convolution.h>
+#include <ATen/ops/_slow_conv2d_backward.h>
+#include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/constant_pad_nd.h>
+#include <ATen/ops/conv1d_native.h>
+#include <ATen/ops/conv2d_native.h>
+#include <ATen/ops/conv3d_native.h>
+#include <ATen/ops/conv_depthwise3d.h>
+#include <ATen/ops/conv_transpose1d_native.h>
+#include <ATen/ops/conv_transpose2d_native.h>
+#include <ATen/ops/conv_transpose3d_native.h>
+#include <ATen/ops/convolution.h>
+#include <ATen/ops/convolution_backward_native.h>
+#include <ATen/ops/convolution_backward_overrideable.h>
+#include <ATen/ops/convolution_backward_overrideable_native.h>
+#include <ATen/ops/convolution_native.h>
+#include <ATen/ops/convolution_overrideable.h>
+#include <ATen/ops/convolution_overrideable_native.h>
+#include <ATen/ops/cudnn_convolution.h>
+#include <ATen/ops/cudnn_convolution_transpose.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/miopen_convolution.h>
+#include <ATen/ops/miopen_convolution_transpose.h>
+#include <ATen/ops/miopen_depthwise_convolution.h>
+#include <ATen/ops/mkldnn_convolution.h>
+#include <ATen/ops/mps_convolution_backward.h>
+#include <ATen/ops/mps_convolution_transpose_backward.h>
+#include <ATen/ops/slow_conv3d.h>
+#include <ATen/ops/slow_conv_dilated2d.h>
+#include <ATen/ops/slow_conv_dilated3d.h>
+#include <ATen/ops/slow_conv_transpose2d.h>
+#include <ATen/ops/slow_conv_transpose3d.h>
+#include <ATen/ops/thnn_conv2d.h>
+#include <ATen/ops/view_as_real.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 constexpr int MIOPEN_DIM_MAX = 5;
@@ -855,8 +910,8 @@ static Tensor convolution_same(
   auto k = weight.dim();
   TORCH_CHECK(k > 2, "weight should have at least three dimensions");
   auto dim = static_cast<size_t>(k - 2);
-  auto weight_sizes = weight.sizes();
-  auto input_sizes = input.sizes();
+  auto weight_sizes = weight.sym_sizes();
+  auto input_sizes = input.sym_sizes();
   TORCH_CHECK(k == input.dim(),
               "Expected ", k, "-dimensional input for ",
               k, "-dimensional weight", weight_sizes, ", but got ",
@@ -871,7 +926,7 @@ static Tensor convolution_same(
   }
 
   // Calculate the correct padding
-  DimVector padding_l, padding_r;
+  SymDimVector padding_l, padding_r;
   bool symmetric_padding = true;
   for (auto i: c10::irange(dim)) {
     auto s = stride.size() == 1 ? stride[0] : stride[i];
@@ -887,14 +942,14 @@ static Tensor convolution_same(
 
   if (symmetric_padding) {
     // All backends handle symmetric padding natively
-    DimVector output_padding(static_cast<size_t>(dim));
-    return at::convolution(input, weight, bias, stride, padding_l, dilation,
+    SymDimVector output_padding(static_cast<size_t>(dim));
+    return at::convolution_symint(input, weight, bias, stride, padding_l, dilation,
                                false, output_padding, groups);
   }
 
   TORCH_WARN_ONCE("Using padding='same' with even kernel lengths and odd dilation may"
                   " require a zero-padded copy of the input be created");
-  SmallVector<int64_t, kDimVectorStaticSize * 2> pad_nd(static_cast<size_t>(2 * dim));
+  SmallVector<c10::SymInt, kDimVectorStaticSize * 2> pad_nd(static_cast<size_t>(2 * dim));
   for (auto i: c10::irange(dim)) {
     // Apply padding by the difference, leaving only a symmetric padding
     auto delta_pad = padding_r[i] - padding_l[i];
@@ -906,10 +961,10 @@ static Tensor convolution_same(
       padding_l[i] = padding_r[i];
     }
   }
-  auto padded_input = at::constant_pad_nd(input, pad_nd, 0);
-  DimVector output_padding(static_cast<size_t>(dim));
-  return at::convolution(padded_input, weight, bias, stride, padding_l,
-                         dilation, false, output_padding, groups);
+  auto padded_input = at::constant_pad_nd_symint(input, pad_nd, 0);
+  SymDimVector output_padding(static_cast<size_t>(dim));
+  return at::convolution_symint(padded_input, weight, bias, stride, padding_l,
+                                dilation, false, output_padding, groups);
 }
 
 Tensor _convolution_mode(
@@ -1011,8 +1066,14 @@ at::Tensor conv_transpose2d(
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 2, "conv_transpose2d");
-  auto output = at::convolution(
+  Tensor output;
+  if (at::isComplexType(input_.scalar_type())) {
+    output = complex_convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  } else {
+    output = at::convolution(
+      input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  }
   return is_batched ? output : output.squeeze(0);
 }
 
@@ -1026,8 +1087,14 @@ at::Tensor conv_transpose3d(
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 3, "conv_transpose3d");
-  auto output = at::convolution(
+  Tensor output;
+  if (at::isComplexType(input_.scalar_type())) {
+    output = complex_convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  } else {
+    output = at::convolution(
+      input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  }
   return is_batched ? output : output.squeeze(0);
 }
 
@@ -1061,7 +1128,7 @@ at::Tensor convolution_overrideable(
 ConvBackend select_conv_backend(
     const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
-    bool transposed_, IntArrayRef output_padding_, int64_t groups_) {
+    bool transposed_, IntArrayRef output_padding_, int64_t groups_, const at::OptionalIntArrayRef bias_sizes_opt) {
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
@@ -1094,10 +1161,10 @@ ConvBackend select_conv_backend(
     weight = view4d(weight);
   }
 
-  auto bias_sizes_opt = bias.defined() ? c10::optional<IntArrayRef>(bias.sizes()) : c10::nullopt;
+  auto bias_sizes = bias.defined() ? c10::optional<IntArrayRef>(bias.sizes()) : bias_sizes_opt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
-  return _select_conv_backend(input, weight, bias, bias_sizes_opt, need_backward, params);
+  return _select_conv_backend(input, weight, bias, bias_sizes, need_backward, params);
 }
 
 ConvBackend select_conv_backend(
@@ -1302,6 +1369,13 @@ static inline at::MemoryFormat determine_backend_memory_format(
   }
 #endif
   return backend_memory_format;
+}
+
+at::MemoryFormat _determine_backend_memory_format(
+    const Tensor& input,
+    const Tensor& weight,
+    const ConvBackend backend)  {
+  return determine_backend_memory_format(input, weight, backend);
 }
 
 at::Tensor _convolution(

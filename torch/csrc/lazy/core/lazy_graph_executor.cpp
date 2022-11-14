@@ -390,10 +390,15 @@ bool TensorsHaveIR(const std::vector<LazyTensorPtr>& tensors) {
   return false;
 }
 
+std::atomic<LazyGraphExecutor*> lazy_graph_executor_registry;
 } // namespace
 
+void LazyGraphExecutor::Register(LazyGraphExecutor* executor) {
+  lazy_graph_executor_registry.store(executor);
+}
 LazyGraphExecutor* LazyGraphExecutor::Get() {
-  static LazyGraphExecutor* executor = new LazyGraphExecutor();
+  auto* executor = lazy_graph_executor_registry.load();
+  TORCH_CHECK(executor, "Lazy graph executor not registered.");
   return executor;
 }
 
@@ -604,6 +609,10 @@ void LazyGraphExecutor::Async::Wait() {
   }
 }
 
+bool LazyGraphExecutor::ShouldSyncTensor(const LazyTensorPtr tensor) const {
+  return tensor->GetIrValue()->op() != ltc_not_supported;
+}
+
 LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
     const std::vector<LazyTensorPtr>& tensors,
     const SyncTensorsConfig& config) {
@@ -635,7 +644,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
         tensors[i]->CurrentDataHandle() == nullptr) {
       Value ir_value = tensors[i]->CurrentIrValue();
       if (ir_value) {
-        if (getBackend()->ShouldSyncTensor(tensors[i])) {
+        if (ShouldSyncTensor(tensors[i])) {
           // Add only tensors which need to be synced.
           coll.hash = HashCombine(coll.hash, ir_value.hash());
           coll.indices.push_back(i);
@@ -712,7 +721,7 @@ std::vector<BackendDataPtr> LazyGraphExecutor::FetchTensorData(
 LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
     const std::vector<LazyTensorPtr>& tensors,
     SyncTensorCollection* coll) {
-  std::vector<Node*> roots;
+  std::vector<const Node*> roots;
   roots.reserve(coll->indices.size());
   for (auto index : coll->indices) {
     Value ir_value = tensors.at(index)->CurrentIrValue();
@@ -780,33 +789,6 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
     Value ir_value = tensors[index]->CurrentIrValue();
     lowering_ctx->AddResult(ir_value);
   }
-  if (FLAGS_torch_lazy_param_aliasing && coll.config.sync_ltc_data) {
-    // We can only alias at the step barrier, when force_ltc_data is true.
-    // Consider the case:
-    //   1. Tensor A(DEVICE_DATA)
-    //   2. Tensor B = A + 0.9
-    //   3. A += 0.4
-    // If we activate aliasing for A's graph, and we do:
-    //   print(A)
-    //   print(A)
-    // The first print will update DEVICE_DATA' with DEVICE_DATA+0.4, and the
-    // second print will again update DEVICE_DATA" with DEVICE_DATA'+0.4, which
-    // will lead to incorrect results.
-    // We cannot normally turn A's state into DEVICE_DATA, as if any of the
-    // sources is a view, this will not lead to correct results (as A's value
-    // taken at different times need to reflect view source changes):
-    //   1. Tensor A = some_graph_with_view_source(V)
-    //   2. print(A)
-    //   3. V += 1
-    //   4. print(A)
-    // The second print should reflect the new value due to V's changes.
-    // Also in the first example, unless we are doing a step barrier and hence
-    // include all live tensors, if the B value is not part of the graph, it
-    // will later fetch the new value of A, which is incorrect.
-    // But, when we issue a step barrier (force_ltc_data == true) we have to
-    // turn everything into DEVICE_DATA, so we can activate aliasing.
-    BuildInputOutputAliases(tensors, coll.indices, lowering_ctx.get());
-  }
 
   ComputationPtr computation = lowering_ctx->Build();
   // If force_ltc_data is true it means that we did a proper sync and are
@@ -856,40 +838,6 @@ LazyGraphExecutor::ComputationCache::TypePtr LazyGraphExecutor::
 #include <BaseTsd.h>
 typedef SSIZE_T ssize_t;
 #endif
-
-void LazyGraphExecutor::BuildInputOutputAliases(
-    const std::vector<LazyTensorPtr>& tensors,
-    c10::ArrayRef<size_t> indices,
-    LoweringContext* lowering_ctx) {
-  std::unordered_map<int64_t, size_t> output_tensor_id_map;
-  for (const auto i : c10::irange(indices.size())) {
-    size_t tensor_index = indices[i];
-    int64_t tensor_id = tensors[tensor_index]->GetUniqueId();
-    output_tensor_id_map[tensor_id] = i;
-  }
-  const std::vector<BackendDataPtr>& parameters_data =
-      lowering_ctx->GetParametersData();
-  std::vector<ssize_t> alias_map(indices.size(), -1);
-  for (const auto i : c10::irange(parameters_data.size())) {
-    DeviceDataInfo* data_info =
-        dynamic_cast<DeviceDataInfo*>(parameters_data[i]->info());
-    if (data_info != nullptr && !data_info->read_only) {
-      auto it = output_tensor_id_map.find(data_info->tensor_id);
-      if (it != output_tensor_id_map.end()) {
-        size_t output_index = it->second;
-        if (lowering_ctx->CheckResultShape(parameters_data[i], output_index) &&
-            alias_map[output_index] < 0) {
-          lowering_ctx->SetUpAlias({static_cast<int64_t>(output_index)}, i, {});
-          alias_map[output_index] = i;
-
-          VLOG(6) << "Aliased parameter " << i << " with output "
-                  << output_index << ": " << Shape(parameters_data[i]->shape());
-        }
-      }
-    }
-  }
-  TORCH_LAZY_VALUE_METRIC("InputOutputAliasCount", alias_map.size());
-}
 
 std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
     SyncTensorsGraphInternal(

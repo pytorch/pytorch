@@ -16,7 +16,7 @@ __all__ = ["caching_allocator_alloc", "caching_allocator_delete", "set_per_proce
            "reset_peak_memory_stats", "reset_max_memory_allocated", "reset_max_memory_cached",
            "memory_allocated", "max_memory_allocated", "memory_reserved", "max_memory_reserved",
            "memory_cached", "max_memory_cached", "memory_snapshot", "memory_summary", "list_gpu_processes",
-           "mem_get_info"]
+           "mem_get_info", "get_allocator_backend"]
 
 def _host_allocator():
     _lazy_init()
@@ -177,7 +177,7 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
 
     The caching allocator can be configured via ENV to not split blocks larger than a
     defined size (see Memory Management section of the Cuda Semantics documentation).
-    This helps avoid memory framentation but may have a performance
+    This helps avoid memory fragmentation but may have a performance
     penalty. Additional outputs to assist with tuning and evaluating impact:
 
     - ``"max_split_size"``: blocks above this size will not be split.
@@ -194,6 +194,10 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
     .. note::
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
+
+    .. note::
+        With :ref:`backend:cudaMallocAsync<cuda-memory-envvars>`, some stats are not
+        meaningful, and are always reported as zero.
     """
     result = []
 
@@ -636,3 +640,14 @@ def _save_memory_usage(filename='output.svg', snapshot=None):
 
 def _set_allocator_settings(env: str):
     return torch._C._cuda_cudaCachingAllocator_set_allocator_settings(env)
+
+def get_allocator_backend() -> str:
+    r"""Returns a string describing the active allocator backend as set by
+    ``PYTORCH_CUDA_ALLOC_CONF``. Currently available backends are
+    ``native`` (PyTorch's native caching allocator) and `cudaMallocAsync``
+    (CUDA's built-in asynchronous allocator).
+
+    .. note::
+        See :ref:`cuda-memory-management` for details on choosing the allocator backend.
+    """
+    return torch._C._cuda_getAllocatorBackend()
