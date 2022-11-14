@@ -1997,7 +1997,7 @@ linear(input, weight, bias=None) -> Tensor
 
 Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
-This opperation supports 2-D :attr:`weight` with :ref:`sparse layout<sparse-docs>`
+This operation supports 2-D :attr:`weight` with :ref:`sparse layout<sparse-docs>`
 
 {sparse_beta_warning}
 
@@ -2524,6 +2524,8 @@ def group_norm(
     """
     if has_torch_function_variadic(input, weight, bias):
         return handle_torch_function(group_norm, (input, weight, bias,), input, num_groups, weight=weight, bias=bias, eps=eps)
+    if input.dim() < 2:
+        raise RuntimeError(f"Expected at least 2 dimensions for input tensor but received {input.dim()}")
     _verify_batch_size([input.size(0) * input.size(1) // num_groups, num_groups] + list(input.size()[2:]))
     return torch.group_norm(input, num_groups, weight, bias, eps, torch.backends.cudnn.enabled)
 

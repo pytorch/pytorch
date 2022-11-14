@@ -15,7 +15,6 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
-    skipIfSlowGradcheckEnv,
     dtype_abbrs
 )
 from torch.testing._internal.common_device_type import (
@@ -53,7 +52,6 @@ b8 = torch.bool
 u8 = torch.uint8
 
 
-@skipIfSlowGradcheckEnv
 class TestMetaConverter(TestCase):
     def assertSameVersionCounter(self, m1, m2):
         # Cannot easily test m1 and m2 have same storage due to
@@ -297,58 +295,24 @@ CHECK_STRIDES_SKIPS = {
     aten._fft_r2c.default,
     aten._linalg_svd.default,
     aten._scaled_dot_product_attention_forward.default,
-    aten.add.Tensor,
-    aten.atan2.default,
     aten.binary_cross_entropy.default,
-    aten.bitwise_and.Tensor,
-    aten.bitwise_left_shift.Tensor,
-    aten.bitwise_or.Tensor,
-    aten.bitwise_right_shift.Tensor,
-    aten.bitwise_xor.Tensor,
-    aten.clamp_max.Tensor,
-    aten.clamp_min.Tensor,
     aten.complex.default,
     aten.copysign.Tensor,
     aten.div.Tensor_mode,
-    aten.div.Tensor,
-    aten.eq.Tensor,
     aten.floor_divide.default,
-    aten.fmax.default,
-    aten.fmin.default,
-    aten.fmod.Tensor,
-    aten.gcd.default,
-    aten.ge.Tensor,
-    aten.gt.Tensor,
     aten.heaviside.default,
-    aten.hypot.default,
-    aten.igamma.default,
-    aten.igammac.default,
-    aten.lcm.default,
-    aten.le.Tensor,
+    aten.lerp.Scalar,
+    aten.lerp.Tensor,
     aten.logical_and.default,
     aten.logical_or.default,
     aten.logical_xor.default,
-    aten.lt.Tensor,
-    aten.maximum.default,
-    aten.minimum.default,
-    aten.mul.Tensor,
-    aten.ne.Tensor,
-    aten.nextafter.default,
     aten.pow.Scalar,
-    aten.pow.Tensor_Scalar,
-    aten.pow.Tensor_Tensor,
     aten.prelu.default,
-    aten.remainder.Tensor,
-    aten.rsub.Tensor,
     aten.special_xlog1py.default,
-    aten.special_zeta.default,
-    aten.sub.Tensor,
-    aten.where.self,
     aten.xlogy.Tensor,
 
     # channel_last and channel_last_3d related failures
     aten.convolution.default,
-    aten.upsample_bilinear2d.vec,
 
     # following ops fails if include_storage_offset = True, but these are a bit edge casey
     # we should still fix them, leaving them here for tracking.
@@ -781,7 +745,6 @@ meta_function_device_expected_failures_only_outplace['cuda'] = {
 }
 
 meta_function_device_skips['cpu'] = {
-    torch.narrow_copy: {b8, bf16, c128, c32, c64, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.native_batch_norm: {f32, f64},
 }
 
@@ -1117,7 +1080,6 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 # inconsistencies between CUDA and CPU, and running on CUDA makes it easier
 # to ignore the CPU case when inconsistencies arise.  Ideally we deal
 # with the inconsistencies but this takes time.
-@skipIfSlowGradcheckEnv
 class TestMeta(TestCase):
     # Copies inputs to inplace operations to avoid inplace modifications
     #   to leaves requiring gradient
