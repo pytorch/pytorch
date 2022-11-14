@@ -287,6 +287,14 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.neg()"
 
     @staticmethod
+    def floordiv(a, b):
+        # a and b are integer type
+        _t = f"decltype({a})"
+        quot = f"{a} / {b}"
+        rem = f"{a} % {b}"
+        return f"(({a} < {_t}(0)) != ({b} < {_t}(0)) ? ({rem} != {_t}(0) ? {quot} - {_t}(1) : {quot}) : {quot})"
+
+    @staticmethod
     def truncdiv(a, b):
         # a and b are integer type
         return f"{a} / {b}"
