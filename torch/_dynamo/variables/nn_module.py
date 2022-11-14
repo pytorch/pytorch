@@ -197,8 +197,9 @@ class NNModuleVariable(VariableTracker):
                 # The module type will change after it is called
                 if is_lazy:
                     self.module_type = mod.cls_to_become
+                from .builder import wrap_fx_proxy
 
-                return variables.TensorVariable.create(
+                return wrap_fx_proxy(
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_module",
@@ -337,6 +338,8 @@ class NNModuleVariable(VariableTracker):
             ):
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+        elif name == "modules":
+            return wrap_values(module.named_modules())
         elif name == "parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
         elif name == "values":
@@ -452,7 +455,9 @@ class NNModuleVariable(VariableTracker):
 
             proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
 
-            return variables.TensorVariable.create(
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method",
