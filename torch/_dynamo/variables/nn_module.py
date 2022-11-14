@@ -9,7 +9,6 @@ from typing import Dict, List
 import torch.nn
 
 from .. import skipfiles, variables
-from ..allowed_functions import is_allowed
 from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
@@ -171,59 +170,19 @@ class NNModuleVariable(VariableTracker):
                 del tx.nn_module_stack[self.module_key]
 
         with record_nn_module_stack():
-            is_lazy = is_lazy_module(mod)
-            if (
-                isinstance(mod, torch.nn.Sequential)
-                and mod.__class__.forward is torch.nn.Sequential.forward
-            ):
-                # unroll Sequential()
-                assert not kwargs
-                (arg,) = args
-                for idx, submod in enumerate(mod):
-                    tx.call_function(
-                        tx.output.register_attr_or_module(
-                            submod,
-                            self.module_key,
-                            idx,
-                            source=NNModuleSource(GetItemSource(self.source, idx)),
-                            **options,
-                        ),
-                        [arg],
-                        {},
-                    )
-                    arg = tx.pop()
-                return arg
-            elif is_allowed(mod.__class__):
-                # The module type will change after it is called
-                if is_lazy:
-                    self.module_type = mod.cls_to_become
-                from .builder import wrap_fx_proxy
-
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_module",
-                        self.module_key,
-                        *proxy_args_kwargs(args, kwargs),
-                        current_tx=tx,
-                    ),
-                    **options,
-                )
-
+            # for lazy modules, run the pre-hooks which will update the type
+            # TODO mlazos: we don't fully support all of the hooks that exist,
+            # so restrict using __call__ only to lazy modules for now
+            if is_lazy_module(mod):
+                fn = mod.__class__.__call__
             else:
-                # for lazy modules, run the pre-hooks which will update the type
-                # TODO mlazos: we don't fully support all of the hooks that exist,
-                # so restrict using __call__ only to lazy modules for now
-                if is_lazy:
-                    fn = mod.__class__.__call__
-                else:
-                    fn = mod.__class__.forward
+                fn = mod.__class__.forward
 
-                return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, **options),
-                    [self] + args,
-                    kwargs,
-                )
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn, **options),
+                [self] + args,
+                kwargs,
+            )
 
     def call_method(
         self,
