@@ -3,6 +3,7 @@
 import contextlib
 import dataclasses
 import io
+import typing
 import unittest
 from typing import AbstractSet, Tuple
 
@@ -18,7 +19,7 @@ def _assert_has_diagnostics(
     rule_level_pairs: AbstractSet[Tuple[infra.Rule, infra.Level]],
 ):
     sarif_log = engine.sarif_log()
-    unseen_pairs = {(rule.id, level.value) for rule, level in rule_level_pairs}
+    unseen_pairs = {(rule.id, level.name.lower()) for rule, level in rule_level_pairs}
     actual_results = []
     for run in sarif_log.runs:
         if run.results is None:
@@ -110,9 +111,38 @@ class TestOnnxDiagnostics(common_utils.TestCase):
     def setUp(self):
         engine = diagnostics.engine
         engine.clear()
+        self._sample_rule = diagnostics.rules.missing_custom_symbolic_function
         super().setUp()
 
-    @unittest.skip("TODO: Pass locally but fail in CI.")
+    def _trigger_node_missing_onnx_shape_inference_warning_diagnostic_from_cpp(
+        self,
+    ) -> diagnostics.ExportDiagnostic:
+        class CustomAdd(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x + y
+
+            @staticmethod
+            def symbolic(g, x, y):
+                return g.op("custom::CustomAdd", x, y)
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return CustomAdd.apply(x, x)
+
+        # trigger warning for missing shape inference.
+        rule = diagnostics.rules.node_missing_onnx_shape_inference
+        torch.onnx.export(M(), torch.randn(3, 4), io.BytesIO())
+
+        context = diagnostics.engine.contexts[-1]
+        for diagnostic in context.diagnostics:
+            if (
+                diagnostic.rule == rule
+                and diagnostic.level == diagnostics.levels.WARNING
+            ):
+                return typing.cast(diagnostics.ExportDiagnostic, diagnostic)
+        raise AssertionError("No diagnostic found.")
+
     def test_assert_diagnostic_raises_when_diagnostic_not_found(self):
         with self.assertRaises(AssertionError):
             with assert_diagnostic(
@@ -124,20 +154,6 @@ class TestOnnxDiagnostics(common_utils.TestCase):
                 pass
 
     def test_cpp_diagnose_emits_warning(self):
-        class CustomAdd(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x, y):
-                ctx.save_for_backward(x, y)
-                return x + y
-
-            @staticmethod
-            def symbolic(g, x, y):
-                return g.op("custom::CustomAdd", x, y)
-
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return CustomAdd.apply(x, x)
-
         with assert_diagnostic(
             self,
             diagnostics.engine,
@@ -145,7 +161,7 @@ class TestOnnxDiagnostics(common_utils.TestCase):
             diagnostics.levels.WARNING,
         ):
             # trigger warning for missing shape inference.
-            torch.onnx.export(M(), torch.randn(3, 4), io.BytesIO())
+            self._trigger_node_missing_onnx_shape_inference_warning_diagnostic_from_cpp()
 
     def test_py_diagnose_emits_error(self):
         class M(torch.nn.Module):
@@ -169,15 +185,43 @@ class TestOnnxDiagnostics(common_utils.TestCase):
     def test_diagnostics_engine_records_diagnosis_reported_outside_of_export(
         self,
     ):
-        sample_rule = diagnostics.rules.missing_custom_symbolic_function
         sample_level = diagnostics.levels.ERROR
         with assert_diagnostic(
             self,
             diagnostics.engine,
-            sample_rule,
+            self._sample_rule,
             sample_level,
         ):
-            diagnostics.context.diagnose(sample_rule, sample_level, ("foo",))
+            diagnostics.context.diagnose(self._sample_rule, sample_level)
+
+    def test_diagnostics_records_python_call_stack(self):
+        diagnostic = diagnostics.ExportDiagnostic(
+            self._sample_rule, diagnostics.levels.NOTE
+        )
+        stack = diagnostic.python_call_stack
+        assert stack is not None  # for mypy
+        self.assertGreater(len(stack.frames), 0)
+        frame = stack.frames[0]
+        assert frame.location.snippet is not None  # for mypy
+        self.assertIn("self._sample_rule", frame.location.snippet)
+        assert frame.location.uri is not None  # for mypy
+        self.assertIn("test_diagnostics.py", frame.location.uri)
+
+    def test_diagnostics_records_cpp_call_stack(self):
+        diagnostic = (
+            self._trigger_node_missing_onnx_shape_inference_warning_diagnostic_from_cpp()
+        )
+        stack = diagnostic.cpp_call_stack
+        assert stack is not None  # for mypy
+        self.assertGreater(len(stack.frames), 0)
+        frame_messages = [frame.location.message for frame in stack.frames]
+        self.assertTrue(
+            any(
+                isinstance(message, str)
+                and "torch::jit::ONNXShapeTypeInference" in message
+                for message in frame_messages
+            )
+        )
 
 
 @dataclasses.dataclass
@@ -197,31 +241,17 @@ class TestDiagnosticsInfra(common_utils.TestCase):
     def setUp(self):
         self.engine = infra.DiagnosticEngine()
         self.rules = _RuleCollectionForTest()
-        self.diagnostic_tool = infra.DiagnosticTool("test_tool", "1.0.0", self.rules)
         with contextlib.ExitStack() as stack:
             self.context = stack.enter_context(
-                self.engine.create_diagnostic_context(self.diagnostic_tool)
+                self.engine.create_diagnostic_context("test", "1.0.0")
             )
             self.addCleanup(stack.pop_all().close)
         return super().setUp()
 
-    def test_diagnose_raises_value_error_when_rule_not_supported(self):
-        rule_id = "0"
-        rule_name = "nonexistent-rule"
-        with self.assertRaisesRegex(
-            ValueError,
-            f"Rule '{rule_id}:{rule_name}' is not supported by this tool "
-            f"'{self.diagnostic_tool.name} {self.diagnostic_tool.version}'.",
-        ):
-            self.context.diagnose(
-                infra.Rule(id=rule_id, name=rule_name, message_default_template=""),
-                infra.Level.WARNING,
-            )
-
     def test_diagnostics_engine_records_diagnosis_reported_in_nested_contexts(
         self,
     ):
-        with self.engine.create_diagnostic_context(self.diagnostic_tool) as context:
+        with self.engine.create_diagnostic_context("inner_test", "1.0.1") as context:
             context.diagnose(self.rules.rule_without_message_args, infra.Level.WARNING)
             sarif_log = self.engine.sarif_log()
             self.assertEqual(len(sarif_log.runs), 2)
@@ -251,9 +281,7 @@ class TestDiagnosticsInfra(common_utils.TestCase):
         )
 
         with self.engine.create_diagnostic_context(
-            tool=infra.DiagnosticTool(
-                name="custom_tool", version="1.0", rules=custom_rules
-            )
+            "custom_rules", "1.0"
         ) as diagnostic_context:
             with assert_all_diagnostics(
                 self,
@@ -269,20 +297,6 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 diagnostic_context.diagnose(
                     custom_rules.custom_rule_2, infra.Level.ERROR  # type: ignore[attr-defined]
                 )
-
-    def test_diagnostic_tool_raises_type_error_when_diagnostic_type_is_invalid(
-        self,
-    ):
-        with self.assertRaisesRegex(
-            TypeError,
-            "Expected diagnostic_type to be a subclass of Diagnostic, but got",
-        ):
-            _ = infra.DiagnosticTool(
-                "custom_tool",
-                "1.0",
-                self.rules,
-                diagnostic_type=int,
-            )
 
 
 if __name__ == "__main__":

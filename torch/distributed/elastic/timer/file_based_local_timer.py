@@ -10,6 +10,7 @@ import logging
 import os
 import select
 import signal
+import sys
 import threading
 import time
 from typing import Callable, Dict, List, Optional, Set, Tuple
@@ -75,10 +76,11 @@ class FileTimerClient(TimerClient):
         file_path: str, the path of a FIFO special file. ``FileTimerServer``
                         must have created it by calling os.mkfifo().
 
-        signal: singal, the signal to use to kill the process. Using a
+        signal: signal, the signal to use to kill the process. Using a
                         negative or zero signal will not kill the process.
     """
-    def __init__(self, file_path: str, signal=signal.SIGKILL) -> None:
+    def __init__(self, file_path: str, signal=(signal.SIGKILL if sys.platform != "win32" else
+                                               signal.CTRL_C_EVENT)) -> None:  # type: ignore[attr-defined]
         super().__init__()
         self._file_path = file_path
         self.signal = signal

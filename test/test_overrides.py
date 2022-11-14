@@ -387,6 +387,10 @@ class TestTorchFunctionOverride(TestCase):
         self.assertEqual(torch.mean(t3), 4.0)
         self.assertEqual(bar(t3), 0)
 
+    def test_has_torch_function_non_sequence(self):
+        with self.assertRaisesRegex(TypeError, "expected a sequence"):
+            has_torch_function(object())
+
     def test_mm_semantics(self):
         """Test that a function with multiple arguments can be overrided"""
         t1 = DiagonalTensor(5, 2)
@@ -1175,7 +1179,7 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch.mm(x, x), -1)
             self.assertEqual(bar(x), 1)
             self.assertRaisesRegex(
-                TypeError, r'SubTensor.+TorchFunctionStackMode',
+                TypeError, r'SubTensor',
                 lambda: self.assertEqual(torch.max(x, x)))
 
     def test_with_mode(self):
@@ -1248,7 +1252,7 @@ class TestTorchFunctionMode(TestCase):
                 return func(args, kwargs)
 
         x = torch.tensor(5.)
-        with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
+        with self.assertRaisesRegex(RuntimeError, "classmethod is not supported, please make it a plain method"):
             with A():
                 x + x
 

@@ -250,10 +250,8 @@ def _create_chunk_sharded_tensor(
             requires_grad=False,
             memory_format=torch.contiguous_format,
             pin_memory=tensor.is_pinned(),
-        )
+        ),
     )
     return ShardedTensor._init_from_local_shards_and_global_metadata(
-        local_shards,
-        sharded_tensor_metadata=sharded_tensor_metadata,
-        process_group=pg
+        local_shards, sharded_tensor_metadata=sharded_tensor_metadata, process_group=pg
     )

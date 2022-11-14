@@ -1,5 +1,7 @@
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <ATen/native/vulkan/ops/Utils.h>
+
+#include <ATen/Context.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -41,7 +43,7 @@ vTensor pack_weights(const Tensor& weight_arg) {
       weight.options(),
   };
 
-  api::StorageBuffer staging(context, at::kFloat, v_weight.numcells());
+  api::StorageBuffer staging(context, at::kFloat, v_weight.gpu_numel());
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
@@ -104,7 +106,7 @@ vTensor pack_biases(
         bias_arg->options(),
     };
 
-    api::StorageBuffer staging(context, at::kFloat, v_bias.numcells());
+    api::StorageBuffer staging(context, at::kFloat, v_bias.gpu_numel());
     {
       api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
@@ -133,7 +135,7 @@ vTensor pack_biases(
         weight_arg.options(),
     };
 
-    api::StorageBuffer staging(context, at::kFloat, v_bias.numcells());
+    api::StorageBuffer staging(context, at::kFloat, v_bias.gpu_numel());
     {
       api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 

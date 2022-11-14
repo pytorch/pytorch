@@ -1,21 +1,29 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Copy.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/FunctionalTensorWrapper.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
 #include <ATen/metal/Context.h>
-#include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_copy_from.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/expand_copy.h>
+#endif
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
@@ -212,6 +220,18 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return at::metal::metal_copy_(self, src);
   }
 
+  // Exit early if self and src are views of the same data
+  const bool is_same_data = (
+      self.is_alias_of(src) &&
+      self.storage_offset() == src.storage_offset() &&
+      self.strides().equals(src.strides()) &&
+      self.sizes().equals(src.sizes()) &&
+      self.scalar_type() == src.scalar_type()
+    );
+  if (is_same_data) {
+    return self;
+  }
+
 
   auto iter = TensorIteratorConfig()
     .add_output(self)
@@ -269,8 +289,8 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
   //   c = torch.ones(4, 4)
   //   torch.ops.aten.copy(a, b).add_(c)
   // We don't want to emit an extra copy every time though, so we only do it if the shapes are different.
-  if (self.sizes() != intermediate.sizes()) {
-    return at::expand_copy(intermediate, self.sizes());
+  if (self.sym_sizes() != intermediate.sym_sizes()) {
+    return at::expand_copy_symint(intermediate, self.sym_sizes());
   } else {
     return intermediate;
   }
