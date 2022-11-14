@@ -27,7 +27,7 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .dicts import ConstDictVariable
-from .tensor import DynamicShapeVariable, FakeItemVariable
+from .tensor import DynamicShapeVariable, FakeItemVariable, UnspecializedPythonVariable
 
 log = logging.getLogger(__name__)
 
@@ -371,13 +371,7 @@ class BuiltinVariable(VariableTracker):
                 ),
                 **options,
             )
-            return DynamicShapeVariable.create(tx, proxy, value, **options)
         return super().call_function(tx, args, kwargs)
-
-    def _dynamic_args(self, *args, **kwargs):
-        return any([isinstance(x, DynamicShapeVariable) for x in args]) or any(
-            [isinstance(x, DynamicShapeVariable) for x in kwargs.values()]
-        )
 
     def _call_min_max(self, tx, a, b):
         if self.tensor_args(a, b):
@@ -495,11 +489,14 @@ class BuiltinVariable(VariableTracker):
 
             args = [guard_if_dyn(arg) for arg in args]
             value = self.fn(*args)
-            return variables.RangeVariable(
-                value=value
-            )
+            return variables.RangeVariable(value=value)
         # None no-ops this handler and lets the driving function proceed
         return None
+
+    def _dynamic_args(self, *args, **kwargs):
+        return any([isinstance(x, DynamicShapeVariable) for x in args]) or any(
+            [isinstance(x, DynamicShapeVariable) for x in kwargs.values()]
+        )
 
     def call_slice(self, tx, *args):
         return variables.SliceVariable(args)
@@ -616,15 +613,8 @@ class BuiltinVariable(VariableTracker):
 
     def call_isinstance(self, tx, arg, isinstance_type):
         arg_type = arg.python_type()
-        try:
-            isinstance_type = isinstance_type.as_python_constant()
-        except NotImplementedError:
-            try:
-                isinstance_type = isinstance_type.python_type()
-            except NotImplementedError:
-                unimplemented(
-                    f"isinstance called with unknown instance type {isinstance_type}"
-                )
+
+        isinstance_type = isinstance_type.as_python_constant()
 
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
             return variables.ConstantVariable(arg.call_isinstance(isinstance_type))

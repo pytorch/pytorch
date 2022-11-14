@@ -973,6 +973,8 @@ class FakeTensorMode(TorchDispatchMode):
             aten.detach.default,
             aten.zero.default,
             aten.resize_.default,
+            aten.view_as_real.default,
+            aten.view_as_complex.default,
             aten.squeeze_.dim,
             aten._fused_moving_avg_obs_fq_helper_functional.default,
             aten._sparse_coo_tensor_with_dims_and_tensors.default,

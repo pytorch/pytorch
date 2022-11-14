@@ -23,10 +23,6 @@ from .constant import ConstantVariable
 from .lists import ShapeVariable, SizeVariable
 
 
-class _missing:
-    pass
-
-
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 

@@ -1370,30 +1370,8 @@ def pool2d_shape_check(
     )
 
 
-@register_meta(aten.max_pool2d_with_indices_backward.default)
-def meta_max_pool2d_with_indices_backward(
-    grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices
-):
-    # Reference: aten/src/ATen/native/cpu/MaxPoolKernel.cpp
-    memory_format = utils.suggest_memory_format(self)
-    if memory_format == torch.contiguous_format:
-        pass
-    elif memory_format == torch.channels_last:
-        check(
-            self.ndim == 4,
-            lambda: "max pooling backward with channels last format supports tensors with 4 dims.",
-        )
-    else:
-        check(
-            False,
-            lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
-        )
-    return self.new_empty(self.shape)
-
-
-@register_meta(aten.max_pool2d_with_indices.default)
-def meta_max_pool2d_with_indices(
-    input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
+def max_pool2d_checks_and_compute_shape(
+    input, kernel_size, stride, padding, dilation, ceil_mode
 ):
     # Reference: aten/src/ATen/native/DilatedMaxPool2d.cpp
     def unpack(name, val):
@@ -1418,6 +1396,9 @@ def meta_max_pool2d_with_indices(
 
     padH, padW = unpack("padding", padding)
     dilationH, dilationW = unpack("dilation", dilation)
+    nInputPlane = input.size(-3)
+    inputHeight = input.size(-2)
+    inputWidth = input.size(-1)
 
     memory_format = utils.suggest_memory_format(input)
     if memory_format == torch.channels_last:
@@ -1435,11 +1416,6 @@ def meta_max_pool2d_with_indices(
             False,
             lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
         )
-
-    nbatch = input.size(-4) if input.dim() == 4 else 1
-    nInputPlane = input.size(-3)
-    inputHeight = input.size(-2)
-    inputWidth = input.size(-1)
 
     outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, dilationH, ceil_mode)
     outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, dilationW, ceil_mode)
@@ -1462,6 +1438,49 @@ def meta_max_pool2d_with_indices(
         memory_format,
     )
 
+    return nInputPlane, outputHeight, outputWidth
+
+
+@register_meta(aten.max_pool2d_with_indices_backward.default)
+def meta_max_pool2d_with_indices_backward(
+    grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices
+):
+    nInputPlane, outputHeight, outputWidth = max_pool2d_checks_and_compute_shape(
+        self, kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+    check(
+        self.dtype == grad_output.dtype,
+        lambda: "expected dtype {self.dtype} for `gradOutput` but got dtype {grad_output.dtype}",
+    )
+
+    nOutputPlane = nInputPlane
+    ndim = self.ndim
+
+    def _check_dim_size(t):
+        check_dim_size(t, ndim, ndim - 3, nOutputPlane)
+        check_dim_size(t, ndim, ndim - 2, outputHeight)
+        check_dim_size(t, ndim, ndim - 1, outputWidth)
+
+    _check_dim_size(grad_output)
+    _check_dim_size(indices)
+
+    memory_format = utils.suggest_memory_format(self)
+    return torch.empty(
+        self.shape, dtype=self.dtype, device=self.device, memory_format=memory_format
+    )
+
+
+@register_meta(aten.max_pool2d_with_indices.default)
+def meta_max_pool2d_with_indices(
+    input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
+):
+    nInputPlane, outputHeight, outputWidth = max_pool2d_checks_and_compute_shape(
+        input, kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+    nbatch = input.size(-4) if input.dim() == 4 else 1
+    memory_format = utils.suggest_memory_format(input)
     if input.dim() == 3:
         size = [nInputPlane, outputHeight, outputWidth]
     else:
@@ -1893,30 +1912,31 @@ def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
     return self
 
 
-@register_meta(aten.upsample_nearest2d.vec)
-def upsample_nearest2d_vec(input, output_size, scale_factors):
-    mem_format = utils.suggest_memory_format(input)
-    spatial_dimensions = input.dim() - 2
+def multiply_integers(vs):
+    r = 1
+    for v in vs:
+        r *= v
+    return r
 
-    input_shape = input.shape
-    if output_size is not None:
-        assert scale_factors is None
-        out_size = output_size
-    elif scale_factors is not None:
-        assert output_size is None
-        out_size = []
-        for i in range(spatial_dimensions):
-            sym_float = (input_shape[i + 2] / 1) * scale_factors[i]
-            assert sym_float >= 0
-            out_size.append(math.floor(sym_float))
 
-    output_height = out_size[0]
-    output_width = out_size[1]
-    nbatch = input_shape[0]
-    channels = input_shape[1]
-    return input.new_empty((nbatch, channels, output_height, output_width)).to(
-        memory_format=mem_format
-    )
+def upsample_2d_common_check(input_size, output_size):
+    check(len(output_size) == 2, lambda: f"It is expected output_size equals to 2, but got size {len(output_size)}")
+    check(len(input_size) == 4, lambda: f"It is expected input_size equals to 4, but got size {len(input_size)}")
+
+    output_height, output_width = output_size
+    nbatch, channels, input_height, input_width = input_size
+
+    check(input_height > 0 and input_width > 0 and output_height > 0 and output_width > 0, f"Input and output sizes should be greater than 0, but got input (H: {input_height}, W: {input_width}), output (H: {output_height}), W: {output_width})")
+
+    return (nbatch, channels, output_height, output_width)
+
+
+@register_meta(aten.upsample_nearest2d.default)
+def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
+    full_output_size = upsample_2d_common_check(input.size(), output_size)
+    check(input.numel() != 0 or multiply_integers(input.size()[1:]),
+        lambda: "Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}")
+    return input.new_empty(full_output_size).to(memory_format=utils.suggest_memory_format(input))
 
 
 @register_meta([aten.sort.default, aten.sort.stable])
@@ -1981,6 +2001,36 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     if len(topKSize) > 0:
         topKSize[dim] = k
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
+
+
+legacy_contiguous_memory_format = torch.contiguous_format
+
+
+# From aten/src/ATen/native/cuda/RNN.cu
+def checkLSTMBackwardSizes(grad_hy, grad_cy, cx, cy, workspace):
+    defined_grad = grad_hy if grad_hy is not None else grad_cy
+    check(defined_grad.dim() == 2, lambda: "")
+    exp_size = defined_grad.size()
+    if grad_hy is not None:
+        check(grad_hy.size() == exp_size, lambda: "")
+    if grad_cy is not None:
+        check(grad_cy.size() == exp_size, lambda: "")
+    check(cx.size() == exp_size, lambda: "")
+    check(cy.size() == exp_size, lambda: "")
+    check(workspace.dim() == 2, lambda: "")
+    check(workspace.numel() == exp_size[0] * exp_size[1] * 4, lambda: "")
+
+
+# From aten/src/ATen/native/cuda/RNN.cu
+@register_meta(aten._thnn_fused_lstm_cell_backward_impl.default)
+def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has_bias):
+    if grad_hy is None and grad_cy is None:
+        return None, None, None
+    checkLSTMBackwardSizes(grad_hy, grad_cy, cx, cy, workspace)
+    grad_gates = torch.empty_like(workspace, memory_format=legacy_contiguous_memory_format)
+    grad_cx = torch.empty_like(cx, memory_format=legacy_contiguous_memory_format)
+    grad_bias = grad_gates.sum(0, keepdim=False) if has_bias else None
+    return grad_gates, grad_cx, grad_bias
 
 
 # We must also trigger meta registrations from PrimTorch ref
