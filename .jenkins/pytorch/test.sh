@@ -249,7 +249,7 @@ test_inductor_distributed() {
 }
 
 test_inductor() {
-  python test/run_test.py --include test_modules --verbose
+  python test/run_test.py --include test_modules test_ops --verbose
   # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
   # seen intest_ops_gradients.py
   # pytest test/test_ops_gradients.py --verbose -k "not _complex and not test_inplace_grad_acos_cuda_float64"
