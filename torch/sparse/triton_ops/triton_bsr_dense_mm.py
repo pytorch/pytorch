@@ -1,7 +1,8 @@
 import torch
 import triton
 import triton.language as tl
-from typing import Optional
+import itertools
+from typing import Optional, Tuple
 
 
 def compressed_indices_to_plain_indices(cidx, pidx):
@@ -24,6 +25,18 @@ def compressed_indices_to_plain_indices(cidx, pidx):
     ).select(0, 0)
 
     return idx_linear.reshape(batch_numel, -1).sub_(cdim * batch_offset)
+
+
+def slicer(dim, slice_range, *tensors):
+    for t in tensors:
+        slices = [slice(None)] * t.dim()
+        slices[dim] = slice_range
+        yield t[slices]
+
+
+def ptr_stride_gen(*tensors):
+    for t in tensors:
+        yield t, *t.stride()
 
 
 @triton.jit
@@ -150,12 +163,12 @@ def _bsr_strided_dense_rowspace_kernel(
 
 @triton.jit
 def _bsr_strided_sparse_rowspace_kernel(
+    BLOCKSIZE_ROW: tl.constexpr,
+    BLOCKSIZE_COL: tl.constexpr,
     batch_idx_ptr,
     row_idx_ptr,
     nnz_per_row_ptr,
     nnz_per_row_cumsum_ptr,
-    BLOCKSIZE_ROW: tl.constexpr,
-    BLOCKSIZE_COL: tl.constexpr,
     col_indices_ptr,
     col_indices_stride,
     # values prologue
@@ -250,7 +263,7 @@ def _bsr_strided_sparse_rowspace_kernel(
 
 
 def _run_sparse_rowspace_kernel(
-    blocksize, values, crow_indices, col_indices, dense, output
+    blocksize, values, crow_indices, col_indices, dense, output, max_grid
 ):
     # Compute a vector of non-zero elements numbers per each row.
     # We want to ultimately iterate over non-zero rows.
@@ -273,11 +286,11 @@ def _run_sparse_rowspace_kernel(
     n_block_cols = dense.size(-3)
     grid = (n_nnz_block_rows, n_block_cols)
     _bsr_strided_sparse_rowspace_kernel[grid](
+        *blocksize,
         batch_idx,
         row_idx,
         nnz_per_row,
         nnz_per_row_cumsum,
-        *blocksize,
         col_indices,
         *col_indices.stride(),
         values,
@@ -293,29 +306,47 @@ def _run_sparse_rowspace_kernel(
 
 
 def _run_dense_rowspace_kernel(
-    blocksize, values, crow_indices, col_indices, dense, output
+    blocksize, values, crow_indices, col_indices, dense, output, max_grid
 ):
     # Launch kernel
     n_batches = dense.size(0)
     n_block_rows = crow_indices.size(-1) - 1
     n_block_cols = dense.size(-3)
-    grid = (n_block_rows, n_block_cols, n_batches)
-    _bsr_strided_dense_rowspace_kernel[grid](
-        *blocksize,
-        values,
-        *values.stride(),
-        crow_indices,
-        *crow_indices.stride(),
-        col_indices,
-        *col_indices.stride(),
-        dense,
-        *dense.stride(),
-        output,
-        *output.stride(),
-        GROUP_SIZE_ROW=4,
-        num_stages=4,
-        num_warps=4,
-    )
+    max_n_block_rows, max_n_block_cols, max_n_batches = max_grid
+
+    for b_start in range(0, n_batches, max_n_batches):
+        b_v, b_crow, b_col, b_d, b_o = slicer(
+            0,
+            slice(b_start, b_start + max_n_batches),
+            values,
+            crow_indices,
+            col_indices,
+            dense,
+            output,
+        )
+        b_grid = min(n_batches - b_start, max_n_batches)
+
+        for c_start in range(0, n_block_cols, max_n_block_cols):
+            bc_d, bc_o = slicer(
+                -3, slice(c_start, c_start + max_n_block_cols), b_d, b_o
+            )
+            c_grid = min(n_block_cols - c_start, max_n_block_cols)
+
+            for r_start in range(0, n_block_rows, max_n_block_rows):
+                r_slice = slice(r_start, r_start + max_n_block_rows)
+                br_crow = next(slicer(-1, r_slice, b_crow))
+                brc_o = next(slicer(-4, r_slice, bc_o))
+                r_grid = min(n_block_rows - r_start, max_n_block_rows)
+
+                _bsr_strided_dense_rowspace_kernel[(r_grid, c_grid, b_grid)](
+                    *blocksize,
+                    *itertools.chain.from_iterable(
+                        ptr_stride_gen(b_v, br_crow, b_col, bc_d, brc_o)
+                    ),
+                    GROUP_SIZE_ROW=4,
+                    num_stages=4,
+                    num_warps=4,
+                )
 
 
 def bsr_dense_mm(
@@ -324,6 +355,7 @@ def bsr_dense_mm(
     *,
     is_sparse_rowspace_mode: Optional[bool] = None,
     out: torch.Tensor = None,
+    max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
 ):
     # TODO: insert checks
     m, kl = bsr.shape[-2:]
@@ -433,7 +465,25 @@ def bsr_dense_mm(
         kernel = _run_sparse_rowspace_kernel
     else:
         kernel = _run_dense_rowspace_kernel
-    kernel(blocksize, values, crow_indices, col_indices, dense, out)
+
+    # cuda_max_grid = (2 ** 31 - 1, 2 ** 16 - 1, 2 ** 16 - 1)
+    cuda_max_grid = (2147483647, 65535, 65535)
+    if max_grid is None:
+        max_grid = cuda_max_grid
+    else:
+
+        def valid_grid_dim(g, mg):
+            if g is None:
+                return mg
+            else:
+                # grid must be at least 1 and no greater than mg
+                return max(1, min(g, mg))
+
+        max_grid = tuple(
+            valid_grid_dim(g, mg) for g, mg in zip(max_grid, cuda_max_grid)
+        )
+
+    kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid)
 
     # Block dims need to rejoin with the corresponding block dimensions
     # prior to reshape so that blocks do not end up being transposed.
@@ -451,9 +501,9 @@ if __name__ == "__main__":
     size = (mask_size[0] * block_size[0], mask_size[1] * block_size[1])
 
     n_exp = 512
-    diff = torch.ones(n_exp, device="cuda", dtype=torch.double)
+    diff = torch.ones(n_exp, device="cuda", dtype=torch.float32)
     for i in range(n_exp):
-        mask = torch.rand(*mask_size, device='cuda') < p
+        mask = torch.rand(*mask_size, device="cuda") < p
         x = torch.rand(*mask_size, *block_size, dtype=dtype, device="cuda") / 10
         x = (
             (mask[:, :, None, None] * x)

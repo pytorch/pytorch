@@ -1510,6 +1510,7 @@ class TestSparseCSR(TestCase):
         from functools import partial
         from torch.sparse.triton_ops import bsr_dense_mm
 
+        # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
         # Tensor params
         batches = [(), (2,)]
@@ -1540,6 +1541,16 @@ class TestSparseCSR(TestCase):
             self.assertTrue(kernel_run[0])
             self.assertEqual(res_tri, res_dense)
             kernel_run[0] = False
+
+            # check whether bsr_dense_mm handles different grid sizes
+            # None means max possible grid size which is CUDA-dependent,
+            # and odd values are co-prime with powers of 2 so that we will
+            # always have "uneven" tiles.
+            grid_size = (None, 3, 7)
+            res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
+            for grid in itertools.product(grid_size, grid_size, grid_size):
+                res_tri = bsr_dense_mm(bsr, dense.transpose(-2, -1), max_grid=grid)
+                self.assertEqual(res_tri, res_dense)
 
         # clean-up
         del lib
