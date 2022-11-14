@@ -36,6 +36,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from collections import defaultdict
 from datetime import datetime
 from os.path import abspath, exists
@@ -1093,6 +1094,10 @@ class DashboardUpdater:
         """
         Send a commment to dashboard
         """
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write(comment)
+            filename = f.name
+
         subprocess.check_call(
             [
                 self.args.dashboard_gh_cli_path,
@@ -1100,10 +1105,12 @@ class DashboardUpdater:
                 "comment",
                 "--repo=https://github.com/pytorch/torchdynamo.git",
                 "681",
-                "-b",
-                comment,
+                "-F",
+                filename,
             ]
         )
+
+        os.remove(filename)
 
     def update(self):
         self.upload_graphs()
