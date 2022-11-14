@@ -91,6 +91,20 @@ jobs:
         # WITH_PUSH is used here to determine whether or not to add the --push flag
         run: |
           make -f docker.Makefile "${BUILD_IMAGE_TYPE}-image"
+      - name: Push nightly tags
+        if: ${{ github.event.ref == 'refs/heads/nightly' && matrix.image_type == 'runtime' }}
+        run: |
+          PYTORCH_DOCKER_TAG="${PYTORCH_VERSION}-runtime"
+          CUDA_VERSION=$(python3 -c "import re;print(re.search('CUDA_VERSION\s+=\s+([0-9\.]+)',open('docker.Makefile').read())[1],end='')")
+          PYTORCH_NIGHTLY_COMMIT=$(docker run ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_DOCKER_TAG}" \
+                                          python -c 'import torch; print(torch.version.git_version[:7],end="")')
+          docker tag ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_DOCKER_TAG}" \
+                 ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}-cu${CUDA_VERSION}"
+          docker push ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}-cu${CUDA_VERSION}"
+
+          docker tag ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}-cu${CUDA_VERSION}" \
+                 ghcr.io/pytorch/pytorch-nightly:latest
+          docker push ghcr.io/pytorch/pytorch-nightly:latest
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
