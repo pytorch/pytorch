@@ -1774,14 +1774,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.fc = Linear(in_features=512, out_features=128, bias=True)
+                self.fc = torch.nn.Linear(in_features=2, out_features=3, bias=True)
 
             def forward(self, x):
                 return self.fc(x)
 
         mod = Foo()
         opt_mod = torch._dynamo.optimize("eager")(mod)
-        args = [torch.randn(1, 512)]
+        args = [torch.randn(1, 2)]
         self.assertTrue(same_two_models(mod, opt_mod, args))
 
     def test_class_member(self):
