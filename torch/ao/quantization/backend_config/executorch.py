@@ -7,7 +7,7 @@ import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
 from .backend_config import BackendConfig, BackendPatternConfig, DTypeConfig, ObservationType
 from ._common_operator_config_utils import _Conv2dMetadata
-from ..fuser_method_mappings import reverse_sequential_wrapper2
+from ..fuser_method_mappings import _reverse_sequential_wrapper2
 
 
 __all__ = [
@@ -105,13 +105,13 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
         conv_configs.append(
             BackendPatternConfig((torch.nn.ReLU, convs.root))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(reverse_sequential_wrapper2(convs.fused_conv_relu))
+                .set_fuser_method(_reverse_sequential_wrapper2(convs.fused_conv_relu))
                 .set_fused_module(convs.fused_conv_relu))
         # conv module + functional relu
         conv_configs.append(
             BackendPatternConfig((F.relu, convs.root))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(reverse_sequential_wrapper2(convs.fused_conv_relu))
+                .set_fuser_method(_reverse_sequential_wrapper2(convs.fused_conv_relu))
                 .set_fused_module(convs.fused_conv_relu))
         # fused conv relu module
         conv_configs.append(
@@ -181,7 +181,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
     ]
     share_qparams_op_configs: List[BackendPatternConfig] = []
     for op in share_qparams_ops:
-        share_qparams_ops.append(
+        share_qparams_op_configs.append(
             BackendPatternConfig(op)
                 .set_observation_type(observation_type)  # noqa: E131
                 .set_dtype_configs(dtype_configs))

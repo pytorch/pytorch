@@ -10,7 +10,7 @@ from torch._C import _onnx as _C_onnx
 # Import utils to get _params_dict because it is a global that is accessed by c++ code
 from torch.onnx import _deprecation, utils
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, jit_utils
 
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
@@ -70,7 +70,7 @@ def _graph_op(
     args = [_const_if_tensor(g, arg) for arg in raw_args]
 
     if "::" in opname:
-        namespace, op = opname.split("::")
+        namespace, op = jit_utils.parse_node_kind(opname)
     else:
         namespace = "onnx"
         op = opname
@@ -124,7 +124,7 @@ def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwarg
 @_beartype.beartype
 def _block_op(block: _C.Block, opname: str, *args: _C.Value, **kwargs):
     if "::" in opname:
-        namespace, op = opname.split("::")
+        namespace, op = jit_utils.parse_node_kind(opname)
     else:
         namespace = "onnx"
         op = opname
