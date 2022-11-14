@@ -99,7 +99,8 @@ jobs:
         id: monitor-script
         shell: bash
         run: |
-          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          # Windows conda doesn't have python3 binary, only python, but it's python3
+          python -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download PyTorch Build Artifacts
@@ -203,7 +204,8 @@ jobs:
         shell: bash
         run: |
           set -x
-          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+          # Windows conda doesn't have python3 binary, only python, but it's python3
+          python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win
