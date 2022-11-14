@@ -744,7 +744,7 @@ def general_cosine(M, *,
                        requires_grad=requires_grad)
 
     for i, w in enumerate(a):
-        window = window + (-1) ** i * w * torch.cos(i * k)
+        window += (-1) ** i * w * torch.cos(i * k)
 
     return window
 
