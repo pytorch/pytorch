@@ -34,11 +34,6 @@ def slicer(dim, slice_range, *tensors):
         yield t[slices]
 
 
-def ptr_stride_gen(*tensors):
-    for t in tensors:
-        yield t, *t.stride()
-
-
 @triton.jit
 def _bsr_strided_dense_rowspace_kernel(
     BLOCKSIZE_ROW: tl.constexpr,
@@ -340,9 +335,11 @@ def _run_dense_rowspace_kernel(
 
                 _bsr_strided_dense_rowspace_kernel[(r_grid, c_grid, b_grid)](
                     *blocksize,
-                    *itertools.chain.from_iterable(
-                        ptr_stride_gen(b_v, br_crow, b_col, bc_d, brc_o)
-                    ),
+                    b_v, *b_v.stride(),
+                    br_crow, *br_crow.stride(),
+                    b_col, *b_col.stride(),
+                    bc_d, *bc_d.stride(),
+                    brc_o, *brc_o.stride(),
                     GROUP_SIZE_ROW=4,
                     num_stages=4,
                     num_warps=4,
