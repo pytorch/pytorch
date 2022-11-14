@@ -121,7 +121,28 @@ class DebugInterpreter(fx.Interpreter):
         # TODO: This will fail once we start caching in AOTAutograd
         # again, because we need to remap SymInts to their new values
         # in the presence of dynamism
+        # Check that inputs are consistent
+        def check(nv, rv, desc):
+            assert callable(desc)
+            assert nv.size() == rv.size(), f"{desc()}: {nv.size()} != {rv.size()}"
+            assert nv.dtype == rv.dtype, f"{desc()}: {nv.dtype} != {rv.dtype}"
+            same_strides, idx = torch._prims_common.check_significant_strides(nv, rv, only_cuda=False)
+            assert same_strides, f"{desc()}: {nv.stride()} != {rv.stride()} (mismatch at index {idx})"
+
+        a_vals, _ = pytree.tree_flatten((n.args, n.kwargs))
+        for i, a in enumerate(a_vals):
+            if not isinstance(a, fx.Node):
+                continue
+            if 'val' not in a.meta:
+                continue
+            if not isinstance(a.meta['val'], torch.Tensor):
+                continue
+            r = self.env[a]
+            # TODO: make this more descriptive
+            check(a.meta['val'], r, lambda: f"input {i}")
+
         r = super().run_node(n)
+        # Check that outputs are consistent
         if 'val' in n.meta:
             n_vals, n_spec = pytree.tree_flatten(n.meta['val'])
             r_vals, r_spec = pytree.tree_flatten(r)
@@ -130,9 +151,7 @@ class DebugInterpreter(fx.Interpreter):
             for i, nv, rv in zip(range(len(n_vals)), n_vals, r_vals):
                 if not isinstance(rv, torch.Tensor):
                     continue
-                assert nv.size() == rv.size(), f"output {i}: {nv.size()} != {rv.size()}"
-                assert nv.dtype == rv.dtype, f"output {i}: {nv.dtype} != {rv.dtype}"
-                assert torch._prims_common.check_significant_strides(nv, rv), f"output {i}: {nv.stride()} != {rv.stride()}"
+                check(nv, rv, lambda: f"output {i}")
         return r
 
 
