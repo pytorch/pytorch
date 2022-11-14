@@ -231,8 +231,8 @@ class TestPythonKey(AOTTestCase):
         self.assertEqual(grads, grads2)
 
 
-def _outs_and_grads(fn, inps):
-    outs = fn(*inps)
+def _outs_and_grads(fn, graph_inps, inps):
+    outs = fn(*graph_inps)
     for out in pytree.tree_flatten(outs)[0]:
         if isinstance(out, torch.Tensor) and out.requires_grad:
             out.sum().backward(retain_graph=True)
@@ -243,8 +243,10 @@ def _outs_and_grads(fn, inps):
 
 
 class TestAOTAutograd(AOTTestCase):
-    def verify_aot_autograd(self, f, inp, *, mutate_output: bool=False):
-        # Create a copy of inputs, so we can test input mutation correctness.
+    # test_mutation will:
+    # - Ensure that inputs are non-leaves, so our graphs can mutate them
+    # - try to mutate outputs of the graph (to ensure that autograd meta is set properly on outputs)
+    def verify_aot_autograd(self, f, inp, *, test_mutation: bool = False):
         inp_copy = []
         for x in inp:
             x_copy = x.clone().detach().requires_grad_(x.requires_grad)
@@ -252,12 +254,21 @@ class TestAOTAutograd(AOTTestCase):
                 x_copy = x_copy.clone()
             inp_copy.append(x_copy)
 
+        if test_mutation:
+            # For graphs where we mutate inputs, need our test to make sure inputs aren't leaves
+            graph_inps = [x.add(1) for x in inp]
+            graph_inps_copy = [x.add(1) for x in inp_copy]
+        else:
+            graph_inps_copy = inp_copy
+
+        # Create a copy of inputs, so we can test input mutation correctness.
+
         if isinstance(f, nn.Module):
             compiled_f = aot_module(f, nop)
         else:
             compiled_f = aot_function(f, nop)
-        ref_out, ref_grad = _outs_and_grads(f, inp)
-        test_out, test_grad = _outs_and_grads(compiled_f, inp_copy)
+        ref_out, ref_grad = _outs_and_grads(f, graph_inps, inp)
+        test_out, test_grad = _outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
         self.assertEqual(ref_out, test_out)
         self.assertEqual(ref_grad, test_grad)
 
@@ -270,11 +281,11 @@ class TestAOTAutograd(AOTTestCase):
                 self.assertEqual(ref_o.is_leaf, test_o.is_leaf)
                 self.assertEqual(ref_o._is_view(), test_o._is_view())
                 self.assertEqual(ref_o, test_o)
-                if mutate_output:
+                if test_mutation:
                     # This tests that autograd meta is set properly on the output we can
                     # mutate it.
-                    ref_o.add_(1)
-                    test_o.add_(1)
+                    ref_o.mul_(1)
+                    test_o.mul_(1)
                     self.assertEqual(ref_o, test_o)
         for ref_i, test_i in zip(inp, inp_copy):
             if isinstance(ref_i, torch.Tensor):
@@ -301,42 +312,53 @@ class TestAOTAutograd(AOTTestCase):
 
     def test_input_mutation_simple(self):
         def f(a):
-            a.add_(1)
-            return a + 2
-        inp = [torch.ones(3, 3, requires_grad=True).add(1)]
+            a.mul_(2)
+            return a * 3
+        inp = [torch.ones(3, 3, requires_grad=True)]
 
-        self.verify_aot_autograd(f, inp)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_mutation_is_output(self):
         def f(a):
-            a.add_(1)
+            a.mul_(2)
             return a
-        inp = [torch.ones(3, 3, requires_grad=True).add(1)]
+        inp = [torch.ones(3, 3, requires_grad=True)]
 
-        self.verify_aot_autograd(f, inp)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_mutation_multiple(self):
         def f(a, b, c):
-            a.add_(1)
-            c.add_(1)
+            a.mul_(2)
+            c.mul_(2)
             return a + b + c
 
         inp = [
-            torch.ones(3, 3, requires_grad=True).add(1),
-            torch.ones(3, 3, requires_grad=True).add(1),
-            torch.ones(3, 3, requires_grad=True).add(1),
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=True),
         ]
 
-        self.verify_aot_autograd(f, inp)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_mutation_metadata(self):
+        def f(a, b):
+            a.transpose_(1, 0)
+            return a + b
+        inp = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=True),
+        ]
+
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+
+    def test_input_mutation_metadata2(self):
         def f(a):
             a.transpose_(1, 0)
-            a.add_(1)
+            a.mul_(2)
             return a + 1
-        inp = [torch.ones(3, 3, requires_grad=True).add(1)]
+        inp = [torch.ones(3, 3, requires_grad=True)]
 
-        self.verify_aot_autograd(f, inp)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_mutation_resize_smaller(self):
         def f(a, b):
@@ -348,7 +370,7 @@ class TestAOTAutograd(AOTTestCase):
             torch.ones(2, 2, requires_grad=True),
         ]
 
-        self.verify_aot_autograd(f, inp)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_output_view_mutate_simple(self):
         def f(a):
@@ -357,7 +379,7 @@ class TestAOTAutograd(AOTTestCase):
             torch.ones(2, 2, requires_grad=True).add(1),
         ]
 
-        self.verify_aot_autograd(f, inp, mutate_output=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_output_view_mutate_multiple(self):
         def f(a, b, c, d):
@@ -369,7 +391,7 @@ class TestAOTAutograd(AOTTestCase):
             torch.ones(2, 2, requires_grad=True).add(1),
         ]
 
-        self.verify_aot_autograd(f, inp, mutate_output=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_mutation_and_output_view(self):
         def f(a):
@@ -379,7 +401,21 @@ class TestAOTAutograd(AOTTestCase):
             torch.ones(2, 2, requires_grad=True).add(1),
         ]
 
-        self.verify_aot_autograd(f, inp, mutate_output=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+
+    def test_input_mutation_output_view_multiple(self):
+        def f(a, b, c, d):
+            b.transpose_(1, 0)
+            c.add_(1)
+            return d + 1, b.diagonal(), a + c
+        inp = [
+            torch.arange(4, requires_grad=True, dtype=torch.float32).view(2, 2).add(1),
+            torch.arange(4, requires_grad=True, dtype=torch.float32).view(2, 2).add(1),
+            torch.ones(2, 2, requires_grad=True).add(1),
+            torch.ones(2, 2, requires_grad=True).add(1),
+        ]
+
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_no_grad_input_output(self):
         def f(a, b):
@@ -1196,20 +1232,13 @@ symbolic_aot_autograd_failures = {
     xfail('masked.cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('masked.cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
     xfail('masked_fill', ''),  # could not find kernel
-    xfail('masked.log_softmax', ''),  # argument 'size' (position 2) must be tuple of ints, not ...
     xfail('masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposi...
     xfail('masked.logsumexp', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked.mean', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=t...
-    xfail('masked.median', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked.norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    # Seems flaky: https://github.com/pytorch/pytorch/issues/88883
+    skip('masked.median', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
-    xfail('masked.softmax', ''),  # argument 'size' (position 2) must be tuple of ints, not torc...
-    xfail('masked.softmin', ''),  # argument 'size' (position 2) must be tuple of ints, not torc...
-    xfail('masked.std', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=to...
-    xfail('masked.sum', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked.var', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=to...
     xfail('matmul', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decompo...
     xfail('median', ''),  # could not find kernel
@@ -1317,7 +1346,6 @@ symbolic_aot_autograd_failures = {
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('topk', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trapz', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides

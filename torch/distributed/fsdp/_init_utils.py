@@ -3,6 +3,7 @@ import warnings
 from typing import (
     Callable,
     Dict,
+    Generator,
     Iterable,
     Iterator,
     List,
@@ -33,8 +34,11 @@ from torch.distributed.fsdp._wrap_utils import _get_submodule_to_states
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
+    FullStateDictConfig,
     MixedPrecision,
     ShardingStrategy,
+    StateDictConfig,
+    StateDictType,
 )
 from torch.distributed.fsdp.flat_param import (
     _HandlesKey,
@@ -206,7 +210,11 @@ def _init_prefetching_state(
 
 
 def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
-    # TODO: after rebase
+    state._state_dict_type = StateDictType.FULL_STATE_DICT
+    state_dict_config: StateDictConfig = FullStateDictConfig()
+    state._state_dict_config = state_dict_config
+    unshard_params_ctx: Dict[nn.Module, Generator] = {}
+    state._unshard_params_ctx = unshard_params_ctx
     return state
 
 
