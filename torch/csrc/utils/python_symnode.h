@@ -164,10 +164,6 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return dispatch_common_(__FUNCTION__);
   }
 
-  c10::SymNode sym_int() override {
-    return dispatch_common_(__FUNCTION__);
-  }
-
   c10::SymNode sym_float() override {
     return dispatch_common_(__FUNCTION__);
   }
