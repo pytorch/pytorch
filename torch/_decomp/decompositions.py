@@ -1373,13 +1373,13 @@ def native_batch_norm(
     return output.to(dtype=input.dtype), save_mean, save_rstd
 
 
-# TODO: this decomposition is NOT here to stay. We would much prefer replacing native_batch_norm 
+# TODO: this decomposition is NOT here to stay. We would much prefer replacing native_batch_norm
 # with our new correctly schema'd native_batch_norm_legit and its variants, but
 # we cannot do that immediately in the C++ because it would be forwards incompatible
 # with some mobile use cases.
 #
-# Since this change is most impactful for aot autograd/functionalization, we simply 
-# register this decomposition on the Autograd key for the python dispatcher (which is 
+# Since this change is most impactful for aot autograd/functionalization, we simply
+# register this decomposition on the Autograd key for the python dispatcher (which is
 # currently only used by aot autograd/functionalization and no one else, really).
 # In two weeks or so, we should remove this decomposition and phase out the current native_batch_norm
 # to be native_batch_norm_legit and have the right schema (stating that there are input mutations).
@@ -1395,7 +1395,9 @@ def native_batch_norm_decomposition(
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor]:
     if running_mean is not None and running_var is not None:
-            return aten.native_batch_norm_legit(input, weight, bias, running_mean, running_var, training, momentum, eps)
+        return aten.native_batch_norm_legit(
+            input, weight, bias, running_mean, running_var, training, momentum, eps
+        )
     return aten.native_batch_norm_legit(input, weight, bias, training, momentum, eps)
 
 
