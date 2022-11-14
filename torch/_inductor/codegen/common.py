@@ -450,7 +450,7 @@ class CSE:
     def generate(
         self, buffer: IndentedBuffer, expr: typing.Union[str, CSEVariable], write=True
     ) -> CSEVariable:
-        assert isinstance(expr, str) or isinstance(expr, CSEVariable), type(expr)
+        assert isinstance(expr, (str, CSEVariable)), type(expr)
         if isinstance(expr, CSEVariable):
             return expr
         if expr not in self.cache:
