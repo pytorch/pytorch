@@ -659,6 +659,18 @@ def sanitize_pytest_xml(xml_file: str):
         testcase.set("file", f"{file}.py")
     tree.write(xml_file)
 
+
+def print_unexpected_success(xml_file: str):
+    # pytest already prints them, so only need to do this for unittest
+    import xml.etree.ElementTree as ET
+    tree = ET.parse(xml_file)
+    for testcase in tree.iter('testcase'):
+        for children in testcase:
+            if children.attrib.get("type", "") == "UnexpectedSuccess":
+                print(f"ERROR [{testcase.attrib.get('time', '')}s]: {testcase.attrib.get('name', '')}" +
+                      f"(__main__.{testcase.attrib.get('classname', '')}): unexpected success")
+
+
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if SLOW_TESTS_FILE:
@@ -771,10 +783,13 @@ def run_tests(argv=UNITTEST_ARGS):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print(f'Test results will be stored in {test_report_path}')
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+        exit_code = unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
             output=test_report_path,
             verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose))
+            resultclass=XMLTestResultVerbose),
+            exit=False)
+        print_unexpected_success(test_report_path)
+        exit(exit_code)
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
