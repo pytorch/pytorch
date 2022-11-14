@@ -10,7 +10,8 @@ namespace testing {
 ///
 /// @param name identifies a resource, relative path starting from the
 ///             repo root
-inline auto getResourcePath(std::string name) -> std::experimental::filesystem::path {
+inline auto getResourcePath(std::string name)
+    -> std::experimental::filesystem::path {
   return std::move(name);
 }
 
