@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 
+"""
+Generate CI workflows. This script is based on common binary build matrix
+and requires generate_binary_build_matrix.py file from test-infra repository.
+To automatically pull this file and regenerate run it using  .githun/regenerate.sh
+script.
+
+"""
+
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, Set, List, Iterable
+from types import ModuleType
 
 import jinja2
 
 import os
 import sys
 from typing_extensions import Literal, TypedDict
-
-import generate_binary_build_matrix  # type: ignore[import]
+import importlib.util
 
 Arch = Literal["windows", "linux", "macos"]
 
@@ -22,6 +30,7 @@ LABEL_CIFLOW_PERIODIC = "ciflow/periodic"
 LABEL_CIFLOW_BINARIES_LIBTORCH = "ciflow/binaries_libtorch"
 LABEL_CIFLOW_BINARIES_CONDA = "ciflow/binaries_conda"
 LABEL_CIFLOW_BINARIES_WHEEL = "ciflow/binaries_wheel"
+CHANNEL = "nightly"
 
 @dataclass
 class CIFlowConfig:
@@ -51,7 +60,7 @@ class BinaryBuildWorkflow:
     abi_version: str = ''
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     is_scheduled: str = ''
-    branches: str = 'nightly'
+    branches: str = CHANNEL
     # Mainly for macos
     cross_compile_arm64: bool = False
     xcode_version: str = ''
@@ -83,11 +92,36 @@ class OperatingSystem:
     MACOS = "macos"
     MACOS_ARM64 = "macos-arm64"
 
+def import_module(modname: str, fname: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(modname, fname)
+    if spec is None:
+        raise ImportError(f"Could not load spec for module '{modname}' at: {fname}. \
+        Please run the regenerate.sh from .github folder before running generate_ci_workflows")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[modname] = module
+    try:
+        spec.loader.exec_module(module)
+    except FileNotFoundError as e:
+        raise ImportError(f"{e.strerror}: {fname}") from e
+    return module
+
+generate_binary_build_matrix = import_module(
+    "generate_binary_build_matrix",
+    str(Path(__file__).parent / ".tools" / "generate_binary_build_matrix.py"),
+)
+
+generate_binary_build_matrix.initialize_globals(CHANNEL)
+
 LINUX_BINARY_BUILD_WORFKLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
         package_type="manywheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(OperatingSystem.LINUX),
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+            OperatingSystem.LINUX,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.ENABLE,
+            with_pypi_cudnn=generate_binary_build_matrix.ENABLE),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
             isolated_workflow=True,
@@ -96,7 +130,11 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
         package_type="conda",
-        build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.LINUX),
+        build_configs=generate_binary_build_matrix.generate_conda_matrix(
+            OperatingSystem.LINUX,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
             isolated_workflow=True,
@@ -107,7 +145,11 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.CXX11_ABI,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI
+            OperatingSystem.LINUX,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE,
+            abi_versions=[generate_binary_build_matrix.CXX11_ABI]
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -119,7 +161,11 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX, generate_binary_build_matrix.PRE_CXX11_ABI
+            OperatingSystem.LINUX,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE,
+            abi_versions=[generate_binary_build_matrix.PRE_CXX11_ABI]
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -134,6 +180,10 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         package_type="manywheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE,
+            with_pypi_cudnn=generate_binary_build_matrix.ENABLE,
             arches=["11.6"],
             python_versions=["3.7"]),
         branches="master",
@@ -143,7 +193,11 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.CXX11_ABI,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
+            OperatingSystem.LINUX,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE,
+            abi_versions=[generate_binary_build_matrix.CXX11_ABI],
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),
@@ -154,7 +208,11 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
+            OperatingSystem.LINUX,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE,
+            abi_versions=[generate_binary_build_matrix.CXX11_ABI],
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),
@@ -166,7 +224,11 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
         package_type="wheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(OperatingSystem.WINDOWS),
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+            OperatingSystem.WINDOWS,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
             isolated_workflow=True,
@@ -175,7 +237,11 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
         package_type="conda",
-        build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.WINDOWS),
+        build_configs=generate_binary_build_matrix.generate_conda_matrix(
+            OperatingSystem.WINDOWS,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
             isolated_workflow=True,
@@ -186,7 +252,11 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.RELEASE,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS, generate_binary_build_matrix.RELEASE
+            OperatingSystem.WINDOWS,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE,
+            abi_versions=[generate_binary_build_matrix.RELEASE]
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -198,7 +268,11 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.DEBUG,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS, generate_binary_build_matrix.DEBUG
+            OperatingSystem.WINDOWS,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE,
+            abi_versions=[generate_binary_build_matrix.DEBUG]
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -212,7 +286,11 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.RELEASE,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS, generate_binary_build_matrix.RELEASE,
+            OperatingSystem.WINDOWS,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE,
+            abi_versions=[generate_binary_build_matrix.RELEASE],
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),
@@ -223,7 +301,11 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.DEBUG,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS, generate_binary_build_matrix.DEBUG,
+            OperatingSystem.WINDOWS,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE,
+            abi_versions=[generate_binary_build_matrix.DEBUG],
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),
@@ -235,7 +317,11 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.MACOS,
         package_type="wheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(OperatingSystem.MACOS),
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+            OperatingSystem.MACOS,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
             isolated_workflow=True,
@@ -244,7 +330,11 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.MACOS,
         package_type="conda",
-        build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.MACOS),
+        build_configs=generate_binary_build_matrix.generate_conda_matrix(
+            OperatingSystem.MACOS,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
             isolated_workflow=True,
@@ -255,7 +345,11 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.CXX11_ABI,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.MACOS, generate_binary_build_matrix.CXX11_ABI
+            OperatingSystem.MACOS,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE,
+            abi_versions=[generate_binary_build_matrix.CXX11_ABI]
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -267,7 +361,11 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.MACOS, generate_binary_build_matrix.PRE_CXX11_ABI
+            OperatingSystem.MACOS,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE,
+            abi_versions=[generate_binary_build_matrix.PRE_CXX11_ABI]
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -277,7 +375,11 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.MACOS_ARM64,
         package_type="wheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(OperatingSystem.MACOS),
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+            OperatingSystem.MACOS,
+            CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE),
         cross_compile_arm64=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
@@ -288,7 +390,10 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         os=OperatingSystem.MACOS_ARM64,
         package_type="conda",
         cross_compile_arm64=True,
-        build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.MACOS_ARM64),
+        build_configs=generate_binary_build_matrix.generate_conda_matrix(
+            OperatingSystem.MACOS_ARM64, CHANNEL,
+            with_cuda=generate_binary_build_matrix.ENABLE,
+            with_py311=generate_binary_build_matrix.DISABLE),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
             isolated_workflow=True,
@@ -296,7 +401,9 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
     ),
 ]
 
+
 def main() -> None:
+
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
