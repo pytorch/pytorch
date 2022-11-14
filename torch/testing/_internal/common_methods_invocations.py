@@ -14551,7 +14551,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_full,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
