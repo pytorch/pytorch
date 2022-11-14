@@ -3749,6 +3749,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
+        @sandcastle_skip_if(BACKEND == "ucc", "flaky on PyTorch CI with timeout")
         def test_barrier_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -3842,7 +3843,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
-        # @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
+        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
         @skip_if_no_gpu
         def test_all_reduce_multigpu(self):
             group, group_id, rank = self._init_global_test()
@@ -3860,7 +3861,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
-        # @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
+        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
         @skip_if_no_gpu
         def test_all_reduce_multigpu_complex(self):
             group, group_id, rank = self._init_global_test()
@@ -7683,7 +7684,7 @@ class DistributedTest:
                 # Should only be run by rank 0, and blocking_wait catches and
                 # reports exception.
                 dist.barrier(group_to_use)
-            
+
             # We don't check when self.rank != 0 because the logger doesn't log
             # the error "Caught collective operation" as that is not thrown in the reducer.
             if use_logger and self.rank != 0:
@@ -7695,20 +7696,19 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        # @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
+        @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
         @skip_if_lt_x_gpu(2)
         def test_verify_model_across_rank_with_logger(self):
             self._test_verify_model_across_rank(use_logger=True)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        # @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
+        @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
         @skip_if_lt_x_gpu(2)
         def test_verify_model_across_rank_without_logger(self):
             self._test_verify_model_across_rank(use_logger=False)
 
         def _run_test_ddp_model_with_diff_params(self, ctx, net, ddp_group, group_gloo):
-            print('starting _run_test_ddp_model_with_diff_params')
             with ctx:
                 net = torch.nn.parallel.DistributedDataParallel(
                     net.to(self.rank),
@@ -7718,18 +7718,16 @@ class DistributedTest:
                 # Should only be run by rank 0, and blocking_wait catches and
                 # reports exception.
                 dist.barrier(ddp_group)
-            print('made it past first barrier')
 
             # can't use verify_ddp_error_logged here because net was never properly constructed
 
             # Perform gloo-based barrier to ensure one rank doesn't exit test
             # early which causes failure with Barrier.sync.
             dist.barrier(group_gloo)
-            print('finished _run_test_ddp_model_with_diff_params')
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        # @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
+        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
         @skip_if_lt_x_gpu(2)
         def test_ddp_model_diff_shape_across_ranks(self):
             group_gloo = dist.new_group(
@@ -7738,7 +7736,6 @@ class DistributedTest:
             # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
             # determinism.
             os.environ["NCCL_BLOCKING_WAIT"] = "1"
-            os.environ["TORCH_UCC_BLOCKING_WAIT"] = "all"
             group_to_use = dist.new_group(
                 backend=dist.get_backend(), timeout=timedelta(seconds=10)
             )
@@ -7753,7 +7750,7 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        # @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
+        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
         @skip_if_lt_x_gpu(2)
         def test_ddp_model_diff_num_params_across_ranks(self):
             group_gloo = dist.new_group(
@@ -7762,7 +7759,6 @@ class DistributedTest:
             # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
             # determinism.
             os.environ["NCCL_BLOCKING_WAIT"] = "1"
-            os.environ["TORCH_UCC_BLOCKING_WAIT"] = "all"
             group_to_use = dist.new_group(
                 backend=dist.get_backend(), timeout=timedelta(seconds=10)
             )
@@ -9167,6 +9163,10 @@ class DistributedTest:
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["cuda"],
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices"
+        )
+        @sandcastle_skip_if(
+            BACKEND == "ucc",
+            "flaky on PyTorch CI: No such file or directory: '/tmp/checkpoint.pt'"
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_ddp_hook_pickling_powerSGD(self):
