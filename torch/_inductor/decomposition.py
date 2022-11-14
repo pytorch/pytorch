@@ -101,6 +101,8 @@ decompositions = get_decompositions(
         aten.unfold_backward,
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
+        aten.softplus,
+        aten.softplus_backward,
     ]
 )
 
@@ -323,7 +325,7 @@ register_extra_random_decomp = functools.partial(
 
 @register_extra_random_decomp([aten.bernoulli_])
 def bernoulli_(self, p=0.5):
-    return self.copy_(torch.rand_like(self) < p)
+    return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
 
 
 @functools.lru_cache(None)

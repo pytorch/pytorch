@@ -14,6 +14,7 @@ python -m tools.onnx.gen_diagnostics \
 
 import argparse
 import os
+import string
 import subprocess
 import textwrap
 import typing
@@ -31,19 +32,37 @@ See tools/onnx/gen_diagnostics.py for more information.
 Diagnostic rules for PyTorch ONNX export.
 """
 
-_PY_RULE_TEMPLATE = """\
-{0}: infra.Rule = dataclasses.field(
-    default=infra.Rule.from_sarif(**{1}),
+_PY_RULE_CLASS_COMMENT = """\
+GENERATED CODE - DO NOT EDIT DIRECTLY
+The purpose of generating a class for each rule is to override the `format_message`
+method to provide more details in the signature about the format arguments.
+"""
+
+_PY_RULE_CLASS_TEMPLATE = """\
+class _{pascal_case_name}(infra.Rule):
+    \"\"\"{short_description}\"\"\"
+    def format_message(self, {message_arguments}) -> str:  # type: ignore[override]
+        \"\"\"Returns the formatted default message of this Rule.
+
+        Message template: {message_template}
+        \"\"\"
+        return self.message_default_template.format({message_arguments_assigned})
+
+"""
+
+_PY_RULE_COLLECTION_FIELD_TEMPLATE = """\
+{snake_case_name}: _{pascal_case_name} = dataclasses.field(
+    default=_{pascal_case_name}.from_sarif(**{sarif_dict}),
     init=False,
 )
-\"\"\"{2}\"\"\"
+\"\"\"{short_description}\"\"\"
 """
 
 _CPP_RULE_TEMPLATE = """\
 /**
- * @brief {1}
+ * @brief {short_description}
  */
-{0},
+{name},
 """
 
 _RuleType = Mapping[str, Any]
@@ -57,17 +76,54 @@ def _kebab_case_to_pascal_case(name: str) -> str:
     return "".join(word.capitalize() for word in name.split("-"))
 
 
-def _format_rule_for_python(rule: _RuleType) -> str:
-    name = _kebab_case_to_snake_case(rule["name"])
+def _format_rule_for_python_class(rule: _RuleType) -> str:
+    pascal_case_name = _kebab_case_to_pascal_case(rule["name"])
+    short_description = rule["short_description"]["text"]
+    message_template = rule["message_strings"]["default"]["text"]
+    field_names = [
+        field_name
+        for _, field_name, _, _ in string.Formatter().parse(message_template)
+        if field_name is not None
+    ]
+    for field_name in field_names:
+        assert isinstance(
+            field_name, str
+        ), f"Unexpected field type {type(field_name)} from {field_name}. "
+        "Field name must be string.\nFull message template: {message_template}"
+        assert (
+            not field_name.isnumeric()
+        ), f"Unexpected numeric field name {field_name}. "
+        "Only keyword name formatting is supported.\nFull message template: {message_template}"
+    message_arguments = ", ".join(field_names)
+    message_arguments_assigned = ", ".join(
+        [f"{field_name}={field_name}" for field_name in field_names]
+    )
+    return _PY_RULE_CLASS_TEMPLATE.format(
+        pascal_case_name=pascal_case_name,
+        short_description=short_description,
+        message_template=repr(message_template),
+        message_arguments=message_arguments,
+        message_arguments_assigned=message_arguments_assigned,
+    )
+
+
+def _format_rule_for_python_field(rule: _RuleType) -> str:
+    snake_case_name = _kebab_case_to_snake_case(rule["name"])
+    pascal_case_name = _kebab_case_to_pascal_case(rule["name"])
     short_description = rule["short_description"]["text"]
 
-    return _PY_RULE_TEMPLATE.format(name, rule, short_description)
+    return _PY_RULE_COLLECTION_FIELD_TEMPLATE.format(
+        snake_case_name=snake_case_name,
+        pascal_case_name=pascal_case_name,
+        sarif_dict=rule,
+        short_description=short_description,
+    )
 
 
 def _format_rule_for_cpp(rule: _RuleType) -> str:
     name = f"k{_kebab_case_to_pascal_case(rule['name'])}"
     short_description = rule["short_description"]["text"]
-    return _CPP_RULE_TEMPLATE.format(name, short_description)
+    return _CPP_RULE_TEMPLATE.format(name=name, short_description=short_description)
 
 
 def load_rules(rules_path: str) -> Sequence[_RuleType]:
@@ -81,7 +137,8 @@ def gen_diagnostics_python(
     rules: Sequence[_RuleType], out_py_dir: str, template_dir: str
 ) -> None:
 
-    rule_lines = [_format_rule_for_python(rule) for rule in rules]
+    rule_class_lines = [_format_rule_for_python_class(rule) for rule in rules]
+    rule_field_lines = [_format_rule_for_python_field(rule) for rule in rules]
 
     fm = torchgen_utils.FileManager(
         install_dir=out_py_dir, template_dir=template_dir, dry_run=False
@@ -91,7 +148,9 @@ def gen_diagnostics_python(
         "rules.py.in",
         lambda: {
             "generated_comment": _RULES_GENERATED_COMMENT,
-            "rules": textwrap.indent("\n".join(rule_lines), " " * 4),
+            "generated_rule_class_comment": _PY_RULE_CLASS_COMMENT,
+            "rule_classes": "\n".join(rule_class_lines),
+            "rules": textwrap.indent("\n".join(rule_field_lines), " " * 4),
         },
     )
 
