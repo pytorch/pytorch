@@ -186,9 +186,7 @@ def main() -> None:
         # No PR number, no tag, we can just return the test matrix as it is
         filtered_test_matrix = test_matrix
 
-
-    # TODO: DEBUG, to be removed back to == "schedule"
-    if args.event_name != "schedule":
+    if args.event_name == "schedule":
         filtered_test_matrix = set_periodic_modes(filtered_test_matrix)
 
     # Set the filtered test matrix as the output
