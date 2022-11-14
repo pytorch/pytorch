@@ -2388,6 +2388,35 @@ class TestComposability(TestCase):
         with self.assertRaises(RuntimeError):
             grad(f)(x)
 
+    def test_autograd_function_debug_switch(self, device):
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, gy):
+                x, = ctx.saved_tensors
+                return gy * x.cos()
+
+        x = torch.randn([])
+
+        # by default, autograd.Function is disabled in a functorch transform
+        with self.assertRaisesRegex(RuntimeError, "autograd.Function"):
+            grad(MySin.apply)(x)
+
+        # we have a debug switch to allow it
+        self.assertFalse(torch._C._functorch.get_autograd_function_allowed())
+        try:
+            torch._C._functorch.set_autograd_function_allowed(True)
+            self.assertTrue(torch._C._functorch.get_autograd_function_allowed())
+            y = grad(MySin.apply)(x)
+        finally:
+            torch._C._functorch.set_autograd_function_allowed(False)
+        self.assertFalse(torch._C._functorch.get_autograd_function_allowed())
+        self.assertEqual(y, x.cos())
+
     @parametrize('transform', [
         'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
