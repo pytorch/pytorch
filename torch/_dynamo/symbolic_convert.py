@@ -55,7 +55,7 @@ from .utils import (
     istype,
 )
 from .variables.base import MutableLocal, typestr, VariableTracker
-from .variables.builder import VariableBuilder
+from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.dicts import ConstDictVariable
@@ -81,7 +81,7 @@ from .variables.misc import (
     WithExitFunctionVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import TensorVariable
+from .variables.tensor import DynamicShapeVariable, TensorVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
 
@@ -129,8 +129,17 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
             if truth_fn(value.as_python_constant()):
                 push and self.push(value)
                 self.jump(inst)
-        elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
+        elif (
+            isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
+        ):
             # compile a partial subgraph prefix then jump into user code
+            if self.has_backedge():
+                msg = (
+                    "Skipping frame because there is a graph break in a for/while loop"
+                )
+                log.debug(msg)
+                raise exc.SkipFrame(msg)
+
             self.push(value)
             self.output.compile_subgraph(
                 self,
@@ -155,6 +164,11 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 push and self.push(value)
                 self.jump(inst)
+        elif isinstance(value, DynamicShapeVariable):
+            eval_result = value.evaluate_expr(self.output)
+            if truth_fn(eval_result):
+                push and self.push(value)
+                self.jump(inst)
         else:
             unimplemented(f"generic_jump {typestr(value)}")
 
@@ -172,10 +186,15 @@ def break_graph_if_unsupported(*, push):
             reason = None
             try:
                 return inner_fn(self, inst)
-            except Unsupported as exc:
+            except Unsupported as excp:
+                if self.has_backedge():
+                    msg = "Skipping frame because there is a graph break in a for/while loop"
+                    log.debug(msg)
+                    raise exc.SkipFrame(msg)
+
                 if not self.should_compile_partial_graph():
                     raise
-                user_stack = [self.frame_summary()] + list(reversed(exc.real_stack))
+                user_stack = [self.frame_summary()] + list(reversed(excp.real_stack))
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
@@ -186,12 +205,12 @@ def break_graph_if_unsupported(*, push):
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
                     log.warning(
-                        f"Graph break: {exc} from user code at {user_stack_formatted}"
+                        f"Graph break: {excp} from user code at {user_stack_formatted}"
                     )
 
-                exc.remove_from_stats()
-                exc.add_to_stats("graph_break")
-                reason = GraphCompileReason(exc.msg, user_stack)
+                excp.remove_from_stats()
+                excp.add_to_stats("graph_break")
+                reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
             self.output.compile_subgraph(self, reason=reason)
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
@@ -230,6 +249,19 @@ def break_graph_if_unsupported(*, push):
 
 
 class InstructionTranslatorBase(object):
+    def has_backedge(self):
+        cur_offset = self.current_instruction.offset
+        for inst in self.instructions[self.instruction_pointer :]:
+            if inst.opname in (
+                "JUMP_ABSOLUTE",
+                "POP_JUMP_IF_TRUE",
+                "POP_JUMP_IF_FALSE",
+            ):
+                jump_offset = inst.argval
+                if jump_offset < cur_offset:
+                    return True
+        return False
+
     def cell_and_freevars(self):
         if not hasattr(self, "_cell_and_freevars"):
             self._cell_and_freevars = tuple(
@@ -700,6 +732,7 @@ class InstructionTranslatorBase(object):
                 left,
                 (
                     TensorVariable,
+                    DynamicShapeVariable,
                     NNModuleVariable,
                     BaseListVariable,
                     UserDefinedVariable,
@@ -718,16 +751,6 @@ class InstructionTranslatorBase(object):
                 )
             )
         elif (
-            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
-        ) and op in supported_tensors:
-            self.push(
-                TensorVariable.create(
-                    self,
-                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
-                    **options,
-                )
-            )
-        elif (
             left.is_python_constant()
             and right.is_python_constant()
             and op in supported_any
@@ -741,10 +764,40 @@ class InstructionTranslatorBase(object):
                     **options,
                 )
             )
+        elif (
+            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
+        ) and op in supported_tensors:
+            self.push(
+                wrap_fx_proxy(
+                    self,
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    **options,
+                )
+            )
+        elif (
+            isinstance(left, DynamicShapeVariable)
+            or isinstance(right, DynamicShapeVariable)
+        ) and op in supported_tensors:
+            self.push(
+                DynamicShapeVariable.create(
+                    self,
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    dyn_shape=None,
+                    **options,
+                )
+            )
         elif op in ("in", "not in"):
             self.push(right.call_method(self, "__contains__", [left], {}))
             if op == "not in":
                 self.UNARY_NOT(inst)
+        elif (
+            isinstance(left, UserFunctionVariable)
+            and isinstance(right, UserFunctionVariable)
+            and op in supported_is_const
+        ):
+            self.push(
+                ConstantVariable(supported_is_const[op](left.fn, right.fn), **options)
+            )
         else:
             unimplemented(f"COMPARE_OP {typestr(left)} {op} {typestr(right)}")
 
@@ -828,6 +881,14 @@ class InstructionTranslatorBase(object):
     def STORE_ATTR(self, inst):
         prior = self.copy_graphstate()
         val, obj = self.popn(2)
+
+        if isinstance(obj, NNModuleVariable):
+            # We don't allow side effects during export
+            # https://github.com/pytorch/torchdynamo/issues/1475
+            assert (
+                not self.export
+            ), f"Mutating module attribute {inst.argval} during export."
+
         try:
             self.output.guards.update(
                 BuiltinVariable(setattr)
@@ -1013,12 +1074,12 @@ class InstructionTranslatorBase(object):
         elif isinstance(seq, TensorVariable):
             proxy = seq.as_proxy()
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable.create(self, proxy[i], **options))
+                self.push(wrap_fx_proxy(self, proxy[i], **options))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable.create(self, proxy[i], **options))
+                self.push(wrap_fx_proxy(self, proxy[i], **options))
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
 
@@ -1093,7 +1154,8 @@ class InstructionTranslatorBase(object):
             fmt_spec = ConstantVariable("")
 
         value = self.pop()
-
+        if isinstance(value, DynamicShapeVariable):
+            value = ConstantVariable(str(value.dyn_shape))
         if (flags & 0x03) == 0x01:
             value = BuiltinVariable(str).call_function(self, [value], {})
         elif (flags & 0x03) == 0x02:
@@ -1312,6 +1374,7 @@ class InstructionTranslatorBase(object):
         symbolic_locals: Dict[str, VariableTracker],
         symbolic_globals: Dict[str, VariableTracker],
         f_code: types.CodeType,
+        export: bool,
     ):
         super(InstructionTranslatorBase, self).__init__()
 
@@ -1341,6 +1404,8 @@ class InstructionTranslatorBase(object):
         self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
         # Stack of module being parsed, current nn.module is at the end of ordered dict
         self.nn_module_stack: Dict[str, str] = {}
+        # Flag to indicate whether tracing is used for export.
+        self.export = export
 
         if fake_tensors_available:
             with torch._subclasses.FakeTensorMode(
@@ -1391,6 +1456,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             # A global var is inserted only after a STORE_GLOBAL happens to it
             symbolic_globals=collections.OrderedDict(),
             f_code=f_code,
+            export=export,
         )
         self.one_graph: bool = one_graph
         self.export = export
@@ -1618,6 +1684,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             instructions=cleaned_instructions(code),
             code_options={k: getattr(code, k) for k in dir(code)},
             f_code=code,
+            export=parent.export,
         )
         self.parent = parent
         self.symbolic_result = None
