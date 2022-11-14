@@ -1370,27 +1370,6 @@ def pool2d_shape_check(
     )
 
 
-@register_meta(aten.max_pool2d_with_indices_backward.default)
-def meta_max_pool2d_with_indices_backward(
-    grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices
-):
-    # Reference: aten/src/ATen/native/cpu/MaxPoolKernel.cpp
-    memory_format = utils.suggest_memory_format(self)
-    if memory_format == torch.contiguous_format:
-        pass
-    elif memory_format == torch.channels_last:
-        check(
-            self.ndim == 4,
-            lambda: "max pooling backward with channels last format supports tensors with 4 dims.",
-        )
-    else:
-        check(
-            False,
-            lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
-        )
-    return self.new_empty(self.shape)
-
-
 def max_pool2d_checks_and_compute_shape(
     input, kernel_size, stride, padding, dilation, ceil_mode
 ):
