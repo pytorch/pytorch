@@ -131,7 +131,7 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
-Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optional<int64_t> output_size) {
+Tensor repeat_interleave_mps(const Tensor& repeats,c10::optional<int64_t> output_size) {
 
   Tensor output;
   using namespace mps;
@@ -145,12 +145,21 @@ Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optio
   };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+  
+  NSNumber repeats_shape;
+
+  if (output_size.has_value()) {
+    repeats_shape = output_size.value();
+  } else {
+    repeats_shape = cumsum[-1].item<int64_t>();
+    TORCH_CHECK(
+        (repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
+  }
 
 
   @autoreleasepool {
     // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types etc match the earlier created MPSGraph
-    string key = "repeat_interleave_mps:" + getTensorsStringKey({self});
-                               + ":" + getTensorsStringKey({repeat});
+    string key = "repeat_interleave_mps:" + ":" + getTensorsStringKey({repeats}) + output_size;
 
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
@@ -162,9 +171,9 @@ Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optio
           newCachedGraph = new CachedGraph(mpsGraph);
 
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()), getMPSShape(self));
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(repeats.scalar_type()), getMPSShape(repeats));
           MPSGraphTensor* outputTensor = [mpsGraph tileTensor:inputTensor
-                                               withMultiplier:repeat
+                                               withMultiplier:repeats_shape
                                                          name:nil];
 
           newCachedGraph->inputTensor_ = inputTensor;
@@ -176,7 +185,7 @@ Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optio
       cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, repeat);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, repeats, getMPSShape(repeats));
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
@@ -191,54 +200,6 @@ Tensor repeat_interleave_mps(const Tensor& self, const Tensor& repeat,c10::optio
 
   return output;
 }
-
-Tensor repeat_interleave_mps(const Tensor& self,const Tensor& repeats,c10::optional<int64_t> dim,c10::optional<int64_t> output_size) {
-  Tensor input = self;
-
-  // Store conj and neg bits
-  const auto conj = input.is_conj();
-  if (conj) {
-    input = input.conj();
-  }
-  const auto neg = input.is_neg();
-  if (neg) {
-    input = input._neg_view();
-  }
-
-  if (!dim) {
-    input = input.flatten();
-    dim = 0;
-  }
-
-  Tensor repeats_ = repeats;
-  if (repeats.dim() == 0 || (repeats.dim() == 1 && repeats.size(0) == 1)) {
-    repeats_ = repeats.reshape({1}).expand({input.size(dim.value())});
-  } else if (repeats.dim() == 1) {
-    TORCH_CHECK(
-        repeats.size(0) == input.size(dim.value()),
-        "repeats must have the same size as input along dim")
-  } else {
-    AT_ERROR("repeats must be 0-dim or 1-dim tensor");
-  }
-
-  auto ret = input.index_select(
-      dim.value(), repeat_interleave_mps(repeats_, output_size));
-  // Restore conj and neg bits
-  if (conj) {
-    ret = ret.conj();
-  }
-  if (neg) {
-    ret = ret._neg_view();
-  }
-  return ret;
-}
-
-Tensor repeat_interleave_mps(const Tensor& self,int64_t repeats,c10::optional<int64_t> dim,c10::optional<int64_t> output_size) {
-  at::Tensor repeats_ =
-      at::empty(1, self.options().dtype(at::kLong)).fill_(repeats);
-  return repeat_interleave_mps(self, repeats_, dim, output_size);
-}
-
 
 }
 }
