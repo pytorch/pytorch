@@ -3,6 +3,7 @@
 #include <ATen/core/DimVector.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/IListRef.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
@@ -1573,7 +1574,7 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     //
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
-    if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
+    if (!self.is_xla() && !self.is_lazy() && !self.is_ipu() && !at::isTensorSubclassLike(self)) {
       return self._reshape_alias_symint(shape, stride.value());
     } else {
       return self.view_symint(shape);
