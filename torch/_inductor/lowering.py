@@ -960,6 +960,40 @@ def register_onednn_fusion_ops():
                 )
             )
 
+        @register_lowering(torch.ops.mkldnn._convolution_pointwise_.binary)
+        def convolution_binary_inplace(
+            x: TensorBox,
+            other: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            stride,
+            dilation,
+            groups,
+            binary_attr,
+            binary_alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionBinaryInplace.create(
+                    x,
+                    other,
+                    weight,
+                    bias,
+                    padding,
+                    stride,
+                    dilation,
+                    groups,
+                    binary_attr,
+                    binary_alpha,
+                    unary_attr,
+                    unary_scalars,
+                    unary_algorithm,
+                )
+            )
+
         @register_lowering(torch.ops.mkldnn._linear_pointwise)
         def linear_unary(
             x: TensorBox, w: TensorBox, b: TensorBox, attr, scalars, algorithm
