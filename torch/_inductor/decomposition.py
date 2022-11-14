@@ -49,6 +49,7 @@ decompositions = get_decompositions(
         aten.im2col,
         aten.index_add,
         aten.index_add_,
+        aten.index_copy_,
         aten.index_select,
         aten.l1_loss,
         aten.leaky_relu,
