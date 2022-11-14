@@ -86,7 +86,7 @@ class ValidateSiblings : public IterVisitor {
         auto sibling_id = it->second;
         TORCH_INTERNAL_ASSERT(
             sibling->axis(i) == sibling_id,
-            "Invalid matching sinbling ID detected. Expr: ",
+            "Invalid matching sibling ID detected. Expr: ",
             expr->toString(),
             "Sibling ID: ",
             sibling_id->toString());
@@ -1183,7 +1183,7 @@ void validateAndConvertIterDomainGrouping(Fusion* fusion) {
 
       // Halo is not allowed
       TORCH_CHECK(
-          GpuLower::current()->haloInfo().getExtent(id) == nullptr,
+          GpuLower::current()->haloInfo()->getExtent(id) == nullptr,
           "Invalid use of ParallelType::Group.",
           " Grouping of halo-extended IterDomain, ",
           id->toString(),

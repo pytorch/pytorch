@@ -3436,18 +3436,7 @@ add_docstr_all(
     r"""
 narrow(dimension, start, length) -> Tensor
 
-See :func:`torch.narrow`
-
-Example::
-
-    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-    >>> x.narrow(0, 0, 2)
-    tensor([[ 1,  2,  3],
-            [ 4,  5,  6]])
-    >>> x.narrow(1, 1, 2)
-    tensor([[ 2,  3],
-            [ 5,  6],
-            [ 8,  9]])
+See :func:`torch.narrow`.
 """,
 )
 
@@ -4263,7 +4252,7 @@ between ``0`` and ``self.size(dim) - 1`` inclusive.
 
 Additionally accepts an optional :attr:`reduce` argument that allows
 specification of an optional reduction operation, which is applied to all
-values in the tensor :attr:`src` into :attr:`self` at the indicies
+values in the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index`. For each value in :attr:`src`, the reduction
 operation is applied to an index in :attr:`self` which is specified by
 its index in :attr:`src` for ``dimension != dim`` and by the corresponding

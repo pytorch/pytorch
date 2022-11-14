@@ -14,7 +14,6 @@ from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx._symbolic_trace import is_fx_tracing
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel.distributed import DistributedDataParallel
 
@@ -150,13 +149,17 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            if is_fx_tracing():
+            if (
+                not isinstance(self, DisableContext)
+                and torch.fx._symbolic_trace.is_fx_tracing()
+            ):
                 if config.error_on_nested_fx_trace:
                     raise RuntimeError(
                         "Detected that you are using FX to symbolically trace "
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
-                return fn
+                else:
+                    return fn(*args, **kwargs)
 
             on_enter()
             prior = set_eval_frame(callback)
@@ -233,7 +236,6 @@ def catch_errors_wrapper(callback):
                 with compile_lock:
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
-                        parameters_to_ignore=ddp_module.parameters_to_ignore,
                         backend_compile_fn=callback._torchdynamo_orig_callable,
                     )
                     hijacked_callback = convert_frame.convert_frame(
@@ -552,7 +554,10 @@ def export(
             )
 
         def placeholder(self, target, args, kwargs):
-            return next(self.old_args_gen)
+            arg = next(self.old_args_gen)
+            if "val" in self.current_node.meta:
+                arg.node.meta["val"] = self.current_node.meta["val"]
+            return arg
 
         def output(self, target, args, kwargs):
             dynamo_result_flat = args[0]
@@ -561,6 +566,10 @@ def export(
             new_result = pytree.tree_unflatten(new_result_flat, out_spec_traced)
 
             return super().output(target, (new_result,), {})
+
+        def run_node(self, n):
+            self.current_node = n
+            return super().run_node(n)
 
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace

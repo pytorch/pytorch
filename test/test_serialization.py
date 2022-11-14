@@ -567,6 +567,34 @@ class SerializationMixin(object):
         b = torch.load(data)
         self.assertTrue(data.was_called('readinto'))
 
+    def test_serialization_filelike_exceptions(self):
+        # Try to serialize to buffers that does not have write method
+        # Or have a malfrormed one, and make sure it does not cause an abort
+        # See https://github.com/pytorch/pytorch/issues/87997
+        x = torch.rand(10)
+        with self.assertRaises(AttributeError):
+            # Tries to serialize str into tensor
+            torch.save('foo', x)
+        x.write = "bar"
+        x.flush = "baz"
+        with self.assertRaises(TypeError):
+            # Tries to serialize str into tensor with write property
+            torch.save('foo', x)
+        x.write = str.__add__
+        x.flush = str.__mul__
+        with self.assertRaises(TypeError):
+            # Tries to serialize str into tensor with wrong callable write property
+            torch.save('foo', x)
+        s_data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        s = torch.CharStorage(s_data)
+        with self.assertRaises(AttributeError):
+            # Tries to serialize list into CharStorage
+            torch.save(s_data, s)
+        x = torch.randint(10, (3, 3), dtype=torch.float).cpu().numpy()
+        with self.assertRaises(AttributeError):
+            # Tries to serialize ndarray into ndarray
+            torch.save(x, x)
+
 
     def test_serialization_storage_slice(self):
         # Generated using:
@@ -877,6 +905,28 @@ class TestSerialization(TestCase, SerializationMixin):
 
         self.assertEqual(state['weight'].size(), big_model.weight.size())
 
+    def test_serialization_python_attr(self):
+        def _test_save_load_attr(t):
+            t.foo = 'foo'
+            t.pi = 3.14
+
+            with BytesIOContext() as f:
+                torch.save(t, f)
+                f.seek(0)
+                loaded_t = torch.load(f)
+
+            self.assertEqual(t, loaded_t)
+            self.assertEqual(t.foo, loaded_t.foo)
+            self.assertEqual(t.pi, loaded_t.pi)
+
+        t = torch.zeros(3, 3)
+        _test_save_load_attr(t)
+        # This should start failing once Parameter
+        # supports saving Python Attribute.
+        err_msg = "'Parameter' object has no attribute"
+        with self.assertRaisesRegex(AttributeError, err_msg):
+            _test_save_load_attr(torch.nn.Parameter(t))
+
     def test_weights_only_assert(self):
         class HelloWorld:
             def __reduce__(self):
@@ -891,6 +941,48 @@ class TestSerialization(TestCase, SerializationMixin):
             # Safe load should assert
             with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported class"):
                 torch.load(f, weights_only=True)
+
+    @parametrize('weights_only', (False, True))
+    def test_serialization_math_bits(self, weights_only):
+        t = torch.randn(1, dtype=torch.cfloat)
+
+        def _save_load_check(t):
+            with BytesIOContext() as f:
+                torch.save(t, f)
+                f.seek(0)
+                # Unsafe load should work
+                self.assertEqual(torch.load(f, weights_only=weights_only), t)
+
+        t_conj = torch.conj(t)
+        _save_load_check(t_conj)
+
+        t_neg = torch._neg_view(t)
+        _save_load_check(t_neg)
+
+        t_n_c = torch._neg_view(torch.conj(t))
+        _save_load_check(t_n_c)
+
+    @parametrize('weights_only', (False, True))
+    def test_serialization_efficient_zerotensor(self, weights_only):
+        # We don't support serializing `ZeroTensor` as it is not public
+        # facing yet.
+        # If in future, `ZeroTensor` serialization is supported, this test
+        # should start failing!
+        t = torch._efficientzerotensor((4, 5))
+
+        def _save_load_check(t):
+            with BytesIOContext() as f:
+                torch.save(t, f)
+                f.seek(0)
+                # Unsafe load should work
+                self.assertEqual(torch.load(f, weights_only=weights_only), t)
+
+        # NOTE: `torch.save` fails before we hit the TORCH_CHECK in `getTensoMetadata`
+        #       as nullptr storage is disabled.
+        err_msg = (r'python bindings to nullptr storage \(e.g., from torch.Tensor._make_wrapper_subclass\)'
+                   ' are currently unsafe and thus disabled')
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            _save_load_check(t)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

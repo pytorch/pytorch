@@ -493,7 +493,7 @@ void FusionKernelRuntime::startAsyncCompile(KernelArgumentHolder& args_old) {
 
     TORCH_INTERNAL_ASSERT(
         args.size() == segmented_fusion_->inputs().size(),
-        "Inputs were not set up correctly, recieved ",
+        "Inputs were not set up correctly, received ",
         args.size(),
         " inputs but expecting ",
         segmented_fusion_->inputs().size());
@@ -610,7 +610,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
 
   TORCH_INTERNAL_ASSERT(
       args.size() == segmented_fusion_->inputs().size(),
-      "Inputs were not set up correctly, recieved ",
+      "Inputs were not set up correctly, received ",
       args.size(),
       " inputs but expecting ",
       segmented_fusion_->inputs().size());
@@ -657,11 +657,16 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
         group_outputs.size() == group_runtime_outputs.size(),
         "output size does not match");
     for (const size_t group_out_i : c10::irange(group_outputs.size())) {
-      output_holder[group_outputs[group_out_i]] =
-          group_runtime_outputs[group_out_i];
+      // trivial forwarding outputs empty tensor to save bandwidth, skip
+      // tensor_map update on those, since we want all future use of inputs on
+      // the original tensor input. See note [trivial forwarding]
+      if (!group_outputs[group_out_i]->isFusionInput()) {
+        output_holder[group_outputs[group_out_i]] =
+            group_runtime_outputs[group_out_i];
 
-      args.push(group_runtime_outputs[group_out_i]);
-      tensor_map.emplace(group_outputs[group_out_i], args.back());
+        args.push(group_runtime_outputs[group_out_i]);
+        tensor_map.emplace(group_outputs[group_out_i], args.back());
+      }
     }
   }
 
@@ -676,6 +681,32 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
     const auto iter = output_holder.find(output);
     if (iter != output_holder.end()) {
       fusion_outputs.push_back(iter->second);
+    } else if (output->isFusionInput()) {
+      // Note [ trivial forwarding ]
+      //
+      // Background:
+      // nvfuser codegen doesn't handle aliases at all. When we have a fusion
+      // that forwards an input to output without any operations on it, this is
+      // a no-op for codegen and the output tensor is never written to. However,
+      // the codegen cannot "forward" an input to output, since all outputs are
+      // allocated in integration. If we do not special case it, we'll ended up
+      // having a "fresh" tensor allocated for the forwarded-input.
+      //
+      // Approach:
+      // There are two aspects of the support:
+      // step 1. Codegen handles forwarding implicitly. Forwarded inputs doesn't
+      // have any producer in the IR, hence the output argument is not used in
+      // the code. But it does require to have an argument in the kernel as a
+      // place-holder so we'll map each arguments correctly.
+      // step 2. Integration handles the trivial forwarding of inputs. When we
+      // put together `fusion_outputs` for a given fusion, when outputs are just
+      // fusion inputs, we directly return the input tensor.
+      const auto iter = tensor_map.find(output);
+      TORCH_INTERNAL_ASSERT(
+          iter != tensor_map.end(), "Can not find output as aliased intput");
+      auto arg = dynamic_cast<const TensorArgAbstract*>(iter->second);
+      // See step 2 - note [ trivial forwarding ]
+      fusion_outputs.push_back(arg->getTensor());
     } else {
       bool empty_type_check = output->getDataType().has_value() &&
           output->getDataType().value() == DataType::Float;

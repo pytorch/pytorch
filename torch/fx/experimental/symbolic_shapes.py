@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Set, Dict, List, Type, Optional, cast
+from typing import Set, Dict, List, Type, Optional, cast, Union
 import sys
 import operator
 import builtins
@@ -24,7 +24,8 @@ aten = torch.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "sym_float", "FloorDiv", "guard_int", "wrap_node"
+    "SymDispatchMode", "sym_int", "sym_float", "FloorDiv", "guard_int", "wrap_node",
+    "sym_sqrt",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -103,12 +104,39 @@ def sym_float(a):
         return a.__sym_float__()
     return float(a)
 
+# Drop in replacement for math.sqrt
+def sym_sqrt(a):
+    if hasattr(a, '__sym_sqrt__'):
+        return a.__sym_sqrt__()
+    return math.sqrt(a)
+
+# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
+# directly usable, but this has a more relaxed type signature for mypy
+# (mypy requires SupportFloat which is too strict)
+def sym_floor(a):
+    return math.floor(a)  # type: ignore[type]
+
+def sym_ceil(a):
+    return math.ceil(a)  # type: ignore[type]
+
 def sym_int(a):
     if isinstance(a, SymInt):
         return a
-    elif hasattr(a, '__sym_int__'):
-        return a.__sym_int__()
+    elif isinstance(a, SymFloat):
+        return sym_floor(a) if a > 0 else sym_ceil(a)
     return int(a)
+
+def to_node(self, num):
+    if isinstance(num, (SymInt, SymFloat)):
+        return num.node
+    elif isinstance(num, int):
+        return self.wrap_int(num)
+    elif isinstance(num, float):
+        return self.wrap_float(num)
+    else:
+        # NotImplemented is important so that Python tries the
+        # other magic method
+        return NotImplemented
 
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
@@ -132,18 +160,6 @@ class SymNode:
     def _update_expr(self):
         self._expr = self.shape_env.replace(self._expr)
 
-    def to_node(self, num):
-        if isinstance(num, (SymInt, SymFloat)):
-            return num.node
-        elif isinstance(num, int):
-            return self.wrap_int(num)
-        elif isinstance(num, float):
-            return self.wrap_float(num)
-        else:
-            # NotImplemented is important so that Python tries the
-            # other magic method
-            return NotImplemented
-
     def is_int(self):
         return self.pytype is int
 
@@ -156,7 +172,7 @@ class SymNode:
 
     def wrap_float(self, num):
         assert isinstance(num, float)
-        return SymNode(sympy.Integer(num), self.shape_env, float, constant=num)
+        return SymNode(sympy.Float(num), self.shape_env, float, constant=num)
 
     def clone(self):
         return SymNode(self.expr, self.shape_env, self.pytype, constant=self.constant)
@@ -255,39 +271,47 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
-    'sym_float': lambda a: a,  # TODO: why can't I wrap with sympy.Float?
-    'sym_int': lambda a: _nyi(),
+    'floor': lambda a: sympy.floor(a),
+    'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
     'max': lambda a, b: sympy.Max(a, b),
+    'sym_sqrt': lambda a: sympy.sqrt(a),
 }
 
 unary_magic_methods = {
     'sym_float',
     'ceil',
+    'floor',
     'neg',
+    'sym_sqrt',
 }
 
-float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
+magic_methods_on_builtins = {"min", "max"}
+magic_methods_on_math = {"ceil", "floor"}
+magic_methods_on_submodule = {"sym_float", "sym_sqrt"}
+
+always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
+always_int_magic_methods = {"ceil", "floor"}
+always_bool_magic_methods = {"eq", "gt", "lt", "le", "ge"}
 
 def wrap_node(x):
-    if not isinstance(x, SymNode):
-        return x
-    if x.constant is not None:
+    # TODO: let C++ also take advantage of this
+    if isinstance(x, SymNode) and x.constant is not None:
         return x.constant
-    if x.pytype is int:
+    if x.is_int():
         return SymInt(x)
-    elif x.pytype is float:
+    elif x.is_float():
         return SymFloat(x)
     else:
-        raise AssertionError(f"unrecognized return type {x.pytype}")
+        raise AssertionError(f"unrecognized return type {x}")
 
 def _make_node_magic(method, func):
     func = lru_cache(256)(func)
 
     def binary_magic_impl(self, other):
-        if method in ["min", "max"]:
+        if method in magic_methods_on_builtins:
             op = getattr(builtins, method)
         else:
             op = getattr(operator, method)
@@ -303,7 +327,7 @@ def _make_node_magic(method, func):
         out = func(expr, other_expr)
         out = sympy.expand(out)
         pytype: Type
-        if method in ["truediv"]:
+        if method in always_float_magic_methods:
             pytype = float
         else:
             pytype = self.pytype
@@ -314,9 +338,9 @@ def _make_node_magic(method, func):
 
     def unary_magic_impl(self):
         if SYM_FUNCTION_MODE:
-            if method in ["ceil", "floor"]:
+            if method in magic_methods_on_math:
                 op = getattr(math, method)
-            elif method in ["sym_float", "sym_int"]:
+            elif method in magic_methods_on_submodule:
                 op = getattr(sys.modules[__name__], method)
             else:
                 op = getattr(operator, method)
@@ -328,9 +352,9 @@ def _make_node_magic(method, func):
         out = func(expr)
         out = sympy.expand(out)
         pytype: Type
-        if method in ["ceil", "floor"]:
+        if method in always_int_magic_methods:
             pytype = int
-        elif method in ["sym_float"]:
+        elif method in always_float_magic_methods:
             pytype = float
         else:
             pytype = self.pytype
@@ -353,13 +377,13 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method)())
 
     def binary_magic_impl(self, other):
-        other_node = self.node.to_node(other)
+        other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
         return wrap_node(getattr(self.node, method)(other_node))
 
     def rbinary_magic_impl(self, other):
-        other_node = self.node.to_node(other)
+        other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
         return wrap_node(getattr(other_node, method)(self.node))
@@ -373,10 +397,6 @@ def _make_user_magic(method, user_type):
 
 for method, func in magic_methods.items():
     _make_user_magic(method, SymInt)
-
-for method, func in magic_methods.items():
-    if method not in float_magic_methods:
-        continue
     _make_user_magic(method, SymFloat)
 
 del method
@@ -436,7 +456,6 @@ class ShapeEnv(object):
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
-
         size = [self.create_symbol(i) for i in ex.size()]
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
@@ -469,7 +488,7 @@ class ShapeEnv(object):
         assert all(x is not None for x in stride)
         return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
 
-    def create_symintnode(self, expr: "sympy.Expr"):
+    def create_symintnode(self, expr: Union["sympy.Expr", int]):
         return SymInt(SymNode(expr, self, int))
 
     def create_symbol(self, val: int) -> "sympy.Expr":
