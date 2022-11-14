@@ -1769,6 +1769,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ]
         self.assertTrue(same_two_models(mod, opt_mod, args))
 
+    def test_optimized_deepcopy(self):
+        # See https://github.com/pytorch/pytorch/pull/88629
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = Linear(in_features=512, out_features=128, bias=True)
+
+            def forward(self, x):
+                return self.fc(x)
+
+        mod = Foo()
+        opt_mod = torch._dynamo.optimize("eager")(mod)
+        args = [torch.randn(1, 512)]
+        self.assertTrue(same_two_models(mod, opt_mod, args))
+
     def test_class_member(self):
         class Foo(torch.nn.Module):
             a = 4
