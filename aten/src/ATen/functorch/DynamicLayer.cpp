@@ -101,7 +101,7 @@ class FuncTorchTLS : public FuncTorchTLSBase {
   }
 
   int64_t checkSupportsAutogradFunction() const override {
-    TORCH_CHECK(dynamicLayerStack.size() == 0,
+    TORCH_CHECK(dynamicLayerStack.size() == 0 || getAutogradFunctionAllowed(),
         "functorch functions (vmap, grad, vjp, etc.) currently do not support the use of autograd.Function. ",
         "Please rewrite your function to not use autograd.Function while we work on fixing this");
     return 0;
@@ -128,6 +128,7 @@ class FuncTorchTLS : public FuncTorchTLSBase {
 
   std::vector<DynamicLayer> dynamicLayerStack;
   bool allow_inplace_requires_grad_ = false;
+  bool allow_autograd_function_ = false;
 };
 
 static FuncTorchTLS* getRawFunctorchTLS() {
@@ -149,6 +150,16 @@ void setInplaceRequiresGradAllowed(bool allowed) {
 bool getInplaceRequiresGradAllowed() {
   auto* functorch_tls = getRawFunctorchTLS();
   return functorch_tls->allow_inplace_requires_grad_;
+}
+
+void setAutogradFunctionAllowed(bool allowed) {
+  auto* functorch_tls = getRawFunctorchTLS();
+  functorch_tls->allow_autograd_function_ = allowed;
+}
+
+bool getAutogradFunctionAllowed() {
+  auto* functorch_tls = getRawFunctorchTLS();
+  return functorch_tls->allow_autograd_function_;
 }
 
 static std::vector<DynamicLayer>& dynamicLayerStackAccessor() {
