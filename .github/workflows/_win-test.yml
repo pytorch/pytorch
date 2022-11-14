@@ -80,9 +80,11 @@ jobs:
           # Windows conda is baked into the AMI at this location
           CONDA="C:\Jenkins\Miniconda3\condabin\conda.bat"
 
-          echo "CONDA_RUN=${CONDA} run --no-capture-output" >> "${GITHUB_ENV}"
-          echo "CONDA_BUILD=${CONDA} run conda-build" >> "${GITHUB_ENV}"
-          echo "CONDA_INSTALL=${CONDA} install" >> "${GITHUB_ENV}"
+          {
+            echo "CONDA_RUN=${CONDA} run --no-capture-output";
+            echo "CONDA_BUILD=${CONDA} run conda-build";
+            echo "CONDA_INSTALL=${CONDA} install";
+          } >> "${GITHUB_ENV}"
 
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
