@@ -1343,16 +1343,13 @@ inplace_symbolic_tensor_failures = {
     xfail('addmm', 'decomposed'),
     xfail('logit', ''),
     xfail('nn.functional.hardsigmoid', ''),
-    xfail('scatter_add', ''),
     xfail('unique', ''),
     # in-place has a different signature than out-of-place
     xfail('uniform', ''),
     # Views
-    xfail('as_strided', ''),
     xfail('squeeze', ''),
     xfail('t', ''),
     xfail('transpose', ''),
-    xfail('unsqueeze', ''),
     xfail('nn.functional.dropout3d', ''),  # calls unsqueeze_
 }
 
