@@ -908,35 +908,12 @@ class TestViewOps(TestCase):
             op = partial(fn, source=0, destination=1)
             run_test(device, op)
 
-    # Testing that the generated view_copy kernel and its derivative are implemented correctly
-    def test_view_copy(self, device):
-        a = torch.randn(4, device=device, requires_grad=True)
-        a_ref = a.clone().detach().requires_grad_()
-        a_view = a_ref.view(2, 2)
-        a_view_copy = torch.view_copy(a, (2, 2))
-
-        # view_copy ops don't preserve view relationship
-        self.assertTrue(self.is_view_of(a_ref, a_view))
-        self.assertFalse(self.is_view_of(a, a_view_copy))
-
-        a_view_copy.sum().backward()
-        a_view.sum().backward()
-
-        # forward and backward give the same shape + result
-        self.assertEqual(a_view_copy, a_view)
-        self.assertEqual(a.grad, a_ref.grad)
-
-    # Testing that the output of a view_copy kernel (by default) is contiguous.
-    def test_view_copy_output_contiguous(self, device):
-        a = torch.randn(4, 4, 4, 4, device=device).to(memory_format=torch.channels_last)
-        b = torch.ops.aten.slice_copy(a, 0, 0, 2)
-        self.assertTrue(b.is_contiguous())
-
-    def test_view_copy_out(self, device):
+    def test_diagonal_copy_out(self, device):
         a = torch.randn(2, 2, device=device)
         out = torch.empty(2, device=device)
 
         torch.diagonal_copy(a, out=out)
+
         expected = torch.diagonal_copy(a)
 
         self.assertEqual(expected, out)
@@ -950,6 +927,7 @@ class TestViewOps(TestCase):
 
         self.assertEqual(expected1, out1)
         self.assertEqual(expected2, out2)
+
 
 class TestOldViewOps(TestCase):
     def test_ravel(self, device):

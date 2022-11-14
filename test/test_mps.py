@@ -5719,25 +5719,7 @@ class TestViewOpsMPS(TestCase):
             op = partial(fn, source=0, destination=1)
             run_test(device, op)
 
-    # Testing that the generated view_copy kernel and its derivative are implemented correctly
-    def test_view_copy(self, device="mps"):
-        a = torch.randn(4, device=device, requires_grad=True)
-        a_ref = a.clone().detach().requires_grad_()
-        a_view = a_ref.view(2, 2)
-        a_view_copy = torch.view_copy(a, (2, 2))
-
-        # view_copy ops don't preserve view relationship
-        self.assertTrue(self.is_view_of(a_ref, a_view))
-        self.assertFalse(self.is_view_of(a, a_view_copy))
-
-        a_view_copy.sum().backward()
-        a_view.sum().backward()
-
-        # forward and backward give the same shape + result
-        self.assertEqual(a_view_copy, a_view)
-        self.assertEqual(a.grad, a_ref.grad)
-
-    def test_view_copy_out(self, device="mps"):
+    def test_diagonal_copy_out(self, device="mps"):
         a = torch.randn(2, 2, device=device)
         out = torch.empty(2, device=device)
 
