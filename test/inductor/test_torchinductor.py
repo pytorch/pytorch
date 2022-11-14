@@ -20,6 +20,7 @@ from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -40,7 +41,7 @@ try:
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
-    from torch._inductor.utils import has_torchvision_roi_align, timed
+    from torch._inductor.utils import has_torchvision_roi_align, has_triton, timed
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
@@ -52,10 +53,25 @@ except (ImportError, AssertionError) as e:
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+HAS_CPU = False
+try:
+    from subprocess import CalledProcessError
+
+    from torch._inductor.codecache import CppCodeCache
+
+    CppCodeCache.load("")
+    HAS_CPU = not IS_FBCODE
+except (
+    CalledProcessError,
+    OSError,
+    torch._inductor.exc.InvalidCxxCompiler,
+    torch._inductor.exc.CppCompileError,
+):
+    pass
 
 aten = torch.ops.aten
 
+HAS_CUDA = has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 torch._inductor.config.triton.autotune = False  # too slow
@@ -1384,6 +1400,7 @@ class CommonTemplate:
             [1, 3],
             [1, 2],
             [1, 4],
+            ["same", 0],
             test_memory_format,
         )
 
@@ -1393,6 +1410,7 @@ class CommonTemplate:
             kernel_size,
             dilation,
             groups,
+            padding,
             memory_format,
         ) in options:
             oC = 32 * groups
@@ -1403,6 +1421,7 @@ class CommonTemplate:
                     iC,
                     oC,
                     kernel_size=kernel_size,
+                    padding=padding,
                     dilation=dilation,
                     groups=groups,
                     bias=bias,
@@ -1432,6 +1451,7 @@ class CommonTemplate:
                 out_channels,
                 dilation,
                 groups,
+                padding,
                 bias,
                 has_relu,
                 **kwargs,
@@ -1442,6 +1462,7 @@ class CommonTemplate:
                     out_channels,
                     dilation=dilation,
                     groups=groups,
+                    padding=padding,
                     bias=bias,
                     **kwargs,
                 )
@@ -1451,6 +1472,7 @@ class CommonTemplate:
                         out_channels,
                         dilation=dilation,
                         groups=groups,
+                        padding=padding,
                         bias=bias,
                         **kwargs,
                     )
@@ -1471,6 +1493,7 @@ class CommonTemplate:
             [1, 3],
             [1, 2],
             [1, 4],
+            ["same", 0],
             test_memory_format,
         )
 
@@ -1481,6 +1504,7 @@ class CommonTemplate:
             kernel_size,
             dilation,
             groups,
+            padding,
             memory_format,
         ) in options:
             oC = 32 * groups
@@ -1492,6 +1516,7 @@ class CommonTemplate:
                 oC,
                 dilation,
                 groups,
+                padding,
                 bias,
                 has_relu,
                 kernel_size=kernel_size,
