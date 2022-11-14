@@ -298,7 +298,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
     "linalg.eigvalsh": {f32, f64},
-    "linalg.lu": {f32, f64},
     "linalg.lstsq": {f32, f64},
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
