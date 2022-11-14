@@ -15,7 +15,11 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import (
+    always_wrap_policy,
+    ModuleWrapPolicy,
+    transformer_auto_wrap_policy,
+)
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -110,7 +114,7 @@ class TestFSDPMisc(FSDPTest):
         def _check_equal(local, fsdp):
             with FSDP.summon_full_params(fsdp):
                 for p1, p2 in zip(fsdp.parameters(), local.parameters()):
-                    torch.testing.assert_allclose(p1, p2)
+                    torch.testing.assert_close(p1, p2)
 
         for sharding_strategy in [
             ShardingStrategy.FULL_SHARD,
@@ -211,10 +215,20 @@ class TestFSDPMisc(FSDPTest):
     def test_device_id_auto_wrap(self):
         """Tests that ``auto_wrap_policy`` propagates ``device_id`` to all
         nested FSDP instances."""
-        auto_wrap_policy = functools.partial(
-            transformer_auto_wrap_policy,
-            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer},
+        self.run_subtests(
+            {"use_callable": [False, True]},
+            self._test_device_id_auto_wrap,
         )
+
+    def _test_device_id_auto_wrap(self, use_callable: bool):
+        module_classes = {TransformerEncoderLayer, TransformerDecoderLayer}
+        if use_callable:
+            auto_wrap_policy = functools.partial(
+                transformer_auto_wrap_policy,
+                transformer_layer_cls=module_classes,
+            )
+        else:
+            auto_wrap_policy = ModuleWrapPolicy(module_classes)
         fsdp_kwargs = {
             "auto_wrap_policy": auto_wrap_policy,
             "device_id": torch.cuda.current_device(),
