@@ -204,10 +204,11 @@
 #include <ATen/ops/zeros_native.h>
 #endif
 
+#include <c10/util/StringUtil.h>
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <vector>
-#include <c10/util/StringUtil.h>
 
 namespace at {
 namespace meta {
@@ -416,7 +417,7 @@ Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt st
     const auto itemsize = result.dtype().itemsize();
     c10::SymInt size_bytes = at::detail::computeStorageNbytes(
         size, stride, itemsize, storage_offset);
-    storage.set_nbytes(size_bytes);
+    storage.set_nbytes(std::move(size_bytes));
   }
   return result;
 }
@@ -537,8 +538,8 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   return at::sparse_coo_tensor(new_indices, new_values, size)._coalesced_(is_coalesced);
 }
 
-Tensor broadcast_to(const Tensor& self, IntArrayRef size) {
-  return self.expand(size);
+Tensor broadcast_to_symint(const Tensor& self, SymIntArrayRef size) {
+  return self.expand_symint(size);
 }
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
@@ -1196,6 +1197,13 @@ Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t
   return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
 }
 
+// Should just use narrow_copy_out, but this API is used internally at Meta:
+// https://github.com/pytorch/pytorch/pull/87045#issuecomment-1309353561
+Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
+  auto output = at::empty_like(self);
+  return narrow_copy_dense_cpu_out(self, dim, start, length, output);
+}
+
 Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   int64_t allDim = self.dim();
   int64_t end = start+length;
@@ -1229,6 +1237,89 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
 
   auto newTensor = at::sparse_coo_tensor(new_indices, new_values, new_sizes);
   return newTensor._coalesced_(self.is_coalesced());
+}
+
+// Should just use narrow_copy_out, but this API is used internally at Meta:
+// https://github.com/pytorch/pytorch/pull/87045#issuecomment-1309353561
+Tensor& narrow_copy_dense_cpu_out(
+  const Tensor& self, int64_t dim, int64_t start, int64_t length, Tensor& output
+) {
+
+  TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  TORCH_CHECK(self.dtype() == output.dtype());
+
+  auto self_contig = self.expect_contiguous();
+  const auto self_sizes = self_contig->sizes();
+
+  // wrap dim if negative and do bound check
+  if (dim < 0) {
+    dim = at::maybe_wrap_dim(dim, self_sizes.size());
+  } else {
+    TORCH_CHECK(dim < static_cast<int64_t>(self_sizes.size()));
+  }
+
+  // wrap start and do bound check
+  const auto cur_size = self_sizes[dim];
+  if (start != cur_size && start < 0) { // start being the end is valid, but
+                                        // not a valid dim specification.
+    start = at::maybe_wrap_dim(start, cur_size);
+  }
+  TORCH_CHECK(
+      length >= 0 && start <= cur_size - length,
+      "start (",
+      start,
+      ") + length (",
+      length,
+      ") exceeds dimension size (",
+      cur_size,
+      ").");
+
+  // resize output
+  auto output_sizes = self_sizes.vec();
+  output_sizes[dim] = length;
+  at::native::resize_(output, output_sizes);
+
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  const int64_t unit = c10::size_from_dim_(dim + 1, self_sizes);
+  const int64_t num_blocks = c10::size_to_dim_(dim, self_sizes);
+
+  const auto itemsize = self_contig->dtype().itemsize();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+  size_t src_nbytes = itemsize * self_contig->numel();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+  size_t dst_nbytes = itemsize * output.numel();
+
+  size_t src_block_size = unit * self_sizes[dim];
+  size_t dst_block_size = unit * length;
+
+  if (num_blocks == 0 || dst_block_size == 0) {
+    return output;
+  }
+
+  char* src_bytes = static_cast<char*>(self_contig->data_ptr());
+  char* dst_bytes = static_cast<char*>(output.data_ptr());
+
+  size_t src_block_size_bytes = itemsize * src_block_size;
+  size_t dst_block_size_bytes = itemsize * dst_block_size;
+  size_t src_offset = unit * start;
+
+  char* src_offset_bytes = src_bytes + itemsize * src_offset;
+  char* dst_offset_bytes = dst_bytes;
+
+  for (const auto i : c10::irange(num_blocks)) {
+    char* local_src_offset_bytes = src_offset_bytes + i * src_block_size_bytes;
+    char* local_dst_offset_bytes = dst_offset_bytes + i * dst_block_size_bytes;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        static_cast<void*>(local_src_offset_bytes + dst_block_size_bytes) <=
+        static_cast<void*>(src_bytes + src_nbytes));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        static_cast<void*>(local_dst_offset_bytes + dst_block_size_bytes) <=
+        static_cast<void*>(dst_bytes + dst_nbytes));
+
+    memcpy(
+        local_dst_offset_bytes, local_src_offset_bytes, dst_block_size_bytes);
+  }
+  return output;
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
@@ -1498,7 +1589,7 @@ Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_sha
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
 
   if (self.is_mkldnn()) {
-    TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tesnors");
+    TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tensors");
   }
 
   if (self.is_contiguous()) {

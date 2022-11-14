@@ -1349,9 +1349,8 @@ def pool2d_shape_check(
     )
 
 
-@register_meta(aten.max_pool2d_with_indices.default)
-def meta_max_pool2d_with_indices(
-    input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
+def max_pool2d_checks_and_compute_shape(
+    input, kernel_size, stride, padding, dilation, ceil_mode
 ):
     # Reference: aten/src/ATen/native/DilatedMaxPool2d.cpp
     def unpack(name, val):
@@ -1376,6 +1375,9 @@ def meta_max_pool2d_with_indices(
 
     padH, padW = unpack("padding", padding)
     dilationH, dilationW = unpack("dilation", dilation)
+    nInputPlane = input.size(-3)
+    inputHeight = input.size(-2)
+    inputWidth = input.size(-1)
 
     memory_format = utils.suggest_memory_format(input)
     if memory_format == torch.channels_last:
@@ -1393,11 +1395,6 @@ def meta_max_pool2d_with_indices(
             False,
             lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
         )
-
-    nbatch = input.size(-4) if input.dim() == 4 else 1
-    nInputPlane = input.size(-3)
-    inputHeight = input.size(-2)
-    inputWidth = input.size(-1)
 
     outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, dilationH, ceil_mode)
     outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, dilationW, ceil_mode)
@@ -1420,6 +1417,49 @@ def meta_max_pool2d_with_indices(
         memory_format,
     )
 
+    return nInputPlane, outputHeight, outputWidth
+
+
+@register_meta(aten.max_pool2d_with_indices_backward.default)
+def meta_max_pool2d_with_indices_backward(
+    grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices
+):
+    nInputPlane, outputHeight, outputWidth = max_pool2d_checks_and_compute_shape(
+        self, kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+    check(
+        self.dtype == grad_output.dtype,
+        lambda: "expected dtype {self.dtype} for `gradOutput` but got dtype {grad_output.dtype}",
+    )
+
+    nOutputPlane = nInputPlane
+    ndim = self.ndim
+
+    def _check_dim_size(t):
+        check_dim_size(t, ndim, ndim - 3, nOutputPlane)
+        check_dim_size(t, ndim, ndim - 2, outputHeight)
+        check_dim_size(t, ndim, ndim - 1, outputWidth)
+
+    _check_dim_size(grad_output)
+    _check_dim_size(indices)
+
+    memory_format = utils.suggest_memory_format(self)
+    return torch.empty(
+        self.shape, dtype=self.dtype, device=self.device, memory_format=memory_format
+    )
+
+
+@register_meta(aten.max_pool2d_with_indices.default)
+def meta_max_pool2d_with_indices(
+    input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
+):
+    nInputPlane, outputHeight, outputWidth = max_pool2d_checks_and_compute_shape(
+        input, kernel_size, stride, padding, dilation, ceil_mode
+    )
+
+    nbatch = input.size(-4) if input.dim() == 4 else 1
+    memory_format = utils.suggest_memory_format(input)
     if input.dim() == 3:
         size = [nInputPlane, outputHeight, outputWidth]
     else:
@@ -1735,6 +1775,65 @@ def meta_sort(self, stable=None, dim=-1, descending=False):
     return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
 
 
+def zero_numel_check_dims(self, dim, fn_name):
+    if self.ndim == 0:
+        check(
+            dim == 0 or dim == -1,
+            lambda: f"{fn_name}: Expected reduction dim -1 or 0 for scalar but got {dim}",
+            IndexError,
+        )
+    else:
+        check(
+            self.size(dim) != 0,
+            lambda: f"{fn_name}: Expected reduction dim {dim} to have non-zero size.",
+            IndexError,
+        )
+
+
+# From aten/src/ATen/native/ReduceOps.cpp
+def check_argmax_argmin(name, self, dim):
+    if dim is not None:
+        dim = maybe_wrap_dim(dim, self.dim())
+        zero_numel_check_dims(self, dim, name)
+    else:
+        check(
+            self.numel() != 0,
+            lambda: f"{name}: Expected reduction dim to be specified for input.numel() == 0.",
+        )
+
+
+@register_meta([aten.argmax.default, aten.argmin.default])
+def argmax_argmin_meta(self, dim=None, keepdim=False):
+    check_argmax_argmin("argmax", self, dim)
+    dims = utils.reduction_dims(self.shape, (dim,) if dim is not None else None)
+    shape = _compute_reduction_shape(self, dims, keepdim)
+    return self.new_empty(shape, dtype=torch.int64)
+
+
+@register_meta(aten.scalar_tensor.default)
+def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
+    return torch.empty(
+        (), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
+@register_meta(aten.topk.default)
+def topk_meta(self, k, dim=-1, largest=True, sorted=True):
+    # From aten/src/ATen/native/Sorting.cpp
+    dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
+    check(
+        k >= 0 and k <= (self.size(dim) if self.dim() > 0 else 1),
+        lambda: "selected index k out of range",
+    )
+    sliceSize = 1 if self.dim() == 0 else self.size(dim)
+    check(k >= 0 and k <= sliceSize, lambda: "k not in range for dimension")
+
+    topKSize = list(self.shape)
+    if len(topKSize) > 0:
+        topKSize[dim] = k
+    return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
@@ -1768,10 +1867,7 @@ def activate_meta():
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
             pass
-        elif any(
-            a.alias_info is not None and not a.alias_info.is_write
-            for a in op_overload._schema.arguments
-        ):
+        elif op_overload.is_view:
             # Attempting to register a python meta kernel for a view operator.
             # We shouldn't do this, because the output will report as not having aliased storages.
             # All view ops have meta kernels in C++ today, so we should use those instead.

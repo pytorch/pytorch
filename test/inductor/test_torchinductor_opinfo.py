@@ -279,6 +279,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
+    "bucketize": {b8, f16, f32, f64, i32, i64},
     "chalf": {b8, f16, f32, f64, i32, i64},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
