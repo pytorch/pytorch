@@ -4049,7 +4049,7 @@ class TestSparseMeta(TestCase):
         self.assertEqual(r.values(), torch.empty(0, 4, device='meta'))
 
 
-class TestSparseAny(TestSparseBase):
+class TestSparseAny(TestCase):
 
     def test_generate_simple_inputs(self):
         # Temporarily disable BSC and BSC layouts as these don't support select yet
