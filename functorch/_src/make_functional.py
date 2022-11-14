@@ -44,7 +44,7 @@ def _get_nested_attr(obj: nn.Module, names: List[str]) -> None:
     if len(names) == 1:
         return getattr(obj, names[0])
     else:
-        _get_nested_attr(getattr(obj, names[0]), names[1:])
+        return _get_nested_attr(getattr(obj, names[0]), names[1:])
 
 
 def raise_parameter_tying_error():
