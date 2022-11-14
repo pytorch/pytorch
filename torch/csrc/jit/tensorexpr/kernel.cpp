@@ -29,7 +29,7 @@ namespace tensorexpr {
 
 std::string buildErrorMessage(const std::string& s) {
   static const std::string generic_error_message =
-      "This error occured in the fuser. You can turn off the fuser with "
+      "This error occurred in the fuser. You can turn off the fuser with "
       "torch.jit.enable_fusion(False).";
   if (s.empty()) {
     return generic_error_message;
