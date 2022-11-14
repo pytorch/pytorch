@@ -325,14 +325,14 @@ std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
     if (buckets_bdim.has_value() && self_bdim.has_value()) {
       auto self_ = moveBatchDimToFront(self, self_bdim);
       auto result = at::searchsorted(buckets, self_, out_int32, right, std::move(side), sorter_);
-      return std::make_tuple(result, 0);
+      return std::make_tuple(std::move(result), 0);
     }
     // B<...>D, <...>V -> B<...>D, B<...>V
     if (buckets_bdim.has_value() && !self_bdim.has_value()) {
       auto self_ = moveBatchDimToFront(self, self_bdim);
       self_ = ensure_has_bdim(self_, self_bdim.has_value(), buckets.size(0));
       auto result = at::searchsorted(buckets, self_, out_int32, right, std::move(side), sorter_);
-      return std::make_tuple(result, 0);
+      return std::make_tuple(std::move(result), 0);
     }
     // <...>D, B<...>V -> <...>D, <...>(BV)
     if (!buckets_bdim.has_value() && self_bdim.has_value()) {
@@ -340,7 +340,7 @@ std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
       auto self_ = reshape_dim_into(*self_bdim, -1, self);
       auto result = at::searchsorted(buckets, self_, out_int32, right, std::move(side), sorter_);
       result = reshape_dim_outof(-1, bdim_size, result);
-      return std::make_tuple(result, result.dim() - 2);
+      return std::make_tuple(std::move(result), result.dim() - 2);
     }
     TORCH_INTERNAL_ASSERT(false);
   }
@@ -351,7 +351,7 @@ std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
     self_ = self_.flatten(1);
     auto result = at::searchsorted(buckets, self_, out_int32, right, std::move(side), sorter_);
     result = result.view(self_.sizes());
-    return std::make_tuple(result, 0);
+    return std::make_tuple(std::move(result), 0);
   }
   // BD, * -> BD, flat(*) -> BD, B flat(*)
   if (buckets_bdim.has_value() && !self_bdim.has_value()) {
@@ -360,12 +360,12 @@ std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
     self_ = self_.flatten(1);
     auto result = at::searchsorted(buckets, self_, out_int32, right, std::move(side), sorter_);
     result = result.view(self_.sizes());
-    return std::make_tuple(result, 0);
+    return std::make_tuple(std::move(result), 0);
   }
   // D, B* -> no change
   if (!buckets_bdim.has_value() && self_bdim.has_value()) {
     auto result = at::searchsorted(buckets, self, out_int32, right, std::move(side), sorter_);
-    return std::make_tuple(result, self_bdim);
+    return std::make_tuple(std::move(result), self_bdim);
   }
   TORCH_INTERNAL_ASSERT(false);
 }

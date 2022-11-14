@@ -2375,7 +2375,7 @@ std::tuple<Tensor, Tensor> geqrf(const Tensor& input) {
   Tensor QR = at::empty({0}, input.options());
   Tensor tau = at::empty({0}, input.options());
   std::tie(QR, tau) = at::geqrf_outf(input, QR, tau);
-  return std::make_tuple(QR, tau);
+  return std::make_tuple(std::move(QR), std::move(tau));
 }
 
 /*
@@ -3840,7 +3840,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
   Tensor singular_values = at::empty({0}, input.options().dtype(toRealValueType(input.scalar_type())));
   std::tie(solution, residuals, rank, singular_values) =
       at::linalg_lstsq_outf(input, other, rcond, std::move(driver), solution, residuals, rank, singular_values);
-  return std::make_tuple(solution, residuals, rank, singular_values);
+  return std::make_tuple(std::move(solution), std::move(residuals), std::move(rank), std::move(singular_values));
 }
 
 DEFINE_DISPATCH(ldl_factor_stub);

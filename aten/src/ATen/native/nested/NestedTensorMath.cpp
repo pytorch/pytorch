@@ -607,7 +607,7 @@ std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, c
   // i.e. if input is not contiguous, then output is also discontiguous
   Tensor output = wrap_buffer(std::move(output_buffer), sizemat.clone(), stridemat.clone(), std::vector<int64_t>(offsets)),
       mask = wrap_buffer(std::move(mask_buffer), sizemat.clone(), stridemat.clone(), std::vector<int64_t>(offsets));
-  return std::make_tuple(output, mask);
+  return std::make_tuple(std::move(output), std::move(mask));
 }
 
 Tensor softmax_nested(
