@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Type
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
@@ -14,9 +14,7 @@ class DiagnosticEngine:
 
     This class is the main interface for diagnostics. It manages the creation of diagnostic contexts.
     A DiagnosticContext provides the entry point for recording Diagnostics.
-    Each DiagnosticContext is powered by a DiagnosticTool, which can be customized with
-    custom RuleCollection and Diagnostic type.
-    See infra.DiagnosticContext and infra.DiagnosticTool for more details.
+    See infra.DiagnosticContext for more details.
 
     Examples:
         Step 1: Create a set of rules.
@@ -31,36 +29,29 @@ class DiagnosticEngine:
         ...     ],
         ... )
 
-        Step 2: Create a diagnostic tool.
-        >>> tool = infra.DiagnosticTool(
-        ...     name="tool",
-        ...     version="1.0.0",
-        ...     rules=rules,
-        ... )
-
-        Step 3: Create a diagnostic engine.
+        Step 2: Create a diagnostic engine.
         >>> engine = DiagnosticEngine()
 
-        Step 4: Start a new diagnostic context.
-        >>> with engine.start_diagnostic_context(tool) as context:
+        Step 3: Start a new diagnostic context.
+        >>> with engine.create_diagnostic_context("torch.onnx.export", version="1.0") as context:
 
-        Step 5: Add diagnostics in your code.
+        Step 4: Add diagnostics in your code.
         ...     context.diagnose(rules.rule1, infra.Level.ERROR)
 
-        Step 6: Afterwards, get the SARIF log.
+        Step 5: Afterwards, get the SARIF log.
         >>> sarif_log = engine.sarif_log()
     """
 
-    _contexts: List[infra.DiagnosticContext]
+    contexts: List[infra.DiagnosticContext]
 
     def __init__(self) -> None:
-        self._contexts = []
+        self.contexts = []
 
     def sarif_log(self) -> sarif.SarifLog:
         return sarif.SarifLog(
             version=sarif_version.SARIF_VERSION,
             schema_uri=sarif_version.SARIF_SCHEMA_LINK,
-            runs=[context.sarif() for context in self._contexts],
+            runs=[context.sarif() for context in self.contexts],
         )
 
     def __str__(self) -> str:
@@ -75,13 +66,42 @@ class DiagnosticEngine:
 
     def clear(self) -> None:
         """Clears all diagnostic contexts."""
-        self._contexts.clear()
+        self.contexts.clear()
 
     def create_diagnostic_context(
         self,
-        tool: infra.DiagnosticTool,
+        name: str,
+        version: str,
         options: Optional[infra.DiagnosticOptions] = None,
+        diagnostic_type: Type[infra.Diagnostic] = infra.Diagnostic,
     ) -> infra.DiagnosticContext:
-        context = infra.DiagnosticContext(tool, options)
-        self._contexts.append(context)
+        """Creates a new diagnostic context.
+
+        Args:
+            name: The subject name for the diagnostic context.
+            version: The subject version for the diagnostic context.
+            options: The options for the diagnostic context.
+
+        Returns:
+            A new diagnostic context.
+        """
+        if options is None:
+            options = infra.DiagnosticOptions()
+        context = infra.DiagnosticContext(
+            name, version, options, diagnostic_type=diagnostic_type
+        )
+        self.contexts.append(context)
         return context
+
+    def pretty_print(
+        self, verbose: bool = False, level: infra.Level = infra.Level.ERROR
+    ) -> None:
+        """Pretty prints all diagnostics in the diagnostic contexts.
+
+        Args:
+            verbose: Whether to print the diagnostics in verbose mode. See Diagnostic.pretty_print.
+            level: The minimum level of diagnostics to print.
+        """
+        formatter.pretty_print_title(f"{len(self.contexts)} Diagnostic Run")
+        for context in self.contexts:
+            context.pretty_print(verbose, level)
