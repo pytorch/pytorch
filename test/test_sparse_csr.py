@@ -1542,14 +1542,20 @@ class TestSparseCSR(TestCase):
             self.assertEqual(res_tri, res_dense)
             kernel_run[0] = False
 
+            res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
             # check whether bsr_dense_mm handles different grid sizes
             # None means max possible grid size which is CUDA-dependent,
             # and odd values are co-prime with powers of 2 so that we will
             # always have "uneven" tiles.
             grid_size = (None, 3, 7)
-            res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
-            for grid in itertools.product(grid_size, grid_size, grid_size):
-                res_tri = bsr_dense_mm(bsr, dense.transpose(-2, -1), max_grid=grid)
+            grid_gen = itertools.product(grid_size, repeat=3)
+            for is_sparse_rowspace, grid in itertools.product((True, False), grid_gen):
+                res_tri = bsr_dense_mm(
+                    bsr,
+                    dense.transpose(-2, -1),
+                    max_grid=grid,
+                    is_sparse_rowspace_mode=is_sparse_rowspace
+                )
                 self.assertEqual(res_tri, res_dense)
 
         # clean-up

@@ -276,28 +276,46 @@ def _run_sparse_rowspace_kernel(
     # are used to compute offsets into nnz values.
     nnz_per_row_cumsum = nnz_per_row.cumsum(-1)
 
-    # Launch kernel
     n_nnz_block_rows = row_idx.size(-1)
     n_block_cols = dense.size(-3)
+    max_n_nnz_block_rows, max_n_block_cols = max_grid[:2]
     grid = (n_nnz_block_rows, n_block_cols)
-    _bsr_strided_sparse_rowspace_kernel[grid](
-        *blocksize,
-        batch_idx,
-        row_idx,
-        nnz_per_row,
-        nnz_per_row_cumsum,
-        col_indices,
-        *col_indices.stride(),
-        values,
-        *values.stride(),
-        dense,
-        *dense.stride(),
-        output,
-        *output.stride(),
-        GROUP_SIZE_ROW=4,
-        num_stages=4,
-        num_warps=4,
-    )
+
+    for r_start in range(0, n_nnz_block_rows, max_n_nnz_block_rows):
+        r_batch_idx, r_row_idx, r_nnz_per_row, r_nnz_per_row_cumsum = slicer(
+            0,
+            slice(r_start, r_start + max_n_nnz_block_rows),
+            batch_idx,
+            row_idx,
+            nnz_per_row,
+            nnz_per_row_cumsum,
+        )
+        r_grid = min(n_nnz_block_rows - r_start, max_n_nnz_block_rows)
+
+        for c_start in range(0, n_block_cols, max_n_block_cols):
+            c_dense, c_output = slicer(
+                -3, slice(c_start, c_start + max_n_block_cols), dense, output
+            )
+            c_grid = min(n_block_cols - c_start, max_n_block_cols)
+
+            _bsr_strided_sparse_rowspace_kernel[(r_grid, c_grid)](
+                *blocksize,
+                r_batch_idx,
+                r_row_idx,
+                r_nnz_per_row,
+                r_nnz_per_row_cumsum,
+                col_indices,
+                *col_indices.stride(),
+                values,
+                *values.stride(),
+                c_dense,
+                *c_dense.stride(),
+                c_output,
+                *c_output.stride(),
+                GROUP_SIZE_ROW=4,
+                num_stages=4,
+                num_warps=4,
+            )
 
 
 def _run_dense_rowspace_kernel(
@@ -335,11 +353,16 @@ def _run_dense_rowspace_kernel(
 
                 _bsr_strided_dense_rowspace_kernel[(r_grid, c_grid, b_grid)](
                     *blocksize,
-                    b_v, *b_v.stride(),
-                    br_crow, *br_crow.stride(),
-                    b_col, *b_col.stride(),
-                    bc_d, *bc_d.stride(),
-                    brc_o, *brc_o.stride(),
+                    b_v,
+                    *b_v.stride(),
+                    br_crow,
+                    *br_crow.stride(),
+                    b_col,
+                    *b_col.stride(),
+                    bc_d,
+                    *bc_d.stride(),
+                    brc_o,
+                    *brc_o.stride(),
                     GROUP_SIZE_ROW=4,
                     num_stages=4,
                     num_warps=4,
