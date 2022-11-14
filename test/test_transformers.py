@@ -1095,7 +1095,6 @@ class TestTransformers(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM or IS_WINDOWS, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
-    @slowTest
     def test_efficient_attention_gradcheck(self, contiguous_inputs: bool):
 
         batch_size, seq_len, num_heads, head_dim = 8, 8, 4, 64
