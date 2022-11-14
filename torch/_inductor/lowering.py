@@ -3330,7 +3330,7 @@ def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
 
-@register_lowering(aten.div.Tensor_mode, broadcast=True)
+@register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
@@ -3376,6 +3376,7 @@ div = register_lowering(
     broadcast=True,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )(div_prim)
+
 
 @register_lowering([aten.fmod, prims.fmod], broadcast=True)
 def fmod(a, b):
