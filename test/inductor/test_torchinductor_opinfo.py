@@ -448,6 +448,7 @@ inductor_all_samples = {
     "unsqueeze",
     "sum",
     "amax",
+    "amin",
     "all",
 }
 
