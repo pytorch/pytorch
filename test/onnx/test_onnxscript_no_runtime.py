@@ -108,6 +108,8 @@ class TestONNXScriptExport(common_utils.TestCase):
         self.assertEqual(layer_norm_proto.functions[0].name, "layer_norm")
 
     def test_loop_registration(self):
+        # Control flow is tested for _find_onnxscript_op function in torch/onnx/utils.py,
+        # which has recursive logic to go through every nodes with subgraph in model proto
         class NestedLoopsModel(torch.jit.ScriptModule):
             def __init__(self):
                 super().__init__()
