@@ -25,7 +25,6 @@ target_link_libraries(test_lite_interpreter_runtime PRIVATE torch gtest backend_
 
 if(LINUX)
   target_link_libraries(test_lite_interpreter_runtime PRIVATE "-Wl,--no-as-needed,$<TARGET_FILE:backend_with_compiler_runtime>,--as-needed")
-  target_link_libraries(test_lite_interpreter_runtime PRIVATE stdc++fs)
 endif()
 
 if(INSTALL_TEST)
