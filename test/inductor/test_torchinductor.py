@@ -4787,9 +4787,6 @@ if HAS_CUDA:
                     for param in model_opt.parameters():
                         param.add_(1.0)
 
-        # Probably fails due to the symint math issue caught while adding
-        # max_pool2d_with_indices_backward
-        @unittest.expectedFailure("Accuracy failure, needs debugging")
         def test_accuracy_issue1(self):
             class Repro(torch.nn.Module):
                 def __init__(self):
