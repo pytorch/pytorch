@@ -13,14 +13,18 @@ auto getResourcePath(std::string name) -> detail::Path;
 namespace detail {
 class Path {
  public:
-  Path(std::string rep);
+  Path(std::string rep) : rep_(std::move(rep)) {}
 
-  auto string() const -> std::string const&;
+  auto string() const -> std::string const& { return rep_; }
 
  private:
   std::string rep_;
 };
 }  // namespace detail
+
+auto getResourcePath(std::string name) -> detail::Path {
+  return detail::Path(std::move(name));
+}
 
 }  // namespace testing
 }  // namespace torch
