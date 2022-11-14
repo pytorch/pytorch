@@ -973,6 +973,9 @@ aot_autograd_failures = {
     xfail('cholesky'),
     xfail('linalg.cholesky'),
 
+    # Given input size: (s0xs1x2). Calculated output size: ...
+    skip('max_pool2d_with_indices_backward'),
+
     # Misc
     xfail('to_sparse'),
     xfail('corrcoef'),
@@ -1094,8 +1097,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked_fill', ''),  # could not find kernel
     xfail('masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposi...
     xfail('masked.logsumexp', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    # Seems flaky: https://github.com/pytorch/pytorch/issues/88883
-    skip('masked.median', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
