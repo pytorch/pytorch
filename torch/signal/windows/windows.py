@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List, Tuple, Union
 
 import torch
 from math import sqrt
@@ -13,6 +13,8 @@ __all__ = [
     'cosine',
     'exponential',
     'gaussian',
+    'general_cosine',
+    'general_hamming',
     'hamming',
     'hann',
     'kaiser',
@@ -462,7 +464,9 @@ def hamming(M: int,
                        device=device,
                        requires_grad=requires_grad)
 
-    return alpha - beta * torch.cos(k)
+    return general_hamming(M, sym=sym, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+
+    # return alpha - beta * torch.cos(k)
 
 
 @_add_docstr(
@@ -517,14 +521,13 @@ def hann(M: int,
 
     _window_function_checks('hann', M, dtype, layout)
 
-    return hamming(M,
-                   sym=sym,
-                   alpha=0.5,
-                   beta=0.5,
-                   dtype=dtype,
-                   layout=layout,
-                   device=device,
-                   requires_grad=requires_grad)
+    return general_hamming(M,
+                           alpha=0.5,
+                           sym=sym,
+                           dtype=dtype,
+                           layout=layout,
+                           device=device,
+                           requires_grad=requires_grad)
 
 
 @_add_docstr(
@@ -682,3 +685,145 @@ def bartlett(M: int,
                        requires_grad=requires_grad)
 
     return 1 - torch.abs(k)
+
+
+@_add_docstr(
+    r"""
+Computes the general cosine window.
+
+The general cosine window is defined as follows:
+
+.. math::
+    w[n] = \sum^{M-1}_{i=0} (-1)^i a_i \cos{ \left( \frac{i \times 2 \pi n}{M - 1}\right)}
+
+where ``M`` is the full window size, and the cosine coefficients are ``a``.
+    """,
+    r"""
+
+{normalization}
+
+Arguments:
+    {M}
+
+Keyword args:
+    a (Union[list,tuple]): the coefficients associated to each of the cosine functions.
+    {sym}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+
+Examples::
+
+    >>> # Generate a symmetric general cosine window with 3 coefficients.
+    >>> torch.signal.windows.general_cosine(10, a=[0.46, 0.23, 0.31], sym=True)
+    tensor([0.5400, 0.3376, 0.1288, 0.4200, 0.9136, 0.9136, 0.4200, 0.1288, 0.3376, 0.5400])
+
+    >>> # Generate a periodic general cosine window wit 2 coefficients.
+    >>> torch.signal.windows.bartlett(10, a=[0.5, 1 - 0.5], sym=False)
+    tensor([0.0000, 0.0955, 0.3455, 0.6545, 0.9045, 1.0000, 0.9045, 0.6545, 0.3455, 0.0955])
+""".format(
+        **window_common_args
+    ),
+)
+def general_cosine(M, *,
+                   a: Union[List, Tuple] = None,
+                   sym: bool = True,
+                   dtype: torch.dtype = None,
+                   layout: torch.layout = torch.strided,
+                   device: torch.device = None,
+                   requires_grad: bool = False) -> Tensor:
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    _window_function_checks('blackman', M, dtype, layout)
+
+    if M == 0:
+        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+
+    if M == 1:
+        return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+
+    if not hasattr(a, "__iter__"):
+        raise TypeError("Coefficients must be a list/tuple")
+
+    if len(a) == 0:
+        raise ValueError("Coefficients cannot be empty")
+
+    window = 0
+    constant = 2 * torch.pi / (M if not sym else M - 1)
+
+    k = torch.linspace(start=0,
+                       end=(M - 1) * constant,
+                       steps=M,
+                       dtype=dtype,
+                       layout=layout,
+                       device=device,
+                       requires_grad=requires_grad)
+
+    for i, w in enumerate(a):
+        window = window + (-1) ** i * w * torch.cos(i * k)
+
+    return window
+
+
+@_add_docstr(
+    r"""
+Computes the general Hamming window.
+
+The general Hamming window is defined as follows:
+
+.. math::
+    w[n] = \alpha - (1 - \alpha) \cos{ \left( \frac{2 \pi n}{M-1} \right)}
+
+where ``M`` is the full window size.
+    """,
+    r"""
+
+{normalization}
+
+Arguments:
+    {M}
+
+Keyword args:
+    alpha (float, optional): the window coefficient. Default: 0.54.
+    {sym}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+
+Examples::
+
+    >>> # Generate a symmetric Hamming window with the general Hamming window.
+    >>> torch.signal.windows.general_hamming(10, sym=True)
+    tensor([0.0800, 0.1876, 0.4601, 0.7700, 0.9723, 0.9723, 0.7700, 0.4601, 0.1876, 0.0800])
+    
+    >>> # Generating a periodic Hann window with the general Hamming window.
+    >>> torch.signal.windows.general_hamming(10, alpha=0.5, sym=False)
+    tensor([0.0000, 0.0955, 0.3455, 0.6545, 0.9045, 1.0000, 0.9045, 0.6545, 0.3455, 0.0955])
+""".format(
+        **window_common_args
+    ),
+)
+def general_hamming(M,
+                    *,
+                    alpha: float = 0.54,
+                    sym: bool = True,
+                    dtype: torch.dtype = None,
+                    layout: torch.layout = torch.strided,
+                    device: torch.device = None,
+                    requires_grad: bool = False) -> Tensor:
+    return general_cosine(M,
+                          a=[alpha, 1. - alpha],
+                          sym=sym,
+                          dtype=dtype,
+                          layout=layout,
+                          device=device,
+                          requires_grad=requires_grad)
