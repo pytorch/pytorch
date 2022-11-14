@@ -55,9 +55,6 @@ def _rebuild_from_type(func, type, args, dict):
 
 
 def _rebuild_from_type_v2(func, new_type, args, state):
-    if new_type is Tensor:
-        return func(*args)
-
     ret = func(*args)
     if type(ret) is not new_type:
         ret = ret.as_subclass(new_type)
@@ -70,21 +67,7 @@ def _rebuild_from_type_v2(func, new_type, args, state):
     ):
         ret.__setstate__(state)
     else:
-        if isinstance(state, tuple):
-            if not len(state) == 2:
-                raise RuntimeError(f"Invalid serialized state: {state}")
-            dict_state = state[0]
-            slots_state = state[1]
-        else:
-            dict_state = state
-            slots_state = None
-
-        for k, v in dict_state.items():
-            setattr(ret, k, v)
-
-        if slots_state:
-            for k, v in slots_state.items():
-                setattr(ret, k, v)
+        ret = torch._utils._set_obj_state(ret, state)
     return ret
 
 
@@ -223,31 +206,13 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
-        if type(self) is Tensor:
+        state = torch._utils._get_obj_state(self)
+        if type(self) is Tensor and not state:
+            # Fast path for regular tensor without Python state.
             return self._reduce_ex_internal(proto)
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
-        # Get the state of the python subclass
-        # This loosely mimicks the function on the object class but since Tensor do not inherit
-        # from it, we cannot call that function directly
-        # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
-        getstate_fn = getattr(self, "__getstate__", None)
-        if getstate_fn:
-            state = getstate_fn()
-        else:
-            slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
-            if slots_to_save:
-                state = (
-                    self.__dict__,
-                    {
-                        name: getattr(self, name)
-                        for name in slots_to_save
-                        if hasattr(self, name)
-                    },
-                )
-            else:
-                state = self.__dict__
         return (_rebuild_from_type_v2, (func, type(self), args, state))
 
     def storage(self):
@@ -1297,7 +1262,7 @@ class Tensor(torch._C._TensorBase):
         if not all(issubclass(cls, t) for t in types):
             return NotImplemented
 
-        with _C.DisableTorchFunctionSubclass():
+        with _C.DisableTorchFunction():
             ret = func(*args, **kwargs)
             if func in get_default_nowrap_functions():
                 return ret
