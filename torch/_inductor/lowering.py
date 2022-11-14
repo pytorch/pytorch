@@ -1,10 +1,10 @@
 import functools
 import itertools
 import logging
+import math
 import operator
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
-import math
 
 import sympy
 
@@ -3236,6 +3236,7 @@ def pow_recursive(x, y, dtype):
 def pow_native(a, b):
     return ops.pow(a, b)
 
+
 def pow_integer(a, b, a_dtype, b_dtype):
     max_exponent = torch.iinfo(b_dtype).max
     num_loops = math.log2((max_exponent + 1))
@@ -3260,6 +3261,7 @@ def pow_integer(a, b, a_dtype, b_dtype):
     result = ops.where(ops.logical_and(op.eq(a, "-1"), b_negative), "1", result)
     return ops.where(ops.lt(b, "0"), "0", result)
 
+
 @register_lowering(
     aten.pow,
     broadcast=True,
@@ -3270,15 +3272,14 @@ def pow(a, b):
         b = int(b)
 
     promoted_dtype = get_promoted_dtype(
-        a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+        a,
+        b,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
     )
     a = to_dtype(a, promoted_dtype)
 
     is_integer_pow = is_integer_dtype(promoted_dtype)
-    embed_exponent = (
-        isinstance(b, int) and
-        (-32 < b < 32 or is_integer_pow)
-    )
+    embed_exponent = isinstance(b, int) and (-32 < b < 32 or is_integer_pow)
     if embed_exponent:
         loader = a.make_loader()
 
@@ -3302,7 +3303,8 @@ def pow(a, b):
 
         def fn(idx):
             return pow_integer(
-                a_loader(idx), b_loader(idx), a.get_dtype(), b.get_dtype())
+                a_loader(idx), b_loader(idx), a.get_dtype(), b.get_dtype()
+            )
 
         return Pointwise.create(
             device=a.get_device(),
@@ -3310,7 +3312,6 @@ def pow(a, b):
             inner_fn=fn,
             ranges=a.get_size(),
         )
-
 
     b = to_dtype(b, promoted_dtype)
     return pow_native(a, b)
@@ -3372,7 +3373,7 @@ def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
 
-@register_lowering(aten.div.Tensor_mode, broadcast=True)
+@register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
@@ -3418,6 +3419,7 @@ div = register_lowering(
     broadcast=True,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )(div_prim)
+
 
 @register_lowering([aten.fmod, prims.fmod], broadcast=True)
 def fmod(a, b):
