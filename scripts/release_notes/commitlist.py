@@ -299,6 +299,10 @@ def to_markdown(commit_list: CommitList, category):
     for topic in topics:
         lines.append(f'### {topic}\n')
         commits = commit_list.filter(category=category, topic=topic)
+        if '_' in topic:
+            commits.extend(commit_list.filter(category=category, topic=topic.replace('_', ' ')))
+        if ' ' in topic:
+            commits.extend(commit_list.filter(category=category, topic=topic.replace(' ', '_')))
         for commit in commits:
             if commit.merge_into:
                 continue

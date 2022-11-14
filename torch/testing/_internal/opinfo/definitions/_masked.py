@@ -50,41 +50,28 @@ def sample_inputs_softmax_variant(
     if torch.device(device).type != "xla":
         cases.append(((), (0,)))
 
-    return [
+    return (
         SampleInput(make_arg(shape), args=dim, kwargs=kwargs) for shape, dim in cases
-    ]
+    )
 
 
 def _generate_masked_op_mask(input_shape, device, **kwargs):
+    make_arg = partial(
+        make_tensor, dtype=torch.bool, device=device, requires_grad=False
+    )
     yield None
-    yield make_tensor(input_shape, dtype=torch.bool, device=device, requires_grad=False)
+    yield make_arg(input_shape)
     if len(input_shape) > 2:
         # broadcast last mask dimension:
-        yield make_tensor(
-            input_shape[:-1] + (1,),
-            dtype=torch.bool,
-            device=device,
-            requires_grad=False,
-        )
+        yield make_arg(input_shape[:-1] + (1,))
         # broadcast middle mask dimension:
-        yield make_tensor(
-            input_shape[:1] + (1,) + input_shape[2:],
-            dtype=torch.bool,
-            device=device,
-            requires_grad=False,
-        )
+        yield make_arg(input_shape[:1] + (1,) + input_shape[2:])
         # broadcast first mask dimension:
-        yield make_tensor(
-            (1,) + input_shape[1:], dtype=torch.bool, device=device, requires_grad=False
-        )
+        yield make_arg((1,) + input_shape[1:])
         # mask.ndim < input.ndim
-        yield make_tensor(
-            input_shape[1:], dtype=torch.bool, device=device, requires_grad=False
-        )
+        yield make_arg(input_shape[1:])
         # mask.ndim == 1
-        yield make_tensor(
-            input_shape[-1:], dtype=torch.bool, device=device, requires_grad=False
-        )
+        yield make_arg(input_shape[-1:])
         # masks that require broadcasting of inputs (mask.ndim >
         # input.ndim) will not be supported, however, we may
         # reconsider this if there will be demand on this kind of
@@ -294,24 +281,18 @@ def sample_inputs_masked_softmax(
     same shape as input or a shape that is broadcastable to input
     shape.
     """
-    inputs: List[SampleInput] = []
     for sample_input in sample_inputs_softmax_variant(
         op_info, device, dtype, requires_grad, with_dtype=with_dtype, **kwargs
     ):
         for mask in _generate_masked_op_mask(
             sample_input.input.shape, device, **kwargs
         ):
-            sample_input_args, sample_input_kwargs = sample_input.args, dict(
-                mask=mask, **sample_input.kwargs
+            yield SampleInput(
+                sample_input.input.clone().requires_grad_(requires_grad),
+                *sample_input.args,
+                mask=mask,
+                **sample_input.kwargs,
             )
-            inputs.append(
-                SampleInput(
-                    sample_input.input.clone().requires_grad_(requires_grad),
-                    args=sample_input_args,
-                    kwargs=sample_input_kwargs,
-                )
-            )
-    return inputs
 
 
 def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs):
@@ -338,20 +319,15 @@ def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs)
                     continue
                 dim = sample_input_kwargs.pop("dim")
                 sample_input_args = (dim,)
-            inputs.append(
-                SampleInput(
-                    sample_input.input.clone().requires_grad_(requires_grad),
-                    args=sample_input_args,
-                    kwargs=sample_input_kwargs,
-                )
+            yield SampleInput(
+                sample_input.input.clone().requires_grad_(requires_grad),
+                *sample_input_args,
+                **sample_input_kwargs,
             )
-
-    return inputs
 
 
 def sample_inputs_masked_logaddexp(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked logaddexp."""
-    inputs: List[SampleInput] = []
     shapes = [(S,), (S, S), (S, M, S)]
     input_mask_lists = [
         list(_generate_masked_op_mask(shape, device, **kwargs)) for shape in shapes
@@ -360,44 +336,33 @@ def sample_inputs_masked_logaddexp(op_info, device, dtype, requires_grad, **kwar
         list(_generate_masked_op_mask(shape, device, **kwargs)) for shape in shapes
     ]
 
+    make_arg = partial(
+        make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
+    )
     for shape, input_masks, other_masks in zip(
         shapes, input_mask_lists, other_mask_lists
     ):
         for input_mask, other_mask in zip(input_masks, other_masks):
-            input = make_tensor(
-                shape, dtype=dtype, device=device, requires_grad=requires_grad
+            yield SampleInput(
+                make_arg(shape),
+                make_arg(shape),
+                input_mask=input_mask,
+                other_mask=other_mask,
             )
-            other = make_tensor(
-                shape, dtype=dtype, device=device, requires_grad=requires_grad
-            )
-            inputs.append(
-                SampleInput(
-                    input.clone().requires_grad_(requires_grad),
-                    args=(other.clone().requires_grad_(requires_grad),),
-                    kwargs=dict(input_mask=input_mask, other_mask=other_mask),
-                )
-            )
-    return inputs
 
 
 def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked normalize."""
-    inputs: List[SampleInput] = []
     for ord in [2.0, 1, float("inf"), float("-inf"), 0]:
         for sample_input in sample_inputs_softmax_variant(
             op_info, device, dtype, requires_grad, **kwargs
         ):
-            sample_input_args, sample_input_kwargs = (
+            yield SampleInput(
+                sample_input.input.clone().requires_grad_(requires_grad),
                 ord,
-            ) + sample_input.args, sample_input.kwargs.copy()
-            inputs.append(
-                SampleInput(
-                    sample_input.input.clone().requires_grad_(requires_grad),
-                    args=sample_input_args,
-                    kwargs=sample_input_kwargs,
-                )
+                *sample_input.args,
+                **sample_input.kwargs,
             )
-    return inputs
 
 
 op_db: List[OpInfo] = [
@@ -596,6 +561,12 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                 "TestCompositeCompliance",
                 "test_backward",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=2e-3, rtol=2e-3)}),
+                "TestInductorOpInfo",
+                "test_comprehensive",
                 device_type="cuda",
             ),
         ),
@@ -1138,7 +1109,10 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
             DecorateInfo(
-                unittest.skip("Skipped!"), "TestGradients", "test_fn_gradgrad"
+                unittest.skip("Skipped!"), "TestFwdGradients", "test_fn_gradgrad"
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"), "TestBwdGradients", "test_fn_gradgrad"
             ),
         ),
         sample_inputs_func=sample_inputs_masked_logaddexp,
