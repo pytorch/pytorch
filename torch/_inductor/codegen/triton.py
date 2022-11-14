@@ -24,6 +24,7 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from .common import (
+    CSEVariable,
     DeferredLine,
     ExprPrinter,
     IndentedBuffer,
@@ -107,6 +108,17 @@ def triton_constant(value):
     elif math.isnan(value):
         return 'float("nan")'
     return repr(value)
+
+
+class TritonCSEVariable(CSEVariable):
+    def __init__(self, name):
+        super().__init__(name)
+        self.is_scalar = False
+
+    def update_on_args(self, args, kwargs):
+        self.is_scalar = all(
+            not (isinstance(arg, TritonCSEVariable)) or arg.is_scalar for arg in args
+        )
 
 
 class TritonOverrides(OpOverrides):
@@ -752,7 +764,13 @@ class TritonKernel(Kernel):
             # https://github.com/openai/triton/issues/633
             mask = ["None"]
 
-        return index_str, " & ".join(mask)
+        if (
+            index_str in self.cse.varname_map
+            and self.cse.varname_map[index_str].is_scalar
+        ):
+            mask = ["None"]
+
+        return index_str, " & ".join(map(str, mask))
 
     def var_ranges(self):
         return dict(
@@ -1105,6 +1123,9 @@ class TritonKernel(Kernel):
         code.writeline(
             f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name})"
         )
+
+    def create_cse_var(self, *args, **kwargs):
+        return TritonCSEVariable(*args, **kwargs)
 
 
 class TritonScheduling:
