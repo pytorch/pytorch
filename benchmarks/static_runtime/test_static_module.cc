@@ -77,13 +77,6 @@ const auto sigmoid_inplace_script = R"JIT(
       return (a)
 )JIT";
 
-const auto sigmoid_out_script = R"JIT(
-  def forward(self, inp: Tensor):
-      a = inp + inp
-      b = torch.sigmoid(inp, out=a).clone()
-      return (b)
-)JIT";
-
 } // namespace
 
 // Test that StaticModule::value_group groups values of the graph into
