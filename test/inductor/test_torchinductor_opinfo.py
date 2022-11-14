@@ -16,20 +16,22 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     OpDTypes,
     ops,
+    skipCPUIf,
+    skipCUDAIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     dtype_abbrs,
     run_tests,
     skipCUDAMemoryLeakCheckIf,
+    skipIfCrossRef,
+    skipIfTorchDynamo,
     suppress_warnings,
-    TEST_WITH_ROCM,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 try:
-    from torch._inductor.utils import has_triton
-
     try:
         from .test_torchinductor import check_model, check_model_cuda
     except ImportError:
@@ -120,6 +122,7 @@ inductor_skips = defaultdict(dict)
 
 inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
+    "linalg.ldl_factor": {f32, f64},  # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
 }
 
@@ -169,6 +172,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "argwhere": {b8, f16, f32, f64, i32, i64},
     "bernoulli": {f32, f64},
     "bincount": {i32, i64},
+    "cdouble": {b8, f16, f32, f64, i32, i64},
+    "cfloat": {b8, f16, f32, f64, i32, i64},
     "chalf": {b8, f16, f32, f64, i32, i64},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
@@ -209,11 +214,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
-    "linalg.lu_solve": {f32, f64},
-    "lu_solve": {f32, f64},
-    "lu_unpack": {f32, f64},
+    "linalg.pinv.singular": {f32, f64},
     "logdet": {f32, f64},
     "masked.norm": {f16},
+    "masked.normalize": {f16},
     "masked_fill": {f16},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
@@ -225,8 +229,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nan_to_num": {f16},
     "nanquantile": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
-    "nn.functional.avg_pool2d": {i64},
-    "nn.functional.adaptive_avg_pool2d": {f16},
+    "nn.functional.avg_pool2d": {i64, f64},
+    "nn.functional.adaptive_avg_pool2d": {f16, f64},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f32, f64},
     "nn.functional.gelu": {f64},
@@ -243,6 +247,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "quantile": {f32, f64},
     "rand_like": {f16, f32, f64},
     "randint_like": {f16, f32, f64, i32, i64},
+    "randint": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "scatter_add": {f16},
@@ -455,6 +460,10 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
+    @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
+    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipIfTorchDynamo("Test uses dynamo already")
+    @skipIfCrossRef
     @_ops(op_db[START:END])
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
     def test_comprehensive(self, device, dtype, op):
@@ -599,5 +608,4 @@ class TestInductorOpInfo(TestCase):
 instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
-    if has_triton() and not TEST_WITH_ROCM:
-        run_tests()
+    run_tests()

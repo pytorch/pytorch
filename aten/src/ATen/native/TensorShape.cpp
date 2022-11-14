@@ -204,10 +204,11 @@
 #include <ATen/ops/zeros_native.h>
 #endif
 
+#include <c10/util/StringUtil.h>
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <vector>
-#include <c10/util/StringUtil.h>
 
 namespace at {
 namespace meta {
@@ -416,7 +417,7 @@ Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt st
     const auto itemsize = result.dtype().itemsize();
     c10::SymInt size_bytes = at::detail::computeStorageNbytes(
         size, stride, itemsize, storage_offset);
-    storage.set_nbytes(size_bytes);
+    storage.set_nbytes(std::move(size_bytes));
   }
   return result;
 }
@@ -1588,7 +1589,7 @@ Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_sha
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
 
   if (self.is_mkldnn()) {
-    TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tesnors");
+    TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tensors");
   }
 
   if (self.is_contiguous()) {
