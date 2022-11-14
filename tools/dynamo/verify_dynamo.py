@@ -94,6 +94,17 @@ def check_dynamo(backend, device, err_msg):
     try:
         import torch._dynamo as dynamo
 
+        if device == "cuda":
+            import torch._inductor.utils as utils
+
+            if not utils.has_triton():
+                print(
+                    f"WARNING: CUDA available but triton cannot be used. "
+                    f"Your GPU may not be supported. "
+                    f"Skipping CUDA check on {backend} backend\n"
+                )
+                return
+
         dynamo.reset()
 
         @dynamo.optimize(backend, nopython=True)
@@ -154,3 +165,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    sys.exit(1)
