@@ -1,4 +1,3 @@
-#include <type_traits>
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -7,6 +6,8 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/cpu/vec/vec256/vec256.h>
 #include <ATen/native/transformers/attention.h>
+#include <type_traits>
+#include <utility>
 
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -232,7 +233,7 @@ Tensor qkv_projection(
           q_kv_weight_s.size());
       auto q = gemm_nt(query, q_kv_weight_s[0]);
       auto kv = gemm_nt(key, q_kv_weight_s[1]);
-      qkv = at::cat({q, kv}, 2);
+      qkv = at::cat({std::move(q), std::move(kv)}, 2);
     }
   } else {
     auto q_k_v_weight_s = at::native::chunk(qkv_weight, 3, 0);
@@ -244,7 +245,7 @@ Tensor qkv_projection(
     auto q = gemm_nt(query, q_k_v_weight_s[0]);
     auto k = gemm_nt(key, q_k_v_weight_s[1]);
     auto v = gemm_nt(value, q_k_v_weight_s[2]);
-    qkv = at::cat({q, k, v}, 2);
+    qkv = at::cat({std::move(q), std::move(k), std::move(v)}, 2);
   }
 
   return qkv;

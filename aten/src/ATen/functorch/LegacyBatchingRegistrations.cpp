@@ -16,6 +16,8 @@
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/BatchRulesHelper.h>
 
+#include <utility>
+
 namespace at {
 namespace functorch {
 
@@ -464,7 +466,7 @@ Tensor as_strided_batching_rule(
     optional<c10::SymInt> storage_offset) {
   if (!participatesInCurrentLevel(tensor)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return at::as_strided_symint(tensor, sizes, strides, storage_offset);
+    return at::as_strided_symint(tensor, sizes, strides, std::move(storage_offset));
   }
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(tensor);
   auto num_batch_dims = physical_view.numBatchDims();
@@ -499,7 +501,7 @@ Tensor as_strided_batching_rule(
   // and creates a tensor y such that each y[i] references the same memory
   // locations as zi. See NOTE: [When will the as_strided batching rule fail?]
   auto result = physical_view.tensor().as_strided_symint(
-      physical_sizes, physical_strides, storage_offset);
+      physical_sizes, physical_strides, std::move(storage_offset));
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 

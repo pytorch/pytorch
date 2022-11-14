@@ -14,6 +14,7 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 #include <tuple>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -63,7 +64,7 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
     out_numel += self_size0 * mat2_size1;
   }
   Tensor out_buffer = self_buffer.new_empty(out_numel);
-  Tensor output = wrap_buffer(out_buffer, out_sizemat);
+  Tensor output = wrap_buffer(std::move(out_buffer), std::move(out_sizemat));
   // call tensor mm
   // TODO: `padding nested tensor -> bmm -> remove padding` may be more efficient
   //       until we have specialized nested tensor bmm kernel
@@ -131,7 +132,7 @@ matmul_nested_helper(
     numel += batch_size * self_size0 * mat2_size1;
   }
   Tensor buffer = at::empty(numel, buffer_op);
-  Tensor output = wrap_buffer(buffer, sizemat);
+  Tensor output = wrap_buffer(std::move(buffer), std::move(sizemat));
   return std::make_tuple(batch_sizes, output);
 }
 }
@@ -203,11 +204,11 @@ Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
 
   // view self as [N * n_heads, *, head_dim] (collapse first 2 dims)
   auto viewed_self = create_nested_view_tensor(
-      self, self_new_sizes, self_new_strides, std::vector<int64_t>(self_new_offsets));
+      self, std::move(self_new_sizes), std::move(self_new_strides), std::vector<int64_t>(std::move(self_new_offsets)));
 
   // view mat2 as [N * n_heads, head_dim, *] (collapse first 2_dims)
   auto viewed_mat2 = create_nested_view_tensor(
-      mat2, mat2_new_sizes, mat2_new_strides, std::vector<int64_t>(mat2_new_offsets));
+      mat2, std::move(mat2_new_sizes), std::move(mat2_new_strides), std::vector<int64_t>(std::move(mat2_new_offsets)));
 
   // output [N * n_heads, *, *]
   auto bmm_output = at::bmm(viewed_self, viewed_mat2);
@@ -237,7 +238,7 @@ Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
   }
 
   auto viewed_out = create_nested_view_tensor(
-      bmm_output, out_new_sizes, out_new_strides, std::vector<int64_t>(out_new_offsets));
+      bmm_output, std::move(out_new_sizes), std::move(out_new_strides), std::vector<int64_t>(std::move(out_new_offsets)));
 
   return viewed_out;
 

@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <stack>
+#include <utility>
 
 namespace c10 {
 
@@ -132,7 +133,7 @@ c10::optional<AliasTypeSet> FunctionSchema::mapTypeToAliasTypeSet(const TypePtr&
       if (mutable_types.size() == 0) {
         return c10::nullopt;
       }
-      return {AliasTypeSet{TupleType::create(mutable_types)}};
+      return {AliasTypeSet{TupleType::create(std::move(mutable_types))}};
     }
     default:
       return c10::nullopt;

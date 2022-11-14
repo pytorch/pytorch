@@ -33,6 +33,7 @@
 #include <cctype>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace at { namespace native {
@@ -181,8 +182,8 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   }
 
   // now we can execute the operations above
-  left = left.permute(lpermutation).reshape_symint({lro_size, lo_size, sum_size});
-  right = right.permute(rpermutation).reshape_symint({lro_size, sum_size, ro_size});
+  left = left.permute(lpermutation).reshape_symint({lro_size, std::move(lo_size), sum_size});
+  right = right.permute(rpermutation).reshape_symint({std::move(lro_size), std::move(sum_size), std::move(ro_size)});
   Tensor result = at::bmm(left, right);
   result = result.view_symint(out_size).permute(opermutation);
 

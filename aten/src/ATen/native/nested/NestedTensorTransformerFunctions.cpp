@@ -9,6 +9,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#include <utility>
+
 namespace at {
 namespace native {
 namespace {
@@ -70,7 +72,7 @@ Tensor nested_linear(
   Tensor new_sizes = nt_input->get_nested_size_tensor().clone();
   // Now the last entry in every row of new_sizes should be weight_size_1.
   new_sizes.index_put_({at::indexing::Slice(), -1}, weight_size_1);
-  return wrap_buffer(result_buffer, new_sizes);
+  return wrap_buffer(std::move(result_buffer), std::move(new_sizes));
 }
 
 Tensor NestedTensor_matmul(const Tensor& self, const Tensor& other) {
@@ -84,7 +86,7 @@ Tensor NestedTensor_matmul(const Tensor& self, const Tensor& other) {
   Tensor new_sizes = nt_self->get_nested_size_tensor().clone();
   // Now the last entry in every row of new_sizes should be other_size_1.
   new_sizes.index_put_({at::indexing::Slice(), -1}, other_size_1);
-  return wrap_buffer(result_buffer, new_sizes);
+  return wrap_buffer(std::move(result_buffer), std::move(new_sizes));
 }
 
 Tensor NestedTensor_times_Tensor_plus_Tensor_addmm(

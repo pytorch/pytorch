@@ -7,6 +7,8 @@
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 
+#include <utility>
+
 namespace at {
 
 namespace native {
@@ -116,7 +118,7 @@ Tensor transformer_encoder_layer_forward(
   }
 
 
-  auto pre_ffn_res = x;
+  auto pre_ffn_res = std::move(x);
 
   if (norm_first) {
     x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_2, layer_norm_bias_2, use_nested_tensor);
@@ -194,7 +196,7 @@ std::tuple<Tensor, Tensor, Tensor>  transformer_decoder_only_layer_forward(
       layer_norm_eps,
       true);
 
-  auto pre_ffn_res = x;
+  auto pre_ffn_res = std::move(x);
   x = ffn(
       x,
       ffn_weight_1,

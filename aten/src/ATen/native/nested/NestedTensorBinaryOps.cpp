@@ -15,6 +15,7 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 #include <tuple>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -118,7 +119,7 @@ Tensor NestedTensor_elementwise_Tensor(
       const auto self_buffer = self_ptr->get_buffer();
       const auto self_sizes = self_ptr->get_nested_size_tensor();
       auto result_buffer = at::empty_like(self_buffer);
-      auto result = wrap_buffer(result_buffer, self_sizes);
+      auto result = wrap_buffer(std::move(result_buffer), self_sizes);
       if (op_name == "add") {
         nested_dense_elementwise_stub(self.device().type(), result, self, other, NESTED_DENSE_OP::ADD);
       } else if (op_name == "mul") {

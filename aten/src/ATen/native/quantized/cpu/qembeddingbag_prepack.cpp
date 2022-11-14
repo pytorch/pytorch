@@ -21,6 +21,8 @@
 
 #include <c10/util/irange.h>
 
+#include <utility>
+
 int register_embedding_params();
 
 /*
@@ -391,7 +393,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
     const auto float_weight =
         weight_contig.scalar_type() == at::ScalarType::Half
         ? weight_contig.to(at::ScalarType::Float)
-        : weight_contig;
+        : std::move(weight_contig);
     const auto weight_data = float_weight.data_ptr<float>();
     for (const auto row : c10::irange(embedding_rows)) {
       const float* input_row = weight_data + row * embedding_cols;

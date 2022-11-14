@@ -8,13 +8,15 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
+#include <utility>
+
 namespace at { namespace functorch {
 
 static Tensor getStepTensor(const Tensor& indices, c10::SymInt bdim_size, c10::SymInt num_embeddings) {
   // [batch_size, 1, 1, 1, ..., 1]
   c10::SymDimVector view_shape(indices.dim(), 1);
   view_shape[0] = bdim_size;
-  auto range = at::arange(0, bdim_size * num_embeddings, num_embeddings, indices.options());
+  auto range = at::arange(0, bdim_size * num_embeddings, std::move(num_embeddings), indices.options());
   return range.view_symint(view_shape);
 }
 
@@ -59,7 +61,7 @@ embedding_dense_backward_batch_rule(
     const auto bdim_size = grad.sym_size(*grad_bdim);
     grad = reshape_dim_into(*grad_bdim, -1, grad);
     auto result = at::embedding_dense_backward_symint(
-        grad, indices, num_weights, padding_idx, scale_grad_by_freq);
+        grad, indices, std::move(num_weights), padding_idx, scale_grad_by_freq);
     result = reshape_dim_outof_symint(1, bdim_size, result);
     return std::make_tuple(result, 1);
   }

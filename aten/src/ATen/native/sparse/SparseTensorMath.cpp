@@ -72,6 +72,7 @@
 #endif
 
 #include <algorithm>
+#include <utility>
 
 namespace at { namespace native {
 
@@ -244,7 +245,7 @@ SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value,
     if (should_coalesce) {
       coalesce_(r);
     }
-    r._values().div_(value, rounding_mode);
+    r._values().div_(value, std::move(rounding_mode));
   } else {
     Tensor t_tmp = t;
     if (should_coalesce) {
@@ -255,7 +256,7 @@ SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value,
     indices.resize_as_(t_tmp._indices());
     indices.copy_(t_tmp._indices());
     Tensor r_values = r._values(); // Sigh... needed because div_out takes Tensor&
-    at::div_out(r_values, t_tmp._values(), value, rounding_mode);
+    at::div_out(r_values, t_tmp._values(), value, std::move(rounding_mode));
     get_sparse_impl(r)->set_nnz_and_narrow(t_tmp._nnz());
     r._coalesced_(t_tmp.is_coalesced());
   }
@@ -559,7 +560,7 @@ SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor&
         });
 
     Tensor r_indices = at::cat({t._indices(), src._indices()}, 1);
-    Tensor r_values = at::cat({t_values, s_values}, 0).to(r.scalar_type());
+    Tensor r_values = at::cat({std::move(t_values), std::move(s_values)}, 0).to(r.scalar_type());
     alias_into_sparse(r, r_indices, r_values);
 
     // Prevent unbounded growth of nnz

@@ -14,6 +14,7 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 #include <tuple>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -95,7 +96,7 @@ Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask,
     Tensor sizes = mask;
     Tensor tmp_pad = at::zeros({N, 1}, mask.options());
     // Make sure padding is only added at the end of mask
-    Tensor nums = at::cat({sizes, tmp_pad}, 1).to(kInt).argmin(1);
+    Tensor nums = at::cat({std::move(sizes), std::move(tmp_pad)}, 1).to(kInt).argmin(1);
 
     // N, ([size1, size2, ... sizeN])
     sizes = sizes.cumsum(1).select(1, L - 1);
@@ -109,7 +110,7 @@ Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask,
     Tensor d = at::full_like(sizes, D);
 
     // N * 2, ([[size1, D], [size2, D], ..., [sizeN, D]])
-    sizes = at::cat({sizes, d}, 1).to(kCPU);
+    sizes = at::cat({sizes, std::move(d)}, 1).to(kCPU);
 
     return at::_nested_from_padded(t, sizes, false);
 }
@@ -126,7 +127,7 @@ bool NestedTensor_nested_tensor_from_mask_left_aligned(const Tensor& t, const Te
     Tensor sizes = mask;
     Tensor tmp_pad = at::zeros({N, 1}, mask.options());
     // Make sure padding is only added at the end of mask
-    Tensor nums = at::cat({sizes, tmp_pad}, 1).to(kInt).argmin(1);
+    Tensor nums = at::cat({std::move(sizes), std::move(tmp_pad)}, 1).to(kInt).argmin(1);
 
     // N, ([size1, size2, ... sizeN])
     sizes = sizes.cumsum(1).select(1, L - 1);
@@ -261,7 +262,7 @@ std::tuple<Tensor, Tensor, Tensor> nested_layer_norm(
       &mean,
       &rstd);
   return std::make_tuple(
-    wrap_buffer(output_buffer, nt_input->get_nested_size_tensor()),
+    wrap_buffer(std::move(output_buffer), nt_input->get_nested_size_tensor()),
     mean,
     rstd
   );
@@ -489,7 +490,7 @@ Tensor NestedTensor_sum_dim_CPU(
     }
   });
 
-  return wrap_buffer(output_buffer, output_sizemat);
+  return wrap_buffer(std::move(output_buffer), std::move(output_sizemat));
 }
 
 Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
@@ -546,7 +547,7 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
         }
       }
     }
-    return create_nested_view_tensor(self, new_sizes, new_strides, std::move(new_offsets));
+    return create_nested_view_tensor(self, std::move(new_sizes), std::move(new_strides), std::move(new_offsets));
   }
 
 }
@@ -573,7 +574,7 @@ Tensor clone_nested(
     const Tensor& self_buffer = self_ptr->get_unsafe_storage_as_tensor(),
         sizemat = self_ptr->get_nested_size_tensor();
     Tensor output_buffer = at::empty(self.numel(), self_buffer.options());
-    Tensor output = wrap_buffer(output_buffer, sizemat);
+    Tensor output = wrap_buffer(std::move(output_buffer), sizemat);
     std::vector<Tensor> self_unbind = self.unbind(),
         output_unbind = output.unbind();
     for (const int64_t i: c10::irange(self_ptr->size(0))) {
@@ -604,8 +605,8 @@ std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, c
   }
   // regular tensor dropout reuses input size and stride
   // i.e. if input is not contiguous, then output is also discontiguous
-  Tensor output = wrap_buffer(output_buffer, sizemat.clone(), stridemat.clone(), std::vector<int64_t>(offsets)),
-      mask = wrap_buffer(mask_buffer, sizemat.clone(), stridemat.clone(), std::vector<int64_t>(offsets));
+  Tensor output = wrap_buffer(std::move(output_buffer), sizemat.clone(), stridemat.clone(), std::vector<int64_t>(offsets)),
+      mask = wrap_buffer(std::move(mask_buffer), sizemat.clone(), stridemat.clone(), std::vector<int64_t>(offsets));
   return std::make_tuple(output, mask);
 }
 
@@ -629,7 +630,7 @@ Tensor softmax_nested(
   const Tensor& buffer = input_ptr->get_unsafe_storage_as_tensor(),
       & sizemat = input_ptr->get_nested_size_tensor();
   Tensor output_buffer = buffer.new_empty(buffer.sizes());
-  Tensor output = wrap_buffer(output_buffer, sizemat.clone());
+  Tensor output = wrap_buffer(std::move(output_buffer), sizemat.clone());
   // call tensor softmax
   // TODO: for cpu, maybe use `parallel_for` if benchmarks show necessity
   //       to do that, have to merge `aten/src/ATen/native/cpu/SoftMaxKernel.cpp/softmax_kernel`
@@ -673,7 +674,7 @@ Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
   Tensor sizemat_transposed = at::index_select(sizemat, 1, column_indices),
       stridemat_transposed = at::index_select(stridemat, 1, column_indices);
   return create_nested_view_tensor(
-      self, sizemat_transposed, stridemat_transposed, std::vector<int64_t>(self_ptr->get_storage_offsets()));
+      self, std::move(sizemat_transposed), std::move(stridemat_transposed), std::vector<int64_t>(self_ptr->get_storage_offsets()));
 }
 
 Tensor squeeze_nested(const Tensor& self) {
@@ -712,7 +713,7 @@ Tensor squeeze_dim_nested(const Tensor& self, int64_t dim) {
   auto sizemat_squeezed = at::index_select(sizemat, 1, column_indices);
   auto stridemat_squeezed = at::index_select(stridemat, 1, column_indices);
   return create_nested_view_tensor(
-      self, sizemat_squeezed, stridemat_squeezed, std::vector<int64_t>(self_ptr->get_storage_offsets()));
+      self, std::move(sizemat_squeezed), std::move(stridemat_squeezed), std::vector<int64_t>(self_ptr->get_storage_offsets()));
 }
 
 Tensor unsqueeze_nested(const Tensor& self, int64_t dim) {
@@ -727,7 +728,7 @@ Tensor unsqueeze_nested(const Tensor& self, int64_t dim) {
   auto mat_dim = wrapped_dim - 1;
   Tensor new_size = sizemat.new_ones({sizemat.size(0), 1});
   Tensor sizemat_unsqueezed = at::cat({sizemat.slice(1, 0, mat_dim),
-                                       new_size,
+                                       std::move(new_size),
                                        sizemat.slice(1, mat_dim, ndim)}, 1);
   Tensor new_stride;
   if (wrapped_dim == ndim) {
@@ -736,10 +737,10 @@ Tensor unsqueeze_nested(const Tensor& self, int64_t dim) {
     new_stride = (stridemat.select(1, mat_dim - 1) * sizemat.select(1, mat_dim - 1)).unsqueeze(-1);
   }
   Tensor stridemat_unsqueezed = at::cat({stridemat.slice(1, 0, mat_dim),
-                                         new_stride,
+                                         std::move(new_stride),
                                          stridemat.slice(1, mat_dim, ndim)}, 1);
   return create_nested_view_tensor(
-      self, sizemat_unsqueezed, stridemat_unsqueezed, std::vector<int64_t>(self_ptr->get_storage_offsets()));
+      self, std::move(sizemat_unsqueezed), std::move(stridemat_unsqueezed), std::vector<int64_t>(self_ptr->get_storage_offsets()));
 }
 
 // utilities supporting `view_nested` and `reshape_nested`
@@ -897,7 +898,7 @@ Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
       "view size is not compatible with input tensor's size and stride "
       "(at least one dimension spans across two contiguous subspaces). "
       "Use .reshape(...) instead.");
-  return create_nested_view_tensor(self, sizemat_reshaped, stridemat_reshaped, std::vector<int64_t>(self_ptr->get_storage_offsets()));
+  return create_nested_view_tensor(self, std::move(sizemat_reshaped), std::move(stridemat_reshaped), std::vector<int64_t>(self_ptr->get_storage_offsets()));
 }
   /**
    * Create a buffer tensor that is a view of self

@@ -3,6 +3,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+
+#include <utility>
 namespace at {
 namespace functionalization {
 
@@ -129,7 +131,7 @@ Tensor FunctionalInverses::_neg_view_copy_inverse(const Tensor& base, const Tens
 
 Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
     // Pessimism: we can't reapply views for as_strided_scatter.
-    return base.as_strided_scatter_symint(mutated_view, size, stride, storage_offset);
+    return base.as_strided_scatter_symint(mutated_view, size, stride, std::move(storage_offset));
 }
 
 Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -174,7 +176,7 @@ Tensor FunctionalInverses::lift_fresh_copy_inverse(const Tensor& base, const Ten
 
 Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.slice_scatter_symint(mutated_view, dim, start, end, step);
+    return base.slice_scatter_symint(mutated_view, dim, std::move(start), std::move(end), std::move(step));
 }
 
 Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {

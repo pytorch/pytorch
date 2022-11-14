@@ -17,6 +17,8 @@
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/sqrt.h>
 #include <ATen/ops/true_divide.h>
+
+#include <utility>
 #endif
 
 namespace at {
@@ -102,7 +104,7 @@ Tensor cov(
       !w.defined() || at::is_scalar_tensor_true(w_sum.ne(0)),
       "cov(): weights sum to zero, can't be normalized");
 
-  const auto avg = (w.defined() ? in * w : in).sum(OBSERVATIONS_DIM) / w_sum;
+  const auto avg = (w.defined() ? in * w : std::move(in)).sum(OBSERVATIONS_DIM) / w_sum;
 
   // Compute the normalization factor
   Tensor norm_factor;
@@ -120,7 +122,7 @@ Tensor cov(
 
   // Compute covariance matrix
   in = in - avg.unsqueeze(1);
-  const auto c = at::mm(in, (w.defined() ? in * w : in).t().conj());
+  const auto c = at::mm(in, (w.defined() ? in * w : std::move(in)).t().conj());
   return at::true_divide(c, norm_factor).squeeze();
 }
 

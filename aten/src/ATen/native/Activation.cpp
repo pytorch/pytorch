@@ -73,6 +73,8 @@
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/threshold_native.h>
 #include <ATen/ops/zeros_like.h>
+
+#include <utility>
 #endif
 
 namespace at {
@@ -624,7 +626,7 @@ Tensor rrelu_with_noise_cpu(
     c10::optional<Generator> generator) {
   auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::native::rrelu_with_noise_out_cpu(
-      self, noise, lower, upper, training, generator, output);
+      self, noise, lower, upper, training, std::move(generator), output);
 }
 
 Tensor& rrelu_with_noise_cpu_(
@@ -635,7 +637,7 @@ Tensor& rrelu_with_noise_cpu_(
     bool training,
     c10::optional<Generator> generator) {
   return at::native::rrelu_with_noise_out_cpu(
-      self, noise, lower, upper, training, generator, self);
+      self, noise, lower, upper, training, std::move(generator), self);
 }
 
 Tensor rrelu_with_noise_backward(
@@ -658,12 +660,12 @@ Tensor rrelu_with_noise_backward(
 
 Tensor rrelu(const Tensor & self, const Scalar& lower, const Scalar& upper, bool training, c10::optional<Generator> generator) {
   TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
-  return at::rrelu_with_noise(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
+  return at::rrelu_with_noise(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, std::move(generator));
 }
 
 Tensor & rrelu_(Tensor & self, const Scalar& lower, const Scalar& upper, bool training, c10::optional<Generator> generator) {
   TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
-  return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
+  return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, std::move(generator));
 }
 
 TORCH_IMPL_FUNC(threshold_out)(const Tensor& self, const Scalar& threshold, const Scalar& value, const Tensor& result) {

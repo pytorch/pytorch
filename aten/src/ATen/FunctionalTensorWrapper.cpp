@@ -14,6 +14,8 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/_to_copy.h>
+
+#include <utility>
 #endif
 
 namespace at {
@@ -529,7 +531,7 @@ bool isFunctionalTensorIListRef(c10::IListRef<T> list) {
 }
 
 bool isFunctionalTensor(ITensorListRef list) {
-  return isFunctionalTensorIListRef(list);
+  return isFunctionalTensorIListRef(std::move(list));
 }
 
 void freeze_functional_tensor(const Tensor& tensor) {
@@ -564,7 +566,7 @@ std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorListRef view_
 void mutate_view_meta(const at::Tensor& self, functionalization::ViewMeta meta) {
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
   auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
-  self_impl->mutate_view_meta(meta);
+  self_impl->mutate_view_meta(std::move(meta));
 }
 
 // Note [Propagating strides in the functionalization pass]

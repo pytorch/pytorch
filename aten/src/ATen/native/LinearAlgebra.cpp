@@ -131,6 +131,7 @@
 #include <numeric>
 #include <string>
 #include <tuple>
+#include <utility>
 
 namespace at {
 
@@ -441,7 +442,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
     auto default_rtol = at::full({}, _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2)), options);
     rtol = atol_opt.has_value()
            ? at::where(atol_opt.value() > 0, at::zeros({}, options), default_rtol)
-           : default_rtol;
+           : std::move(default_rtol);
   }
   return std::make_tuple(atol, rtol);
 }
@@ -662,7 +663,7 @@ Tensor linalg_matrix_power_impl(
         // Last multiplication can use the out version
         return result.defined() ? at::matmul_out(out, result, z) : out.copy_(z);
       }
-      result = result.defined() ? at::matmul(result, z) : z;
+      result = result.defined() ? at::matmul(result, z) : std::move(z);
     }
   }
 
@@ -2623,7 +2624,7 @@ Tensor linalg_matrix_norm(
     auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
     auto result = max_min(at::linalg_svdvals(A_.permute(permutation)), -1);
     if (keepdim) {
-      auto permutation_reverse = create_reverse_permutation(permutation);
+      auto permutation_reverse = create_reverse_permutation(std::move(permutation));
       result = result.unsqueeze(-1).permute(permutation_reverse);
     }
     return result;
@@ -2682,7 +2683,7 @@ Tensor linalg_matrix_norm(
     auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], A_.dim());
     auto result = at::linalg_svdvals(A_.permute(permutation)).sum(-1, keepdim);
     if (keepdim) {
-      auto permutation_reverse = create_reverse_permutation(permutation);
+      auto permutation_reverse = create_reverse_permutation(std::move(permutation));
       result = result.unsqueeze(-1).permute(permutation_reverse);
     }
     return result;
@@ -2846,7 +2847,7 @@ Tensor nuclear_norm_impl(const Tensor& self, IntArrayRef dim, bool keepdim) {
   Tensor result_ = at::sum(at::linalg_svdvals(p), -1, keepdim);
   if (keepdim) {
     result_.unsqueeze_(-1);
-    auto permutation_reverse = create_reverse_permutation(permutation);
+    auto permutation_reverse = create_reverse_permutation(std::move(permutation));
     result_ = result_.permute(permutation_reverse);
   }
   return result_;
@@ -2947,7 +2948,7 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
   } else { // ord == ±inf
     squareCheckInputs(self, ("linalg.cond(ord=" + std::to_string(ord.to<int64_t>()) + ")").c_str());
   }
-  return _linalg_cond_helper(self, ord_variant);
+  return _linalg_cond_helper(self, std::move(ord_variant));
 }
 
 Tensor& linalg_cond_out(const Tensor& self, const optional<Scalar>& opt_ord, Tensor& result) {
@@ -2980,7 +2981,7 @@ Tensor linalg_cond(const Tensor& self, c10::string_view ord) {
     return singular_values.sum(-1) * (singular_values.reciprocal().sum(-1));
   }
 
-  return _linalg_cond_helper(self, ord_variant);
+  return _linalg_cond_helper(self, std::move(ord_variant));
 }
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
