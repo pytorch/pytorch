@@ -82,7 +82,7 @@ void CUDAHooks::initCUDA() const {
   at::cuda::detail::init_p2p_access_cache(num_devices);
 
 #if AT_MAGMA_ENABLED()
-  TORCH_INTERNAL_ASSERT(magma_init_fn != nullptr, "Cannot initilaize magma, init routine not set");
+  TORCH_INTERNAL_ASSERT(magma_init_fn != nullptr, "Cannot initialize magma, init routine not set");
   magma_init_fn();
 #endif
 }

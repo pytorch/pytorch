@@ -209,7 +209,7 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
       std::get<serialization_version_index>(serialized);
   TORCH_CHECK(
       serialization_version <= SPARSE_LINEAR_PACKED_PARAM_SERIALIZATION_VERSION,
-      "Attemped to deserialize sparse qlinear packed params with an ",
+      "Attempted to deserialize sparse qlinear packed params with an ",
       "incompatible serialization version (",
       serialization_version,
       " > ",
