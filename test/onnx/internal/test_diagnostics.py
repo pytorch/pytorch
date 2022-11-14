@@ -19,7 +19,7 @@ def _assert_has_diagnostics(
     rule_level_pairs: AbstractSet[Tuple[infra.Rule, infra.Level]],
 ):
     sarif_log = engine.sarif_log()
-    unseen_pairs = {(rule.id, level.value) for rule, level in rule_level_pairs}
+    unseen_pairs = {(rule.id, level.name.lower()) for rule, level in rule_level_pairs}
     actual_results = []
     for run in sarif_log.runs:
         if run.results is None:
