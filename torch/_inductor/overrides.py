@@ -157,6 +157,11 @@ class ConvBinary2d(nn.Conv2d):
         self.unary_scalars = []
         self.unary_algorithm = None
 
+    def _update_unary_params(self, unary):
+        self.unary_attr, self.unary_scalars, self.unary_algorithm = unary_modules_map[
+            unary.__class__
+        ](unary)
+
     def _conv_forward(self, input, other, weight, bias):
         if self.padding_mode != "zeros":
             return torch.ops.mkldnn._convolution_pointwise(
@@ -226,9 +231,9 @@ class ConvBinaryInplace2d(nn.Conv2d):
         self.unary_algorithm = None
 
     def _update_unary_params(self, unary):
-        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
-            unary
-        )
+        self.unary_attr, self.unary_scalars, self.unary_algorithm = unary_modules_map[
+            unary.__class__
+        ](unary)
 
     def _conv_forward(self, input, other, weight, bias):
         if self.padding_mode != "zeros":
@@ -344,6 +349,13 @@ def fused_conv_binary_inplace_eval(conv: nn.Module, binary_op_name: str):
     )
 
 
+def fused_binary_unary_eval(conv_binary: nn.Module, unary: nn.Module):
+    assert not (conv_binary.training), "Fusion only for eval!"
+    # reuse origin conv module, and just update its' unary attr.
+    conv_binary._update_unary_params(unary)
+    return conv_binary
+
+
 def is_bfloat16_module(m):
     weight_is_bf16 = m.weight.dtype == torch.bfloat16
     bias_is_bf16 = m.bias is None or m.bias.dtype == torch.bfloat16
@@ -430,6 +442,9 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     gm = fuse_unary(gm)
     gm = fuse_binary_inplace(gm)
     gm = fuse_binary(gm)
+    # why re-run fuse_unary? we want to enable conv+binary+unary fusion,
+    # such as conv+add+relu for vision model.
+    gm = fuse_unary(gm)
 
     return gm
 
@@ -741,6 +756,8 @@ replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: ra
 computation_op_unary_op_fusion_map = {
     nn.Conv2d: fused_conv_unary_eval,
     nn.Linear: fused_linear_unary_eval,
+    ConvBinary2d: fused_binary_unary_eval,
+    ConvBinaryInplace2d: fused_binary_unary_eval,
 }
 
 
