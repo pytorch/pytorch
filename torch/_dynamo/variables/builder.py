@@ -10,7 +10,6 @@ import re
 import types
 import typing
 from abc import ABCMeta
-from typing import Any, List, Mapping, Union
 
 import numpy as np
 from functorch.experimental.ops import PyOperator
@@ -511,7 +510,7 @@ class VariableBuilder:
             )
         )
 
-    def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
+    def wrap_sym(self, value: typing.Union[torch.SymInt, torch.SymFloat]):
         if not is_constant_source(self.get_source()):
             self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
         elif is_constant_source(self.get_source()):
