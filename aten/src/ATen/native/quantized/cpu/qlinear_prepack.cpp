@@ -23,6 +23,7 @@
 #include <c10/util/irange.h>
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 int register_linear_params();
@@ -249,7 +250,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
                                                              dnnl::memory::data_type::u8);
   ideep::tensor exp_wgt(w_desc);
   exp_wgt.feed_from(wgt);
-  ideep::tensor * packed_weight_p = new ideep::tensor(exp_wgt);
+  ideep::tensor * packed_weight_p = new ideep::tensor(std::move(exp_wgt));
   packed_weight_p->set_scale(wgt_scales);
   packed_weight_p->set_zero_point(wgt_zero_points);
   std::unique_ptr<ideep::tensor> weight_ptr(packed_weight_p);

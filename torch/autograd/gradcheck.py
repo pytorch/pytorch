@@ -1164,7 +1164,7 @@ def _vec_from_tensor(x, generator, downcast_complex=False):
         dtype = _to_real_dtype(x.dtype) if downcast_complex else x.dtype
         values = torch.rand(x_values.numel(), generator=generator) \
             .to(dtype=dtype, device=x.device) \
-            .reshape(x_values.shape)
+            .view(x_values.shape)
         values /= values.norm()
         vec = torch.sparse_coo_tensor(x._indices(), values, x.size())
     else:
