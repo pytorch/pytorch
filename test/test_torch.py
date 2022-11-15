@@ -5649,7 +5649,10 @@ class TestTorch(TestCase):
 
                     ref_out = tensor.index_add(-1, index, source, alpha=2) / 2
                     out = tensor.index_add(-1, index, source)
-                    self.assertEqual(out.float(), ref_out.float())
+                    if device == 'cuda':
+                        self.assertEqual(out.float(), ref_out.float(), atol=1e-3, rtol=1e-3)
+                    else:
+                        self.assertEqual(out.float(), ref_out.float())
 
             # Check bound
             result = torch.ones(3, 3)
