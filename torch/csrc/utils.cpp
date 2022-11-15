@@ -4,6 +4,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/python_tuples.h>
 
 #include <torch/csrc/Export.h>
@@ -346,6 +347,48 @@ handle type_caster<at::IntArrayRef>::cast(
     return_value_policy /* policy */,
     handle /* parent */) {
   return handle(THPUtils_packInt64Array(src.size(), src.data()));
+}
+
+bool type_caster<at::SymIntArrayRef>::load(handle src, bool) {
+  PyObject* source = src.ptr();
+
+  auto tuple = PyTuple_Check(source);
+  if (tuple || PyList_Check(source)) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+    const auto size =
+        tuple ? PyTuple_GET_SIZE(source) : PyList_GET_SIZE(source);
+    std::vector<c10::SymInt> res;
+    res.reserve(size);
+    for (const auto idx : c10::irange(size)) {
+      PyObject* obj =
+          tuple ? PyTuple_GET_ITEM(source, idx) : PyList_GET_ITEM(source, idx);
+
+      if (THPVariable_Check(obj)) {
+        // TODO: this is for consistency with IntArrayRef but arguably
+        // we shouldn't really allow this on pybind11 casters
+        res.push_back(THPVariable_Unpack(obj).item<int64_t>());
+      } else if (torch::is_symint(py::handle(obj))) {
+        res.push_back(py::handle(obj).cast<c10::SymInt>());
+      } else if (PyLong_Check(obj)) {
+        res.push_back(c10::SymInt(THPUtils_unpackIndex(obj)));
+      } else {
+        return false;
+      }
+    }
+    value = std::move(res);
+    return true;
+  }
+  return false;
+}
+handle type_caster<at::SymIntArrayRef>::cast(
+    at::SymIntArrayRef src,
+    return_value_policy /* policy */,
+    handle /* parent */) {
+  py::list t(src.size());
+  for (const auto i : c10::irange(src.size())) {
+    t[i] = py::cast(src[i]);
+  }
+  return std::move(t);
 }
 
 } // namespace detail
