@@ -57,7 +57,6 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyNativeDeviceTypes,
     OpDTypes,
-    skipCUDAIfRocm,
     skipMeta,
 )
 from torch._subclasses.fake_tensor import (
@@ -393,7 +392,6 @@ class TestCommon(TestCase):
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
-    @skipCUDAIfRocm
     @ops(python_ref_db)
     @parametrize('executor', ['aten', 'nvfuser'])
     @skipIfTorchInductor("Takes too long for inductor")
