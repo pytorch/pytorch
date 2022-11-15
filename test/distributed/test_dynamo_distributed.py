@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+import copy
+import functools
 import logging
 import os
 import random
@@ -16,7 +18,9 @@ from torch._dynamo import config
 from torch._dynamo.utils import same
 from torch._dynamo.testing import collect_results
 from torch._inductor.utils import has_triton
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     import_transformers_or_skip,
@@ -175,6 +179,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
 
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp(self):
@@ -198,6 +203,108 @@ class TestDistributedMultiProc(MultiProcessTestCase):
             correct_results = collect_results(model, correct_outputs.logits, correct_loss, inputs_flat)
             opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
             self.assertTrue(same(correct_results, opt_results))
+
+
+    @skip_if_lt_x_gpu(1)
+    # TODO(whc)  delete aot_eager test, if inductor test lands stably
+    def test_fsdp_aot_eager(self):
+        with _per_rank_init(self.rank, self.world_size):
+            # Test with basic FSDP wrapping (outer wrap around whole model)
+            m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
+            fsdp_m = FSDP(m, use_orig_params=True)
+            fsdp_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
+            outputs = fsdp_m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
+
+            # Test with recursive wrapping, nested FSDP around each Linear
+            m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
+            fsdp_m = FSDP(
+                m,
+                auto_wrap_policy=functools.partial(
+                    transformer_auto_wrap_policy, transformer_layer_cls=(nn.Linear, )
+                ),
+                use_orig_params=True
+            )
+            fsdp_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
+            outputs = fsdp_m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
+
+    @skip_if_lt_x_gpu(1)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_fsdp_inductor(self):
+        with _per_rank_init(self.rank, self.world_size):
+            # Test with basic FSDP wrapping (outer wrap around whole model)
+            m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
+            fsdp_m = FSDP(m, use_orig_params=True)
+            fsdp_m = torch._dynamo.optimize("inductor")(fsdp_m)
+            outputs = fsdp_m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
+
+            # Test with recursive wrapping, nested FSDP around each Linear
+            m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
+            fsdp_m = FSDP(
+                m,
+                auto_wrap_policy=functools.partial(
+                    transformer_auto_wrap_policy, transformer_layer_cls=(nn.Linear, )
+                ),
+                use_orig_params=True
+            )
+            fsdp_m = torch._dynamo.optimize("inductor")(fsdp_m)
+            outputs = fsdp_m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
+
+    @import_transformers_or_skip()
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
+    @patch.object(torch._inductor.config.triton, "cudagraphs", False)
+    @patch.object(torch._inductor.config, "fallback_random", True)
+    # TODO(voz): Flaky on CI failure, consistent failure on local master.
+    @unittest.skipIf(True, "Flaky on CI failure, consistent failure on local master")
+    def test_hf_bert_fsdp(self):
+        from transformers.models.bert.modeling_bert import BertLayer
+
+        def apply_fsdp(model, wrap_policy):
+            model = FSDP(
+                copy.deepcopy(model),
+                auto_wrap_policy=wrap_policy,
+                use_orig_params=True
+            )
+            return model
+
+        with _per_rank_init(self.rank, self.world_size):
+            for (wrap_policy, test_instance) in (
+                (
+                    None,
+                    "FSDP without recursive wrapping"
+                ),
+                (
+                    functools.partial(
+                        transformer_auto_wrap_policy, transformer_layer_cls=(BertLayer, )
+                    ),
+                    "FSDP with recursive wrapping BertLayer instances"
+                )
+            ):
+                print(f"Running hf_bert test for {test_instance}")
+                model, inputs = get_hf_bert(self.rank)
+                reset_rng_state()
+                eager_model = apply_fsdp(model, wrap_policy)
+                correct_outputs = eager_model(**inputs)
+                correct_loss = correct_outputs.loss
+                correct_loss.backward()
+
+                reset_rng_state()
+                opt_model = apply_fsdp(model, wrap_policy)
+
+                opt_model = torch._dynamo.optimize("inductor")(opt_model)
+                opt_outputs = opt_model(**inputs)
+                opt_loss = opt_outputs.loss
+                opt_loss.backward()
+
+                inputs_flat = [inputs[k] for k in inputs]
+                correct_results = collect_results(eager_model, correct_outputs.logits, correct_loss, inputs_flat)
+                opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
+                self.assertTrue(same(correct_results, opt_results))
+
 
 @requires_nccl()
 class TestDistributed(torch._dynamo.test_case.TestCase):
@@ -255,32 +362,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         ddp_m = DDP(m, device_ids=self.device_ids)
         ddp_m = torch._dynamo.optimize("inductor")(ddp_m)
         outputs = ddp_m(inputs)
-        self.assertTrue(same(correct_outputs, outputs))
-
-    # TODO(whc) move these tests to 'distributed' shard to get nccl, or see if it's available already in pytorch CI?
-    @unittest.skip(
-        "can't run with gloo (no support for _allgather_base) and nccl not available in CI"
-    )
-    @patch.object(config, "optimize_ddp", False)
-    def test_fsdp_baseline_aot_eager(self):
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-
-        m, inputs, correct_outputs = self.get_model()
-        fsdp_m = FSDP(m, device_id=self.device_ids[0] if self.device_ids else None)
-        fsdp_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
-        outputs = fsdp_m(inputs)
-        self.assertTrue(same(correct_outputs, outputs))
-
-    @unittest.skip("hangs/crashes with inductor currently")
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @patch.object(config, "optimize_ddp", False)
-    def test_fsdp_baseline_inductor(self):
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-
-        m, inputs, correct_outputs = self.get_model()
-        fsdp_m = FSDP(m, device_id=self.device_ids[0] if self.device_ids else None)
-        fsdp_m = torch._dynamo.optimize("inductor")(fsdp_m)
-        outputs = fsdp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
     @patch.object(config, "optimize_ddp", True)
