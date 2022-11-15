@@ -734,6 +734,3 @@ def register_nvprims():
             p.is_recomputable = _nvfuser_is_recomputable.get(name, False)
             p.return_type = main_prim.return_type  # type: ignore[attr-defined]
             p.impl_aten = main_prim.impl_aten
-            # fake tensors are using "prim_meta_impl" attribute instead of going
-            # through the dispatcher
-            p.prim_meta_impl = main_prim.prim_meta_impl
