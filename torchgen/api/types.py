@@ -1,7 +1,18 @@
+import contextlib
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Iterator, List, Optional, Sequence, Set, Tuple, TypeVar, Union
-import contextlib
+from typing import (
+    Dict,
+    Generator,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 from torchgen.model import (
     Argument,
@@ -27,28 +38,31 @@ _T = TypeVar("_T")
 SpecialArgName = Enum("SpecialArgName", ("possibly_redundant_memory_format",))
 ArgName = Union[str, SpecialArgName]
 
-
 # Enable lazy initialization of namespaces
 class Namespace:
+    val = ""
+
+    def __new__(cls, *args, **kwargs):
+        if not hasattr(cls, "instance"):
+            cls.instance = super(Namespace, cls).__new__(cls, *args, **kwargs)
+        return cls.instance
+
     def __init__(self, val: Optional[str]):
-        self._val = val
+        self.val = val
 
     def __str__(self) -> Optional[str]:
-        return self._val
+        return self.val
 
-    def __hash__(self) -> int:
-        return hash(self._val)
+class TensorNamespace(Namespace):
+    pass
 
-    def __eq__(self, other: Union["Namespace", str]) -> bool:
-        if isinstance(other, str):
-            return self._val == other
-        elif isinstance(other, Namespace):
-            return self._val == other._val
+class ContainerNamespace(Namespace):
+    pass
 
 
 # By default use "at" and "c10" namespace for tensor and container respectively
-tensorNamespace: str = Namespace("at")
-containerNamespace: str = Namespace("c10")
+tensorNamespace = TensorNamespace("at")
+containerNamespace = ContainerNamespace("c10")
 
 TENSOR_LIST_LIKE_CTYPES = [
     f"{tensorNamespace}::TensorList",
@@ -60,21 +74,23 @@ TENSOR_LIST_LIKE_CTYPES = [
 @contextlib.contextmanager
 def using_tensor_namespace(tensor: str) -> Generator[None, None, None]:
     global tensorNamespace
-    tensorNamespace, prev_tensor_ns = Namespace(tensor), tensorNamespace
+    tensorNamespace.val, prev_tensor_ns = tensor, tensorNamespace.val
     try:
         yield
     finally:
-        tensorNamespace = prev_tensor_ns
+        tensorNamespace.val = prev_tensor_ns
+
 
 # Override default container namespace
 @contextlib.contextmanager
 def using_container_namespace(container: str) -> Generator[None, None, None]:
     global containerNamespace
-    containerNamespace, prev_container_ns = Namespace(container), containerNamespace
+    containerNamespace.val, prev_container_ns = container, containerNamespace.val
     try:
         yield
     finally:
-        containerNamespace = prev_container_ns
+        containerNamespace.val = prev_container_ns
+
 
 # This class shouldn't be created directly; instead, use/create one of the singletons below.
 @dataclass(frozen=True)
@@ -83,9 +99,10 @@ class BaseCppType:
     name: str
 
     def __str__(self) -> str:
-        if self.ns is None or self.ns == "":
+        ns = self.ns.val if isinstance(self.ns, Namespace) else self.ns
+        if ns is None or ns == "":
             return self.name
-        return f"{self.ns}::{self.name}"
+        return f"{ns}::{self.name}"
 
 
 # The set of all non-templated, valid, fully-qualified names of C++ types that are used in the codegen.
