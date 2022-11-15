@@ -692,7 +692,7 @@ static PyObject* THPVariable_numel(
   }
 
   if (r.idx == 0) {
-    return wrap(r.tensor(0).numel());
+    return wrap(r.tensor(0).sym_numel());
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

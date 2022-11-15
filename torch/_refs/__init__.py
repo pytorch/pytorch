@@ -723,10 +723,10 @@ def nan_to_num(
         nan = 0.0
 
     if posinf is None:
-        posinf = prims.maximum_value(a.dtype)
+        posinf = torch.finfo(a.dtype).max
 
     if neginf is None:
-        neginf = prims.minimum_value(a.dtype)
+        neginf = torch.finfo(a.dtype).min
 
     result = where(isnan(a), nan, a)
 
