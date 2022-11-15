@@ -688,6 +688,31 @@ def atan(g: jit_utils.GraphContext, self):
     return g.op("Atan", self)
 
 
+@_onnx_symbolic("aten::atan2")
+# atan2(A, B) = [
+#                   atan(A, B)              if B > 0,
+#                   atan(A, B) + pi         if B < 0, A >= 0,
+#                   atan(A, B) - pi         if B < 0, A < 0,
+#                   pi/2                    if B = 0, A > 0,
+#                   - pi/2                  if B = 0, A < 0,
+#                   undefined               if B = 0, A = 0,
+#               ]
+@_beartype.beartype
+def atan2(g: jit_utils.GraphContext, self, other):
+    scalar_type = symbolic_helper._try_get_scalar_type(self)
+    if scalar_type is None:
+        return symbolic_helper._unimplemented(
+            "atan2", "input dtype not accessible", self
+        )
+    atan = g.op("Atan", div(g, self, other))
+    cond = lt(g, other, g.op("Constant", value_t=torch.tensor(0, dtype=scalar_type.dtype())))
+    pi_factor = g.op("Where", cond,
+                     mul(g, sign(g, self),
+                         g.op("Constant", value_t=torch.tensor(math.pi, dtype=scalar_type.dtype()))),
+                     g.op("Constant", value_t=torch.tensor(0, dtype=scalar_type.dtype())))
+    return add(g, atan, pi_factor)
+
+
 @_onnx_symbolic("aten::sigmoid")
 # Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qsigmoid.cpp
 @symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)

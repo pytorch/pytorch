@@ -7005,6 +7005,22 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 4, 5, 6, requires_grad=True)
         self.run_test(GeluModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_atan2(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.atan2(x, y)
+
+        model = Model()
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        self.run_test(model, (y, x))
+        self.run_test(model, (-y, x))
+        self.run_test(model, (y, -x))
+        self.run_test(model, (-y, -x))
+        self.run_test(model, (y, torch.zeros(4, 4)))
+        self.run_test(model, (-y, torch.zeros(4, 4)))
+
     def test_add_inplace(self):
         class InplaceAddModel(torch.nn.Module):
             def forward(self, x):
