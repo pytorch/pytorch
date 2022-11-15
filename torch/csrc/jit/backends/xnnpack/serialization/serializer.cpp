@@ -20,7 +20,7 @@ void XNNSerializer::serializeAddNode(
   const auto addNode =
       CreateXNNAdd(_builder, input1_id, input2_id, output_id, flags);
   const auto flatbufferNode =
-      CreateNode(_builder, NodeUnion::XNNAdd, addNode.Union());
+      CreateXNode(_builder, XNodeUnion::XNNAdd, addNode.Union());
   _nodes.push_back(flatbufferNode);
 }
 
@@ -61,7 +61,7 @@ void XNNSerializer::serializeTensorValue(
       id_out);
 
   const auto flatbufferValue =
-      CreateValue(_builder, ValueUnion::XNNTensorValue, tensorValue.Union());
+      CreateXValue(_builder, XValueUnion::XNNTensorValue, tensorValue.Union());
   _values.push_back(flatbufferValue);
 }
 
