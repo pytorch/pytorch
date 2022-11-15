@@ -278,10 +278,10 @@ class CompositeLearningRate : public LearningRateFunctor<T> {
  public:
   CompositeLearningRate(
       const std::list<CompositeLearningRateItem<T>>& sub_policies) {
-    DCHECK_GT(sub_policies.size(), 0);
+    TORCH_DCHECK_GT(sub_policies.size(), 0);
     int64_t num_iter_start = 1;
     for (auto it = sub_policies.begin(); it != sub_policies.end(); ++it) {
-      DCHECK_GT(it->num_iter_, 0);
+      TORCH_DCHECK_GT(it->num_iter_, 0);
       sub_policies_[num_iter_start].reset(it->policy_);
       sub_policy_lr_scales_[num_iter_start] = it->lr_scale_;
       num_iter_start += it->num_iter_;

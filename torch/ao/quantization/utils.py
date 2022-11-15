@@ -4,6 +4,7 @@ Utils shared by different modes of quantization (eager/graph)
 import warnings
 import functools
 import torch
+from torch.fx import Node
 from torch.ao.quantization.quant_type import QuantType
 from typing import Tuple, Any, Union, Callable, Dict, Optional
 from torch.nn.utils.parametrize import is_parametrized
@@ -11,10 +12,22 @@ from collections import OrderedDict
 from inspect import signature
 from inspect import getfullargspec
 
+NodePattern = Union[Tuple[Node, Node], Tuple[Node, Tuple[Node, Node]], Any]
+NodePattern.__module__ = "torch.ao.quantization.utils"
+
+# This is the Quantizer class instance from torch/quantization/fx/quantize.py.
+# Define separately to prevent circular imports.
+# TODO(future PR): improve this.
+# make this public once fixed (can't be public as is because setting the module directly
+# doesn't work)
+QuantizerCls = Any
+
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
 # TODO: not sure if typing supports recursive data types
-Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any]
+Pattern = Union[
+    Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any
+]
 Pattern.__module__ = "torch.ao.quantization.utils"
 
 # TODO: maybe rename this to MatchInputNode
@@ -127,6 +140,17 @@ def getattr_from_fqn(obj: Any, fqn: str) -> Any:
     """
     return functools.reduce(getattr, fqn.split("."), obj)
 
+def to_underlying_dtype(qdtype):
+    DTYPE_MAPPING = {
+        torch.quint8: torch.uint8,
+        torch.qint8: torch.int8,
+        torch.qint32: torch.int32,
+        torch.quint4x2: torch.uint8,
+        torch.quint2x4: torch.uint8,
+    }
+    assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + qdtype
+    return DTYPE_MAPPING[qdtype]
+
 def get_qparam_dict(observer_or_fake_quant):
     qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
     dtype = observer_or_fake_quant.dtype
@@ -185,9 +209,12 @@ def weight_dtype(qconfig):
 
 def activation_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
-    quantized or not, this includes quantizing to quint8, qint8 and float16
+    quantized or not, this includes quantizing to quint8, qint8 and qint32 and float16
     """
-    return activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
+    return (
+        activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.qint32, torch.float16]
+        and (not activation_is_dynamically_quantized(qconfig))
+    )
 
 def activation_is_dynamically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
@@ -196,8 +223,7 @@ def activation_is_dynamically_quantized(qconfig):
     """
     activation_dtype, _, activation_compute_dtype = \
         get_qconfig_dtypes(qconfig)
-    return activation_dtype == torch.float and \
-        activation_compute_dtype in [torch.quint8, torch.qint8, torch.float16]
+    return activation_compute_dtype in [torch.quint8, torch.qint8, torch.float16]
 
 def activation_is_int8_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
@@ -230,10 +256,11 @@ def op_is_int8_dynamically_quantized(qconfig) -> bool:
     activation_dtype, weight_dtype, activation_compute_dtype = \
         get_qconfig_dtypes(qconfig)
     return (
-        activation_dtype is torch.float and
+        activation_dtype is torch.quint8 and
         # for now, the lines below assume fbgemm or qnnpack
         weight_dtype is torch.qint8 and
         activation_compute_dtype is torch.quint8
+        # TODO(future PR): add is_dynamic
     )
 
 def get_qconfig_dtypes(qconfig):
@@ -250,17 +277,17 @@ def get_quant_type(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
-    static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2]
+    static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2, torch.qint32]
     if weight.dtype in static_dtypes:
-        if activation.dtype in static_dtypes:
-            return QuantType.STATIC
-        elif hasattr(activation, 'compute_dtype') and activation.compute_dtype in static_dtypes:
+        if hasattr(activation, 'compute_dtype') and activation.compute_dtype in static_dtypes:
             return QuantType.DYNAMIC
+        elif activation.dtype in static_dtypes:
+            return QuantType.STATIC
         else:
             return QuantType.WEIGHT_ONLY
 
     if weight.dtype == torch.float16:
-        if activation.dtype == torch.float:
+        if hasattr(activation, 'compute_dtype') and activation.compute_dtype in static_dtypes:
             return QuantType.DYNAMIC
         elif activation.dtype == torch.float16:
             return QuantType.STATIC
@@ -521,6 +548,7 @@ def get_fqn_to_example_inputs(
 
 
 __all__ = [
+    "NodePattern",
     "Pattern",
     "MatchAllNode",
     "check_node",
@@ -545,4 +573,5 @@ __all__ = [
     "calculate_qmin_qmax",
     "has_no_children_ignoring_parametrizations",
     "get_fqn_to_example_inputs",
+    "to_underlying_dtype",
 ]

@@ -81,7 +81,7 @@ class QuantizationTracer(Tracer):
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
         return (
             (
-                m.__module__.startswith("torch.nn")
+                (m.__module__.startswith("torch.nn") or m.__module__.startswith("torch.ao.nn"))
                 and not isinstance(m, torch.nn.Sequential)
             )
             or module_qualified_name in self.skipped_module_names

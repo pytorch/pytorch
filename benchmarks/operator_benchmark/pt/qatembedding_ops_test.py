@@ -1,6 +1,6 @@
 import operator_benchmark as op_bench
 import torch
-import torch.nn.qat as nnqat
+import torch.ao.nn.qat as nnqat
 import numpy
 from pt import configs
 from torch.ao.quantization import default_embedding_qat_qconfig

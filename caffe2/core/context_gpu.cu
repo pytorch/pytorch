@@ -235,7 +235,7 @@ static void Caffe2InitializeCuda() {
         // a reserved flag for cudaDeviceEnablePeerAccess that should always be
         // zero currently.
         // It is ok if peer access is already enabled...
-        cudaError_t err = cudaDeviceEnablePeerAccess(j, 0);
+        cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaDeviceEnablePeerAccess(j, 0));
         if ((err != cudaErrorPeerAccessAlreadyEnabled) &&
             (err != cudaSuccess)) {
           CAFFE_THROW(cudaGetErrorString(err));
@@ -351,7 +351,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
       CUDA_ENFORCE(cudaHostUnregister(data));
       GetDefaultCPUAllocator()->raw_deleter()(data);
     } else {
-      cudaError_t err = cudaFreeHost(data);
+      cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaFreeHost(data));
       profiledCPUMemoryReporter().Delete(data);
       if (err == cudaErrorInvalidValue) {
         free(data);
@@ -437,7 +437,7 @@ CUDAContext::CUDAContext(const DeviceOption& option)
           option.has_random_seed() ? option.random_seed()
                                    : RandomNumberSeed()) {
   static Caffe2CudaInitializerHelper g_cuda_initializer_;
-  DCHECK_EQ(option.device_type(), PROTO_CUDA);
+  TORCH_DCHECK_EQ(option.device_type(), PROTO_CUDA);
 }
 
 CUDAContext::~CUDAContext() {
@@ -598,7 +598,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
     switch (g_cuda_memory_pool_type) {
       case CudaMemoryPoolType::NONE: {
         // If memory pool is not set up, use simple cudaFree.
-        cudaError_t error = cudaFree(ptr);
+        cudaError_t error = C10_CUDA_ERROR_HANDLED(cudaFree(ptr));
         // For some reason, in Python runtime we sometimes delete a data pointer
         // after the cuda runtime exits - this is odd but is probably caused by
         // a static workspace that pycaffe2 uses, and the destruction got

@@ -1,12 +1,14 @@
-from .flatten_params_wrapper import FlatParameter
-from .fully_sharded_data_parallel import FullyShardedDataParallel
+from .flat_param import FlatParameter
 from .fully_sharded_data_parallel import (
-    CPUOffload,
     BackwardPrefetch,
-    ShardingStrategy,
-    MixedPrecision,
+    CPUOffload,
     FullStateDictConfig,
+    FullyShardedDataParallel,
     LocalStateDictConfig,
+    MixedPrecision,
+    OptimStateKeyType,
+    ShardedStateDictConfig,
+    ShardingStrategy,
+    StateDictType,
 )
-from .fully_sharded_data_parallel import StateDictType, OptimStateKeyType
 from .wrap import ParamExecOrderWrapPolicy

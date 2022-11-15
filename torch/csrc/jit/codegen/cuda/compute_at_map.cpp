@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
+#include <tuple>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -29,11 +31,242 @@ bool idIsALeafDomain(IterDomain* id, TensorView* tv) {
 
 } // namespace
 
-IterDomainGraph::IterDomainGraph(Fusion* fusion) {
+IterDomainGraph::IterDomainGraph(Fusion* fusion, bool allow_self_mapping) {
   build(fusion);
+
+  if (!allow_self_mapping) {
+    TORCH_INTERNAL_ASSERT(
+        !hasSelfMapping(),
+        "Unsupported domain mapping detected in ",
+        std::get<0>(*self_mapping_info_)->toString(),
+        ". ",
+        std::get<3>(*self_mapping_info_),
+        " domains, ",
+        std::get<1>(*self_mapping_info_)->toString(),
+        " and ",
+        std::get<2>(*self_mapping_info_)->toString(),
+        ", are mapped with each other.");
+  }
 }
 
+//! Map corresponding inputs and outputs of swizzle op together
+//!  on the given disjoint set, if the given id is an output
+//!  of a swizzle operator.
+//!
+//! The current usage of swizzle operator is local to each tensor
+//!  itself, so they should not affect exact or permissive mapping
+//!  between iterdomains on different tensor domains.
+//! TODO:
+//!   Exact mapping based index hoisting of swizzled iterdomains
+//!   is disabled currently and will be re-enabled in the next
+//!   few build out steps.
+void mapMaybeSwizzleOp(
+    DisjointSets<IterDomain*>& disjoint_sets,
+    IterDomain* id) {
+  if (auto swizzle_2d = dynamic_cast<Swizzle2D*>(id->definition())) {
+    // Map each input to its corresponding output on the given
+    //  disjoint set.
+    disjoint_sets.mapEntries(swizzle_2d->inX(), swizzle_2d->outX());
+    disjoint_sets.mapEntries(swizzle_2d->inY(), swizzle_2d->outY());
+  }
+}
+
+bool IterDomainGraph::exprsMap(
+    Expr* first,
+    Expr* second,
+    bool forward,
+    const DisjointSets<IterDomain*>& id_map) {
+  if (first == nullptr || second == nullptr) {
+    return false;
+  }
+
+  if (first->etype() != second->etype()) {
+    return false;
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      first->etype() == ExprType::Merge || first->etype() == ExprType::Split,
+      "Merge and split are the only expressions supported through rfactor operations in compute at map, but found:\n",
+      first->toString());
+
+  auto first_ids = ir_utils::filterByType<IterDomain>(
+                       forward ? first->inputs() : first->outputs())
+                       .vector();
+
+  auto second_ids = ir_utils::filterByType<IterDomain>(
+                        forward ? second->inputs() : second->outputs())
+                        .vector();
+
+  TORCH_INTERNAL_ASSERT(
+      first_ids.size() == second_ids.size(),
+      "Expected number of ",
+      (forward ? "inputs" : "outputs"),
+      " to match for\n",
+      first->toString(),
+      second->toString());
+
+  {
+    std::vector<std::pair<IterDomain*, IterDomain*>> zipped_ids;
+
+    std::transform(
+        first_ids.begin(),
+        first_ids.end(),
+        second_ids.begin(),
+        std::back_inserter(zipped_ids),
+        [](IterDomain* first, IterDomain* second) {
+          return std::make_pair(first, second);
+        });
+
+    if (std::any_of(
+            zipped_ids.begin(),
+            zipped_ids.end(),
+            [&](std::pair<IterDomain*, IterDomain*> id_pair) {
+              return !id_map.strictAreMapped(id_pair.first, id_pair.second);
+            })) {
+      return false;
+    }
+  }
+
+  if (first->isA<Merge>() && !forward) {
+    // Can't back prop through merge without making sure one dimension actually
+    // is identical extents.
+    auto merge0 = first->as<Merge>();
+    auto merge1 = second->as<Merge>();
+
+    auto extent_0o = merge0->outer()->extent();
+    auto extent_0i = merge0->inner()->extent();
+    auto extent_1o = merge1->outer()->extent();
+    auto extent_1i = merge1->inner()->extent();
+
+    auto extent_0_match = extent_0o->sameAs(extent_1o) ||
+        (extent_0o->isConstInt() && extent_1o->isConstInt() &&
+         extent_0o->evaluateInt() == extent_1o->evaluateInt());
+
+    auto extent_1_match = extent_0i->sameAs(extent_1i) ||
+        (extent_0i->isConstInt() && extent_1i->isConstInt() &&
+         extent_0i->evaluateInt() == extent_1i->evaluateInt());
+
+    if (!(extent_0_match || extent_1_match)) {
+      return false;
+    }
+  }
+
+  if (first->isA<Split>()) {
+    auto first_split = first->as<Split>();
+    auto second_split = second->as<Split>();
+    if (!first_split->factor()->sameAs(second_split->factor()) ||
+        first_split->innerSplit() != second_split->innerSplit() ||
+        !first_split->startOffset()->sameAs(second_split->startOffset()) ||
+        !first_split->stopOffset()->sameAs(second_split->stopOffset())) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void IterDomainGraph::mapThroughExpr(Expr* first, Expr* second, bool forward) {
+  if (first == nullptr || second == nullptr) {
+    return;
+  }
+
+  if (!exprsMap(first, second, forward, exact_nodes_)) {
+    return;
+  }
+
+  auto first_ids = ir_utils::filterByType<IterDomain>(
+                       forward ? first->outputs() : first->inputs())
+                       .vector();
+  auto second_ids = ir_utils::filterByType<IterDomain>(
+                        forward ? second->outputs() : second->inputs())
+                        .vector();
+  TORCH_INTERNAL_ASSERT(
+      first_ids.size() == second_ids.size(),
+      "This should be unreachable, if transformation expressions match, their number of inputs and outputs should as well.\n However found:\n",
+      first->toString(),
+      "\nand\n",
+      second->toString());
+  for (auto out_i : c10::irange(first_ids.size())) {
+    exact_nodes_.mapEntries(first_ids[out_i], second_ids[out_i]);
+    permissive_nodes_.mapEntries(first_ids[out_i], second_ids[out_i]);
+  }
+}
+
+namespace {
+
+// Returns a pair of mapped IDs
+c10::optional<std::pair<IterDomain*, IterDomain*>> detectMappablePair(
+    const std::vector<IterDomain*>& ids,
+    const IterDomainGraph& id_graph) {
+  for (auto id1 : ids) {
+    for (auto id2 : ids) {
+      if (id1 == id2) {
+        continue;
+      }
+      if (id_graph.permissiveNodes().disjointSetMap().at(id1)->has(id2)) {
+        return std::make_pair(id1, id2);
+      }
+    }
+  }
+
+  return {};
+}
+
+// It is assumed that for any tensor represented by a list of domains,
+// those domains should never be mapped with each other. It may be
+// possible to lift this assumption, but it's unclear if it could
+// matter in practice.
+c10::optional<std::tuple<TensorView*, IterDomain*, IterDomain*, std::string>>
+findFirstSelfMapping(Fusion* fusion, const IterDomainGraph& id_graph) {
+  for (auto tv : ir_utils::allTvs(fusion)) {
+    // For each tensor, make sure root, rfactor and leaf domains
+    // should not include domains that are mapped with another domain
+    // in the same set of domains. This may be overly conservative,
+    // and it maybe enough to check the root domains.
+
+    // Root domains
+    auto self_mappped_root_pair =
+        detectMappablePair(tv->getRootDomain(), id_graph);
+    if (self_mappped_root_pair.has_value()) {
+      return std::make_tuple(
+          tv,
+          self_mappped_root_pair->first,
+          self_mappped_root_pair->second,
+          "Root");
+    }
+
+    // Rfactor domains
+    if (tv->hasRFactor()) {
+      auto self_mappped_rf_pair =
+          detectMappablePair(tv->getRFactorDomain(), id_graph);
+      if (self_mappped_rf_pair.has_value()) {
+        return std::make_tuple(
+            tv,
+            self_mappped_rf_pair->first,
+            self_mappped_rf_pair->second,
+            "RFactor");
+      }
+    }
+
+    // Leaf domains
+    auto self_mappped_leaf_pair =
+        detectMappablePair(tv->domain()->domain(), id_graph);
+    if (self_mappped_leaf_pair.has_value()) {
+      return std::make_tuple(
+          tv,
+          self_mappped_leaf_pair->first,
+          self_mappped_leaf_pair->second,
+          "Leaf");
+    }
+  }
+  return c10::nullopt;
+}
+
+} // namespace
+
 void IterDomainGraph::build(Fusion* fusion) {
+  FusionGuard fg(fusion);
+
   // Initialize a node for every iteration domain
   for (auto tv : ir_utils::allTvs(fusion)) {
     const auto& root_domain = tv->getRootDomain();
@@ -156,6 +389,8 @@ void IterDomainGraph::build(Fusion* fusion) {
             BestEffortReplay::replayPasC(p_tv, c_tv, -1, pairwise_map);
 
         const auto& permissive_c2p_map = permissive_replay_PasC.getReplay();
+        const auto permissive_disjoint_sets =
+            permissive_replay_PasC.getDisjointSets();
 
         // For exact mapings do not map any broadcast dimensions to
         // non-broadcast dimensions. Prevent any broadcasted axes being mapped
@@ -178,6 +413,12 @@ void IterDomainGraph::build(Fusion* fusion) {
           exact_nodes_.mapEntries(c_id, p_id);
           consumers_.at(p_id).pushBack(c_id);
           producers_.at(c_id).pushBack(p_id);
+
+          // Add the swizzle inputs to the same
+          //  disjoint set as well if either c_id
+          //  or p_id is swizzle output.
+          mapMaybeSwizzleOp(exact_nodes_, p_id);
+          mapMaybeSwizzleOp(exact_nodes_, c_id);
         }
 
         for (auto entry : permissive_c2p_map) {
@@ -185,14 +426,31 @@ void IterDomainGraph::build(Fusion* fusion) {
           auto p_id = entry.second;
           if (idIsAComputeAtLeafDomain(p_id, p_tv)) {
             loop_nodes_.mapEntries(c_id, p_id);
+          } else {
+            // When there are trivial reductions merged with other dims, `p_id`
+            // might not be a compute at leaf domain of `p_tv`, but it actually
+            // has an equivalent compute at leaf domain. For that case, we map
+            // the equivalent compute at leaf domain.
+            for (int i = 0; i < p_tv->getComputeAtPosition(); i++) {
+              auto id = p_tv->axis(i);
+              if (permissive_disjoint_sets.permissiveAreMapped(p_id, id)) {
+                loop_nodes_.mapEntries(c_id, id);
+              }
+            }
           }
           permissive_nodes_.mapEntries(c_id, p_id);
           consumers_.at(p_id).pushBack(c_id);
           producers_.at(c_id).pushBack(p_id);
+
+          // Add the swizzle inputs to the same
+          //  disjoint set as well if either c_id
+          //  or p_id is swizzle output.
+          mapMaybeSwizzleOp(permissive_nodes_, p_id);
+          mapMaybeSwizzleOp(permissive_nodes_, c_id);
         }
 
-        // Make sure we always get root mapping for the permissive map. Because
-        // of forwarding we could otherwise miss some root mappings.
+        // Make sure we always get root mapping for the permissive map.
+        // Because of forwarding we could otherwise miss some root mappings.
         for (auto entry : permissive_c2p_root_map) {
           auto c_id = entry.first;
           auto p_id = entry.second;
@@ -204,6 +462,151 @@ void IterDomainGraph::build(Fusion* fusion) {
       }
     }
   }
+
+  // Explicitly map through rfactor transformations, if we have an op like:
+  //
+  // T1[x, y*z] = view(T0[x*y, z])
+  // T3[x, y*z] = view(T2[x*y, z])
+  // T4 = T0 + T2
+  //
+  // We want to map T1 and T3's rfactor transformations together by playing the
+  // transformations forward since their root domains map. If instead we have:
+  //
+  // T1[x, y*z] = view(T0[x*y, z])
+  // T3[x, y*z] = view(T2[x*y, z])
+  // T4 = T1 + T3
+  //
+  // Then we wouldn't have a mapping of T1 and T3's root domain, we'd have a
+  // mapping of their rfactor domain, so we would want to map T1 and T3's
+  // rfactor transformations starting at their rfactor domains.
+  //
+  // Therefore we'll explicitly map rfactor transformation iteration domains
+  // forward and backwards. Something similar could happen with rfactor of root
+  // domains, though it seems mapping rfactor reduction domains aren't that
+  // important. Mapping view transformations is more important since view is
+  // part of the compute definition so having the map through the
+  // transformations makes it easy to check if different view operations are
+  // consistent with eachother.
+
+  auto all_tvs = ir_utils::allTvs(fusion);
+  std::vector<TensorView*> all_consumer_tvs;
+  std::copy_if(
+      all_tvs.begin(),
+      all_tvs.end(),
+      std::back_inserter(all_consumer_tvs),
+      [](TensorView* tv) { return !tv->isFusionInput() && tv->hasRFactor(); });
+
+  // IterDomains could have multiple uses defined in the fusion if multiple
+  // transformations were redefined (more than one transform propagation pass
+  // was run and retransformed sections of the graph). We're going to make a new
+  // uses map so we can easily process the actual uses of IterDomains. We
+  // actually only need rfactor uses for this section of mapping, so we'll limit
+  // this map to only rfactor transformations.
+  std::unordered_map<IterDomain*, Expr*> rfactor_id_uses;
+
+  // Order of traversal is important for processing all the rfactor ids as the
+  // first pass will go forward through expressions and the second pass will
+  // traverse backwards through them. ID's will be unique in this vector,
+  // enforced when building it since it's built with rfactor_id_uses.
+  std::vector<IterDomain*> rfactor_id_order;
+
+  // Grab all the rfactor ids.
+  for (auto consumer_tv : all_consumer_tvs) {
+    auto exprs = StmtSort::getExprs(
+        fusion,
+        {consumer_tv->getMaybeRFactorDomain().begin(),
+         consumer_tv->getMaybeRFactorDomain().end()});
+    for (auto expr : exprs) {
+      auto rfactor_inp_ids = ir_utils::filterByType<IterDomain>(expr->inputs());
+      TORCH_INTERNAL_ASSERT(
+          expr->isA<Split>() || expr->isA<Merge>(),
+          "Wasn't expecting the expression type of:\n",
+          expr->toString(),
+          "\nto be an expression defined in an rfactor transformation.");
+      for (auto rfactor_inp_id : rfactor_inp_ids) {
+        TORCH_INTERNAL_ASSERT(
+            rfactor_id_uses.find(rfactor_inp_id) == rfactor_id_uses.end(),
+            "Was expecting iter domains to only have one active transformation but found id ",
+            rfactor_inp_id->toString(),
+            " used in\n",
+            rfactor_id_uses.at(rfactor_inp_id),
+            "\nand\n",
+            expr->toString());
+        rfactor_id_uses.emplace(std::make_pair(rfactor_inp_id, expr));
+        rfactor_id_order.push_back(rfactor_inp_id);
+      }
+    }
+    for (auto rfactor_id : consumer_tv->getMaybeRFactorDomain()) {
+      if (rfactor_id->isRFactorProduct()) {
+        rfactor_id_uses.emplace(std::make_pair(rfactor_id, nullptr));
+        rfactor_id_order.push_back(rfactor_id);
+      }
+    }
+  }
+
+  // if prop_forward we're going forward through transformations and
+  // expressions, meaning if inputs of expressions map then we map their
+  // outputs, otherwise we're traversing backwards, meaning if outputs of
+  // expressions map then we map their inputs.
+  for (auto prop_forward : {true, false}) {
+    std::unordered_set<Expr*> visited_exprs;
+
+    for (auto rfactor_id_i : c10::irange(rfactor_id_order.size())) {
+      auto first_rfactor_id = prop_forward
+          ? rfactor_id_order[rfactor_id_i]
+          : rfactor_id_order[rfactor_id_order.size() - 1 - rfactor_id_i];
+
+      // At should be safe since we made rfactor_id_order and rfactor_id_uses at
+      // the same time so they should have the same exact entries.
+      auto first_expr = prop_forward ? rfactor_id_uses.at(first_rfactor_id)
+                                     : first_rfactor_id->definition();
+
+      if (first_expr == nullptr) {
+        continue;
+      }
+
+      if (visited_exprs.find(first_expr) != visited_exprs.end()) {
+        continue;
+      }
+      visited_exprs.emplace(first_expr);
+
+      // Only need to be concerned here with mapping across rfactor iter
+      // domains, so isolate out those.
+      auto all_exact_map_ids = exact_nodes_.getDisjointSetOf(first_rfactor_id);
+      std::vector<IterDomain*> exact_map_rf_ids;
+      std::copy_if(
+          all_exact_map_ids.vector().begin(),
+          all_exact_map_ids.vector().end(),
+          std::back_inserter(exact_map_rf_ids),
+          [](IterDomain* id) { return id->isRFactorProduct(); });
+
+      for (auto exact_map_rf_id : exact_map_rf_ids) {
+        if (exact_map_rf_id == first_rfactor_id) {
+          continue;
+        }
+        // If there's an input with an rfactor domain we could have an exact
+        // mapped rfactor id that's on the input meaning it wouldn't have an
+        // entry in rfactor_id_uses
+        auto other_use =
+            rfactor_id_uses.find(exact_map_rf_id) == rfactor_id_uses.end()
+            ? nullptr
+            : rfactor_id_uses.at(exact_map_rf_id);
+        auto other_expr =
+            prop_forward ? other_use : exact_map_rf_id->definition();
+
+        if (other_expr == nullptr) {
+          continue;
+        }
+
+        if (visited_exprs.find(other_expr) != visited_exprs.end()) {
+          continue;
+        }
+
+        mapThroughExpr(first_expr, other_expr, prop_forward);
+      }
+    }
+  }
+  self_mapping_info_ = findFirstSelfMapping(fusion, *this);
 }
 
 void IterDomainGraph::initializeId(
@@ -276,7 +679,7 @@ void ComputeAtMap::allocateIndexVariables() {
                   // Halo extended parallel loops currently are handled
                   // differently and an index variable would still
                   // be allocated in this case.
-                  (GpuLower::current()->haloInfo().getExtent(id) == nullptr)) {
+                  (GpuLower::current()->haloInfo()->getExtent(id) == nullptr)) {
                 ptype = id->getParallelType();
                 return true;
               }
@@ -748,6 +1151,10 @@ std::vector<IterDomain*> ComputeAtMap::getViewRfactorDomainsOfIdGroup(
 
 const std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>& ComputeAtMap::
     disjointSetOf(IterDomain* id, IdMappingMode mode) const {
+  TORCH_INTERNAL_ASSERT(
+      idExistsInMap(id),
+      id->toString(),
+      " has not been processed in this Compute At Map, yet the disjoint set for it was requested.");
   return getIdSets(mode).disjointSetMap().at(id);
 }
 
@@ -762,6 +1169,11 @@ const DisjointSets<IterDomain*>& ComputeAtMap::getIdSets(
       return id_graph_.loopNodes();
   }
   TORCH_INTERNAL_ASSERT(false, "Error with mapping mode provided.");
+}
+
+bool ComputeAtMap::idExistsInMap(IterDomain* id) const {
+  return getIdSets(IdMappingMode::EXACT).disjointSetMap().find(id) !=
+      getIdSets(IdMappingMode::EXACT).disjointSetMap().end();
 }
 
 } // namespace cuda

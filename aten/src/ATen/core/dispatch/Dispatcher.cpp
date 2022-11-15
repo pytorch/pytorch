@@ -1,8 +1,20 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <list>
 #include <sstream>
+#include <chrono>
 
 namespace c10 {
+
+bool show_dispatch_trace() {
+    static char const* temp = getenv("TORCH_SHOW_DISPATCH_TRACE");
+    return temp != nullptr;
+}
+
+static thread_local int64_t dispatch_trace_nesting_value_;
+
+void dispatch_trace_nesting_incr() { ++dispatch_trace_nesting_value_; }
+void dispatch_trace_nesting_decr() { --dispatch_trace_nesting_value_; }
+int64_t dispatch_trace_nesting_value() { return dispatch_trace_nesting_value_; }
 
 namespace detail {
 
@@ -39,7 +51,9 @@ Dispatcher::Dispatcher()
 , operatorLookupTable_()
 , backendFallbackKernels_()
 , listeners_(std::make_unique<detail::RegistrationListenerList>())
-, mutex_() {}
+, mutex_()
+, cond_var_()
+{}
 
 Dispatcher::~Dispatcher() = default;
 
@@ -56,6 +70,41 @@ c10::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_na
     }
     return found->second;
   });
+}
+
+// NB: If you add more waitFor* implementations, you also have to add
+// appropriate notify_all() calls to the relevant register calls
+
+void Dispatcher::waitForDef(const FunctionSchema& schema) {
+  using namespace std::chrono_literals;
+  std::unique_lock<std::mutex> lock(mutex_);
+  bool r = cond_var_.wait_for(lock, 2s, [&]{
+    return findOp(schema.operator_name()) != c10::nullopt;
+  });
+  TORCH_INTERNAL_ASSERT(r,
+    "Expected main interpreter to define ", schema.operator_name(),
+    ", but this didn't happen within timeout.  Are you trying to load "
+    "different models in the same torchdeploy/multipy instance?  You "
+    "must warmup each interpreter identically, e.g., import all "
+    "the same dependencies.");
+}
+
+void Dispatcher::waitForImpl(const OperatorName& op_name, c10::optional<c10::DispatchKey> maybe_dk) {
+  using namespace std::chrono_literals;
+  std::unique_lock<std::mutex> lock(mutex_);
+  auto dk = maybe_dk.value_or(DispatchKey::CompositeImplicitAutograd);
+  auto op = findOrRegisterName_(op_name);
+  bool r = cond_var_.wait_for(lock, 2s, [&]{
+    // NB: this is slightly unsound for overrides, but overrides are
+    // funny business anyway
+    return op.hasKernelForDispatchKey(dk);
+  });
+  TORCH_INTERNAL_ASSERT(r,
+    "Expected main interpreter to implement ", dk, " for ", op_name,
+    ", but this didn't happen within timeout.  Are you trying to load "
+    "different models in the same torchdeploy/multipy instance?  You "
+    "must warmup each interpreter identically, e.g., import all "
+    "the same dependencies.");
 }
 
 c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
@@ -164,6 +213,8 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::strin
   ++op.operatorDef_->def_count;
   ++op.operatorDef_->def_and_impl_count;
 
+  cond_var_.notify_all();
+
   return RegistrationHandleRAII([this, op, op_name] {
     deregisterDef_(op, op_name);
   });
@@ -216,6 +267,8 @@ RegistrationHandleRAII Dispatcher::registerImpl(
 
   ++op.operatorDef_->def_and_impl_count;
 
+  cond_var_.notify_all();
+
   return RegistrationHandleRAII([this, op, op_name, dispatch_key, handle] {
     deregisterImpl_(op, op_name, dispatch_key, handle);
   });
@@ -238,6 +291,7 @@ RegistrationHandleRAII Dispatcher::registerName(OperatorName op_name) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto op = findOrRegisterName_(op_name);
   ++op.operatorDef_->def_and_impl_count;
+
   return RegistrationHandleRAII(
       [this, op, op_name] { deregisterName_(op, op_name); });
 }

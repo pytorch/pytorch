@@ -67,23 +67,26 @@ TEST_SKIPS = {
     "generic": TestSkip(
         86, "Test skipped at subprocess level, look at subprocess log for skip reason"
     ),
+    "importerror": TestSkip(
+        88, "Test skipped due to missing import"
+    ),
 }
 
 @dataclass
 class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
-    skip_collective["allgather_coalesced"] = {"nccl", "mpi"}
+    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc"}
     skip_collective["reduce"] = set()
-    skip_collective["sendrecv anysource"] = {"nccl"}
-    skip_collective["cpu barrier"] = {"nccl"}
+    skip_collective["sendrecv anysource"] = {"nccl", "ucc"}
+    skip_collective["cpu barrier"] = {"nccl", "ucc"}
 
     # Sets showing that something is implemented
     backend_feature = {}
-    backend_feature["gpu"] = {"nccl", "gloo"}
-    backend_feature["cuda"] = {"nccl", "gloo"}
-    backend_feature["ddp"] = {"nccl", "gloo"}
-    backend_feature["subgroup"] = {"nccl", "gloo"}
+    backend_feature["gpu"] = {"nccl", "gloo", "ucc"}
+    backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
+    backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
+    backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
     backend_feature["plugin"] = set()
 
 
@@ -136,6 +139,19 @@ def require_n_gpus_for_nccl_backend(n, backend):
 
     return decorator
 
+def import_transformers_or_skip():
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                from transformers import BertConfig, AutoModelForMaskedLM  # noqa: Unused
+                return func(*args, **kwargs)
+            except ImportError:
+                sys.exit(TEST_SKIPS["importerror"].exit_code)
+
+        return wrapper
+
+    return decorator
 
 def skip_if_lt_x_gpu(x):
     def decorator(func):
@@ -336,7 +352,7 @@ if TEST_WITH_TSAN:
     # TSAN runs much slower.
     TIMEOUT_DEFAULT = 500
 else:
-    TIMEOUT_DEFAULT = 100
+    TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '300'))
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
 # https://github.com/pytorch/pytorch/issues/75665

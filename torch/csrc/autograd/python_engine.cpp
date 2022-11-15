@@ -13,6 +13,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 
 #ifndef _WIN32
@@ -72,7 +73,7 @@ void PythonEngine::thread_init(
   // Create a PyThreadState, but release the GIL. This lets
   // pybind11::gil_scoped_acquire calls inside thread_main acquire the GIL
   // without having to create a new PyThreadState each time.
-#if defined(IS_PYTHON_3_9_PLUS) || defined(USE_DEPLOY)
+#if defined(IS_PYTHON_3_9_PLUS)
   auto gil = std::make_unique<pybind11::gil_scoped_acquire>();
 #else
   pybind11::gil_scoped_acquire gil;
@@ -85,7 +86,7 @@ void PythonEngine::thread_init(
     decrement_non_reentrant_thread_count();
   }
 
-#if defined(IS_PYTHON_3_9_PLUS) || defined(USE_DEPLOY)
+#if defined(IS_PYTHON_3_9_PLUS)
   // Do not call PyEval_RestoreThread, PyThreadState_[Clear|DeleteCurrent] if
   // runtime is finalizing
   if (!Py_IsInitialized()) {

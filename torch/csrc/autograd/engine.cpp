@@ -11,7 +11,14 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/isnan.h>
+#endif
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
@@ -264,10 +271,7 @@ void Engine::stop() {
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
   auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
-  if (!wait_duration_str) {
-    wait_duration_str = "10.0";
-  }
-  auto wait_duration = std::atof(wait_duration_str);
+  auto wait_duration = wait_duration_str ? std::atof(wait_duration_str) : 10.0;
   bool noBackward = true;
   for (auto& queue : device_ready_queues_) {
     noBackward = noBackward && queue->empty();
@@ -368,6 +372,89 @@ void GraphTaskGuard::restore_current_graph_task() {
   current_graph_task = std::move(last_graph_task_);
 }
 
+// The current graph task's exec_info is being used to trim unnecessary edegs
+// during node evaluation, see `Node.task_should_compute_output()` function.
+const std::unordered_map<Node*, GraphTask::ExecInfo>*
+get_current_graph_task_exec_info() {
+  return current_graph_task ? &current_graph_task->exec_info_ : nullptr;
+}
+
+const std::unordered_set<Node*>* get_current_graph_task_nodes_in_graph() {
+  return current_graph_task ? &current_graph_task->nodes_in_graph_ : nullptr;
+}
+
+int get_current_graph_task_id() {
+  return current_graph_task ? current_graph_task->id_ : -1;
+}
+
+bool get_current_graph_task_keep_graph() {
+  return current_graph_task ? current_graph_task->keep_graph_ : true;
+}
+
+void add_node_to_current_graph_task_exec_info(Node* fn) {
+  current_graph_task->exec_info_[fn].needed_ = true;
+}
+
+// NB: The engine itself does not use the outputs of this function.
+std::vector<Node*> get_current_graph_task_execution_order() {
+  std::shared_ptr<GraphTask> task = current_graph_task;
+  if (!task) {
+    return {};
+  }
+
+  // We could potentially check if there is only a single device here
+  // but explicitly require this context doens't seem bad either
+  TORCH_CHECK(
+      !c10::AutogradState::get_tls_state().get_multithreading_enabled(),
+      "get_current_graph_task_execution_order expects the current backward to be "
+      "executed with multithreading disabled, e.g. by running:\n\n"
+      ">>> with torch.autograd.set_multithreading_enabled(False):\n"
+      "...     torch.autograd.grad(...)\n");
+
+  const bool check_exec_info = !task->exec_info_.empty();
+  std::vector<Node*> out{};
+  std::unordered_set<Node*> seen{};
+
+  auto compare_seq_nr = [](Node* n1, Node* n2) {
+    return n1->sequence_nr() < n2->sequence_nr();
+  };
+  std::priority_queue<Node*, std::vector<Node*>, decltype(compare_seq_nr)> heap(
+      compare_seq_nr);
+
+  for (Node* ptr : task->graph_roots_) {
+    heap.push(ptr);
+  }
+
+  // Implementation notes:
+  // - Don't need to count dependencies because we have sequence_nr
+  // - Don't need to check topological_nr because we have exec_info
+  while (!heap.empty()) {
+    Node* fn = heap.top();
+    heap.pop();
+
+    const bool was_inserted = seen.insert(fn).second;
+    if (!was_inserted) {
+      continue;
+    }
+
+    out.push_back(fn);
+    for (const auto& edge : fn->next_edges()) {
+      Node* next_ptr = edge.function.get();
+      if (!next_ptr) {
+        continue;
+      }
+      if (check_exec_info) {
+        auto it = task->exec_info_.find(next_ptr);
+        if (it == task->exec_info_.end() || !it->second.should_execute()) {
+          continue;
+        }
+      }
+      heap.push(next_ptr);
+    }
+  }
+  return out;
+}
+
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
 // case:
 //
@@ -405,11 +492,6 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
   // backwards, user thread), this function is expected to exit once that
   // graph_task complete.
 
-#ifdef USE_ROCM
-  // Keep track of backward pass for rocblas.
-  at::ROCmBackwardPassGuard in_backward;
-#endif
-
   // local_ready_queue should already been initialized when we get into
   // thread_main
   TORCH_INTERNAL_ASSERT(local_ready_queue != nullptr);
@@ -441,7 +523,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
         // NB: The ThreadLocalStateGuard doesn't set the grad_mode because
         // GraphTask always saves ThreadLocalState without grad_mode.
         at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
-        c10::Warning::WarningHandlerGuard warnings_guard(
+        c10::WarningUtils::WarningHandlerGuard warnings_guard(
             &local_graph_task->warning_handler_);
 
         try {
@@ -758,7 +840,8 @@ void validate_outputs(
       // Strided when metadata is SparseCsr
       if (!grad.is_sparse() &&
           !(grad.layout() == at::kStrided &&
-            metadata.layout() == at::kSparseCsr)) {
+            (at::sparse_csr::is_sparse_compressed(metadata.layout()) ||
+             metadata.layout() == at::kSparse))) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected layout ";
         ss << metadata.layout() << " but got " << grad.layout();
@@ -892,7 +975,7 @@ void Engine::evaluate_function(
     return;
   }
 
-  if (AnomalyMode::is_enabled()) {
+  if (AnomalyMode::is_enabled() && AnomalyMode::should_check_nan()) {
     AutoGradMode grad_mode(false);
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
@@ -990,7 +1073,6 @@ auto Engine::compute_dependencies(
     GraphTask& task,
     uint64_t min_topo_nr) -> void {
   // Computes the number of dependencies for each function which requires grad
-  std::unordered_set<Node*> seen;
   std::vector<Node*> queue{root};
   bool might_use_cuda = at::globalContext().hasCUDA();
   bool will_use_cuda = false;
@@ -1010,7 +1092,7 @@ auto Engine::compute_dependencies(
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
-        const bool was_inserted = seen.insert(next_ptr).second;
+        const bool was_inserted = task.nodes_in_graph_.insert(next_ptr).second;
         if (was_inserted)
           queue.push_back(next_ptr);
       }
@@ -1025,7 +1107,7 @@ auto Engine::compute_dependencies(
 }
 
 auto Engine::execute(
-    const edge_list& roots,
+    const edge_list& root_edges,
     const variable_list& inputs,
     bool keep_graph,
     bool create_graph,
@@ -1033,9 +1115,9 @@ auto Engine::execute(
     const edge_list& outputs) -> variable_list {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(
-      roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
-        return msg;
-      });
+      root_edges,
+      const_cast<variable_list&>(inputs),
+      [](const std::string& msg) { return msg; });
   if (accumulate_grad && create_graph) {
     TORCH_WARN_ONCE(
         "Using backward() with create_graph=True will create a reference cycle "
@@ -1058,17 +1140,25 @@ auto Engine::execute(
   init_local_ready_queue();
   bool not_reentrant_backward_call = worker_device == NO_DEVICE;
 
+  // Store root nodes so we can traverse through the graph later
+  // e.g., for get_current_graph_task_execution_order
+  c10::SmallVector<Node*, 4> temp_roots{root_edges.size()};
+  for (const auto i : c10::irange(root_edges.size())) {
+    temp_roots[i] = root_edges[i].function.get();
+  }
+
   auto graph_task = std::make_shared<GraphTask>(
       /* keep_graph */ keep_graph,
       /* create_graph */ create_graph,
       /* depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
-      /* cpu_ready_queue */ local_ready_queue);
+      /* cpu_ready_queue */ local_ready_queue,
+      /* graph_roots */ std::move(temp_roots));
 
   // If we receive a single root, skip creating extra root node
-  bool skip_dummy_node = roots.size() == 1;
+  bool skip_dummy_node = root_edges.size() == 1;
   auto graph_root = skip_dummy_node
-      ? roots.at(0).function
-      : std::make_shared<GraphRoot>(roots, inputs);
+      ? root_edges.at(0).function
+      : std::make_shared<GraphRoot>(root_edges, inputs);
 
   auto min_topo_nr = compute_min_topological_nr(outputs);
   // Now compute the dependencies for all executable functions
@@ -1081,14 +1171,17 @@ auto Engine::execute(
 
   // Queue the root
   if (skip_dummy_node) {
-    InputBuffer input_buffer(roots.at(0).function->num_inputs());
+    InputBuffer input_buffer(root_edges.at(0).function->num_inputs());
     auto input = inputs.at(0);
 
     const auto input_stream = InputMetadata(input).stream();
     const auto opt_next_stream =
-        roots.at(0).function->stream(c10::DeviceType::CUDA);
+        root_edges.at(0).function->stream(c10::DeviceType::CUDA);
     input_buffer.add(
-        roots.at(0).input_nr, std::move(input), input_stream, opt_next_stream);
+        root_edges.at(0).input_nr,
+        std::move(input),
+        input_stream,
+        opt_next_stream);
 
     execute_with_graph_task(graph_task, graph_root, std::move(input_buffer));
   } else {
@@ -1236,7 +1329,9 @@ void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
 auto Engine::ready_queue(
     std::shared_ptr<ReadyQueue> cpu_ready_queue,
     at::Device device) -> std::shared_ptr<ReadyQueue> {
-  if (should_run_in_cpu_ready_queue(device.type())) {
+  bool multithreading_disabled =
+      !c10::AutogradState::get_tls_state().get_multithreading_enabled();
+  if (multithreading_disabled || should_run_in_cpu_ready_queue(device.type())) {
     // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;

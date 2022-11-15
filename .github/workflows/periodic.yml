@@ -9,46 +9,45 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 jobs:
-  linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build:
-    if: false # https://github.com/pytorch/pytorch/issues/80314
-    name: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
+  linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build:
+    name: linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
-      docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
-
-  linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-test:
-    if: false # https://github.com/pytorch/pytorch/issues/80314
-    name: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build
-    with:
-      build-environment: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
-      docker-image: ${{ needs.linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build.outputs.docker-image }}
+      build-environment: linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-focal-rocm5_1-py3_7-slow-build:
-    name: linux-focal-rocm5.1-py3.7-slow
+  linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-test:
+    name: linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build
+    with:
+      build-environment: linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build.outputs.test-matrix }}
+
+  linux-focal-rocm5_2-py3_8-slow-build:
+    name: linux-focal-rocm5.2-py3.8-slow
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.1-py3.7
-      docker-image-name: pytorch-linux-focal-rocm5.1-py3.7
+      build-environment: linux-focal-rocm5.2-py3.8
+      docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
 
-  linux-focal-rocm5_1-py3_7-slow-test:
-    name: linux-focal-rocm5.1-py3.7-slow
+  linux-focal-rocm5_2-py3_8-slow-test:
+    name: linux-focal-rocm5.2-py3.8-slow
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm5_1-py3_7-slow-build
+    needs: linux-focal-rocm5_2-py3_8-slow-build
     with:
-      build-environment: linux-focal-rocm5.1-py3.7
-      docker-image: ${{ needs.linux-focal-rocm5_1-py3_7-slow-build.outputs.docker-image }}
+      build-environment: linux-focal-rocm5.2-py3.8
+      docker-image: ${{ needs.linux-focal-rocm5_2-py3_8-slow-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
@@ -57,21 +56,20 @@ jobs:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
-  linux-focal-rocm5_1-py3_7-distributed-build:
-    name: linux-focal-rocm5.1-py3.7-distributed
+  linux-focal-rocm5_2-py3_8-distributed-build:
+    name: linux-focal-rocm5.2-py3.8-distributed
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.1-py3.7
-      docker-image-name: pytorch-linux-focal-rocm5.1-py3.7
+      build-environment: linux-focal-rocm5.2-py3.8
+      docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
 
-  linux-focal-rocm5_1-py3_7-distributed-test:
-    if: false # https://github.com/pytorch/pytorch/issues/80529
-    name: linux-focal-rocm5.1-py3.7-distributed
+  linux-focal-rocm5_2-py3_8-distributed-test:
+    name: linux-focal-rocm5.2-py3.8-distributed
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm5_1-py3_7-distributed-build
+    needs: linux-focal-rocm5_2-py3_8-distributed-build
     with:
-      build-environment: linux-focal-rocm5.1-py3.7
-      docker-image: ${{ needs.linux-focal-rocm5_1-py3_7-distributed-build.outputs.docker-image }}
+      build-environment: linux-focal-rocm5.2-py3.8
+      docker-image: ${{ needs.linux-focal-rocm5_2-py3_8-distributed-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
@@ -81,24 +79,26 @@ jobs:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
-  linux-bionic-cuda10_2-py3_9-gcc7-build:
-    name: linux-bionic-cuda10.2-py3.9-gcc7
+  linux-bionic-cuda11_6-py3_9-gcc7-build:
+    name: linux-bionic-cuda11.6-py3.9-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda10.2-py3.9-gcc7
-      docker-image-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
-
-  linux-bionic-cuda10_2-py3_9-gcc7-test:
-    name: linux-bionic-cuda10.2-py3.9-gcc7
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda10_2-py3_9-gcc7-build
-    with:
-      build-environment: linux-bionic-cuda10.2-py3.9-gcc7
-      docker-image: ${{ needs.linux-bionic-cuda10_2-py3_9-gcc7-build.outputs.docker-image }}
+      build-environment: linux-bionic-cuda11.6-py3.9-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
       test-matrix: |
         { include: [
           { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.16xlarge.nvidia.gpu" },
         ]}
+      build-with-debug: false
+
+  linux-bionic-cuda11_6-py3_9-gcc7-test:
+    name: linux-bionic-cuda11.6-py3.9-gcc7
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda11_6-py3_9-gcc7-build
+    with:
+      build-environment: linux-bionic-cuda11.6-py3.9-gcc7
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_9-gcc7-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_9-gcc7-build.outputs.test-matrix }}
 
   linux-bionic-cuda11_6-py3_7-gcc7-debug-build:
     name: linux-bionic-cuda11.6-py3.7-gcc7-debug
@@ -107,14 +107,6 @@ jobs:
       build-environment: linux-bionic-cuda11.6-py3.7-gcc7-debug
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
       build-with-debug: true
-
-  linux-bionic-cuda11_6-py3_7-gcc7-debug-test:
-    name: linux-bionic-cuda11.6-py3.7-gcc7-debug
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_6-py3_7-gcc7-debug-build
-    with:
-      build-environment: linux-bionic-cuda11.6-py3.7-gcc7-debug
-      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-debug-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
@@ -123,6 +115,69 @@ jobs:
           { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
+  linux-bionic-cuda11_6-py3_7-gcc7-debug-test:
+    name: linux-bionic-cuda11.6-py3.7-gcc7-debug
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda11_6-py3_7-gcc7-debug-build
+    with:
+      build-environment: linux-bionic-cuda11.6-py3.7-gcc7-debug
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-debug-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-debug-build.outputs.test-matrix }}
+
+  linux-bionic-cuda11_7-py3_7-gcc7-debug-build:
+    name: linux-bionic-cuda11.7-py3.7-gcc7-debug
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-cuda11.7-py3.7-gcc7-debug
+      docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
+      build-with-debug: true
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-bionic-cuda11_7-py3_7-gcc7-debug-test:
+    name: linux-bionic-cuda11.7-py3.7-gcc7-debug
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda11_7-py3_7-gcc7-debug-build
+    with:
+      build-environment: linux-bionic-cuda11.7-py3.7-gcc7-debug
+      docker-image: ${{ needs.linux-bionic-cuda11_7-py3_7-gcc7-debug-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_7-py3_7-gcc7-debug-build.outputs.test-matrix }}
+
+  libtorch-linux-bionic-cuda11_7-py3_7-gcc7-build:
+    name: libtorch-linux-bionic-cuda11.7-py3.7-gcc7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: libtorch-linux-bionic-cuda11.7-py3.7-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
+      build-generates-artifacts: false
+
+  win-vs2019-cuda11_7-py3-build:
+    name: win-vs2019-cuda11.7-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2019-cuda11.7-py3
+      cuda-version: "11.7"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
+        ]}
+
+  win-vs2019-cuda11_7-py3-test:
+    name: win-vs2019-cuda11.7-py3
+    uses: ./.github/workflows/_win-test.yml
+    needs: win-vs2019-cuda11_7-py3-build
+    with:
+      build-environment: win-vs2019-cuda11.7-py3
+      cuda-version: "11.7"
+      test-matrix: ${{ needs.win-vs2019-cuda11_7-py3-build.outputs.test-matrix }}
+
   ios-12-5-1-x86-64-coreml:
     name: ios-12-5-1-x86-64-coreml
     uses: ./.github/workflows/_ios-build-test.yml
@@ -130,11 +185,6 @@ jobs:
       build-environment: ios-12-5-1-x86-64-coreml
       ios-platform: SIMULATOR
       ios-arch: x86_64
-    secrets:
-      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
-      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
-      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
-      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
 
   ios-12-5-1-arm64:
     name: ios-12-5-1-arm64
@@ -143,11 +193,6 @@ jobs:
       build-environment: ios-12-5-1-arm64
       ios-platform: OS
       ios-arch: arm64
-    secrets:
-      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
-      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
-      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
-      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
 
   ios-12-5-1-arm64-coreml:
     name: ios-12-5-1-arm64-coreml
@@ -156,11 +201,6 @@ jobs:
       build-environment: ios-12-5-1-arm64-coreml
       ios-platform: OS
       ios-arch: arm64
-    secrets:
-      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
-      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
-      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
-      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
 
   ios-12-5-1-arm64-custom-ops:
     name: ios-12-5-1-arm64-custom-ops
@@ -169,11 +209,6 @@ jobs:
       build-environment: ios-12-5-1-arm64-custom-ops
       ios-platform: OS
       ios-arch: arm64
-    secrets:
-      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
-      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
-      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
-      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
 
   ios-12-5-1-arm64-metal:
     name: ios-12-5-1-arm64-metal
@@ -182,11 +217,6 @@ jobs:
       build-environment: ios-12-5-1-arm64-metal
       ios-platform: OS
       ios-arch: arm64
-    secrets:
-      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
-      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
-      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
-      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
 
   buck-build-test:
     name: buck-build-test

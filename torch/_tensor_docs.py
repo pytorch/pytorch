@@ -2,19 +2,22 @@
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
-from ._torch_docs import parse_kwargs
-from ._torch_docs import reproducibility_notes
+from ._torch_docs import parse_kwargs, reproducibility_notes
 
 
 def add_docstr_all(method, docstr):
     add_docstr(getattr(torch._C._TensorBase, method), docstr)
 
-common_args = parse_kwargs("""
+
+common_args = parse_kwargs(
+    """
     memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.preserve_format``.
-""")
+"""
+)
 
-new_common_args = parse_kwargs("""
+new_common_args = parse_kwargs(
+    """
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
     dtype (:class:`torch.dtype`, optional): the desired type of returned tensor.
@@ -25,11 +28,18 @@ new_common_args = parse_kwargs("""
         returned tensor. Default: ``False``.
     pin_memory (bool, optional): If set, returned tensor would be allocated in
         the pinned memory. Works only for CPU tensors. Default: ``False``.
-""")
+    layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
+        Default: ``torch.strided``.
+"""
+)
 
-add_docstr_all('new_tensor',
-               r"""
-new_tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
+add_docstr_all(
+    "new_tensor",
+    """
+new_tensor(data, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a new Tensor with :attr:`data` as the tensor data.
 By default, the returned Tensor has the same :class:`torch.dtype` and
@@ -52,9 +62,13 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 
 Args:
     data (array_like): The returned Tensor copies :attr:`data`.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -64,11 +78,18 @@ Example::
     tensor([[ 0,  1],
             [ 2,  3]], dtype=torch.int8)
 
-""".format(**new_common_args))
+""".format(
+        **new_common_args
+    ),
+)
 
-add_docstr_all('new_full',
-               r"""
-new_full(size, fill_value, dtype=None, device=None, requires_grad=False) -> Tensor
+add_docstr_all(
+    "new_full",
+    """
+new_full(size, fill_value, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a Tensor of size :attr:`size` filled with :attr:`fill_value`.
 By default, the returned Tensor has the same :class:`torch.dtype` and
@@ -76,9 +97,13 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 
 Args:
     fill_value (scalar): the number to fill the output tensor with.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -88,20 +113,33 @@ Example::
             [ 3.1416,  3.1416,  3.1416,  3.1416],
             [ 3.1416,  3.1416,  3.1416,  3.1416]], dtype=torch.float64)
 
-""".format(**new_common_args))
+""".format(
+        **new_common_args
+    ),
+)
 
-add_docstr_all('new_empty',
-               r"""
-new_empty(size, dtype=None, device=None, requires_grad=False) -> Tensor
+add_docstr_all(
+    "new_empty",
+    """
+new_empty(size, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a Tensor of size :attr:`size` filled with uninitialized data.
 By default, the returned Tensor has the same :class:`torch.dtype` and
 :class:`torch.device` as this tensor.
 
 Args:
+    size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
+        shape of the output tensor.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -110,20 +148,33 @@ Example::
     tensor([[ 5.8182e-18,  4.5765e-41, -1.0545e+30],
             [ 3.0949e-41,  4.4842e-44,  0.0000e+00]])
 
-""".format(**new_common_args))
+""".format(
+        **new_common_args
+    ),
+)
 
-add_docstr_all('new_empty_strided',
-               r"""
-new_empty_strided(size, stride, dtype=None, device=None, requires_grad=False) -> Tensor
+add_docstr_all(
+    "new_empty_strided",
+    """
+new_empty_strided(size, stride, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a Tensor of size :attr:`size` and strides :attr:`stride` filled with
 uninitialized data. By default, the returned Tensor has the same
 :class:`torch.dtype` and :class:`torch.device` as this tensor.
 
 Args:
+    size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
+        shape of the output tensor.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -132,11 +183,18 @@ Example::
     tensor([[ 5.8182e-18,  4.5765e-41, -1.0545e+30],
             [ 3.0949e-41,  4.4842e-44,  0.0000e+00]])
 
-""".format(**new_common_args))
+""".format(
+        **new_common_args
+    ),
+)
 
-add_docstr_all('new_ones',
-               r"""
-new_ones(size, dtype=None, device=None, requires_grad=False) -> Tensor
+add_docstr_all(
+    "new_ones",
+    """
+new_ones(size, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a Tensor of size :attr:`size` filled with ``1``.
 By default, the returned Tensor has the same :class:`torch.dtype` and
@@ -145,9 +203,13 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -156,11 +218,18 @@ Example::
     tensor([[ 1,  1,  1],
             [ 1,  1,  1]], dtype=torch.int32)
 
-""".format(**new_common_args))
+""".format(
+        **new_common_args
+    ),
+)
 
-add_docstr_all('new_zeros',
-               r"""
-new_zeros(size, dtype=None, device=None, requires_grad=False) -> Tensor
+add_docstr_all(
+    "new_zeros",
+    """
+new_zeros(size, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a Tensor of size :attr:`size` filled with ``0``.
 By default, the returned Tensor has the same :class:`torch.dtype` and
@@ -169,9 +238,13 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -180,91 +253,123 @@ Example::
     tensor([[ 0.,  0.,  0.],
             [ 0.,  0.,  0.]], dtype=torch.float64)
 
-""".format(**new_common_args))
+""".format(
+        **new_common_args
+    ),
+)
 
-add_docstr_all('abs',
-               r"""
+add_docstr_all(
+    "abs",
+    r"""
 abs() -> Tensor
 
 See :func:`torch.abs`
-""")
+""",
+)
 
-add_docstr_all('abs_',
-               r"""
+add_docstr_all(
+    "abs_",
+    r"""
 abs_() -> Tensor
 
 In-place version of :meth:`~Tensor.abs`
-""")
+""",
+)
 
-add_docstr_all('absolute',
-               r"""
+add_docstr_all(
+    "absolute",
+    r"""
 absolute() -> Tensor
 
 Alias for :func:`abs`
-""")
+""",
+)
 
-add_docstr_all('absolute_',
-               r"""
+add_docstr_all(
+    "absolute_",
+    r"""
 absolute_() -> Tensor
 
 In-place version of :meth:`~Tensor.absolute`
 Alias for :func:`abs_`
-""")
+""",
+)
 
-add_docstr_all('acos',
-               r"""
+add_docstr_all(
+    "acos",
+    r"""
 acos() -> Tensor
 
 See :func:`torch.acos`
-""")
+""",
+)
 
-add_docstr_all('acos_',
-               r"""
+add_docstr_all(
+    "acos_",
+    r"""
 acos_() -> Tensor
 
 In-place version of :meth:`~Tensor.acos`
-""")
+""",
+)
 
-add_docstr_all('arccos', r"""
+add_docstr_all(
+    "arccos",
+    r"""
 arccos() -> Tensor
 
 See :func:`torch.arccos`
-""")
+""",
+)
 
-add_docstr_all('arccos_', r"""
+add_docstr_all(
+    "arccos_",
+    r"""
 arccos_() -> Tensor
 
 In-place version of :meth:`~Tensor.arccos`
-""")
+""",
+)
 
-add_docstr_all('acosh',
-               r"""
+add_docstr_all(
+    "acosh",
+    r"""
 acosh() -> Tensor
 
 See :func:`torch.acosh`
-""")
+""",
+)
 
-add_docstr_all('acosh_',
-               r"""
+add_docstr_all(
+    "acosh_",
+    r"""
 acosh_() -> Tensor
 
 In-place version of :meth:`~Tensor.acosh`
-""")
+""",
+)
 
-add_docstr_all('arccosh', r"""
+add_docstr_all(
+    "arccosh",
+    r"""
 acosh() -> Tensor
 
 See :func:`torch.arccosh`
-""")
+""",
+)
 
-add_docstr_all('arccosh_', r"""
+add_docstr_all(
+    "arccosh_",
+    r"""
 acosh_() -> Tensor
 
 In-place version of :meth:`~Tensor.arccosh`
-""")
+""",
+)
 
-add_docstr_all('add',
-               r"""
+add_docstr_all(
+    "add",
+    r"""
 add(other, *, alpha=1) -> Tensor
 
 Add a scalar or tensor to :attr:`self` tensor. If both :attr:`alpha`
@@ -276,115 +381,147 @@ When :attr:`other` is a tensor, the shape of :attr:`other` must be
 tensor
 
 See :func:`torch.add`
-""")
+""",
+)
 
-add_docstr_all('add_',
-               r"""
+add_docstr_all(
+    "add_",
+    r"""
 add_(other, *, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.add`
-""")
+""",
+)
 
-add_docstr_all('addbmm',
-               r"""
+add_docstr_all(
+    "addbmm",
+    r"""
 addbmm(batch1, batch2, *, beta=1, alpha=1) -> Tensor
 
 See :func:`torch.addbmm`
-""")
+""",
+)
 
-add_docstr_all('addbmm_',
-               r"""
+add_docstr_all(
+    "addbmm_",
+    r"""
 addbmm_(batch1, batch2, *, beta=1, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.addbmm`
-""")
+""",
+)
 
-add_docstr_all('addcdiv',
-               r"""
+add_docstr_all(
+    "addcdiv",
+    r"""
 addcdiv(tensor1, tensor2, *, value=1) -> Tensor
 
 See :func:`torch.addcdiv`
-""")
+""",
+)
 
-add_docstr_all('addcdiv_',
-               r"""
+add_docstr_all(
+    "addcdiv_",
+    r"""
 addcdiv_(tensor1, tensor2, *, value=1) -> Tensor
 
 In-place version of :meth:`~Tensor.addcdiv`
-""")
+""",
+)
 
-add_docstr_all('addcmul',
-               r"""
+add_docstr_all(
+    "addcmul",
+    r"""
 addcmul(tensor1, tensor2, *, value=1) -> Tensor
 
 See :func:`torch.addcmul`
-""")
+""",
+)
 
-add_docstr_all('addcmul_',
-               r"""
+add_docstr_all(
+    "addcmul_",
+    r"""
 addcmul_(tensor1, tensor2, *, value=1) -> Tensor
 
 In-place version of :meth:`~Tensor.addcmul`
-""")
+""",
+)
 
-add_docstr_all('addmm',
-               r"""
+add_docstr_all(
+    "addmm",
+    r"""
 addmm(mat1, mat2, *, beta=1, alpha=1) -> Tensor
 
 See :func:`torch.addmm`
-""")
+""",
+)
 
-add_docstr_all('addmm_',
-               r"""
+add_docstr_all(
+    "addmm_",
+    r"""
 addmm_(mat1, mat2, *, beta=1, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.addmm`
-""")
+""",
+)
 
-add_docstr_all('addmv',
-               r"""
+add_docstr_all(
+    "addmv",
+    r"""
 addmv(mat, vec, *, beta=1, alpha=1) -> Tensor
 
 See :func:`torch.addmv`
-""")
+""",
+)
 
-add_docstr_all('addmv_',
-               r"""
+add_docstr_all(
+    "addmv_",
+    r"""
 addmv_(mat, vec, *, beta=1, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.addmv`
-""")
+""",
+)
 
-add_docstr_all('sspaddmm',
-               r"""
+add_docstr_all(
+    "sspaddmm",
+    r"""
 sspaddmm(mat1, mat2, *, beta=1, alpha=1) -> Tensor
 
 See :func:`torch.sspaddmm`
-""")
+""",
+)
 
-add_docstr_all('smm',
-               r"""
+add_docstr_all(
+    "smm",
+    r"""
 smm(mat) -> Tensor
 
 See :func:`torch.smm`
-""")
+""",
+)
 
-add_docstr_all('addr',
-               r"""
+add_docstr_all(
+    "addr",
+    r"""
 addr(vec1, vec2, *, beta=1, alpha=1) -> Tensor
 
 See :func:`torch.addr`
-""")
+""",
+)
 
-add_docstr_all('addr_',
-               r"""
+add_docstr_all(
+    "addr_",
+    r"""
 addr_(vec1, vec2, *, beta=1, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.addr`
-""")
+""",
+)
 
-add_docstr_all('align_as',
-               r"""
+add_docstr_all(
+    "align_as",
+    r"""
 align_as(other) -> Tensor
 
 Permutes the dimensions of the :attr:`self` tensor to match the dimension order
@@ -428,38 +565,48 @@ Examples::
 .. warning::
     The named tensor API is experimental and subject to change.
 
-""")
+""",
+)
 
-add_docstr_all('all',
-               r"""
+add_docstr_all(
+    "all",
+    r"""
 all(dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.all`
-""")
+""",
+)
 
-add_docstr_all('allclose',
-               r"""
+add_docstr_all(
+    "allclose",
+    r"""
 allclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
 
 See :func:`torch.allclose`
-""")
+""",
+)
 
-add_docstr_all('angle',
-               r"""
+add_docstr_all(
+    "angle",
+    r"""
 angle() -> Tensor
 
 See :func:`torch.angle`
-""")
+""",
+)
 
-add_docstr_all('any',
-               r"""
+add_docstr_all(
+    "any",
+    r"""
 any(dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.any`
-""")
+""",
+)
 
-add_docstr_all('apply_',
-               r"""
+add_docstr_all(
+    "apply_",
+    r"""
 apply_(callable) -> Tensor
 
 Applies the function :attr:`callable` to each element in the tensor, replacing
@@ -469,152 +616,219 @@ each element with the value returned by :attr:`callable`.
 
     This function only works with CPU tensors and should not be used in code
     sections that require high performance.
-""")
+""",
+)
 
-add_docstr_all('asin', r"""
+add_docstr_all(
+    "asin",
+    r"""
 asin() -> Tensor
 
 See :func:`torch.asin`
-""")
+""",
+)
 
-add_docstr_all('asin_',
-               r"""
+add_docstr_all(
+    "asin_",
+    r"""
 asin_() -> Tensor
 
 In-place version of :meth:`~Tensor.asin`
-""")
+""",
+)
 
-add_docstr_all('arcsin', r"""
+add_docstr_all(
+    "arcsin",
+    r"""
 arcsin() -> Tensor
 
 See :func:`torch.arcsin`
-""")
+""",
+)
 
-add_docstr_all('arcsin_', r"""
+add_docstr_all(
+    "arcsin_",
+    r"""
 arcsin_() -> Tensor
 
 In-place version of :meth:`~Tensor.arcsin`
-""")
+""",
+)
 
-add_docstr_all('asinh', r"""
+add_docstr_all(
+    "asinh",
+    r"""
 asinh() -> Tensor
 
 See :func:`torch.asinh`
-""")
+""",
+)
 
-add_docstr_all('asinh_',
-               r"""
+add_docstr_all(
+    "asinh_",
+    r"""
 asinh_() -> Tensor
 
 In-place version of :meth:`~Tensor.asinh`
-""")
+""",
+)
 
-add_docstr_all('arcsinh', r"""
+add_docstr_all(
+    "arcsinh",
+    r"""
 arcsinh() -> Tensor
 
 See :func:`torch.arcsinh`
-""")
+""",
+)
 
-add_docstr_all('arcsinh_', r"""
+add_docstr_all(
+    "arcsinh_",
+    r"""
 arcsinh_() -> Tensor
 
 In-place version of :meth:`~Tensor.arcsinh`
-""")
+""",
+)
 
-add_docstr_all('as_strided', r"""
+add_docstr_all(
+    "as_strided",
+    r"""
 as_strided(size, stride, storage_offset=None) -> Tensor
 
 See :func:`torch.as_strided`
-""")
+""",
+)
 
-add_docstr_all('atan', r"""
+add_docstr_all(
+    "atan",
+    r"""
 atan() -> Tensor
 
 See :func:`torch.atan`
-""")
+""",
+)
 
-add_docstr_all('atan_', r"""
+add_docstr_all(
+    "atan_",
+    r"""
 atan_() -> Tensor
 
 In-place version of :meth:`~Tensor.atan`
-""")
+""",
+)
 
-add_docstr_all('arctan', r"""
+add_docstr_all(
+    "arctan",
+    r"""
 arctan() -> Tensor
 
 See :func:`torch.arctan`
-""")
+""",
+)
 
-add_docstr_all('arctan_', r"""
+add_docstr_all(
+    "arctan_",
+    r"""
 arctan_() -> Tensor
 
 In-place version of :meth:`~Tensor.arctan`
-""")
+""",
+)
 
-add_docstr_all('atan2', r"""
+add_docstr_all(
+    "atan2",
+    r"""
 atan2(other) -> Tensor
 
 See :func:`torch.atan2`
-""")
+""",
+)
 
-add_docstr_all('atan2_', r"""
+add_docstr_all(
+    "atan2_",
+    r"""
 atan2_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.atan2`
-""")
+""",
+)
 
-add_docstr_all('arctan2', r"""
+add_docstr_all(
+    "arctan2",
+    r"""
 arctan2(other) -> Tensor
 
 See :func:`torch.arctan2`
-""")
+""",
+)
 
-add_docstr_all('arctan2_', r"""
+add_docstr_all(
+    "arctan2_",
+    r"""
 atan2_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.arctan2`
-""")
+""",
+)
 
-add_docstr_all('atanh', r"""
+add_docstr_all(
+    "atanh",
+    r"""
 atanh() -> Tensor
 
 See :func:`torch.atanh`
-""")
+""",
+)
 
-add_docstr_all('atanh_', r"""
+add_docstr_all(
+    "atanh_",
+    r"""
 atanh_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.atanh`
-""")
+""",
+)
 
-add_docstr_all('arctanh', r"""
+add_docstr_all(
+    "arctanh",
+    r"""
 arctanh() -> Tensor
 
 See :func:`torch.arctanh`
-""")
+""",
+)
 
-add_docstr_all('arctanh_', r"""
+add_docstr_all(
+    "arctanh_",
+    r"""
 arctanh_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.arctanh`
-""")
+""",
+)
 
-add_docstr_all('baddbmm',
-               r"""
+add_docstr_all(
+    "baddbmm",
+    r"""
 baddbmm(batch1, batch2, *, beta=1, alpha=1) -> Tensor
 
 See :func:`torch.baddbmm`
-""")
+""",
+)
 
-add_docstr_all('baddbmm_',
-               r"""
+add_docstr_all(
+    "baddbmm_",
+    r"""
 baddbmm_(batch1, batch2, *, beta=1, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.baddbmm`
-""")
+""",
+)
 
-add_docstr_all('bernoulli',
-               r"""
+add_docstr_all(
+    "bernoulli",
+    r"""
 bernoulli(*, generator=None) -> Tensor
 
 Returns a result tensor where each :math:`\texttt{result[i]}` is independently
@@ -622,10 +836,12 @@ sampled from :math:`\text{Bernoulli}(\texttt{self[i]})`. :attr:`self` must have
 floating point ``dtype``, and the result will have the same ``dtype``.
 
 See :func:`torch.bernoulli`
-""")
+""",
+)
 
-add_docstr_all('bernoulli_',
-               r"""
+add_docstr_all(
+    "bernoulli_",
+    r"""
 bernoulli_(p=0.5, *, generator=None) -> Tensor
 
 Fills each location of :attr:`self` with an independent sample from
@@ -641,171 +857,219 @@ will be set to a value sampled from
 floating point ``dtype``.
 
 See also :meth:`~Tensor.bernoulli` and :func:`torch.bernoulli`
-""")
+""",
+)
 
-add_docstr_all('bincount',
-               r"""
+add_docstr_all(
+    "bincount",
+    r"""
 bincount(weights=None, minlength=0) -> Tensor
 
 See :func:`torch.bincount`
-""")
+""",
+)
 
-add_docstr_all('bitwise_not',
-               r"""
+add_docstr_all(
+    "bitwise_not",
+    r"""
 bitwise_not() -> Tensor
 
 See :func:`torch.bitwise_not`
-""")
+""",
+)
 
-add_docstr_all('bitwise_not_',
-               r"""
+add_docstr_all(
+    "bitwise_not_",
+    r"""
 bitwise_not_() -> Tensor
 
 In-place version of :meth:`~Tensor.bitwise_not`
-""")
+""",
+)
 
-add_docstr_all('bitwise_and',
-               r"""
+add_docstr_all(
+    "bitwise_and",
+    r"""
 bitwise_and() -> Tensor
 
 See :func:`torch.bitwise_and`
-""")
+""",
+)
 
-add_docstr_all('bitwise_and_',
-               r"""
+add_docstr_all(
+    "bitwise_and_",
+    r"""
 bitwise_and_() -> Tensor
 
 In-place version of :meth:`~Tensor.bitwise_and`
-""")
+""",
+)
 
-add_docstr_all('bitwise_or',
-               r"""
+add_docstr_all(
+    "bitwise_or",
+    r"""
 bitwise_or() -> Tensor
 
 See :func:`torch.bitwise_or`
-""")
+""",
+)
 
-add_docstr_all('bitwise_or_',
-               r"""
+add_docstr_all(
+    "bitwise_or_",
+    r"""
 bitwise_or_() -> Tensor
 
 In-place version of :meth:`~Tensor.bitwise_or`
-""")
+""",
+)
 
-add_docstr_all('bitwise_xor',
-               r"""
+add_docstr_all(
+    "bitwise_xor",
+    r"""
 bitwise_xor() -> Tensor
 
 See :func:`torch.bitwise_xor`
-""")
+""",
+)
 
-add_docstr_all('bitwise_xor_',
-               r"""
+add_docstr_all(
+    "bitwise_xor_",
+    r"""
 bitwise_xor_() -> Tensor
 
 In-place version of :meth:`~Tensor.bitwise_xor`
-""")
+""",
+)
 
-add_docstr_all('bitwise_left_shift',
-               r"""
+add_docstr_all(
+    "bitwise_left_shift",
+    r"""
 bitwise_left_shift(other) -> Tensor
 
 See :func:`torch.bitwise_left_shift`
-""")
+""",
+)
 
-add_docstr_all('bitwise_left_shift_',
-               r"""
+add_docstr_all(
+    "bitwise_left_shift_",
+    r"""
 bitwise_left_shift_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.bitwise_left_shift`
-""")
+""",
+)
 
-add_docstr_all('bitwise_right_shift',
-               r"""
+add_docstr_all(
+    "bitwise_right_shift",
+    r"""
 bitwise_right_shift(other) -> Tensor
 
 See :func:`torch.bitwise_right_shift`
-""")
+""",
+)
 
-add_docstr_all('bitwise_right_shift_',
-               r"""
+add_docstr_all(
+    "bitwise_right_shift_",
+    r"""
 bitwise_right_shift_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.bitwise_right_shift`
-""")
+""",
+)
 
-add_docstr_all('broadcast_to',
-               r"""
+add_docstr_all(
+    "broadcast_to",
+    r"""
 broadcast_to(shape) -> Tensor
 
 See :func:`torch.broadcast_to`.
-""")
+""",
+)
 
-add_docstr_all('logical_and',
-               r"""
+add_docstr_all(
+    "logical_and",
+    r"""
 logical_and() -> Tensor
 
 See :func:`torch.logical_and`
-""")
+""",
+)
 
-add_docstr_all('logical_and_',
-               r"""
+add_docstr_all(
+    "logical_and_",
+    r"""
 logical_and_() -> Tensor
 
 In-place version of :meth:`~Tensor.logical_and`
-""")
+""",
+)
 
-add_docstr_all('logical_not',
-               r"""
+add_docstr_all(
+    "logical_not",
+    r"""
 logical_not() -> Tensor
 
 See :func:`torch.logical_not`
-""")
+""",
+)
 
-add_docstr_all('logical_not_',
-               r"""
+add_docstr_all(
+    "logical_not_",
+    r"""
 logical_not_() -> Tensor
 
 In-place version of :meth:`~Tensor.logical_not`
-""")
+""",
+)
 
-add_docstr_all('logical_or',
-               r"""
+add_docstr_all(
+    "logical_or",
+    r"""
 logical_or() -> Tensor
 
 See :func:`torch.logical_or`
-""")
+""",
+)
 
-add_docstr_all('logical_or_',
-               r"""
+add_docstr_all(
+    "logical_or_",
+    r"""
 logical_or_() -> Tensor
 
 In-place version of :meth:`~Tensor.logical_or`
-""")
+""",
+)
 
-add_docstr_all('logical_xor',
-               r"""
+add_docstr_all(
+    "logical_xor",
+    r"""
 logical_xor() -> Tensor
 
 See :func:`torch.logical_xor`
-""")
+""",
+)
 
-add_docstr_all('logical_xor_',
-               r"""
+add_docstr_all(
+    "logical_xor_",
+    r"""
 logical_xor_() -> Tensor
 
 In-place version of :meth:`~Tensor.logical_xor`
-""")
+""",
+)
 
-add_docstr_all('bmm',
-               r"""
+add_docstr_all(
+    "bmm",
+    r"""
 bmm(batch2) -> Tensor
 
 See :func:`torch.bmm`
-""")
+""",
+)
 
-add_docstr_all('cauchy_',
-               r"""
+add_docstr_all(
+    "cauchy_",
+    r"""
 cauchy_(median=0, sigma=1, *, generator=None) -> Tensor
 
 Fills the tensor with numbers drawn from the Cauchy distribution:
@@ -813,77 +1077,104 @@ Fills the tensor with numbers drawn from the Cauchy distribution:
 .. math::
 
     f(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - \text{median})^2 + \sigma^2}
-""")
+""",
+)
 
-add_docstr_all('ceil',
-               r"""
+add_docstr_all(
+    "ceil",
+    r"""
 ceil() -> Tensor
 
 See :func:`torch.ceil`
-""")
+""",
+)
 
-add_docstr_all('ceil_',
-               r"""
+add_docstr_all(
+    "ceil_",
+    r"""
 ceil_() -> Tensor
 
 In-place version of :meth:`~Tensor.ceil`
-""")
+""",
+)
 
-add_docstr_all('cholesky',
-               r"""
+add_docstr_all(
+    "cholesky",
+    r"""
 cholesky(upper=False) -> Tensor
 
 See :func:`torch.cholesky`
-""")
+""",
+)
 
-add_docstr_all('cholesky_solve',
-               r"""
+add_docstr_all(
+    "cholesky_solve",
+    r"""
 cholesky_solve(input2, upper=False) -> Tensor
 
 See :func:`torch.cholesky_solve`
-""")
+""",
+)
 
-add_docstr_all('cholesky_inverse',
-               r"""
+add_docstr_all(
+    "cholesky_inverse",
+    r"""
 cholesky_inverse(upper=False) -> Tensor
 
 See :func:`torch.cholesky_inverse`
-""")
+""",
+)
 
-add_docstr_all('clamp',
-               r"""
+add_docstr_all(
+    "clamp",
+    r"""
 clamp(min=None, max=None) -> Tensor
 
 See :func:`torch.clamp`
-""")
+""",
+)
 
-add_docstr_all('clamp_',
-               r"""
+add_docstr_all(
+    "clamp_",
+    r"""
 clamp_(min=None, max=None) -> Tensor
 
 In-place version of :meth:`~Tensor.clamp`
-""")
+""",
+)
 
-add_docstr_all('clip', r"""
+add_docstr_all(
+    "clip",
+    r"""
 clip(min=None, max=None) -> Tensor
 
 Alias for :meth:`~Tensor.clamp`.
-""")
+""",
+)
 
-add_docstr_all('clip_', r"""
+add_docstr_all(
+    "clip_",
+    r"""
 clip_(min=None, max=None) -> Tensor
 
 Alias for :meth:`~Tensor.clamp_`.
-""")
+""",
+)
 
-add_docstr_all('clone', r"""
+add_docstr_all(
+    "clone",
+    r"""
 clone(*, memory_format=torch.preserve_format) -> Tensor
 
 See :func:`torch.clone`
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('coalesce',
-               r"""
+add_docstr_all(
+    "coalesce",
+    r"""
 coalesce() -> Tensor
 
 Returns a coalesced copy of :attr:`self` if :attr:`self` is an
@@ -893,10 +1184,12 @@ Returns :attr:`self` if :attr:`self` is a coalesced tensor.
 
 .. warning::
   Throws an error if :attr:`self` is not a sparse COO tensor.
-""")
+""",
+)
 
-add_docstr_all('contiguous',
-               r"""
+add_docstr_all(
+    "contiguous",
+    r"""
 contiguous(memory_format=torch.contiguous_format) -> Tensor
 
 Returns a contiguous in memory tensor containing the same data as :attr:`self` tensor. If
@@ -906,10 +1199,12 @@ Returns a contiguous in memory tensor containing the same data as :attr:`self` t
 Args:
     memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.contiguous_format``.
-""")
+""",
+)
 
-add_docstr_all('copy_',
-               r"""
+add_docstr_all(
+    "copy_",
+    r"""
 copy_(src, non_blocking=False) -> Tensor
 
 Copies the elements from :attr:`src` into :attr:`self` tensor and returns
@@ -924,86 +1219,111 @@ Args:
     non_blocking (bool): if ``True`` and this copy is between CPU and GPU,
         the copy may occur asynchronously with respect to the host. For other
         cases, this argument has no effect.
-""")
+""",
+)
 
-add_docstr_all('conj',
-               r"""
+add_docstr_all(
+    "conj",
+    r"""
 conj() -> Tensor
 
 See :func:`torch.conj`
-""")
+""",
+)
 
-add_docstr_all('conj_physical',
-               r"""
+add_docstr_all(
+    "conj_physical",
+    r"""
 conj_physical() -> Tensor
 
 See :func:`torch.conj_physical`
-""")
+""",
+)
 
-add_docstr_all('conj_physical_',
-               r"""
+add_docstr_all(
+    "conj_physical_",
+    r"""
 conj_physical_() -> Tensor
 
 In-place version of :meth:`~Tensor.conj_physical`
-""")
+""",
+)
 
-add_docstr_all('resolve_conj',
-               r"""
+add_docstr_all(
+    "resolve_conj",
+    r"""
 resolve_conj() -> Tensor
 
 See :func:`torch.resolve_conj`
-""")
+""",
+)
 
-add_docstr_all('resolve_neg',
-               r"""
+add_docstr_all(
+    "resolve_neg",
+    r"""
 resolve_neg() -> Tensor
 
 See :func:`torch.resolve_neg`
-""")
+""",
+)
 
-add_docstr_all('copysign',
-               r"""
+add_docstr_all(
+    "copysign",
+    r"""
 copysign(other) -> Tensor
 
 See :func:`torch.copysign`
-""")
+""",
+)
 
-add_docstr_all('copysign_', r"""
+add_docstr_all(
+    "copysign_",
+    r"""
 copysign_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.copysign`
-""")
+""",
+)
 
-add_docstr_all('cos',
-               r"""
+add_docstr_all(
+    "cos",
+    r"""
 cos() -> Tensor
 
 See :func:`torch.cos`
-""")
+""",
+)
 
-add_docstr_all('cos_',
-               r"""
+add_docstr_all(
+    "cos_",
+    r"""
 cos_() -> Tensor
 
 In-place version of :meth:`~Tensor.cos`
-""")
+""",
+)
 
-add_docstr_all('cosh',
-               r"""
+add_docstr_all(
+    "cosh",
+    r"""
 cosh() -> Tensor
 
 See :func:`torch.cosh`
-""")
+""",
+)
 
-add_docstr_all('cosh_',
-               r"""
+add_docstr_all(
+    "cosh_",
+    r"""
 cosh_() -> Tensor
 
 In-place version of :meth:`~Tensor.cosh`
-""")
+""",
+)
 
-add_docstr_all('cpu',
-               r"""
+add_docstr_all(
+    "cpu",
+    r"""
 cpu(memory_format=torch.preserve_format) -> Tensor
 
 Returns a copy of this object in CPU memory.
@@ -1014,36 +1334,50 @@ then no copy is performed and the original object is returned.
 Args:
     {memory_format}
 
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('count_nonzero',
-               r"""
+add_docstr_all(
+    "count_nonzero",
+    r"""
 count_nonzero(dim=None) -> Tensor
 
 See :func:`torch.count_nonzero`
-""")
+""",
+)
 
-add_docstr_all('cov', r"""
+add_docstr_all(
+    "cov",
+    r"""
 cov(*, correction=1, fweights=None, aweights=None) -> Tensor
 
 See :func:`torch.cov`
-""")
+""",
+)
 
-add_docstr_all('corrcoef', r"""
+add_docstr_all(
+    "corrcoef",
+    r"""
 corrcoef() -> Tensor
 
 See :func:`torch.corrcoef`
-""")
+""",
+)
 
-add_docstr_all('cross',
-               r"""
+add_docstr_all(
+    "cross",
+    r"""
 cross(other, dim=None) -> Tensor
 
 See :func:`torch.cross`
-""")
+""",
+)
 
-add_docstr_all('cuda',
-               r"""
+add_docstr_all(
+    "cuda",
+    r"""
 cuda(device=None, non_blocking=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a copy of this object in CUDA memory.
@@ -1058,10 +1392,14 @@ Args:
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('ipu',
-               r"""
+add_docstr_all(
+    "ipu",
+    r"""
 ipu(device=None, non_blocking=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a copy of this object in IPU memory.
@@ -1076,10 +1414,14 @@ Args:
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('xpu',
-               r"""
+add_docstr_all(
+    "xpu",
+    r"""
 xpu(device=None, non_blocking=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a copy of this object in XPU memory.
@@ -1094,127 +1436,163 @@ Args:
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('logcumsumexp',
-               r"""
+add_docstr_all(
+    "logcumsumexp",
+    r"""
 logcumsumexp(dim) -> Tensor
 
 See :func:`torch.logcumsumexp`
-""")
+""",
+)
 
-add_docstr_all('cummax',
-               r"""
+add_docstr_all(
+    "cummax",
+    r"""
 cummax(dim) -> (Tensor, Tensor)
 
 See :func:`torch.cummax`
-""")
+""",
+)
 
-add_docstr_all('cummin',
-               r"""
+add_docstr_all(
+    "cummin",
+    r"""
 cummin(dim) -> (Tensor, Tensor)
 
 See :func:`torch.cummin`
-""")
+""",
+)
 
-add_docstr_all('cumprod',
-               r"""
+add_docstr_all(
+    "cumprod",
+    r"""
 cumprod(dim, dtype=None) -> Tensor
 
 See :func:`torch.cumprod`
-""")
+""",
+)
 
-add_docstr_all('cumprod_',
-               r"""
+add_docstr_all(
+    "cumprod_",
+    r"""
 cumprod_(dim, dtype=None) -> Tensor
 
 In-place version of :meth:`~Tensor.cumprod`
-""")
+""",
+)
 
-add_docstr_all('cumsum',
-               r"""
+add_docstr_all(
+    "cumsum",
+    r"""
 cumsum(dim, dtype=None) -> Tensor
 
 See :func:`torch.cumsum`
-""")
+""",
+)
 
-add_docstr_all('cumsum_',
-               r"""
+add_docstr_all(
+    "cumsum_",
+    r"""
 cumsum_(dim, dtype=None) -> Tensor
 
 In-place version of :meth:`~Tensor.cumsum`
-""")
+""",
+)
 
-add_docstr_all('data_ptr',
-               r"""
+add_docstr_all(
+    "data_ptr",
+    r"""
 data_ptr() -> int
 
 Returns the address of the first element of :attr:`self` tensor.
-""")
+""",
+)
 
-add_docstr_all('dequantize',
-               r"""
+add_docstr_all(
+    "dequantize",
+    r"""
 dequantize() -> Tensor
 
 Given a quantized Tensor, dequantize it and return the dequantized float Tensor.
-""")
+""",
+)
 
-add_docstr_all('dense_dim',
-               r"""
+add_docstr_all(
+    "dense_dim",
+    r"""
 dense_dim() -> int
 
 Return the number of dense dimensions in a :ref:`sparse tensor <sparse-docs>` :attr:`self`.
 
-.. warning::
-  Throws an error if :attr:`self` is not a sparse tensor.
+.. note::
+  Returns ``len(self.shape)`` if :attr:`self` is not a sparse tensor.
 
 See also :meth:`Tensor.sparse_dim` and :ref:`hybrid tensors <sparse-hybrid-coo-docs>`.
-""")
+""",
+)
 
-add_docstr_all('diag',
-               r"""
+add_docstr_all(
+    "diag",
+    r"""
 diag(diagonal=0) -> Tensor
 
 See :func:`torch.diag`
-""")
+""",
+)
 
-add_docstr_all('diag_embed',
-               r"""
+add_docstr_all(
+    "diag_embed",
+    r"""
 diag_embed(offset=0, dim1=-2, dim2=-1) -> Tensor
 
 See :func:`torch.diag_embed`
-""")
+""",
+)
 
-add_docstr_all('diagflat',
-               r"""
+add_docstr_all(
+    "diagflat",
+    r"""
 diagflat(offset=0) -> Tensor
 
 See :func:`torch.diagflat`
-""")
+""",
+)
 
-add_docstr_all('diagonal',
-               r"""
+add_docstr_all(
+    "diagonal",
+    r"""
 diagonal(offset=0, dim1=0, dim2=1) -> Tensor
 
 See :func:`torch.diagonal`
-""")
+""",
+)
 
-add_docstr_all('diagonal_scatter',
-               r"""
+add_docstr_all(
+    "diagonal_scatter",
+    r"""
 diagonal_scatter(src, offset=0, dim1=0, dim2=1) -> Tensor
 
 See :func:`torch.diagonal_scatter`
-""")
+""",
+)
 
-add_docstr_all('as_strided_scatter',
-               r"""
-as_strided_scatter(src, size, stride, storage_offset=0) -> Tensor
+add_docstr_all(
+    "as_strided_scatter",
+    r"""
+as_strided_scatter(src, size, stride, storage_offset=None) -> Tensor
 
 See :func:`torch.as_strided_scatter`
-""")
+""",
+)
 
-add_docstr_all('fill_diagonal_',
-               r"""
+add_docstr_all(
+    "fill_diagonal_",
+    r"""
 fill_diagonal_(fill_value, wrap=False) -> Tensor
 
 Fill the main diagonal of a tensor that has at least 2-dimensions.
@@ -1251,97 +1629,120 @@ Example::
             [0., 5., 0.],
             [0., 0., 5.]])
 
-""")
+""",
+)
 
-add_docstr_all('floor_divide',
-               r"""
+add_docstr_all(
+    "floor_divide",
+    r"""
 floor_divide(value) -> Tensor
 
 See :func:`torch.floor_divide`
-""")
+""",
+)
 
-add_docstr_all('floor_divide_',
-               r"""
+add_docstr_all(
+    "floor_divide_",
+    r"""
 floor_divide_(value) -> Tensor
 
 In-place version of :meth:`~Tensor.floor_divide`
-""")
+""",
+)
 
-add_docstr_all('diff',
-               r"""
+add_docstr_all(
+    "diff",
+    r"""
 diff(n=1, dim=-1, prepend=None, append=None) -> Tensor
 
 See :func:`torch.diff`
-""")
+""",
+)
 
-add_docstr_all('digamma',
-               r"""
+add_docstr_all(
+    "digamma",
+    r"""
 digamma() -> Tensor
 
 See :func:`torch.digamma`
-""")
+""",
+)
 
-add_docstr_all('digamma_',
-               r"""
+add_docstr_all(
+    "digamma_",
+    r"""
 digamma_() -> Tensor
 
 In-place version of :meth:`~Tensor.digamma`
-""")
+""",
+)
 
-add_docstr_all('dim',
-               r"""
+add_docstr_all(
+    "dim",
+    r"""
 dim() -> int
 
 Returns the number of dimensions of :attr:`self` tensor.
-""")
+""",
+)
 
-add_docstr_all('dist',
-               r"""
+add_docstr_all(
+    "dist",
+    r"""
 dist(other, p=2) -> Tensor
 
 See :func:`torch.dist`
-""")
+""",
+)
 
-add_docstr_all('div', r"""
+add_docstr_all(
+    "div",
+    r"""
 div(value, *, rounding_mode=None) -> Tensor
 
 See :func:`torch.div`
-""")
+""",
+)
 
-add_docstr_all('div_', r"""
+add_docstr_all(
+    "div_",
+    r"""
 div_(value, *, rounding_mode=None) -> Tensor
 
 In-place version of :meth:`~Tensor.div`
-""")
+""",
+)
 
-add_docstr_all('divide', r"""
+add_docstr_all(
+    "divide",
+    r"""
 divide(value, *, rounding_mode=None) -> Tensor
 
 See :func:`torch.divide`
-""")
+""",
+)
 
-add_docstr_all('divide_', r"""
+add_docstr_all(
+    "divide_",
+    r"""
 divide_(value, *, rounding_mode=None) -> Tensor
 
 In-place version of :meth:`~Tensor.divide`
-""")
+""",
+)
 
-add_docstr_all('dot',
-               r"""
+add_docstr_all(
+    "dot",
+    r"""
 dot(other) -> Tensor
 
 See :func:`torch.dot`
-""")
+""",
+)
 
-add_docstr_all('eig',
-               r"""
-eig(eigenvectors=False) -> (Tensor, Tensor)
-
-See :func:`torch.eig`
-""")
-
-add_docstr_all('element_size',
-               r"""
+add_docstr_all(
+    "element_size",
+    r"""
 element_size() -> int
 
 Returns the size in bytes of an individual element.
@@ -1353,115 +1754,147 @@ Example::
     >>> torch.tensor([], dtype=torch.uint8).element_size()
     1
 
-""")
+""",
+)
 
-add_docstr_all('eq',
-               r"""
+add_docstr_all(
+    "eq",
+    r"""
 eq(other) -> Tensor
 
 See :func:`torch.eq`
-""")
+""",
+)
 
-add_docstr_all('eq_',
-               r"""
+add_docstr_all(
+    "eq_",
+    r"""
 eq_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.eq`
-""")
+""",
+)
 
-add_docstr_all('equal',
-               r"""
+add_docstr_all(
+    "equal",
+    r"""
 equal(other) -> bool
 
 See :func:`torch.equal`
-""")
+""",
+)
 
-add_docstr_all('erf',
-               r"""
+add_docstr_all(
+    "erf",
+    r"""
 erf() -> Tensor
 
 See :func:`torch.erf`
-""")
+""",
+)
 
-add_docstr_all('erf_',
-               r"""
+add_docstr_all(
+    "erf_",
+    r"""
 erf_() -> Tensor
 
 In-place version of :meth:`~Tensor.erf`
-""")
+""",
+)
 
-add_docstr_all('erfc',
-               r"""
+add_docstr_all(
+    "erfc",
+    r"""
 erfc() -> Tensor
 
 See :func:`torch.erfc`
-""")
+""",
+)
 
-add_docstr_all('erfc_',
-               r"""
+add_docstr_all(
+    "erfc_",
+    r"""
 erfc_() -> Tensor
 
 In-place version of :meth:`~Tensor.erfc`
-""")
+""",
+)
 
-add_docstr_all('erfinv',
-               r"""
+add_docstr_all(
+    "erfinv",
+    r"""
 erfinv() -> Tensor
 
 See :func:`torch.erfinv`
-""")
+""",
+)
 
-add_docstr_all('erfinv_',
-               r"""
+add_docstr_all(
+    "erfinv_",
+    r"""
 erfinv_() -> Tensor
 
 In-place version of :meth:`~Tensor.erfinv`
-""")
+""",
+)
 
-add_docstr_all('exp',
-               r"""
+add_docstr_all(
+    "exp",
+    r"""
 exp() -> Tensor
 
 See :func:`torch.exp`
-""")
+""",
+)
 
-add_docstr_all('exp_',
-               r"""
+add_docstr_all(
+    "exp_",
+    r"""
 exp_() -> Tensor
 
 In-place version of :meth:`~Tensor.exp`
-""")
+""",
+)
 
-add_docstr_all('exp2',
-               r"""
+add_docstr_all(
+    "exp2",
+    r"""
 exp2() -> Tensor
 
 See :func:`torch.exp2`
-""")
+""",
+)
 
-add_docstr_all('exp2_',
-               r"""
+add_docstr_all(
+    "exp2_",
+    r"""
 exp2_() -> Tensor
 
 In-place version of :meth:`~Tensor.exp2`
-""")
+""",
+)
 
-add_docstr_all('expm1',
-               r"""
+add_docstr_all(
+    "expm1",
+    r"""
 expm1() -> Tensor
 
 See :func:`torch.expm1`
-""")
+""",
+)
 
-add_docstr_all('expm1_',
-               r"""
+add_docstr_all(
+    "expm1_",
+    r"""
 expm1_() -> Tensor
 
 In-place version of :meth:`~Tensor.expm1`
-""")
+""",
+)
 
-add_docstr_all('exponential_',
-               r"""
+add_docstr_all(
+    "exponential_",
+    r"""
 exponential_(lambd=1, *, generator=None) -> Tensor
 
 Fills :attr:`self` tensor with elements drawn from the exponential distribution:
@@ -1469,146 +1902,192 @@ Fills :attr:`self` tensor with elements drawn from the exponential distribution:
 .. math::
 
     f(x) = \lambda e^{-\lambda x}
-""")
+""",
+)
 
-add_docstr_all('fill_',
-               r"""
+add_docstr_all(
+    "fill_",
+    r"""
 fill_(value) -> Tensor
 
 Fills :attr:`self` tensor with the specified value.
-""")
+""",
+)
 
-add_docstr_all('floor',
-               r"""
+add_docstr_all(
+    "floor",
+    r"""
 floor() -> Tensor
 
 See :func:`torch.floor`
-""")
+""",
+)
 
-add_docstr_all('flip',
-               r"""
+add_docstr_all(
+    "flip",
+    r"""
 flip(dims) -> Tensor
 
 See :func:`torch.flip`
-""")
+""",
+)
 
-add_docstr_all('fliplr',
-               r"""
+add_docstr_all(
+    "fliplr",
+    r"""
 fliplr() -> Tensor
 
 See :func:`torch.fliplr`
-""")
+""",
+)
 
-add_docstr_all('flipud',
-               r"""
+add_docstr_all(
+    "flipud",
+    r"""
 flipud() -> Tensor
 
 See :func:`torch.flipud`
-""")
+""",
+)
 
-add_docstr_all('roll',
-               r"""
+add_docstr_all(
+    "roll",
+    r"""
 roll(shifts, dims) -> Tensor
 
 See :func:`torch.roll`
-""")
+""",
+)
 
-add_docstr_all('floor_',
-               r"""
+add_docstr_all(
+    "floor_",
+    r"""
 floor_() -> Tensor
 
 In-place version of :meth:`~Tensor.floor`
-""")
+""",
+)
 
-add_docstr_all('fmod',
-               r"""
+add_docstr_all(
+    "fmod",
+    r"""
 fmod(divisor) -> Tensor
 
 See :func:`torch.fmod`
-""")
+""",
+)
 
-add_docstr_all('fmod_',
-               r"""
+add_docstr_all(
+    "fmod_",
+    r"""
 fmod_(divisor) -> Tensor
 
 In-place version of :meth:`~Tensor.fmod`
-""")
+""",
+)
 
-add_docstr_all('frac',
-               r"""
+add_docstr_all(
+    "frac",
+    r"""
 frac() -> Tensor
 
 See :func:`torch.frac`
-""")
+""",
+)
 
-add_docstr_all('frac_',
-               r"""
+add_docstr_all(
+    "frac_",
+    r"""
 frac_() -> Tensor
 
 In-place version of :meth:`~Tensor.frac`
-""")
+""",
+)
 
-add_docstr_all('frexp',
-               r"""
+add_docstr_all(
+    "frexp",
+    r"""
 frexp(input) -> (Tensor mantissa, Tensor exponent)
 
 See :func:`torch.frexp`
-""")
+""",
+)
 
-add_docstr_all('flatten',
-               r"""
+add_docstr_all(
+    "flatten",
+    r"""
 flatten(start_dim=0, end_dim=-1) -> Tensor
 
 See :func:`torch.flatten`
-""")
+""",
+)
 
-add_docstr_all('gather',
-               r"""
+add_docstr_all(
+    "gather",
+    r"""
 gather(dim, index) -> Tensor
 
 See :func:`torch.gather`
-""")
+""",
+)
 
-add_docstr_all('gcd',
-               r"""
+add_docstr_all(
+    "gcd",
+    r"""
 gcd(other) -> Tensor
 
 See :func:`torch.gcd`
-""")
+""",
+)
 
-add_docstr_all('gcd_',
-               r"""
+add_docstr_all(
+    "gcd_",
+    r"""
 gcd_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.gcd`
-""")
+""",
+)
 
-add_docstr_all('ge', r"""
+add_docstr_all(
+    "ge",
+    r"""
 ge(other) -> Tensor
 
 See :func:`torch.ge`.
-""")
+""",
+)
 
-add_docstr_all('ge_', r"""
+add_docstr_all(
+    "ge_",
+    r"""
 ge_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.ge`.
-""")
+""",
+)
 
-add_docstr_all('greater_equal', r"""
+add_docstr_all(
+    "greater_equal",
+    r"""
 greater_equal(other) -> Tensor
 
 See :func:`torch.greater_equal`.
-""")
+""",
+)
 
-add_docstr_all('greater_equal_', r"""
+add_docstr_all(
+    "greater_equal_",
+    r"""
 greater_equal_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.greater_equal`.
-""")
+""",
+)
 
-add_docstr_all('geometric_',
-               r"""
+add_docstr_all(
+    "geometric_",
+    r"""
 geometric_(p, *, generator=None) -> Tensor
 
 Fills :attr:`self` tensor with elements drawn from the geometric distribution:
@@ -1617,90 +2096,118 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
 
     f(X=k) = p^{k - 1} (1 - p)
 
-""")
+""",
+)
 
-add_docstr_all('geqrf',
-               r"""
+add_docstr_all(
+    "geqrf",
+    r"""
 geqrf() -> (Tensor, Tensor)
 
 See :func:`torch.geqrf`
-""")
+""",
+)
 
-add_docstr_all('ger',
-               r"""
+add_docstr_all(
+    "ger",
+    r"""
 ger(vec2) -> Tensor
 
 See :func:`torch.ger`
-""")
+""",
+)
 
-add_docstr_all('inner', r"""
+add_docstr_all(
+    "inner",
+    r"""
 inner(other) -> Tensor
 
 See :func:`torch.inner`.
-""")
+""",
+)
 
-add_docstr_all('outer', r"""
+add_docstr_all(
+    "outer",
+    r"""
 outer(vec2) -> Tensor
 
 See :func:`torch.outer`.
-""")
+""",
+)
 
-add_docstr_all('hypot',
-               r"""
+add_docstr_all(
+    "hypot",
+    r"""
 hypot(other) -> Tensor
 
 See :func:`torch.hypot`
-""")
+""",
+)
 
-add_docstr_all('hypot_',
-               r"""
+add_docstr_all(
+    "hypot_",
+    r"""
 hypot_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.hypot`
-""")
+""",
+)
 
-add_docstr_all('i0',
-               r"""
+add_docstr_all(
+    "i0",
+    r"""
 i0() -> Tensor
 
 See :func:`torch.i0`
-""")
+""",
+)
 
-add_docstr_all('i0_',
-               r"""
+add_docstr_all(
+    "i0_",
+    r"""
 i0_() -> Tensor
 
 In-place version of :meth:`~Tensor.i0`
-""")
+""",
+)
 
-add_docstr_all('igamma',
-               r"""
+add_docstr_all(
+    "igamma",
+    r"""
 igamma(other) -> Tensor
 
 See :func:`torch.igamma`
-""")
+""",
+)
 
-add_docstr_all('igamma_',
-               r"""
+add_docstr_all(
+    "igamma_",
+    r"""
 igamma_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.igamma`
-""")
+""",
+)
 
-add_docstr_all('igammac',
-               r"""
+add_docstr_all(
+    "igammac",
+    r"""
 igammac(other) -> Tensor
 See :func:`torch.igammac`
-""")
+""",
+)
 
-add_docstr_all('igammac_',
-               r"""
+add_docstr_all(
+    "igammac_",
+    r"""
 igammac_(other) -> Tensor
 In-place version of :meth:`~Tensor.igammac`
-""")
+""",
+)
 
-add_docstr_all('indices',
-               r"""
+add_docstr_all(
+    "indices",
+    r"""
 indices() -> Tensor
 
 Return the indices tensor of a :ref:`sparse COO tensor <sparse-coo-docs>`.
@@ -1713,25 +2220,30 @@ See also :meth:`Tensor.values`.
 .. note::
   This method can only be called on a coalesced sparse tensor. See
   :meth:`Tensor.coalesce` for details.
-""")
+""",
+)
 
-add_docstr_all('get_device',
-               r"""
+add_docstr_all(
+    "get_device",
+    r"""
 get_device() -> Device ordinal (Integer)
 
 For CUDA tensors, this function returns the device ordinal of the GPU on which the tensor resides.
-For CPU tensors, an error is thrown.
+For CPU tensors, this function returns `-1`.
 
 Example::
 
     >>> x = torch.randn(3, 4, 5, device='cuda:0')
     >>> x.get_device()
     0
-    >>> x.cpu().get_device()  # RuntimeError: get_device is not implemented for type torch.FloatTensor
-""")
+    >>> x.cpu().get_device()
+    -1
+""",
+)
 
-add_docstr_all('values',
-               r"""
+add_docstr_all(
+    "values",
+    r"""
 values() -> Tensor
 
 Return the values tensor of a :ref:`sparse COO tensor <sparse-coo-docs>`.
@@ -1744,74 +2256,100 @@ See also :meth:`Tensor.indices`.
 .. note::
   This method can only be called on a coalesced sparse tensor. See
   :meth:`Tensor.coalesce` for details.
-""")
+""",
+)
 
-add_docstr_all('gt', r"""
+add_docstr_all(
+    "gt",
+    r"""
 gt(other) -> Tensor
 
 See :func:`torch.gt`.
-""")
+""",
+)
 
-add_docstr_all('gt_', r"""
+add_docstr_all(
+    "gt_",
+    r"""
 gt_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.gt`.
-""")
+""",
+)
 
-add_docstr_all('greater', r"""
+add_docstr_all(
+    "greater",
+    r"""
 greater(other) -> Tensor
 
 See :func:`torch.greater`.
-""")
+""",
+)
 
-add_docstr_all('greater_', r"""
+add_docstr_all(
+    "greater_",
+    r"""
 greater_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.greater`.
-""")
+""",
+)
 
-add_docstr_all('has_names',
-               r"""
+add_docstr_all(
+    "has_names",
+    r"""
 Is ``True`` if any of this tensor's dimensions are named. Otherwise, is ``False``.
-""")
+""",
+)
 
-add_docstr_all('hardshrink',
-               r"""
+add_docstr_all(
+    "hardshrink",
+    r"""
 hardshrink(lambd=0.5) -> Tensor
 
 See :func:`torch.nn.functional.hardshrink`
-""")
+""",
+)
 
-add_docstr_all('heaviside',
-               r"""
+add_docstr_all(
+    "heaviside",
+    r"""
 heaviside(values) -> Tensor
 
 See :func:`torch.heaviside`
-""")
+""",
+)
 
-add_docstr_all('heaviside_',
-               r"""
+add_docstr_all(
+    "heaviside_",
+    r"""
 heaviside_(values) -> Tensor
 
 In-place version of :meth:`~Tensor.heaviside`
-""")
+""",
+)
 
-add_docstr_all('histc',
-               r"""
+add_docstr_all(
+    "histc",
+    r"""
 histc(bins=100, min=0, max=0) -> Tensor
 
 See :func:`torch.histc`
-""")
+""",
+)
 
-add_docstr_all('histogram',
-               r"""
+add_docstr_all(
+    "histogram",
+    r"""
 histogram(input, bins, *, range=None, weight=None, density=False) -> (Tensor, Tensor)
 
 See :func:`torch.histogram`
-""")
+""",
+)
 
-add_docstr_all('index_add_',
-               r"""
+add_docstr_all(
+    "index_add_",
+    r"""
 index_add_(dim, index, source, *, alpha=1) -> Tensor
 
 Accumulate the elements of :attr:`alpha` times ``source`` into the :attr:`self`
@@ -1858,10 +2396,14 @@ Example::
             [  1.,   1.,   1.],
             [  1.,   1.,   1.],
             [  1.,   1.,   1.]])
-""".format(**reproducibility_notes))
+""".format(
+        **reproducibility_notes
+    ),
+)
 
-add_docstr_all('index_copy_',
-               r"""
+add_docstr_all(
+    "index_copy_",
+    r"""
 index_copy_(dim, index, tensor) -> Tensor
 
 Copies the elements of :attr:`tensor` into the :attr:`self` tensor by selecting
@@ -1894,10 +2436,12 @@ Example::
             [ 7.,  8.,  9.],
             [ 0.,  0.,  0.],
             [ 4.,  5.,  6.]])
-""")
+""",
+)
 
-add_docstr_all('index_fill_',
-               r"""
+add_docstr_all(
+    "index_fill_",
+    r"""
 index_fill_(dim, index, value) -> Tensor
 
 Fills the elements of the :attr:`self` tensor with value :attr:`value` by
@@ -1915,10 +2459,12 @@ Example::
     tensor([[-1.,  2., -1.],
             [-1.,  5., -1.],
             [-1.,  8., -1.]])
-""")
+""",
+)
 
-add_docstr_all('index_put_',
-               r"""
+add_docstr_all(
+    "index_put_",
+    r"""
 index_put_(indices, values, accumulate=False) -> Tensor
 
 Puts values from the tensor :attr:`values` into the tensor :attr:`self` using
@@ -1934,17 +2480,21 @@ Args:
     indices (tuple of LongTensor): tensors used to index into `self`.
     values (Tensor): tensor of same dtype as `self`.
     accumulate (bool): whether to accumulate into self
-""")
+""",
+)
 
-add_docstr_all('index_put',
-               r"""
+add_docstr_all(
+    "index_put",
+    r"""
 index_put(indices, values, accumulate=False) -> Tensor
 
 Out-place version of :meth:`~Tensor.index_put_`.
-""")
+""",
+)
 
-add_docstr_all('index_reduce_',
-               r"""
+add_docstr_all(
+    "index_reduce_",
+    r"""
 index_reduce_(dim, index, source, reduce, *, include_self=True) -> Tensor
 
 Accumulate the elements of ``source`` into the :attr:`self`
@@ -2008,17 +2558,23 @@ Example::
             [ 7.,  8.,  9.],
             [ 2.,  2.,  2.],
             [ 4.,  5.,  6.]])
-""".format(**reproducibility_notes))
+""".format(
+        **reproducibility_notes
+    ),
+)
 
-add_docstr_all('index_select',
-               r"""
+add_docstr_all(
+    "index_select",
+    r"""
 index_select(dim, index) -> Tensor
 
 See :func:`torch.index_select`
-""")
+""",
+)
 
-add_docstr_all('sparse_mask',
-               r"""
+add_docstr_all(
+    "sparse_mask",
+    r"""
 sparse_mask(mask) -> Tensor
 
 Returns a new :ref:`sparse tensor <sparse-docs>` with values from a
@@ -2060,66 +2616,84 @@ Example::
                           [[ 0.0793,  0.0036],
                            [-0.2569, -0.1055]]]),
            size=(5, 5, 2, 2), nnz=4, layout=torch.sparse_coo)
-""")
+""",
+)
 
-add_docstr_all('inverse',
-               r"""
+add_docstr_all(
+    "inverse",
+    r"""
 inverse() -> Tensor
 
 See :func:`torch.inverse`
-""")
+""",
+)
 
-add_docstr_all('isnan',
-               r"""
+add_docstr_all(
+    "isnan",
+    r"""
 isnan() -> Tensor
 
 See :func:`torch.isnan`
-""")
+""",
+)
 
-add_docstr_all('isinf',
-               r"""
+add_docstr_all(
+    "isinf",
+    r"""
 isinf() -> Tensor
 
 See :func:`torch.isinf`
-""")
+""",
+)
 
-add_docstr_all('isposinf',
-               r"""
+add_docstr_all(
+    "isposinf",
+    r"""
 isposinf() -> Tensor
 
 See :func:`torch.isposinf`
-""")
+""",
+)
 
-add_docstr_all('isneginf',
-               r"""
+add_docstr_all(
+    "isneginf",
+    r"""
 isneginf() -> Tensor
 
 See :func:`torch.isneginf`
-""")
+""",
+)
 
-add_docstr_all('isfinite',
-               r"""
+add_docstr_all(
+    "isfinite",
+    r"""
 isfinite() -> Tensor
 
 See :func:`torch.isfinite`
-""")
+""",
+)
 
-add_docstr_all('isclose',
-               r"""
+add_docstr_all(
+    "isclose",
+    r"""
 isclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
 
 See :func:`torch.isclose`
-""")
+""",
+)
 
-add_docstr_all('isreal',
-               r"""
+add_docstr_all(
+    "isreal",
+    r"""
 isreal() -> Tensor
 
 See :func:`torch.isreal`
-""")
+""",
+)
 
-add_docstr_all('is_coalesced',
-               r"""
+add_docstr_all(
+    "is_coalesced",
+    r"""
 is_coalesced() -> bool
 
 Returns ``True`` if :attr:`self` is a :ref:`sparse COO tensor
@@ -2129,10 +2703,12 @@ Returns ``True`` if :attr:`self` is a :ref:`sparse COO tensor
   Throws an error if :attr:`self` is not a sparse COO tensor.
 
 See :meth:`coalesce` and :ref:`uncoalesced tensors <sparse-uncoalesced-coo-docs>`.
-""")
+""",
+)
 
-add_docstr_all('is_contiguous',
-               r"""
+add_docstr_all(
+    "is_contiguous",
+    r"""
 is_contiguous(memory_format=torch.contiguous_format) -> bool
 
 Returns True if :attr:`self` tensor is contiguous in memory in the order specified
@@ -2141,64 +2717,83 @@ by memory format.
 Args:
     memory_format (:class:`torch.memory_format`, optional): Specifies memory allocation
         order. Default: ``torch.contiguous_format``.
-""")
+""",
+)
 
-add_docstr_all('is_pinned',
-               r"""
+add_docstr_all(
+    "is_pinned",
+    r"""
 Returns true if this tensor resides in pinned memory.
-""")
+""",
+)
 
-add_docstr_all('is_floating_point',
-               r"""
+add_docstr_all(
+    "is_floating_point",
+    r"""
 is_floating_point() -> bool
 
 Returns True if the data type of :attr:`self` is a floating point data type.
-""")
+""",
+)
 
-add_docstr_all('is_complex',
-               r"""
+add_docstr_all(
+    "is_complex",
+    r"""
 is_complex() -> bool
 
 Returns True if the data type of :attr:`self` is a complex data type.
-""")
+""",
+)
 
-add_docstr_all('is_inference',
-               r"""
+add_docstr_all(
+    "is_inference",
+    r"""
 is_inference() -> bool
 
 See :func:`torch.is_inference`
-""")
+""",
+)
 
-add_docstr_all('is_conj',
-               r"""
+add_docstr_all(
+    "is_conj",
+    r"""
 is_conj() -> bool
 
 Returns True if the conjugate bit of :attr:`self` is set to true.
-""")
+""",
+)
 
-add_docstr_all('is_neg',
-               r"""
+add_docstr_all(
+    "is_neg",
+    r"""
 is_neg() -> bool
 
 Returns True if the negative bit of :attr:`self` is set to true.
-""")
+""",
+)
 
-add_docstr_all('is_signed',
-               r"""
+add_docstr_all(
+    "is_signed",
+    r"""
 is_signed() -> bool
 
 Returns True if the data type of :attr:`self` is a signed data type.
-""")
+""",
+)
 
-add_docstr_all('is_set_to',
-               r"""
+add_docstr_all(
+    "is_set_to",
+    r"""
 is_set_to(tensor) -> bool
 
 Returns True if both tensors are pointing to the exact same memory (same
 storage, offset, size and stride).
-""")
+""",
+)
 
-add_docstr_all('item', r"""
+add_docstr_all(
+    "item",
+    r"""
 item() -> number
 
 Returns the value of this tensor as a standard Python number. This only works
@@ -2212,171 +2807,228 @@ Example::
     >>> x.item()
     1.0
 
-""")
+""",
+)
 
-add_docstr_all('kron',
-               r"""
+add_docstr_all(
+    "kron",
+    r"""
 kron(other) -> Tensor
 
 See :func:`torch.kron`
-""")
+""",
+)
 
-add_docstr_all('kthvalue',
-               r"""
+add_docstr_all(
+    "kthvalue",
+    r"""
 kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.kthvalue`
-""")
+""",
+)
 
-add_docstr_all('ldexp',
-               r"""
+add_docstr_all(
+    "ldexp",
+    r"""
 ldexp(other) -> Tensor
 
 See :func:`torch.ldexp`
-""")
+""",
+)
 
-add_docstr_all('ldexp_',
-               r"""
+add_docstr_all(
+    "ldexp_",
+    r"""
 ldexp_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.ldexp`
-""")
+""",
+)
 
-add_docstr_all('lcm',
-               r"""
+add_docstr_all(
+    "lcm",
+    r"""
 lcm(other) -> Tensor
 
 See :func:`torch.lcm`
-""")
+""",
+)
 
-add_docstr_all('lcm_',
-               r"""
+add_docstr_all(
+    "lcm_",
+    r"""
 lcm_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.lcm`
-""")
+""",
+)
 
-add_docstr_all('le', r"""
+add_docstr_all(
+    "le",
+    r"""
 le(other) -> Tensor
 
 See :func:`torch.le`.
-""")
+""",
+)
 
-add_docstr_all('le_', r"""
+add_docstr_all(
+    "le_",
+    r"""
 le_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.le`.
-""")
+""",
+)
 
-add_docstr_all('less_equal', r"""
+add_docstr_all(
+    "less_equal",
+    r"""
 less_equal(other) -> Tensor
 
 See :func:`torch.less_equal`.
-""")
+""",
+)
 
-add_docstr_all('less_equal_', r"""
+add_docstr_all(
+    "less_equal_",
+    r"""
 less_equal_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.less_equal`.
-""")
+""",
+)
 
-add_docstr_all('lerp',
-               r"""
+add_docstr_all(
+    "lerp",
+    r"""
 lerp(end, weight) -> Tensor
 
 See :func:`torch.lerp`
-""")
+""",
+)
 
-add_docstr_all('lerp_',
-               r"""
+add_docstr_all(
+    "lerp_",
+    r"""
 lerp_(end, weight) -> Tensor
 
 In-place version of :meth:`~Tensor.lerp`
-""")
+""",
+)
 
-add_docstr_all('lgamma',
-               r"""
+add_docstr_all(
+    "lgamma",
+    r"""
 lgamma() -> Tensor
 
 See :func:`torch.lgamma`
-""")
+""",
+)
 
-add_docstr_all('lgamma_', r"""
+add_docstr_all(
+    "lgamma_",
+    r"""
 lgamma_() -> Tensor
 
 In-place version of :meth:`~Tensor.lgamma`
-""")
+""",
+)
 
-add_docstr_all('log',
-               r"""
+add_docstr_all(
+    "log",
+    r"""
 log() -> Tensor
 
 See :func:`torch.log`
-""")
+""",
+)
 
-add_docstr_all('log_', r"""
+add_docstr_all(
+    "log_",
+    r"""
 log_() -> Tensor
 
 In-place version of :meth:`~Tensor.log`
-""")
+""",
+)
 
-add_docstr_all('log10',
-               r"""
+add_docstr_all(
+    "log10",
+    r"""
 log10() -> Tensor
 
 See :func:`torch.log10`
-""")
+""",
+)
 
-add_docstr_all('log10_',
-               r"""
+add_docstr_all(
+    "log10_",
+    r"""
 log10_() -> Tensor
 
 In-place version of :meth:`~Tensor.log10`
-""")
+""",
+)
 
-add_docstr_all('log1p',
-               r"""
+add_docstr_all(
+    "log1p",
+    r"""
 log1p() -> Tensor
 
 See :func:`torch.log1p`
-""")
+""",
+)
 
-add_docstr_all('log1p_',
-               r"""
+add_docstr_all(
+    "log1p_",
+    r"""
 log1p_() -> Tensor
 
 In-place version of :meth:`~Tensor.log1p`
-""")
+""",
+)
 
-add_docstr_all('log2',
-               r"""
+add_docstr_all(
+    "log2",
+    r"""
 log2() -> Tensor
 
 See :func:`torch.log2`
-""")
+""",
+)
 
-add_docstr_all('log2_',
-               r"""
+add_docstr_all(
+    "log2_",
+    r"""
 log2_() -> Tensor
 
 In-place version of :meth:`~Tensor.log2`
-""")
+""",
+)
 
-add_docstr_all('logaddexp',
-               r"""
+add_docstr_all(
+    "logaddexp",
+    r"""
 logaddexp(other) -> Tensor
 
 See :func:`torch.logaddexp`
-""")
+""",
+)
 
-add_docstr_all('logaddexp2',
-               r"""
+add_docstr_all(
+    "logaddexp2",
+    r"""
 logaddexp2(other) -> Tensor
 
 See :func:`torch.logaddexp2`
-""")
+""",
+)
 
-add_docstr_all('log_normal_', r"""
+add_docstr_all(
+    "log_normal_",
+    r"""
 log_normal_(mean=1, std=2, *, generator=None)
 
 Fills :attr:`self` tensor with numbers samples from the log-normal distribution
@@ -2388,55 +3040,66 @@ returned distribution:
 .. math::
 
     f(x) = \dfrac{1}{x \sigma \sqrt{2\pi}}\ e^{-\frac{(\ln x - \mu)^2}{2\sigma^2}}
-""")
+""",
+)
 
-add_docstr_all('logsumexp',
-               r"""
+add_docstr_all(
+    "logsumexp",
+    r"""
 logsumexp(dim, keepdim=False) -> Tensor
 
 See :func:`torch.logsumexp`
-""")
+""",
+)
 
-add_docstr_all('lstsq',
-               r"""
-lstsq(A) -> (Tensor, Tensor)
-
-See :func:`torch.lstsq`
-""")
-
-add_docstr_all('lt', r"""
+add_docstr_all(
+    "lt",
+    r"""
 lt(other) -> Tensor
 
 See :func:`torch.lt`.
-""")
+""",
+)
 
-add_docstr_all('lt_', r"""
+add_docstr_all(
+    "lt_",
+    r"""
 lt_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.lt`.
-""")
+""",
+)
 
-add_docstr_all('less', r"""
+add_docstr_all(
+    "less",
+    r"""
 lt(other) -> Tensor
 
 See :func:`torch.less`.
-""")
+""",
+)
 
-add_docstr_all('less_', r"""
+add_docstr_all(
+    "less_",
+    r"""
 less_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.less`.
-""")
+""",
+)
 
-add_docstr_all('lu_solve',
-               r"""
+add_docstr_all(
+    "lu_solve",
+    r"""
 lu_solve(LU_data, LU_pivots) -> Tensor
 
 See :func:`torch.lu_solve`
-""")
+""",
+)
 
-add_docstr_all('map_',
-               r"""
+add_docstr_all(
+    "map_",
+    r"""
 map_(tensor, callable)
 
 Applies :attr:`callable` for each element in :attr:`self` tensor and the given
@@ -2446,10 +3109,12 @@ the given :attr:`tensor` must be :ref:`broadcastable <broadcasting-semantics>`.
 The :attr:`callable` should have the signature::
 
     def callable(a, b) -> number
-""")
+""",
+)
 
-add_docstr_all('masked_scatter_',
-               r"""
+add_docstr_all(
+    "masked_scatter_",
+    r"""
 masked_scatter_(mask, source)
 
 Copies elements from :attr:`source` into :attr:`self` tensor at positions where
@@ -2466,10 +3131,12 @@ Args:
 
     The :attr:`mask` operates on the :attr:`self` tensor, not on the given
     :attr:`source` tensor.
-""")
+""",
+)
 
-add_docstr_all('masked_fill_',
-               r"""
+add_docstr_all(
+    "masked_fill_",
+    r"""
 masked_fill_(mask, value)
 
 Fills elements of :attr:`self` tensor with :attr:`value` where :attr:`mask` is
@@ -2480,219 +3147,293 @@ tensor.
 Args:
     mask (BoolTensor): the boolean mask
     value (float): the value to fill in with
-""")
+""",
+)
 
-add_docstr_all('masked_select',
-               r"""
+add_docstr_all(
+    "masked_select",
+    r"""
 masked_select(mask) -> Tensor
 
 See :func:`torch.masked_select`
-""")
+""",
+)
 
-add_docstr_all('matrix_power', r"""
+add_docstr_all(
+    "matrix_power",
+    r"""
 matrix_power(n) -> Tensor
 
 .. note:: :meth:`~Tensor.matrix_power` is deprecated, use :func:`torch.linalg.matrix_power` instead.
 
 Alias for :func:`torch.linalg.matrix_power`
-""")
+""",
+)
 
-add_docstr_all('matrix_exp',
-               r"""
+add_docstr_all(
+    "matrix_exp",
+    r"""
 matrix_exp() -> Tensor
 
 See :func:`torch.matrix_exp`
-""")
+""",
+)
 
-add_docstr_all('max',
-               r"""
+add_docstr_all(
+    "max",
+    r"""
 max(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 
 See :func:`torch.max`
-""")
+""",
+)
 
-add_docstr_all('amax',
-               r"""
+add_docstr_all(
+    "amax",
+    r"""
 amax(dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.amax`
-""")
+""",
+)
 
-add_docstr_all('maximum',
-               r"""
+add_docstr_all(
+    "maximum",
+    r"""
 maximum(other) -> Tensor
 
 See :func:`torch.maximum`
-""")
+""",
+)
 
-add_docstr_all('fmax',
-               r"""
+add_docstr_all(
+    "fmax",
+    r"""
 fmax(other) -> Tensor
 
 See :func:`torch.fmax`
-""")
+""",
+)
 
-add_docstr_all('argmax',
-               r"""
+add_docstr_all(
+    "argmax",
+    r"""
 argmax(dim=None, keepdim=False) -> LongTensor
 
 See :func:`torch.argmax`
-""")
+""",
+)
 
-add_docstr_all('argwhere',
-               r"""
+add_docstr_all(
+    "argwhere",
+    r"""
 argwhere() -> Tensor
 
 See :func:`torch.argwhere`
-""")
+""",
+)
 
-add_docstr_all('mean', r"""
+add_docstr_all(
+    "mean",
+    r"""
 mean(dim=None, keepdim=False, *, dtype=None) -> Tensor
 
 See :func:`torch.mean`
-""")
+""",
+)
 
-add_docstr_all('nanmean', r"""
+add_docstr_all(
+    "nanmean",
+    r"""
 nanmean(dim=None, keepdim=False, *, dtype=None) -> Tensor
 
 See :func:`torch.nanmean`
-""")
+""",
+)
 
-add_docstr_all('median',
-               r"""
+add_docstr_all(
+    "median",
+    r"""
 median(dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.median`
-""")
+""",
+)
 
-add_docstr_all('nanmedian',
-               r"""
+add_docstr_all(
+    "nanmedian",
+    r"""
 nanmedian(dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.nanmedian`
-""")
+""",
+)
 
-add_docstr_all('min',
-               r"""
+add_docstr_all(
+    "min",
+    r"""
 min(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 
 See :func:`torch.min`
-""")
+""",
+)
 
-add_docstr_all('amin',
-               r"""
+add_docstr_all(
+    "amin",
+    r"""
 amin(dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.amin`
-""")
+""",
+)
 
-add_docstr_all('minimum',
-               r"""
+add_docstr_all(
+    "minimum",
+    r"""
 minimum(other) -> Tensor
 
 See :func:`torch.minimum`
-""")
+""",
+)
 
-add_docstr_all('aminmax', r"""
+add_docstr_all(
+    "aminmax",
+    r"""
 aminmax(*, dim=None, keepdim=False) -> (Tensor min, Tensor max)
 
 See :func:`torch.aminmax`
-""")
+""",
+)
 
-add_docstr_all('fmin',
-               r"""
+add_docstr_all(
+    "fmin",
+    r"""
 fmin(other) -> Tensor
 
 See :func:`torch.fmin`
-""")
+""",
+)
 
-add_docstr_all('argmin',
-               r"""
+add_docstr_all(
+    "argmin",
+    r"""
 argmin(dim=None, keepdim=False) -> LongTensor
 
 See :func:`torch.argmin`
-""")
+""",
+)
 
-add_docstr_all('mm',
-               r"""
+add_docstr_all(
+    "mm",
+    r"""
 mm(mat2) -> Tensor
 
 See :func:`torch.mm`
-""")
+""",
+)
 
-add_docstr_all('mode',
-               r"""
+add_docstr_all(
+    "mode",
+    r"""
 mode(dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.mode`
-""")
+""",
+)
 
-add_docstr_all('movedim', r"""
+add_docstr_all(
+    "movedim",
+    r"""
 movedim(source, destination) -> Tensor
 
 See :func:`torch.movedim`
-""")
+""",
+)
 
-add_docstr_all('moveaxis', r"""
+add_docstr_all(
+    "moveaxis",
+    r"""
 moveaxis(source, destination) -> Tensor
 
 See :func:`torch.moveaxis`
-""")
+""",
+)
 
-add_docstr_all('mul', r"""
+add_docstr_all(
+    "mul",
+    r"""
 mul(value) -> Tensor
 
 See :func:`torch.mul`.
-""")
+""",
+)
 
-add_docstr_all('mul_', r"""
+add_docstr_all(
+    "mul_",
+    r"""
 mul_(value) -> Tensor
 
 In-place version of :meth:`~Tensor.mul`.
-""")
+""",
+)
 
-add_docstr_all('multiply', r"""
+add_docstr_all(
+    "multiply",
+    r"""
 multiply(value) -> Tensor
 
 See :func:`torch.multiply`.
-""")
+""",
+)
 
-add_docstr_all('multiply_', r"""
+add_docstr_all(
+    "multiply_",
+    r"""
 multiply_(value) -> Tensor
 
 In-place version of :meth:`~Tensor.multiply`.
-""")
+""",
+)
 
-add_docstr_all('multinomial',
-               r"""
+add_docstr_all(
+    "multinomial",
+    r"""
 multinomial(num_samples, replacement=False, *, generator=None) -> Tensor
 
 See :func:`torch.multinomial`
-""")
+""",
+)
 
-add_docstr_all('mv',
-               r"""
+add_docstr_all(
+    "mv",
+    r"""
 mv(vec) -> Tensor
 
 See :func:`torch.mv`
-""")
+""",
+)
 
-add_docstr_all('mvlgamma',
-               r"""
+add_docstr_all(
+    "mvlgamma",
+    r"""
 mvlgamma(p) -> Tensor
 
 See :func:`torch.mvlgamma`
-""")
+""",
+)
 
-add_docstr_all('mvlgamma_',
-               r"""
+add_docstr_all(
+    "mvlgamma_",
+    r"""
 mvlgamma_(p) -> Tensor
 
 In-place version of :meth:`~Tensor.mvlgamma`
-""")
+""",
+)
 
-add_docstr_all('narrow',
-               r"""
+add_docstr_all(
+    "narrow",
+    r"""
 narrow(dimension, start, length) -> Tensor
 
 See :func:`torch.narrow`
@@ -2707,140 +3448,182 @@ Example::
     tensor([[ 2,  3],
             [ 5,  6],
             [ 8,  9]])
-""")
+""",
+)
 
-add_docstr_all('narrow_copy',
-               r"""
+add_docstr_all(
+    "narrow_copy",
+    r"""
 narrow_copy(dimension, start, length) -> Tensor
 
-Same as :meth:`Tensor.narrow` except returning a copy rather
-than shared storage.  This is primarily for sparse tensors, which
-do not have a shared-storage narrow method.  Calling ``narrow_copy``
-with ``dimemsion > self.sparse_dim()`` will return a copy with the
-relevant dense dimension narrowed, and ``self.shape`` updated accordingly.
-""")
+See :func:`torch.narrow_copy`.
+""",
+)
 
-add_docstr_all('ndimension',
-               r"""
+add_docstr_all(
+    "ndimension",
+    r"""
 ndimension() -> int
 
 Alias for :meth:`~Tensor.dim()`
-""")
+""",
+)
 
-add_docstr_all('nan_to_num', r"""
+add_docstr_all(
+    "nan_to_num",
+    r"""
 nan_to_num(nan=0.0, posinf=None, neginf=None) -> Tensor
 
 See :func:`torch.nan_to_num`.
-""")
+""",
+)
 
-add_docstr_all('nan_to_num_', r"""
+add_docstr_all(
+    "nan_to_num_",
+    r"""
 nan_to_num_(nan=0.0, posinf=None, neginf=None) -> Tensor
 
 In-place version of :meth:`~Tensor.nan_to_num`.
-""")
+""",
+)
 
-add_docstr_all('ne', r"""
+add_docstr_all(
+    "ne",
+    r"""
 ne(other) -> Tensor
 
 See :func:`torch.ne`.
-""")
+""",
+)
 
-add_docstr_all('ne_', r"""
+add_docstr_all(
+    "ne_",
+    r"""
 ne_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.ne`.
-""")
+""",
+)
 
-add_docstr_all('not_equal', r"""
+add_docstr_all(
+    "not_equal",
+    r"""
 not_equal(other) -> Tensor
 
 See :func:`torch.not_equal`.
-""")
+""",
+)
 
-add_docstr_all('not_equal_', r"""
+add_docstr_all(
+    "not_equal_",
+    r"""
 not_equal_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.not_equal`.
-""")
+""",
+)
 
-add_docstr_all('neg',
-               r"""
+add_docstr_all(
+    "neg",
+    r"""
 neg() -> Tensor
 
 See :func:`torch.neg`
-""")
+""",
+)
 
-add_docstr_all('negative',
-               r"""
+add_docstr_all(
+    "negative",
+    r"""
 negative() -> Tensor
 
 See :func:`torch.negative`
-""")
+""",
+)
 
-add_docstr_all('neg_',
-               r"""
+add_docstr_all(
+    "neg_",
+    r"""
 neg_() -> Tensor
 
 In-place version of :meth:`~Tensor.neg`
-""")
+""",
+)
 
-add_docstr_all('negative_',
-               r"""
+add_docstr_all(
+    "negative_",
+    r"""
 negative_() -> Tensor
 
 In-place version of :meth:`~Tensor.negative`
-""")
+""",
+)
 
-add_docstr_all('nelement',
-               r"""
+add_docstr_all(
+    "nelement",
+    r"""
 nelement() -> int
 
 Alias for :meth:`~Tensor.numel`
-""")
+""",
+)
 
-add_docstr_all('nextafter',
-               r"""
+add_docstr_all(
+    "nextafter",
+    r"""
 nextafter(other) -> Tensor
 See :func:`torch.nextafter`
-""")
+""",
+)
 
-add_docstr_all('nextafter_',
-               r"""
+add_docstr_all(
+    "nextafter_",
+    r"""
 nextafter_(other) -> Tensor
 In-place version of :meth:`~Tensor.nextafter`
-""")
+""",
+)
 
-add_docstr_all('nonzero',
-               r"""
+add_docstr_all(
+    "nonzero",
+    r"""
 nonzero() -> LongTensor
 
 See :func:`torch.nonzero`
-""")
+""",
+)
 
-add_docstr_all('norm',
-               r"""
+add_docstr_all(
+    "norm",
+    r"""
 norm(p=2, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.norm`
-""")
+""",
+)
 
-add_docstr_all('normal_',
-               r"""
+add_docstr_all(
+    "normal_",
+    r"""
 normal_(mean=0, std=1, *, generator=None) -> Tensor
 
 Fills :attr:`self` tensor with elements samples from the normal distribution
 parameterized by :attr:`mean` and :attr:`std`.
-""")
+""",
+)
 
-add_docstr_all('numel',
-               r"""
+add_docstr_all(
+    "numel",
+    r"""
 numel() -> int
 
 See :func:`torch.numel`
-""")
+""",
+)
 
-add_docstr_all('numpy',
-               r"""
+add_docstr_all(
+    "numpy",
+    r"""
 numpy(*, force=False) -> numpy.ndarray
 
 Returns the tensor as a NumPy :class:`ndarray`.
@@ -2861,87 +3644,111 @@ Setting :attr:`force` to ``True`` can be a useful shorthand.
 Args:
     force (bool): if ``True``, the ndarray may be a copy of the tensor
                instead of always sharing memory, defaults to ``False``.
-""")
+""",
+)
 
-add_docstr_all('orgqr',
-               r"""
+add_docstr_all(
+    "orgqr",
+    r"""
 orgqr(input2) -> Tensor
 
 See :func:`torch.orgqr`
-""")
+""",
+)
 
-add_docstr_all('ormqr',
-               r"""
+add_docstr_all(
+    "ormqr",
+    r"""
 ormqr(input2, input3, left=True, transpose=False) -> Tensor
 
 See :func:`torch.ormqr`
-""")
+""",
+)
 
-add_docstr_all('permute',
-               r"""
+add_docstr_all(
+    "permute",
+    r"""
 permute(*dims) -> Tensor
 
 See :func:`torch.permute`
-""")
+""",
+)
 
-add_docstr_all('polygamma',
-               r"""
+add_docstr_all(
+    "polygamma",
+    r"""
 polygamma(n) -> Tensor
 
 See :func:`torch.polygamma`
-""")
+""",
+)
 
-add_docstr_all('polygamma_',
-               r"""
+add_docstr_all(
+    "polygamma_",
+    r"""
 polygamma_(n) -> Tensor
 
 In-place version of :meth:`~Tensor.polygamma`
-""")
+""",
+)
 
-add_docstr_all('positive',
-               r"""
+add_docstr_all(
+    "positive",
+    r"""
 positive() -> Tensor
 
 See :func:`torch.positive`
-""")
+""",
+)
 
-add_docstr_all('pow',
-               r"""
+add_docstr_all(
+    "pow",
+    r"""
 pow(exponent) -> Tensor
 
 See :func:`torch.pow`
-""")
+""",
+)
 
-add_docstr_all('pow_',
-               r"""
+add_docstr_all(
+    "pow_",
+    r"""
 pow_(exponent) -> Tensor
 
 In-place version of :meth:`~Tensor.pow`
-""")
+""",
+)
 
-add_docstr_all('float_power',
-               r"""
+add_docstr_all(
+    "float_power",
+    r"""
 float_power(exponent) -> Tensor
 
 See :func:`torch.float_power`
-""")
+""",
+)
 
-add_docstr_all('float_power_',
-               r"""
+add_docstr_all(
+    "float_power_",
+    r"""
 float_power_(exponent) -> Tensor
 
 In-place version of :meth:`~Tensor.float_power`
-""")
+""",
+)
 
-add_docstr_all('prod',
-               r"""
+add_docstr_all(
+    "prod",
+    r"""
 prod(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.prod`
-""")
+""",
+)
 
-add_docstr_all('put_',
-               r"""
+add_docstr_all(
+    "put_",
+    r"""
 put_(index, source, accumulate=False) -> Tensor
 
 Copies the elements from :attr:`source` into the positions specified by
@@ -2967,88 +3774,112 @@ Example::
     >>> src.put_(torch.tensor([1, 3]), torch.tensor([9, 10]))
     tensor([[  4,   9,   5],
             [ 10,   7,   8]])
-""")
+""",
+)
 
-add_docstr_all('put',
-               r"""
+add_docstr_all(
+    "put",
+    r"""
 put(input, index, source, accumulate=False) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.put_`.
 `input` corresponds to `self` in :meth:`torch.Tensor.put_`.
-""")
+""",
+)
 
-add_docstr_all('qr',
-               r"""
+add_docstr_all(
+    "qr",
+    r"""
 qr(some=True) -> (Tensor, Tensor)
 
 See :func:`torch.qr`
-""")
+""",
+)
 
-add_docstr_all('qscheme',
-               r"""
+add_docstr_all(
+    "qscheme",
+    r"""
 qscheme() -> torch.qscheme
 
 Returns the quantization scheme of a given QTensor.
-""")
+""",
+)
 
-add_docstr_all('quantile', r"""
+add_docstr_all(
+    "quantile",
+    r"""
 quantile(q, dim=None, keepdim=False, *, interpolation='linear') -> Tensor
 
 See :func:`torch.quantile`
-""")
+""",
+)
 
-add_docstr_all('nanquantile', r"""
+add_docstr_all(
+    "nanquantile",
+    r"""
 nanquantile(q, dim=None, keepdim=False, *, interpolation='linear') -> Tensor
 
 See :func:`torch.nanquantile`
-""")
+""",
+)
 
-add_docstr_all('q_scale',
-               r"""
+add_docstr_all(
+    "q_scale",
+    r"""
 q_scale() -> float
 
 Given a Tensor quantized by linear(affine) quantization,
 returns the scale of the underlying quantizer().
-""")
+""",
+)
 
-add_docstr_all('q_zero_point',
-               r"""
+add_docstr_all(
+    "q_zero_point",
+    r"""
 q_zero_point() -> int
 
 Given a Tensor quantized by linear(affine) quantization,
 returns the zero_point of the underlying quantizer().
-""")
+""",
+)
 
-add_docstr_all('q_per_channel_scales',
-               r"""
+add_docstr_all(
+    "q_per_channel_scales",
+    r"""
 q_per_channel_scales() -> Tensor
 
 Given a Tensor quantized by linear (affine) per-channel quantization,
 returns a Tensor of scales of the underlying quantizer. It has the number of
 elements that matches the corresponding dimensions (from q_per_channel_axis) of
 the tensor.
-""")
+""",
+)
 
-add_docstr_all('q_per_channel_zero_points',
-               r"""
+add_docstr_all(
+    "q_per_channel_zero_points",
+    r"""
 q_per_channel_zero_points() -> Tensor
 
 Given a Tensor quantized by linear (affine) per-channel quantization,
 returns a tensor of zero_points of the underlying quantizer. It has the number of
 elements that matches the corresponding dimensions (from q_per_channel_axis) of
 the tensor.
-""")
+""",
+)
 
-add_docstr_all('q_per_channel_axis',
-               r"""
+add_docstr_all(
+    "q_per_channel_axis",
+    r"""
 q_per_channel_axis() -> int
 
 Given a Tensor quantized by linear (affine) per-channel quantization,
 returns the index of dimension on which per-channel quantization is applied.
-""")
+""",
+)
 
-add_docstr_all('random_',
-               r"""
+add_docstr_all(
+    "random_",
+    r"""
 random_(from=0, to=None, *, generator=None) -> Tensor
 
 Fills :attr:`self` tensor with numbers sampled from the discrete uniform
@@ -3057,59 +3888,75 @@ only bounded by :attr:`self` tensor's data type. However, for floating point
 types, if unspecified, range will be ``[0, 2^mantissa]`` to ensure that every
 value is representable. For example, `torch.tensor(1, dtype=torch.double).random_()`
 will be uniform in ``[0, 2^53]``.
-""")
+""",
+)
 
-add_docstr_all('rad2deg',
-               r"""
+add_docstr_all(
+    "rad2deg",
+    r"""
 rad2deg() -> Tensor
 
 See :func:`torch.rad2deg`
-""")
+""",
+)
 
-add_docstr_all('rad2deg_',
-               r"""
+add_docstr_all(
+    "rad2deg_",
+    r"""
 rad2deg_() -> Tensor
 
 In-place version of :meth:`~Tensor.rad2deg`
-""")
+""",
+)
 
-add_docstr_all('deg2rad',
-               r"""
+add_docstr_all(
+    "deg2rad",
+    r"""
 deg2rad() -> Tensor
 
 See :func:`torch.deg2rad`
-""")
+""",
+)
 
-add_docstr_all('deg2rad_',
-               r"""
+add_docstr_all(
+    "deg2rad_",
+    r"""
 deg2rad_() -> Tensor
 
 In-place version of :meth:`~Tensor.deg2rad`
-""")
+""",
+)
 
-add_docstr_all('ravel',
-               r"""
+add_docstr_all(
+    "ravel",
+    r"""
 ravel() -> Tensor
 
 see :func:`torch.ravel`
-""")
+""",
+)
 
-add_docstr_all('reciprocal',
-               r"""
+add_docstr_all(
+    "reciprocal",
+    r"""
 reciprocal() -> Tensor
 
 See :func:`torch.reciprocal`
-""")
+""",
+)
 
-add_docstr_all('reciprocal_',
-               r"""
+add_docstr_all(
+    "reciprocal_",
+    r"""
 reciprocal_() -> Tensor
 
 In-place version of :meth:`~Tensor.reciprocal`
-""")
+""",
+)
 
-add_docstr_all('record_stream',
-               r"""
+add_docstr_all(
+    "record_stream",
+    r"""
 record_stream(stream)
 
 Ensures that the tensor memory is not reused for another tensor until all
@@ -3124,38 +3971,48 @@ current work queued on :attr:`stream` are complete.
     unexpectedly. Calling this method lets the allocator know which streams
     have used the tensor.
 
-""")
+""",
+)
 
-add_docstr_all('remainder',
-               r"""
+add_docstr_all(
+    "remainder",
+    r"""
 remainder(divisor) -> Tensor
 
 See :func:`torch.remainder`
-""")
+""",
+)
 
-add_docstr_all('remainder_',
-               r"""
+add_docstr_all(
+    "remainder_",
+    r"""
 remainder_(divisor) -> Tensor
 
 In-place version of :meth:`~Tensor.remainder`
-""")
+""",
+)
 
-add_docstr_all('renorm',
-               r"""
+add_docstr_all(
+    "renorm",
+    r"""
 renorm(p, dim, maxnorm) -> Tensor
 
 See :func:`torch.renorm`
-""")
+""",
+)
 
-add_docstr_all('renorm_',
-               r"""
+add_docstr_all(
+    "renorm_",
+    r"""
 renorm_(p, dim, maxnorm) -> Tensor
 
 In-place version of :meth:`~Tensor.renorm`
-""")
+""",
+)
 
-add_docstr_all('repeat',
-               r"""
+add_docstr_all(
+    "repeat",
+    r"""
 repeat(*sizes) -> Tensor
 
 Repeats this tensor along the specified dimensions.
@@ -3184,17 +4041,21 @@ Example::
             [ 1,  2,  3,  1,  2,  3]])
     >>> x.repeat(4, 2, 1).size()
     torch.Size([4, 2, 3])
-""")
+""",
+)
 
-add_docstr_all('repeat_interleave',
-               r"""
+add_docstr_all(
+    "repeat_interleave",
+    r"""
 repeat_interleave(repeats, dim=None, *, output_size=None) -> Tensor
 
 See :func:`torch.repeat_interleave`.
-""")
+""",
+)
 
-add_docstr_all('requires_grad_',
-               r"""
+add_docstr_all(
+    "requires_grad_",
+    r"""
 requires_grad_(requires_grad=True) -> Tensor
 
 Change if autograd should record operations on this tensor: sets this tensor's
@@ -3227,10 +4088,12 @@ Example::
     >>> weights.grad
     tensor([-1.1007,  0.9853, -4.2316, -1.6606])
 
-""")
+""",
+)
 
-add_docstr_all('reshape',
-               r"""
+add_docstr_all(
+    "reshape",
+    r"""
 reshape(*shape) -> Tensor
 
 Returns a tensor with the same data and number of elements as :attr:`self`
@@ -3243,10 +4106,12 @@ See :func:`torch.reshape`
 Args:
     shape (tuple of ints or int...): the desired shape
 
-""")
+""",
+)
 
-add_docstr_all('reshape_as',
-               r"""
+add_docstr_all(
+    "reshape_as",
+    r"""
 reshape_as(other) -> Tensor
 
 Returns this tensor as the same shape as :attr:`other`.
@@ -3259,10 +4124,12 @@ Please see :meth:`reshape` for more information about ``reshape``.
 Args:
     other (:class:`torch.Tensor`): The result tensor has the same shape
         as :attr:`other`.
-""")
+""",
+)
 
-add_docstr_all('resize_',
-               r"""
+add_docstr_all(
+    "resize_",
+    r"""
 resize_(*sizes, memory_format=torch.contiguous_format) -> Tensor
 
 Resizes :attr:`self` tensor to the specified size. If the number of elements is
@@ -3292,10 +4159,12 @@ Example::
     >>> x.resize_(2, 2)
     tensor([[ 1,  2],
             [ 3,  4]])
-""")
+""",
+)
 
-add_docstr_all('resize_as_',
-               r"""
+add_docstr_all(
+    "resize_as_",
+    r"""
 resize_as_(tensor, memory_format=torch.contiguous_format) -> Tensor
 
 Resizes the :attr:`self` tensor to be the same size as the specified
@@ -3306,45 +4175,57 @@ Args:
         Tensor. Default: ``torch.contiguous_format``. Note that memory format of
         :attr:`self` is going to be unaffected if ``self.size()`` matches ``tensor.size()``.
 
-""")
+""",
+)
 
-add_docstr_all('rot90',
-               r"""
+add_docstr_all(
+    "rot90",
+    r"""
 rot90(k, dims) -> Tensor
 
 See :func:`torch.rot90`
-""")
+""",
+)
 
-add_docstr_all('round',
-               r"""
+add_docstr_all(
+    "round",
+    r"""
 round(decimals=0) -> Tensor
 
 See :func:`torch.round`
-""")
+""",
+)
 
-add_docstr_all('round_',
-               r"""
+add_docstr_all(
+    "round_",
+    r"""
 round_(decimals=0) -> Tensor
 
 In-place version of :meth:`~Tensor.round`
-""")
+""",
+)
 
-add_docstr_all('rsqrt',
-               r"""
+add_docstr_all(
+    "rsqrt",
+    r"""
 rsqrt() -> Tensor
 
 See :func:`torch.rsqrt`
-""")
+""",
+)
 
-add_docstr_all('rsqrt_',
-               r"""
+add_docstr_all(
+    "rsqrt_",
+    r"""
 rsqrt_() -> Tensor
 
 In-place version of :meth:`~Tensor.rsqrt`
-""")
+""",
+)
 
-add_docstr_all('scatter_',
-               r"""
+add_docstr_all(
+    "scatter_",
+    r"""
 scatter_(dim, index, src, reduce=None) -> Tensor
 
 Writes all values from the tensor :attr:`src` into :attr:`self` at the indices
@@ -3382,7 +4263,7 @@ between ``0`` and ``self.size(dim) - 1`` inclusive.
 
 Additionally accepts an optional :attr:`reduce` argument that allows
 specification of an optional reduction operation, which is applied to all
-values in the tensor :attr:`src` into :attr:`self` at the indicies
+values in the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index`. For each value in :attr:`src`, the reduction
 operation is applied to an index in :attr:`self` which is specified by
 its index in :attr:`src` for ``dimension != dim`` and by the corresponding
@@ -3433,10 +4314,12 @@ Example::
     tensor([[2.0000, 2.0000, 3.2300, 2.0000],
             [2.0000, 2.0000, 2.0000, 3.2300]])
 
-""")
+""",
+)
 
-add_docstr_all('scatter_add_',
-               r"""
+add_docstr_all(
+    "scatter_add_",
+    r"""
 scatter_add_(dim, index, src) -> Tensor
 
 Adds all values from the tensor :attr:`src` into :attr:`self` at the indices
@@ -3485,9 +4368,14 @@ Example::
             [0., 2., 0., 0., 0.],
             [0., 0., 2., 1., 1.]])
 
-""".format(**reproducibility_notes))
+""".format(
+        **reproducibility_notes
+    ),
+)
 
-add_docstr_all('scatter_reduce_', r"""
+add_docstr_all(
+    "scatter_reduce_",
+    r"""
 scatter_reduce_(dim, index, src, reduce, *, include_self=True) -> Tensor
 
 Reduces all values from the :attr:`src` tensor to the indices specified in
@@ -3548,31 +4436,41 @@ Example::
     tensor([3., 6., 5., 2.])
 
 
-""".format(**reproducibility_notes))
+""".format(
+        **reproducibility_notes
+    ),
+)
 
-add_docstr_all('select',
-               r"""
+add_docstr_all(
+    "select",
+    r"""
 select(dim, index) -> Tensor
 
 See :func:`torch.select`
-""")
+""",
+)
 
-add_docstr_all('select_scatter',
-               r"""
+add_docstr_all(
+    "select_scatter",
+    r"""
 select_scatter(src, dim, index) -> Tensor
 
 See :func:`torch.select_scatter`
-""")
+""",
+)
 
-add_docstr_all('slice_scatter',
-               r"""
+add_docstr_all(
+    "slice_scatter",
+    r"""
 slice_scatter(src, dim=0, start=None, end=None, step=1) -> Tensor
 
 See :func:`torch.slice_scatter`
-""")
+""",
+)
 
-add_docstr_all('set_',
-               r"""
+add_docstr_all(
+    "set_",
+    r"""
 set_(source=None, storage_offset=0, size=None, stride=None) -> Tensor
 
 Sets the underlying storage, size, and strides. If :attr:`source` is a tensor,
@@ -3588,115 +4486,147 @@ Args:
     storage_offset (int, optional): the offset in the storage
     size (torch.Size, optional): the desired size. Defaults to the size of the source.
     stride (tuple, optional): the desired stride. Defaults to C-contiguous strides.
-""")
+""",
+)
 
-add_docstr_all('sigmoid',
-               r"""
+add_docstr_all(
+    "sigmoid",
+    r"""
 sigmoid() -> Tensor
 
 See :func:`torch.sigmoid`
-""")
+""",
+)
 
-add_docstr_all('sigmoid_',
-               r"""
+add_docstr_all(
+    "sigmoid_",
+    r"""
 sigmoid_() -> Tensor
 
 In-place version of :meth:`~Tensor.sigmoid`
-""")
+""",
+)
 
-add_docstr_all('logit',
-               r"""
+add_docstr_all(
+    "logit",
+    r"""
 logit() -> Tensor
 
 See :func:`torch.logit`
-""")
+""",
+)
 
-add_docstr_all('logit_',
-               r"""
+add_docstr_all(
+    "logit_",
+    r"""
 logit_() -> Tensor
 
 In-place version of :meth:`~Tensor.logit`
-""")
+""",
+)
 
-add_docstr_all('sign',
-               r"""
+add_docstr_all(
+    "sign",
+    r"""
 sign() -> Tensor
 
 See :func:`torch.sign`
-""")
+""",
+)
 
-add_docstr_all('sign_',
-               r"""
+add_docstr_all(
+    "sign_",
+    r"""
 sign_() -> Tensor
 
 In-place version of :meth:`~Tensor.sign`
-""")
+""",
+)
 
-add_docstr_all('signbit',
-               r"""
+add_docstr_all(
+    "signbit",
+    r"""
 signbit() -> Tensor
 
 See :func:`torch.signbit`
-""")
+""",
+)
 
-add_docstr_all('sgn',
-               r"""
+add_docstr_all(
+    "sgn",
+    r"""
 sgn() -> Tensor
 
 See :func:`torch.sgn`
-""")
+""",
+)
 
-add_docstr_all('sgn_',
-               r"""
+add_docstr_all(
+    "sgn_",
+    r"""
 sgn_() -> Tensor
 
 In-place version of :meth:`~Tensor.sgn`
-""")
+""",
+)
 
-add_docstr_all('sin',
-               r"""
+add_docstr_all(
+    "sin",
+    r"""
 sin() -> Tensor
 
 See :func:`torch.sin`
-""")
+""",
+)
 
-add_docstr_all('sin_',
-               r"""
+add_docstr_all(
+    "sin_",
+    r"""
 sin_() -> Tensor
 
 In-place version of :meth:`~Tensor.sin`
-""")
+""",
+)
 
-add_docstr_all('sinc',
-               r"""
+add_docstr_all(
+    "sinc",
+    r"""
 sinc() -> Tensor
 
 See :func:`torch.sinc`
-""")
+""",
+)
 
-add_docstr_all('sinc_',
-               r"""
+add_docstr_all(
+    "sinc_",
+    r"""
 sinc_() -> Tensor
 
 In-place version of :meth:`~Tensor.sinc`
-""")
+""",
+)
 
-add_docstr_all('sinh',
-               r"""
+add_docstr_all(
+    "sinh",
+    r"""
 sinh() -> Tensor
 
 See :func:`torch.sinh`
-""")
+""",
+)
 
-add_docstr_all('sinh_',
-               r"""
+add_docstr_all(
+    "sinh_",
+    r"""
 sinh_() -> Tensor
 
 In-place version of :meth:`~Tensor.sinh`
-""")
+""",
+)
 
-add_docstr_all('size',
-               r"""
+add_docstr_all(
+    "size",
+    r"""
 size(dim=None) -> torch.Size or int
 
 Returns the size of the :attr:`self` tensor. If ``dim`` is not specified,
@@ -3714,43 +4644,53 @@ Example::
     >>> t.size(dim=1)
     4
 
-""")
+""",
+)
 
-add_docstr_all('sort',
-               r"""
+add_docstr_all(
+    "sort",
+    r"""
 sort(dim=-1, descending=False) -> (Tensor, LongTensor)
 
 See :func:`torch.sort`
-""")
+""",
+)
 
-add_docstr_all('msort',
-               r"""
+add_docstr_all(
+    "msort",
+    r"""
 msort() -> Tensor
 
 See :func:`torch.msort`
-""")
+""",
+)
 
-add_docstr_all('argsort',
-               r"""
+add_docstr_all(
+    "argsort",
+    r"""
 argsort(dim=-1, descending=False) -> LongTensor
 
 See :func:`torch.argsort`
-""")
+""",
+)
 
-add_docstr_all('sparse_dim',
-               r"""
+add_docstr_all(
+    "sparse_dim",
+    r"""
 sparse_dim() -> int
 
 Return the number of sparse dimensions in a :ref:`sparse tensor <sparse-docs>` :attr:`self`.
 
-.. warning::
-  Throws an error if :attr:`self` is not a sparse tensor.
+.. note::
+  Returns ``0`` if :attr:`self` is not a sparse tensor.
 
 See also :meth:`Tensor.dense_dim` and :ref:`hybrid tensors <sparse-hybrid-coo-docs>`.
-""")
+""",
+)
 
-add_docstr_all('sparse_resize_',
-               r"""
+add_docstr_all(
+    "sparse_resize_",
+    r"""
 sparse_resize_(size, sparse_dim, dense_dim) -> Tensor
 
 Resizes :attr:`self` :ref:`sparse tensor <sparse-docs>` to the desired
@@ -3777,10 +4717,12 @@ Args:
       original size.
     sparse_dim (int): the number of sparse dimensions
     dense_dim (int): the number of dense dimensions
-""")
+""",
+)
 
-add_docstr_all('sparse_resize_and_clear_',
-               r"""
+add_docstr_all(
+    "sparse_resize_and_clear_",
+    r"""
 sparse_resize_and_clear_(size, sparse_dim, dense_dim) -> Tensor
 
 Removes all specified elements from a :ref:`sparse tensor
@@ -3794,52 +4736,66 @@ Args:
     size (torch.Size): the desired size.
     sparse_dim (int): the number of sparse dimensions
     dense_dim (int): the number of dense dimensions
-""")
+""",
+)
 
-add_docstr_all('sqrt',
-               r"""
+add_docstr_all(
+    "sqrt",
+    r"""
 sqrt() -> Tensor
 
 See :func:`torch.sqrt`
-""")
+""",
+)
 
-add_docstr_all('sqrt_',
-               r"""
+add_docstr_all(
+    "sqrt_",
+    r"""
 sqrt_() -> Tensor
 
 In-place version of :meth:`~Tensor.sqrt`
-""")
+""",
+)
 
-add_docstr_all('square',
-               r"""
+add_docstr_all(
+    "square",
+    r"""
 square() -> Tensor
 
 See :func:`torch.square`
-""")
+""",
+)
 
-add_docstr_all('square_',
-               r"""
+add_docstr_all(
+    "square_",
+    r"""
 square_() -> Tensor
 
 In-place version of :meth:`~Tensor.square`
-""")
+""",
+)
 
-add_docstr_all('squeeze',
-               r"""
+add_docstr_all(
+    "squeeze",
+    r"""
 squeeze(dim=None) -> Tensor
 
 See :func:`torch.squeeze`
-""")
+""",
+)
 
-add_docstr_all('squeeze_',
-               r"""
+add_docstr_all(
+    "squeeze_",
+    r"""
 squeeze_(dim=None) -> Tensor
 
 In-place version of :meth:`~Tensor.squeeze`
-""")
+""",
+)
 
-add_docstr_all('std',
-               r"""
+add_docstr_all(
+    "std",
+    r"""
 std(dim, unbiased=True, keepdim=False) -> Tensor
 
 See :func:`torch.std`
@@ -3848,10 +4804,12 @@ See :func:`torch.std`
    :noindex:
 
 See :func:`torch.std`
-""")
+""",
+)
 
-add_docstr_all('storage_offset',
-               r"""
+add_docstr_all(
+    "storage_offset",
+    r"""
 storage_offset() -> int
 
 Returns :attr:`self` tensor's offset in the underlying storage in terms of
@@ -3865,10 +4823,12 @@ Example::
     >>> x[3:].storage_offset()
     3
 
-""")
+""",
+)
 
-add_docstr_all('stride',
-               r"""
+add_docstr_all(
+    "stride",
+    r"""
 stride(dim) -> tuple or int
 
 Returns the stride of :attr:`self` tensor.
@@ -3891,109 +4851,147 @@ Example::
     >>> x.stride(-1)
     1
 
-""")
+""",
+)
 
-add_docstr_all('sub', r"""
+add_docstr_all(
+    "sub",
+    r"""
 sub(other, *, alpha=1) -> Tensor
 
 See :func:`torch.sub`.
-""")
+""",
+)
 
-add_docstr_all('sub_',
-               r"""
+add_docstr_all(
+    "sub_",
+    r"""
 sub_(other, *, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.sub`
-""")
+""",
+)
 
-add_docstr_all('subtract', r"""
+add_docstr_all(
+    "subtract",
+    r"""
 subtract(other, *, alpha=1) -> Tensor
 
 See :func:`torch.subtract`.
-""")
+""",
+)
 
-add_docstr_all('subtract_', r"""
+add_docstr_all(
+    "subtract_",
+    r"""
 subtract_(other, *, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.subtract`.
-""")
+""",
+)
 
-add_docstr_all('sum',
-               r"""
+add_docstr_all(
+    "sum",
+    r"""
 sum(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.sum`
-""")
+""",
+)
 
-add_docstr_all('nansum',
-               r"""
+add_docstr_all(
+    "nansum",
+    r"""
 nansum(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.nansum`
-""")
+""",
+)
 
-add_docstr_all('svd',
-               r"""
+add_docstr_all(
+    "svd",
+    r"""
 svd(some=True, compute_uv=True) -> (Tensor, Tensor, Tensor)
 
 See :func:`torch.svd`
-""")
+""",
+)
 
-add_docstr_all('symeig',
-               r"""
+add_docstr_all(
+    "symeig",
+    r"""
 symeig(eigenvectors=False, upper=True) -> (Tensor, Tensor)
 
 See :func:`torch.symeig`
-""")
+""",
+)
 
-add_docstr_all('swapdims', r"""
+add_docstr_all(
+    "swapdims",
+    r"""
 swapdims(dim0, dim1) -> Tensor
 
 See :func:`torch.swapdims`
-""")
+""",
+)
 
-add_docstr_all('swapdims_',
-               r"""
+add_docstr_all(
+    "swapdims_",
+    r"""
 swapdims_(dim0, dim1) -> Tensor
 
 In-place version of :meth:`~Tensor.swapdims`
-""")
+""",
+)
 
-add_docstr_all('swapaxes', r"""
+add_docstr_all(
+    "swapaxes",
+    r"""
 swapaxes(axis0, axis1) -> Tensor
 
 See :func:`torch.swapaxes`
-""")
+""",
+)
 
-add_docstr_all('swapaxes_', r"""
+add_docstr_all(
+    "swapaxes_",
+    r"""
 swapaxes_(axis0, axis1) -> Tensor
 
 In-place version of :meth:`~Tensor.swapaxes`
-""")
+""",
+)
 
-add_docstr_all('t',
-               r"""
+add_docstr_all(
+    "t",
+    r"""
 t() -> Tensor
 
 See :func:`torch.t`
-""")
+""",
+)
 
-add_docstr_all('t_',
-               r"""
+add_docstr_all(
+    "t_",
+    r"""
 t_() -> Tensor
 
 In-place version of :meth:`~Tensor.t`
-""")
+""",
+)
 
-add_docstr_all('tile',
-               r"""
+add_docstr_all(
+    "tile",
+    r"""
 tile(*reps) -> Tensor
 
 See :func:`torch.tile`
-""")
+""",
+)
 
-add_docstr_all('to',
-               r"""
+add_docstr_all(
+    "to",
+    r"""
 to(*args, **kwargs) -> Tensor
 
 Performs Tensor dtype and/or device conversion. A :class:`torch.dtype` and :class:`torch.device` are
@@ -4060,191 +5058,261 @@ Example::
     >>> tensor.to(other, non_blocking=True)
     tensor([[-0.5044,  0.0005],
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('byte',
-               r"""
+add_docstr_all(
+    "byte",
+    r"""
 byte(memory_format=torch.preserve_format) -> Tensor
 
 ``self.byte()`` is equivalent to ``self.to(torch.uint8)``. See :func:`to`.
 
 Args:
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('bool',
-               r"""
+add_docstr_all(
+    "bool",
+    r"""
 bool(memory_format=torch.preserve_format) -> Tensor
 
 ``self.bool()`` is equivalent to ``self.to(torch.bool)``. See :func:`to`.
 
 Args:
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('char',
-               r"""
+add_docstr_all(
+    "char",
+    r"""
 char(memory_format=torch.preserve_format) -> Tensor
 
 ``self.char()`` is equivalent to ``self.to(torch.int8)``. See :func:`to`.
 
 Args:
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('bfloat16',
-               r"""
+add_docstr_all(
+    "bfloat16",
+    r"""
 bfloat16(memory_format=torch.preserve_format) -> Tensor
 ``self.bfloat16()`` is equivalent to ``self.to(torch.bfloat16)``. See :func:`to`.
 
 Args:
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('double',
-               r"""
+add_docstr_all(
+    "double",
+    r"""
 double(memory_format=torch.preserve_format) -> Tensor
 
 ``self.double()`` is equivalent to ``self.to(torch.float64)``. See :func:`to`.
 
 Args:
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('float',
-               r"""
+add_docstr_all(
+    "float",
+    r"""
 float(memory_format=torch.preserve_format) -> Tensor
 
 ``self.float()`` is equivalent to ``self.to(torch.float32)``. See :func:`to`.
 
 Args:
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('cdouble',
-               r"""
+add_docstr_all(
+    "cdouble",
+    r"""
 cdouble(memory_format=torch.preserve_format) -> Tensor
 
 ``self.cdouble()`` is equivalent to ``self.to(torch.complex128)``. See :func:`to`.
 
 Args:
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('cfloat',
-               r"""
+add_docstr_all(
+    "cfloat",
+    r"""
 cfloat(memory_format=torch.preserve_format) -> Tensor
 
 ``self.cfloat()`` is equivalent to ``self.to(torch.complex64)``. See :func:`to`.
 
 Args:
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('chalf',
-               r"""
+add_docstr_all(
+    "chalf",
+    r"""
 chalf(memory_format=torch.preserve_format) -> Tensor
 
 ``self.chalf()`` is equivalent to ``self.to(torch.complex32)``. See :func:`to`.
 
 Args:
      {memory_format}
- """.format(**common_args))
+ """.format(
+        **common_args
+    ),
+)
 
-add_docstr_all('half',
-               r"""
+add_docstr_all(
+    "half",
+    r"""
 half(memory_format=torch.preserve_format) -> Tensor
 
 ``self.half()`` is equivalent to ``self.to(torch.float16)``. See :func:`to`.
 
 Args:
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('int',
-               r"""
+add_docstr_all(
+    "int",
+    r"""
 int(memory_format=torch.preserve_format) -> Tensor
 
 ``self.int()`` is equivalent to ``self.to(torch.int32)``. See :func:`to`.
 
 Args:
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('int_repr',
-               r"""
+add_docstr_all(
+    "int_repr",
+    r"""
 int_repr() -> Tensor
 
 Given a quantized Tensor,
 ``self.int_repr()`` returns a CPU Tensor with uint8_t as data type that stores the
 underlying uint8_t values of the given Tensor.
-""")
+""",
+)
 
 
-add_docstr_all('long',
-               r"""
+add_docstr_all(
+    "long",
+    r"""
 long(memory_format=torch.preserve_format) -> Tensor
 
 ``self.long()`` is equivalent to ``self.to(torch.int64)``. See :func:`to`.
 
 Args:
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('short',
-               r"""
+add_docstr_all(
+    "short",
+    r"""
 short(memory_format=torch.preserve_format) -> Tensor
 
 ``self.short()`` is equivalent to ``self.to(torch.int16)``. See :func:`to`.
 
 Args:
     {memory_format}
-""".format(**common_args))
+""".format(
+        **common_args
+    ),
+)
 
-add_docstr_all('take',
-               r"""
+add_docstr_all(
+    "take",
+    r"""
 take(indices) -> Tensor
 
 See :func:`torch.take`
-""")
+""",
+)
 
-add_docstr_all('take_along_dim',
-               r"""
+add_docstr_all(
+    "take_along_dim",
+    r"""
 take_along_dim(indices, dim) -> Tensor
 
 See :func:`torch.take_along_dim`
-""")
+""",
+)
 
-add_docstr_all('tan',
-               r"""
+add_docstr_all(
+    "tan",
+    r"""
 tan() -> Tensor
 
 See :func:`torch.tan`
-""")
+""",
+)
 
-add_docstr_all('tan_',
-               r"""
+add_docstr_all(
+    "tan_",
+    r"""
 tan_() -> Tensor
 
 In-place version of :meth:`~Tensor.tan`
-""")
+""",
+)
 
-add_docstr_all('tanh',
-               r"""
+add_docstr_all(
+    "tanh",
+    r"""
 tanh() -> Tensor
 
 See :func:`torch.tanh`
-""")
+""",
+)
 
-add_docstr_all('tanh_',
-               r"""
+add_docstr_all(
+    "tanh_",
+    r"""
 tanh_() -> Tensor
 
 In-place version of :meth:`~Tensor.tanh`
-""")
+""",
+)
 
-add_docstr_all('tolist',
-               r"""
+add_docstr_all(
+    "tolist",
+    r"""
 tolist() -> list or number
 
 Returns the tensor as a (nested) list. For scalars, a standard
@@ -4261,23 +5329,24 @@ Examples::
      [-0.08909505605697632, 0.7729271650314331]]
     >>> a[0,0].tolist()
     0.012766935862600803
-""")
+""",
+)
 
-add_docstr_all('topk',
-               r"""
+add_docstr_all(
+    "topk",
+    r"""
 topk(k, dim=None, largest=True, sorted=True) -> (Tensor, LongTensor)
 
 See :func:`torch.topk`
-""")
+""",
+)
 
-add_docstr_all('to_dense',
-               r"""
+add_docstr_all(
+    "to_dense",
+    r"""
 to_dense() -> Tensor
 
-Creates a strided copy of :attr:`self`.
-
-.. warning::
-  Throws an error if :attr:`self` is a strided tensor.
+Creates a strided copy of :attr:`self` if :attr:`self` is not a strided tensor, otherwise returns :attr:`self`.
 
 Example::
 
@@ -4290,11 +5359,14 @@ Example::
     tensor([[ 0,  0,  0],
             [ 9,  0, 10],
             [ 0,  0,  0]])
-""")
+""",
+)
 
-add_docstr_all('to_sparse',
-               r"""
+add_docstr_all(
+    "to_sparse",
+    r"""
 to_sparse(sparseDims) -> Tensor
+
 Returns a sparse copy of the tensor.  PyTorch supports sparse tensors in
 :ref:`coordinate format <sparse-coo-docs>`.
 
@@ -4317,12 +5389,15 @@ Example::
     tensor(indices=tensor([[1]]),
            values=tensor([[ 9,  0, 10]]),
            size=(3, 3), nnz=1, layout=torch.sparse_coo)
-""")
+""",
+)
 
-add_docstr_all('to_sparse_csr',
-               r"""
+add_docstr_all(
+    "to_sparse_csr",
+    r"""
 to_sparse_csr() -> Tensor
-Convert a tensor to compressed row storage format. Only works with 2D tensors.
+
+Convert a tensor to compressed row storage format (CSR). Only works with 2D tensors.
 
 Example::
 
@@ -4331,11 +5406,31 @@ Example::
     >>> sparse._nnz()
     25
 
-""")
+""",
+)
 
-add_docstr_all('to_sparse_bsr',
-               r"""
+add_docstr_all(
+    "to_sparse_csc",
+    r"""
+to_sparse_csc() -> Tensor
+
+Convert a tensor to compressed column storage (CSC) format. Only works with 2D tensors.
+
+Example::
+
+    >>> dense = torch.randn(5, 5)
+    >>> sparse = dense.to_sparse_csc()
+    >>> sparse._nnz()
+    25
+
+""",
+)
+
+add_docstr_all(
+    "to_sparse_bsr",
+    r"""
 to_sparse_bsr(blocksize) -> Tensor
+
 Convert a CSR tensor to a block sparse row (BSR) storage format of given blocksize.
 
 Example::
@@ -4346,115 +5441,165 @@ Example::
     >>> sparse_bsr.col_indices()
     tensor([0, 1, 0, 1])
 
-""")
+""",
+)
 
-add_docstr_all('to_mkldnn',
-               r"""
+add_docstr_all(
+    "to_sparse_bsc",
+    r"""
+to_sparse_bsc(blocksize) -> Tensor
+
+Convert a CSR tensor to a block sparse column (BSC) storage format of given blocksize.
+
+Example::
+
+    >>> dense = torch.randn(10, 10)
+    >>> sparse = dense.to_sparse_csr()
+    >>> sparse_bsc = sparse.to_sparse_bsc((5, 5))
+    >>> sparse_bsc.row_indices()
+    tensor([0, 1, 0, 1])
+
+""",
+)
+
+add_docstr_all(
+    "to_mkldnn",
+    r"""
 to_mkldnn() -> Tensor
 Returns a copy of the tensor in ``torch.mkldnn`` layout.
 
-""")
+""",
+)
 
-add_docstr_all('trace',
-               r"""
+add_docstr_all(
+    "trace",
+    r"""
 trace() -> Tensor
 
 See :func:`torch.trace`
-""")
+""",
+)
 
-add_docstr_all('transpose',
-               r"""
+add_docstr_all(
+    "transpose",
+    r"""
 transpose(dim0, dim1) -> Tensor
 
 See :func:`torch.transpose`
-""")
+""",
+)
 
-add_docstr_all('transpose_',
-               r"""
+add_docstr_all(
+    "transpose_",
+    r"""
 transpose_(dim0, dim1) -> Tensor
 
 In-place version of :meth:`~Tensor.transpose`
-""")
+""",
+)
 
-add_docstr_all('triangular_solve',
-               r"""
+add_docstr_all(
+    "triangular_solve",
+    r"""
 triangular_solve(A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
 
 See :func:`torch.triangular_solve`
-""")
+""",
+)
 
-add_docstr_all('tril',
-               r"""
+add_docstr_all(
+    "tril",
+    r"""
 tril(diagonal=0) -> Tensor
 
 See :func:`torch.tril`
-""")
+""",
+)
 
-add_docstr_all('tril_',
-               r"""
+add_docstr_all(
+    "tril_",
+    r"""
 tril_(diagonal=0) -> Tensor
 
 In-place version of :meth:`~Tensor.tril`
-""")
+""",
+)
 
-add_docstr_all('triu',
-               r"""
+add_docstr_all(
+    "triu",
+    r"""
 triu(diagonal=0) -> Tensor
 
 See :func:`torch.triu`
-""")
+""",
+)
 
-add_docstr_all('triu_',
-               r"""
+add_docstr_all(
+    "triu_",
+    r"""
 triu_(diagonal=0) -> Tensor
 
 In-place version of :meth:`~Tensor.triu`
-""")
+""",
+)
 
-add_docstr_all('true_divide',
-               r"""
+add_docstr_all(
+    "true_divide",
+    r"""
 true_divide(value) -> Tensor
 
 See :func:`torch.true_divide`
-""")
+""",
+)
 
-add_docstr_all('true_divide_',
-               r"""
+add_docstr_all(
+    "true_divide_",
+    r"""
 true_divide_(value) -> Tensor
 
 In-place version of :meth:`~Tensor.true_divide_`
-""")
+""",
+)
 
-add_docstr_all('trunc',
-               r"""
+add_docstr_all(
+    "trunc",
+    r"""
 trunc() -> Tensor
 
 See :func:`torch.trunc`
-""")
+""",
+)
 
-add_docstr_all('fix',
-               r"""
+add_docstr_all(
+    "fix",
+    r"""
 fix() -> Tensor
 
 See :func:`torch.fix`.
-""")
+""",
+)
 
-add_docstr_all('trunc_',
-               r"""
+add_docstr_all(
+    "trunc_",
+    r"""
 trunc_() -> Tensor
 
 In-place version of :meth:`~Tensor.trunc`
-""")
+""",
+)
 
-add_docstr_all('fix_',
-               r"""
+add_docstr_all(
+    "fix_",
+    r"""
 fix_() -> Tensor
 
 In-place version of :meth:`~Tensor.fix`
-""")
+""",
+)
 
-add_docstr_all('type',
-               r"""
+add_docstr_all(
+    "type",
+    r"""
 type(dtype=None, non_blocking=False, **kwargs) -> str or Tensor
 Returns the type if `dtype` is not provided, else casts this object to
 the specified type.
@@ -4470,10 +5615,12 @@ Args:
         has no effect.
     **kwargs: For compatibility, may contain the key ``async`` in place of
         the ``non_blocking`` argument. The ``async`` arg is deprecated.
-""")
+""",
+)
 
-add_docstr_all('type_as',
-               r"""
+add_docstr_all(
+    "type_as",
+    r"""
 type_as(tensor) -> Tensor
 
 Returns this tensor cast to the type of the given tensor.
@@ -4483,10 +5630,12 @@ equivalent to ``self.type(tensor.type())``
 
 Args:
     tensor (Tensor): the tensor which has the desired type
-""")
+""",
+)
 
-add_docstr_all('unfold',
-               r"""
+add_docstr_all(
+    "unfold",
+    r"""
 unfold(dimension, size, step) -> Tensor
 
 Returns a view of the original tensor which contains all slices of size :attr:`size` from
@@ -4521,10 +5670,12 @@ Example::
     tensor([[ 1.,  2.],
             [ 3.,  4.],
             [ 5.,  6.]])
-""")
+""",
+)
 
-add_docstr_all('uniform_',
-               r"""
+add_docstr_all(
+    "uniform_",
+    r"""
 uniform_(from=0, to=1) -> Tensor
 
 Fills :attr:`self` tensor with numbers sampled from the continuous uniform
@@ -4532,24 +5683,30 @@ distribution:
 
 .. math::
     P(x) = \dfrac{1}{\text{to} - \text{from}}
-""")
+""",
+)
 
-add_docstr_all('unsqueeze',
-               r"""
+add_docstr_all(
+    "unsqueeze",
+    r"""
 unsqueeze(dim) -> Tensor
 
 See :func:`torch.unsqueeze`
-""")
+""",
+)
 
-add_docstr_all('unsqueeze_',
-               r"""
+add_docstr_all(
+    "unsqueeze_",
+    r"""
 unsqueeze_(dim) -> Tensor
 
 In-place version of :meth:`~Tensor.unsqueeze`
-""")
+""",
+)
 
-add_docstr_all('var',
-               r"""
+add_docstr_all(
+    "var",
+    r"""
 var(dim, unbiased=True, keepdim=False) -> Tensor
 
 See :func:`torch.var`
@@ -4558,17 +5715,21 @@ See :func:`torch.var`
    :noindex:
 
 See :func:`torch.var`
-""")
+""",
+)
 
-add_docstr_all('vdot',
-               r"""
+add_docstr_all(
+    "vdot",
+    r"""
 vdot(other) -> Tensor
 
 See :func:`torch.vdot`
-""")
+""",
+)
 
-add_docstr_all('view',
-               r"""
+add_docstr_all(
+    "view",
+    r"""
 view(*shape) -> Tensor
 
 Returns a new tensor with the same data as the :attr:`self` tensor but of a
@@ -4704,10 +5865,12 @@ Example::
               28, 191]], dtype=torch.uint8)
     >>> x.view(torch.uint8).size()
     torch.Size([4, 16])
-""")
+""",
+)
 
-add_docstr_all('view_as',
-               r"""
+add_docstr_all(
+    "view_as",
+    r"""
 view_as(other) -> Tensor
 
 View this tensor as the same size as :attr:`other`.
@@ -4718,10 +5881,12 @@ Please see :meth:`~Tensor.view` for more information about ``view``.
 Args:
     other (:class:`torch.Tensor`): The result tensor has the same size
         as :attr:`other`.
-""")
+""",
+)
 
-add_docstr_all('expand',
-               r"""
+add_docstr_all(
+    "expand",
+    r"""
 expand(*sizes) -> Tensor
 
 Returns a new view of the :attr:`self` tensor with singleton dimensions expanded
@@ -4763,10 +5928,12 @@ Example::
     tensor([[ 1,  1,  1,  1],
             [ 2,  2,  2,  2],
             [ 3,  3,  3,  3]])
-""")
+""",
+)
 
-add_docstr_all('expand_as',
-               r"""
+add_docstr_all(
+    "expand_as",
+    r"""
 expand_as(other) -> Tensor
 
 Expand this tensor to the same size as :attr:`other`.
@@ -4777,10 +5944,12 @@ Please see :meth:`~Tensor.expand` for more information about ``expand``.
 Args:
     other (:class:`torch.Tensor`): The result tensor has the same size
         as :attr:`other`.
-""")
+""",
+)
 
-add_docstr_all('sum_to_size',
-               r"""
+add_docstr_all(
+    "sum_to_size",
+    r"""
 sum_to_size(*size) -> Tensor
 
 Sum ``this`` tensor to :attr:`size`.
@@ -4788,231 +5957,295 @@ Sum ``this`` tensor to :attr:`size`.
 
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
-""")
+""",
+)
 
 
-add_docstr_all('zero_',
-               r"""
+add_docstr_all(
+    "zero_",
+    r"""
 zero_() -> Tensor
 
 Fills :attr:`self` tensor with zeros.
-""")
+""",
+)
 
-add_docstr_all('matmul',
-               r"""
+add_docstr_all(
+    "matmul",
+    r"""
 matmul(tensor2) -> Tensor
 
 See :func:`torch.matmul`
-""")
+""",
+)
 
-add_docstr_all('chunk',
-               r"""
+add_docstr_all(
+    "chunk",
+    r"""
 chunk(chunks, dim=0) -> List of Tensors
 
 See :func:`torch.chunk`
-""")
+""",
+)
 
-add_docstr_all('unsafe_chunk',
-               r"""
+add_docstr_all(
+    "unsafe_chunk",
+    r"""
 unsafe_chunk(chunks, dim=0) -> List of Tensors
 
 See :func:`torch.unsafe_chunk`
-""")
+""",
+)
 
-add_docstr_all('unsafe_split',
-               r"""
+add_docstr_all(
+    "unsafe_split",
+    r"""
 unsafe_split(split_size, dim=0) -> List of Tensors
 
 See :func:`torch.unsafe_split`
-""")
+""",
+)
 
-add_docstr_all('tensor_split',
-               r"""
+add_docstr_all(
+    "tensor_split",
+    r"""
 tensor_split(indices_or_sections, dim=0) -> List of Tensors
 
 See :func:`torch.tensor_split`
-""")
+""",
+)
 
-add_docstr_all('hsplit',
-               r"""
+add_docstr_all(
+    "hsplit",
+    r"""
 hsplit(split_size_or_sections) -> List of Tensors
 
 See :func:`torch.hsplit`
-""")
+""",
+)
 
-add_docstr_all('vsplit',
-               r"""
+add_docstr_all(
+    "vsplit",
+    r"""
 vsplit(split_size_or_sections) -> List of Tensors
 
 See :func:`torch.vsplit`
-""")
+""",
+)
 
-add_docstr_all('dsplit',
-               r"""
+add_docstr_all(
+    "dsplit",
+    r"""
 dsplit(split_size_or_sections) -> List of Tensors
 
 See :func:`torch.dsplit`
-""")
+""",
+)
 
-add_docstr_all('stft',
-               r"""
+add_docstr_all(
+    "stft",
+    r"""
 stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
 
 See :func:`torch.stft`
-""")
+""",
+)
 
-add_docstr_all('istft',
-               r"""
+add_docstr_all(
+    "istft",
+    r"""
 istft(n_fft, hop_length=None, win_length=None, window=None,
  center=True, normalized=False, onesided=True, length=None) -> Tensor
 
 See :func:`torch.istft`
-""")
+""",
+)
 
-add_docstr_all('det',
-               r"""
+add_docstr_all(
+    "det",
+    r"""
 det() -> Tensor
 
 See :func:`torch.det`
-""")
+""",
+)
 
-add_docstr_all('where',
-               r"""
+add_docstr_all(
+    "where",
+    r"""
 where(condition, y) -> Tensor
 
 ``self.where(condition, y)`` is equivalent to ``torch.where(condition, self, y)``.
 See :func:`torch.where`
-""")
+""",
+)
 
-add_docstr_all('logdet',
-               r"""
+add_docstr_all(
+    "logdet",
+    r"""
 logdet() -> Tensor
 
 See :func:`torch.logdet`
-""")
+""",
+)
 
-add_docstr_all('slogdet',
-               r"""
+add_docstr_all(
+    "slogdet",
+    r"""
 slogdet() -> (Tensor, Tensor)
 
 See :func:`torch.slogdet`
-""")
+""",
+)
 
-add_docstr_all('unbind',
-               r"""
+add_docstr_all(
+    "unbind",
+    r"""
 unbind(dim=0) -> seq
 
 See :func:`torch.unbind`
-""")
+""",
+)
 
-add_docstr_all('pin_memory',
-               r"""
+add_docstr_all(
+    "pin_memory",
+    r"""
 pin_memory() -> Tensor
 
 Copies the tensor to pinned memory, if it's not already pinned.
-""")
+""",
+)
 
-add_docstr_all('pinverse',
-               r"""
+add_docstr_all(
+    "pinverse",
+    r"""
 pinverse() -> Tensor
 
 See :func:`torch.pinverse`
-""")
+""",
+)
 
-add_docstr_all('index_add',
-               r"""
+add_docstr_all(
+    "index_add",
+    r"""
 index_add(dim, index, source, *, alpha=1) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_add_`.
-""")
+""",
+)
 
-add_docstr_all('index_copy',
-               r"""
+add_docstr_all(
+    "index_copy",
+    r"""
 index_copy(dim, index, tensor2) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_copy_`.
-""")
+""",
+)
 
-add_docstr_all('index_fill',
-               r"""
+add_docstr_all(
+    "index_fill",
+    r"""
 index_fill(dim, index, value) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_fill_`.
-""")
+""",
+)
 
-add_docstr_all('scatter',
-               r"""
+add_docstr_all(
+    "scatter",
+    r"""
 scatter(dim, index, src) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_`
-""")
+""",
+)
 
-add_docstr_all('scatter_add',
-               r"""
+add_docstr_all(
+    "scatter_add",
+    r"""
 scatter_add(dim, index, src) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_add_`
-""")
+""",
+)
 
-add_docstr_all('scatter_reduce',
-               r"""
+add_docstr_all(
+    "scatter_reduce",
+    r"""
 scatter_reduce(dim, index, src, reduce, *, include_self=True) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_reduce_`
-""")
+""",
+)
 
-add_docstr_all('masked_scatter',
-               r"""
+add_docstr_all(
+    "masked_scatter",
+    r"""
 masked_scatter(mask, tensor) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
-""")
+""",
+)
 
-add_docstr_all('xlogy',
-               r"""
+add_docstr_all(
+    "xlogy",
+    r"""
 xlogy(other) -> Tensor
 
 See :func:`torch.xlogy`
-""")
+""",
+)
 
-add_docstr_all('xlogy_',
-               r"""
+add_docstr_all(
+    "xlogy_",
+    r"""
 xlogy_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.xlogy`
-""")
+""",
+)
 
-add_docstr_all('masked_fill',
-               r"""
+add_docstr_all(
+    "masked_fill",
+    r"""
 masked_fill(mask, value) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_fill_`
-""")
+""",
+)
 
-add_docstr_all('grad',
-               r"""
+add_docstr_all(
+    "grad",
+    r"""
 This attribute is ``None`` by default and becomes a Tensor the first time a call to
 :func:`backward` computes gradients for ``self``.
 The attribute will then contain the gradients computed and future calls to
 :func:`backward` will accumulate (add) gradients into it.
-""")
+""",
+)
 
-add_docstr_all('retain_grad',
-               r"""
+add_docstr_all(
+    "retain_grad",
+    r"""
 retain_grad() -> None
 
 Enables this Tensor to have their :attr:`grad` populated during
 :func:`backward`. This is a no-op for leaf tensors.
-""")
+""",
+)
 
-add_docstr_all('retains_grad',
-               r"""
+add_docstr_all(
+    "retains_grad",
+    r"""
 Is ``True`` if this Tensor is non-leaf and its :attr:`grad` is enabled to be
 populated during :func:`backward`, ``False`` otherwise.
-""")
+""",
+)
 
-add_docstr_all('requires_grad',
-               r"""
+add_docstr_all(
+    "requires_grad",
+    r"""
 Is ``True`` if gradients need to be computed for this Tensor, ``False`` otherwise.
 
 .. note::
@@ -5020,10 +6253,12 @@ Is ``True`` if gradients need to be computed for this Tensor, ``False`` otherwis
     The fact that gradients need to be computed for a Tensor do not mean that the :attr:`grad`
     attribute will be populated, see :attr:`is_leaf` for more details.
 
-""")
+""",
+)
 
-add_docstr_all('is_leaf',
-               r"""
+add_docstr_all(
+    "is_leaf",
+    r"""
 All Tensors that have :attr:`requires_grad` which is ``False`` will be leaf Tensors by convention.
 
 For Tensors that have :attr:`requires_grad` which is ``True``, they will be leaf Tensors if they were
@@ -5060,10 +6295,12 @@ Example::
     # f requires grad, has no operation creating it
 
 
-""")
+""",
+)
 
-add_docstr_all('names',
-               r"""
+add_docstr_all(
+    "names",
+    r"""
 Stores names for each of this tensor's dimensions.
 
 ``names[idx]`` corresponds to the name of tensor dimension ``idx``.
@@ -5078,66 +6315,90 @@ Tensors may not have two named dimensions with the same name.
 .. warning::
     The named tensor API is experimental and subject to change.
 
-""")
+""",
+)
 
-add_docstr_all('is_cuda',
-               r"""
+add_docstr_all(
+    "is_cuda",
+    r"""
 Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
-""")
+""",
+)
 
-add_docstr_all('is_cpu',
-               r"""
+add_docstr_all(
+    "is_cpu",
+    r"""
 Is ``True`` if the Tensor is stored on the CPU, ``False`` otherwise.
-""")
+""",
+)
 
-add_docstr_all('is_ipu',
-               r"""
+add_docstr_all(
+    "is_ipu",
+    r"""
 Is ``True`` if the Tensor is stored on the IPU, ``False`` otherwise.
-""")
+""",
+)
 
-add_docstr_all('is_xpu',
-               r"""
+add_docstr_all(
+    "is_xpu",
+    r"""
 Is ``True`` if the Tensor is stored on the XPU, ``False`` otherwise.
-""")
+""",
+)
 
-add_docstr_all('is_quantized',
-               r"""
+add_docstr_all(
+    "is_quantized",
+    r"""
 Is ``True`` if the Tensor is quantized, ``False`` otherwise.
-""")
+""",
+)
 
-add_docstr_all('is_meta',
-               r"""
+add_docstr_all(
+    "is_meta",
+    r"""
 Is ``True`` if the Tensor is a meta tensor, ``False`` otherwise.  Meta tensors
 are like normal tensors, but they carry no data.
-""")
+""",
+)
 
-add_docstr_all('is_mps',
-               r"""
+add_docstr_all(
+    "is_mps",
+    r"""
 Is ``True`` if the Tensor is stored on the MPS device, ``False`` otherwise.
-""")
+""",
+)
 
-add_docstr_all('is_sparse',
-               r"""
+add_docstr_all(
+    "is_sparse",
+    r"""
 Is ``True`` if the Tensor uses sparse storage layout, ``False`` otherwise.
-""")
+""",
+)
 
-add_docstr_all('is_sparse_csr',
-               r"""
+add_docstr_all(
+    "is_sparse_csr",
+    r"""
 Is ``True`` if the Tensor uses sparse CSR storage layout, ``False`` otherwise.
-""")
+""",
+)
 
-add_docstr_all('device',
-               r"""
+add_docstr_all(
+    "device",
+    r"""
 Is the :class:`torch.device` where this Tensor is.
-""")
+""",
+)
 
-add_docstr_all('ndim',
-               r"""
+add_docstr_all(
+    "ndim",
+    r"""
 Alias for :meth:`~Tensor.dim()`
-""")
+""",
+)
 
-add_docstr_all('T',
-               r"""
+add_docstr_all(
+    "T",
+    r"""
 Returns a view of this tensor with its dimensions reversed.
 
 If ``n`` is the number of dimensions in ``x``,
@@ -5148,10 +6409,12 @@ If ``n`` is the number of dimensions in ``x``,
     is deprecated and it will throw an error in a future release. Consider :attr:`~.Tensor.mT`
     to transpose batches of matrices or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse
     the dimensions of a tensor.
-""")
+""",
+)
 
-add_docstr_all('H',
-               r"""
+add_docstr_all(
+    "H",
+    r"""
 Returns a view of a matrix (2-D tensor) conjugated and transposed.
 
 ``x.H`` is equivalent to ``x.transpose(0, 1).conj()`` for complex matrices and
@@ -5160,29 +6423,37 @@ Returns a view of a matrix (2-D tensor) conjugated and transposed.
 .. seealso::
 
         :attr:`~.Tensor.mH`: An attribute that also works on batches of matrices.
-""")
+""",
+)
 
-add_docstr_all('mT',
-               r"""
+add_docstr_all(
+    "mT",
+    r"""
 Returns a view of this tensor with the last two dimensions transposed.
 
 ``x.mT`` is equivalent to ``x.transpose(-2, -1)``.
-""")
+""",
+)
 
-add_docstr_all('mH',
-               r"""
+add_docstr_all(
+    "mH",
+    r"""
 Accessing this property is equivalent to calling :func:`adjoint`.
-""")
+""",
+)
 
-add_docstr_all('adjoint',
-               r"""
+add_docstr_all(
+    "adjoint",
+    r"""
 adjoint() -> Tensor
 
 Alias for :func:`adjoint`
-""")
+""",
+)
 
-add_docstr_all('real',
-               r"""
+add_docstr_all(
+    "real",
+    r"""
 Returns a new tensor containing real values of the :attr:`self` tensor for a complex-valued input tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
 
@@ -5195,10 +6466,12 @@ Example::
     >>> x.real
     tensor([ 0.3100, -0.5445, -1.6492, -0.0638])
 
-""")
+""",
+)
 
-add_docstr_all('imag',
-               r"""
+add_docstr_all(
+    "imag",
+    r"""
 Returns a new tensor containing imaginary values of the :attr:`self` tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
 
@@ -5212,19 +6485,23 @@ Example::
     >>> x.imag
     tensor([ 0.3553, -0.7896, -0.0633, -0.8119])
 
-""")
+""",
+)
 
-add_docstr_all('as_subclass',
-               r"""
+add_docstr_all(
+    "as_subclass",
+    r"""
 as_subclass(cls) -> Tensor
 
 Makes a ``cls`` instance with the same data pointer as ``self``. Changes
 in the output mirror changes in ``self``, and the output stays attached
 to the autograd graph. ``cls`` must be a subclass of ``Tensor``.
-""")
+""",
+)
 
-add_docstr_all('crow_indices',
-               r"""
+add_docstr_all(
+    "crow_indices",
+    r"""
 crow_indices() -> IntTensor
 
 Returns the tensor containing the compressed row indices of the :attr:`self`
@@ -5239,10 +6516,12 @@ Example::
     >>> csr.crow_indices()
     tensor([0, 1, 2, 3, 4, 5], dtype=torch.int32)
 
-""")
+""",
+)
 
-add_docstr_all('col_indices',
-               r"""
+add_docstr_all(
+    "col_indices",
+    r"""
 col_indices() -> IntTensor
 
 Returns the tensor containing the column indices of the :attr:`self`
@@ -5257,54 +6536,13 @@ Example::
     >>> csr.col_indices()
     tensor([0, 1, 2, 3, 4], dtype=torch.int32)
 
-""")
+""",
+)
 
-add_docstr_all('to_padded_tensor',
-               r"""
+add_docstr_all(
+    "to_padded_tensor",
+    r"""
 to_padded_tensor(padding, output_size=None) -> Tensor
-
-Returns a new (non-nested) Tensor by padding the nested tensor.
-The leading entries will be filled with the nested data,
-while the trailing entries will be padded.
-
-.. warning::
-
-    :func:`to_padded_tensor` always copies the underlying data,
-    since the nested and the non-nested tensors differ in memory layout.
-
-Args:
-    padding (float): The padding value for the trailing entries.
-    output_size (Tuple[int]): The size of the output tensor.
-                              If given, it must be large enough to contain all nested data;
-                              else, will infer by taking the max size of each nested sub-tensor along each dimension.
-
-Example::
-
-    >>> nt = torch.nested_tensor([torch.randn((2, 5)), torch.randn((3, 4))])
-    nested_tensor([
-      tensor([[ 1.6862, -1.1282,  1.1031,  0.0464, -1.3276],
-              [-1.9967, -1.0054,  1.8972,  0.9174, -1.4995]]),
-      tensor([[-1.8546, -0.7194, -0.2918, -0.1846],
-              [ 0.2773,  0.8793, -0.5183, -0.6447],
-              [ 1.8009,  1.8468, -0.9832, -1.5272]])
-    ])
-    >>> pt_infer = nt.to_padded_tensor(0.0)
-    tensor([[[ 1.6862, -1.1282,  1.1031,  0.0464, -1.3276],
-             [-1.9967, -1.0054,  1.8972,  0.9174, -1.4995],
-             [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000]],
-            [[-1.8546, -0.7194, -0.2918, -0.1846,  0.0000],
-             [ 0.2773,  0.8793, -0.5183, -0.6447,  0.0000],
-             [ 1.8009,  1.8468, -0.9832, -1.5272,  0.0000]]])
-    >>> pt_large = nt.to_padded_tensor(1.0, (2, 4, 6))
-    tensor([[[ 1.6862, -1.1282,  1.1031,  0.0464, -1.3276,  1.0000],
-             [-1.9967, -1.0054,  1.8972,  0.9174, -1.4995,  1.0000],
-             [ 1.0000,  1.0000,  1.0000,  1.0000,  1.0000,  1.0000],
-             [ 1.0000,  1.0000,  1.0000,  1.0000,  1.0000,  1.0000]],
-            [[-1.8546, -0.7194, -0.2918, -0.1846,  1.0000,  1.0000],
-             [ 0.2773,  0.8793, -0.5183, -0.6447,  1.0000,  1.0000],
-             [ 1.8009,  1.8468, -0.9832, -1.5272,  1.0000,  1.0000],
-             [ 1.0000,  1.0000,  1.0000,  1.0000,  1.0000,  1.0000]]])
-    >>> pt_small = nt.to_padded_tensor(2.0, (2, 2, 2))
-    RuntimeError: Value in output_size is less than NestedTensor padded size. Truncation is not supported.
-
-""")
+See :func:`to_padded_tensor`
+""",
+)

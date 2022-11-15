@@ -54,7 +54,7 @@ namespace cuda {
 //   Do not forward through any broadcast IDs
 class TORCH_CUDA_CU_API IterDomainGraph {
  public:
-  IterDomainGraph(Fusion* fusion);
+  IterDomainGraph(Fusion* fusion, bool allow_self_mapping = false);
 
   const DisjointSets<IterDomain*>& permissiveNodes() const {
     return permissive_nodes_;
@@ -88,10 +88,28 @@ class TORCH_CUDA_CU_API IterDomainGraph {
     return view_rfactor_ids_;
   }
 
+  // Returns if first and second are expressions through which the provided
+  // id_map have matching inputs (if forward), or outputs (if not forward).
+  // Returning true means the expressions are "the same", in terms they modify
+  // matching original extents, by the same amount.
+  static bool exprsMap(
+      Expr* first,
+      Expr* second,
+      bool forward,
+      const DisjointSets<IterDomain*>& id_map);
+
+  bool hasSelfMapping() const {
+    return self_mapping_info_.has_value();
+  }
+
  private:
   void build(Fusion* fusion);
 
   void initializeId(IterDomain* id, bool is_view_rfactor_id, bool is_leaf_id);
+
+  // Checks if exprsMap then if forward will map outputs else inputs in exact
+  // and permissive map.
+  void mapThroughExpr(Expr* first, Expr* second, bool forward);
 
   DisjointSets<IterDomain*> permissive_nodes_;
   DisjointSets<IterDomain*> exact_nodes_;
@@ -108,6 +126,9 @@ class TORCH_CUDA_CU_API IterDomainGraph {
   VectorOfUniqueEntries<IterDomain*> all_ids_;
 
   std::unordered_set<IterDomain*> view_rfactor_ids_;
+
+  c10::optional<std::tuple<TensorView*, IterDomain*, IterDomain*, std::string>>
+      self_mapping_info_ = c10::nullopt;
 };
 
 class TrivialReductionInfo;
@@ -175,6 +196,10 @@ class TORCH_CUDA_CU_API ComputeAtMap {
 
   //! Get the ID sets for a provided IdMappingMode
   const DisjointSets<IterDomain*>& getIdSets(IdMappingMode mode) const;
+
+  // Returns if the ID actually has a disjoint set meaning it has been processed
+  // in the creation of the compute at map.
+  bool idExistsInMap(IterDomain* id) const;
 
   //! Returns the pre-allocated index variable integer used in
   //!  the kir::ForLoop corresponding to the given IterDomain.

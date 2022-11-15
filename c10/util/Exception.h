@@ -4,6 +4,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/variant.h>
 
 #include <cstddef>
 #include <exception>
@@ -112,17 +113,66 @@ class C10_API Error : public std::exception {
   std::string compute_what(bool include_backtrace) const;
 };
 
+class C10_API Warning {
+ public:
+  class C10_API UserWarning {};
+  class C10_API DeprecationWarning {};
+
+  using warning_variant_t = c10::variant<UserWarning, DeprecationWarning>;
+
+  Warning(
+      warning_variant_t type,
+      const SourceLocation& source_location,
+      const std::string& msg,
+      bool verbatim);
+
+  Warning(
+      warning_variant_t type,
+      SourceLocation source_location,
+      const char* msg,
+      bool verbatim);
+
+  Warning(
+      warning_variant_t type,
+      SourceLocation source_location,
+      ::c10::detail::CompileTimeEmptyString msg,
+      bool verbatim);
+
+  // Getters for members
+  warning_variant_t type() const;
+  const SourceLocation& source_location() const;
+  const std::string& msg() const;
+  bool verbatim() const;
+
+ private:
+  // The type of warning
+  warning_variant_t type_;
+
+  // Where the warning happened.
+  SourceLocation source_location_;
+
+  // The actual warning message.
+  std::string msg_;
+
+  // See note: [Verbatim Warnings]
+  bool verbatim_;
+};
+
+using UserWarning = Warning::UserWarning;
+using DeprecationWarning = Warning::DeprecationWarning;
+
+// Issue a warning with a given message. Dispatched to the current
+// warning handler.
+void C10_API warn(const Warning& warning);
+
 class C10_API WarningHandler {
  public:
   virtual ~WarningHandler() = default;
   /// The default warning handler. Prints the message to stderr.
-  virtual void process(
-      const SourceLocation& source_location,
-      const std::string& msg,
-      const bool verbatim);
+  virtual void process(const Warning& warning);
 };
 
-namespace Warning {
+namespace WarningUtils {
 
 // Note: [Verbatim Warnings]
 // Warnings originating in C++ code can appear out-of-place to Python users:
@@ -137,20 +187,6 @@ namespace Warning {
 // context in their warnings should set verbatim to true so their warnings
 // appear without modification.
 
-/// Issue a warning with a given message. Dispatched to the current
-/// warning handler.
-C10_API void warn(
-    const SourceLocation& source_location,
-    const std::string& msg,
-    bool verbatim);
-C10_API void warn(
-    SourceLocation source_location,
-    const char* msg,
-    bool verbatim);
-C10_API void warn(
-    SourceLocation source_location,
-    ::c10::detail::CompileTimeEmptyString msg,
-    bool verbatim);
 /// Sets the global warning handler. This is not thread-safe, so it should
 /// generally be called once during initialization or while holding the GIL
 /// for programs that use python.
@@ -165,11 +201,11 @@ class C10_API WarningHandlerGuard {
 
  public:
   WarningHandlerGuard(WarningHandler* new_handler)
-      : prev_handler_(c10::Warning::get_warning_handler()) {
-    c10::Warning::set_warning_handler(new_handler);
+      : prev_handler_(c10::WarningUtils::get_warning_handler()) {
+    c10::WarningUtils::set_warning_handler(new_handler);
   }
   ~WarningHandlerGuard() {
-    c10::Warning::set_warning_handler(prev_handler_);
+    c10::WarningUtils::set_warning_handler(prev_handler_);
   }
 };
 
@@ -190,7 +226,7 @@ struct C10_API WarnAlways {
   bool prev_setting;
 };
 
-} // namespace Warning
+} // namespace WarningUtils
 
 // Used in ATen for out-of-bound indices that can reasonably only be detected
 // lazily inside a kernel (See: advanced indexing).  These turn into
@@ -232,6 +268,10 @@ class C10_API OnnxfiBackendSystemError : public Error {
 // Used for numerical errors from the linalg module. These
 // turn into LinAlgError when they cross into Python.
 class C10_API LinAlgError : public Error {
+  using Error::Error;
+};
+
+class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
@@ -512,53 +552,43 @@ namespace detail {
 #define TORCH_CHECK_NOT_IMPLEMENTED(cond, ...) \
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
 
+#ifdef STRIP_ERROR_MESSAGES
+#define WARNING_MESSAGE_STRING(...) \
+  ::c10::detail::CompileTimeEmptyString {}
+#else
+#define WARNING_MESSAGE_STRING(...) ::c10::str(__VA_ARGS__)
+#endif
+
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
-#ifdef STRIP_ERROR_MESSAGES
-#define TORCH_WARN(...)                                      \
-  ::c10::Warning::warn(                                      \
+#define TORCH_WARN_WITH(warning_t, ...)                      \
+  ::c10::warn(::c10::Warning(                                \
+      warning_t(),                                           \
       {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
-      ::c10::detail::CompileTimeEmptyString{},               \
-      false)
-#else
-#define TORCH_WARN(...)                                      \
-  ::c10::Warning::warn(                                      \
-      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
-      ::c10::str(__VA_ARGS__),                               \
-      false)
-#endif
+      WARNING_MESSAGE_STRING(__VA_ARGS__),                   \
+      false));
+
+#define TORCH_WARN(...) TORCH_WARN_WITH(::c10::UserWarning, __VA_ARGS__);
+
+#define TORCH_WARN_DEPRECATION(...) \
+  TORCH_WARN_WITH(::c10::DeprecationWarning, __VA_ARGS__);
 
 // Report a warning to the user only once.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //
-#ifdef STRIP_ERROR_MESSAGES
 #define _TORCH_WARN_ONCE(...)                                             \
   C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = \
       [&] {                                                               \
-        ::c10::Warning::warn(                                             \
-            {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},        \
-            ::c10::detail::CompileTimeEmptyString{},                      \
-            false);                                                       \
+        TORCH_WARN(__VA_ARGS__);                                          \
         return true;                                                      \
       }()
-#else
-#define _TORCH_WARN_ONCE(...)                                             \
-  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = \
-      [&] {                                                               \
-        ::c10::Warning::warn(                                             \
-            {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},        \
-            ::c10::str(__VA_ARGS__),                                      \
-            false);                                                       \
-        return true;                                                      \
-      }()
-#endif
 
-#define TORCH_WARN_ONCE(...)              \
-  if (::c10::Warning::get_warnAlways()) { \
-    TORCH_WARN(__VA_ARGS__);              \
-  } else {                                \
-    _TORCH_WARN_ONCE(__VA_ARGS__);        \
+#define TORCH_WARN_ONCE(...)                   \
+  if (::c10::WarningUtils::get_warnAlways()) { \
+    TORCH_WARN(__VA_ARGS__);                   \
+  } else {                                     \
+    _TORCH_WARN_ONCE(__VA_ARGS__);             \
   }
 
 // Report an error with a specific argument

@@ -1,19 +1,54 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Parallel.h>
 #include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorUtils.h>
 
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/batch_norm.h>
 #include <ATen/native/Normalization.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_batch_norm_impl_index.h>
+#include <ATen/ops/_batch_norm_impl_index_backward_native.h>
+#include <ATen/ops/_batch_norm_impl_index_native.h>
+#include <ATen/ops/alias.h>
+#include <ATen/ops/batch_norm.h>
+#include <ATen/ops/batch_norm_native.h>
+#include <ATen/ops/batch_norm_update_stats_native.h>
+#include <ATen/ops/cudnn_batch_norm.h>
+#include <ATen/ops/cudnn_batch_norm_backward.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/instance_norm_native.h>
+#include <ATen/ops/linalg_vector_norm.h>
+#include <ATen/ops/mean.h>
+#include <ATen/ops/miopen_batch_norm.h>
+#include <ATen/ops/miopen_batch_norm_backward.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/native_batch_norm.h>
+#include <ATen/ops/native_batch_norm_backward.h>
+#include <ATen/ops/native_batch_norm_backward_native.h>
+#include <ATen/ops/native_batch_norm_native.h>
+#include <ATen/ops/renorm_native.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/sqrt.h>
+#endif
+
 #include <vector>
+#include <c10/core/SymIntArrayRef.h>
 
 static const int MIOPEN_DIM_MAX = 5;
 
@@ -41,14 +76,14 @@ DEFINE_DISPATCH(batch_norm_cpu_backward_stub);
 DEFINE_DISPATCH(renorm_scale_factor_stub);
 
 namespace {
-  void check_dims_match_num_input_features(const char* arg_name, int64_t expected, int64_t actual){
+  void check_dims_match_num_input_features(const char* arg_name, SymInt expected, SymInt actual){
     TORCH_CHECK(actual == expected,
              arg_name, " should contain ", expected, " elements not ", actual);
   }
 
-  static inline Tensor repeat_if_defined(const Tensor& t, int64_t repeat) {
+  static inline Tensor repeat_if_defined(const Tensor& t, SymInt repeat) {
     if (t.defined()) {
-      return t.repeat(repeat);
+      return t.repeat_symint(repeat);
     }
     return t;
   }
@@ -141,8 +176,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     .check_all_same_dtype(false)
     .promote_inputs_to_common_dtype(false)
     .build();
-
-  cpu_kernel(iter, [=](scalar_t input, param_t mean, param_t invstd, param_t weight, param_t bias) {
+  cpu_kernel(iter, [=](scalar_t input, param_t mean, param_t invstd, param_t weight, param_t bias) -> scalar_t {
     return ((input - mean) * invstd) * weight + bias;
   });
   return std::make_tuple(output, save_mean, save_invstd);
@@ -186,6 +220,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     auto _var_sum = at::empty({n_input}, input.options().dtype(dtype));
     auto _mean_a = _mean.accessor<param_t, 1>();
     auto _var_sum_a = _var_sum.accessor<param_t, 1>();
+    auto momentum_ = static_cast<param_t>(momentum);
 
     batch_norm_cpu_collect_stats_stub(kCPU, _mean, _var_sum, input);
 
@@ -195,11 +230,11 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
         save_var_transform_a[f] = VarTransform<accscalar_t>{}(_var_sum_a[f] / n, eps);
 
         if (running_mean.defined()) {
-          running_mean_a[f] = momentum * _mean_a[f] + (1 - momentum) * running_mean_a[f];
+          running_mean_a[f] = momentum_ * _mean_a[f] + (1 - momentum_) * running_mean_a[f];
         }
         if (running_var.defined()) {
-           accscalar_t unbiased_var = _var_sum_a[f] / (n - 1);
-           running_var_a[f] = momentum * unbiased_var + (1 - momentum) * running_var_a[f];
+          accscalar_t unbiased_var = _var_sum_a[f] / (n - 1);
+          running_var_a[f] = momentum_ * unbiased_var + (1 - momentum_) * running_var_a[f];
         }
       }
     });
@@ -442,14 +477,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
-  auto num_features = input.sizes()[1];
+  auto num_features = input.sym_sizes()[1];
 
-  if (input.numel() == 0) {
+  if (input.sym_numel() == 0) {
     Tensor reserve = at::empty({0}, input.options().dtype(kByte));
     auto options = input.options().dtype(
         at::toAccumulateType(input.scalar_type(), /*is_cuda=*/input.is_cuda()));
-    auto save_mean = at::empty({num_features}, options);
-    auto save_invstd = at::empty({num_features}, options);
+    auto save_mean = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
+    auto save_invstd = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
 
     // don't return view of input, don't return empty tensor because it will break gradient chain
     auto out = input.clone();
@@ -460,20 +495,20 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   }
 
   if (running_mean.defined()) {
-    check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
+    check_dims_match_num_input_features("running_mean", num_features, running_mean.sym_numel());
   } else if (!training) {
     AT_ERROR("running_mean must be defined in evaluation mode");
   }
   if (running_var.defined()) {
-    check_dims_match_num_input_features("running_var", num_features, running_var.numel());
+    check_dims_match_num_input_features("running_var", num_features, running_var.sym_numel());
   } else if (!training) {
     AT_ERROR("running_var must be defined in evaluation mode");
   }
   if (weight.defined()) {
-    check_dims_match_num_input_features("weight", num_features, weight.numel());
+    check_dims_match_num_input_features("weight", num_features, weight.sym_numel());
   }
   if (bias.defined()) {
-    check_dims_match_num_input_features("bias", num_features, bias.numel());
+    check_dims_match_num_input_features("bias", num_features, bias.sym_numel());
   }
 
   const bool use_cudnn = (
@@ -485,11 +520,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
       && (input.dim() >= 3)
-      && ((input.size(0) <= 880801 && training) // spatial, training
-          ||(input.size(0) <= 65535 && !training)) //spatial, eval
+      && ((input.sym_size(0) <= 880801 && training) // spatial, training
+          ||(input.sym_size(0) <= 65535 && !training)) //spatial, eval
       && detail::getCUDAHooks().compiledWithCuDNN()
       && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
-      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
+      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L
+      && input.sym_numel() < std::numeric_limits<std::int32_t>::max() // some cuDNN kernels have 32-bit indexing limitations
+      );
 
   if (use_cudnn) {
     auto input_c = input.contiguous(input.suggest_memory_format());
@@ -521,7 +558,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                && cudnn_enabled
                );
 
-  if (use_miopen) {
+  if (use_miopen && input.suggest_memory_format() != MemoryFormat::ChannelsLast && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d) {
     return std::tuple_cat(
              at::miopen_batch_norm(
                input.contiguous(), weight.contiguous(), bias.contiguous(),
@@ -607,32 +644,32 @@ Tensor instance_norm(
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
-  TORCH_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
+ TORCH_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
            "Expected running_mean and running_var to be defined when use_input_stats is false");
-  std::vector<int64_t> shape = input.sizes().vec();
-  int64_t b = input.size(0);
-  int64_t c = input.size(1);
+  std::vector<SymInt> shape = input.sym_sizes().vec();
+  SymInt b = input.sym_size(0);
+  SymInt c = input.sym_size(1);
   shape[1] = b * c;
-  shape[0] = 1;
+  shape[0] = SymInt(1);
 
   Tensor weight_ = repeat_if_defined(weight, b);
   Tensor bias_ = repeat_if_defined(bias, b);
   Tensor running_mean_ = repeat_if_defined(running_mean, b);
   Tensor running_var_ = repeat_if_defined(running_var, b);
 
-  auto input_reshaped = input.contiguous().view(shape);
+  auto input_reshaped = input.contiguous().view_symint(shape);
   auto out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
                             use_input_stats, momentum, eps, cudnn_enabled);
 
   // we alias running_mean and running_var because they are const but we want to modify their data
   if (running_mean.defined()) {
-    at::alias(running_mean).copy_(running_mean_.view({ b, c }).mean(0, false));
+    at::alias(running_mean).copy_(running_mean_.view_symint({ b, c }).mean(0, false));
   }
   if (running_var.defined()) {
-    at::alias(running_var).copy_(running_var_.view({ b, c }).mean(0, false));
+    at::alias(running_var).copy_(running_var_.view_symint({ b, c }).mean(0, false));
   }
 
-  return out.view(input.sizes());
+  return out.view_symint(input.sym_sizes());
 }
 
 std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(

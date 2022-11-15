@@ -1,5 +1,4 @@
 //  Copyright © 2022 Apple Inc.
-
 #include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
@@ -12,6 +11,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/Indexing.h>
 #include <ATen/native/Resize.h>
 #include <ATen/AccumulateType.h>
 #include <torch/library.h>
@@ -20,6 +20,7 @@
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/SmallVector.h>
+#include <ATen/native/IndexKernel.h>
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
@@ -27,6 +28,199 @@
 
 namespace at {
 namespace native {
+
+static
+bool dispatchIndexKernel(TensorIteratorBase& iter,
+                         IntArrayRef index_size,
+                         IntArrayRef index_stride,
+                         bool index_select,
+                         bool accumulate) {
+  using namespace mps;
+
+ if (iter.numel() == 0)
+    return true;
+
+  const Tensor& inputTensor = iter.tensor(1);
+  Tensor outputTensor = iter.tensor(0);
+  id<MTLBuffer> inputBuffer  = getMTLBufferStorage(inputTensor);
+  id<MTLBuffer> outputBuffer = getMTLBufferStorage(outputTensor);
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+
+  dispatch_sync(mpsStream->queue(), ^(){
+    @autoreleasepool {
+    NSError* error = nil;
+      constexpr uint32_t nOffsets = 3;
+      const int64_t num_indices = index_size.size();
+      const uint32_t numThreads = iter.numel();
+      const uint32_t nDim = iter.ndim();
+      const IntArrayRef& iterShape = iter.shape();
+      std::vector<uint32_t> iterShapeData(iterShape.size());
+      std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
+
+      for (const auto i: c10::irange(iterShape.size())) {
+        TORCH_CHECK(i <= UINT32_MAX);
+        iterShapeData[i] = (uint32_t)(iterShape[i]);
+      }
+
+      for (const auto i: c10::irange(nDim)) {
+        for (const auto offset: c10::irange(nOffsets)) {
+          strides[i][offset] = iter.strides(offset)[i];
+        }
+      }
+
+      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+      id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+      id<MTLFunction> kernelDataOffsetsFunction = MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets", nil);
+      id<MTLComputePipelineState> kernelDataOffsetsPSO = [[device newComputePipelineStateWithFunction: kernelDataOffsetsFunction
+                                                                                                error: &error] autorelease];
+      id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength: numThreads * sizeof(simd_uint3)
+                                                             options: 0] autorelease];
+      TORCH_CHECK(kernelDataOffsetsPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
+
+      [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
+      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
+      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
+      [computeEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
+      [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
+      [computeEncoder setBytes:&nOffsets length:sizeof(uint32_t) atIndex:4];
+
+      NSUInteger kernelOffsetsTGSize = kernelDataOffsetsPSO.maxTotalThreadsPerThreadgroup;
+      if (kernelOffsetsTGSize > numThreads)
+          kernelOffsetsTGSize = numThreads;
+
+      MTLSize kernelOffsetsThreadGroupSize = MTLSizeMake(kernelOffsetsTGSize, 1, 1);
+      [computeEncoder dispatchThreads: gridSize
+                threadsPerThreadgroup: kernelOffsetsThreadGroupSize];
+
+      MTLFunctionConstantValues* constantValues = [[MTLFunctionConstantValues new] autorelease];
+      [constantValues setConstantValue: &num_indices type:MTLDataTypeUInt atIndex:0];
+
+      std::string indexFunction = getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate);
+      id<MTLFunction> indexKernelFunction = MPSDevice::getInstance()->metalIndexingFunction(indexFunction, constantValues);
+      id<MTLArgumentEncoder> argumentEncoder = [[indexKernelFunction newArgumentEncoderWithBufferIndex:0] autorelease];
+      NSUInteger argumentBufferLength = argumentEncoder.encodedLength;
+      id<MTLBuffer> indexAB = [[device newBufferWithLength:argumentBufferLength options:0] autorelease];
+      [argumentEncoder setArgumentBuffer:indexAB offset:0];
+
+      for (uint32_t idx = 0; idx < num_indices; idx++) {
+        const Tensor& indexTensor = iter.tensor(idx+2);
+        [argumentEncoder setBuffer: getMTLBufferStorage(indexTensor)
+                            offset: indexTensor.storage_offset() * indexTensor.element_size()
+                           atIndex: idx];
+        TORCH_CHECK(indexTensor.scalar_type() == ScalarType::Long, "index(): Expected dtype int64 for Index");
+      }
+
+      // FIXME: PSO needs to be cached
+      id<MTLComputePipelineState> indexSelectPSO = [[device newComputePipelineStateWithFunction: indexKernelFunction
+                                                                                          error: &error] autorelease];
+      TORCH_CHECK(indexSelectPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
+
+      for (uint32_t idx = 0; idx < num_indices; idx++) {
+        const Tensor& indexTensor = iter.tensor(idx+2);
+        [computeEncoder useResource:getMTLBufferStorage(indexTensor) usage:MTLResourceUsageRead];
+      }
+
+      [computeEncoder setComputePipelineState:indexSelectPSO];
+      [computeEncoder setBuffer:indexAB offset:0 atIndex:0];
+      [computeEncoder setBytes:index_size.data() length:sizeof(index_size[0]) * index_size.size() atIndex:1];
+      [computeEncoder setBytes:index_stride.data() length:sizeof(index_stride[0]) * index_stride.size() atIndex:2];
+      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
+      [computeEncoder setBuffer:inputBuffer offset:inputTensor.storage_offset() * inputTensor.element_size() atIndex:4];
+      [computeEncoder setBuffer:outputBuffer offset:outputTensor.storage_offset() * outputTensor.element_size() atIndex:5];
+
+      NSUInteger tgSize = indexSelectPSO.maxTotalThreadsPerThreadgroup;
+      if (tgSize > numThreads)
+          tgSize = numThreads;
+
+      MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
+      [computeEncoder dispatchThreads: gridSize
+                threadsPerThreadgroup: threadGroupSize];
+
+      [computeEncoder endEncoding];
+      mpsStream->commit(true);
+    }
+  });
+
+  return true;
+}
+
+static void validateInputData(const TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, const std::string& op, bool accumulate) {
+  using namespace mps;
+
+  int64_t num_indices = index_size.size();
+  TORCH_CHECK(num_indices <= 16, "Current limit allows up to 16 indices to be used in MPS indexing kernels");
+
+  AT_ASSERT(num_indices == index_stride.size());
+  AT_ASSERT(num_indices == iter.ntensors() - 2);
+  const Tensor& inputTensor = iter.tensor(1);
+
+  if (accumulate) {
+    // No atomic support for the rest of dtypes
+    TORCH_CHECK(inputTensor.scalar_type() == ScalarType::Float ||
+                inputTensor.scalar_type() == ScalarType::Int   ||
+                inputTensor.scalar_type() == ScalarType::Bool);
+  } else {
+    TORCH_CHECK(c10::isIntegralType(inputTensor.scalar_type(), /*includesBool=*/true) ||
+                inputTensor.scalar_type() == ScalarType::Float ||
+                inputTensor.scalar_type() == ScalarType::Half,
+                getMPSTypeString(inputTensor.scalar_type()) + std::string(" not supported for index.Tensor_out"));
+  }
+}
+
+void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+  using namespace mps;
+  @autoreleasepool {
+    validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
+    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/true, /*accumulate=*/false);
+  }
+}
+
+void index_put_kernel_mps(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
+  using namespace mps;
+  @autoreleasepool {
+    validateInputData(iter, index_size, index_stride, "index_put_impl", accumulate);
+    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/false, accumulate);
+  }
+}
+
+static Tensor & masked_select_out_mps_impl(Tensor & result, const Tensor & self, const Tensor & mask) {
+  NoNamesGuard guard;
+
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
+              "masked_select: expected BoolTensor or ByteTensor for mask");
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(),
+              "masked_select(): self and result must have the same scalar type");
+
+  auto mask_temp = (mask.dim() == 0)
+    ? c10::MaybeOwned<Tensor>::owned(mask.unsqueeze(0))
+    : c10::MaybeOwned<Tensor>::borrowed(mask);
+  auto self_temp = (self.dim() == 0)
+    ? c10::MaybeOwned<Tensor>::owned(self.unsqueeze(0))
+    : c10::MaybeOwned<Tensor>::borrowed(self);
+
+  // Cannot reassign to mask_temp and self_temp here! if they are
+  // owning and expand_outplace returns a borrow, the returned borrow
+  // would dangle.
+  auto mask_self_expanded = expand_outplace(*mask_temp, *self_temp);
+  at::index_out(
+      result, *std::get<1>(mask_self_expanded),
+      c10::List<c10::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))}));
+
+  return result;
+}
+
+Tensor masked_select_mps(const Tensor & self, const Tensor & mask) {
+  namedinference::compute_broadcast_outnames(self, mask);
+  Tensor result = at::empty({0}, self.options());
+  return masked_select_out_mps_impl(result, self, mask);
+}
+
+Tensor & masked_select_out_mps(const Tensor & self, const Tensor & mask, Tensor & result) {
+  namedinference::compute_broadcast_outnames(self, mask);
+  return masked_select_out_mps_impl(result, self, mask);
+}
 
 Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
   using namespace mps;
@@ -42,7 +236,7 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
   auto total_dims = self.dim();
   // It wraps the dims and checks that there are no repeated dims
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
-  NSMutableArray<NSNumber*> * ns_dims = [NSMutableArray<NSNumber*> new];
+  NSMutableArray<NSNumber*> * ns_dims = [[NSMutableArray<NSNumber*> new] autorelease];
 
   for (const auto i : c10::irange(total_dims)) {
     if(flip_dims_b[i] && self.size(i) > 1 && self.stride(i) != 0) {
@@ -161,11 +355,6 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
           MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
           MPSGraphTensor* sourceTensor = mpsGraphRankedPlaceHolder(mpsGraph, source);
           MPSGraphTensor* alphaTensor = mpsGraphScalarPlaceHolder(mpsGraph, alpha_f);
-          MPSGraphTensor* inputSlice = [mpsGraph gatherWithUpdatesTensor:inputTensor
-                                                           indicesTensor:indexTensor
-                                                                    axis:dim
-                                                         batchDimensions:0
-                                                                    name:nil];
           MPSGraphTensor* alphaSourceSlice = [mpsGraph multiplicationWithPrimaryTensor:sourceTensor
                                                                        secondaryTensor:alphaTensor
                                                                                   name:nil];
@@ -190,12 +379,13 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
     Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
     Placeholder sourcePlaceholder = Placeholder(cachedGraph->sourceTensor_, source);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+    MPSScalar alpha_scalar = getMPSScalar(alpha_f, source.scalar_type());
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
       indexPlaceholder.getMPSGraphTensor() : indexPlaceholder.getMPSGraphTensorData(),
       sourcePlaceholder.getMPSGraphTensor() : sourcePlaceholder.getMPSGraphTensorData(),
-      cachedGraph->alphaTensor_ : getMPSGraphTensorFromScalar(stream, alpha_f, MPSDataTypeFloat32)
+      cachedGraph->alphaTensor_ : getMPSGraphTensorFromScalar(stream, alpha_scalar),
     };
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
@@ -455,11 +645,14 @@ Tensor embedding_dense_backward_mps(
 
             MPSGraphTensor* indicesTensor = native_mps::mpsGraphUnrankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(indices.scalar_type()));
 
-            MPSGraphTensor *reshapedIndicesTensor = [mpsGraph  expandDimsOfTensor:indicesTensor
-                             axes:@[@-1]
-                             name:nil];
+            MPSGraphTensor* reshapedIndicesTensor = indicesTensor;
 
-            MPSGraphTensor *outgoingGradTensor;
+            if (num_indices_dims != 0)
+              reshapedIndicesTensor = [mpsGraph  expandDimsOfTensor:indicesTensor
+                              axes:@[@-1]
+                              name:nil];
+
+            MPSGraphTensor* outgoingGradTensor;
             outgoingGradTensor = [mpsGraph scatterNDWithUpdatesTensor:incomingGradTensor
                             indicesTensor:reshapedIndicesTensor
                                     shape:native_mps::getMPSShape(IntArrayRef(outgoing_gradient_shape.data(), outgoing_gradient_shape.size()))
@@ -499,5 +692,7 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Tensor & valu
   return masked_fill__mps(self, mask, value.item());
 }
 
-}
-}
+REGISTER_DISPATCH(index_stub, &index_kernel_mps);
+REGISTER_DISPATCH(index_put_stub, &index_put_kernel_mps);
+} // native
+} // at

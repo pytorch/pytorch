@@ -127,9 +127,9 @@ Tensor FunctionalInverses::_neg_view_copy_inverse(const Tensor& base, const Tens
     }
 }
 
-Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) {
+Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
     // Pessimism: we can't reapply views for as_strided_scatter.
-    return base.as_strided_scatter(mutated_view, size, stride, storage_offset);
+    return base.as_strided_scatter_symint(mutated_view, size, stride, storage_offset);
 }
 
 Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -137,19 +137,15 @@ Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tenso
     return base.diagonal_scatter(mutated_view, offset, dim1, dim2);
 }
 
-Tensor FunctionalInverses::expand_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef size, bool implicit) {
-    return at::sum_to(mutated_view, base.sizes(),/*always_return_non_view=*/!reapply_views);
-}
-
-Tensor FunctionalInverses::expand_copy_SymInt_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, c10::SymIntArrayRef size, bool implicit) {
-    return at::sum_to(mutated_view, c10::asIntArrayRefSlow(base.sym_sizes()),/*always_return_non_view=*/!reapply_views);
+Tensor FunctionalInverses::expand_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, bool implicit) {
+    return at::sum_to(mutated_view, base.sym_sizes(),/*always_return_non_view=*/!reapply_views);
 }
 
 Tensor FunctionalInverses::permute_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef dims) {
     return at::functionalization::permute_copy_inverse(mutated_view, dims, reapply_views);
 }
 
-Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef size, at::IntArrayRef stride) {
+Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, at::SymIntArrayRef stride) {
     // Note that I'm directly calling reshape(), and ignoring the strides.
     // _reshape_alias() isn't available from user code, and is an implementation detail of reshape().
     // Specifically, passing in the strides directly can get us into trouble in cases like:
@@ -157,9 +153,9 @@ Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const
     // When we eventually run the _reshape_alias_inverse() call here, if we were to pass in both sizes and strides,
     // The call would fail because `mutated_view` doesn't have enough bytes of storage.
     if (reapply_views) {
-      return at::_reshape_alias(mutated_view, base.sizes(), base.strides());
+      return at::_reshape_alias_symint(mutated_view, base.sym_sizes(), base.sym_strides());
     } else {
-      return at::_reshape_alias_copy(mutated_view, base.sizes(), base.strides());
+      return at::_reshape_alias_copy_symint(mutated_view, base.sym_sizes(), base.sym_strides());
     }
 }
 
@@ -176,36 +172,36 @@ Tensor FunctionalInverses::lift_fresh_copy_inverse(const Tensor& base, const Ten
     return mutated_view;
 }
 
-Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.slice_scatter(mutated_view, dim, start, end, step);
+    return base.slice_scatter_symint(mutated_view, dim, start, end, step);
 }
 
-Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, int64_t split_size, int64_t dim) {
+Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
     // It would be nice if this logic could be re-used from autograd's split_backward(), but I don't think it can.
     // For functionalization, we have only have one of the tensors from the TensorList outputed by split(), and we want to layer i
     // on top of the base tensor.
     // For autograd, we have all of the tensors outputted by split() and we just want to stack them.
-    dim = at::maybe_wrap_dim(dim, base.sizes().size());
-    auto dim_size = base.size(dim);
-    auto start = mutated_view_idx * split_size;
-    auto end = start + split_size;
+    dim = at::maybe_wrap_dim(dim, base.dim());
+    auto dim_size = base.sym_size(dim);
+    auto start = split_size * mutated_view_idx;
+    auto end = split_size + start;
     if (end > dim_size) end = dim_size;
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.slice_scatter(mutated_view, dim, start, end, 1);
+    return base.slice_scatter_symint(mutated_view, dim, start, end, 1);
 }
 
-Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, at::IntArrayRef split_sizes, int64_t dim) {
-    dim = at::maybe_wrap_dim(dim, base.sizes().size());
-    auto dim_size = base.size(dim);
-    int64_t start = 0;
+Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymIntArrayRef split_sizes, int64_t dim) {
+    dim = at::maybe_wrap_dim(dim, base.dim());
+    auto dim_size = base.sym_size(dim);
+    c10::SymInt start = 0;
     for (auto i = 0; i < mutated_view_idx; ++i) {
         start += split_sizes[i];
     }
     auto end = start + split_sizes[mutated_view_idx];
     if (end > dim_size) end = dim_size;
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.slice_scatter(mutated_view, dim, start, end, 1);
+    return base.slice_scatter_symint(mutated_view, dim, start, end, 1);
 }
 
 Tensor FunctionalInverses::squeeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
@@ -230,6 +226,11 @@ Tensor FunctionalInverses::transpose_copy_int_inverse(const Tensor& base, const 
     } else {
       return transpose_copy(mutated_view, dim0, dim1);
     }
+}
+
+Tensor FunctionalInverses::_nested_view_from_buffer_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, const Tensor& nested_size_tensor, const Tensor& nested_stride_tensor, IntArrayRef offsets) {
+    TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_buffer() during the functionalization pass. For now, nested tensors aren't supported during functionalization");
+    return Tensor();
 }
 
 Tensor FunctionalInverses::unsqueeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim) {
@@ -291,13 +292,14 @@ Tensor FunctionalInverses::unbind_copy_int_inverse(const Tensor& base, const Ten
     return base.select_scatter(mutated_view, dim, mutated_view_idx);
 }
 
-Tensor FunctionalInverses::view_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef size) {
+Tensor FunctionalInverses::view_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size) {
     if (reapply_views) {
-      return mutated_view.view(base.sizes());
+      return mutated_view.view_symint(base.sym_sizes());
     } else {
-      return at::view_copy(mutated_view, base.sizes());
+      return at::view_copy_symint(mutated_view, base.sym_sizes());
     }
 }
+
 
 Tensor FunctionalInverses::view_copy_dtype_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::ScalarType dtype) {
     if (reapply_views) {

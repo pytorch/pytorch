@@ -212,7 +212,7 @@ bool PReluGradientOp<float, CUDAContext>::RunOnDevice() {
 
   CAFFE_ENFORCE(&Y != &X, "Cannot backpropagate through an in-place PReLU");
 
-  DCHECK_EQ(dY.numel(), Y.numel());
+  TORCH_DCHECK_EQ(dY.numel(), Y.numel());
   auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   auto* dW = Output(1, W.sizes(), at::dtype<float>());
 

@@ -7,7 +7,7 @@
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-echo "Testing pytorch (distributed only)"
+echo "Testing pytorch"
 if [ -n "${CI}" ]; then
   # TODO move this to docker
   # Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
@@ -48,4 +48,6 @@ time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/
 time python test/run_test.py --verbose -i distributed/_shard/sharded_optim/test_sharded_optim
 time python test/run_test.py --verbose -i distributed/_shard/test_partial_tensor
 time python test/run_test.py --verbose -i distributed/_shard/test_replicated_tensor
+# Other tests
+time python test/run_test.py --verbose -i test_cuda_primary_ctx
 assert_git_not_dirty

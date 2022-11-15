@@ -5,14 +5,18 @@ from typing import Any, Dict, Union, Tuple
 
 import torch
 from . import is_initialized, _get_device_index, _lazy_init
+
+from ._memory_viz import segments as _segments, memory as _memory
+
 from torch.types import Device
+from torch import _C
 
 __all__ = ["caching_allocator_alloc", "caching_allocator_delete", "set_per_process_memory_fraction",
            "empty_cache", "memory_stats", "memory_stats_as_nested_dict", "reset_accumulated_memory_stats",
            "reset_peak_memory_stats", "reset_max_memory_allocated", "reset_max_memory_cached",
            "memory_allocated", "max_memory_allocated", "memory_reserved", "max_memory_reserved",
            "memory_cached", "max_memory_cached", "memory_snapshot", "memory_summary", "list_gpu_processes",
-           "mem_get_info"]
+           "mem_get_info", "get_allocator_backend"]
 
 def _host_allocator():
     _lazy_init()
@@ -173,7 +177,7 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
 
     The caching allocator can be configured via ENV to not split blocks larger than a
     defined size (see Memory Management section of the Cuda Semantics documentation).
-    This helps avoid memory framentation but may have a performance
+    This helps avoid memory fragmentation but may have a performance
     penalty. Additional outputs to assist with tuning and evaluating impact:
 
     - ``"max_split_size"``: blocks above this size will not be split.
@@ -190,6 +194,10 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
     .. note::
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
+
+    .. note::
+        With :ref:`backend:cudaMallocAsync<cuda-memory-envvars>`, some stats are not
+        meaningful, and are always reported as zero.
     """
     result = []
 
@@ -412,7 +420,7 @@ def memory_snapshot():
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
-    return torch._C._cuda_memorySnapshot()
+    return torch._C._cuda_memorySnapshot()['segments']
 
 
 def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False) -> str:
@@ -590,3 +598,56 @@ def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
         device = torch.cuda.current_device()
     device = _get_device_index(device)
     return torch.cuda.cudart().cudaMemGetInfo(device)
+
+def _record_memory_history(enabled: bool, record_context=True,
+                           trace_alloc_max_entries=1,
+                           trace_alloc_record_context=False, device: Union[Device, int] = None,
+                           _enable_expensive_cpp=False):
+    """Enables recording of Python stack traces to be associated with memory
+    allocations, so you can tell what allocated any piece of memory in
+    :func:`torch.memory_snapshot`.
+
+    The Python trace collection is fast (2us per trace), so you may consider
+    enabling this on production jobs if you anticipate ever having to debug
+    memory issues.
+
+    .. warning:
+        The :attr:`_enable_expensive_cpp` arguments lets you enable also
+        collecting C++ stack traces.  This collection is VERY SLOW and should
+        only be used if you are debugging framework problems on a minified
+        example.  In principle, it should be possible to implement fast C++
+        stack trace collection; file an issue with us if you need it.
+    """
+    with torch.cuda.device(device):
+        _C._cuda_recordMemoryHistory(enabled, record_context, _enable_expensive_cpp,
+                                     trace_alloc_max_entries, trace_alloc_record_context)
+
+def _snapshot(device: Union[Device, int] = None):
+    with torch.cuda.device(device):
+        return _C._cuda_memorySnapshot()
+
+def _save_segment_usage(filename='output.svg', snapshot=None):
+    if snapshot is None:
+        snapshot = _snapshot()
+    with open(filename, 'w') as f:
+        f.write(_segments(snapshot))
+
+def _save_memory_usage(filename='output.svg', snapshot=None):
+    if snapshot is None:
+        snapshot = _snapshot()
+    with open(filename, 'w') as f:
+        f.write(_memory(snapshot))
+
+def _set_allocator_settings(env: str):
+    return torch._C._cuda_cudaCachingAllocator_set_allocator_settings(env)
+
+def get_allocator_backend() -> str:
+    r"""Returns a string describing the active allocator backend as set by
+    ``PYTORCH_CUDA_ALLOC_CONF``. Currently available backends are
+    ``native`` (PyTorch's native caching allocator) and `cudaMallocAsync``
+    (CUDA's built-in asynchronous allocator).
+
+    .. note::
+        See :ref:`cuda-memory-management` for details on choosing the allocator backend.
+    """
+    return torch._C._cuda_getAllocatorBackend()

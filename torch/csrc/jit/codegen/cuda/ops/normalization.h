@@ -38,6 +38,11 @@ struct BackwardRMSNormResult {
   TensorView* grad_weight = nullptr;
 };
 
+struct VarMeanResult {
+  TensorView* var = nullptr;
+  TensorView* mean = nullptr;
+};
+
 TORCH_CUDA_CU_API TensorView* mean(
     TensorView* x,
     const std::vector<int>& dims,
@@ -50,6 +55,12 @@ TORCH_CUDA_CU_API TensorView* variance(
     bool keepdim);
 
 TORCH_CUDA_CU_API TensorView* variance(
+    TensorView* x,
+    const std::vector<int>& dims,
+    int64_t correction,
+    bool keepdim);
+
+TORCH_CUDA_CU_API VarMeanResult variance_mean(
     TensorView* x,
     const std::vector<int>& dims,
     int64_t correction,

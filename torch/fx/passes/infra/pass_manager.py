@@ -1,4 +1,5 @@
 import inspect
+import logging
 from queue import Queue
 from functools import wraps
 from typing import Callable, Dict, List
@@ -8,30 +9,10 @@ from torch.fx.graph_module import GraphModule
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 
-__all__ = ['inplace_wrapper', 'pass_result_wrapper', 'this_before_that_pass_constraint', 'PassManager']
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)
 
-@compatibility(is_backward_compatible=False)
-def inplace_wrapper(fn: Callable) -> Callable:
-    """
-    Convenience wrapper for passes which modify an object inplace. This
-    wrapper makes them return a PassResult containing the modified object and
-    True for the "modified" flag.
-
-    Args:
-        fn (Callable[Module, Any])
-
-    Returns:
-        wrapped_fn (Callable[Module, PassResult])
-    """
-    if fn is None:
-        return None
-
-    @wraps(fn)
-    def wrapped_fn(gm):
-        fn(gm)
-        return PassResult(gm, True)
-
-    return wrapped_fn
+__all__ = ['pass_result_wrapper', 'this_before_that_pass_constraint', 'PassManager']
 
 @compatibility(is_backward_compatible=False)
 def pass_result_wrapper(fn: Callable) -> Callable:
@@ -51,8 +32,16 @@ def pass_result_wrapper(fn: Callable) -> Callable:
 
     @wraps(fn)
     def wrapped_fn(gm):
-        gm = fn(gm)
-        return PassResult(gm, True)
+        res = fn(gm)
+        if res is None:
+            return PassResult(gm, True)
+        if isinstance(res, PassResult):
+            return res
+        elif isinstance(res, nn.Module):
+            return PassResult(res, True)
+
+    if not inspect.isfunction(fn):
+        wrapped_fn.__name__ = type(fn).__name__
 
     return wrapped_fn
 
@@ -172,6 +161,8 @@ class PassManager:
         steps (int): Max number of times we run the passes (default = 1).
         run_checks_after_each_pass (bool): Whether to run checks and linting
             after each pass
+        suppress_check_failures (bool): Whether to raise errors when running
+            checks
     """
 
     passes: List[Callable[[nn.Module], PassResult]] = []
@@ -273,18 +264,30 @@ class PassManager:
             modified = False
 
             # Run the set of passes on the graph module
-            for fn in self.passes:
-                res = fn(module)
+            for i, fn in enumerate(self.passes):
+                logger.debug(f"Running pass \'{fn.__name__}\'")
 
-                module = res.graph_module
-                modified = modified or res.modified
+                try:
+                    res = fn(module)
 
-                if isinstance(module, GraphModule):
-                    module.recompile()
+                    if not isinstance(res, PassResult) and not hasattr(res, "graph_module"):
+                        raise TypeError(f"The result of the pass {fn.__name__} should be type PassResult. \
+                                          Please wrap it with pass_result_wrapper()")
+                    module = res.graph_module
+                    modified = modified or res.modified
 
-                # Check graph invariants
-                if self.run_checks_after_each_pass:
-                    self.check(module)
+                    if isinstance(module, GraphModule):
+                        logger.debug(f"Graph after pass \'{fn.__name__}\':", module.graph)
+                        module.recompile()
+
+                    # Check graph invariants
+                    if self.run_checks_after_each_pass:
+                        self.check(module)
+
+                except Exception as e:
+                    prev_pass_names = [p.__name__ for p in self.passes[:i]]
+                    msg = f"An error occurred when running the \'{fn.__name__}\' pass after the following passes: {prev_pass_names}"
+                    raise Exception(msg) from e
 
             # If the graph no longer changes, then we can stop running these passes
             overall_modified = overall_modified or modified

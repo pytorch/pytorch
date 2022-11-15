@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
@@ -17,6 +18,11 @@ bool is_zero_sized_tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
 bool is_cpu_scalar(const at::Tensor& tensor);
 bool is_cpu_scalar(const c10::TensorType& tensor_type);
 
+// TODO: merge these two
+// check if input is compatible with 32b index mode
+int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs);
+KernelIndexMode collectIndexMode(const at::ArrayRef<at::IValue>& inputs);
+
 //! Types of debug print-outs
 //!
 //! These can be set through the `PYTORCH_NVFUSER_DUMP` environment variable
@@ -24,11 +30,14 @@ bool is_cpu_scalar(const c10::TensorType& tensor_type);
 enum class DebugDumpOption {
   FusionIr, //!< Dump the Fusion IR before lowering
   FusionIrMath, //!< Dump just the compute (math) part of the Fusion IR
+  FusionIrPresched, //!< Dump the Fusion IR before it is scheduled.
   KernelIr, //!< Dump the compiler Kernel IR
   ComputeAtMap, //!< Dump the computeAt map
   CudaKernel, //!< Dump the generated CUDA C++ kernel code
   CudaFull, //!< Dump the complete CUDA C++ code
   CudaToFile, //!< Dump CUDA Strings to File
+  DebugInfo, //!< Embed line info and debug info to compiled kernel, and dump
+             //!< the full CUDA C++ code
   LaunchParam, //!< Dump the Launch parameters of kernel
   FusionSegments, //!< Dump Segmented Fusion Graph
   FusionSegmenterLog, //!< Dump Detailed Segmenter Logging
@@ -42,8 +51,16 @@ enum class DebugDumpOption {
   SchedulerDebug, //! Dump scheduler heuristic parameters
   ParallelDimensions, //!< Dump known parallel dimensions
   Halo, //! Halo information of tensors
-  PerfDebugVerbose //! When running kernels, print verbose information
-                   //! associated with what's running
+  PerfDebugVerbose, //! When running kernels, print verbose information
+                    //! associated with what's running
+  PythonDefinition, //! Python Frontend Fusion Definition.
+  PythonFrontendDebug, //! Python Frontend debug information.
+  TransformPropagator, //! When running TransformPropagator, print propagation
+                       //! path and replay result
+  Cubin, //! Dump compiled CUBIN
+  Ptx, //! Dump compiled PTX
+  BankConflictInfo, //! Dump bank confliction info
+  SyncMap //! RAW dependency info
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
@@ -54,15 +71,16 @@ TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
 //!
 enum class DisableOption {
   ArchCheck, //! Disable hardware-specific checks to enable cross arch debug
+  CompileToSass, //! Disable direct compilation to sass so the ptx can be
+                 //! examined
   Fallback, //! Disable fallback
   Fma, //! Disable FMA instructions
   IndexHoist, //! Disable index hoisting
   Nvtx, //! Disable NVTX instrumentation
-  PredicateElimination, //! Disable predicate elimination
-  UnrollWithRng //! Disable unrolling for kernels with RNG in them
+  PredicateElimination //! Disable predicate elimination
 };
 
-TORCH_CUDA_CU_API bool isDisabled(DisableOption option);
+TORCH_CUDA_CU_API bool isOptionDisabled(DisableOption option);
 
 //! Types of features to enable
 //!
@@ -72,10 +90,10 @@ enum class EnableOption {
   Complex, //! Enable complex support on python
   KernelProfile, //! Enable intra-kernel performance profiling
   LinearDecomposition, //! Enable linear-bias decomposition
-  ConvDecomposition //! Enable conv-bias decomposition
+  ConvDecomposition, //! Enable conv-bias decomposition
 };
 
-TORCH_CUDA_CU_API bool isEnabled(EnableOption option);
+TORCH_CUDA_CU_API bool isOptionEnabled(EnableOption option);
 
 // Check if fallback path should be used which will dispatch to eagermode if any
 // errors are encountered. Helpful for debugging.

@@ -1,0 +1,93 @@
+name: Build Official Docker Images
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - Dockerfile
+      - docker.Makefile
+      - .github/workflows/docker-release.yml
+  push:
+    branches:
+      - nightly
+    tags:
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - ciflow/nightly/*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+env:
+  BUILD_PROGRESS: plain
+  BUILD_TYPE: official
+  DOCKER_ORG: pytorch
+  DOCKER_REGISTRY: ghcr.io
+  NO_BUILD_SUFFIX: true
+  USE_BUILDX: 1
+  WITH_PUSH: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
+
+jobs:
+  build:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    runs-on: [self-hosted, linux.2xlarge]
+    timeout-minutes: 240
+    strategy:
+      matrix:
+        include:
+          # nvidia specific images don't exist for arm64 so only build the runtime image
+          - image_type: runtime
+            platform: linux/arm64,linux/amd64
+          - image_type: devel
+            platform: linux/amd64
+    env:
+      BUILD_IMAGE_TYPE: ${{ matrix.image_type }}
+      BUILD_PLATFORMS: ${{ matrix.platform }}
+    steps:
+      # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) required for git merge-base
+      - name: Checkout PyTorch
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to GitHub Container Registry
+        if: ${{ env.WITH_PUSH == 'true' }}
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: pytorch
+          password: ${{ secrets.GHCR_PAT }}
+      # Setup multi-arch image builds
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+        env:
+          QEMU_BINARY_PATH: ${{ runner.temp }}/bin
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Setup job specific variables
+        run: |
+          set -eou pipefail
+          # To get QEMU binaries in our PATh
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+          # Generate PyTorch version to use
+          echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py)" >> "${GITHUB_ENV}"
+      - name: Setup nightly specific variables
+        if: ${{ github.event.ref == 'refs/heads/nightly' }}
+        run: |
+          # Use nightly image if building for nightly
+          echo "DOCKER_IMAGE=pytorch-nightly" >> "${GITHUB_ENV}"
+      - name: Run docker build / push
+        # WITH_PUSH is used here to determine whether or not to add the --push flag
+        run: |
+          make -f docker.Makefile "${BUILD_IMAGE_TYPE}-image"
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()

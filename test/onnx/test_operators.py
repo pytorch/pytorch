@@ -1,5 +1,11 @@
 # Owner(s): ["module: onnx"]
 
+"""
+Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
+          --no-onnx: no onnx python dependency
+          --produce-onnx-test-data: generate onnx test data
+          --accept: accept onnx updates and overwrite models
+"""
 import glob
 import inspect
 import io
@@ -7,6 +13,9 @@ import itertools
 import os
 import shutil
 import tempfile
+
+# Full diff for expect files
+import unittest
 
 import torch
 import torch.nn as nn
@@ -29,15 +38,6 @@ from torch.onnx.symbolic_helper import (
 )
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfCaffe2, skipIfNoLapack
-
-"""Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
-          --no-onnx: no onnx python dependence
-          --produce-onnx-test-data: generate onnx test data
-          --accept: accept onnx updates and overwrite models
-"""
-
-# Full diff for expect files
-import unittest
 
 unittest.TestCase.maxDiff = None
 
@@ -194,6 +194,16 @@ class TestOperators(common_utils.TestCase):
     def test_rsub(self):
         x = torch.randn(2, 3, requires_grad=True).double()
         self.assertONNX(lambda x: 1 - x, (x,))
+
+    def test_mul_bool(self):
+        x = torch.tensor([True, False, True, False])
+        y = torch.tensor([True, True, False, False])
+        self.assertONNX(lambda x, y: torch.mul(x, y), (x, y))
+
+    def test_mul_fp_bool(self):
+        x = torch.tensor([9.4, 1.7, 3.6])
+        y = torch.tensor([True, True, False])
+        self.assertONNX(lambda x, y: torch.mul(x, y), (x, y))
 
     def test_transpose(self):
         x = torch.tensor([[0.0, 1.0], [2.0, 3.0]], requires_grad=True)
@@ -729,10 +739,6 @@ class TestOperators(common_utils.TestCase):
     def test_empty_like(self):
         x = torch.randn(5, 8, requires_grad=True)
         self.assertONNX(lambda x: torch.empty_like(x), x)
-
-    def test_empty_like_opset7(self):
-        x = torch.randn(5, 8, requires_grad=True)
-        self.assertONNX(lambda x: torch.empty_like(x), x, opset_version=7)
 
     def test_zeros_like(self):
         x = torch.randn(5, 8, requires_grad=True)

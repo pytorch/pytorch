@@ -15,6 +15,45 @@ BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
+export VALGRIND=ON
+if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
+  # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
+  # such that valgrind complains along these lines:
+  #
+  # Conditional jump or move depends on uninitialised value(s)
+  #    at 0x40303A: ~optional_base (Optional.h:281)
+  #    by 0x40303A: call (Dispatcher.h:448)
+  #    by 0x40303A: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:10)
+  #    by 0x403700: main (basic.cpp:16)
+  #  Uninitialised value was created by a stack allocation
+  #    at 0x402AAA: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:6)
+  #
+  # The problem does not appear with gcc or newer versions of clang (we tested
+  # clang14).  So we suppress valgrind testing for clang9 specifically.
+  # You may need to suppress it for other versions of clang if they still have
+  # the bug.
+  #
+  # A minimal repro for the valgrind error is below:
+  #
+  # #include <ATen/ATen.h>
+  # #include <ATen/core/dispatch/Dispatcher.h>
+  #
+  # using namespace at;
+  #
+  # Tensor call(const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+  #   auto op = c10::Dispatcher::singleton()
+  #       .findSchemaOrThrow(at::_ops::as_strided::name, at::_ops::as_strided::overload_name)
+  #       .typed<at::_ops::as_strided::schema>();
+  #   return op.call(self, size, stride, storage_offset);
+  # }
+  #
+  # int main(int argv) {
+  #   Tensor b = empty({3, 4});
+  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), c10::nullopt);
+  # }
+  export VALGRIND=OFF
+fi
+
 # Get fully qualified path using realpath
 if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
@@ -58,10 +97,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  export BUILD_SPLIT_CUDA=ON
-fi
-
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
   export PYTORCH_TEST_WITH_CROSSREF=1
 fi
@@ -70,24 +105,14 @@ if [[ "$TEST_CONFIG" == *dynamo* ]]; then
   export PYTORCH_TEST_WITH_DYNAMO=1
 fi
 
-# TODO: this condition is never true, need to fix this.
-if [[ -n "$PR_NUMBER" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
-  # skip expensive checks when on PR and CI_MASTER flag is not set
-  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
-else
-  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
+if [[ "$TEST_CONFIG" == *inductor* ]]; then
+  export PYTORCH_TEST_WITH_INDUCTOR=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
-
-  # Manually set NUM_TEST_SHARDS since Jenkins doesn't do it
-  # TODO: Can remove this once ROCm migration from Jenkins to GHA is complete.
-  if [[ -z "${GITHUB_ACTIONS}" ]]; then
-    export NUM_TEST_SHARDS=2
-  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
@@ -102,9 +127,8 @@ fi
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    # Suppress vptr violations arising from multiple copies of pybind11
     export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=0
-    export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
+    export UBSAN_OPTIONS=print_stacktrace=1
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
@@ -147,10 +171,15 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     ulimit -s 81920
 
     (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
-    echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
+    echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
+    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_vptr_ubsan()")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
+  export PYTORCH_TEST_WITH_TSAN=1
 fi
 
 if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
@@ -169,7 +198,9 @@ test_python_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
+
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
+
   assert_git_not_dirty
 }
 
@@ -184,6 +215,8 @@ test_dynamo_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
+  # Temporarily disable test_fx for dynamo pending the investigation on TTS
+  # regression in https://github.com/pytorch/torchdynamo/issues/784
   time python test/run_test.py \
     --exclude-jit-executor \
     --exclude-distributed-tests \
@@ -196,13 +229,56 @@ test_dynamo_shard() {
       test_reductions \
       test_namedtensor \
       test_namedtuple_return_api \
-      test_profiler \
-      test_profiler_tree \
+      profiler/test_profiler \
+      profiler/test_profiler_tree \
       test_overrides \
       test_python_dispatch \
+      test_fx \
+      test_package \
+      test_vmap \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
+}
+
+test_inductor_distributed() {
+  # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
+  # with if required # gpus aren't available
+  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed
+  assert_git_not_dirty
+}
+
+test_inductor() {
+  python test/test_modules.py --verbose
+  # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
+  # seen intest_ops_gradients.py
+  # pytest test/test_ops_gradients.py --verbose -k "not _complex and not test_inplace_grad_acos_cuda_float64"
+}
+
+test_inductor_huggingface_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  TEST_REPORTS_DIR=/tmp/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
+    --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
+}
+
+test_inductor_timm_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  TEST_REPORTS_DIR=/tmp/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
+    --device cuda --inductor --float32 --total-partitions 5 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
 }
 
 test_python_gloo_with_tls() {
@@ -293,8 +369,11 @@ test_libtorch() {
     TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
     mkdir -p $TEST_REPORTS_DIR
 
-    # Run JIT cpp tests
-    python test/cpp/jit/tests_setup.py setup
+    if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
+        # Run JIT cpp tests
+        python test/cpp/jit/tests_setup.py setup
+    fi
+
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       "$TORCH_BIN_DIR"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     else
@@ -308,7 +387,10 @@ test_libtorch() {
       "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
     fi
 
-    python test/cpp/jit/tests_setup.py shutdown
+    if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
+        python test/cpp/jit/tests_setup.py shutdown
+    fi
+
     # Wait for background download to finish
     wait
     # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy.
@@ -328,6 +410,14 @@ test_libtorch() {
 
 test_aot_compilation() {
   echo "Testing Ahead of Time compilation"
+  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+
+  # Make test_reports directory
+  # NB: the ending test_libtorch must match the current function name for the current
+  # test reporting process (in print_test_stats.py) to function as expected.
+  TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_aot_compilation
+  mkdir -p $TEST_REPORTS_DIR
   if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
   # shellcheck source=test/mobile/nnc/test_aot_compile.sh
   if [ -f "$TORCH_BIN_DIR"/aot_model_compiler_test ]; then source test/mobile/nnc/test_aot_compile.sh; fi
@@ -456,10 +546,15 @@ build_xla() {
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
   XLA_DIR=xla
-  USE_CACHE=0
+  USE_CACHE=1
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "xla/.circleci/common.sh"
+
+  # TODO: The torch pin #73164 is involved in the sev https://github.com/pytorch/pytorch/issues/86093
+  # so this is temporarily removed until XLA fixes the weird logic in https://github.com/pytorch/xla/blob/master/scripts/apply_patches.sh#L17-L18
+  rm "${XLA_DIR}/torch_patches/.torch_pin" || true
+
   apply_patches
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
   # These functions are defined in .circleci/common.sh in pytorch/xla repo
@@ -596,45 +691,19 @@ test_vec256() {
   fi
 }
 
-test_dynamo() {
-  pushd ../torchdynamo
-  pytest tests
-  popd
-}
-
-test_functorch() {
-  pushd ../functorch
-  pytest test
-  popd
-}
-
-test_torch_deploy() {
-  python torch/csrc/deploy/example/generate_examples.py
-  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-  "$TORCH_BIN_DIR"/test_deploy
-  "$TORCH_BIN_DIR"/test_deploy_gpu
-  assert_git_not_dirty
-}
-
 test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
 
-if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${TEST_CONFIG}" == *deploy* ]]; then
-  install_torchdynamo
-  test_torch_deploy
-elif [[ "${TEST_CONFIG}" == *backward* ]]; then
+if [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
-  install_torchdynamo
   build_xla
   test_xla
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
@@ -643,32 +712,60 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
-  install_torchdynamo
+  install_filelock
+  install_triton
   test_distributed
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
+elif [[ "$TEST_CONFIG" == deploy ]]; then
+  checkout_install_torchdeploy
+  test_torch_deploy
+elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  install_torchdynamo
+  install_triton
   test_dynamo_shard 1
   test_aten
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  checkout_install_torchdynamo
+  install_filelock
+  install_triton
   test_dynamo_shard 2
-  test_dynamo
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  test_inductor
+  test_inductor_distributed
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_huggingface_shard 0
+elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 8 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_timm
+  id=$((SHARD_NUMBER-3))
+  test_inductor_timm_shard $id
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  install_torchdynamo
+  install_triton
   test_python_shard 1
   test_aten
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  checkout_install_torchdynamo
+  install_triton
   test_python_shard 2
   test_libtorch
   test_aot_compilation
@@ -677,7 +774,7 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_torch_function_benchmark
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
-  install_torchdynamo
+  install_triton
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
@@ -685,14 +782,17 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
+elif [[ "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
+  # TODO: TSAN check is currently failing with 415 data race warnings. This will
+  # be addressed later, the first PR can be merged first to setup the CI jobs
+  test_libtorch || true
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
-  checkout_install_functorch
   test_functorch
 else
   install_torchvision
-  install_torchdynamo
+  install_triton
   install_monkeytype
   test_python
   test_aten

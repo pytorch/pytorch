@@ -1,6 +1,9 @@
 from functools import wraps
 from inspect import unwrap
 from typing import Callable, List
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # for callables which modify object inplace and return something other than
@@ -19,10 +22,50 @@ def inplace_wrapper(fn: Callable) -> Callable:
 
     @wraps(fn)
     def wrapped_fn(gm):
-        fn(gm)
+        val = fn(gm)
         return gm
 
     return wrapped_fn
+
+def log_hook(fn: Callable, level=logging.INFO) -> Callable:
+    """
+    Logs callable output.
+
+    This is useful for logging output of passes. Note inplace_wrapper replaces
+    the pass output with the modified object. If we want to log the original
+    output, apply this wrapper before inplace_wrapper.
+
+
+    ```
+    def my_pass(d: Dict) -> bool:
+        changed = False
+        if 'foo' in d:
+            d['foo'] = 'bar'
+            changed = True
+        return changed
+
+    pm = PassManager(
+        passes=[
+            inplace_wrapper(log_hook(my_pass))
+        ]
+    )
+    ```
+
+    Args:
+        fn (Callable[Type1, Type2])
+        level: logging level (e.g. logging.INFO)
+
+    Returns:
+        wrapped_fn (Callable[Type1, Type2])
+    """
+    @wraps(fn)
+    def wrapped_fn(gm):
+        val = fn(gm)
+        logger.log(level, f"Ran pass {fn}\t Return value: {val}",)
+        return val
+
+    return wrapped_fn
+
 
 
 def loop_pass(base_pass: Callable, n_iter: int = None, predicate: Callable = None):
@@ -167,6 +210,16 @@ class PassManager:
 
     def add_constraint(self, constraint):
         self.constraints.append(constraint)
+        self._validated = False
+
+    def remove_pass(self, _passes: List[Callable]):
+        if _passes is None:
+            return
+        passes_left = []
+        for ps in self.passes:
+            if ps.__name__ not in _passes:
+                passes_left.append(ps)
+        self.passes = passes_left
         self._validated = False
 
     def validate(self):

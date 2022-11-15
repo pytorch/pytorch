@@ -4,7 +4,7 @@ import warnings
 
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 from torch.nn.intrinsic import _FusedModule
 
 from torch.ao.quantization.quantization_mappings import (
@@ -27,6 +27,24 @@ from torch.ao.quantization.qconfig import (
     float_qparams_weight_only_qconfig_4bit,
     activation_is_memoryless)
 from torch.nn.utils.parametrize import type_before_parametrizations
+
+__all__ = [
+    "get_default_custom_config_dict",
+    "is_activation_post_process",
+    "propagate_qconfig_",
+    "register_activation_post_process_hook",
+    "add_observer_",
+    "get_unique_devices_",
+    "add_quant_dequant",
+    "prepare",
+    "quantize",
+    "quantize_dynamic",
+    "prepare_qat",
+    "quantize_qat",
+    "convert",
+    "swap_module",
+    "get_observer_dict",
+]
 
 _DEFAULT_CUSTOM_CONFIG_DICT = {
     'float_to_observed_custom_module_class': {
@@ -196,12 +214,12 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             # activation_post_process are now added directly to nn.Sequentail/_FusedModule
             if needs_observation(child):
                 insert_activation_post_process(child)
-        elif _has_special_act_post_process(child):
-            special_act_post_process = _get_special_act_post_process(child)
-            insert_activation_post_process(child, special_act_post_process)
         elif non_leaf_module_list is not None and type_before_parametrizations(child) in non_leaf_module_list:
             if needs_observation(child):
                 insert_activation_post_process(child)
+        elif _has_special_act_post_process(child):
+            special_act_post_process = _get_special_act_post_process(child)
+            insert_activation_post_process(child, special_act_post_process)
         elif needs_observation(child) and type_before_parametrizations(child) in custom_module_class_mapping:
             observed_child = custom_module_class_mapping[type_before_parametrizations(child)].from_float(child)
             setattr(module, name, observed_child)

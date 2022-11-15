@@ -2,13 +2,31 @@ name: Upload test stats
 
 on:
   workflow_run:
-    workflows: [pull, trunk, periodic]
+    workflows: [pull, trunk, periodic, inductor]
     types:
       - completed
 
 jobs:
+  # the conclusion field in the github context is sometimes null
+  # solution adapted from https://github.com/community/community/discussions/21090#discussioncomment-3226271
+  get_workflow_conclusion:
+    runs-on: ubuntu-latest
+    outputs:
+      conclusion: ${{ fromJson(steps.get_conclusion.outputs.data).conclusion }}
+    steps:
+      - name: Get workflow run conclusion
+        uses: octokit/request-action@v2.1.0
+        id: get_conclusion
+        with:
+          route: GET /repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/attempts/${{ github.event.workflow_run.run_attempt }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   upload-test-stats:
-    if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
+    needs: get_workflow_conclusion
+    if:
+      github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' ||
+      needs.get_workflow_conclusion.outputs.conclusion == 'success' || needs.get_workflow_conclusion.outputs.conclusion == 'failure'
     runs-on: [self-hosted, linux.2xlarge]
     name: Upload test stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
 
@@ -40,6 +58,20 @@ jobs:
           python3 -m tools.stats.upload_test_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --head-branch "${HEAD_BRANCH}"
           python3 -m tools.stats.upload_sccache_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
 
+      - name: Upload test artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_ARTIFACTS_URL: ${{ github.event.workflow_run.artifacts_url }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
+        run: |
+          echo "${WORKFLOW_ARTIFACTS_URL}"
+
+          # Note that in the case of Linux and Windows, their artifacts have already been uploaded to S3, so there simply won't be
+          # anything on GitHub to upload. The command should return right away
+          python3 -m tools.stats.upload_artifacts --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
+
   check-api-rate:
     if: ${{ always() }}
     runs-on: [self-hosted, linux.2xlarge]
@@ -48,5 +80,9 @@ jobs:
       - name: Get our GITHUB_TOKEN API limit usage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN}}
+          MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN}}
         run: |
           curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/rate_limit
+          curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $PYTORCHBOT_TOKEN" https://api.github.com/rate_limit
+          curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $MERGEBOT_TOKEN" https://api.github.com/rate_limit

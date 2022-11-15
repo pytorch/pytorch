@@ -2,16 +2,15 @@
 #include <c10/util/irange.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <c10d/FileStore.hpp>
-#include <c10d/ProcessGroupGloo.hpp>
 #include <gtest/gtest.h>
+#include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
 
 using namespace c10d::test;
 
 using at::cuda::CUDAStream;
-using c10d::ProcessGroup;
 
 template <typename T, typename... Args>
 std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
@@ -94,7 +93,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     }
   }
 
-  void wait(c10::intrusive_ptr<ProcessGroup::Work>& work) {
+  void wait(c10::intrusive_ptr<c10d::Work>& work) {
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
     work->wait();
   }
@@ -130,7 +129,7 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
   AsyncAllreduceTest(const std::string& path, int numTensors)
       : AsyncInputIsOutputTest(path, numTensors) {}
 
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::Work> run() {
     // For the duration of this function, make THC use our streams
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -156,9 +155,7 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
   AsyncBroadcastTest(const std::string& path, int numTensors)
       : AsyncInputIsOutputTest(path, numTensors) {}
 
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> run(
-      int rootRank,
-      int rootTensor) {
+  c10::intrusive_ptr<c10d::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -187,7 +184,7 @@ void runAsyncAllreduceTest(
     size_t numProcesses = 4,
     size_t numTensors = 2) {
   auto tests = initialize<AsyncAllreduceTest>(path, numProcesses, numTensors);
-  std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
+  std::vector<c10::intrusive_ptr<c10d::Work>> work(numProcesses);
   for (const auto i : c10::irange(numProcesses)) {
     work[i] = tests[i].run();
   }
@@ -231,8 +228,7 @@ void runAsyncBroadcastTest(
   // Try every permutation of root rank and root tensor
   for (const auto rootRank : c10::irange(numProcesses)) {
     for (const auto rootTensor : c10::irange(numTensors)) {
-      std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> work(
-          numProcesses);
+      std::vector<c10::intrusive_ptr<c10d::Work>> work(numProcesses);
       for (const auto i : c10::irange(numProcesses)) {
         work[i] = tests[i].run(rootRank, rootTensor);
       }

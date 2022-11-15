@@ -34,7 +34,7 @@ even though mathematically it's an identical computation.
 
 Similarly, an operation applied to a tensor slice is not guaranteed to produce results that are
 identical to the slice of the result of the same operation applied to the full tensor. E.g. let
-``A`` be a 2-dimentional tensor. ``A.sum(-1)[0]`` is not guaranteed to be bitwise equal to
+``A`` be a 2-dimensional tensor. ``A.sum(-1)[0]`` is not guaranteed to be bitwise equal to
 ``A[:,0].sum()``.
 
 Extremal values
@@ -54,16 +54,14 @@ datatype. E.g.:
 TensorFloat-32(TF32) on Nvidia Ampere devices
 ---------------------------------------------
 
-On Ampere Nvidia GPUs, PyTorch by default uses TensorFloat32 (TF32) to speed up mathematically
-intensive operations, in particular matrix multiplications and convolutions. When operation is performed
-using TF32 tensor cores, only the first 10 bits of the input mantissa are read. This leads to less accurate
-results, and surprising results such as multiplying a matrix by identity matrix produces
-results that are different from the input.
-Most neural network workloads have the same convergence behavior when using tf32 as they have
-with fp32, however, if better accuracy is desired, TF32 can be turned off with
-``torch.backends.cuda.matmul.allow_tf32 = False``
+On Ampere Nvidia GPUs, PyTorch can use TensorFloat32 (TF32) to speed up mathematically intensive operations, in particular matrix multiplications and convolutions.
+When an operation is performed using TF32 tensor cores, only the first 10 bits of the input mantissa are read.
+This may reduce accuracy and produce surprising results (e.g., multiplying a matrix by the identity matrix may produce results that are different from the input).
+By default, TF32 tensor cores are disabled for matrix multiplications and enabled for convolutions, although most neural network workloads have the same convergence behavior when using TF32 as they have with fp32.
+We recommend enabling TF32 tensor cores for matrix multiplications with ``torch.backends.cuda.matmul.allow_tf32 = True`` if your network does not need full float32 precision.
+If your network needs full float32 precision for both matrix multiplications and convolutions, then TF32 tensor cores can also be disabled for convolutions with ``torch.backends.cudnn.allow_tf32 = False``.
 
-For more information see :ref:`TensorFloat32<tf32_on_ampere>`
+For more information see :ref:`TensorFloat32<tf32_on_ampere>`.
 
 Reduced Precision Reduction for FP16 GEMMs
 ------------------------------------------

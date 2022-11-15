@@ -59,7 +59,8 @@ SavedVariable::SavedVariable(
 
     auto maybe_hooks = get_default_hooks();
 
-    if (maybe_hooks) {
+    // Avoid wrapped numbers from being leaked to the user
+    if (maybe_hooks && !variable.unsafeGetTensorImpl()->is_wrapped_number()) {
       save_metadata(variable);
       set_hooks_and_pack_data(std::move(maybe_hooks), variable);
       return;
@@ -159,7 +160,12 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
       message
           << "one of the variables needed for gradient computation has been "
              "modified by an inplace operation: ["
-          << data_.toString() << " " << data_.sizes() << "]";
+          << data_.toString() << " ";
+      if (data_.is_nested()) {
+        message << data_._nested_tensor_size() << "]";
+      } else {
+        message << data_.sizes() << "]";
+      }
       if (grad_fn) {
         message << ", which is output " << output_nr_ << " of "
                 << grad_fn->name() << ",";

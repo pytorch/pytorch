@@ -8,7 +8,6 @@
 #include <c10/util/irange.h>
 #include <ATen/jit_macros.h>
 #include <ATen/cuda/detail/LazyNVRTC.h>
-#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 namespace at { namespace cuda { namespace jit {
 

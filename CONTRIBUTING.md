@@ -16,7 +16,9 @@
     - [Running `mypy`](#running-mypy)
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
+- [Merging your Change](#merging-your-change)
 - [Writing documentation](#writing-documentation)
+  - [Docstring type formatting](#docstring-type-formatting)
   - [Building documentation](#building-documentation)
     - [Tips](#tips)
     - [Building C++ Documentation](#building-c-documentation)
@@ -116,21 +118,9 @@ git submodule sync --recursive
 git submodule update --init --recursive --jobs 0
 ```
 
-If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
+If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
 
-3. Follow  the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source), except when it's time to install PyTorch instead of invoking `setup.py install` you'll want to call `setup.py develop` instead:
-
-Specifically, the change you have to make is to replace
-
-```bash
-python setup.py install
-```
-
-with
-
-```bash
-python setup.py develop
-```
+3. Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source), but instead of installing PyTorch via `python setup.py install`, use `python setup.py develop`.
 
 This mode will symlink the Python files from the current local source
 tree into the Python install.  This way when you modify a Python file, you
@@ -434,6 +424,17 @@ ghstack submit
 [`ghstack`](https://github.com/ezyang/ghstack). It creates a large commit that is
 of very low signal to reviewers.
 
+## Merging your Change
+If you know the right people or team that should approve your PR (and you have the required permisssions to do so), add them to the Reviewers list.
+
+If not, leave the Reviewers section empty. Our triage squad will review your PR, add a module label, and assign it to the appropriate reviewer in a couple business days.  The reviewer will then look at your PR and respond.
+
+Occasionally, things might fall through the cracks (sorry!). In case your PR either doesn't get assigned to a reviewer or doesn't get any response from the reviewer for 4 business days, please leave comment on the PR (mentioning the reviewer if one has been assigned). That'll get it nudged back onto people's radar.
+
+If that still doesn't help, come see us during [our office hours](https://github.com/pytorch/pytorch/wiki/Contact-Pytorch-Dev-Infra-Office)
+
+Once your PR is approved, you can merge it in by entering a comment with the content `@pytorchmergebot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
+
 ## Writing documentation
 
 So you want to write some documentation and don't know where to start?
@@ -443,12 +444,50 @@ These are the docs that you see over at [our docs website](https://pytorch.org/d
 - **Developer facing documentation**:
 Developer facing documentation is spread around our READMEs in our codebase and in
 the [PyTorch Developer Wiki](https://pytorch.org/wiki).
-If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation%3F) on our best practices for where to put it.
+If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation) on our best practices for where to put it.
 
 The rest of this section is about user-facing documentation.
 
-PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
+PyTorch uses [Google style](https://www.sphinx-doc.org/en/master/usage/extensions/example_google.html)
 for formatting docstrings. Each line inside a docstrings block must be limited to 80 characters so that it fits into Jupyter documentation popups.
+
+
+### Docstring type formatting
+
+In addition to the standard Google Style docstring formatting rules, the following guidelines should be followed for docstring types (docstring types are the type information contained in the round brackets after the variable name):
+
+* The "`Callable`", "`Any`", "`Iterable`", "`Iterator`", "`Generator`" types should have their first letter capitalized.
+
+* The "`list`" and "`tuple`" types should be completely lowercase.
+
+* Types should not be made plural. For example: `tuple of int` should be used instead of `tuple of ints`.
+
+* The only acceptable delimiter words for types are `or` and `of`. No other non-type words should be used other than `optional`.
+
+* The word `optional` should only be used after the types, and it is only used if the user does not have to specify a value for the variable. Default values are listed after the variable description. Example:
+
+    ```
+    my_var (int, optional): Variable description. Default: 1
+    ```
+
+* Basic Python types should match their type name so that the [Intersphinx](https://www.sphinx-doc.org/en/master/usage/extensions/intersphinx.html) extension can correctly identify them. For example:
+    * Use `str` instead of `string`.
+    * Use `bool` instead of `boolean`.
+    * Use `dict` instead of `dictionary`.
+
+* Square brackets should be used for the dictionary type. For example:
+
+    ```
+    my_var (dict[str, int]): Variable description.
+    ```
+
+* If a variable has two different possible types, then the word `or` should be used without a comma. Otherwise variables with 3 or more types should use commas to separate the types. Example:
+
+    ```
+    x (type1 or type2): Variable description.
+    y (type1, type2, or type3): Variable description.
+    ```
+
 
 ### Building documentation
 
@@ -1207,13 +1246,6 @@ In 2018, we merged Caffe2 into the PyTorch source repository. While the
 steady state aspiration is that Caffe2 and PyTorch share code freely,
 in the meantime there will be some separation.
 
-If you submit a PR to only PyTorch or only Caffe2 code, CI will only
-run for the project you edited. The logic for this is implemented
-in `.jenkins/pytorch/dirty.sh` and `.jenkins/caffe2/dirty.sh`; you
-can look at this to see what path prefixes constitute changes.
-This also means if you ADD a new top-level path, or you start
-sharing code between projects, you need to modify these files.
-
 There are a few "unusual" directories which, for historical reasons,
 are Caffe2/PyTorch specific. Here they are:
 
@@ -1246,8 +1278,9 @@ our [CI wiki](https://github.com/pytorch/pytorch/wiki/Debugging-using-with-ssh-f
 ### Which commit is used in CI?
 
 For CI run on `master`, this repository is checked out for a given `master`
-commit, and CI is run on that commit (there isn't really any other choice). For
-PRs, however, it's a bit more complicated. Consider this commit graph, where
+commit, and CI is run on that commit (there isn't really any other choice).
+
+For PRs, however, it's a bit more complicated. Consider this commit graph, where
 `master` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
 commit `B`:
 
@@ -1256,7 +1289,7 @@ commit `B`:
       /         \
      /           C (refs/pull/42/merge)
     /           /
----o---o---o---A (refs/heads/master)
+---o---o---o---A (merge-destination) - usually master
 ```
 
 There are two possible choices for which commit to use:
@@ -1264,37 +1297,18 @@ There are two possible choices for which commit to use:
 1. Checkout commit `B`, the head of the PR (manually committed by the PR
    author).
 2. Checkout commit `C`, the hypothetical result of what would happen if the PR
-   were merged into `master` (automatically generated by GitHub).
+   were merged into it's destination (usually `master`).
 
-This choice depends on several factors; here is the decision tree as of
-2021-03-30:
+For all practical purposes, most people can think of the commit being used as
+commit `B` (choice **1**).
 
-- For CI jobs on CircleCI:
-  - If the name of the job (or one of its ancestors in the workflow DAG)
-    contains "xla" or "gcc5", choice **2** is used. This includes the following
-    jobs:
-    - pytorch_linux_xenial_py3_6_gcc5_4_build
-      - pytorch_cpp_doc_build
-      - pytorch_doc_test
-      - pytorch_linux_forward_backward_compatibility_check_test
-      - pytorch_linux_xenial_py3_6_gcc5_4_jit_legacy_test
-      - pytorch_linux_xenial_py3_6_gcc5_4_test
-      - pytorch_python_doc_build
-    - pytorch_xla_linux_bionic_py3_6_clang9_build
-      - pytorch_xla_linux_bionic_py3_6_clang9_test
-  - Otherwise, choice **1** is used.
-- For CI jobs on GitHub Actions:
-  - If the PR was created using [`ghstack`](https://github.com/ezyang/ghstack),
-    choice **1** is used.
-  - Otherwise, choice **2** is used.
+However, if workflow files (which govern CI behavior) were modified (either by your PR or since dev branch were created ) there's
+a nuance to know about:
+The workflow files themselves get taken from checkpoint `C`, the merger of your
+PR and the `master` branch. But only the workflow files get taken from that merged
+checkpoint. Everything else (tests, code, etc) all get taken directly from your
+PR's commit (commit `B`). Please note, this scenario would never affect PRs authored by `ghstack` as they would not automatically ingest the updates from default branch.
 
-This is important to be aware of, because if you see a CI failure on your PR and
-choice **2** is being used for that CI job, it is possible that the failure is
-nondeterministically caused by a commit that does not exist in the ancestry of
-your PR branch. If you happen to have write access to this repo, you can choose
-to use `ghstack` to eliminate this nondeterminism for GitHub Actions jobs on
-your PRs, but it will still be present for the select CircleCI jobs listed
-above.
 
 ## Dev Infra Office Hours
 [Dev Infra Office Hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours) are hosted every Friday to answer any questions regarding developer experience, Green HUD, and CI.

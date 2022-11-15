@@ -1,12 +1,22 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/RangeFactories.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/Parallel.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 #include <c10/util/irange.h>
 #include <cmath>
 #include <limits>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/linspace_native.h>
+#include <ATen/ops/logspace_native.h>
+#include <ATen/ops/range_native.h>
+#endif
 
 namespace at { namespace native {
 
@@ -115,7 +125,7 @@ Tensor& range_out(const Scalar& start, const Scalar& end, const Scalar& step, Te
              std::isfinite(static_cast<double>(xend)),
              "unsupported range: ", xstart, " -> ", xend);
     TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
-             "upper bound and larger bound inconsistent with step sign");
+             "upper bound and lower bound inconsistent with step sign");
     int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
     if (result.numel() != size) {
       result.resize_({size});
@@ -140,6 +150,10 @@ Tensor& range_out(const Scalar& start, const Scalar& end, const Scalar& step, Te
   });
 
   return result;
+}
+
+Tensor& range_out_no_step(const Scalar& start, const Scalar& end, Tensor& result) {
+  return range_out(start, end, /*step = */ 1, result);
 }
 
 Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {

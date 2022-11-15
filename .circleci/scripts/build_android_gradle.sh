@@ -24,7 +24,7 @@ export GRADLE_LOCAL_PROPERTIES=~/workspace/android/local.properties
 rm -f $GRADLE_LOCAL_PROPERTIES
 echo "sdk.dir=/opt/android/sdk" >> $GRADLE_LOCAL_PROPERTIES
 echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
-echo "cmake.dir=/usr/local" >> $GRADLE_LOCAL_PROPERTIES
+echo "cmake.dir=/usr" >> $GRADLE_LOCAL_PROPERTIES
 
 retry () {
   $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
@@ -78,7 +78,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-gradle-build-only-x86_32* ]]; then
     GRADLE_PARAMS+=" -PABI_FILTERS=x86"
 fi
 
-if [ -n "{GRADLE_OFFLINE:-}" ]; then
+if [ -n "${GRADLE_OFFLINE:-}" ]; then
     GRADLE_PARAMS+=" --offline"
 fi
 

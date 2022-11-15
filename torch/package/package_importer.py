@@ -1,5 +1,6 @@
 import builtins
 import importlib
+import importlib.machinery
 import inspect
 import io
 import linecache
@@ -21,7 +22,6 @@ from ._importlib import (
     _resolve_name,
     _sanity_check,
 )
-import importlib.machinery
 from ._mangling import demangle, PackageMangler
 from ._package_unpickler import PackageUnpickler
 from .file_structure_representation import _create_directory_from_file_list, Directory
@@ -39,6 +39,9 @@ IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
     "numpy",
     "numpy.core",
     "numpy.core._multiarray_umath",
+    # FX GraphModule might depend on builtins module and users usually
+    # don't extern builtins. Here we import it here by default.
+    "builtins",
 ]
 
 
@@ -234,9 +237,9 @@ class PackageImporter(Importer):
                     )
                 storage = loaded_storages[key]
                 # TODO: Once we decide to break serialization FC, we can
-                # stop wrapping with _TypedStorage
-                return torch.storage._TypedStorage(
-                    wrap_storage=storage._untyped(), dtype=dtype
+                # stop wrapping with TypedStorage
+                return torch.storage.TypedStorage(
+                    wrap_storage=storage.untyped(), dtype=dtype
                 )
             elif typename == "reduce_package":
                 # to fix BC breaking change, objects on this load path
@@ -294,7 +297,7 @@ class PackageImporter(Importer):
 
         Args:
             include (Union[List[str], str]): An optional string e.g. ``"my_package.my_subpackage"``, or optional list of strings
-                for the names of the files to be inluded in the zipfile representation. This can also be
+                for the names of the files to be included in the zipfile representation. This can also be
                 a glob-style pattern, as described in :meth:`PackageExporter.mock`
 
             exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.

@@ -26,7 +26,7 @@ void validateParallelizationOfTensor(TensorView* tv) {
     // It doesn't matter if this axis is a non-concretized broadcast
     // TODO: merging broadcast and non-broadcast
     if (axis->isBroadcast() &&
-        !GpuLower::current()->concretizedBroadcastDomains().isConcretized(
+        !GpuLower::current()->concretizedBroadcastDomains()->isConcretized(
             axis)) {
       continue;
     }
@@ -137,6 +137,16 @@ void SyncMap::build(Fusion* fusion) {
                                           ->threadPredMap()
                                           .getPredicateInfo(producer)
                                           .redundant_types;
+      // Get the parallel types that are inactive in consumer's use chains.
+      auto producer_redundant_use_types = GpuLower::current()
+                                              ->threadPredMap()
+                                              .getPredicateInfo(producer)
+                                              .redundant_use_types;
+
+      // In sync info pass we only consider the parallel types in
+      //  producer that are redundantly produced but not redundantly consumed.
+      producer_redundant_types =
+          producer_redundant_types & (~producer_redundant_use_types);
 
       for (const auto producer_i : c10::irange(producer->nDims())) {
         auto producer_axis = producer->axis(producer_i);
@@ -185,7 +195,7 @@ void SyncMap::build(Fusion* fusion) {
               (!parallel_bcast_doms.get(consumer_ptype) ||
                !GpuLower::current()
                     ->concretizedBroadcastDomains()
-                    .isConcretized(consumer_axis))) {
+                    ->isConcretized(consumer_axis))) {
             continue;
           }
 
@@ -205,24 +215,23 @@ void SyncMap::build(Fusion* fusion) {
             continue;
           }
 
-          auto parallel_type_i = getParallelTypeBitMapOffset(parallel_type);
-
-          auto p_id = producer_parallel_ids[parallel_type_i];
-          auto c_id = consumer_parallel_ids[parallel_type_i];
-
-          // If consumer is parallelized with this type but producer is
-          //  predicated redundant on this type. This parallel dimension
-          //  is a RAW dimension. See test: FusionSeriaSmemWriteParallelRead1/2
-          //
-          // Even if consumer is not parallelized with this type, would still
-          //  need a raw sync unless all use chain of the producer end with an
-          //  output with the same redundant type.
-          // TODO: need a separate pass to detect the case where no raw sync
-          //  is needed in this case, i.e. all use-def chains are redundant.
+          // In the case when the parallel id's are mapped by ca map,
+          //   will additionally need to consider if the producer is
+          //   a redundant write. The raw dim can be skipped only if
+          //   consumer use chains only contain redundant uses.
+          //  TODO:
+          //    still losing a bit precision here for expr ordering
+          //  sensitive cases, but we could wait until that becomes
+          //  a perf limiter to fix.
           if (producer_redundant_types.get(parallel_type)) {
             raw_dims.set(parallel_type);
             continue;
           }
+
+          auto parallel_type_i = getParallelTypeBitMapOffset(parallel_type);
+
+          auto p_id = producer_parallel_ids[parallel_type_i];
+          auto c_id = consumer_parallel_ids[parallel_type_i];
 
           if (p_id == nullptr && c_id == nullptr) {
             continue;
@@ -231,12 +240,12 @@ void SyncMap::build(Fusion* fusion) {
                     p_id, c_id, IdMappingMode::PERMISSIVE)) {
               const auto halo_info = GpuLower::current()->haloInfo();
 
-              if (halo_info.hasHaloWidth(p_id) !=
-                      halo_info.hasHaloWidth(c_id) ||
-                  (halo_info.hasHaloWidth(p_id) &&
-                   halo_info.hasHaloWidth(c_id) &&
-                   halo_info.getHaloWidth(p_id) !=
-                       halo_info.getHaloWidth(c_id))) {
+              if (halo_info->hasHaloWidth(p_id) !=
+                      halo_info->hasHaloWidth(c_id) ||
+                  (halo_info->hasHaloWidth(p_id) &&
+                   halo_info->hasHaloWidth(c_id) &&
+                   halo_info->getHaloWidth(p_id) !=
+                       halo_info->getHaloWidth(c_id))) {
                 raw_dims.set(parallel_type);
                 continue;
               }
@@ -339,6 +348,20 @@ void SyncMap::build(Fusion* fusion) {
             }
           }
 
+          // If any leaf id of producer is block or grid parallel and is
+          // involved
+          //  in any swizzle pattern, track this parallel dim as a communication
+          //  dimension that requires the corresponding synchronization and
+          //  memory type.
+          if (isParallelTypeThread(producer_ptype) &&
+              producer->hasSwizzleOp()) {
+            if (!ir_utils::getAllSwizzlesBetween(
+                     producer->getMaybeRFactorDomain(), {p_id})
+                     .empty()) {
+              raw_dims.set(producer_ptype);
+            }
+          }
+
           // In shift or gather operations, if a thread or block
           // domain's root ID is shifted or gathered, it can overlap
           // in shared or global memory. This doesn't
@@ -387,33 +410,13 @@ void SyncMap::build(Fusion* fusion) {
             }
           }
 
-          // If same parallel type and mapped, no need for syncs unless
-          // producer is in smem, producer parallel type is a thread
-          // dimension, and consumer concretizes the dimension. This sync is
-          // due to the redundant predicate omission in lower thread
-          // predicate.
-          auto redundant_preds = GpuLower::current()
-                                     ->threadPredMap()
-                                     .getPredicateInfo(producer)
-                                     .redundant_types;
-
-          if (p_id->isBroadcast() &&
-              GpuLower::current()->concretizedBroadcastDomains().isConcretized(
-                  p_id) &&
-              producer->getMemoryType() == MemoryType::Shared &&
-              redundant_preds.hasTID()) {
-            redundant_preds.clearAllBID();
-            raw_dims |= redundant_preds;
-            continue;
-          }
-
           // When the producer axis is a broadcast, it is not really
           // parallelized unless thread-predicated and concretized
           if (isParallelTypeThread(producer_ptype) && p_id->isBroadcast() &&
               (!parallel_bcast_doms.get(producer_ptype) ||
                !GpuLower::current()
                     ->concretizedBroadcastDomains()
-                    .isConcretized(p_id))) {
+                    ->isConcretized(p_id))) {
             continue;
           }
 
@@ -460,7 +463,7 @@ void SyncMap::build(Fusion* fusion) {
       } // end for consumers
 
       if (raw_dims.any()) {
-        needs_raw_sync_[producer] = raw_dims;
+        needs_raw_sync_[producer] |= raw_dims;
       }
 
     } // end producer
@@ -469,10 +472,14 @@ void SyncMap::build(Fusion* fusion) {
 
 std::string SyncMap::toString() const {
   std::stringstream ss;
-  ss << "TVs requiring RAW:" << std::endl;
+  ss << "SyncMap:";
+  bool is_first = true;
   for (auto entry : needs_raw_sync_) {
-    ss << "  " << entry.first->toString() << " :: " << entry.second.toString()
-       << std::endl;
+    if (!is_first) {
+      ss << ",";
+    }
+    ss << " " << entry.first->toString() << " -> " << entry.second.toString();
+    is_first = false;
   }
   return ss.str();
 }

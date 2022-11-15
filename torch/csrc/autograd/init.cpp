@@ -1,12 +1,14 @@
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/PythonTorchFunctionTLS.h>
+#include <ATen/SavedTensorHooks.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/impl/PythonDispatcherTLS.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
@@ -22,11 +24,11 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/profiler/execution_graph_observer.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/utils/python_torch_function_mode.h>
 
 #include <set>
 #include <unordered_set>
@@ -39,6 +41,42 @@ struct DisableFuncTorch {
         back_guard_(c10::DispatchKey::FuncTorchDynamicLayerBackMode) {}
   c10::impl::ExcludeDispatchKeyGuard front_guard_;
   c10::impl::ExcludeDispatchKeyGuard back_guard_;
+};
+
+struct MultithreadingEnabled {
+  MultithreadingEnabled(bool enabled)
+      : old_(c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
+    c10::AutogradState::get_tls_state().set_multithreading_enabled(enabled);
+  }
+  ~MultithreadingEnabled() {
+    c10::AutogradState::get_tls_state().set_multithreading_enabled(old_);
+  }
+  bool old_;
+};
+
+struct DisableAutocast {
+  c10::impl::ExcludeDispatchKeyGuard guard_{c10::autocast_dispatch_keyset};
+};
+
+struct EnableTorchFunction {
+  EnableTorchFunction()
+      : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
+    at::impl::PythonTorchFunctionTLS::set_disabled(false);
+  }
+  ~EnableTorchFunction() {
+    at::impl::PythonTorchFunctionTLS::set_disabled(old_);
+  }
+  bool old_;
+};
+
+struct EnablePythonDispatcher {
+  EnablePythonDispatcher() : old_(c10::impl::PythonDispatcherTLS::get_state()) {
+    c10::impl::PythonDispatcherTLS::set_state(getPyInterpreter());
+  }
+  ~EnablePythonDispatcher() {
+    c10::impl::PythonDispatcherTLS::set_state(old_);
+  }
+  c10::impl::PyInterpreter* old_;
 };
 
 } // namespace
@@ -80,77 +118,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   if (!ParameterClass)
     return nullptr;
 
-  py::enum_<ProfilerState>(m, "ProfilerState")
-      .value("Disabled", ProfilerState::Disabled)
-      .value("CPU", ProfilerState::CPU)
-      .value("CUDA", ProfilerState::CUDA)
-      .value("NVTX", ProfilerState::NVTX)
-      .value("ITT", ProfilerState::ITT)
-      .value("KINETO", ProfilerState::KINETO)
-      .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
-
-  using torch::profiler::impl::ActiveProfilerType;
-  py::enum_<ActiveProfilerType>(m, "ActiveProfilerType")
-      .value("NONE", ActiveProfilerType::NONE)
-      .value("LEGACY", ActiveProfilerType::LEGACY)
-      .value("KINETO", ActiveProfilerType::KINETO)
-      .value("NVTX", ActiveProfilerType::NVTX);
-
-  py::enum_<ActivityType>(m, "ProfilerActivity")
-      .value("CPU", ActivityType::CPU)
-      .value("CUDA", ActivityType::CUDA);
-
-  py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
-      .def(
-          py::init<
-              std::vector<std::string> /* profiler_metrics */,
-              bool /* profiler_measure_per_kernel */
-              >(),
-          "An experimental config for Kineto features. Please note that"
-          "backward compatibility is not guaranteed.\n"
-          "    profiler_metrics : a list of CUPTI profiler metrics used\n"
-          "       to measure GPU performance events.\n"
-          "       If this list contains values Kineto runs in CUPTI profiler mode\n"
-          "    profiler_measure_per_kernel (bool) : whether to profile metrics per kernel\n"
-          "       or for the entire measurement duration.",
-          py::arg("profiler_metrics") = std::vector<std::string>(),
-          py::arg("profiler_measure_per_kernel") = false)
-      .def(py::pickle(
-          [](const ExperimentalConfig& p) { // __getstate__
-            py::list py_metrics;
-            for (const auto& metric : p.profiler_metrics) {
-              py::bytes mbytes(metric);
-              py_metrics.append(mbytes);
-            }
-            /* Return a tuple that fully encodes the state of the config */
-            return py::make_tuple(py_metrics, p.profiler_measure_per_kernel);
-          },
-          [](py::tuple t) { // __setstate__
-            if (t.size() != 2) {
-              throw std::runtime_error("Expected 2 values in state");
-            }
-
-            py::list py_metrics = t[0].cast<py::list>();
-            std::vector<std::string> metrics{py_metrics.size()};
-
-            for (const auto& py_metric : py_metrics) {
-              metrics.push_back(py::str(py_metric));
-            }
-
-            return ExperimentalConfig(std::move(metrics), t[1].cast<bool>());
-          }));
-
-  py::class_<ProfilerConfig>(m, "ProfilerConfig")
-      .def(py::init<
-           ProfilerState,
-           bool, /* record_input_shapes */
-           bool, /* profile_memory */
-           bool, /* with_stack */
-           bool, /* with_flops */
-           bool, /* with_modules */
-           ExperimentalConfig /* experimental_config */
-           >());
-
   py::class_<LegacyEvent>(m, "ProfilerEvent")
       .def("kind", &LegacyEvent::kindStr)
       .def("name", [](const LegacyEvent& e) { return e.name(); })
@@ -185,12 +152,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("FPGA", c10::DeviceType::FPGA)
       .value("ORT", c10::DeviceType::ORT)
       .value("XLA", c10::DeviceType::XLA)
-      .value("Lazy", c10::DeviceType::Lazy)
-      .value("MPS", c10::DeviceType::MPS)
-      .value("HPU", c10::DeviceType::HPU)
-      .value("Meta", c10::DeviceType::Meta)
       .value("Vulkan", c10::DeviceType::Vulkan)
-      .value("Metal", c10::DeviceType::Metal);
+      .value("Metal", c10::DeviceType::Metal)
+      .value("XPU", c10::DeviceType::XPU)
+      .value("MPS", c10::DeviceType::MPS)
+      .value("Meta", c10::DeviceType::Meta)
+      .value("HPU", c10::DeviceType::HPU)
+      .value("VE", c10::DeviceType::VE)
+      .value("Lazy", c10::DeviceType::Lazy)
+      .value("IPU", c10::DeviceType::IPU);
 
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
@@ -219,34 +189,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           "correlation_id",
           [](const KinetoEvent& e) { return e.correlationId(); })
       // shapes of input tensors
-      .def(
-          "shapes",
-          [](const KinetoEvent& e) {
-            if (e.hasShapes()) {
-              return e.shapes();
-            } else {
-              return std::vector<std::vector<int64_t>>();
-            }
-          })
-      .def(
-          "dtypes",
-          [](const KinetoEvent& e) {
-            if (e.hasTypes()) {
-              return e.dtypes();
-            } else {
-              return std::vector<std::string>();
-            }
-          })
+      .def("shapes", [](const KinetoEvent& e) { return e.shapes().vec(); })
+      .def("dtypes", [](const KinetoEvent& e) { return e.dtypes().vec(); })
       // stack traces of the PyTorch CPU events
-      .def(
-          "stack",
-          [](const KinetoEvent& e) {
-            if (e.hasStack()) {
-              return e.stack();
-            } else {
-              return std::vector<std::string>();
-            }
-          })
+      .def("stack", [](const KinetoEvent& e) { return e.stack().vec(); })
       // type of the RecordFunction that generated a PyTorch CPU event
       // (op, torchscript function, user label, etc)
       .def("scope", [](const KinetoEvent& e) { return e.scope(); })
@@ -269,57 +215,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs)
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
-  {
-    using torch::profiler::impl::Result;
-    py::enum_<EventType>(m, "_EventType")
-        .value("TorchOp", EventType::TorchOp)
-        .value("Backend", EventType::Backend)
-        .value("Allocation", EventType::Allocation)
-        .value("PyCall", EventType::PyCall)
-        .value("PyCCall", EventType::PyCCall);
-    py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp")
-        .def_readonly("inputs", &ExtraFields<EventType::TorchOp>::inputs_)
-        .def_readonly(
-            "allow_tf32_cublas",
-            &ExtraFields<EventType::TorchOp>::allow_tf32_cublas_);
-    py::class_<Inputs>(m, "_Inputs")
-        .def_readonly("shapes", &Inputs::shapes_)
-        .def_readonly("dtypes", &Inputs::dtypes_);
-    py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
-    py::class_<ExtraFields<EventType::Allocation>>(
-        m, "_ExtraFields_Allocation");
-    py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
-        .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
-    py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
-        .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
-    py::class_<PyFrameState>(m, "_PyFrameState")
-        .def_readonly("line_number", &PyFrameState::line_no_)
-        .def_property_readonly(
-            "file_name",
-            [](const PyFrameState& s) { return s.filename_.str(); })
-        .def_property_readonly("function_name", [](const PyFrameState& s) {
-          return s.funcname_.str();
-        });
-
-    py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
-        .def("name", &Result::name)
-        .def_readonly("extra_fields", &Result::extra_fields_)
-        .def_property_readonly(
-            "id",
-            [](const Result& r) {
-              return reinterpret_cast<intptr_t>(r.shared_from_this().get());
-            })
-        .def_property_readonly(
-            "parent", [](const Result& r) { return r.parent_.lock(); })
-        .def_readonly("children", &Result::children_)
-        .def_readonly("start_time_ns", &Result::start_time_ns_)
-        .def_readonly("start_tid", &Result::start_tid_)
-        .def_property_readonly("correlation_id", &Result::correlationID)
-        .def_property_readonly("end_time_ns", &Result::endTimeNS)
-        .def_property_readonly("duration_time_ns", [](const Result& r) {
-          return r.endTimeNS() - r.start_time_ns_;
-        });
-  }
+  m.def("_soft_assert_raises", &setSoftAssertRaises);
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
       .def("trace_start_us", &ProfilerResult::trace_start_us)
@@ -341,21 +237,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_add_metadata_json", addMetadataJson); // Only if `USE_KINETO` is set
   m.def("_kineto_step", profilerStep); // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
-
-  // PyTorch profiler execution graph internal interface.
-  m.def(
-      "_add_execution_graph_observer",
-      &torch::profiler::impl::addExecutionGraphObserver,
-      py::arg("output_file_name"));
-  m.def(
-      "_remove_execution_graph_observer",
-      &torch::profiler::impl::removeExecutionGraphObserver);
-  m.def(
-      "_enable_execution_graph_observer",
-      &torch::profiler::impl::enableExecutionGraphObserver);
-  m.def(
-      "_disable_execution_graph_observer",
-      &torch::profiler::impl::disableExecutionGraphObserver);
 
   // NOTICE: These record functions are not torch operators and may not show up
   // in TorchScript tracing, FX transforms, or operator serialization. For these
@@ -430,6 +311,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
   m.def("_clear_callbacks", []() { at::clearCallbacks(); });
   m.def(
+      "_saved_tensors_hooks_is_enabled",
+      at::SavedTensorDefaultHooks::is_enabled);
+  m.def("_saved_tensors_hooks_enable", at::SavedTensorDefaultHooks::enable);
+  m.def("_saved_tensors_hooks_disable", at::SavedTensorDefaultHooks::disable);
+  m.def(
+      "_saved_tensors_hooks_get_disabled_error_message",
+      at::SavedTensorDefaultHooks::get_disabled_error_message);
+  m.def(
       "_push_saved_tensors_default_hooks",
       [](py::function& pack_hook, py::function& unpack_hook) {
         torch::autograd::PyDefaultSavedVariableHooks::push_hooks(
@@ -446,6 +335,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         registerPythonTensorClass(device, cls);
       });
 
+  _C_m.def("_activate_cuda_trace", []() { activateCUDATrace(); });
+
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode").def(py::init<bool>());
 
   py::class_<at::impl::RestorePythonTLSSnapshot>(
@@ -455,8 +346,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
       .def(py::init<>());
+  py::class_<EnableTorchFunction>(_C_m, "_EnableTorchFunction")
+      .def(py::init<>());
+  py::class_<EnablePythonDispatcher>(_C_m, "_EnablePythonDispatcher")
+      .def(py::init<>());
+  py::class_<c10::impl::DisablePythonDispatcher>(
+      _C_m, "_DisablePythonDispatcher")
+      .def(py::init<>());
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
-
+  py::class_<MultithreadingEnabled>(_C_m, "_MultithreadingEnabled")
+      .def(py::init<bool>());
+  py::class_<DisableAutocast>(_C_m, "_DisableAutocast").def(py::init<>());
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
         TORCH_CHECK(
@@ -495,6 +395,17 @@ static PyObject* set_autocast_enabled(PyObject* _unused, PyObject* arg) {
 static PyObject* is_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (at::autocast::is_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (at::autocast::is_enabled() || at::autocast::is_cpu_enabled() ||
+      at::autocast::is_xpu_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -633,12 +544,17 @@ static PyObject* is_inference_mode_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_anomaly_mode_enabled(PyObject* _unused, PyObject* arg) {
+static PyObject* set_anomaly_mode_enabled(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
-  AnomalyMode::set_enabled(arg == Py_True);
+  static PythonArgParser parser({
+      "set_anomaly_enabled(bool enabled, bool check_nan=True)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  AnomalyMode::set_enabled(r.toBool(0), r.toBool(1));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -646,6 +562,18 @@ static PyObject* set_anomaly_mode_enabled(PyObject* _unused, PyObject* arg) {
 static PyObject* is_anomaly_mode_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (AnomalyMode::is_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_anomaly_check_nan_enabled(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (AnomalyMode::should_check_nan()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -679,59 +607,117 @@ static PyObject* python_exit_dual_level(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
+static PyObject* is_torch_function_mode_enabled(
+    PyObject* _unused,
+    PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  if (arg == Py_None) {
-    at::impl::TorchDispatchModeTLS::set_state(nullptr);
+  if (at::impl::torch_function_mode_enabled()) {
+    Py_RETURN_TRUE;
   } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* push_on_torch_function_stack(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (arg != Py_None) {
     Py_INCREF(arg);
-    at::impl::TorchDispatchModeTLS::set_state(
+    at::impl::PythonTorchFunctionTLS::push_onto_stack(
         std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* get_torch_dispatch_mode(
+static PyObject* pop_torch_function_stack(
     PyObject* _unused,
     PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  const auto& mode = at::impl::TorchDispatchModeTLS::get_state();
-  if (!mode) {
-    Py_RETURN_NONE;
-  } else {
-    auto* r = mode->ptr(getPyInterpreter());
-    Py_INCREF(r);
-    return r;
-  }
+  const auto& mode = at::impl::PythonTorchFunctionTLS::pop_stack();
+  auto* r = mode->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_torch_function_mode(PyObject* _unused, PyObject* arg) {
+static PyObject* get_function_stack_at(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  if (arg == Py_None) {
-    at::impl::PythonTorchFunctionTLS::set_mode(nullptr);
-  } else {
+  static PythonArgParser parser({"get_stack_at(int64_t level)"});
+
+  ParsedArgs<1> parsed_args;
+  auto _r = parser.parse(args, kwargs, parsed_args);
+
+  auto idx = _r.toInt64(0);
+  const auto& mode = at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
+  auto* r = mode->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* len_torch_function_stack(
+    PyObject* _unused,
+    PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto len = at::impl::PythonTorchFunctionTLS::stack_len();
+  return utils::wrap(static_cast<int64_t>(len));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* push_on_torch_dispatch_stack(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (arg != Py_None) {
     Py_INCREF(arg);
-    at::impl::PythonTorchFunctionTLS::set_mode(
+    c10::impl::TorchDispatchModeTLS::push_onto_stack(
         std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* get_torch_function_mode(
+static PyObject* pop_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  const auto& mode = at::impl::PythonTorchFunctionTLS::get_mode();
-  if (!mode) {
-    Py_RETURN_NONE;
-  } else {
-    auto* r = mode->ptr(getPyInterpreter());
-    Py_INCREF(r);
-    return r;
-  }
+  const auto& mode = c10::impl::TorchDispatchModeTLS::pop_stack();
+  auto* r = mode->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* get_dispatch_stack_at(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"get_stack_at(int64_t level)"});
+
+  ParsedArgs<1> parsed_args;
+  auto _r = parser.parse(args, kwargs, parsed_args);
+
+  auto idx = _r.toInt64(0);
+  const auto& mode = c10::impl::TorchDispatchModeTLS::get_stack_at(idx);
+  auto* r = mode->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* len_torch_dispatch_stack(
+    PyObject* _unused,
+    PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto len = c10::impl::TorchDispatchModeTLS::stack_len();
+  return utils::wrap(static_cast<int64_t>(len));
   END_HANDLE_TH_ERRORS
 }
 
@@ -745,6 +731,7 @@ static PyMethodDef methods[] = { // NOLINT
      nullptr},
     {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
     {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},
+    {"_is_any_autocast_enabled", is_any_autocast_enabled, METH_NOARGS, nullptr},
     {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
     {"set_autocast_cpu_enabled", set_autocast_cpu_enabled, METH_O, nullptr},
     {"is_autocast_cpu_enabled", is_autocast_cpu_enabled, METH_NOARGS, nullptr},
@@ -765,17 +752,56 @@ static PyMethodDef methods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
-    {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
+    {"set_anomaly_enabled",
+     castPyCFunctionWithKeywords(set_anomaly_mode_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
+    {"is_anomaly_check_nan_enabled",
+     is_anomaly_check_nan_enabled,
+     METH_NOARGS,
+     nullptr},
     {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
     {"_exit_dual_level",
      castPyCFunctionWithKeywords(python_exit_dual_level),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"_set_torch_dispatch_mode", set_torch_dispatch_mode, METH_O, nullptr},
-    {"_get_torch_dispatch_mode", get_torch_dispatch_mode, METH_NOARGS, nullptr},
-    {"_set_torch_function_mode", set_torch_function_mode, METH_O, nullptr},
-    {"_get_torch_function_mode", get_torch_function_mode, METH_NOARGS, nullptr},
+    {"_is_torch_function_mode_enabled",
+     is_torch_function_mode_enabled,
+     METH_NOARGS,
+     nullptr},
+    {"_push_on_torch_function_stack",
+     push_on_torch_function_stack,
+     METH_O,
+     nullptr},
+    {"_pop_torch_function_stack",
+     pop_torch_function_stack,
+     METH_NOARGS,
+     nullptr},
+    {"_get_function_stack_at",
+     castPyCFunctionWithKeywords(get_function_stack_at),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_len_torch_function_stack",
+     len_torch_function_stack,
+     METH_NOARGS,
+     nullptr},
+    {"_push_on_torch_dispatch_stack",
+     push_on_torch_dispatch_stack,
+     METH_O,
+     nullptr},
+    {"_pop_torch_dispatch_stack",
+     pop_torch_dispatch_stack,
+     METH_NOARGS,
+     nullptr},
+    {"_get_dispatch_stack_at",
+     castPyCFunctionWithKeywords(get_dispatch_stack_at),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_len_torch_dispatch_stack",
+     len_torch_dispatch_stack,
+     METH_NOARGS,
+     nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {

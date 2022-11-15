@@ -80,7 +80,7 @@ The following table compares the differences between Eager Mode Quantization and
 |                 |Static, Dynamic,   |Static, Dynamic,   |
 |                 |Weight Only        |Weight Only        |
 |                 |                   |                   |
-|                 |Quantiztion Aware  |Quantiztion Aware  |
+|                 |Quantization Aware |Quantization Aware |
 |                 |Training:          |Training:          |
 |                 |Static             |Static             |
 +-----------------+-------------------+-------------------+
@@ -103,7 +103,7 @@ There are three types of quantization supported:
 3. static quantization aware training (weights quantized, activations quantized,
    quantization numerics modeled during training)
 
-Please see our `Introduction to Quantization on Pytorch
+Please see our `Introduction to Quantization on PyTorch
 <https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>`_ blog post
 for a more comprehensive overview of the tradeoffs between these quantization
 types.
@@ -258,7 +258,7 @@ PTSQ API Example::
   # attach a global qconfig, which contains information about what kind
   # of observers to attach. Use 'fbgemm' for server inference and
   # 'qnnpack' for mobile inference. Other quantization configurations such
-  # as selecting symmetric or assymetric quantization and MinMax or L2Norm
+  # as selecting symmetric or asymmetric quantization and MinMax or L2Norm
   # calibration techniques can be specified here.
   model_fp32.qconfig = torch.quantization.get_default_qconfig('fbgemm')
 
@@ -354,7 +354,7 @@ QAT API Example::
   # attach a global qconfig, which contains information about what kind
   # of observers to attach. Use 'fbgemm' for server inference and
   # 'qnnpack' for mobile inference. Other quantization configurations such
-  # as selecting symmetric or assymetric quantization and MinMax or L2Norm
+  # as selecting symmetric or asymmetric quantization and MinMax or L2Norm
   # calibration techniques can be specified here.
   model_fp32.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
 
@@ -407,15 +407,15 @@ For static quantization techniques which quantize activations, the user needs
 to do the following in addition:
 
 1. Specify where activations are quantized and de-quantized. This is done using
-   :class:`~torch.quantization.QuantStub` and
-   :class:`~torch.quantization.DeQuantStub` modules.
-2. Use :class:`torch.nn.quantized.FloatFunctional` to wrap tensor operations
+   :class:`~torch.ao.quantization.QuantStub` and
+   :class:`~torch.ao.quantization.DeQuantStub` modules.
+2. Use :class:`~torch.ao.nn.quantized.FloatFunctional` to wrap tensor operations
    that require special handling for quantization into modules. Examples
    are operations like ``add`` and ``cat`` which require special handling to
    determine output quantization parameters.
 3. Fuse modules: combine operations/modules into a single module to obtain
    higher accuracy and performance. This is done using the
-   :func:`torch.quantization.fuse_modules` API, which takes in lists of modules
+   :func:`~torch.ao.quantization.fuse_modules` API, which takes in lists of modules
    to be fused. We currently support the following fusions:
    [Conv, Relu], [Conv, BatchNorm], [Conv, BatchNorm, Relu], [Linear, Relu]
 
@@ -535,7 +535,7 @@ Here are a few key attributes for quantized Tensor:
 
     * scale (float)
     * zero_point (int)
-  * torch.per_tensor_affine would have quantization parameters of
+  * torch.per_channel_affine would have quantization parameters of
 
     * per_channel_scales (list of float)
     * per_channel_zero_points (list of int)
@@ -632,7 +632,7 @@ Quantization Mode Support
 |                             |Quantization                                          |Dataset         | Works Best For | Accuracy   |      Notes      |
 |                             |Mode                                                  |Requirement     |                |            |                 |
 +-----------------------------+---------------------------------+--------------------+----------------+----------------+------------+-----------------+
-|Post Training Quantization   |Dyanmic/Weight Only Quantization |activation          |None            |LSTM, MLP,      |good        |Easy to use,     |
+|Post Training Quantization   |Dynamic/Weight Only Quantization |activation          |None            |LSTM, MLP,      |good        |Easy to use,     |
 |                             |                                 |dynamically         |                |Embedding,      |            |close to static  |
 |                             |                                 |quantized (fp16,    |                |Transformer     |            |quantization when|
 |                             |                                 |int8) or not        |                |                |            |performance is   |
@@ -640,7 +640,7 @@ Quantization Mode Support
 |                             |                                 |statically quantized|                |                |            |bound due to     |
 |                             |                                 |(fp16, int8, in4)   |                |                |            |weights          |
 |                             +---------------------------------+--------------------+----------------+----------------+------------+-----------------+
-|                             |Static Quantization              |acivation and       |calibration     |CNN             |good        |Provides best    |
+|                             |Static Quantization              |activation and      |calibration     |CNN             |good        |Provides best    |
 |                             |                                 |weights statically  |dataset         |                |            |perf, may have   |
 |                             |                                 |quantized (int8)    |                |                |            |big impact on    |
 |                             |                                 |                    |                |                |            |accuracy, good   |
@@ -652,7 +652,7 @@ Quantization Mode Support
 |                             |                                 |weight are fake     |dataset         |                |            |for now          |
 |                             |                                 |quantized           |                |                |            |                 |
 |                             +---------------------------------+--------------------+----------------+----------------+------------+-----------------+
-|                             |Static Quantization              |activatio nand      |fine-tuning     |CNN, MLP,       |best        |Typically used   |
+|                             |Static Quantization              |activation and      |fine-tuning     |CNN, MLP,       |best        |Typically used   |
 |                             |                                 |weight are fake     |dataset         |Embedding       |            |when static      |
 |                             |                                 |quantized           |                |                |            |quantization     |
 |                             |                                 |                    |                |                |            |leads to bad     |
@@ -736,7 +736,7 @@ Backend/Hardware Support
 +-----------------+---------------+------------+------------+------------+
 |server GPU       |TensorRT (early|Not support |Supported   |Static      |
 |                 |prototype)     |this it     |            |Quantization|
-|                 |               |requries a  |            |            |
+|                 |               |requires a  |            |            |
 |                 |               |graph       |            |            |
 +-----------------+---------------+------------+------------+------------+
 
@@ -998,6 +998,25 @@ if ``dtype`` is ``torch.qint8``, make sure to set a custom ``quant_min`` to be `
 you call the `torch.ao.quantization.get_default_qconfig(backend)` or `torch.ao.quantization.get_default_qat_qconfig(backend)` function to get the default ``qconfig`` for
 ``fbgemm`` or ``qnnpack`` backend
 
+Frequently Asked Questions
+--------------------------
+
+1. How can I do quantized inference on GPU?:
+
+   We don't have official GPU support yet, but this is an area of active development, you can find more information
+   `here <https://github.com/pytorch/pytorch/issues/87395>`_
+
+2. Where can I get ONNX support for my quantized model?:
+
+   You can open an issue in `GitHub - onnx/onnx <https://github.com/onnx/onnx>`_  when you encounter problems with ONNX,
+   or reach out to people in this list: `PyTorch Governance | Maintainers | ONNX exporter <https://pytorch.org/docs/stable/community/persons_of_interest.html#onnx-exporter>`_
+
+3. How can I use quantization with LSTM's?:
+
+   LSTM is supported through our custom module api in both eager mode and fx graph mode quantization. Examples can be found at
+   Eager Mode: `pytorch/test_quantized_op.py TestQuantizedOps.test_custom_module_lstm <https://github.com/pytorch/pytorch/blob/9b88dcf248e717ca6c3f8c5e11f600825547a561/test/quantization/core/test_quantized_op.py#L2782>`_
+   FX Graph Mode: `pytorch/test_quantize_fx.py TestQuantizeFx.test_static_lstm <https://github.com/pytorch/pytorch/blob/9b88dcf248e717ca6c3f8c5e11f600825547a561/test/quantization/fx/test_quantize_fx.py#L4116>`_
+
 Common Errors
 ---------------------------------------
 
@@ -1133,6 +1152,9 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. They are here for tracking purposes until they are more permanently fixed.
 .. py:module:: torch.ao
 .. py:module:: torch.ao.nn
+.. py:module:: torch.ao.nn.quantizable
+.. py:module:: torch.ao.nn.quantizable.modules
+.. py:module:: torch.ao.nn.quantized
 .. py:module:: torch.ao.nn.sparse
 .. py:module:: torch.ao.nn.sparse.quantized
 .. py:module:: torch.ao.nn.sparse.quantized.dynamic
@@ -1141,6 +1163,18 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.ao.quantization
 .. py:module:: torch.ao.quantization.fx
 .. py:module:: torch.ao.quantization.backend_config
-.. py:module:: torch.ao.sparsity
-.. py:module:: torch.ao.sparsity.scheduler
-.. py:module:: torch.ao.sparsity.sparsifier
+.. py:module:: torch.ao.pruning
+.. py:module:: torch.ao.pruning.scheduler
+.. py:module:: torch.ao.pruning.sparsifier
+
+.. py:module:: torch.nn.qat
+.. py:module:: torch.nn.qat.modules
+.. py:module:: torch.nn.qat.dynamic
+.. py:module:: torch.nn.qat.dynamic.modules
+.. py:module:: torch.nn.quantized
+.. py:module:: torch.nn.quantized.modules
+.. py:module:: torch.nn.quantized.dynamic
+.. py:module:: torch.nn.quantized.dynamic.modules
+
+.. py:module:: torch.ao.nn.quantized.reference
+.. py:module:: torch.ao.nn.quantized.reference.modules

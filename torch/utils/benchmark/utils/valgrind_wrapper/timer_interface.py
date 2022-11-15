@@ -209,7 +209,7 @@ class CallgrindStats(object):
     def counts(self, *, denoise: bool = False) -> int:
         """Returns the total number of instructions executed.
 
-        See `FunctionCounts.denoise()` for an explation of the `denoise` arg.
+        See `FunctionCounts.denoise()` for an explanation of the `denoise` arg.
         """
         stats = self.stmt_exclusive_stats
         return (stats.denoise() if denoise else stats).sum()
@@ -820,10 +820,10 @@ class _ValgrindWrapper(object):
             # =============================================================================
             # == Check that subprocess matches parent =====================================
             # =============================================================================
-            if sys.executable != "{parent_interpreter}":
+            if os.path.realpath(sys.executable) != "{parent_interpreter}":
                 log_failure(
                     "Interpreter mismatch:\n"
-                    f"  {{sys.executable}}\n    vs.\n  {parent_interpreter}"
+                    f"  {{os.path.realpath(sys.executable)}}\n    vs.\n  {parent_interpreter}"
                 )
 
             if torch.__file__ != "{torch_file}":
@@ -888,7 +888,7 @@ class _ValgrindWrapper(object):
             num_threads=task_spec.num_threads,
             error_log_repr=repr(error_log),
             stat_log=stat_log,
-            parent_interpreter=sys.executable,
+            parent_interpreter=os.path.realpath(sys.executable),
             torch_file=torch.__file__,
             bindings_import=(
                 "import torch._C as callgrind_bindings" if bindings is None

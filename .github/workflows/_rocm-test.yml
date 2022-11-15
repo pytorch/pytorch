@@ -58,9 +58,18 @@ jobs:
         uses: ./.github/actions/setup-rocm
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.docker-image }}
+
+      - name: Start monitoring script
+        id: monitor-script
+        shell: bash
+        run: |
+          python3 -m pip install psutil==5.9.1
+          python3 -m pip install pynvml==11.4.1
+          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
@@ -87,6 +96,8 @@ jobs:
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
+          PYTORCH_JIT_ENABLE_NVFUSER: 1
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0'}}
         timeout-minutes: 270
         run: |
           set -x
@@ -101,10 +112,17 @@ jobs:
 
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
 
+          # sanitize the input commit message and PR body here:
+          #
           # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
           # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
-          export PR_BODY="${PR_BODY//[$'\n\r']}"
+          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          PR_BODY="${PR_BODY//[$'\n\r']}"
+
+          # then trim all special characters like single and double quotes to avoid unescaped inputs to
+          # wreak havoc internally
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
+          export PR_BODY="${PR_BODY//[\'\"]}"
 
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
@@ -129,6 +147,7 @@ jobs:
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+            -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
@@ -159,6 +178,15 @@ jobs:
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stop monitoring script
+        if: always() && steps.monitor-script.outputs.monitor-script-pid
+        shell: bash
+        continue-on-error: true
+        env:
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        run: |
+          kill "$MONITOR_SCRIPT_PID"
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts

@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+from typing import List
 import torch
 import torch.nn as nn
 import torch.utils.data
@@ -50,8 +51,8 @@ class TestCheckpoint(TestCase):
         module_lists_to_compare,
         num_chunks,
         input,
+        use_reentrant,
     ):
-
         # not checkpointed
         out = model(input)
         out_not_checkpointed = out.detach().clone()
@@ -68,7 +69,9 @@ class TestCheckpoint(TestCase):
             detached.requires_grad = True
 
             # pass list of modules to checkpoint
-            out = checkpoint_sequential(model_to_compare, num_chunks, detached)
+            out = checkpoint_sequential(
+                model_to_compare, num_chunks, detached, use_reentrant=use_reentrant
+            )
             out_checkpointed = out.detach().clone()
             model.zero_grad()
             out.sum().backward()
@@ -95,21 +98,26 @@ class TestCheckpoint(TestCase):
 
             def forward(self, input_var):
                 self.counter += 1
-                return input_var
+                # For reentrant, need to have autograd actually
+                # pack a tensor to trigger recomp
+                ret = input_var * torch.tensor(2.)
+                return ret
 
         # checkpointed
-        modules = [Net() for _ in range(10)]
-        for m in modules:
-            self.assertEqual(m.counter, 0)
-        input_var = torch.randn(3, 4, requires_grad=True)
-        out = checkpoint_sequential(modules, 2, input_var)
-        for m in modules:
-            self.assertEqual(m.counter, 1)
-        out.sum().backward()
-        for m in modules[:(len(modules) // 2)]:
-            self.assertEqual(m.counter, 2)
-        for m in modules[(len(modules) // 2):]:
-            self.assertEqual(m.counter, 1)
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                modules = [Net() for _ in range(10)]
+                for m in modules:
+                    self.assertEqual(m.counter, 0)
+                input_var = torch.randn(3, 4, requires_grad=True)
+                out = checkpoint_sequential(modules, 2, input_var, use_reentrant=use_reentrant)
+                for m in modules:
+                    self.assertEqual(m.counter, 1)
+                out.sum().backward()
+                for m in modules[:(len(modules) // 2)]:
+                    self.assertEqual(m.counter, 2)
+                for m in modules[(len(modules) // 2):]:
+                    self.assertEqual(m.counter, 1)
 
     def test_checkpoint_valid(self):
         model = nn.Sequential(
@@ -131,27 +139,42 @@ class TestCheckpoint(TestCase):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
             )
+        # works with use_reentrant=False, and grads are the same
+        out = model(input_var)
+        grads_no_checkpoint = torch.autograd.grad(
+            outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True,
+        )
+        out_checkpoint = checkpoint_sequential(modules, chunks, input_var, use_reentrant=False)
+        # check outputs are the same
+        self.assertEqual(out_checkpoint, out)
+        grads_checkpoint = torch.autograd.grad(
+            outputs=[out_checkpoint], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True,
+        )
+        self.assertEqual(grads_no_checkpoint, grads_checkpoint)
 
     def test_checkpoint(self):
-        model = nn.Sequential(
-            nn.Linear(100, 50),
-            nn.ReLU(),
-            nn.Linear(50, 20),
-            nn.ReLU(),
-            nn.Linear(20, 5),
-            nn.ReLU()
-        )
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                model = nn.Sequential(
+                    nn.Linear(100, 50),
+                    nn.ReLU(),
+                    nn.Linear(50, 20),
+                    nn.ReLU(),
+                    nn.Linear(20, 5),
+                    nn.ReLU()
+                )
 
-        # Compare uncheckpointed model with its checkpointed counterparts
-        # In addition to running checkpoint_sequential on the nn.Sequential
-        # instance, we also run the function on the list of functions within
-        # the module.
-        self._check_checkpoint_sequential(
-            model,
-            [list(model.children()), model],
-            2,
-            torch.randn(1, 100, requires_grad=True)
-        )
+                # Compare uncheckpointed model with its checkpointed counterparts
+                # In addition to running checkpoint_sequential on the nn.Sequential
+                # instance, we also run the function on the list of functions within
+                # the module.
+                self._check_checkpoint_sequential(
+                    model,
+                    [list(model.children()), model],
+                    2,
+                    torch.randn(1, 100, requires_grad=True),
+                    use_reentrant=use_reentrant,
+                )
 
     def test_checkpoint_module_list(self):
         class ModuleListNet(nn.Module):
@@ -172,15 +195,18 @@ class TestCheckpoint(TestCase):
                     input = layer(input)
                 return input
 
-        model = ModuleListNet()
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                model = ModuleListNet()
 
-        # Compare uncheckpointed model with its checkpointed counterparts.
-        self._check_checkpoint_sequential(
-            model,
-            [list(model.module_list.children()), model.module_list],
-            2,
-            torch.randn(1, 100, requires_grad=True),
-        )
+                # Compare uncheckpointed model with its checkpointed counterparts.
+                self._check_checkpoint_sequential(
+                    model,
+                    [list(model.module_list.children()), model.module_list],
+                    2,
+                    torch.randn(1, 100, requires_grad=True),
+                    use_reentrant=use_reentrant,
+                )
 
     def test_checkpoint_sequential_deprecated_multiple_args(self):
         class Two(nn.Module):
@@ -191,8 +217,10 @@ class TestCheckpoint(TestCase):
         a = torch.randn(1, 100, requires_grad=True)
         b = torch.randn(1, 100, requires_grad=True)
 
-        with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1, a, b)  # type: ignore[call-arg]
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                with self.assertRaises(TypeError):
+                    checkpoint_sequential(model, 1, a, b)  # type: ignore[call-arg]
 
     def test_checkpoint_sequential_deprecated_no_args(self):
         class Noop(nn.Module):
@@ -200,9 +228,10 @@ class TestCheckpoint(TestCase):
                 pass
 
         model = nn.Sequential(Noop())
-
-        with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1)  # type: ignore[call-arg]
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                with self.assertRaises(TypeError):
+                    checkpoint_sequential(model, 1)  # type: ignore[call-arg]
 
     def test_checkpoint_rng_cpu(self):
         for _ in range(5):
@@ -362,8 +391,67 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2)
             out.sum().backward()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    def test_checkpointing_without_reentrant_early_free(self):
+        # I don't know how to check if the temporary saved variable buffer
+        # get de-allocated directly. So using cuda memory usage as a proxy
+
+        def _do_test(fn, should_free):
+            stats: List[int] = []
+
+            def track(x, idx):
+                # Track that at each step of the backward, some Tensor were
+                # de-allocated (which correspond to the checkpoint storage being
+                # emptied at each step)
+                def hook(_unused):
+                    self.assertEqual(len(stats), idx)
+                    torch.cuda.synchronize()
+                    stats.append(torch.cuda.memory_allocated())
+                    if idx > 0:
+                        if should_free:
+                            self.assertLess(stats[idx], stats[idx - 1])
+                        else:
+                            self.assertEqual(stats[idx], stats[idx - 1])
+
+                x.register_hook(hook)
+
+            def test_fn(x):
+                # The main property of this function is that it contains multiple
+                # operations that save gradients in a chain.
+                x = x ** 2
+                track(x, 2)
+                x = x ** 2
+                track(x, 1)
+                x = x ** 2
+                track(x, 0)
+                x = x ** 2
+                return x.sum()
+
+            fn(test_fn)
+
+            return stats
+
+        x = torch.zeros(10, device="cuda", requires_grad=True)
+        x.grad = torch.zeros_like(x)
+
+        # In a regular backward, buffers get eagerly freed
+        non_retain_stats = _do_test(lambda fn: fn(x).backward(), True)
+
+        # In a retain_grad backward, buffers get preserved
+        retain_stats = _do_test(lambda fn: fn(x).backward(retain_graph=True), False)
+
+        # In a regular backward with checkpoint, buffers get eagerly freed
+        checkpoint_non_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(), True)
+
+        # In a retain_grad backward with checkpoint, buffers get preserved
+        checkpoint_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(retain_graph=True), False)
+
+        self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
+        self.assertEqual(retain_stats, checkpoint_retain_stats)
+
 class TestDataLoaderUtils(TestCase):
     def setUp(self):
+        super().setUp()
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
 

@@ -6,8 +6,8 @@ import caffe2.python.onnx.backend as c2
 
 import numpy as np
 import onnx
+import torch.ao.nn.quantized as nnq
 import torch.nn as nn
-import torch.nn.quantized as nnq
 import torch.onnx
 from torch.testing._internal import common_utils
 
@@ -201,7 +201,7 @@ class TestQuantizedOps(common_utils.TestCase):
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
-                res = torch.nn.quantized.functional.interpolate(
+                res = torch.ao.nn.quantized.functional.interpolate(
                     self.quant1(x), size=[6, 8], mode="nearest"
                 )
                 return self.dequant(res)

@@ -191,7 +191,7 @@ class PredicateChcker : public IterVisitor {
         predicateMisalignedVectorize(expr) || predicateShift(expr) ||
         predicateSharedMemAccess(expr) || predicateProducerConsumerPair(expr) ||
         predicateNonDivisibleRootDomains(expr) ||
-        predicateNonDivisibleSplit(expr);
+        predicateNonDivisibleSplit(expr) || predicateExpandReduce(expr);
 
     // A cp.async op would need a predicate for either the global
     //  input or its shared mem output, or both.
@@ -232,6 +232,54 @@ class PredicateChcker : public IterVisitor {
          expr->as<BinaryOp>()->getBinaryOpType() == BinaryOpType::CeilDiv));
   }
 
+  // If we're reducing an expanded domain, we need to be careful to predicate it
+  // or we could end up reducing a broadcasted value too many times.
+  bool predicateExpandReduce(Expr* expr) const {
+    if (!ir_utils::isReductionOp(expr)) {
+      return false;
+    }
+    auto tv_inputs = ir_utils::getTvs(expr->inputs());
+    TORCH_INTERNAL_ASSERT(
+        tv_inputs.size() > 0,
+        "Should never have a reduction op without a tensor view input.");
+    bool found_expand = false;
+    for (auto tv_input : tv_inputs) {
+      found_expand |= std::any_of(
+          tv_input->getMaybeRFactorDomain().begin(),
+          tv_input->getMaybeRFactorDomain().end(),
+          [](IterDomain* id) { return id->hasExpandedExtent(); });
+    }
+
+    if (!found_expand) {
+      return false;
+    }
+
+    auto tv_outputs = ir_utils::getTvs(expr->outputs());
+    if (expr->isA<WelfordOp>() && tv_inputs.size() != tv_outputs.size()) {
+      tv_outputs = std::vector<TensorView*>(tv_inputs.size(), tv_outputs[0]);
+    }
+
+    TORCH_INTERNAL_ASSERT(
+        tv_outputs.size() == tv_inputs.size(),
+        "Was expecting matching number of inputs and outputs for expression: ",
+        expr->toString());
+
+    for (auto i : c10::irange(tv_inputs.size())) {
+      const auto root_p2c =
+          PairwiseRootDomainMap(tv_inputs[i], tv_outputs[i])
+              .mapProducerToConsumer(
+                  tv_inputs[i]->domain(), tv_outputs[i]->domain());
+      for (auto entry : root_p2c) {
+        auto p_id = entry.first;
+        auto c_id = entry.second;
+        if (p_id->hasExpandedExtent() && c_id->isReduction()) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   // Skip if MisalignedVectorize is involved for now. This could be
   // relaxed.
   bool predicateMisalignedVectorize(Expr* expr) const {
@@ -255,12 +303,12 @@ class PredicateChcker : public IterVisitor {
 
   // Shift is not supported yet.
   bool predicateShift(Expr* expr) const {
-    auto& halo_info = GpuLower::current()->haloInfo();
+    auto halo_info = GpuLower::current()->haloInfo();
     auto input_tvs = ir_utils::filterByType<TensorView>(expr->inputs());
-    return halo_info.needsShiftPredicate(expr) ||
+    return halo_info->needsShiftPredicate(expr) ||
         std::any_of(input_tvs.begin(), input_tvs.end(), [&](auto input_tv) {
              return input_tv->definition() != nullptr &&
-                 halo_info.needsShiftPredicate(input_tv->definition());
+                 halo_info->needsShiftPredicate(input_tv->definition());
            });
   }
 
@@ -592,16 +640,17 @@ class PredicateChcker : public IterVisitor {
       // If input is not predicated, out-of-bound value may be
       // overwritten by a garbage value. However, it doesn't matter if
       // the input is also produced by another welford.
-      if (!input_def->isA<WelfordOp>() &&
+      if (!input_def->isA<WelfordOp>() && !input_def->isA<GroupedWelfordOp>() &&
           non_predicated_exprs_.find(input_def) !=
               non_predicated_exprs_.end()) {
         needs_predicate_ = true;
+        return;
       }
     }
   }
 
   void handle(GroupedReductionOp* grouped_rop) final {
-    for (const auto i : c10::irange(grouped_rop->numReductions())) {
+    for (const auto i : c10::irange(grouped_rop->numExprs())) {
       auto input = grouped_rop->input(i)->as<TensorView>();
       auto input_def = input->definition();
       // When input_def is null, input must be an input to the fusion,
@@ -643,12 +692,8 @@ class PredicateChcker : public IterVisitor {
       } else if (
           auto input_def_grouped_rop =
               dynamic_cast<GroupedReductionOp*>(input_def)) {
-        auto input_index_as_output = std::distance(
-            input_def_grouped_rop->outputs().begin(),
-            std::find(
-                input_def_grouped_rop->outputs().begin(),
-                input_def_grouped_rop->outputs().end(),
-                input));
+        auto input_index_as_output =
+            input_def_grouped_rop->getExprIndexOfOutput(input);
         if (grouped_rop->getReductionOpType(i) !=
                 input_def_grouped_rop->getReductionOpType(
                     input_index_as_output) &&
@@ -662,6 +707,62 @@ class PredicateChcker : public IterVisitor {
           non_predicated_exprs_.end()) {
         needs_predicate_ = true;
         return;
+      }
+    }
+  }
+
+  void handle(GroupedWelfordOp* grouped_wop) final {
+    for (const auto expr_idx : c10::irange(grouped_wop->numExprs())) {
+      for (const auto val_idx : c10::irange(3)) {
+        auto init = grouped_wop->initVals().at(expr_idx).get(val_idx);
+
+        // Welford input can be a scalar. Predicate is required unless
+        // the scalar value is equal to the init value.
+        auto input = grouped_wop->inputVals().at(expr_idx).get(val_idx);
+        if (input->isScalar()) {
+          if (!input->sameAs(init)) {
+            needs_predicate_ = true;
+            return;
+          }
+          continue;
+        }
+
+        auto input_tv = dynamic_cast<TensorView*>(input);
+        TORCH_INTERNAL_ASSERT(input_tv != nullptr);
+
+        auto input_def = input->definition();
+
+        // When input_def is null, input must be an input to the fusion,
+        // so that must be allocated on global memory. Since we don't omit
+        // predication for expressions involving global memory, this
+        // should never occur.
+        TORCH_INTERNAL_ASSERT(
+            input_def != nullptr,
+            "Inconsistent input found: ",
+            input->toString());
+
+        // The input needs to be initialized to the init value to omit
+        // the predicate, so if the input has its own init value, i.e.,
+        // produced by another reduction, they must use the same init
+        // value.
+        Val* input_init = ir_utils::getReductionInitValOf(input_tv);
+        if (input_init != nullptr && !init->sameAs(input_init)) {
+          needs_predicate_ = true;
+          return;
+        }
+
+        // If input is not predicated, out-of-bound value may be
+        // overwritten by a garbage value. However, it doesn't matter if
+        // the input is also produced by another reduction op as it
+        // must be initialized and its initialized value is already
+        // found to be equal to the initil value of this op.
+        if (!input_def->isA<WelfordOp>() &&
+            !input_def->isA<GroupedWelfordOp>() &&
+            non_predicated_exprs_.find(input_def) !=
+                non_predicated_exprs_.end()) {
+          needs_predicate_ = true;
+          return;
+        }
       }
     }
   }
@@ -837,7 +938,7 @@ bool PredicateElimination::setReductionInitValue(
 bool PredicateElimination::canOmitPredicate(const Expr* expr) const {
   // Predicate elimination can be disabled with
   // PYTORCH_NVFUSER_DISABLE=predicate_elimination
-  if (isDisabled(DisableOption::PredicateElimination)) {
+  if (isOptionDisabled(DisableOption::PredicateElimination)) {
     assertOnWarpOps(expr);
     return false;
   }
@@ -890,7 +991,7 @@ Val* PredicateElimination::getInitValue(TensorView* tv) const {
 }
 
 void PredicateElimination::build(Fusion* fusion) {
-  traverseFrom(fusion, fusion->outputs());
+  traverseTo(fusion, fusion->outputs());
 }
 
 std::string PredicateElimination::toString() const {

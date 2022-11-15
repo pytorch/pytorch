@@ -26,59 +26,6 @@ namespace at {
 
 TORCH_API int _crash_if_asan(int);
 
-// TODO: This unwrapping code is ONLY used for TH bindings; once TH goes
-// away, we can delete this function
-static inline TensorImpl* checked_dense_tensor_unwrap(
-    const Tensor& expr,
-    const char* name,
-    int pos,
-    const char* api,
-    bool allowNull,
-    DeviceType device_type,
-    ScalarType scalar_type) {
-  if (allowNull && !expr.defined()) {
-    return nullptr;
-  }
-  if (expr.layout() != Layout::Strided) {
-    AT_ERROR(
-        "Expected dense tensor but got ",
-        expr.layout(),
-        " for argument #",
-        pos,
-        " '",
-        name,
-        "' in call to ",
-        api);
-  }
-  if (expr.device().type() != device_type) {
-    AT_ERROR(
-        "Expected object of device type ",
-        device_type,
-        " but got device type ",
-        expr.device().type(),
-        " for argument #",
-        pos,
-        " '",
-        name,
-        "' in call to ",
-        api);
-  }
-  if (expr.scalar_type() != scalar_type) {
-    AT_ERROR(
-        "Expected object of scalar type ",
-        scalar_type,
-        " but got scalar type ",
-        expr.scalar_type(),
-        " for argument #",
-        pos,
-        " '",
-        name,
-        "' in call to ",
-        api);
-  }
-  return expr.unsafeGetTensorImpl();
-}
-
 // Converts a TensorList (i.e. ArrayRef<Tensor> to vector of TensorImpl*)
 // NB: This is ONLY used by legacy TH bindings, and ONLY used by cat.
 // Once cat is ported entirely to ATen this can be deleted!

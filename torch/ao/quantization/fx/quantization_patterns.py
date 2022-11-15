@@ -6,13 +6,30 @@ from torch.fx.graph import (
 from .utils import (
     all_node_args_have_no_tensors,
 )
-from torch.ao.quantization.quantization_types import (
+from torch.ao.quantization.utils import (
     Pattern,
     NodePattern,
 )
 
 from abc import ABC
 from typing import Any, Callable, Dict, Optional
+
+__all__ = [
+    "QuantizeHandler",
+    "BinaryOpQuantizeHandler",
+    "CatQuantizeHandler",
+    "ConvReluQuantizeHandler",
+    "LinearReLUQuantizeHandler",
+    "BatchNormQuantizeHandler",
+    "EmbeddingQuantizeHandler",
+    "RNNDynamicQuantizeHandler",
+    "DefaultNodeQuantizeHandler",
+    "FixedQParamsOpQuantizeHandler",
+    "CopyNodeQuantizeHandler",
+    "GeneralTensorShapeOpQuantizeHandler",
+    "CustomModuleQuantizeHandler",
+    "StandaloneModuleQuantizeHandler",
+]
 
 def _default_root_node_getter(node_pattern):
     if node_pattern is None:
@@ -21,12 +38,7 @@ def _default_root_node_getter(node_pattern):
         node_pattern = node_pattern[-1]
     return node_pattern
 
-# -------------------------
-# Pattern Registrations
-# -------------------------
-
-# 1. Post Training Static Quantization and Quantization Aware Training Patterns
-
+# TODO: move to backend_config_utils.py
 # Base Pattern Handler
 class QuantizeHandler(ABC):
     """ Base handler class for the quantizer patterns
@@ -52,7 +64,7 @@ class QuantizeHandler(ABC):
         # determine how many of the first two args are Tensors (versus scalars)
         # this distinguishes things like "x + y" from "x + 2" or "2 + x"
         if isinstance(self.root_node, Node):
-            cache_for_no_tensor_check: Dict[Node, bool] = dict()
+            cache_for_no_tensor_check: Dict[Node, bool] = {}
             for arg_idx in range(len(self.root_node.args)):
                 arg = self.root_node.args[arg_idx]
                 if isinstance(arg, Node) and (

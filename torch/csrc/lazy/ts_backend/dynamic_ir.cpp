@@ -18,7 +18,7 @@ TSOpVector SizeNode::Lower(
   arguments.emplace_back(index);
   torch::lazy::TSOpVector size_out =
       torch::lazy::LowerTSBuiltin(function, op().op, arguments, kwarguments);
-  CHECK_EQ(size_out.size(), 1);
+  TORCH_CHECK_EQ(size_out.size(), 1);
   return size_out;
 }
 
@@ -34,7 +34,7 @@ SizeNode::SizeNode(Value input, size_t dim)
 int64_t SizeNode::getStaticValue() const {
   return dynamic_cast<const TsNode*>(operand(0).node)->shape(0).size(dim_);
 }
-bool SizeNode::isDynamic() const {
+bool SizeNode::isSymbolic() const {
   auto symbolic_vec =
       dynamic_cast<const TsNode*>(operand(0).node)->shape(0).is_symbolic();
   if (!symbolic_vec.has_value()) {
@@ -59,8 +59,8 @@ int64_t SizeAdd::getStaticValue() const {
       DimCast(operand(1))->getStaticValue();
 }
 
-bool SizeAdd::isDynamic() const {
-  return DimCast(operand(0))->isDynamic() || DimCast(operand(1))->isDynamic();
+bool SizeAdd::isSymbolic() const {
+  return DimCast(operand(0))->isSymbolic() || DimCast(operand(1))->isSymbolic();
 }
 
 std::string SizeAdd::ToString() const {
@@ -79,8 +79,8 @@ int64_t SizeMul::getStaticValue() const {
       DimCast(operand(1))->getStaticValue();
 }
 
-bool SizeMul::isDynamic() const {
-  return DimCast(operand(0))->isDynamic() || DimCast(operand(1))->isDynamic();
+bool SizeMul::isSymbolic() const {
+  return DimCast(operand(0))->isSymbolic() || DimCast(operand(1))->isSymbolic();
 }
 
 std::string SizeMul::ToString() const {
@@ -102,8 +102,8 @@ int64_t SizeDiv::getStaticValue() const {
       DimCast(operand(1))->getStaticValue();
 }
 
-bool SizeDiv::isDynamic() const {
-  return DimCast(operand(0))->isDynamic() || DimCast(operand(1))->isDynamic();
+bool SizeDiv::isSymbolic() const {
+  return DimCast(operand(0))->isSymbolic() || DimCast(operand(1))->isSymbolic();
 }
 
 std::string SizeDiv::ToString() const {

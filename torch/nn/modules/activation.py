@@ -654,10 +654,11 @@ class GELU(Module):
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
     When the approximate argument is 'tanh', Gelu is estimated with:
-        :math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+
+    .. math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
     Args:
-        approximate (string, optional): the gelu approximation algorithm to use:
+        approximate (str, optional): the gelu approximation algorithm to use:
             ``'none'`` | ``'tanh'``. Default: ``'none'``
 
     Shape:
@@ -683,7 +684,7 @@ class GELU(Module):
         return F.gelu(input, approximate=self.approximate)
 
     def extra_repr(self) -> str:
-        return 'approximate={}'.format(self.approximate)
+        return 'approximate={}'.format(repr(self.approximate))
 
 
 class Hardshrink(Module):
@@ -934,6 +935,7 @@ class MultiheadAttention(Module):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
 
@@ -1029,8 +1031,7 @@ class MultiheadAttention(Module):
             to ignore for the purpose of attention (i.e. treat as "padding"). For unbatched `query`, shape should be :math:`(S)`.
             Binary and byte masks are supported.
             For a binary mask, a ``True`` value indicates that the corresponding ``key`` value will be ignored for
-            the purpose of attention. For a byte mask, a non-zero value indicates that the corresponding ``key``
-            value will be ignored.
+            the purpose of attention. For a float mask, it will be directly added to the corresponding ``key`` value.
         need_weights: If specified, returns ``attn_output_weights`` in addition to ``attn_outputs``.
             Default: ``True``.
         attn_mask: If specified, a 2D or 3D mask preventing attention to certain positions. Must be of shape
@@ -1060,6 +1061,11 @@ class MultiheadAttention(Module):
             `batch_first` argument is ignored for unbatched inputs.
         """
         is_batched = query.dim() == 3
+        if key_padding_mask is not None:
+            _kpm_dtype = key_padding_mask.dtype
+            if _kpm_dtype != torch.bool and not torch.is_floating_point(key_padding_mask):
+                raise AssertionError(
+                    "only bool and floating types of key_padding_mask are supported")
         why_not_fast_path = ''
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
@@ -1087,10 +1093,12 @@ class MultiheadAttention(Module):
             why_not_fast_path = "add_zero_attn was enabled"
         elif not self._qkv_same_embed_dim:
             why_not_fast_path = "_qkv_same_embed_dim was not True"
-        elif attn_mask is not None:
-            why_not_fast_path = "attn_mask was not None"
-        elif query.is_nested and key_padding_mask is not None:
-            why_not_fast_path = "key_padding_mask is not supported with NestedTensor input"
+        elif query.is_nested and (key_padding_mask is not None or attn_mask is not None):
+            why_not_fast_path = "key_padding_mask and attn_mask are not supported with NestedTensor input"
+        elif not query.is_nested and key_padding_mask is not None and attn_mask is not None:
+            why_not_fast_path = "key_padding_mask and attn_mask were both supplied"
+        elif torch.is_autocast_enabled():
+            why_not_fast_path = "autocast is enabled"
 
         if not why_not_fast_path:
             tensor_args = (
@@ -1124,7 +1132,9 @@ class MultiheadAttention(Module):
                     self.out_proj.bias,
                     key_padding_mask if key_padding_mask is not None else attn_mask,
                     need_weights,
-                    average_attn_weights)
+                    average_attn_weights,
+                    1 if key_padding_mask is not None else 0 if attn_mask is not None else None)
+
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
                                 f"The fast path was not hit because {why_not_fast_path}")
@@ -1302,7 +1312,7 @@ class Softmin(Module):
 
     Examples::
 
-        >>> m = nn.Softmin()
+        >>> m = nn.Softmin(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
@@ -1334,7 +1344,7 @@ class Softmax(Module):
     .. math::
         \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
 
-    When the input Tensor is a sparse tensor then the unspecifed
+    When the input Tensor is a sparse tensor then the unspecified
     values are treated as ``-inf``.
 
     Shape:
@@ -1429,7 +1439,7 @@ class LogSoftmax(Module):
 
     Examples::
 
-        >>> m = nn.LogSoftmax()
+        >>> m = nn.LogSoftmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """

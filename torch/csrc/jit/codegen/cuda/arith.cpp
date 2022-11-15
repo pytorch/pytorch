@@ -63,7 +63,11 @@ Val* promoteSize(Val* v1, Val* v2) {
   } else if (v1->isConstInt() && v2->isConstInt()) {
     TORCH_INTERNAL_ASSERT(
         v1->evaluateInt() == v2->evaluateInt(),
-        "Expected sizes to match but found ",
+        "Expected sizes of, ",
+        v1->toString(),
+        " and ",
+        v2->toString(),
+        " to match but found ",
         v1->evaluateInt(),
         " and ",
         v2->evaluateInt(),
@@ -404,17 +408,6 @@ Val* unaryOp(UnaryOpType type, Val* v1) {
   TORCH_INTERNAL_ASSERT(
       type != UnaryOpType::Address,
       "The reference operator & is not accessible in the Fusion IR");
-
-  // TODO: We should add the following, but we need to go through schedulers
-  // and make sure all calls to "fusion->inputs" includes the output of RandLike
-  //
-  //  If rand like, there isn't a real dependency on the input value, so map it
-  //  to a dummy scalar. if
-  //
-  // (type == UnaryOpType::RandLike) {
-  //   v1 = new NamedScalar("__rnd", v1->getDataType().value());
-  // }
-
   Val* out = newValLike(v1, v1->getDataType().value());
   IrBuilder::create<UnaryOp>(type, out, v1);
   return out;
@@ -447,6 +440,156 @@ TensorView* unaryOp(
   return unaryOp(type, cast_v1)->as<TensorView>();
 }
 
+// TENSOR FACTORIES
+TensorView* rand(const std::vector<Val*>& shape, DataType dtype) {
+  auto n = shape.size();
+  auto out = TensorViewBuilder()
+                 .ndims(n)
+                 .dtype(dtype)
+                 .contiguity(std::vector<bool>(n, true))
+                 .shape(shape)
+                 .build();
+  IrBuilder::create<RNGOp>(RNGOpType::Uniform, out, dtype);
+  return out;
+}
+
+// TENSOR FACTORIES
+TensorView* uniform(
+    const std::vector<Val*>& shape,
+    Val* low,
+    Val* high,
+    DataType dtype) {
+  auto n = shape.size();
+  auto out = TensorViewBuilder()
+                 .ndims(n)
+                 .dtype(dtype)
+                 .contiguity(std::vector<bool>(n, true))
+                 .shape(shape)
+                 .build();
+  IrBuilder::create<RNGOp>(
+      RNGOpType::UniformRange, out, dtype, std::vector<Val*>{low, high});
+  return out;
+}
+
+TensorView* rand_like(TensorView* tv) {
+  TORCH_CHECK(
+      isFloatingPointType(tv->dtype()),
+      "input must have floating point type, but got ",
+      tv->dtype());
+  std::vector<Val*> shape;
+  auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
+  shape.reserve(dom.size());
+  for (auto id : dom) {
+    shape.emplace_back(id->getMaybeExpandedExtent());
+  }
+  return rand(shape, tv->dtype());
+}
+
+Val* rand_like(Val* v) {
+  return rand_like(v->as<TensorView>());
+}
+
+TensorView* full(
+    const std::vector<Val*>& shape,
+    Val* fill_value,
+    DataType dtype) {
+  auto n = shape.size();
+  auto out = TensorViewBuilder()
+                 .ndims(n)
+                 .dtype(dtype)
+                 .contiguity(std::vector<bool>(n, true))
+                 .shape(shape)
+                 .build();
+  IrBuilder::create<FullOp>(out, fill_value, dtype);
+  return out;
+}
+
+TensorView* full_like(TensorView* tv, Val* fill_value) {
+  std::vector<Val*> shape;
+  auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
+  shape.reserve(dom.size());
+  for (auto id : dom) {
+    shape.emplace_back(id->getMaybeExpandedExtent());
+  }
+  return full(shape, fill_value, tv->dtype());
+}
+
+Val* full_like(Val* v, Val* fill_value) {
+  return full_like(v->as<TensorView>(), fill_value);
+}
+
+TensorView* zeros(const std::vector<Val*>& shape, DataType dtype) {
+  return full(shape, FusionGuard::getCurFusion()->zeroVal(), dtype);
+}
+
+TensorView* zeros_like(TensorView* tv) {
+  return full_like(tv, FusionGuard::getCurFusion()->zeroVal());
+}
+
+Val* zeros_like(Val* v) {
+  return zeros_like(v->as<TensorView>());
+}
+
+TensorView* ones(const std::vector<Val*>& shape, DataType dtype) {
+  return full(shape, FusionGuard::getCurFusion()->oneVal(), dtype);
+}
+
+TensorView* ones_like(TensorView* tv) {
+  return full_like(tv, FusionGuard::getCurFusion()->oneVal());
+}
+
+Val* ones_like(Val* v) {
+  return ones_like(v->as<TensorView>());
+}
+
+TensorView* arange(Val* end, DataType dtype) {
+  return arange(FusionGuard::getCurFusion()->zeroVal(), end, dtype);
+}
+
+TensorView* arange(Val* start, Val* end, DataType dtype) {
+  return arange(start, end, FusionGuard::getCurFusion()->oneVal(), dtype);
+}
+
+TensorView* arange(Val* start, Val* end, Val* step, DataType dtype) {
+  if (isIntegralType(dtype)) {
+    start = castOp(DataType::Int, start);
+    end = castOp(DataType::Int, end);
+    step = castOp(DataType::Int, step);
+  } else if (isFloatingPointType(dtype)) {
+    start = castOp(DataType::Double, start);
+    end = castOp(DataType::Double, end);
+    step = castOp(DataType::Double, step);
+  }
+  // Make sure no negative value is passed to ceilDiv as the device
+  // implementation of ceilDiv assumes positive inputs
+  auto size = castOp(DataType::Int, ceilDiv(abs(sub(end, start)), abs(step)));
+  auto out = TensorViewBuilder()
+                 .ndims(1)
+                 .dtype(dtype)
+                 .contiguity({true})
+                 .shape({size})
+                 .build();
+  IrBuilder::create<ARangeOp>(out, start, end, step, dtype);
+  return out;
+}
+
+TensorView* eye(Val* rows, Val* cols, DataType dtype) {
+  TORCH_CHECK(rows->getDataType() == DataType::Int, "rows must have type Int");
+  TORCH_CHECK(cols->getDataType() == DataType::Int, "cols must have type Int");
+  auto out = TensorViewBuilder()
+                 .ndims(2)
+                 .dtype(dtype)
+                 .contiguity({true, true})
+                 .shape(std::vector<Val*>{rows, cols})
+                 .build();
+  IrBuilder::create<EyeOp>(out, dtype);
+  return out;
+}
+
+TensorView* eye(Val* size, DataType dtype) {
+  return eye(size, size, dtype);
+}
+
 // UNARY OPERATIONS
 
 #define NVFUSER_DEFINE_UNARY_OP(op_name, op_type) \
@@ -458,7 +601,6 @@ TensorView* unaryOp(
   }
 
 NVFUSER_DEFINE_UNARY_OP(set, Set)
-NVFUSER_DEFINE_UNARY_OP(randlike, RandLike)
 NVFUSER_DEFINE_UNARY_OP(ceil, Ceil)
 NVFUSER_DEFINE_UNARY_OP(floor, Floor)
 NVFUSER_DEFINE_UNARY_OP(frac, Frac)
@@ -467,6 +609,7 @@ NVFUSER_DEFINE_UNARY_OP(relu, Relu)
 NVFUSER_DEFINE_UNARY_OP(round, Round)
 NVFUSER_DEFINE_UNARY_OP(silu, Silu)
 NVFUSER_DEFINE_UNARY_OP(trunc, Trunc)
+NVFUSER_DEFINE_UNARY_OP(print, Print)
 #undef NVFUSER_DEFINE_UNARY_OP
 
 Val* bitwise_not(Val* v) {
@@ -980,6 +1123,11 @@ static TensorView* newForReduction(
 
     new_domain.push_back(
         IterDomainBuilder(id)
+            // If the domain is being reduced, but it's coming in as an expanded
+            // extent, we need to realize the expand.
+            .extent(
+                isReduction && id->hasExpandedExtent() ? id->expandedExtent()
+                                                       : id->extent())
             .resetSchedulingParams()
             .iter_type(isReduction ? IterType::Reduction : id->getIterType())
             .build());
@@ -1107,7 +1255,11 @@ TensorView* sum(
 TensorView* max(
     TensorView* v1,
     const std::vector<int>& axes,
-    bool keep_dim /*=false*/) {
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
+  TORCH_CHECK(
+      dtype == DataType::Null,
+      "A dtype other than Null is not currently supported.");
   Val* init = getMinimumValue(v1->getDataType().value());
   TORCH_CHECK(init != nullptr, "Missing initial value");
   return reductionOp(BinaryOpType::Max, axes, init, v1, keep_dim);
@@ -1116,7 +1268,11 @@ TensorView* max(
 TensorView* min(
     TensorView* v1,
     const std::vector<int>& axes,
-    bool keep_dim /*=false*/) {
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
+  TORCH_CHECK(
+      dtype == DataType::Null,
+      "A dtype other than Null is not currently supported.");
   Val* init = getMaximumValue(v1->getDataType().value());
   TORCH_CHECK(init != nullptr, "Missing initial value");
   return reductionOp(BinaryOpType::Min, axes, init, v1, keep_dim);
@@ -1210,7 +1366,7 @@ TensorView* expand(TensorView* inp, const std::vector<Val*>& expanded_sizes) {
       // This is just done for clarity. It isn't necessary as it's
       // already done when constructing out_id_builder.
       out_id_builder.extent(inp_id->extent());
-    } else if (inp_id->isBroadcast()) {
+    } else if (inp_id->isBroadcast() && expanded_size_int != 1) {
       // When input id is a broadcast, expand the extent to the given
       // size, which can be concrete or symbolic.
       expanded = true;
@@ -1223,7 +1379,7 @@ TensorView* expand(TensorView* inp, const std::vector<Val*>& expanded_sizes) {
       // does not mean the ID becomes a broadcast.
       out_id_builder.extent(expanded_sizes[i]);
     } else {
-      // Input id is non-broadcast and its extent is concrete. Nothing
+      // Input id is non-expand and its extent is concrete. Nothing
       // to expand, but the input and expanded sizes should match if
       // the expanded size is also concrete.
       auto inp_id_size_int = inp_id->extent()->getInt();
@@ -1380,12 +1536,12 @@ WelfordResult Welford(
       out_avg,
       out_var,
       out_N, /*out var/avg/count */
+      tv, /*in var/avg/count */
+      FusionGuard::getCurFusion()->zeroVal(),
+      FusionGuard::getCurFusion()->oneVal(),
       init_avg_val,
       init_var_val,
-      init_N, /*init var/avg/count */
-      tv,
-      FusionGuard::getCurFusion()->zeroVal(),
-      FusionGuard::getCurFusion()->oneVal()); /*in var/avg/count */
+      init_N); /*init var/avg/count */
 
   return WelfordResult(out_avg, out_var, out_N);
 }
@@ -1397,12 +1553,6 @@ WelfordResult::WelfordResult(
     : avg(in_avg), var_sum(in_var_sum), n(in_n) {
   TORCH_INTERNAL_ASSERT(avg->definition()->sameAs(var_sum->definition()));
   TORCH_INTERNAL_ASSERT(avg->definition()->sameAs(n->definition()));
-}
-
-WelfordResult WelfordResult::rFactor(const std::vector<int>& axes) {
-  auto o_tv = avg->definition()->as<WelfordOp>()->out()->as<TensorView>();
-  auto rf_tvs = o_tv->rFactor(axes, std::vector<TensorView*>{avg, var_sum, n});
-  return WelfordResult{rf_tvs.at(0), rf_tvs.at(1), rf_tvs.at(2)};
 }
 
 // COMPOUND OPERATIONS

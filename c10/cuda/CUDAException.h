@@ -22,41 +22,23 @@ class C10_CUDA_API CUDAError : public c10::Error {
 };
 } // namespace c10
 
-// For CUDA Runtime API
-#ifdef STRIP_ERROR_MESSAGES
-#define C10_CUDA_CHECK(EXPR)                                     \
-  do {                                                           \
-    cudaError_t __err = EXPR;                                    \
-    if (__err != cudaSuccess) {                                  \
-      throw c10::CUDAError(                                      \
-          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
-          TORCH_CHECK_MSG(false, ""));                           \
-    }                                                            \
+#define C10_CUDA_CHECK(EXPR)                                               \
+  do {                                                                     \
+    const cudaError_t __err = EXPR;                                        \
+    if (C10_UNLIKELY(__err != cudaSuccess)) {                              \
+      c10::cuda::c10_cuda_check_implementation(                            \
+          __FILE__,                                                        \
+          __func__, /* Line number's data type is not well-defined between \
+                       compilers, so we perform an explicit cast */        \
+          static_cast<uint32_t>(__LINE__),                                 \
+          true);                                                           \
+    }                                                                      \
   } while (0)
-#else
-#define C10_CUDA_CHECK(EXPR)                                        \
-  do {                                                              \
-    cudaError_t __err = EXPR;                                       \
-    if (__err != cudaSuccess) {                                     \
-      auto error_unused C10_UNUSED = cudaGetLastError();            \
-      (void)error_unused;                                           \
-      auto _cuda_check_suffix = c10::cuda::get_cuda_check_suffix(); \
-      throw c10::CUDAError(                                         \
-          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},    \
-          TORCH_CHECK_MSG(                                          \
-              false,                                                \
-              "",                                                   \
-              "CUDA error: ",                                       \
-              cudaGetErrorString(__err),                            \
-              _cuda_check_suffix));                                 \
-    }                                                               \
-  } while (0)
-#endif
 
 #define C10_CUDA_CHECK_WARN(EXPR)                              \
   do {                                                         \
-    cudaError_t __err = EXPR;                                  \
-    if (__err != cudaSuccess) {                                \
+    const cudaError_t __err = EXPR;                            \
+    if (C10_UNLIKELY(__err != cudaSuccess)) {                  \
       auto error_unused C10_UNUSED = cudaGetLastError();       \
       (void)error_unused;                                      \
       TORCH_WARN("CUDA warning: ", cudaGetErrorString(__err)); \
@@ -69,8 +51,8 @@ class C10_CUDA_API CUDAError : public c10::Error {
 // Intentionally ignore a CUDA error
 #define C10_CUDA_IGNORE_ERROR(EXPR)                             \
   do {                                                          \
-    cudaError_t __err = EXPR;                                   \
-    if (__err != cudaSuccess) {                                 \
+    const cudaError_t __err = EXPR;                             \
+    if (C10_UNLIKELY(__err != cudaSuccess)) {                   \
       cudaError_t error_unused C10_UNUSED = cudaGetLastError(); \
       (void)error_unused;                                       \
     }                                                           \
@@ -87,3 +69,17 @@ class C10_CUDA_API CUDAError : public c10::Error {
 // the launch happened correctly and provide an early, close-to-source
 // diagnostic if it didn't.
 #define C10_CUDA_KERNEL_LAUNCH_CHECK() C10_CUDA_CHECK(cudaGetLastError())
+
+namespace c10 {
+namespace cuda {
+
+/// In the event of a CUDA failure, formats a nice error message about that
+/// failure and also checks for device-side assertion failures
+C10_CUDA_API void c10_cuda_check_implementation(
+    const char* filename,
+    const char* function_name,
+    const int line_number,
+    const bool include_device_assertions);
+
+} // namespace cuda
+} // namespace c10

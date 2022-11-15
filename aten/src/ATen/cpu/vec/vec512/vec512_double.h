@@ -450,6 +450,11 @@ Vectorized<double> inline fmadd(const Vectorized<double>& a, const Vectorized<do
   return _mm512_fmadd_pd(a, b, c);
 }
 
+template <>
+Vectorized<double> inline fmsub(const Vectorized<double>& a, const Vectorized<double>& b, const Vectorized<double>& c) {
+  return _mm512_fmsub_pd(a, b, c);
+}
+
 #endif
 
 }}}

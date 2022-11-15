@@ -1,4 +1,10 @@
 {
+    "HOW TO UPDATE THE BINARIES": [
+        "Upload the new file to S3 under a new folder with the version number embedded in (see actionlint for an example).",
+        "(Don't override the old files, otherwise you'll break `lintrunner install` for anyone using an older commit of pytorch.)",
+        "'Hash' is the sha256 of the uploaded file.",
+        "Validate the new download url and hash by running 'lintrunner init' to pull the new binaries and then run 'lintrunner' to try linting the files."
+    ],
     "clang-format": {
         "Darwin": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/mac/clang-format-mojave",
@@ -21,12 +27,12 @@
     },
     "actionlint": {
         "Darwin": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos/actionlint",
-            "hash": "3ce2c94280c540e20b270acae60bdd9e72ad17d6cb35b688951b1ec1eb8cbdd6"
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.6.21/Darwin_amd64/actionlint",
+            "hash": "b354db83815384d3c3a07f68f44b30cb0a70899757a0d185d7322de9952e8813"
         },
         "Linux": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/actionlint",
-            "hash": "693f464106474760f0edf4a1778215095eacc4bd5f79aab5dc950892f120828b"
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.6.21/Linux_arm64/actionlint",
+            "hash": "025ac157db121b33971ef24af72d73d71cda3cb1e3a94795bb2708ef4032ca76"
         }
     }
 }

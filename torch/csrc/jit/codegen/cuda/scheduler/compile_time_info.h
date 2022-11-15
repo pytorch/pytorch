@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/pointwise_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 
 namespace torch {
@@ -24,12 +25,56 @@ namespace HeuristicCompileTime {
 
 //! Enum for all possible types of cached entries of compile-time info.
 enum class CompileTimeEntryType {
+  DOMAIN_MAP,
+  TRANSPOSE_DOMAIN_MAP,
+  REFERENCE_TENSORS,
+  REFERENCE_TENSORS_FOR_GROUPS,
   VECTORIZABLE_INPUTS_AND_OUTPUTS,
+  INPUTS_AND_OUTPUTS_INNER_DIM_GROUPS,
   UNROLLABLE_INPUTS_AND_OUTPUTS,
   REDUCTION_TVS,
   PERSISTENT_BUFFER_INFO,
   SCOPE_PERSISTENT_FACTOR_INFO,
-  BROADCAST_BYTE_MULTIPLES
+  BROADCAST_BYTE_MULTIPLES,
+  INNER_MOST_DIMS_INFO,
+  CAN_SCHEDULE_TRANSPOSE,
+};
+
+//! Entry type definition class for `DOMAIN_MAP`,
+//!  stores the domain map of a fusion.
+class DomainMap {
+ public:
+  using DataType = pointwise_utils::DomainMap;
+  static const CompileTimeEntryType EntryType =
+      CompileTimeEntryType::DOMAIN_MAP;
+};
+
+//! Entry type definition class for `DOMAIN_MAP`,
+//!  stores the domain map of a fusion, used by transpose scheduler.
+class TransposeDomainMap {
+ public:
+  using DataType = pointwise_utils::DomainMap;
+  static const CompileTimeEntryType EntryType =
+      CompileTimeEntryType::TRANSPOSE_DOMAIN_MAP;
+};
+
+//! Entry type definition class for `REFERENCE_TENSORS`,
+//!  stores the the reference TensorViews used to schedule a fusion.
+class ReferenceTensors {
+ public:
+  using DataType = std::vector<TensorView*>;
+  static const CompileTimeEntryType EntryType =
+      CompileTimeEntryType::REFERENCE_TENSORS;
+};
+
+//! Entry type definition class for `REFERENCE_TENSORS`,
+//!  stores the the reference TensorViews used to schedule a fusion, used by
+//!  transpose scheduler.
+class ReferenceTensorsForGroups {
+ public:
+  using DataType = std::vector<TensorView*>;
+  static const CompileTimeEntryType EntryType =
+      CompileTimeEntryType::REFERENCE_TENSORS_FOR_GROUPS;
 };
 
 //! Entry type definition class for `VECTORIZABLE_INPUTS_AND_OUTPUTS`,
@@ -39,6 +84,15 @@ class VectorizableInputsAndOutputs {
   using DataType = std::vector<TensorView*>;
   static const CompileTimeEntryType EntryType =
       CompileTimeEntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS;
+};
+
+//! Entry type definition class for `INPUTS_AND_OUTPUTS_INNER_DIM_GROUPS`,
+//!  stores the fusion's inputs and outputs grouped by inner most dimension.
+class InputsOutputsInnerDimGroups {
+ public:
+  using DataType = std::vector<std::vector<TensorView*>>;
+  static const CompileTimeEntryType EntryType =
+      CompileTimeEntryType::INPUTS_AND_OUTPUTS_INNER_DIM_GROUPS;
 };
 
 //! Entry type definition class for `UNROLLABLE_INPUTS_AND_OUTPUTS`,
@@ -68,6 +122,16 @@ class PersistentBufferInfo {
       CompileTimeEntryType::PERSISTENT_BUFFER_INFO;
 };
 
+//! Entry type definition class for `INNER_MOST_DIMS_INFO`,
+//!  Used in the transpose scheduler to store inner most IterDomains and their
+//!  position in reference1 of group 1 and group 2
+class InnerMostDimInfo {
+ public:
+  using DataType = std::vector<int64_t>;
+  static const CompileTimeEntryType EntryType =
+      CompileTimeEntryType::INNER_MOST_DIMS_INFO;
+};
+
 //! Auxiliary data types for `SCOPE_PERSISTENT_FACTOR_INFO` entry type.
 using ScopedPersistenceBufferMap = std::unordered_map<Val*, std::vector<bool>>;
 
@@ -90,9 +154,18 @@ class ScopePersistentFactorInfo {
 //!  information.
 class BroadcastMultiples {
  public:
-  using DataType = std::vector<scheduler_utils::BroadcastMultiple>;
+  using DataType = scheduler_utils::BroadcastMultipleInformation;
   static const CompileTimeEntryType EntryType =
       CompileTimeEntryType::BROADCAST_BYTE_MULTIPLES;
+};
+
+//! Entry type definition class for `CAN_SCHEDULE_TRANSPOSE`,
+//!  stores if the transpose scheduler can scheduler this fusion
+class CanScheduleTranspose {
+ public:
+  using DataType = bool;
+  static const CompileTimeEntryType EntryType =
+      CompileTimeEntryType::CAN_SCHEDULE_TRANSPOSE;
 };
 
 //! Base abstract class for unified storage in `HeuristicSummary`,

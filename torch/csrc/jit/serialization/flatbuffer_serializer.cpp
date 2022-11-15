@@ -1,17 +1,33 @@
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 
+#ifdef FLATBUFFERS_VERSION_MAJOR
+#error "flatbuffer_serializer.h must not include any flatbuffers headers"
+#endif // FLATBUFFERS_VERSION_MAJOR
+
+#include <fstream>
+#include <functional>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #include <ATen/ATen.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
 #include <caffe2/serialize/versions.h>
-#include <flatbuffers/flatbuffers.h>
 #include <torch/csrc/jit/mobile/code.h>
-#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/train/export_data.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
-#include <torch/csrc/jit/serialization/export.h>
-#include <string>
+
+#if defined(FB_XPLAT_BUILD) || defined(FBCODE_CAFFE2)
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated_fbsource.h> // NOLINT
+namespace flatbuffers = flatbuffers_fbsource;
+#define FLATBUFFERS_MAX_ALIGNMENT FLATBUFFERS_FBSOURCE_MAX_ALIGNMENT
+#else
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
+#endif
 
 namespace torch {
 namespace jit {
@@ -697,7 +713,7 @@ flatbuffers::Offset<mobile::serialization::IValue> FlatbufferSerializer::
   } else if (ivalue.isString()) {
     ivalue_type = IValueUnion::String;
     offset = mobile::serialization::CreateString(
-                 fbb, fbb.CreateSharedString(ivalue.toString()->string()))
+                 fbb, fbb.CreateSharedString(ivalue.toStringRef()))
                  .Union();
   } else if (ivalue.isGenericDict()) {
     ivalue_type = IValueUnion::Dict;
@@ -760,29 +776,54 @@ void save_mobile_module(
   auto buffer = save_mobile_module_to_bytes(
       module, extra_files, jit_sources, jit_constants);
   std::fstream ofile(filename, std::ios::binary | std::ios::out);
-  ofile.write(reinterpret_cast<char*>(buffer.data()), buffer.size());
+  ofile.write(
+      reinterpret_cast<char*>(buffer->data()),
+      static_cast<std::streamsize>(buffer->size()));
   ofile.close();
 }
 
-flatbuffers::DetachedBuffer save_mobile_module_to_bytes(
+/// Deletes a DetachedBuffer, along with the internal
+/// flatbuffers::DetachedBuffer if present. Used as a custom deleter for
+/// std::unique_ptr; see UniqueDetachedBuffer and make_unique_detached_buffer.
+void DetachedBuffer::destroy(DetachedBuffer* buf) {
+  // May be null.
+  delete static_cast<flatbuffers::DetachedBuffer*>(buf->data_owner_);
+  delete buf;
+}
+
+/// Provides access to DetachedBuffer::destroy().
+struct DetachedBufferFriend {
+  /// Returns a UniqueDetachedBuffer that wraps the provided DetachedBuffer.
+  static DetachedBuffer::UniqueDetachedBuffer make_unique_detached_buffer(
+      DetachedBuffer* buf) {
+    return DetachedBuffer::UniqueDetachedBuffer(buf, DetachedBuffer::destroy);
+  }
+};
+
+DetachedBuffer::UniqueDetachedBuffer save_mobile_module_to_bytes(
     const mobile::Module& module,
     const ExtraFilesMap& extra_files,
     const ExtraFilesMap& jit_sources,
     const std::vector<IValue>& jit_constants) {
   FlatbufferSerializer fb_serializer;
-  return fb_serializer.serializeModule(
+  flatbuffers::DetachedBuffer buf = fb_serializer.serializeModule(
       module,
-      /*include_tensor_data_in_flatbuffer*/ true,
+      /*include_tensor_data_in_flatbuffer=*/true,
       extra_files,
       jit_sources,
       jit_constants);
+  flatbuffers::DetachedBuffer* buf_ptr =
+      new flatbuffers::DetachedBuffer(std::move(buf));
+  DetachedBuffer* ret =
+      new DetachedBuffer(buf_ptr->data(), buf_ptr->size(), buf_ptr);
+  return DetachedBufferFriend::make_unique_detached_buffer(ret);
 }
 
 static void save_mobile_module_to_func(
     const mobile::Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func) {
   auto buffer = save_mobile_module_to_bytes(module);
-  writer_func(buffer.data(), buffer.size());
+  writer_func(buffer->data(), buffer->size());
 }
 
 bool register_flatbuffer_serializer() {

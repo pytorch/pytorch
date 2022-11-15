@@ -1,6 +1,20 @@
 import inspect
 import functools
+from enum import Enum
+
 import torch.autograd
+
+
+class _SnapshotState(Enum):
+    r"""
+    These are the snapshotting-related states that IterDataPipes can be in.
+    `NotStarted` - allows you to restore a snapshot and create an iterator with reset
+    `Restored` - cannot restore again, allows you to create an iterator without resetting the DataPipe
+    `Iterating` - can restore, will reset if you create a new iterator
+    """
+    NotStarted = 0
+    Restored = 1
+    Iterating = 2
 
 
 def _simplify_obj_name(obj) -> str:
@@ -140,6 +154,15 @@ def hook_iterator(namespace, profile_name):
         def wrap_generator(*args, **kwargs):
             gen = func(*args, **kwargs)
             datapipe = args[0]
+            if datapipe._fast_forward_iterator:
+                it = datapipe._fast_forward_iterator
+                datapipe._fast_forward_iterator = None
+                datapipe._snapshot_state = _SnapshotState.Iterating
+                while True:
+                    try:
+                        yield next(it)
+                    except StopIteration:
+                        return
             iterator_id = _set_datapipe_valid_iterator_id(datapipe)  # This ID is tied to each created iterator
             _profiler_enabled = torch.autograd._profiler_enabled()
             try:
@@ -161,7 +184,7 @@ def hook_iterator(namespace, profile_name):
                         _check_iterator_valid(datapipe, iterator_id)
                         response = gen.send(request)
             except StopIteration as e:
-                return e.value
+                return
             except Exception as e:
                 # TODO: Simplify the traceback message to skip over `response = gen.send(None)`
                 #       Part of https://github.com/pytorch/data/issues/284
@@ -170,7 +193,7 @@ def hook_iterator(namespace, profile_name):
                 single_iterator_msg = "single iterator per IterDataPipe constraint"
                 if hasattr(e.args, '__len__'):
                     full_msg = f"{msg} {datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
-                    if len(e.args) == 0:  # If an exception message doesn't exist
+                    if len(e.args) == 0 or not isinstance(e.args[0], str):  # If an exception message doesn't exist
                         e.args = (f'\nThis exception is {full_msg}',)
                     elif msg not in e.args[0] and single_iterator_msg not in e.args[0]:
                         e.args = (e.args[0] + f'\nThis exception is {full_msg}',) + e.args[1:]
@@ -206,6 +229,11 @@ def hook_iterator(namespace, profile_name):
         def wrap_iter(*args, **kwargs):
             iter_ret = func(*args, **kwargs)
             datapipe = args[0]
+            datapipe._snapshot_state = _SnapshotState.Iterating
+            if datapipe._fast_forward_iterator:
+                iter_ret = datapipe._fast_forward_iterator
+                datapipe._fast_forward_iterator = None
+                return iter_ret
             iterator_id = _set_datapipe_valid_iterator_id(datapipe)  # This ID is tied to each created iterator
             return IteratorDecorator(iter_ret, datapipe, iterator_id, '__next__' in namespace)
 

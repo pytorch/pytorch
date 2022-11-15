@@ -888,15 +888,13 @@ class TestDistributions(DistributionsTestCase):
     def _check_enumerate_support(self, dist, examples):
         for params, expected in examples:
             params = {k: torch.tensor(v) for k, v in params.items()}
-            expected = torch.tensor(expected)
             d = dist(**params)
             actual = d.enumerate_support(expand=False)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(actual, expected)
+            expected = torch.tensor(expected, dtype=actual.dtype)
+            self.assertEqual(actual, expected)
             actual = d.enumerate_support(expand=True)
             expected_with_expand = expected.expand((-1,) + d.batch_shape + d.event_shape)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(actual, expected_with_expand)
+            self.assertEqual(actual, expected_with_expand)
 
     def test_repr(self):
         for Dist, params in EXAMPLES:
@@ -1203,10 +1201,9 @@ class TestDistributions(DistributionsTestCase):
 
     def test_binomial_vectorized_count(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
-        total_count = torch.tensor([[4, 7], [3, 8]])
+        total_count = torch.tensor([[4, 7], [3, 8]], dtype=torch.float64)
         bin0 = Binomial(total_count, torch.tensor(1.))
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(bin0.sample(), total_count)
+        self.assertEqual(bin0.sample(), total_count)
         bin1 = Binomial(total_count, torch.tensor(0.5))
         samples = bin1.sample(torch.Size((100000,)))
         self.assertTrue((samples <= total_count.type_as(samples)).all())
@@ -1304,9 +1301,8 @@ class TestDistributions(DistributionsTestCase):
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
 
         # sample check for extreme value of probs
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(Multinomial(total_count, s).sample(),
-                                   torch.tensor([[total_count, 0], [0, total_count]]))
+        self.assertEqual(Multinomial(total_count, s).sample(),
+                         torch.tensor([[total_count, 0], [0, total_count]], dtype=torch.float64))
 
     def test_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
@@ -1424,11 +1420,8 @@ class TestDistributions(DistributionsTestCase):
         # approximation enters the forbidden parameter space. We instead compare with the
         # theoretical results.
         dist = Poisson(rate_zero)
-        s = dist.sample()
-        dist.log_prob(s).backward()
-        torch.testing.assert_allclose(rate_zero.grad, -1.0)
         dist.log_prob(torch.ones_like(rate_zero)).backward()
-        torch.testing.assert_allclose(rate_zero.grad, torch.inf)
+        self.assertEqual(rate_zero.grad, torch.inf)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_sample(self):

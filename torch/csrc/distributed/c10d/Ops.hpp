@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/util/intrusive_ptr.h>
-#include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 
 namespace c10d {
 namespace ops {
@@ -11,62 +11,62 @@ namespace ops {
 // const std::vector<at::Tensor>&. However, const std::vector<at::Tensor>& is
 // used whenever the API accepts std::vector<std::vector<at::Tensor>>& to keep
 // consistency.
-TORCH_API c10::intrusive_ptr<ProcessGroup::Work> broadcast(
+TORCH_API c10::intrusive_ptr<Work> broadcast(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     const BroadcastOptions& opts = {});
 
-TORCH_API c10::intrusive_ptr<ProcessGroup::Work> allreduce(
+TORCH_API c10::intrusive_ptr<Work> allreduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     const AllreduceOptions& opts = {});
 
-TORCH_API c10::intrusive_ptr<ProcessGroup::Work> allgather(
+TORCH_API c10::intrusive_ptr<Work> allgather(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
     const AllgatherOptions& opts = {});
 
-TORCH_API c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
+TORCH_API c10::intrusive_ptr<Work> reduce_scatter(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const ReduceScatterOptions& opts = {});
 
-TORCH_API c10::intrusive_ptr<ProcessGroup::Work> reduce(
+TORCH_API c10::intrusive_ptr<Work> reduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     const ReduceOptions& opts = {});
 
-TORCH_API c10::intrusive_ptr<ProcessGroup::Work> gather(
+TORCH_API c10::intrusive_ptr<Work> gather(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
     const GatherOptions& opts = {});
 
-TORCH_API c10::intrusive_ptr<ProcessGroup::Work> scatter(
+TORCH_API c10::intrusive_ptr<Work> scatter(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const ScatterOptions& opts = {});
 
-TORCH_API c10::intrusive_ptr<ProcessGroup::Work> alltoall(
+TORCH_API c10::intrusive_ptr<Work> alltoall(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList output_tensors,
     at::TensorList input_tensors,
     const AllToAllOptions& opts = {});
 
-TORCH_API c10::intrusive_ptr<ProcessGroup::Work> barrier(
+TORCH_API c10::intrusive_ptr<Work> barrier(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const BarrierOptions& opts = {});
 
-TORCH_API c10::intrusive_ptr<ProcessGroup::Work> send(
+TORCH_API c10::intrusive_ptr<Work> send(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     int64_t dstRank,
     int64_t tag);
 
-TORCH_API c10::intrusive_ptr<ProcessGroup::Work> recv(
+TORCH_API c10::intrusive_ptr<Work> recv(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     int64_t srcRank,

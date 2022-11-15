@@ -36,8 +36,14 @@ from quantization.core.test_workflow_module import TestRecordHistogramObserver  
 from quantization.core.test_workflow_module import TestHistogramObserver  # noqa: F401
 from quantization.core.test_workflow_module import TestDistributed  # noqa: F401
 from quantization.core.test_workflow_module import TestFusedObsFakeQuantModule  # noqa: F401
+from quantization.core.test_backend_config import TestBackendConfig  # noqa: F401
 from quantization.core.test_utils import TestUtils  # noqa: F401
-from quantization.core.test_docs import TestQuantizationDocs  # noqa: F401
+try:
+    # This test has extra data dependencies, so in some environments, e.g. Meta internal
+    # Buck, it has its own test runner.
+    from quantization.core.test_docs import TestQuantizationDocs  # noqa: F401
+except ImportError:
+    pass
 
 # Eager Mode Workflow. Tests for the functionality of APIs and different features implemented
 # using eager mode.
@@ -46,7 +52,6 @@ from quantization.core.test_docs import TestQuantizationDocs  # noqa: F401
 from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerPTQStatic  # noqa: F401
 from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerPTQDynamic  # noqa: F401
 from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerOps  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerONNXExport  # noqa: F401
 # 2. Eager mode quantization aware training
 from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQAT  # noqa: F401
 from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQATNumerics  # noqa: F401
@@ -78,6 +83,7 @@ try:
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcher  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcherModels  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIs  # noqa: F401
+    from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteNShadows  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsModels  # noqa: F401
 except ImportError:
     pass
@@ -118,16 +124,10 @@ from quantization.jit.test_deprecated_jit_quant import TestDeprecatedJitQuantize
 
 # AO Migration tests
 from quantization.ao_migration.test_quantization import TestAOMigrationQuantization  # noqa: F401
+from quantization.ao_migration.test_ao_migration import TestAOMigrationNNQuantized  # noqa: F401
+from quantization.ao_migration.test_ao_migration import TestAOMigrationNNIntrinsic  # noqa: F401
 try:
     from quantization.ao_migration.test_quantization_fx import TestAOMigrationQuantizationFx  # noqa: F401
-except ImportError:
-    pass
-
-try:
-    from quantization.dbr.test_quantize_dbr import TestQuantizeDBR  # noqa: F401
-    from quantization.dbr.test_quantize_dbr import TestQuantizeDBRIndividualOps  # noqa: F401
-    from quantization.dbr.test_quantize_dbr import TestQuantizeDBRMultipleOps  # noqa: F401
-    from quantization.dbr.test_quantize_dbr import TestQuantizeDBRModels  # noqa: F401
 except ImportError:
     pass
 

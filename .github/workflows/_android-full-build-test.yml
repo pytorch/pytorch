@@ -19,23 +19,6 @@ on:
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
 
-    secrets:
-      SONATYPE_NEXUS_USERNAME:
-        description: nexus user
-        required: true
-      SONATYPE_NEXUS_PASSWORD:
-        description: nexus pass
-        required: true
-      ANDROID_SIGN_KEY:
-        description: android key
-        required: true
-      ANDROID_SIGN_PASS:
-        description: android pass
-        required: true
-      SCRIBE_GRAPHQL_ACCESS_TOKEN:
-        description: token for writing to scribe/scuba
-        required: true
-
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
@@ -53,7 +36,7 @@ jobs:
         uses: ./.github/actions/setup-linux
 
       - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -64,7 +47,7 @@ jobs:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -145,7 +128,7 @@ jobs:
 
           # run gradle buildRelease
           (echo "./.circleci/scripts/build_android_gradle.sh" | docker exec \
-            -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build" \
+            -e BUILD_ENVIRONMENT="pytorch-linux-focal-py3-clang7-android-ndk-r19c-gradle-build" \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             -e PR_NUMBER \
@@ -160,25 +143,6 @@ jobs:
           mkdir -p "${GITHUB_WORKSPACE}/build_android_artifacts"
           docker cp "${ID_X86_32}:/var/lib/jenkins/workspace/android/artifacts.tgz" "${GITHUB_WORKSPACE}/build_android_artifacts/"
 
-      - name: Publish android snapshot
-        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
-        env:
-          SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
-          SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
-          ANDROID_SIGN_KEY: ${{ secrets.ANDROID_SIGN_KEY }}
-          ANDROID_SIGN_PASS: ${{ secrets.ANDROID_SIGN_PASS }}
-          ID_X86_32: ${{ steps.build-x86_32.outputs.container_id }}
-        run: |
-          set -eux
-          (echo "./.circleci/scripts/publish_android_snapshot.sh" | docker exec \
-            -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-publish-snapshot" \
-            -e SONATYPE_NEXUS_USERNAME \
-            -e SONATYPE_NEXUS_PASSWORD \
-            -e ANDROID_SIGN_KEY \
-            -e ANDROID_SIGN_PASS \
-            -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
-            -u jenkins -i "${ID_X86_32}" bash) 2>&1
-
       - name: Store PyTorch Android Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
         with:
@@ -192,5 +156,5 @@ jobs:
         if: always()
 
       - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()

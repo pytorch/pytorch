@@ -1,4 +1,4 @@
-if((NOT BUILD_CAFFE2) OR (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE))
+if(NOT BUILD_CAFFE2 OR INTERN_BUILD_MOBILE)
   list(APPEND Caffe2_CPU_SRCS
     utils/string_utils.cc
     utils/threadpool/ThreadPool.cc
