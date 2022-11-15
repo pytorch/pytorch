@@ -20,14 +20,17 @@ namespace c10 {
 C10_ALWAYS_INLINE bool add_overflows(uint64_t a, uint64_t b, uint64_t* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
   return __builtin_add_overflow(a, b, out);
-#elif defined (_M_X64)
+#else
   unsigned long long tmp;
-  auto carry = _addcarry_u64(0, a, b, &tmp);
+  #if defined (_M_ARM64) || defined (_M_HYBRID_X86_ARM64) || defined (_M_ARM64EC)
+    tmp = a + b;
+    unsigned long long vector = (a & b) ^ ((a ^ b) & ~tmp);
+    auto carry = vector >> 63;
+  #else
+    auto carry = _addcarry_u64(0, a, b, &tmp);
+  #endif
   *out = tmp;
   return carry;
-#else
-  *out = a + b;
-  return *out < a;
 #endif
 }
 
