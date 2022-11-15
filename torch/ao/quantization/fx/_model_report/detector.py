@@ -10,7 +10,7 @@ from torch.ao.quantization.fx._model_report.model_report_observer import ModelRe
 from torch.ao.quantization.qconfig import (
     QConfig,
     default_qconfig,
-    assert_valid_qconfig,
+    _assert_valid_qconfig,
 )
 from torch.ao.quantization.observer import (
     ObserverBase,
@@ -84,7 +84,7 @@ class DetectorQConfigInfo():
             weight = default_per_channel_weight_observer if rec[1] else default_weight_observer
             test_config = QConfig(activation, weight)
             try:
-                assert_valid_qconfig(test_config, module)
+                _assert_valid_qconfig(test_config, module)
                 module_qconfig = test_config
                 break
             except AssertionError:
