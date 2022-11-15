@@ -139,15 +139,17 @@ def setup_stacktrace_preservation_hooks(roots: List):
 
 @dataclass(frozen=True)
 class ViewAndMutationMeta:
+    # length: # forward inputs
     # For every input, tells us whether the input:
     # (a) is not mutated
     # (b) only metadata is mutated
     # (c) data (and maybe metadta) is mutated
     mutated_input_info: List[MutationType]
-    # For every output from the forward, tells us whether or not the output should require gradients or not
+    # length: # forward inputs + # forward outputs
+    # For every output *and* mutated input returned from the forward,
+    # tells us whether or not the output should require gradients or not
     requires_grad_out_info: List[bool]
-    # TODO: flesh out
-    # inner_calling_convention_meta: Dict[int, Union[int, Callable]]]
+    # length: # forward outputs
     # For every output that is a view of an input, gives us information on how to recompute it later.
     # If the i'th output aliases an input, this will be a tuple of
     # (
@@ -207,7 +209,6 @@ def run_functionalized_fw_and_collect_metadata(
 
         collect_mutated_input_info: List[MutationType] = []
         collect_requires_grad_out_info: List[bool] = []
-        collect_inner_calling_convention_meta: Dict[int, Union[int, Callable]] = {}
         collect_aliased_output_info: List[Optional[Union[int, torch.Tensor]]] = []
 
         f_args = pytree.tree_map(to_fun, args)
@@ -236,6 +237,10 @@ def run_functionalized_fw_and_collect_metadata(
                 else:
                     collect_mutated_input_info.append(MutationType.data)
                 mutated_inputs.append(new_arg)
+                # For every mutated input, we ALSO need to return info on
+                # whether than mutated input requires gradients. Why?
+                # Our custom autograd.Function.forward returns updated inputs as outputs,
+                collect_requires_grad_out_info.append(f_arg.requires_grad)
             else:
                 collect_mutated_input_info.append(MutationType.none)
 
@@ -245,7 +250,7 @@ def run_functionalized_fw_and_collect_metadata(
             torch._sync(t)
             return torch._from_functional_tensor(t)
 
-        def maybe_collect_grad_info(t):
+        def collect_grad_info(t):
             # Collect info on which output tensors require gradients,
             # so we can mark them properly in the returned autograd.Function
             nonlocal collect_requires_grad_out_info
@@ -255,11 +260,13 @@ def run_functionalized_fw_and_collect_metadata(
         def filter_and_record_aliased_outs(outputs):
             # NOTE: this dict will clobber keys if we have multiple inputs that alias.
             # Let's say inpA and inpB alias, and the user generated an output using out = inpA.view(...)
-            # It is actually fine to arbitrarily pick which input to regenerate the aliased output from,
-            # because as_strided looks at the underlying storage.
+            # For now, since we're not handling the case with multiple _base's sharing a storage,
+            # it is actually fine to arbitrarily pick which input to regenerate the aliased output from.
             # e.g. out_new = inpB.as_strided(out.size(), out.stride(), out.storage_offset())
+            # This is more complicated when you have multiple _base tensors aliasing the same
+            # underlying storage. But for now, we don't handle that case.
             inp_storage_refs = {StorageWeakRef(inpt.storage()): idx for idx, inpt in enumerate(flat_f_args)}
-            inp_tensor_ids = {id(inpt) for inpt in flat_f_args}
+            inp_tensor_ids = {id(inpt) for inpt in flat_f_args if isinstance(inpt, torch.Tensor)}
             inp_storage_refs_set = set(inp_storage_refs)
             non_aliased_outs = []
             for o in outputs:
@@ -268,37 +275,63 @@ def run_functionalized_fw_and_collect_metadata(
                 # but the inner tensors no longer alias.
                 if isinstance(o, torch.Tensor):
                     out_storage_ref = StorageWeakRef(o.storage())
-                    # The ID check is because it is perfectly fine to return an input as an output.
-                    # Only outputs that are aten views of inputs need to be handled specially.
-                    if out_storage_ref in inp_storage_refs and id(o) not in inp_tensor_ids:
+                    # Note: if the function returns an output that *is* an input, we still cannot
+                    # return it in the graph.
+                    # Specifically, let's say:
+                    # - the input was mutated and returned
+                    # - the input was a view (._is_view() is true)
+                    # Then returning the output in the graph won't preserve the ._is_view() property,
+                    # because we'll be returning the "updated input" (which was created from an out-of-place op)
+                    if out_storage_ref in inp_storage_refs:
                         maybe_aliased_inp_idx = inp_storage_refs[out_storage_ref]
                     else:
                         maybe_aliased_inp_idx = None
                 else:
                     maybe_aliased_inp_idx = None
 
-                # Only return outputs that are not aliases of inputs.
                 if maybe_aliased_inp_idx is None:
+                    # Only return outputs that are not aliases of inputs.
                     non_aliased_outs.append(o)
+                # elif collect_mutated_input_info[maybe_aliased_inp_idx] == MutationType.data:
+                    # That includes outputs that alias mutated inputs!
+                    # See Note [Handling input mutations and aliased outputs in the compiled forward]
+                    # non_aliased_outs.append(o)
 
                 # Also, track the metadata to properly regenerate these outputs later.
                 nonlocal collect_aliased_output_info
-                if collect_aliased_output_info is not None:
-                    # We store (inp_idx, fake_tensor_representing_output)
-                    # That way later we can regenerate the output with inputs[inp_idx].as_strided(fake_tensor_output_metadata)
-                    collect_aliased_output_info.append(None if maybe_aliased_inp_idx is None else (maybe_aliased_inp_idx, o))
+                # We store (inp_idx, fake_tensor_representing_output)
+                # That way later we can regenerate the output with inputs[inp_idx].as_strided(fake_tensor_output_metadata)
+                if maybe_aliased_inp_idx is None:
+                    # Note that if we have something like:
+                    # def f(x):
+                    #     x.add_(1)
+                    #     return x
+                    # Our compiled fw will return an "x_updated", but it is *not* ok to return that to the user.
+                    # We need to manually do x.copy_(x_updated), and return the original x to the user.
+                    # Why? for example, the metadata between x and x_updated might be different (e.g. _is_leaf())
+                    collect_aliased_output_info.append(None)
+                elif id(o) not in inp_tensor_ids:
+                    # Special case: the output *was* an input. Don't regenerate a view for it, just return the input directly
+                    # This is signaled by the fact that the second tuple arg is None
+                    collect_aliased_output_info.append((maybe_aliased_inp_idx, None))
+                else:
+                    collect_aliased_output_info.append((maybe_aliased_inp_idx, o))
             return non_aliased_outs
 
         outs = filter_and_record_aliased_outs(outs)
 
-        pytree.tree_map(maybe_collect_grad_info, outs)
+        pytree.tree_map(collect_grad_info, outs)
 
         # Calling convention: the output is (mutated_input_values, original_outs)
         mutated_inps_and_outs = mutated_inputs + list(outs)
+
+        # Our autograd.Function.forward returns both mutated inputs and outputs,
+        # so we need grad info on all of them.
+        assert len(collect_requires_grad_out_info) == len(mutated_inps_and_outs)
+
         metadata = ViewAndMutationMeta(
             mutated_input_info=collect_mutated_input_info,
             requires_grad_out_info=collect_requires_grad_out_info,
-            # maybe_inner_calling_convention_meta=collect_inner_calling_convention_meta,
             aliased_output_info=collect_aliased_output_info,
         )
         return metadata, pytree.tree_map(from_fun, mutated_inps_and_outs)
@@ -311,14 +344,34 @@ def run_functionalized_fw_and_collect_metadata(
 # It has a precondition which is that the passed in function
 # must be observationally pure; it is not permitted to mutate
 # the primals or tangents.
-def create_joint_forward_backward_functionalized(fn, *, meta: ViewAndMutationMeta):
-
+def create_joint_forward_backward_functionalized(
+    fn,
+    *,
+    meta: ViewAndMutationMeta,
+    synthetic_base_info: List[Union[int, Tuple[int, List[Any]]]],
+):
     def maybe_to_fresh_input(idx, t):
         if isinstance(t, Tensor) and meta.mutated_input_info[idx] != MutationType.none:
             out = t.clone()
         else:
             out = t
         return out
+
+    def unpack_synthetic_bases(primals: List[Any]) -> List[Any]:
+        # This is only not None if our graph mutates a graph input that aliases another graph input.
+        if synthetic_base_info is None:
+            return primals
+
+        f_args_inner = []
+        for outer_idx_or_lambda in synthetic_base_info:
+            if isinstance(outer_idx_or_lambda, int):
+                f_args_inner.append(primals[outer_idx_or_lambda])
+            else:
+                outer_base_idx, strided_args = outer_idx_or_lambda
+                outer_base = primals[outer_base_idx]
+                view_arg = outer_base.as_strided(*strided_args)
+                f_args_inner.append(view_arg)
+        return f_args_inner
 
     # One important thing to note here: we *must* rely on the pre-computed ViewAndMutation metadata
     # to figure out how to handles views and mutations inside of this function.
@@ -330,16 +383,42 @@ def create_joint_forward_backward_functionalized(fn, *, meta: ViewAndMutationMet
     def joint_forward_backward(
         primals: List[Any], tangents: List[Any]
     ) -> Tuple[List[Any], List[Any]]:
-        assert len(meta.mutated_input_info) == len(primals)
         # Call the forward pass, making sure to clone any inputs that are mutated first.
         # We need to ensure that the inputs we pass to autograd.grad() are the *original*
         # inputs, and not their mutated values.
-        primals_ = [maybe_to_fresh_input(i, t) for i, t in enumerate(primals)]
+        primals_no_input_mutations = [maybe_to_fresh_input(i, t) for i, t in enumerate(primals)]
+        # This is also where we handle the calling convention around synthetic bases.
+        # We need to make sure that we convert any synthetic base arguments into views
+        # *after* we do the cloning above, to preserve the view relationship.
+        primals_ = unpack_synthetic_bases(primals_no_input_mutations)
+        assert len(meta.mutated_input_info) == len(primals_)
         all_outs = fn(*primals_)
         assert len(meta.aliased_output_info) == len(all_outs)
 
-        # **ignore** any outs that are aliases of inputs. These will be handled outside of the compiled function
-        outs = [o for (idx, o) in enumerate(all_outs) if meta.aliased_output_info[idx] is None]
+        # Note [Handling input mutations and aliased outputs in the compiled forward]
+        # What happens for graphs where we mutate an input, and return a view of that input?
+        # From the perspective of the captured fw + bw graph, the returned value is no longer
+        # a view, and we can (and should) treat it as a normal output that we grad() through.
+        # If we did not, then we would lose any gradients accumulated from the mutation.
+        # However, we still need to take care to copy the mutation back to the original input,
+        # *and* to regenerate the view output from the original input.
+        # Why? the original input might have different metadata from the updated input.
+        # Two useful examples are:
+        # (1) def f(x):
+        #         x.mul_(2)
+        #         return x.view(...)
+        #     If the input x was some weird, non-densely-packed view, then that would be lost
+        #     by returning x.mul(2).view(...)
+        # (2) def f(x):
+        #         x.mul_(2)
+        #         return x
+        #     If the input x was a differentiable view (so x._is_view_() is True)
+        #     This would be lost on the updated input (x_updated = x.mul(2); return x_updated)
+        # Pass any (non-aliased) outputs from the fw as tangents
+        outputs_for_grad = [x for (i, x) in enumerate(all_outs) if meta.aliased_output_info[i] is None]
+        # Pass any (non-aliased) mutated inputs in as a tangents, since they'll be returned as outputs in the fw
+        mutated_inputs_for_grad = [x for (i, x) in enumerate(primals_) if meta.mutated_input_info[i] == MutationType.data]
+        mutated_inputs_and_outs_to_grad = mutated_inputs_for_grad + outputs_for_grad
 
         # Take any mutated inputs and return them as outputs
         mutated_inputs = []
@@ -354,7 +433,6 @@ def create_joint_forward_backward_functionalized(fn, *, meta: ViewAndMutationMet
                 mutated_inputs.append(new_arg)
             # Should be unnecessary, since we don't mutate inputs directly in the joint (we clone them first)
             torch._sync(arg)
-        mutated_inputs_and_outs = mutated_inputs + outs
 
         # Get the inputs that need gradients
         grad_primals = []
@@ -367,10 +445,10 @@ def create_joint_forward_backward_functionalized(fn, *, meta: ViewAndMutationMet
                 grad_primals.append(p)
 
         # Get the outputs that need gradients
-        assert len(tangents) == len(outs)
+        assert len(tangents) == len(mutated_inputs_and_outs_to_grad)
         needed_outs = []
         needed_tangents = []
-        for out, tangent in zip(outs, tangents):
+        for out, tangent in zip(mutated_inputs_and_outs_to_grad, tangents):
             if isinstance(out, Tensor) and out.requires_grad:
                 needed_outs.append(out)
                 needed_tangents.append(tangent.requires_grad_(True))
@@ -388,7 +466,7 @@ def create_joint_forward_backward_functionalized(fn, *, meta: ViewAndMutationMet
                     allow_unused=True,
                 )
         backward_out_iter = iter(backward_out)
-        return mutated_inputs + outs, [
+        return mutated_inputs_and_outs_to_grad, [
             next(backward_out_iter) if i else None for i in inputs_needs_grads
         ]
 
@@ -594,21 +672,7 @@ def same_dtype_views(view1, view2):
 #   b_base = torch.Tensor(b.storage())
 #   c_base = torch.Tensor(c.storage())
 #   f(c_base, b_base, a, d)
-def merge_view_inputs(fwd_inputs, mutated_input_info: List[MutationType]):
-        # TODO: PUT THIS SOMEWHERE
-        # for a in args:
-            # # TODO: clean up / test this logic
-            # # Map the outer calling convention to the inner calling convention
-            # f_args_inner = len(collect_inner_calling_convention_meta)
-            # for i in range(len(collect_inner_calling_convention_meta)):
-                # idx_or_lambda = collect_inner_calling_convention_meta[i]
-                # if isinstance(idx_or_lambda, int):
-                    # f_args_inner[i] = f_args_inner[idx_or_lambda]
-                # else:
-                    # assert isinstance(idx_or_lambda, Callable)
-                    # f_args_inner[i] = idx_or_lambda()
-        # else:
-            # f_args_inner = f_args
+def merge_view_inputs(fwd_inputs: List[Any], mutated_input_info: List[MutationType]) -> Tuple[List[Any], Optional[List[Union[int, Tuple[int, Tuple[Any]]]]]]:
     assert len(fwd_inputs) == len(mutated_input_info)
     storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
     for i, inpt in enumerate(fwd_inputs):
@@ -620,8 +684,9 @@ def merge_view_inputs(fwd_inputs, mutated_input_info: List[MutationType]):
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:
     # - another int (corresponding to the index in the argument list of the element from the outer calling convention)
-    # - or a lambda corresponding to an input view arg, that functionalization will use to generate the argument from a synthetic base.
-    inner_calling_convention_meta: Dict[int, Union[int, Callable]] = [None for _ in range(len(fwd_inputs))]
+    # - idx, *args, where we can generate the new output with old_args[idx].as_strided(*args)
+    #   idx corresponds to which synthetic base from the outer calling context to view
+    inner_calling_convention_meta: Dict[int, Union[int, Tuple[int, List[Any]]]] = {}
     for aliased_input_indices in storage_ref_to_idx.values():
         if len(aliased_input_indices) > 1 and any(mutated_input_info[inpt_idx] != MutationType.none for inpt_idx in aliased_input_indices):
             # We detected an input that was mutated, AND aliases with another input.
@@ -631,17 +696,50 @@ def merge_view_inputs(fwd_inputs, mutated_input_info: List[MutationType]):
             for idx1, idx2 in zip(aliased_input_indices, aliased_input_indices[1:]):
                 view1 = fwd_inputs[idx1]
                 view2 = fwd_inputs[idx2]
-                assert are_differentiable_views(view1, view2), "aot_dispatch_autograd() does not yet handle non-differentiable view input mutations."
+                assert are_differentiable_views(view1, view2), "aot_autograd() does not yet handle non-differentiable view input mutations."
                 # Regenerating views when reinterpreting complex / real tensors seems non-trivial,
                 # not handling for now
-                assert same_dtype_views(view1, view2), "aot_dispatch_autograd() does not yet handle input mutations on views with different dtypes."
-            # Create the synthetic base.
-            storage = fwd_inputs[aliased_input_indices[0]].storage()
-            synthetic_base = torch.Tensor(storage)
+                assert same_dtype_views(view1, view2), "aot_autograd() does not yet handle input mutations on views with different dtypes."
+            # Below is some logic to create a synthetic base, in the case where we can't
+            # rely on the ._base attribute (because at least one of the input aliases
+            # was .detached(), so their autograd bases differ).
+            # This case is complicated so we're skipping it for now
+            # For aliases that don't have a ._base attribute, we need a true synthetic base
+            # that's created from poking at its storage.
+            # We check that:
+            # - All aliases have the same _base,
+            # - or if there are any aliases with no ._base attribute, then they *are* the base (alias is other_alias._base).
+            # Specifically, we can't always create the synthetic base by poking at storage
+            # because that will break the autograd chain from view to _base.
+            non_none_bases = [fwd_inputs[i]._base for i in aliased_input_indices if fwd_inputs[i]._base is not None]
+            aliases_with_none_bases = [fwd_inputs[i] for i in aliased_input_indices if fwd_inputs[i]._base is None]
+            assert len(non_none_bases) > 0, "aot_autograd() does not yet handle non-differentiable view input mutations."
+            synthetic_base = non_none_bases[0]
+            for other_base in non_none_bases[1:]:
+                assert other_base is synthetic_base, "aot_autograd() does not yet handle non-differentiable view input mutations."
+            for alias in aliases_with_none_bases:
+                assert alias is synthetic_base, "aot_autograd() does not yet handle non-differentiable view input mutations."
+            # Create the synthetic base by poking at storage.
+            # sample_fwd_input = fwd_inputs[aliased_input_indices[0]]
+            # storage = sample_fwd_input.storage()
+            # If any of the aliases require grad, then the base should require grad
+            # Note that in this case, even if the base was a non-leaf,
+            # we will trace as if the base was a leaf.
+            # This should be ok though, because later on we always make sure to .clone()
+            # inputs that we know will later get mutated in the graph.
+            # synthetic_base = torch.Tensor(storage)
+            # any_requires_grad = any(fwd_inputs[i].requires_grad for i in aliased_input_indices)
+            # synthetic_base.requires_grad_(any_requires_grad)
             base_args.append(synthetic_base)
             for curr_view_idx in aliased_input_indices:
                 curr_view = fwd_inputs[curr_view_idx]
-                inner_calling_convention_meta[curr_view_idx] = lambda: synthetic_base.as_strided(curr_view.sizes(), curr_view.strides(), curr_view.storage_offset())
+                base_idx = len(base_args) - 1
+                size_ = curr_view.size()
+                stride_ = curr_view.stride()
+                storage_offset_ = curr_view.storage_offset()
+                # We store just enough info here so that we can regenerate the view later.
+                # Regeneration: args[base_idx].as_strided(size_, stride_, storage_offset_)
+                inner_calling_convention_meta[curr_view_idx] = (base_idx, (size_, stride_, storage_offset_))
         else:
             for curr_idx in aliased_input_indices:
                 other_args.append(fwd_inputs[curr_idx])
@@ -653,14 +751,21 @@ def merge_view_inputs(fwd_inputs, mutated_input_info: List[MutationType]):
         # Otherwise, return:
         # (1) The new args according to the updated calling convention: (synthetic_bases, other_args)
         # (2) Metadata telling functionalization how to generate the inner argument list given the outer calling convention.
-        assert False, "Not ready yet"
+        #     We post-process it into a list, where meta[i] tells you info about the i'th argument in the inner calling convention.
         args_to_functionalization = base_args + other_args
         arg_to_old_idx_map = {arg: i for (i, arg) in enumerate(fwd_inputs)}
         for i, other_arg in enumerate(other_args):
             new_idx = len(base_args) + i
             old_idx = arg_to_old_idx_map[other_arg]
             inner_calling_convention_meta[old_idx] = new_idx
-        return args_to_functionalization, inner_calling_convention_meta
+        # post process into a list
+        post_processed_calling_convention_meta: List[Union[int, Callable]] = [-1 for _ in range(len(inner_calling_convention_meta))]
+        for k, v in inner_calling_convention_meta.items():
+            post_processed_calling_convention_meta[k] = v
+        # Quick assert: every argument in the inner calling convention should be accounted for.
+        for x in post_processed_calling_convention_meta:
+            assert x != -1
+        return args_to_functionalization, post_processed_calling_convention_meta
 
 
 
@@ -719,23 +824,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
-    # Run the forward to get proper metadata on the output, which we use to trace the backward.
-    # We also run the forward with functionalization turned on, for two reasons:
-    # - We don't want this first run to actually mutate any inputs, which we re-use for the full trace later.
-    # - We collect info on which inputs are mutated in this pass, which we use
-    #   to properly handle mutations on aliased inputs in the trace later.
-    _mutated_input_info: List[MutationType] = [MutationType.none for _ in range(len(deduped_flat_args))]
-    # requires_grad gets set on the wrappers and not on the actual inner tensors,
-    # so we need to record this info inside of functionalization instead of being able to
-    # directly check the outputs
-    _flat_outs_not_requiring_grad: List[bool] = []
-    # Any outputs that are direct aliases of graph inputs need to be pulled outside of the compiled function,
-    # and regenerated directly (outside of the autograd.Function)
-    # Otherwise, this would prevent users from subsequently modifying those views inplace.
-    # _aliased_output_info[i] = None if the i'th output is a "normal" output.
-    # Otherwise (if the i'th output is an alias of an input, it contains the FakeTensor representing that output,
-    # so we know later how to regenerate the output.
-    _aliased_output_info: List[Optional[torch.Tensor]] = []
     _fw_metadata, out = run_functionalized_fw_and_collect_metadata(
         lambda *args: flat_fn(*(add_dupe_args(args))),
     )(*deduped_flat_args)
@@ -744,31 +832,30 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     _num_aliased_outputs = len([x for x in _fw_metadata.aliased_output_info if x is not None])
     _num_mutated_inputs = len([x for x in _fw_metadata.mutated_input_info if x != MutationType.none])
 
-    joint_forward_backward = create_joint_forward_backward_functionalized(lambda *args: flat_fn(*add_dupe_args(args)), meta=_fw_metadata)
 
-    # Note using detach_and_functionalize_pure() is useful here because it lets us getting everything in one go:
-    # (1) Which inputs were mutated
-    # (2) Which outputs require/don't require grad
-    # (3) The actual outputs
-    # The downside is that:
-    # (1) The actual outputs that we get don't have correct grad info. We end up
-    #     storing gradient info on the wrapper and not the actual out tensor.
-    #     This is ok, because we don't care about that gradient info here
-    #     (see the .detach().contiguous() below).
-    # (2) We end up getting back (updated_inpts, outputs). We don't care about the mutated inputs here.
-    out = out[_num_mutated_inputs:]
+    if isinstance(out, (list, tuple)):
+        _num_outs = len(out[_num_mutated_inputs:])
+    else:
+        _num_outs = 1
+    assert len(_fw_metadata.requires_grad_out_info) == _num_mutated_inputs + _num_outs
+
     out = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
         out,
     )
+    # Pass any (non-aliased) mutated inputs in as a tangents, since they'll be returned as outputs in the fw
+    mutated_inputs_for_grad = [x for (i, x) in enumerate(out[:_num_mutated_inputs]) if _fw_metadata.mutated_input_info[i] == MutationType.data]
+    # Pass any (non-aliased) outputs from the fw as tangents
+    outputs_for_grad = [x for (i, x) in enumerate(out[_num_mutated_inputs:]) if _fw_metadata.aliased_output_info[i] is None]
+    out = mutated_inputs_for_grad + outputs_for_grad
 
-    if isinstance(out, (list, tuple)):
-        _num_outs = len(out)
-    else:
-        _num_outs = 1
-    assert len(_fw_metadata.requires_grad_out_info) == _num_outs
+    deduped_flat_args_with_views_handled, _synthetic_base_info = merge_view_inputs(deduped_flat_args, _fw_metadata.mutated_input_info)
 
-    deduped_flat_args_with_views_handled, _maybe_inner_calling_convention_meta = merge_view_inputs(deduped_flat_args, _mutated_input_info)
+    joint_forward_backward = create_joint_forward_backward_functionalized(
+        lambda *args: flat_fn(*add_dupe_args(args)),
+        meta=_fw_metadata,
+        synthetic_base_info=_synthetic_base_info,
+    )
 
     joint_inputs = (deduped_flat_args_with_views_handled, out)
 
@@ -797,7 +884,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
-            fw_outs = fw_outs[_num_outs:]
+            fw_outs = fw_outs[_num_mutated_inputs + _num_outs:]
             symint_outs = [n for n in fw_outs if is_sym_node(n)]
             _num_symints = len(symint_outs)
 
@@ -818,28 +905,17 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         fw_metadata = _fw_metadata
         num_mutated_inputs = _num_mutated_inputs
         num_aliased_outputs = _num_aliased_outputs
-        maybe_inner_calling_convention_meta = _maybe_inner_calling_convention_meta
+        synthetic_base_info = _synthetic_base_info
 
         @staticmethod
         @disable_torchdynamo
         def forward(ctx, *deduped_flat_tensor_args):
-            if CompiledFunction.maybe_inner_calling_convention_meta is not None:
-                # Given: the original args, including at least one pair of inputs that are aliased
-                # and get subsequently mutated.
-                # Generate: the updated args, including (potentially multiple) synthetic bases
-                # that replace the views. The input views are regenerated manually in the compiled function.
-                # TODO: think harder about what happens if (a view of) one of these mutated input views is ALSO returned
-                new_inputs, metadata = merge_view_inputs(deduped_flat_tensor_args, CompiledFunction.fw_metadata.mutated_input_info)
-                # We're just re-running the original-args-to-synthetic-base transformation
-                # that we ran during compilation.
-                # This returns metadata that we use during tracing to recover the input views,
-                # which we don't actually need at runtime.
-                assert metadata is not None
-                deduped_flat_tensor_args = new_inputs
 
             # There is a pretty complicated calling convention around what the compiled fw returns.
             # The full list of outputs and their relative order is:
             # (*mutated_inputs, *fw_outs, *saved_tensors, *saved_symints)
+            # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
+            #   of the original view, and not the synthetic base
             fw_outs = call_func_with_args(
                 CompiledFunction.compiled_fw, deduped_flat_tensor_args, disable_amp=disable_amp
             )
@@ -858,19 +934,18 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 ctx.symints = []
 
             fw_outs_not_requiring_grad = [
-                x for (i, x) in enumerate(fw_outs[num_mutated_inputs:num_mutated_inputs + num_outs])
+                x for (i, x) in enumerate(fw_outs[:num_forward_returns])
                 if isinstance(x, torch.Tensor) and not CompiledFunction.fw_metadata.requires_grad_out_info[i]
             ]
             fw_out_ids_requiring_grad = [
-                id(x) for (i, x) in enumerate(fw_outs[num_mutated_inputs:num_mutated_inputs + num_outs])
+                id(x) for (i, x) in enumerate(fw_outs[:num_forward_returns])
                 if isinstance(x, torch.Tensor) and CompiledFunction.fw_metadata.requires_grad_out_info[i]
             ]
-            for updated_inp in fw_outs[:num_mutated_inputs]:
-                if id(updated_inp) not in fw_out_ids_requiring_grad:
-                    # All updated inputs that we return in the forward should be marked as not requiring gradients,
-                    # UNLESS they are also actual forward outputs.
-                    fw_outs_not_requiring_grad.append(updated_inp)
 
+            # TODO: Add special handling for metadata-only mutations on inputs.
+            # (we won't get an updated_input from the fw call,
+            # we just need to manually .as_strided_() and stash new metadata)
+            import pdb; pdb.set_trace()
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
 
             return tuple(fw_outs[0:num_forward_returns])
@@ -901,10 +976,42 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     @wraps(CompiledFunction.apply)
     def compiled_function(*args):
+        # Step 1: remove dupe args
+        no_dupe_args = remove_dupe_args(args)
+
+        # Step 2: remove aliased inputs that are mutated, replace with synthetic bases
+        # Only happens if our graph mutates an input that aliases another input.
+        if CompiledFunction.synthetic_base_info is not None:
+            # Given: the original args, including at least one pair of inputs that are aliased
+            # and get subsequently mutated.
+            # Generate: the updated args, including (potentially multiple) synthetic bases
+            # that replace the views. The input views are regenerated manually in the compiled function.
+            # TODO: think harder about what happens if (a view of) one of these mutated input views is ALSO returned
+            new_inputs, metadata = merge_view_inputs(no_dupe_args, CompiledFunction.fw_metadata.mutated_input_info)
+            # We're just re-running the original-args-to-synthetic-base transformation
+            # that we ran during compilation.
+            # This returns metadata that we use during tracing to recover the input views,
+            # which we don't actually need at runtime.
+            assert metadata is not None
+            no_dupe_args_with_synthetic_bases = new_inputs
+        else:
+            no_dupe_args_with_synthetic_bases = no_dupe_args
+
+        inps = no_dupe_args_with_synthetic_bases
+        # Run the compiled fn
+        outs = CompiledFunction.apply(*inps)
+        # take grad of outs w.r.t inps (this fails)
+        torch.autograd.grad(
+            outs,
+            inps,
+            grad_outputs=[torch.ones_like(x) for x in outs]
+        )
+        # torch.autograd.grad([outs[1]], no_dupe_args_with_synthetic_bases, grad_outputs=[torch.ones_like(outs[1])])
+        torch.autograd.grad(outs, no_dupe_args_with_synthetic_bases, grad_outputs=[torch.ones_like(outs[0]), torch.ones_like(outs[1])])
+
+        # Step 3: After running the compiled fw, apply updates to mutated inputs
         if CompiledFunction.num_mutated_inputs > 0:
             # TODO: test that duped arg cases works with input mutations
-            no_dupe_args = remove_dupe_args(args)
-            outs = CompiledFunction.apply(*no_dupe_args)
             assert len(outs) == CompiledFunction.num_mutated_inputs + CompiledFunction.num_outs
             # Calling convention: mutated inputs show up first.
             updated_inputs = outs[:CompiledFunction.num_mutated_inputs]
@@ -919,19 +1026,22 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 if mutation_type == MutationType.metadata_only:
                     original_inpt.as_strided_(updated_inpt.size(), updated_inpt.stride(), updated_inpt.storage_offset())
                 else:
-                    # This case should only happen when we .resize_() an input to a larger size.
-                    # This case seems possible to handle in principle, but easier to graph break.
-                    # TODO: make dynamo do this.
-                    assert original_inpt.storage().size() == updated_inpt.storage().size(), \
-                        "Dynamo should graph break on resize() calls to a larger tensor"
-                    # Functionalization can't easily tell us if an input had BOTH its metadata actual data mutated.
-                    # So we check if metadata needs to be mutated here manually.
+                    # TODO: handle resize_() on inputs to a larger size.
+                    # This is actually non-trivial to detect, so we should probably just handle it
+                    # (or make dynamo detect).
+                    # We can't just check of original_inpt.storage_size != updated_inpt.storage_size,
+                    # Because the original_inpt might be a view of some larger tensor,
+                    # and updated_inpt is always densely packed.
                     if original_inpt.size() != updated_inpt.size() or original_inpt.stride() != updated_inpt.stride() or original_inpt.storage_offset() != updated_inpt.storage_offset():
+                        # Functionalization can't easily tell us if an input had BOTH its metadata actual data mutated.
+                        # So we check if metadata needs to be mutated here manually.
                         original_inpt.as_strided_(updated_inpt.size(), updated_inpt.stride(), updated_inpt.storage_offset())
                     original_inpt.copy_(updated_inpt)
         else:
-            fw_outs = CompiledFunction.apply(*remove_dupe_args(args))
+            fw_outs = outs
 
+        # Step 4: Manually regenerate any outputs that are aliased to inputs, instead of
+        # compiling them.
         if CompiledFunction.num_aliased_outputs > 0:
             assert CompiledFunction.num_aliased_outputs + len(fw_outs) == len(CompiledFunction.fw_metadata.aliased_output_info)
             fw_outs_including_aliases = []
@@ -951,7 +1061,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                     # TODO: handle the custom autograd function case here.
                     # We need a way to check whether a tensor came from a custom autograd fn from python,
                     # AND a way to replay that custom view fn.
-                    fw_outs_including_aliases.append(input_alias.as_strided(out_tensor_meta.size(), out_tensor_meta.stride(), out_tensor_meta.storage_offset()))
+                    if out_tensor_meta is None:
+                        # This handles the specific case where the user returns an output that *was* an input. Don't create a view.
+                        fw_outs_including_aliases.append(input_alias)
+                    else:
+                        fw_outs_including_aliases.append(input_alias.as_strided(out_tensor_meta.size(), out_tensor_meta.stride(), out_tensor_meta.storage_offset()))
             return fw_outs_including_aliases
         else:
             return fw_outs
