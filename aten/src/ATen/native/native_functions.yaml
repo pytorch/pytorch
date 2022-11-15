@@ -3860,20 +3860,20 @@
     MkldnnCPU: mkldnn_batch_norm_backward
   autogen: native_batch_norm_backward.out
 
-- func: native_batch_norm_legit_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor(a!) running_mean, Tensor(b!) running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  dispatch:
-    CPU: batch_norm_legit_backward_cpu
-    CUDA: batch_norm_legit_backward_cuda
-    MPS: batch_norm_legit_backward_mps
-    MkldnnCPU: mkldnn_batch_norm_legit_backward
-  autogen: native_batch_norm_legit_backward_functional, native_batch_norm_legit_backward.out
+# - func: native_batch_norm_legit_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor(a!) running_mean, Tensor(b!) running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+#   dispatch:
+#     CPU: batch_norm_legit_backward_cpu
+#     CUDA: batch_norm_legit_backward_cuda
+#     MPS: batch_norm_legit_backward_mps
+#     MkldnnCPU: mkldnn_batch_norm_legit_backward
+#   autogen: native_batch_norm_legit_backward_functional, native_batch_norm_legit_backward.out
 
-- func: native_batch_norm_legit_backward.no_stats(Tensor grad_out, Tensor input, Tensor? weight, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  dispatch:
-    CPU: batch_norm_legit_no_stats_backward_cpu
-    CUDA: batch_norm_legit_no_stats_backward_cuda
-    MPS: batch_norm_legit_no_stats_backward_mps
-    MkldnnCPU: mkldnn_batch_norm_legit_no_stats_backward
+# - func: native_batch_norm_legit_backward.no_stats(Tensor grad_out, Tensor input, Tensor? weight, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+#   dispatch:
+#     CPU: batch_norm_legit_no_stats_backward_cpu
+#     CUDA: batch_norm_legit_no_stats_backward_cuda
+#     MPS: batch_norm_legit_no_stats_backward_mps
+#     MkldnnCPU: mkldnn_batch_norm_legit_no_stats_backward
 
 - func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:

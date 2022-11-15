@@ -1401,6 +1401,98 @@ def native_batch_norm_decomposition(
     return aten.native_batch_norm_legit(input, weight, bias, training, momentum, eps)
 
 
+@register_decomposition(aten.native_batch_norm_legit.default)
+def native_batch_norm_legit(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    reduction_dims = [0] + list(range(2, input.dim()))
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    if training:
+        output, mean, rstd = normalize(input, reduction_dims, eps)
+
+        save_mean = _squeeze_multiple(mean, reduction_dims)
+        save_rstd = _squeeze_multiple(rstd, reduction_dims)
+        if running_mean is not None:
+            running_mean.copy_(momentum * save_mean + (1 - momentum) * running_mean)
+        if running_var is not None:
+            n = input.numel() / input.shape[1]
+            # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
+            # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
+            # numerics probably don't matter.
+            unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (
+                n / (n - 1)
+            )
+            running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
+    else:
+        assert running_mean is not None and running_var is not None
+        running_mean = running_mean.to(dtype=computation_dtype, copy=True)
+        running_var = running_var.to(dtype=computation_dtype, copy=True)
+        mean = running_mean
+        invstd = 1 / (torch.sqrt(running_var + eps))
+        # Very annoying inconsistency where CPU and CUDA give different shapes
+        if input.device.type != "cpu":
+            save_mean = running_mean
+            save_rstd = invstd
+        else:
+            save_mean = input.new_zeros((0,))
+            save_rstd = input.new_zeros((0,))
+        mean = _unsqueeze_to_dim(mean, input.dim() - 1)
+        invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
+        output = (input - mean) * invstd
+
+    if weight is None:
+        weight = input.new_ones(())
+
+    if bias is None:
+        bias = input.new_zeros(())
+
+    weight = _unsqueeze_to_dim(weight, input.dim() - 1)
+    bias = _unsqueeze_to_dim(bias, input.dim() - 1)
+    output = output * weight + bias
+    if input.device.type == "cpu":
+        save_mean = save_mean.to(dtype=input.dtype)
+        save_rstd = save_rstd.to(dtype=input.dtype)
+    return output.to(dtype=input.dtype), save_mean, save_rstd
+
+
+@register_decomposition(aten.native_batch_norm_legit.no_stats)
+def native_batch_norm_legit_no_stats(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    reduction_dims = [0] + list(range(2, input.dim()))
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    assert training
+    output, mean, rstd = normalize(input, reduction_dims, eps)
+    save_mean = _squeeze_multiple(mean, reduction_dims)
+    save_rstd = _squeeze_multiple(rstd, reduction_dims)
+
+    if weight is None:
+        weight = input.new_ones(())
+
+    if bias is None:
+        bias = input.new_zeros(())
+
+    weight = _unsqueeze_to_dim(weight, input.dim() - 1)
+    bias = _unsqueeze_to_dim(bias, input.dim() - 1)
+    output = output * weight + bias
+    if input.device.type == "cpu":
+        save_mean = save_mean.to(dtype=input.dtype)
+        save_rstd = save_rstd.to(dtype=input.dtype)
+    return output.to(dtype=input.dtype), save_mean, save_rstd
+
+
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
