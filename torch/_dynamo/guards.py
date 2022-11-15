@@ -449,6 +449,9 @@ class GuardBuilder:
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
+            if not config.dynamic_shapes:
+                # For dynamic shapes, we want to proceed to record tensor names
+                return 
 
         value = self.get(guard.name)
         tensor_name = self.arg_ref(guard)
@@ -614,18 +617,13 @@ class CheckFunctionManager:
         )
         global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if not config.guard_nn_modules and guard.is_nn_module():
-                if (
-                    guard.create_fn == GuardBuilder.TENSOR_MATCH
-                    and id(eval(guard.name, local_builder.scope))
-                    in output_graph.tensor_id_to_sym_shape_ref
-                ):
-                    # An exception to not guarding on nn_module properties
-                    # In dynamic shapes mode, we sometimes get "weights" "bias" or other registered/named buffers
-                    # accesed. We need to install their TENSOR_MATCH guards
-                    # so that the names are known for symbolic shape guarding.
-                    # This is also probably good for correctness anyway.
-                    guard.create(local_builder, global_builder)
+            if not config.guard_nn_modules and guard.is_nn_module() and guard.create_fn != GuardBuilder.TENSOR_MATCH:
+                # The `guard.create_fn != GuardBuilder.TENSOR_MATCH:` part is 
+                # an exception to not guarding on nn_module properties
+                # In dynamic shapes mode, we sometimes get "weights" "bias" or other registered/named buffers
+                # accesed. We need to install their TENSOR_MATCH guards
+                # so that the names are known for symbolic shape guarding.
+                # This is also probably good for correctness anyway.
                 continue
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder, guards)
