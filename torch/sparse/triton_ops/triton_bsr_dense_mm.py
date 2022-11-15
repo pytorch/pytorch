@@ -418,6 +418,12 @@ def bsr_dense_mm(
             "bsr_dense_mm(): `out` argument has wrong shape, "
             f"expected {expected_out_shape}, but got {out.shape}.",
         )
+        check(
+            out.is_contiguous() or out.transpose(-2, -1).is_contiguous(),
+            "bsr_dense_mm(): only row-major/col-major `out` arguments are supported, "
+            "i.e. (out.is_contiguous() or out.transpose(-2, -1).is_contiguous()) "
+            "should be True.",
+        )
 
     # Short circuit if lhs is zero
     if bsr._nnz() == 0:
@@ -437,7 +443,7 @@ def bsr_dense_mm(
     def make_triton_contiguous(t):
         # Triton does not distinguish between row- and col-majorness
         # and will be fast as long as there is a contiguous dimension.
-        if t.stride(-1) != 1 and t.stride(-2) != 1:
+        if not (t.is_contiguous() or t.transpose(-2, -1).is_contiguous()):
             return t.contiguous()
         else:
             return t
