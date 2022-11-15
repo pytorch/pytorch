@@ -242,6 +242,31 @@ bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, int str
 }
 
 
+bool xnnpack_use_convolution2d(
+    const Tensor& input,
+    const Tensor& weight,
+    const at::OptionalIntArrayRef bias_sizes_opt,
+    const IntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation,
+    const int64_t groups,
+    const bool transposed) {
+  return xnnpack::use_convolution2d(input, weight, bias_sizes_opt, padding, stride, dilation, groups, transposed);
+}
+
+bool xnnpack_use_convolution2d(
+    const Tensor& input,
+    const Tensor& weight,
+    const at::OptionalSymIntArrayRef bias_sizes_opt,
+    const SymIntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation,
+    const int64_t groups,
+    const bool transposed) {
+  // Never use xnnpack for symbolic tracing
+  return false;
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 // This struct is templated so that we can run backend selection in a dynamic
 // shapes context; all of the real kernel selection in eager mode runs with
@@ -511,8 +536,11 @@ struct ConvParams {
                    const at::OptionalArrayRef<T> bias_sizes_opt) const {
 #if defined(C10_MOBILE)
     if (!transposed) {
+      // NB: for the call here, it MATTERS that we are templated. If you
+      // untemplate this to always use SymInt, the function
+      // xnnpack_use_convolution2d will always return false
       return (at::symint::size<T>(input, 1) == groups) &&
-              xnnpack::use_convolution2d(
+              xnnpack_use_convolution2d(
                   input,
                   weight,
                   bias_sizes_opt,
@@ -1152,10 +1180,10 @@ ConvBackend _select_conv_backend(
     const ConvParams<T>& params) {
 
   // don't send empty inputs through backends
-  if (input.size(0) == 0 || input.size(1) == 0) {
+  if (at::symint::size<T>(input, 0) == 0 || at::symint::size<T>(input, 1) == 0) {
     return input.is_mkldnn() ? ConvBackend::MkldnnEmpty : ConvBackend::Empty;
   } else if (at::symint::numel<T>(input) == 0) {
-    TORCH_CHECK(false, "Only zero batch or zero channel inputs are supported, but got input shape: ", input.sizes());
+    TORCH_CHECK(false, "Only zero batch or zero channel inputs are supported, but got input shape: ", at::symint::sizes<T>(input));
   }
 
   if (params.is_depthwise(input, weight)) {
