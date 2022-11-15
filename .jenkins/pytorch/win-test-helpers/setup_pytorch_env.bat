@@ -22,6 +22,7 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 )
 
 pushd .
+echo "%VC_VERSION%"
 if "%VC_VERSION%" == "" (
     call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64
 ) else (

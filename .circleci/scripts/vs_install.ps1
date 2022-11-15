@@ -2,7 +2,7 @@
 # Where to find the links: https://learn.microsoft.com/en-us/visualstudio/releases/2022/release-history#fixed-version-bootstrappers
 
 # BuildTools from S3
-$VS_DOWNLOAD_LINK = "https://s3.amazonaws.com/ossci-windows/vs${env:VS_VERSION}_BuildTools.exe"
+$VS_DOWNLOAD_LINK = "https://aka.ms/vs/17/release/vs_buildtools.exe"
 $COLLECT_DOWNLOAD_LINK = "https://aka.ms/vscollect.exe"
 $VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStudio.Workload.VCTools",
                                                      "--add Microsoft.Component.MSBuild",
