@@ -46,10 +46,10 @@ XNNExecutor XNNCompiler::compileModel(std::string ser_model) {
   // a new mapping from the old ids to the newly created ones
   std::unordered_map<uint32_t, uint32_t> remapped_ids;
 
-  for (auto value : *flatbuffer_graph->values()) {
-    switch (value->value_type()) {
-      case fb_xnnpack::ValueUnion::XNNTensorValue: {
-        auto tensor_value = value->value_as_XNNTensorValue();
+  for (auto value : *flatbuffer_graph->xvalues()) {
+    switch (value->xvalue_type()) {
+      case fb_xnnpack::XValueUnion::XNNTensorValue: {
+        auto tensor_value = value->xvalue_as_XNNTensorValue();
 
         const void* data_ptr = nullptr;
         auto buffer_idx = tensor_value->constant_buffer_idx();
@@ -85,10 +85,10 @@ XNNExecutor XNNCompiler::compileModel(std::string ser_model) {
     }
   }
 
-  for (auto node : *flatbuffer_graph->nodes()) {
-    switch (node->node_type()) {
-      case fb_xnnpack::NodeUnion::XNNAdd: {
-        auto graph_node = node->node_as_XNNAdd();
+  for (auto node : *flatbuffer_graph->xnodes()) {
+    switch (node->xnode_type()) {
+      case fb_xnnpack::XNodeUnion::XNNAdd: {
+        auto graph_node = node->xnode_as_XNNAdd();
         status = xnn_define_add2(
             subgraph_ptr,
             output_min,
