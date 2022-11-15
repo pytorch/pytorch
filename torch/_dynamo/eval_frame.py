@@ -310,7 +310,7 @@ def get_compiler_fn(compiler_fn):
 @functools.lru_cache(1)
 def lookup_backend(compiler_fn):
     """Expand backend strings to functions"""
-    if compiler_fn == "inductor":
+    if compiler_fn == "inductor" and torch.cuda.is_available():
         if (
             torch.backends.cuda.matmul.allow_tf32 is False
             and torch.cuda.get_device_capability() >= (8, 0)
