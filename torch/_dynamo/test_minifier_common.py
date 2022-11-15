@@ -1,6 +1,5 @@
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -12,7 +11,8 @@ from torch._dynamo.debug_utils import TEST_REPLACEABLE_COMMENT
 
 
 class MinifierTestBase(torch._dynamo.test_case.TestCase):
-    DEBUG_DIR = os.path.join(tempfile.gettempdir(), "_torchdynamo_debug_")
+    _debug_dir_obj = tempfile.TemporaryDirectory()
+    DEBUG_DIR = _debug_dir_obj.name
 
     @classmethod
     def setUpClass(cls):
@@ -28,7 +28,7 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        shutil.rmtree(torch._dynamo.config.debug_dir_root, ignore_errors=True)
+        cls._debug_dir_obj.cleanup()
         cls._exit_stack.close()
 
     def setUp(self):
