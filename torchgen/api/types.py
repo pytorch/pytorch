@@ -40,16 +40,18 @@ ArgName = Union[str, SpecialArgName]
 
 # Enable lazy initialization of namespaces
 class Namespace:
-    val = ""
+    val: Optional[str] = ""
 
     def __init__(self, val: Optional[str]):
         self.val = val
 
-    def __str__(self) -> Optional[str]:
+    def __str__(self) -> str:
         return self.val
+
 
 class TensorNamespace(Namespace):
     pass
+
 
 class ContainerNamespace(Namespace):
     pass
