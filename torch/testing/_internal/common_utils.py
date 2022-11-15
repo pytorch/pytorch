@@ -659,7 +659,6 @@ def sanitize_pytest_xml(xml_file: str):
         testcase.set("file", f"{file}.py")
     tree.write(xml_file)
 
-
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if SLOW_TESTS_FILE:
