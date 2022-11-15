@@ -48,9 +48,8 @@
 #include <ATen/ops/sqrt.h>
 #endif
 
-#include <c10/core/SymIntArrayRef.h>
-#include <utility>
 #include <vector>
+#include <c10/core/SymIntArrayRef.h>
 
 static const int MIOPEN_DIM_MAX = 5;
 
@@ -491,7 +490,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     auto options = input.options().dtype(
         at::toAccumulateType(input.scalar_type(), /*is_cuda=*/input.is_cuda()));
     auto save_mean = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
-    auto save_invstd = at::empty_symint(c10::SymIntArrayRef({std::move(num_features)}), options);
+    auto save_invstd = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
 
     // don't return view of input, don't return empty tensor because it will break gradient chain
     auto out = input.clone();
@@ -515,7 +514,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     check_dims_match_num_input_features("weight", num_features, weight.sym_numel());
   }
   if (bias.defined()) {
-    check_dims_match_num_input_features("bias", std::move(num_features), bias.sym_numel());
+    check_dims_match_num_input_features("bias", num_features, bias.sym_numel());
   }
 
   const bool use_cudnn = (
@@ -673,7 +672,7 @@ Tensor instance_norm(
     at::alias(running_mean).copy_(running_mean_.view_symint({ b, c }).mean(0, false));
   }
   if (running_var.defined()) {
-    at::alias(running_var).copy_(running_var_.view_symint({ std::move(b), std::move(c) }).mean(0, false));
+    at::alias(running_var).copy_(running_var_.view_symint({ b, c }).mean(0, false));
   }
 
   return out.view_symint(input.sym_sizes());
