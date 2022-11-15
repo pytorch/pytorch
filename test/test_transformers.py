@@ -1168,6 +1168,15 @@ class TestTransformers(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, torch.ones_like(q), 0.0, False, False))
 
+    # Test failing MHA when bias was NoneType
+    def test_bias_is_none(self):
+        x = torch.rand((1, 5, 10))
+        model = torch.nn.modules.activation.MultiheadAttention(10, 1, bias=False, batch_first=True)
+        model.eval()
+        model(x, x, x)
+        # completes without error
+
+
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.
 instantiate_parametrized_tests(TestTransformers)
