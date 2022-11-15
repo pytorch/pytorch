@@ -92,7 +92,7 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
     ASSERT_LE(norm_after, max_norm);
     auto scaled = compare_scaling(grads);
     ASSERT_NEAR(0, scaled.std().item().toFloat(), 1e-7);
-    ASSERT_EQ(scaled[0].item().toFloat(), 1);
+    ASSERT_FLOAT_EQ(scaled[0].item().toFloat(), 1);
   }
   // should accept a single tensor as input
   auto p1 = torch::randn({10, 10});

@@ -122,7 +122,6 @@ __all__ = [
     "bitwise_right_shift",
     "bitwise_xor",
     "clamp_min",
-    # "complex",
     "copysign",
     "div",
     "eq",
@@ -2750,19 +2749,39 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
 
 
 # CompositeImplicitAutograd - don't register decomp
-def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
+def narrow(
+    a: TensorLikeType, dim: int, start: Union[int, TensorLikeType], length: int
+) -> TensorLikeType:
+    # Supports Tensor overload that was added for XLA:
+    # https://github.com/pytorch/pytorch/issues/31558
+    if isinstance(start, TensorLike):
+        check(
+            start.dim() == 0 and utils.is_integer_dtype(start.dtype),
+            lambda: "start must be an 0-dim integral Tensor.",
+        )
+        start = start.item()  # type: ignore[assignment]
+    check(a.dim() > 0, lambda: "narrow() cannot be applied to a 0-dim tensor.")
+    check(length >= 0, lambda: "narrow(): length must be non-negative.")
     dim = utils.canonicalize_dim(a.ndim, dim)
+    dim_length = a.size(dim)
+    # Start being the end is usually invalid since it's out of bounds. So it's
+    # not allowed by canonicalize_dim. But for narrow it's valid as long as
+    # the length is 0, which is handled by the check below.
+    if start != dim_length:
+        # Negative start means indexing from the end of dim.
+        # Note: a dimension isn't being canonicalized here, this reuses
+        # canonicalize_dim because the semantics are similar.
+        start = utils.canonicalize_dim(dim_length, start)  # type: ignore[arg-type]
+    check(
+        start <= dim_length - length,  # type: ignore[arg-type]
+        lambda: f"start ({start}) + length ({length}) exceeds dimension size ({dim_length}).",
+    )
     return prims.slice_in_dim(a, start, start + length, axis=dim)
 
 
-@register_decomposition(torch.ops.aten.narrow_copy)
-@out_wrapper()
-def narrow_copy(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
-    # TODO: This must return a sparse tensor if the input is sparse, but refs
-    # have no sparse support.  See narrow_copy_sparse in core.
-    if a.is_sparse:
-        raise NotImplementedError("narrow_copy ref doesn't support sparse tensors")
-    return torch.clone(torch.narrow(a=a, dim=dim, start=start, length=length))  # type: ignore[call-overload]
+# TODO: This must return a sparse tensor if the input is sparse, but refs have
+# no sparse support. See narrow_copy_sparse in core.
+narrow_copy = _make_copy_from_view(narrow)
 
 
 def _normalize(
@@ -2798,6 +2817,12 @@ def _normalize(
 def _unsqueeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
     for dim in sorted(dimensions):
         x = torch.unsqueeze(x, dim)
+    return x
+
+
+def _squeeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
+    for dim in reversed(sorted(dimensions)):
+        x = torch.squeeze(x, dim)
     return x
 
 
@@ -2849,8 +2874,8 @@ def native_group_norm(
     rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
 
     # remove broadcast dimensions from mean and rstd
-    mean = prims.squeeze(mean, reduction_dims)
-    rstd = prims.squeeze(rstd, reduction_dims)
+    mean = _squeeze_multiple(mean, reduction_dims)
+    rstd = _squeeze_multiple(rstd, reduction_dims)
     return (out, mean, rstd)
 
 
