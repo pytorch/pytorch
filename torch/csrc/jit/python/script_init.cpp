@@ -1774,7 +1774,7 @@ void initJitScriptBindings(PyObject* module) {
           if (def.kind() != TK_DEF) {
             throw ErrorReport(def.range())
                 << "Currently class bodies can only contain method "
-                   "definitions. File an issue on Github if you want "
+                   "definitions. File an issue on GitHub if you want "
                    "something else!";
           }
           methodDefs.emplace_back(Def(def));

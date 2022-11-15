@@ -10,7 +10,10 @@ from torch.ao.quantization.backend_config import (
     BackendConfig,
     DTypeWithConstraints,
 )
-from torch.ao.quantization.fake_quantize import FakeQuantizeBase
+from torch.ao.quantization.fake_quantize import (
+    FakeQuantizeBase,
+    FixedQParamsFakeQuantize,
+)
 from torch.ao.quantization.observer import (
     FixedQParamsObserver,
     ObserverBase,
@@ -979,8 +982,8 @@ def _qconfig_satisfies_dtype_config_constraints(
         backend_quant_min = dtype_with_constraints.quant_min_lower_bound
         backend_quant_max = dtype_with_constraints.quant_max_upper_bound
         backend_scale_min = dtype_with_constraints.scale_min_lower_bound
-        backend_fixed_scale = dtype_with_constraints.scale_exact_match
-        backend_fixed_zero_point = dtype_with_constraints.zero_point_exact_match
+        backend_scale_exact_match = dtype_with_constraints.scale_exact_match
+        backend_zero_point_exact_match = dtype_with_constraints.zero_point_exact_match
         # check quantization ranges
         if backend_quant_min is not None and backend_quant_max is not None:
             if app_quant_min is None or app_quant_max is None:
@@ -1004,7 +1007,7 @@ def _qconfig_satisfies_dtype_config_constraints(
                               (debug_string, app_scale_min, backend_scale_min, qconfig))
                 return False
         # check fixed scale and zero point
-        if backend_fixed_scale is not None and backend_fixed_zero_point is not None:
+        if backend_scale_exact_match is not None and backend_zero_point_exact_match is not None:
             # For tests only, accept the following qconfigs for now
             # TODO: handle fp16 qconfigs properly
             for accepted_qconfig in [float16_static_qconfig, float16_dynamic_qconfig]:
@@ -1016,15 +1019,16 @@ def _qconfig_satisfies_dtype_config_constraints(
                 "    qconfig_mapping = get_default_qconfig_mapping(\"fbgemm\")\n"
                 "    model = prepare_fx(model, qconfig_mapping, example_inputs)"
             )
-            if not isinstance(observer, FixedQParamsObserver):
+            if not isinstance(activation_post_process, FixedQParamsObserver) and \
+                    not isinstance(activation_post_process, FixedQParamsFakeQuantize):
                 warnings.warn(("QConfig must specify a FixedQParamsObserver or a FixedQParamsFakeQuantize "
                               "for fixed qparams ops, ignoring %s.\n%s") % (qconfig, suggestion_str))
                 return False
-            if observer.scale != backend_fixed_scale or observer.zero_point != backend_fixed_zero_point:
+            if observer.scale != backend_scale_exact_match or observer.zero_point != backend_zero_point_exact_match:
                 warnings.warn(("QConfig fixed scale (%s) and zero point (%s) do not match the backend's "
                               "(%s and %s), ignoring %s.\n%s") %
-                              (observer.scale, observer.zero_point, backend_fixed_scale,
-                              backend_fixed_zero_point, qconfig, suggestion_str))
+                              (observer.scale, observer.zero_point, backend_scale_exact_match,
+                              backend_zero_point_exact_match, qconfig, suggestion_str))
                 return False
         return True
 
