@@ -789,6 +789,13 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
     }
 }
 
+int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal){
+  sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, need_attn_weights, is_causal};
+  auto backend = select_sdp_backend(kernel_params);
+  return static_cast<int64_t>(backend);
+}
+
 Tensor flash_scaled_dot_product_attention(
     const Tensor& query,
     const Tensor& key,
