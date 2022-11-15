@@ -58,15 +58,19 @@ Tensor unsqueeze_copy_to(const Tensor & self, int64_t dim, IntArrayRef sizes, bo
 Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, IntArrayRef sizes, bool reapply_views) {
   const auto ndim = sizes.size();
   const auto mask = at::dim_list_to_bitset(dim, ndim);
+  if (ndim == 0) {
+    return self;
+  }
 
   Tensor result = self;
   for (const auto d : c10::irange(ndim)) {
     if (mask.test(d) && sizes[d] == 1) {
-      result = at::unsqueeze(self, d);
+      if (reapply_views) {
+        result = at::unsqueeze(result, d);
+      } else {
+        result = at::unsqueeze_copy(result, d);
+      }
     }
-  }
-  if (!reapply_views) {
-    result = result.clone();
   }
   return result;
 }
