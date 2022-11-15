@@ -1897,7 +1897,7 @@ void UpdateReliable(
     diagnostics::Diagnose(
         diagnostics::Rule::kNodeMissingOnnxShapeInference,
         diagnostics::Level::kWarning,
-        {output->node()->kind().toDisplayString()});
+        {{"op_name", output->node()->kind().toDisplayString()}});
   }
   auto reliable = false;
   if (inferred) {
@@ -2228,7 +2228,7 @@ size_t ONNXAssignOutputShape(
           auto& new_var = THPVariable_Unpack(list_elem);
           TORCH_CHECK(
               var.scalar_type() == new_var.scalar_type(),
-              "Unsupported sequence with mixed elment types in model outputs. "
+              "Unsupported sequence with mixed element types in model outputs. "
               "ONNX supports only sequences of elements of the same data type.");
         }
         auto elem_type = graph->outputs()

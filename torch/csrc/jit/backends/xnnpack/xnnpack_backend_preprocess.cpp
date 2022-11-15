@@ -32,7 +32,6 @@ c10::IValue preprocess(
     const Module& mod,
     const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
     const BackendDebugHandleGenerator& generate_debug_handles) {
-
   auto eval_mod = mod.clone();
   eval_mod.eval();
   eval_mod = torch::jit::freeze(eval_mod);
@@ -67,11 +66,11 @@ c10::IValue preprocess(
   const auto& forward_method = eval_mod.get_method("forward");
 
   auto graph = toGraphFunction(forward_method.function()).graph()->copy();
-    graph = tensorexpr::removeUnusedSelfArgument(graph);
+  graph = tensorexpr::removeUnusedSelfArgument(graph);
   std::vector<c10::IValue> example_inputs;
   if (inp.isTensorList()) {
     c10::List<at::Tensor> inp_list = inp.toTensorList();
-        TORCH_CHECK(
+    TORCH_CHECK(
         graph->inputs().size() == inp_list.size(),
         "method_compile_spec inputs do not match expected number of forward inputs");
 
@@ -80,7 +79,7 @@ c10::IValue preprocess(
       example_inputs.emplace_back(inp_list[i]);
     }
   } else {
-        TORCH_CHECK(
+    TORCH_CHECK(
         graph->inputs().size() == 1,
         "method_compile_spec inputs do not match expected number of forward inputs");
 
