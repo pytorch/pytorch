@@ -29,7 +29,6 @@
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/native/transformers/cuda/flash_attn/fmha.h>
@@ -185,9 +184,6 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     }
     int max_seqlen_q = ((max_seqlen_q_ + 16 - 1) / 16) * 16;
     bool loop = max_seqlen_k > blocksize_c;
-
-    // Otherwise the kernel will be launched from cuda:0 device
-    at::cuda::CUDAGuard device_guard{q.get_device()};
 
     auto opts = q.options();
 

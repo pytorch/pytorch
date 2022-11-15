@@ -746,9 +746,7 @@ std::tuple<Tensor, Tensor> flash_attention_helper_dense_unpacked(
 std::tuple<Tensor, Tensor> mem_eff_helper(
     const Tensor& query,
     const Tensor& key,
-    const Tensor& value,
-    bool compute_log_sumexp,
-    bool is_causal) {
+    const Tensor& value){
   // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
   // Key   -> Key(Batch x KV_seq_len x Num_heads x Dim_per_head)
   // Value -> Value(Batch x KV_seq_len x  Num_heads x Dim_per_head)
@@ -756,18 +754,16 @@ std::tuple<Tensor, Tensor> mem_eff_helper(
   Tensor k_t = key.transpose(1, 2);
   Tensor v_t = value.transpose(1, 2);
 
-  Tensor attention, log_sumexp;
-  std::tie(attention, log_sumexp) = at::_efficient_attention_forward(
+  Tensor attention = std::get<0>(at::_efficient_attention_forward(
       q_t,
       k_t,
       v_t,
       c10::nullopt,
       c10::nullopt,
       c10::nullopt,
-      compute_log_sumexp,
-      is_causal);
-  attention = attention.transpose(1,2);
-  return std::make_tuple(std::move(attention), Tensor());
+      false,
+      false)).transpose(1,2);
+  return std::make_tuple(attention, Tensor());
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
@@ -780,7 +776,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
       case sdp::SDPBackend::flash_attention:
           return flash_attention_helper_dense_unpacked(query_, key, value, dropout_p, need_attn_weights, is_causal);
       case sdp::SDPBackend::efficient_attention:
-          return mem_eff_helper(query_, key , value, need_attn_weights, is_causal);
+          return mem_eff_helper(query_, key , value);
       case sdp::SDPBackend::math:
         return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
       default:
