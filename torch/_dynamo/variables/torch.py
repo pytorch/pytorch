@@ -26,7 +26,7 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .lists import ListVariable, TupleVariable
-from .misc import AutocastModeVariable, ProfilerContextWrapperVariable
+from .misc import AutocastModeVariable, NullContextVariable
 from .nn_module import NNModuleVariable
 from .tensor import TensorWithTFOverrideVariable
 
@@ -293,12 +293,11 @@ class TorchVariable(VariableTracker):
         elif self.value in (
             torch.profiler.profile,
             torch.profiler.record_function,
-            torch.autograd.profiler.dummy,
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
         ):
             log.warning("Profiler will be ignored")
-            return ProfilerContextWrapperVariable(**options)
+            return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
         elif self.value is torch.jit.annotate:
