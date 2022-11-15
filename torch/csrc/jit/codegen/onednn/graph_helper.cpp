@@ -594,7 +594,7 @@ void LlgaNodeWrapper::setOpaqueLayout(size_t offset) {
       ")");
   auto& layouts =
       const_cast<std::vector<int64_t>&>(n->is(attr::output_layouts)); // NOLINT
-  layouts.at(offset) = MKLDNN_LAYOUT;
+  layouts.at(offset) = OPAQUE_LAYOUT;
 }
 
 bool LlgaNodeWrapper::useOpaqueLayout(size_t offset) const {
@@ -606,7 +606,7 @@ bool LlgaNodeWrapper::useOpaqueLayout(size_t offset) const {
       " for attr::output_layouts with size ",
       num_output,
       ")");
-  return n->is(attr::output_layouts)[offset] == MKLDNN_LAYOUT;
+  return n->is(attr::output_layouts)[offset] == OPAQUE_LAYOUT;
 }
 
 } // namespace onednn
