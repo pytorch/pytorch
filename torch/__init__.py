@@ -204,8 +204,6 @@ class SymInt:
     """
 
     def __init__(self, node):
-        from torch.fx.experimental.symbolic_shapes import SymNode
-        assert isinstance(node, SymNode)
         # This field MUST be named node; C++ binding code assumes that this
         # class has a field named node that stores SymNode
         self.node = node
@@ -315,7 +313,7 @@ for name in dir(_C):
         if (isinstance(obj, Callable) or inspect.isclass(obj)):  # type: ignore[arg-type]
             if (obj.__module__ != 'torch'):
                 # TODO: fix their module from C++ side
-                if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
+                if name not in ['DisableTorchFunction', 'Generator']:
                     obj.__module__ = 'torch'
 
 if not TYPE_CHECKING:

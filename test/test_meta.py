@@ -745,7 +745,6 @@ meta_function_device_expected_failures_only_outplace['cuda'] = {
 }
 
 meta_function_device_skips['cpu'] = {
-    torch.narrow_copy: {b8, bf16, c128, c32, c64, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.native_batch_norm: {f32, f64},
 }
 
