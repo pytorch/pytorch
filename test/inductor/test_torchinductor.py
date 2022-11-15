@@ -1384,6 +1384,7 @@ class CommonTemplate:
             [1, 3],
             [1, 2],
             [1, 4],
+            ["same", 0],
             test_memory_format,
         )
 
@@ -1393,6 +1394,7 @@ class CommonTemplate:
             kernel_size,
             dilation,
             groups,
+            padding,
             memory_format,
         ) in options:
             oC = 32 * groups
@@ -1403,6 +1405,7 @@ class CommonTemplate:
                     iC,
                     oC,
                     kernel_size=kernel_size,
+                    padding=padding,
                     dilation=dilation,
                     groups=groups,
                     bias=bias,
@@ -1432,6 +1435,7 @@ class CommonTemplate:
                 out_channels,
                 dilation,
                 groups,
+                padding,
                 bias,
                 has_relu,
                 **kwargs,
@@ -1442,6 +1446,7 @@ class CommonTemplate:
                     out_channels,
                     dilation=dilation,
                     groups=groups,
+                    padding=padding,
                     bias=bias,
                     **kwargs,
                 )
@@ -1451,6 +1456,7 @@ class CommonTemplate:
                         out_channels,
                         dilation=dilation,
                         groups=groups,
+                        padding=padding,
                         bias=bias,
                         **kwargs,
                     )
@@ -1471,6 +1477,7 @@ class CommonTemplate:
             [1, 3],
             [1, 2],
             [1, 4],
+            ["same", 0],
             test_memory_format,
         )
 
@@ -1481,6 +1488,7 @@ class CommonTemplate:
             kernel_size,
             dilation,
             groups,
+            padding,
             memory_format,
         ) in options:
             oC = 32 * groups
@@ -1492,6 +1500,7 @@ class CommonTemplate:
                 oC,
                 dilation,
                 groups,
+                padding,
                 bias,
                 has_relu,
                 kernel_size=kernel_size,
@@ -4782,9 +4791,6 @@ if HAS_CUDA:
                     for param in model_opt.parameters():
                         param.add_(1.0)
 
-        # Probably fails due to the symint math issue caught while adding
-        # max_pool2d_with_indices_backward
-        @unittest.skip("Accuracy failure, needs debugging")
         def test_accuracy_issue1(self):
             class Repro(torch.nn.Module):
                 def __init__(self):
