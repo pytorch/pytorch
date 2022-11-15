@@ -683,7 +683,6 @@ try:
 
     def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
         fake_tensor = fake_mode.from_tensor(e, static_shapes=static_shapes)
-        # breakpoint()
         if tx is not None:
             from torch._dynamo.guards import TensorReference
 

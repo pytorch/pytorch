@@ -566,7 +566,7 @@ class DynamoGuardPrinter(StrPrinter):
         if not expr_found:
             if config.dynamic_shapes_ignore_assert:
                 return f"{self.shape_env.var_to_val[expr]}"
-        assert expr_found, breakpoint()
+        assert expr_found, f"Failed to find {expr}"
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
