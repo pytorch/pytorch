@@ -316,7 +316,8 @@ def lookup_backend(compiler_fn):
             and torch.cuda.get_device_capability() >= (8, 0)
         ):
             warnings.warn(
-                "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. Consider setting `torch.set_float32_matmul_precision('HIGH')`"
+                "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled."
+                "Consider setting `torch.set_float32_matmul_precision('HIGH')`"
             )
 
         compiler_fn = import_module(f"{config.inductor_import}.compile_fx").compile_fx
