@@ -32,6 +32,8 @@ from .ir import (
     SqueezeView,
     TensorBox,
     View,
+    is_storage_and_layout,
+    as_storage_and_layout,
 )
 from .utils import ceildiv, has_torchvision_roi_align, sympy_product
 from .virtualized import ops, V
@@ -1188,6 +1190,24 @@ def philox_rand_like(x, seed, offset):
         ranges=list(size),
     )
 
+def conv_constraint(*args, **kwargs):
+    args, kwargs = pytree.tree_map_only(ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs))
+    def decide_layout(t):
+        if is_storage_and_layout(t):
+            as_storage_and_layout(t, freeze=True)
+        return t
+    args, kwargs = pytree.tree_map_only(ir.IRNode, decide_layout, (args, kwargs))
+
+    return args, kwargs
+
+def _apply_constraint(f, constraint):
+    def inner(*args, **kwargs):
+        args, kwargs = constraint(*args, **kwargs)
+        return f(*args, **kwargs)
+    return inner
+
+def apply_constraint(constraint):
+    return functools.partial(_apply_constraint, constraint=constraint)
 
 def conv_backward(*args, **kwargs):
     # output striding complex and has a lot of build dependent options,
@@ -1287,6 +1307,7 @@ make_fallback(aten.upsample_bilinear2d_backward, inps_hook=require_dense)
 
 
 @register_lowering(aten.convolution)
+@apply_constraint(conv_constraint)
 def convolution(
     x: TensorBox,
     weight: TensorBox,
