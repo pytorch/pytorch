@@ -2669,6 +2669,37 @@ class TestMakeFunctional(TestCase):
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         _ = combine_state_for_ensemble(models)
 
+    def test_state_correctly_returned_after_forward(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        mod = Net()
+        func, params = make_functional(mod)
+
+        # state in func.names_map
+        old_state_linear_weight = func.stateless_model.linear.weight
+        old_state_linear_bias = func.stateless_model.linear.bias
+
+        self.assertIsNotNone(old_state_linear_weight)
+        self.assertIsNotNone(old_state_linear_bias)
+
+        x = torch.randn(4, 3)
+        func(params, x)
+
+        new_state_linear_weight = func.stateless_model.linear.weight
+        new_state_linear_bias = func.stateless_model.linear.bias
+
+        self.assertIsNotNone(new_state_linear_weight)
+        self.assertIsNotNone(new_state_linear_bias)
+
+        self.assertEqual(old_state_linear_weight, new_state_linear_weight)
+        self.assertEqual(old_state_linear_bias, new_state_linear_bias)
 
 class TestExamplesCorrectness(TestCase):
     def test_maml_regression(self, device):
