@@ -107,7 +107,6 @@ IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 RETRY_TEST_CASES = os.getenv('PYTORCH_RETRY_TEST_CASES') == '1'
 OVERRIDE_FLAKY_SIGNAL = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') == '1'
 DISABLE_RUNNING_SCRIPT_CHK = os.getenv('PYTORCH_DISABLE_RUNNING_SCRIPT_CHK') == '1'
-MAX_NUM_RETRIES = 3
 
 DEFAULT_DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 DEFAULT_SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
@@ -506,6 +505,7 @@ parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
 parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
+parser.add_argument('--rerun-disabled-tests', action='store_true')
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
 def run_unittest_help(argv):
@@ -527,6 +527,9 @@ else:
     # infer flags based on the default settings
     GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
 
+RERUN_DISABLED_TESTS = args.rerun_disabled_tests
+# Rerun disabled tests many more times to make sure that they are not flaky anymore
+MAX_NUM_RETRIES = 3 if not RERUN_DISABLED_TESTS else 50
 
 SLOW_TESTS_FILE = args.import_slow_tests
 DISABLED_TESTS_FILE = args.import_disabled_tests
@@ -1653,6 +1656,9 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
     if not IS_SANDCASTLE:
+        should_skip = False
+        skip_msg = ""
+
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
             if len(disable_test_parts) > 1:
@@ -1687,11 +1693,22 @@ def check_if_enable(test: unittest.TestCase):
                         platforms = list(filter(lambda p: p in platform_to_conditional, platforms))
 
                     if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
+                        should_skip = True
                         skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
                             f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
                             "If you're seeing this on your local machine and would like to enable this test, " \
                             "please make sure CI is not set and you are not using the flag --import-disabled-tests."
-                        raise unittest.SkipTest(skip_msg)
+                        break
+
+        if should_skip and not RERUN_DISABLED_TESTS:
+            # Skip the disabled test when not running under --rerun-disabled-tests verification mode
+            raise unittest.SkipTest(skip_msg)
+
+        if not should_skip and RERUN_DISABLED_TESTS:
+            skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
+                " disabled tests are run"
+            raise unittest.SkipTest(skip_msg)
+
     if TEST_SKIP_FAST:
         if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
@@ -1819,6 +1836,31 @@ class TensorOrArrayPair(TensorLikePair):
         super().__init__(actual, expected, **other_parameters)
         self.rtol = max(self.rtol, rtol_override)
         self.atol = max(self.atol, atol_override)
+
+        # This is a slow and ugly hack to allow the comparison of hybrid sparse CSR tensors with strided ones. If
+        # `check_layout=False` (default), the tensors will be converted to strided by calling `.to_dense()` on them.
+        # However, this is not yet supported for hybrid sparse CSR and thus we need to do it manually for now.
+        # FIXME: Remove this as soon as `.to_dense` is supported for hybrid sparse CSR tensors
+        if not self.check_layout:
+            self.actual, self.expected = self._handle_hybrid_sparse_csr(self.actual, self.expected)
+
+    def _handle_hybrid_sparse_csr(self, actual, expected):
+        compressed_sparse_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
+        if not ((actual.layout in compressed_sparse_layouts) ^ (expected.layout in compressed_sparse_layouts)):
+            return actual, expected
+
+        def to_dense(tensor):
+            if tensor.layout not in compressed_sparse_layouts:
+                return tensor
+
+            def partial_to_dense(tensor):
+                if tensor.layout not in compressed_sparse_layouts or tensor.values().ndim == 1:
+                    return tensor.to_dense()
+                return torch.stack([partial_to_dense(sub_tensor) for sub_tensor in tensor])
+
+            return partial_to_dense(tensor)
+
+        return [to_dense(input) for input in [actual, expected]]
 
     def _process_inputs(self, actual, expected, *, id, allow_subclasses):
         self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
@@ -2014,9 +2056,48 @@ class TestCase(expecttest.TestCase):
     def _run_with_retry(self, result=None, num_runs_left=0, report_only=True, num_red=0, num_green=0):
         using_unittest = isinstance(result, unittest.TestResult)
         if num_runs_left == 0:
+            # The logic when RERUN_DISABLED_TESTS is set to true is as follows:
+            # |-if the disabled test passes:
+            # |-- if it's flaky:
+            # |---  Do nothing because it's still flaky
+            # |-- elif it isn't flaky anymore:
+            # |---  Close the disabled ticket (later)
+            # |
+            # |- elif the disabled test fails after n retries:
+            # |--  This is expected, report this but don't fail the job
+            skipped_msg = {
+                "num_red": num_red,
+                "num_green": num_green,
+                "max_num_retries": MAX_NUM_RETRIES,
+                "rerun_disabled_test": RERUN_DISABLED_TESTS,
+            }
+
+            traceback_str = ""
+            if RERUN_DISABLED_TESTS and using_unittest:
+                # Hide all failures and errors when RERUN_DISABLED_TESTS is enabled. This is
+                # a verification check, we don't want more red signals coming from it
+                if result.failures:
+                    _, traceback_str = result.failures.pop(-1)
+                if result.errors:
+                    _, traceback_str = result.errors.pop(-1)
+
+                if traceback_str:
+                    skipped_msg["traceback_str"] = traceback_str
+
+                if num_green == 0:
+                    # The disabled test fails, report as skipped but don't fail the job
+                    result.addSkip(self, json.dumps(skipped_msg))
+
+                if num_red == 0:
+                    # The test passes after re-running multiple times. This acts as a signal
+                    # to confirm that it's not flaky anymore
+                    result.addSuccess(self)
+
             if num_green > 0 and num_red > 0 and using_unittest:
-                result.addSkip(self, f'{{"flaky": {True}, "num_red": {num_red}, "num_green": {num_green},' +
-                                     f'"max_num_retries": {MAX_NUM_RETRIES}}}')
+                skipped_msg["flaky"] = True
+                # Still flaky, do nothing
+                result.addSkip(self, json.dumps(skipped_msg))
+
             return
 
         if using_unittest:
@@ -2075,9 +2156,13 @@ class TestCase(expecttest.TestCase):
                 result.addExpectedFailure(self, err)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red + 1, num_green=num_green)
-        elif report_only and num_retries_left < MAX_NUM_RETRIES:
+        elif (RERUN_DISABLED_TESTS or report_only) and num_retries_left < MAX_NUM_RETRIES:
+            # Always re-run up to MAX_NUM_RETRIES when running under report only or rerun disabled tests modes
             print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
-            result.addUnexpectedSuccess(self)
+            if RERUN_DISABLED_TESTS:
+                result.addSuccess(self)
+            else:
+                result.addUnexpectedSuccess(self)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red, num_green=num_green + 1)
         elif not report_only and num_retries_left < MAX_NUM_RETRIES:
