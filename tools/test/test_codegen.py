@@ -9,7 +9,15 @@ import torchgen.model
 import yaml
 
 from tools.autograd import gen_autograd_functions, load_derivatives
-from torchgen.api.types import CppSignatureGroup, DispatcherSignature
+from torchgen.api.types import (
+    BaseCType,
+    CppSignatureGroup,
+    DispatcherSignature,
+    ListCType,
+    tensorT,
+    using_container_namespace,
+    using_tensor_namespace,
+)
 from torchgen.context import native_function_manager
 from torchgen.gen import (
     get_native_function_declarations,
@@ -495,6 +503,34 @@ class TestStaticDispatchGeneratrion(unittest.TestCase):
         )
 
 
+class TestNamespaceOverride(unittest.TestCase):
+    def test_tensor_namespace_override_generates_correct_code(self) -> None:
+        self.assertEquals(str(tensorT), "at::Tensor")
+        with using_tensor_namespace("custom"):
+            self.assertEquals(str(tensorT), "custom::Tensor")
+        self.assertEquals(str(tensorT), "at::Tensor")
+
+    def test_container_namespace_override_generates_correct_code(self) -> None:
+        default_tensor_list = ListCType(BaseCType(tensorT))
+        self.assertEquals(default_tensor_list.cpp_type(), "c10::List<at::Tensor>")
+        with using_container_namespace("custom"):
+            tensor_list = ListCType(BaseCType(tensorT))
+            self.assertEquals(tensor_list.cpp_type(), "custom::List<at::Tensor>")
+        default_tensor_list = ListCType(BaseCType(tensorT))
+        self.assertEquals(default_tensor_list.cpp_type(), "c10::List<at::Tensor>")
+
+    def test_both_tensor_and_container_namespace_override_generates_correct_code(
+        self,
+    ) -> None:
+        default_tensor_list = ListCType(BaseCType(tensorT))
+        self.assertEquals(default_tensor_list.cpp_type(), "c10::List<at::Tensor>")
+        with using_container_namespace("custom"), using_tensor_namespace("foo"):
+            tensor_list = ListCType(BaseCType(tensorT))
+            self.assertEquals(tensor_list.cpp_type(), "custom::List<foo::Tensor>")
+        default_tensor_list = ListCType(BaseCType(tensorT))
+        self.assertEquals(default_tensor_list.cpp_type(), "c10::List<at::Tensor>")
+
+
 # Represents the most basic NativeFunction. Use dataclasses.replace()
 # to edit for use.
 DEFAULT_NATIVE_FUNCTION, _ = torchgen.model.NativeFunction.from_yaml(
@@ -502,7 +538,6 @@ DEFAULT_NATIVE_FUNCTION, _ = torchgen.model.NativeFunction.from_yaml(
     loc=torchgen.model.Location(__file__, 1),
     valid_tags=set(),
 )
-
 
 if __name__ == "__main__":
     unittest.main()

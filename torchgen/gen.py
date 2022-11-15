@@ -17,6 +17,7 @@ import torchgen.api.structured as structured
 import torchgen.dest as dest
 
 from torchgen.api import cpp
+from torchgen.api import types
 from torchgen.api.translate import translate
 from torchgen.api.types import (
     Binding,
@@ -26,6 +27,8 @@ from torchgen.api.types import (
     NamedCType,
     NativeSignature,
     SpecialArgName,
+    tensorOptionsT,
+    tensorT,
 )
 from torchgen.context import (
     method_with_native_function,
@@ -1018,7 +1021,7 @@ def dynamic_type(t: Type) -> str:
     # Note we don't use t.is_tensor_like() here because it would
     # also include Tensor[]
     if str(t) == "Tensor":
-        return "at::Tensor"
+        return str(tensorT)
     # This is a legacy concept, so never report SymInt
     return cpp.argumenttype_type(
         t, mutable=False, binds="__placeholder__", symint=False
@@ -1114,7 +1117,7 @@ def compute_cpp_argument_yaml(
     if isinstance(cpp_a.argument, TensorOptionsArguments):
         arg: Dict[str, object] = {
             "annotation": None,
-            "dynamic_type": "at::TensorOptions",
+            "dynamic_type": str(tensorOptionsT),
             "is_nullable": False,
             "name": cpp_a.name,
             "type": cpp_a.type,
@@ -2731,7 +2734,6 @@ def main() -> None:
             for k in dispatch_keys
             if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist
         ]
-
     static_dispatch_idx: List[BackendIndex] = []
     if options.static_dispatch_backend:
         static_dispatch_idx = [
