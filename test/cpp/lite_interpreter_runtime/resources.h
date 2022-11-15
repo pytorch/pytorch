@@ -20,7 +20,7 @@ inline auto getResourcePath(std::string name) -> detail::Path;
 namespace detail {
 
 class Path {
-public:
+ public:
   explicit Path(std::string rep) : rep_(std::move(rep)) {}
 
   auto string() const -> std::string const& {
