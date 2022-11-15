@@ -719,7 +719,6 @@ def xfail_inherited_tests(tests):
 
 @skipIfNoSympy
 @xfail_inherited_tests([
-    "test_mode_tracing_factory_function",
     "test_make_fx_overloads",
     "test_trace_subclasses",
 ])
@@ -1133,9 +1132,7 @@ symbolic_tensor_failures = {
     xfail('cummin', ''),  # aten.cummin.default - couldn't find symbolic meta function/decomposition
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('deg2rad', ''),  # aten.deg2rad.default - couldn't find symbolic meta function/decomposition
     xfail('diff', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
-    xfail('dist', ''),  # aten.dist.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
     xfail('fft.fft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fft.fft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1338,10 +1335,8 @@ symbolic_tensor_segfaults = {
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 inplace_symbolic_tensor_failures = {
-    xfail('abs', ''),  # aten.abs_.default - couldn't find symbolic meta function/decomposition
     xfail('acos', ''),  # aten.acos_.default - couldn't find symbolic meta function/decomposition
     xfail('acosh', ''),  # aten.acosh_.default - couldn't find symbolic meta function/decomposition
-    xfail('addbmm', ''),  # aten.addbmm_.default - couldn't find symbolic meta function/decomposition
     xfail('addcdiv', ''),  # aten.addcdiv_.default - couldn't find symbolic meta function/decomposition
     xfail('addcmul', ''),  # aten.addcmul_.default - couldn't find symbolic meta function/decomposition
     xfail('addmm', ''),  # aten.addmm_.default - couldn't find symbolic meta function/decomposition
@@ -1355,7 +1350,6 @@ inplace_symbolic_tensor_failures = {
     xfail('clamp', ''),  # aten.clamp_.Tensor - couldn't find symbolic meta function/decomposition
     xfail('clamp_max', ''),  # aten.clamp_max_.Tensor - couldn't find symbolic meta function/decomposition
     xfail('clamp_min', ''),  # aten.clamp_min_.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('conj_physical', ''),  # aten.conj_physical_.default - couldn't find symbolic meta function/decomposition
     xfail('copysign', ''),  # aten.copysign_.Tensor - couldn't find symbolic meta function/decomposition
     xfail('cos', ''),  # aten.cos_.default - couldn't find symbolic meta function/decomposition
     xfail('cosh', ''),  # aten.cosh_.default - couldn't find symbolic meta function/decomposition
@@ -1372,7 +1366,6 @@ inplace_symbolic_tensor_failures = {
     xfail('expm1', ''),  # aten.expm1_.default - couldn't find symbolic meta function/decomposition
     xfail('float_power', ''),  # the base given to float_power_ has dtype Float but the operation's result requires dtype Double
     xfail('floor', ''),  # aten.floor_.default - couldn't find symbolic meta function/decomposition
-    xfail('floor_divide', ''),  # aten.floor_divide_.Tensor - couldn't find symbolic meta function/decomposition
     xfail('fmod', ''),  # aten.fmod_.Tensor - couldn't find symbolic meta function/decomposition
     xfail('frac', ''),  # aten.frac_.default - couldn't find symbolic meta function/decomposition
     xfail('ge', ''),  # aten.ge_.Tensor - couldn't find symbolic meta function/decomposition

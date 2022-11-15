@@ -297,8 +297,9 @@ def constructors(fake_mode, func, *args, **kwargs):
     out_device = new_kwargs.pop("device", None)
     out_device = out_device if out_device is not None else default_device
     new_kwargs["device"] = torch.device("meta")
-    # Not in_kernel_invocation_manager as no fake tensor inputs
-    with no_dispatch():
+    # _like constructors have fake tensor inputs (maybe this causes the non-like
+    # to fail? hmmm)
+    with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
     return FakeTensor(fake_mode, r, out_device)
 
@@ -821,40 +822,31 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        from torch._decomp import decomposition_table
+        # If there's a Python meta, prefer that over the decomposition
+        from torch._decomp import meta_table as meta_table
+        if func not in meta_table:
+            from torch._decomp import decomposition_table
 
-        with self:
-            # Decomposes CompositeImplicitAutograd ops
-            r = func.decompose(*args, **kwargs)
-            if r is not NotImplemented:
-                return r
-
-        # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
-        if has_symbolic_sizes and not self.cpp_meta_supports_symint(func):
-            from torch._decomp import meta_table as meta_table
-
-            if func == aten.size.default:
-                sys.stderr.write(
-                    "Trying to call aten.size on a tensor with symbolic shapes. "
-                    "It's likely that this is from calling tensor.shape in C++"
+            # Prefer Python decompositions over C++ ones
+            if (
+                func in decomposition_table
+                and (
+                    has_symbolic_sizes or (
+                        # TODO: Remove these exclusions, so that we can remove
+                        # this leg entirely
+                        torch_decomp_decompositions(func)
+                        and all(not e.is_sparse for e in flat_arg_fake_tensors)
+                    )
                 )
-                # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
-                return None
-
-            with self:
-                if func in meta_table:
-                    r = meta_table[func](*args, **kwargs)
-                    return r
-                if func in decomposition_table:
+            ):
+                with self:
                     return decomposition_table[func](*args, **kwargs)
 
-        if (
-            func in decomposition_table
-            and torch_decomp_decompositions(func)
-            and all(not e.is_sparse for e in flat_arg_fake_tensors)
-        ):
             with self:
-                return decomposition_table[func](*args, **kwargs)
+                # Decomposes CompositeImplicitAutograd ops
+                r = func.decompose(*args, **kwargs)
+                if r is not NotImplemented:
+                    return r
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
@@ -868,12 +860,6 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
-
-        if has_symbolic_sizes:
-            if not self.cpp_meta_supports_symint(func):
-                raise RuntimeError(
-                    f"{func} - couldn't find symbolic meta function/decomposition"
-                )
 
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
