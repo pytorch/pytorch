@@ -1,11 +1,12 @@
 import sys
 import torch
 import contextlib
+from enum import IntEnum
 
 from typing import Union
 
 __all__ = ["is_built", "cuFFTPlanCacheAttrContextProp", "cuFFTPlanCache", "cuFFTPlanCacheManager",
-           "cuBLASModule", "preferred_linalg_library", "cufft_plan_cache", "matmul", "enable_flash_sdp",
+           "cuBLASModule", "preferred_linalg_library", "cufft_plan_cache", "matmul", "SDPBackend", "enable_flash_sdp",
            "flash_sdp_enabled", "enable_mem_efficient_sdp", "mem_efficient_sdp_enabled",
            "math_sdp_enabled", "enable_math_sdp", "sdp_kernel"]
 
@@ -163,6 +164,19 @@ def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] 
 
     return torch._C._get_linalg_preferred_backend()
 
+
+class SDPBackend(IntEnum):
+    r"""Enum class for the scaled dot product attention backends.
+
+    .. warning:: This flag is experimental and subject to change.'
+
+    This class needs to stay inline with the enum defined in:
+    pytorch/aten/src/ATen/native/transformers/sdp_utils_cpp.h
+    """
+    MATH = 0
+    FLASH_ATTENTION = 1
+    EFFICIENT_ATTENTION = 2
+    ERROR = 3
 
 def flash_sdp_enabled():
     r"""
