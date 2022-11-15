@@ -1133,6 +1133,201 @@ inline Vectorized<int8_t> Vectorized<int8_t>::le(const Vectorized<int8_t>& other
   return (*this <= other) & Vectorized<int8_t>(1);
 }
 
+template <bool left_shift>
+Vectorized<int16_t> inline shift_256_16(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  // No vector instruction for shifting int16_t, so emulating it instead.
+
+  // Control masks for shuffle operation, treating 256 bits as an
+  // array of 16-bit elements, and considering pairs of neighboring
+  // elements.  Specifially, a mask named "ctl_M_N" (M,N in [0,1], and
+  // M!=N) is set so that shuffle will move element with index M from
+  // input pair into element with index N in output pair, and element
+  // with index M in output pair will be set to all 0s.
+  __m256i ctl_0_1 = _mm256_set_epi8(29, 28, 0x80, 0x80, 25, 24, 0x80, 0x80,
+                                    21, 20, 0x80, 0x80, 17, 16, 0x80, 0x80,
+                                    13, 12, 0x80, 0x80, 9, 8, 0x80, 0x80,
+                                    5, 4, 0x80, 0x80, 1, 0, 0x80, 0x80);
+  __m256i ctl_1_0 = _mm256_set_epi8(0x80, 0x80, 31, 30, 0x80, 0x80, 27, 26,
+                                    0x80, 0x80, 23, 22, 0x80, 0x80, 19, 18,
+                                    0x80, 0x80, 15, 14, 0x80, 0x80, 11, 10,
+                                    0x80, 0x80, 7, 6, 0x80, 0x80, 3, 2);
+
+  // Masks for bitwise and operation, treating 256 bits as an array of
+  // 16-bit elements, and considering them in pairs of neighboring
+  // elements.  A mask named "keep_M" (M in [0,1]) is set so that
+  // bitwise and will copy element with index M from input pair into
+  // element with the same index in output pair, while the other
+  // element in output pair will be set to all 0s.
+  __m256i keep_0 = _mm256_set1_epi32(0xFFFF);
+  __m256i keep_1 = _mm256_set1_epi32(0xFFFF0000);
+
+  // Take each 16-bit element with idx%2==0 from input array to be
+  // shifted and extend it to 32 bits so that 0s are added to the
+  // right.  Then, perform shifting on this 32-bit number.  Upper 16
+  // bits will be proper result of shifting original 16-bit number, so
+  // write them to result array, into the same position from which
+  // corresponding input element is taken.  Also, make sure that
+  // result array elements with idx%2!=0 are set to all 0s.
+  //
+  // Note that number of bits to shift for is extended to 32 bits by
+  // adding 0s to the left.  That means this number is not properly
+  // sign-extended for negative values.  However, number of bits to
+  // shift is treated as an unsigned integer by respective shift
+  // intrinsics anyway so if negative then either with or without
+  // proper sign extension, it will be interpreted as a number greater
+  // than 32, and the shifting result will be the same.
+  __m256i a0 = _mm256_shuffle_epi8(a, ctl_0_1);
+  __m256i b0 = _mm256_and_si256(b, keep_0);
+  __m256i c0;
+  if (left_shift)
+    c0 = _mm256_sllv_epi32(a0, b0);
+  c0 = _mm256_shuffle_epi8(c0, ctl_1_0);
+
+  // Peform shifting the same way for input array elements with
+  // idx%2==1.
+  __m256i a1 = _mm256_and_si256(a, keep_1);
+  __m256i b1 = _mm256_shuffle_epi8(b, ctl_1_0);
+  __m256i c1;
+  if (left_shift)
+    c1 = _mm256_sllv_epi32(a1, b1);
+  c1 = _mm256_and_si256(c1, keep_1);
+
+  // Merge partial results into the final result.
+  __m256i c = _mm256_or_si256(c0, c1);
+
+  return c;
+}
+
+template <bool left_shift>
+Vectorized<int8_t> inline shift_256_8(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
+  // No vector instruction for shifting int8_t, so emulating it instead.
+
+  // Control masks for shuffle operation, treating 256 bits as an
+  // array of 8-bit elements, and considering quadruples of
+  // neighboring elements.  Specifially, a mask named "ctl_M_N" (M,N
+  // in [0,1,2,3], and M!=N) is set so that shuffle will move element
+  // with index M from input quadruple into element with index N in
+  // output quadruple, and other elements in output quadruple will be
+  // set to all 0s.
+  __m256i ctl_0_3 = _mm256_set_epi8(28, 0x80, 0x80, 0x80, 24, 0x80, 0x80, 0x80,
+                                    20, 0x80, 0x80, 0x80, 16, 0x80, 0x80, 0x80,
+                                    12, 0x80, 0x80, 0x80, 8, 0x80, 0x80, 0x80,
+                                    4, 0x80, 0x80, 0x80, 0, 0x80, 0x80, 0x80);
+  __m256i ctl_1_0 = _mm256_set_epi8(0x80, 0x80, 0x80, 29, 0x80, 0x80, 0x80, 25,
+                                    0x80, 0x80, 0x80, 21, 0x80, 0x80, 0x80, 17,
+                                    0x80, 0x80, 0x80, 13, 0x80, 0x80, 0x80, 9,
+                                    0x80, 0x80, 0x80, 5, 0x80, 0x80, 0x80, 1);
+  __m256i ctl_1_3 = _mm256_set_epi8(29, 0x80, 0x80, 0x80, 25, 0x80, 0x80, 0x80,
+                                    21, 0x80, 0x80, 0x80, 17, 0x80, 0x80, 0x80,
+                                    13, 0x80, 0x80, 0x80, 9, 0x80, 0x80, 0x80,
+                                    5, 0x80, 0x80, 0x80, 1, 0x80, 0x80, 0x80);
+  __m256i ctl_2_0 = _mm256_set_epi8(0x80, 0x80, 0x80, 30, 0x80, 0x80, 0x80, 26,
+                                    0x80, 0x80, 0x80, 22, 0x80, 0x80, 0x80, 18,
+                                    0x80, 0x80, 0x80, 14, 0x80, 0x80, 0x80, 10,
+                                    0x80, 0x80, 0x80, 6, 0x80, 0x80, 0x80, 2);
+  __m256i ctl_2_3 = _mm256_set_epi8(30, 0x80, 0x80, 0x80, 26, 0x80, 0x80, 0x80,
+                                    22, 0x80, 0x80, 0x80, 18, 0x80, 0x80, 0x80,
+                                    14, 0x80, 0x80, 0x80, 10, 0x80, 0x80, 0x80,
+                                    6, 0x80, 0x80, 0x80, 2, 0x80, 0x80, 0x80);
+  __m256i ctl_3_0 = _mm256_set_epi8(0x80, 0x80, 0x80, 31, 0x80, 0x80, 0x80, 27,
+                                    0x80, 0x80, 0x80, 23, 0x80, 0x80, 0x80, 19,
+                                    0x80, 0x80, 0x80, 15, 0x80, 0x80, 0x80, 11,
+                                    0x80, 0x80, 0x80, 7, 0x80, 0x80, 0x80, 3);
+  __m256i ctl_3_1 = _mm256_set_epi8(0x80, 0x80, 31, 0x80, 0x80, 0x80, 27, 0x80,
+                                    0x80, 0x80, 23, 0x80, 0x80, 0x80, 19, 0x80,
+                                    0x80, 0x80, 15, 0x80, 0x80, 0x80, 11, 0x80,
+                                    0x80, 0x80, 7, 0x80, 0x80, 0x80, 3, 0x80);
+  __m256i ctl_3_2 = _mm256_set_epi8(0x80, 31, 0x80, 0x80, 0x80, 27, 0x80, 0x80,
+                                    0x80, 23, 0x80, 0x80, 0x80, 19, 0x80, 0x80,
+                                    0x80, 15, 0x80, 0x80, 0x80, 11, 0x80, 0x80,
+                                    0x80, 7, 0x80, 0x80, 0x80, 3, 0x80, 0x80);
+
+  // Masks for bitwise and operation, treating 256 bits as an array of
+  // 8-bit elements, and considering them in quadruples of neighboring
+  // elements.  A mask named "keep_M" (M in [0,1,2,3]) is set so that
+  // bitwise and will copy element with index M from input quadruple
+  // into element with the same index in output quadruple, while the
+  // other elements in output quadruple will be set to all 0s.
+  __m256i keep_0 = _mm256_set1_epi32(0xFF);
+  __m256i keep_3 = _mm256_set1_epi32(0xFF000000);
+
+  // Take each 8-bit element with idx%4==0 from input array to be
+  // shifted and extend it to 32 bits so that 0s are added to the
+  // right.  Then, perform shifting on this 32-bit number.  Upper 8
+  // bits will be proper result of shifting original 8-bit number, so
+  // write them to result array, into the same position from which
+  // corresponding input element is taken.  Also, make sure that
+  // result array elements with idx%4!=0 are set to all 0s.
+  //
+  // Note that number of bits to shift for is extended to 32 bits by
+  // adding 0s to the left.  That means this number is not properly
+  // sign-extended for negative values.  However, number of bits to
+  // shift is treated as an unsigned integer by respective shift
+  // intrinsics anyway so if negative then either with or without
+  // proper sign extension, it will be interpreted as a number greater
+  // than 32, and the shifting result will be the same.
+  __m256i a0 = _mm256_shuffle_epi8(a, ctl_0_3);
+  __m256i b0 = _mm256_and_si256(b, keep_0);
+  __m256i c0;
+  if (left_shift)
+    c0 = _mm256_sllv_epi32(a0, b0);
+  c0 = _mm256_shuffle_epi8(c0, ctl_3_0);
+
+  // Peform shifting the same way for input array elements with
+  // idx%4==1.
+  __m256i a1 = _mm256_shuffle_epi8(a, ctl_1_3);
+  __m256i b1 = _mm256_shuffle_epi8(b, ctl_1_0);
+  __m256i c1;
+  if (left_shift)
+    c1 = _mm256_sllv_epi32(a1, b1);
+  c1 = _mm256_shuffle_epi8(c1, ctl_3_1);
+
+  // Peform shifting the same way for input array elements with
+  // idx%4==2.
+  __m256i a2 = _mm256_shuffle_epi8(a, ctl_2_3);
+  __m256i b2 = _mm256_shuffle_epi8(b, ctl_2_0);
+  __m256i c2;
+  if (left_shift)
+    c2 = _mm256_sllv_epi32(a2, b2);
+  c2 = _mm256_shuffle_epi8(c2, ctl_3_2);
+
+  // Peform shifting the same way for input array elements with
+  // idx%4==3.
+  __m256i a3 =  _mm256_and_si256(a, keep_3);
+  __m256i b3 = _mm256_shuffle_epi8(b, ctl_3_0);
+  __m256i c3;
+  if (left_shift)
+    c3 = _mm256_sllv_epi32(a3, b3);
+  c3 = _mm256_and_si256(c3, keep_3);
+
+  // Merge partial results into the final result.
+  __m256i c01 = _mm256_or_si256(c0, c1);
+  __m256i c23 = _mm256_or_si256(c2, c3);
+  __m256i c = _mm256_or_si256(c01, c23);
+
+  return c;
+}
+
+template <>
+Vectorized<int64_t> inline operator<<(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
+  return _mm256_sllv_epi64(a, b);
+}
+
+template <>
+Vectorized<int32_t> inline operator<<(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return _mm256_sllv_epi32(a, b);
+}
+
+template <>
+Vectorized<int16_t> inline operator<<(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  return shift_256_16<true>(a, b);
+}
+
+template <>
+Vectorized<int8_t> inline operator<<(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
+  return shift_256_8<true>(a, b);
+}
+
 #endif
 
 }}}

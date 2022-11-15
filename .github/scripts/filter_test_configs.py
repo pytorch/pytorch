@@ -34,6 +34,13 @@ VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}" for label in {
     "xla",
 }}
 
+# Supported modes when running periodically
+SUPPORTED_PERIODICAL_MODES = {
+    "mem_leak_check",
+    "rerun_disabled_tests",
+}
+
+
 def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Filter all test configurations and keep only requested ones")
@@ -109,6 +116,23 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
         return filtered_test_matrix
 
 
+def set_periodic_modes(test_matrix: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
+    """
+    Apply all periodic modes when running under a schedule
+    """
+    scheduled_test_matrix: Dict[str, List[Any]] = {
+        "include": [],
+    }
+
+    for config in test_matrix.get("include", []):
+        for mode in SUPPORTED_PERIODICAL_MODES:
+            cfg = config.copy()
+            cfg[mode] = mode
+            scheduled_test_matrix["include"].append(cfg)
+
+    return scheduled_test_matrix
+
+
 def set_output(name: str, val: Any) -> None:
     if os.getenv("GITHUB_OUTPUT"):
         with open(str(os.getenv("GITHUB_OUTPUT")), "a") as env:
@@ -163,8 +187,7 @@ def main() -> None:
         filtered_test_matrix = test_matrix
 
     if args.event_name == "schedule":
-        for config in filtered_test_matrix.get("include", []):
-            config["mem_leak_check"] = "mem_leak_check"
+        filtered_test_matrix = set_periodic_modes(filtered_test_matrix)
 
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
