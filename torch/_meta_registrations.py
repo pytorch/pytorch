@@ -1167,8 +1167,57 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     return self
 
 
+@register_meta(
+    [
+        aten.acos_.default,
+        aten.abs_.default,
+        aten.sinc_.default,
+        aten.acosh_.default,
+        aten.sin_.default,
+        aten.sinh_.default,
+        aten.tan_.default,
+        aten.atanh.default,
+        aten.ceil_.default,
+        aten.cos_.default,
+        aten.cosh_.default,
+        aten.neg_.default,
+        aten.round_.default,
+        aten.asin_.default,
+        aten.asinh_.default,
+        aten.atanh_.default,
+        aten.tanh_.default,
+        aten.rsqrt_.default,
+        aten.reciprocal_.default,
+        aten.log10_.default,
+        aten.log1p_.default,
+        aten.log2_.default,
+        aten.log_.default,
+        aten.exp_.default,
+        aten.exp2_.default,
+        aten.expm1_.default,
+        aten.floor_.default,
+        aten.sgn_.default,
+        aten.atan_.default,
+    ]
+)
+def meta_unary_inplace(self, **kwargs):
+    meta_tensor = _elementwise_meta(
+        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    check(
+        not aten.is_non_overlapping_and_dense(meta_tensor),
+        lambda: "unsupported operation: \
+     more than one element of the written-to tensor refers to a single memory location. \
+     Please clone() the tensor before performing the operation.",
+    )
+    # sanity check
+    assert meta_tensor.stride() == self.stride()
+    assert meta_tensor.dtype == self.dtype
+    return self
+
+
 @register_meta([aten.round.default, aten.round.decimals])
-def meta_round(self, **kwargs):
+def meta_unary_impl(self, **kwargs):
     return _elementwise_meta(
         self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
     )
