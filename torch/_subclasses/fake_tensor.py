@@ -823,38 +823,46 @@ class FakeTensorMode(TorchDispatchMode):
 
         from torch._decomp import decomposition_table
 
-        with self:
-            # Decomposes CompositeImplicitAutograd ops
-            r = func.decompose(*args, **kwargs)
-            if r is not NotImplemented:
-                return r
-
-        # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
-        if has_symbolic_sizes and not self.cpp_meta_supports_symint(func):
-            from torch._decomp import meta_table as meta_table
-
-            if func == aten.size.default:
-                sys.stderr.write(
-                    "Trying to call aten.size on a tensor with symbolic shapes. "
-                    "It's likely that this is from calling tensor.shape in C++"
-                )
-                # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
-                return None
-
+        if not has_symbolic_sizes:
             with self:
-                if func in meta_table:
-                    r = meta_table[func](*args, **kwargs)
+                # Decomposes CompositeImplicitAutograd ops
+                r = func.decompose(*args, **kwargs)
+                if r is not NotImplemented:
                     return r
-                if func in decomposition_table:
+
+            if (
+                func in decomposition_table
+                and torch_decomp_decompositions(func)
+                and all(not e.is_sparse for e in flat_arg_fake_tensors)
+            ):
+                with self:
                     return decomposition_table[func](*args, **kwargs)
 
-        if (
-            func in decomposition_table
-            and torch_decomp_decompositions(func)
-            and all(not e.is_sparse for e in flat_arg_fake_tensors)
-        ):
+        else:
             with self:
-                return decomposition_table[func](*args, **kwargs)
+                # Decomposes CompositeImplicitAutograd ops
+                r = func.decompose(*args, **kwargs)
+                if r is not NotImplemented:
+                    return r
+
+            # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
+            if not self.cpp_meta_supports_symint(func):
+                from torch._decomp import meta_table as meta_table
+
+                if func == aten.size.default:
+                    sys.stderr.write(
+                        "Trying to call aten.size on a tensor with symbolic shapes. "
+                        "It's likely that this is from calling tensor.shape in C++"
+                    )
+                    # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
+                    return None
+
+                with self:
+                    if func in meta_table:
+                        r = meta_table[func](*args, **kwargs)
+                        return r
+                    if func in decomposition_table:
+                        return decomposition_table[func](*args, **kwargs)
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
