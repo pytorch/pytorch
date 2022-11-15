@@ -1060,7 +1060,6 @@ class DashboardUpdater:
             dtype,
         )
 
-
     def upload_graphs(self):
         title = "## Performance graphs ##\n"
         str_io = io.StringIO()
