@@ -1489,3 +1489,33 @@ aten_cuda_with_sort_by_key_source_list = [
 aten_cuda_cu_with_sort_by_key_source_list = [
     "aten/src/ATen/native/cuda/Unique.cu",
 ]
+
+# Followings are source code for xnnpack delegate
+
+xnnpack_delegate_serializer_header = [
+    "torch/csrc/jit/backends/xnnpack/serialization/serializer.h",
+]
+
+xnnpack_delegate_serializer_source_list = [
+    "torch/csrc/jit/backends/xnnpack/serialization/serializer.cpp",
+]
+
+xnnpack_delegate_core_source_list = [
+    "torch/csrc/jit/backends/xnnpack/compiler/xnn_compiler.cpp",
+]
+
+xnnpack_delegate_core_header = [
+    "torch/csrc/jit/backends/xnnpack/compiler/xnn_compiler.h",
+    "torch/csrc/jit/backends/xnnpack/executor/xnn_executor.h",
+]
+
+xnnpack_backend_header = [
+    "torch/csrc/jit/backends/xnnpack/xnnpack_graph_builder.h",
+] + xnnpack_delegate_core_header
+
+xnnpack_backend_source_list = [
+    "torch/csrc/jit/backends/xnnpack/compiler/xnn_compiler.cpp",
+    "torch/csrc/jit/backends/xnnpack/xnnpack_backend_lib.cpp",
+    "torch/csrc/jit/backends/xnnpack/xnnpack_backend_preprocess.cpp",
+    "torch/csrc/jit/backends/xnnpack/xnnpack_graph_builder.cpp",
+] + xnnpack_delegate_core_source_list
