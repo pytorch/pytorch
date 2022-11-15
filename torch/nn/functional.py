@@ -1715,7 +1715,7 @@ where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distr
 
 When the approximate argument is 'tanh', Gelu is estimated with
 
-.. math: 
+.. math:: 
     \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
 See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
