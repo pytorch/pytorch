@@ -1169,7 +1169,10 @@ class TestTransformers(NNTestCase):
         make_tensor = partial(self.rand_tensor, device=device, dtype=dtype)
 
         with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=False):
-            q, k, v = make_tensor(2, 3, 4), make_tensor(2, 3, 4), make_tensor(2, 3, 4)
+            size = (2, 3, 4)
+            q = torch.randn(size, device=device, dtype=dtype)
+            k = torch.randn(size, device=device, dtype=dtype)
+            v = torch.randn(size, device=device, dtype=dtype)
             self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
                                    lambda: torch._fused_sdp_choice(q, k, v))
             self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
@@ -1179,29 +1182,33 @@ class TestTransformers(NNTestCase):
             # Failures for invalid input
 
             # Dim is not 4
-            q, k, v = make_tensor(2, 3, 4), make_tensor(2, 3, 4), make_tensor(2, 3, 4)
+            q = torch.randn(size, device=device, dtype=dtype)
+            k = torch.randn(size, device=device, dtype=dtype)
+            v = torch.randn(size, device=device, dtype=dtype)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
             # Xformers can now cover this case but will add back in next PR
             # Invalid last_dim size
-            q, k, v = make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4)
+            size = (2, 2, 3, 4)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
             # Invalid dtype
-            q, k, v = make_tensor(2, 2, 3, 16, dtype=torch.float64), make_tensor(
-                2, 2, 3, 16, dtype=torch.float64), make_tensor(2, 2, 3, 16, dtype=torch.float64)
+            size = (2, 2, 3, 16)
+            make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float64)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
-            q, k, v = make_tensor(2, 2, 3, 16, dtype=torch.float32), make_tensor(
-                2, 2, 3, 16, dtype=torch.float32), make_tensor(2, 2, 3, 16, dtype=torch.float32)
+            make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float32)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
             # Failures for unsupported SDP args
-            q, k, v = make_tensor(2, 2, 3, 16), make_tensor(2, 2, 3, 16), make_tensor(2, 2, 3, 16)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
 
             # Needs attention weights
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(

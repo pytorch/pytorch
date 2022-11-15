@@ -173,10 +173,11 @@ class SDPBackend(IntEnum):
     This class needs to stay inline with the enum defined in:
     pytorch/aten/src/ATen/native/transformers/sdp_utils_cpp.h
     """
+    ERROR = -1
     MATH = 0
     FLASH_ATTENTION = 1
     EFFICIENT_ATTENTION = 2
-    ERROR = 3
+
 
 def flash_sdp_enabled():
     r"""
