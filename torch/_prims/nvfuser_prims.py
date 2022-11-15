@@ -569,9 +569,6 @@ def register_rand_like():
         p.impl_nvfuser = _nvfuser_impls["rand_like"]
         p.is_recomputable = _nvfuser_is_recomputable["rand_like"]
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
-        # fake tensors are using "prim_meta_impl" attribute instead of going
-        # through the dispatcher
-        p.prim_meta_impl = _meta_rand_like
 
 
 def register_var_mean():
@@ -671,9 +668,6 @@ def register_var_mean():
         p.impl_nvfuser = _nvfuser_impls["var_mean"]
         p.is_recomputable = _nvfuser_is_recomputable["var_mean"]
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
-        # fake tensors are using "prim_meta_impl" attribute instead of going
-        # through the dispatcher
-        p.prim_meta_impl = _meta_var_mean
 
 
 def _nvprims_view_impl_aten(a, original_shape, new_shape):
@@ -713,9 +707,6 @@ def register_view():
         p.is_recomputable = _nvfuser_is_recomputable["view"]
         p.return_type = torch._prims_common.RETURN_TYPE.VIEW  # type: ignore[attr-defined]
         p.impl_aten = _nvprims_view_impl_aten
-        # fake tensors are using "prim_meta_impl" attribute instead of going
-        # through the dispatcher
-        p.prim_meta_impl = _prim_impl
 
 
 def register_nvprims():
