@@ -48,19 +48,20 @@ size_t parseChosenWorkspaceSize() {
     std::sregex_iterator next(config.begin(), config.end(), exp);
     std::sregex_iterator end;
     if (next == end) {
-      TORCH_WARN("Could not parse CUBLAS_WORKSPACE_CONFIG, using default workspace size of 4096.");
-      return 4096 * 1024;
+      TORCH_WARN("Could not parse CUBLAS_WORKSPACE_CONFIG, using default workspace size of :4096:8:16:8.");
+      return 4096 * 1024 * 8 + 16 * 1024 * 8;
     }
     while (next != end) {
       std::smatch match = *next;
       TORCH_CHECK(match.size() == 3, "Expected CUBLAS_WORKSPACE_SPACE_CONFIG match of size 3 (Format :SIZE:COUNT)");
       size_t curr_size = (size_t) std::stoi(match.str(1));
-      total_size += curr_size * 1024;
+      size_t count = (size_t) std::stoi(match.str(2));
+      total_size += curr_size * 1024 * count;
       next++;
     }
     return total_size;
-  } else /* :4096:8 */ {
-    return 4096 * 1024;
+  } else /* :4096:8:16:8 */ {
+    return 4096 * 1024 * 8 + 16 * 1024 * 8;
   }
 }
 
