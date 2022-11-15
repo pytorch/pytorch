@@ -123,7 +123,12 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
 
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  TORCH_CHECK(
+    maybe_layer.has_value(),
+    "oops your boxed tensor escaped from vmap ",
+    "See https://pytorch.org/functorch/stable/ux_limitations.html"
+  )
+
   int64_t cur_level = maybe_layer->layerId();
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);
