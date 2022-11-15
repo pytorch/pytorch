@@ -62,15 +62,6 @@ inline bool check_for_attn_weights(sdp_params params, bool debug) {
   }
   return true;
 }
-
-inline bool check_for_non_zero_dropout(sdp_params params, bool debug) {
-  if (params.dropout != 0.0) {
-    TORCH_CHECK(!debug, "Mem_efficient does not support non_zero dropout. Dropout_p: ", params.dropout);
-    return false;
-  }
-  return true;
-}
-
 inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
   if (!params.query.is_nested()) {
     return true;
@@ -239,8 +230,7 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_for_attn_weights,
       check_tensor_shapes,
       check_for_attn_mask,
-      check_for_seq_len_1_nested_tensor,
-      check_for_non_zero_dropout};
+      check_for_seq_len_1_nested_tensor};
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
