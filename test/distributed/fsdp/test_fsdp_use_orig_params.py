@@ -15,7 +15,7 @@ from torch.distributed.fsdp import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp._common_utils import clean_tensor_name
-from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -117,12 +117,11 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         # combination with the parameter group construction, ensures different
         # hyperparameter settings within one `FlatParameter`
         fsdp_kwargs = {
-            "auto_wrap_policy": functools.partial(
-                transformer_auto_wrap_policy,
-                transformer_layer_cls={
+            "auto_wrap_policy": ModuleWrapPolicy(
+                {
                     TransformerEncoderLayer,
                     TransformerDecoderLayer,
-                },
+                }
             ),
             "use_orig_params": True,
             "sharding_strategy": sharding_strategy,
