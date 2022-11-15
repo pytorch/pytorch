@@ -300,12 +300,6 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 // For now, it only takes care of `conj` and `neg` bit.
 inline std::unordered_map<std::string, bool> getTensorMetadata(
     const at::Tensor& t) {
-  // We don't support serializing `ZeroTensor` as it is not public
-  // facing yet.
-  TORCH_CHECK(
-      !t._is_zerotensor(),
-      "ZeroTensor is not serializable,",
-      " please file an issue if required.");
   std::unordered_map<std::string, bool> metadata{};
 
   // Only add meta-data if the value is not default.
