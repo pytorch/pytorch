@@ -934,6 +934,20 @@ class TestSparseCompressed(TestCase):
             self.assertEqual(sparse.dense_dim(), dense_dim)
 
 
+    @skipMeta
+    @all_sparse_compressed_layouts()
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
+    def test_to_dtype(self, layout, device, dtype):
+        # to_dense does not support hybrid inputs
+        input_gen = self._generate_small_inputs(layout, device=device, enable_hybrid=False)
+        for compressed_indices, plain_indices, values, size in input_gen:
+            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size,
+                                                    dtype=dtype, layout=layout, device=device)
+            for to_dtype in all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16):
+                sparse_to_dtype = sparse.to(to_dtype)
+                dense_to_dtype = sparse.to_dense().to(to_dtype)
+                self.assertEqual(sparse_to_dtype.to_dense(), dense_to_dtype)
+
 def _npref_block_addmm_addmv(c, a, b, alpha, beta):
     return alpha * (a @ b) + beta * c
 
