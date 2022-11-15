@@ -1120,14 +1120,43 @@ class TestTransformers(NNTestCase):
                          wrapper_set_seed(torch.ops.aten._efficient_attention_forward, *args, **kwargs),
                          (query, key, value, None, None, None, True, False), fast_mode=True, atol=8e-5, rtol=1e-3)
 
-    def test_fused_sdp_choice(self):
+    @parametrize("type", ["dense", "nested"])
+    def test_fused_sdp_choice(self, type: str):
         device = "cpu"
         # Test that cpu and nestedtensor cpu return MATH backend
         for dtype in floating_types_and_half():
             make_tensor = partial(self.rand_tensor, device=device, dtype=dtype)
             size = (2, 2, 3, 4)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-            self.assertEqual(SDPBackend.MATH, torch._fused_sdp_choice(q, k, v))
+            assert torch._fused_sdp_choice(q, k, v) == SDPBackend.MATH
+
+        if TEST_CUDA:
+            batch_size, seq_len, num_heads, head_dim = 32, 64, 16, 64
+            shape = (batch_size, seq_len, num_heads, head_dim)
+            device = "cuda"
+            make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float16, packed=True)
+            make_nt = partial(self.rand_nt, device=device, dtype=torch.float16, packed=True)
+
+            qkv = make_tensor(shape) if type == "dense" else make_nt(shape)
+            query, key, value = qkv.chunk(3, dim=-1)
+
+            query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+            value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+            key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION
+
+            make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float32, packed=True)
+            make_nt = partial(self.rand_nt, device=device, dtype=torch.float32, packed=True)
+
+            qkv = make_tensor(shape) if type == "dense" else make_nt(shape)
+            query, key, value = qkv.chunk(3, dim=-1)
+
+            query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+            value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+            key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
 
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
