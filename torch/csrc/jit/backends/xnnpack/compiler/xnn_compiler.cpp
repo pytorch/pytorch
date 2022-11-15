@@ -11,9 +11,10 @@ namespace jit {
 namespace xnnpack {
 namespace delegate {
 
-XNNExecutor XNNCompiler::compileModel(
+void XNNCompiler::compileModel(
     const void* buffer_pointer,
-    size_t num_bytes) {
+    size_t num_bytes,
+    XNNExecutor* executor) {
   auto output_min = -std::numeric_limits<float>::infinity();
   auto output_max = std::numeric_limits<float>::infinity();
 
@@ -109,17 +110,17 @@ XNNExecutor XNNCompiler::compileModel(
   status = xnn_create_runtime_v2(subgraph_ptr, nullptr, 0, &runtime_ptr);
   TORCH_CHECK(xnn_status_success == status);
 
-  XNNExecutor executor(runtime_ptr);
+  executor->runtime_ =
+      std::unique_ptr<xnn_runtime, decltype(&xnn_delete_runtime)>(
+          runtime_ptr, xnn_delete_runtime);
 
   for (auto old_id : *flatbuffer_graph->input_ids()) {
-    executor.input_ids_.push_back(remapped_ids.at(old_id));
+    executor->input_ids_.emplace_back(remapped_ids.at(old_id));
   }
 
   for (auto old_id : *flatbuffer_graph->output_ids()) {
-    executor.output_ids_.push_back(remapped_ids.at(old_id));
+    executor->output_ids_.emplace_back(remapped_ids.at(old_id));
   }
-
-  return executor;
 };
 
 } // namespace delegate
