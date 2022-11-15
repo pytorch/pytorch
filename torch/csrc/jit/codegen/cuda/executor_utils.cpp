@@ -155,7 +155,7 @@ bool validateKernelArgTensor(
   }
 
   if (!is_cpu_scalar(arg) && !arg.is_cuda()) {
-    msg << "Argumnet is a CPU tensor which is not supported in fusions.\n";
+    msg << "Argument is a CPU tensor which is not supported in fusions.\n";
     return false;
   }
 
@@ -824,7 +824,7 @@ void bindInputForExprEvaluation(
         if (root_domain[dim]->hasExpandedExtent()) {
           TORCH_INTERNAL_ASSERT(
               tensor_arg_stride == 0,
-              "Execting an expanded dimension on dimension ",
+              "Expecting an expanded dimension on dimension ",
               dim,
               " but found stride ",
               tensor_arg_stride);
@@ -838,7 +838,7 @@ void bindInputForExprEvaluation(
                 *maybe_expanded_size == tensor_arg_size,
                 "Expecting expanded extent of ",
                 *maybe_expanded_size,
-                " but recieved value of ",
+                " but received value of ",
                 tensor_arg_size);
           }
         }
