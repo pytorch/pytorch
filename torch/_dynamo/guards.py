@@ -614,18 +614,19 @@ class CheckFunctionManager:
         )
         global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if (
-                guard.create_fn == GuardBuilder.TENSOR_MATCH
-                and id(eval(guard.name, local_builder.scope))
-                in output_graph.tensor_id_to_sym_shape_ref
-            ):
-                # An exception to not guarding on nn_module properties
-                # In dynamic shapes mode, we sometimes get "weights" "bias" or other registered/named buffers
-                # accesed. We need to install their TENSOR_MATCH guards
-                # so that the names are known for symbolic shape guarding.
-                # This is also probably good for correctness anyway.
-                guard.create(local_builder, global_builder)
-            continue
+            if not config.guard_nn_modules and guard.is_nn_module():
+                if (
+                    guard.create_fn == GuardBuilder.TENSOR_MATCH
+                    and id(eval(guard.name, local_builder.scope))
+                    in output_graph.tensor_id_to_sym_shape_ref
+                ):
+                    # An exception to not guarding on nn_module properties
+                    # In dynamic shapes mode, we sometimes get "weights" "bias" or other registered/named buffers
+                    # accesed. We need to install their TENSOR_MATCH guards
+                    # so that the names are known for symbolic shape guarding.
+                    # This is also probably good for correctness anyway.
+                    guard.create(local_builder, global_builder)
+                continue
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder, guards)
         self._seen_ids.clear()
