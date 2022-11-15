@@ -260,7 +260,7 @@ class DisjointSets {
         entry_it != disjointSetMap().end(),
         "Strict mapping failed on element: ",
         abstractToString(entry0),
-        " either an error occured, or non strict mapping should have been used.");
+        " either an error occurred, or non strict mapping should have been used.");
     return entry_it->second->has(entry1);
   }
 
@@ -302,17 +302,14 @@ class DisjointSets {
   std::string toString() const {
     std::stringstream ss;
     ss << "disjoint sets{\n";
+    const std::string sep("  ");
     for (auto s_ptr : disjoint_sets_) {
       auto& set = *s_ptr;
-      ss << "  { ";
+      ss << sep << "{\n";
       for (auto entry : set.vector()) {
-        ss << abstractToString(entry);
-        // DomainKey defines == but not !=
-        if (!(entry == set.back())) {
-          ss << "; ";
-        }
+        ss << sep << sep << abstractToString(entry) << "\n";
       }
-      ss << " }\n";
+      ss << sep << "}\n";
     }
     ss << "}";
     return ss.str();

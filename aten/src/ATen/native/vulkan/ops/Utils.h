@@ -8,6 +8,7 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace ops {
+
 namespace utils {
 
 Tensor nchw_to_nc4hw(const Tensor&);

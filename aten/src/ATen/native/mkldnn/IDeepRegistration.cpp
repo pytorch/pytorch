@@ -1,4 +1,4 @@
-#define TORCH_ONLY_METHOD_OPERATORS
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
 #include <c10/core/Allocator.h>
 

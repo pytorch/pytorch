@@ -102,7 +102,7 @@ class TestViewOps(TestCase):
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
         if base.device.type == 'cpu' or base.device.type == 'cuda':
-            if base.storage().data_ptr() != other.storage().data_ptr():
+            if base._storage().data_ptr() != other._storage().data_ptr():
                 return False
 
         return True
@@ -925,6 +925,12 @@ class TestViewOps(TestCase):
         # forward and backward give the same shape + result
         self.assertEqual(a_view_copy, a_view)
         self.assertEqual(a.grad, a_ref.grad)
+
+    # Testing that the output of a view_copy kernel (by default) is contiguous.
+    def test_view_copy_output_contiguous(self, device):
+        a = torch.randn(4, 4, 4, 4, device=device).to(memory_format=torch.channels_last)
+        b = torch.ops.aten.slice_copy(a, 0, 0, 2)
+        self.assertTrue(b.is_contiguous())
 
     def test_view_copy_out(self, device):
         a = torch.randn(2, 2, device=device)

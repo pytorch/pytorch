@@ -9,6 +9,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
+#include <ATen/NestedTensorImpl.h>
 
 #include <functional>
 #include <unordered_set>
@@ -61,6 +62,26 @@ inline bool check_for_attn_weights(sdp_params params, bool debug) {
   }
   return true;
 }
+inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
+  if (!params.query.is_nested()) {
+    return true;
+  }
+  const at::Tensor& sizes = at::native::get_nested_tensor_impl(params.query)->get_nested_size_tensor();
+  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  const int64_t n_tensors = params.query.size(0);
+  const int64_t size_tensor_stride = sizes.stride(0);
+
+  // This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
+  for (const auto i : c10::irange(n_tensors)) {
+    if (sizes_ptr[(i * size_tensor_stride) + 1] <= 1) {
+      TORCH_CHECK(
+          !debug, "Flash Attention does not support sequence_length <= 1");
+      return false;
+    }
+  }
+
+  return true;
+}
 
 inline bool check_for_attn_mask(sdp_params params, bool debug) {
   if (params.has_attn_mask) {
@@ -73,7 +94,7 @@ inline bool check_for_attn_mask(sdp_params params, bool debug) {
 inline bool check_tensor_shapes(sdp_params params, bool debug) {
   auto query_dim = params.query.dim();
   if (!(query_dim == params.key.dim() && query_dim == params.value.dim() &&
-        query_dim == 4)) {
+        (query_dim == 4 ))) {
     TORCH_CHECK(
         !debug,
         "Flash attention requires query, key and value to be 4 dimensional, but got Query dim: ",
@@ -108,11 +129,21 @@ inline bool check_head_dim_size(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_runtime_disabled(sdp_params params, bool debug) {
+inline bool check_runtime_disabled_flash(sdp_params params, bool debug) {
   // We check the global context to see if user has explicitly turned of flash
   // sdp kernels
   if (!at::globalContext().userEnabledFlashSDP()) {
     TORCH_CHECK(!debug, "Flash attention has been runtime disabled.");
+    return false;
+  }
+  return true;
+}
+
+inline bool check_runtime_disabled_mem_efficient(sdp_params params, bool debug) {
+  // We check the global context to see if user has explicitly turned of mem_efficient
+  // sdp kernels
+  if (!at::globalContext().userEnabledMemEfficientSDP()) {
+    TORCH_CHECK(!debug, "Memory Efficient attention has been runtime disabled.");
     return false;
   }
   return true;
@@ -158,27 +189,29 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
   return false;
 #endif
-  // Constraints specific to flash attention
-  static const std::vector<caffe2::ScalarType> flash_dtypes{
-      at::kHalf, at::kBFloat16};
-
   //  Define gate functions that determine if a flash kernel can be ran
-  std::vector<std::function<bool(sdp_params, bool)>> constraints{
-      check_runtime_disabled,
+  constexpr std::array<bool(*)(sdp_params, bool), 7> constraints {{
+      check_runtime_disabled_flash,
       check_tensor_shapes,
       check_for_attn_weights,
       check_for_attn_mask,
       check_head_dim_size,
-      check_gpu_sm75_or_greater};
+      check_gpu_sm75_or_greater,
+      check_for_seq_len_1_nested_tensor}};
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
     }
   }
-  if (!check_tensor_dtype(params, flash_dtypes, debug)) {
-    return false;
+
+  auto dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major >= 8) {
+    static const std::array<at::ScalarType, 2> sm80_flash_dtypes{at::kHalf, at::kBFloat16};
+    return check_tensor_dtype(params, sm80_flash_dtypes, debug);
+  } else {
+    static const std::array<at::ScalarType, 1> default_flash_dtypes{at::kHalf};
+    return check_tensor_dtype(params, default_flash_dtypes, debug);
   }
-  return true;
 }
 
 inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
@@ -193,10 +226,11 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
   //  Define gate functions that determine if a flash kernel can be ran
   std::vector<std::function<bool(sdp_params, bool)>> constraints{
       check_gpu_sm50_or_greater,
-      check_runtime_disabled,
+      check_runtime_disabled_mem_efficient,
       check_for_attn_weights,
       check_tensor_shapes,
-      check_for_attn_mask};
+      check_for_attn_mask,
+      check_for_seq_len_1_nested_tensor};
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -214,7 +248,7 @@ inline SDPBackend select_sdp_backend(sdp_params kernel_params) {
   // 2. Mem Efficient Attention
   // 3. Math fallback
   auto& ctx = at::globalContext();
-  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP()) {
+  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP() && !ctx.userEnabledMemEfficientSDP()) {
     return SDPBackend::error;
   }
   // Because TORCHCHECK checks if condition is true we negate debug so that

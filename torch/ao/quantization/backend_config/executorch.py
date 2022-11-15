@@ -7,7 +7,7 @@ import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
 from .backend_config import BackendConfig, BackendPatternConfig, DTypeConfig, ObservationType
 from ._common_operator_config_utils import _Conv2dMetadata
-from ..fuser_method_mappings import reverse_sequential_wrapper2
+from ..fuser_method_mappings import _reverse_sequential_wrapper2
 
 
 __all__ = [
@@ -105,13 +105,13 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
         conv_configs.append(
             BackendPatternConfig((torch.nn.ReLU, convs.root))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(reverse_sequential_wrapper2(convs.fused_conv_relu))
+                .set_fuser_method(_reverse_sequential_wrapper2(convs.fused_conv_relu))
                 .set_fused_module(convs.fused_conv_relu))
         # conv module + functional relu
         conv_configs.append(
             BackendPatternConfig((F.relu, convs.root))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(reverse_sequential_wrapper2(convs.fused_conv_relu))
+                .set_fuser_method(_reverse_sequential_wrapper2(convs.fused_conv_relu))
                 .set_fused_module(convs.fused_conv_relu))
         # fused conv relu module
         conv_configs.append(
@@ -200,6 +200,14 @@ def _get_bn_configs() -> List[BackendPatternConfig]:
             .set_dtype_configs(dtype_configs))
     return bn_configs
 
+def _get_cat_configs() -> List[BackendPatternConfig]:
+    dtype_configs = [executorch_default_op_quint8_dtype_config]
+    cat_configs = []
+    cat_configs.append(
+        BackendPatternConfig(torch.cat)
+        .set_observation_type(ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT)
+        .set_dtype_configs(dtype_configs))
+    return cat_configs
 
 # =====================
 # |  BACKEND CONFIGS  |
@@ -214,4 +222,5 @@ def get_executorch_backend_config() -> BackendConfig:
         .set_backend_pattern_configs(_get_conv_configs()) \
         .set_backend_pattern_configs(_get_binary_ops_configs()) \
         .set_backend_pattern_configs(_get_share_qparams_ops_configs()) \
-        .set_backend_pattern_configs(_get_bn_configs())
+        .set_backend_pattern_configs(_get_bn_configs()) \
+        .set_backend_pattern_configs(_get_cat_configs())
