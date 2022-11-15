@@ -12602,7 +12602,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_view_reshape,
            error_inputs_func=error_inputs_view_reshape,
            skips=(
-               # The size of tensor a (0) must match the size of tensor b (5) at non-singleton dimension 1
+               # https://github.com/pytorch/pytorch/issues/89068
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
            )),
