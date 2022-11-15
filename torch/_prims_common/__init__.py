@@ -547,6 +547,10 @@ def is_cpu_scalar_tensor(a: Any) -> bool:
     return isinstance(a, TensorLike) and a.ndim == 0 and a.device.type == "cpu"
 
 
+def is_cpu_or_meta_scalar_tensor(a: Any) -> bool:
+    return isinstance(a, TensorLike) and a.ndim == 0 and (a.device.type == "meta" or a.device.type == "cpu")
+
+
 def check_same_device(*args, allow_cpu_scalar_tensors):
     """
     Checks that all Tensors in args have the same device.
@@ -612,7 +616,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
         if isinstance(arg, Number):
             continue
         elif isinstance(arg, TensorLike):
-            if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
+            if allow_cpu_scalar_tensors and is_cpu_or_meta_scalar_tensor(arg):
                 continue
 
             if shape is None:
@@ -640,7 +644,7 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
         if isinstance(arg, Number):
             continue
         elif isinstance(arg, TensorLike):
-            if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
+            if allow_cpu_scalar_tensors and is_cpu_or_meta_scalar_tensor(arg):
                 scalar_shape = arg.shape
                 continue
 
