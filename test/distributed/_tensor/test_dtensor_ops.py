@@ -332,6 +332,7 @@ dtensor_fails = {
     xfail("nn.functional.avg_pool2d"),
     xfail("nn.functional.avg_pool3d"),
     xfail("nn.functional.batch_norm"),
+    xfail("nn.functional.batch_norm", "without_cudnn"),
     xfail("nn.functional.bilinear"),
     xfail("nn.functional.binary_cross_entropy"),
     xfail("nn.functional.binary_cross_entropy_with_logits"),
