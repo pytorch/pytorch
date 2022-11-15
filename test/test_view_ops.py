@@ -9,7 +9,7 @@ import random
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, suppress_warnings, gradcheck, gradgradcheck,
+    IS_FBCODE, TestCase, run_tests, suppress_warnings, gradcheck, gradgradcheck,
     numpy_to_torch_dtype_dict, skipIfTorchDynamo
 )
 from torch.testing._internal.common_device_type import \
@@ -857,6 +857,7 @@ class TestViewOps(TestCase):
         nv[1, 1] = 0
         self.assertNotEqual(t[2, 2], nv[1, 1])
 
+    @unittest.skipIf(IS_FBCODE, "TorchScript backend not yet supported in FBCODE/OVRSOURCE builds")
     def test_advanced_indexing_assignment(self, device):
         t = torch.ones(3, 3, device=device)
         rows = torch.tensor([[0, 0], [2, 2]], device=device)
