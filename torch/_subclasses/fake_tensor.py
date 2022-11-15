@@ -1,7 +1,6 @@
 import contextlib
 import functools
 import itertools
-import sys
 import weakref
 from dataclasses import dataclass
 from functools import partial
@@ -824,19 +823,18 @@ class FakeTensorMode(TorchDispatchMode):
 
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table as meta_table
+
         if func not in meta_table:
             from torch._decomp import decomposition_table
 
             # Prefer Python decompositions over C++ ones
-            if (
-                func in decomposition_table
-                and (
-                    has_symbolic_sizes or (
-                        # TODO: Remove these exclusions, so that we can remove
-                        # this leg entirely
-                        torch_decomp_decompositions(func)
-                        and all(not e.is_sparse for e in flat_arg_fake_tensors)
-                    )
+            if func in decomposition_table and (
+                has_symbolic_sizes
+                or (
+                    # TODO: Remove these exclusions, so that we can remove
+                    # this leg entirely
+                    torch_decomp_decompositions(func)
+                    and all(not e.is_sparse for e in flat_arg_fake_tensors)
                 )
             ):
                 with self:

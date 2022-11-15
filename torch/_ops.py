@@ -1,11 +1,11 @@
 import contextlib
 import ctypes
 import inspect
+import logging
 import sys
 import types
 from abc import ABC
 from typing import Any, Dict
-import logging
 
 import torch._C
 
@@ -272,7 +272,7 @@ class OpOverload(PyOperatorABC):
     def __call__(self, *args, **kwargs):
         try:
             return self._op(*args, **kwargs or {})
-        except:
+        except Exception:
             logging.warning(f"Error when executing {self}")
             raise
 
