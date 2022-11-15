@@ -880,12 +880,6 @@ class FakeTensorMode(TorchDispatchMode):
                 # prim_meta_impl is used to avoid that
                 return func.prim_meta_impl(*args, **kwargs)
 
-        if has_symbolic_sizes:
-            if not self.cpp_meta_supports_symint(func):
-                raise RuntimeError(
-                    f"{func} - couldn't find symbolic meta function/decomposition"
-                )
-
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
         # and then afterwards wrapping them to a FakeTensor
