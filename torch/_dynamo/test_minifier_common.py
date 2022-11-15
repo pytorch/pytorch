@@ -10,6 +10,7 @@ import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.debug_utils import TEST_REPLACEABLE_COMMENT
 
+
 class MinifierTestBase(torch._dynamo.test_case.TestCase):
     DEBUG_DIR = os.path.join(tempfile.gettempdir(), "_torchdynamo_debug_")
 
