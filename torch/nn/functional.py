@@ -23,6 +23,7 @@ from . import _reduction as _Reduction
 from . import grad  # noqa: F401
 from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
+from typing import cast
 
 
 Tensor = torch.Tensor
@@ -5028,10 +5029,10 @@ def multi_head_attention_forward(
             value,
             embed_dim_to_check,
             num_heads,
-            in_proj_weight,
-            in_proj_bias,
+            cast(torch.Tensor, in_proj_weight),
+            cast(torch.Tensor, in_proj_bias),
             out_proj_weight,
-            out_proj_bias,
+            cast(torch.Tensor, out_proj_bias),
             merged_mask,
             need_weights,
             average_attn_weights,
