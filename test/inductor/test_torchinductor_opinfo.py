@@ -124,6 +124,7 @@ inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.ldl_factor": {f32, f64},  # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
+    "native_batch_norm": {f16},  # flaky
 }
 
 inductor_skips["cuda"] = {
