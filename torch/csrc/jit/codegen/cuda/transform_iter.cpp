@@ -612,8 +612,8 @@ int BestEffortReplay::findFirstMismatchedID(
 
 namespace {
 
-// Maps that track information relevant to best effort replay about broadcast
-// axes in consumer that are not in producer
+// Maps that track information relevant to best effort replay about newly added
+// or squeezed broadcast axes
 //
 // For example if we have consumer: T0[i0, b1, b2, i3] and producer:
 // T1[i0, i3]
@@ -632,83 +632,103 @@ namespace {
 // nodes we may have after the forwarding process is finished. Leaf nodes are
 // only important for replayCasP, so look there to see how this is done. Forward
 // map is used for replayCasP and replayPasC.
-struct ConsumerForwardingInfo {
+struct ForwardingInfo {
  public:
   // Map IterDomain* axes that can safely be forwarded to their output.
-  std::unordered_map<IterDomain*, IterDomain*> forwarding_map;
+  std::unordered_map<IterDomain*, IterDomain*> producer_forwarding_map;
+  std::unordered_map<IterDomain*, IterDomain*> consumer_forwarding_map;
 
   // Given a forward id map id_input -> id_forwarded
   // Track the other inputs in the expr that id_input is an input to. These will
   // be used to adjust the replay's leaf tracking. Don't need to track one to
   // many as currently transformations on IterDomains can only have maximum 2
   // inputs, but maybe in the future we'll have more.
-  std::unordered_map<IterDomain*, std::vector<IterDomain*>> compliment_map;
+  std::unordered_map<IterDomain*, std::vector<IterDomain*>>
+      producer_compliment_map;
+  std::unordered_map<IterDomain*, std::vector<IterDomain*>>
+      consumer_compliment_map;
 
-  ConsumerForwardingInfo(
-      const TensorView* producer,
-      const TensorView* consumer) {
-    // Collect which root axes are in consumer that are not in producer because
-    // of broadcasting
-    std::unordered_set<IterDomain*> consumer_bcast_roots_not_in_producer;
+  ForwardingInfo(const TensorView* producer, const TensorView* consumer) {
+    std::unordered_map<IterDomain*, IterDomain*>* active_forwarding_map =
+        nullptr;
+    std::unordered_map<IterDomain*, std::vector<IterDomain*>>*
+        active_compliment_map = nullptr;
+    const std::vector<bool>* active_dim_flags = nullptr;
+    std::vector<IterDomain*> active_root_dom;
+    const TensorView* active_tv = nullptr;
 
-    const auto c2p_root_map =
-        PairwiseRootDomainMap(producer, consumer)
-            .mapConsumerToProducer(consumer->domain(), producer->domain());
+    if (auto bop = dynamic_cast<BroadcastOp*>(consumer->definition())) {
+      active_forwarding_map = &consumer_forwarding_map;
+      active_compliment_map = &consumer_compliment_map;
+      active_dim_flags = &bop->getBroadcastDimFlags();
+      active_root_dom = consumer->getRootDomain();
+      active_tv = consumer;
+    } else if (auto sop = dynamic_cast<SqueezeOp*>(consumer->definition())) {
+      active_forwarding_map = &producer_forwarding_map;
+      active_compliment_map = &producer_compliment_map;
+      active_dim_flags = &sop->getSqueezeDimFlags();
+      active_root_dom =
+          TensorDomain::noReductions(producer->getMaybeRFactorDomain());
+      active_tv = producer;
+    } else {
+      return;
+    }
 
-    for (auto consumer_root_id : consumer->getRootDomain()) {
-      if (consumer_root_id->isBroadcast()) {
-        if (c2p_root_map.find(consumer_root_id) == c2p_root_map.end()) {
-          consumer_bcast_roots_not_in_producer.emplace(consumer_root_id);
-        }
+    TORCH_INTERNAL_ASSERT(active_root_dom.size() == active_dim_flags->size());
+
+    // Collect which root ids are in only in active_tv but not in the inactive
+    // tensor.
+    std::unordered_set<IterDomain*> forwarded_ids;
+    for (auto i : c10::irange(active_dim_flags->size())) {
+      if (active_dim_flags->at(i)) {
+        forwarded_ids.emplace(active_root_dom.at(i));
       }
     }
 
-    // We have root axes in consumer that don't exist in producer, now forward
-    // those to include all id's in consumer comprised of only axes not in
-    // producer.
-    auto consumer_bcast_ids_not_in_producer =
-        consumer_bcast_roots_not_in_producer;
-
-    std::vector<Expr*> consumer_history = StmtSort::getExprs(
+    // We have root axes in active_tv that don't exist in the inactive tensor,
+    // now forward those to include all id's in active_tv comprised of only axes
+    // not in the inactive tensor.
+    std::vector<Expr*> active_tv_history = StmtSort::getExprs(
         FusionGuard::getCurFusion(),
         std::vector<Val*>(
-            consumer->domain()->domain().begin(),
-            consumer->domain()->domain().end()));
+            active_tv->domain()->domain().begin(),
+            active_tv->domain()->domain().end()));
 
-    auto isIdOnlyInConsumer =
-        [&consumer_bcast_ids_not_in_producer](IterDomain* input_id) {
-          return consumer_bcast_ids_not_in_producer.find(input_id) !=
-              consumer_bcast_ids_not_in_producer.end();
-        };
+    auto isIdOnlyInActiveTv = [&forwarded_ids](IterDomain* input_id) {
+      return forwarded_ids.count(input_id) > 0;
+    };
 
-    for (auto expr : consumer_history) {
+    for (auto expr : active_tv_history) {
       auto input_ids = ir_utils::filterByType<IterDomain>(expr->inputs());
-      // If expr inputs are all in consumer_bcast_ids_not_in_producer, than so
-      // are all outputs
-      if (std::all_of(input_ids.begin(), input_ids.end(), isIdOnlyInConsumer)) {
+      // If expr inputs are all in forwarded_ids, then so are all outputs
+      if (std::all_of(input_ids.begin(), input_ids.end(), isIdOnlyInActiveTv)) {
         // add all outputs to not being in producer
         for (auto output_ids :
              ir_utils::filterByType<IterDomain>(expr->outputs())) {
-          consumer_bcast_ids_not_in_producer.emplace(output_ids);
+          forwarded_ids.emplace(output_ids);
         }
       } else if (
           expr->isA<Merge>() &&
-          std::any_of(input_ids.begin(), input_ids.end(), isIdOnlyInConsumer)) {
+          std::any_of(input_ids.begin(), input_ids.end(), isIdOnlyInActiveTv)) {
         auto merge_expr = expr->as<Merge>();
         // If
-        // - one of the inputs is made of id's in consumer that don't map to
-        // producer (bcast axes),
-        // - && the other input maps to an id in both consumer and producer
+        // - one of the inputs is made of id's in active_tv that don't map to
+        //   the inactive tensor,
+        // - && the other input maps to an id in both the active and inactive
+        //   tensor
         // - && this is a merge
-        //   for the sake of BestEffortReplay we can forward the input mapping
-        //   to both consumer and producer to the output of the expression
+        //
+        // For the sake of BestEffortReplay we can forward the input mapping
+        //   to both the active and inactive tensor to the output of the
+        //   expression
         std::vector<IterDomain*> forwarded_ids;
         std::vector<IterDomain*> compliment_ids;
 
         for (auto input_id : input_ids) {
-          if (!isIdOnlyInConsumer(input_id)) {
+          if (!isIdOnlyInActiveTv(input_id)) {
             forwarded_ids.emplace_back(input_id);
-            forwarding_map.emplace(std::make_pair(input_id, merge_expr->out()));
+            active_forwarding_map->emplace(
+                std::make_pair(input_id, merge_expr->out()));
           } else {
             compliment_ids.push_back(input_id);
           }
@@ -716,114 +736,8 @@ struct ConsumerForwardingInfo {
 
         // Set up compliment map
         for (auto forwarded_id : forwarded_ids) {
-          compliment_map.emplace(std::make_pair(forwarded_id, compliment_ids));
-        }
-      }
-    }
-  }
-};
-
-// Maps that track information relevant to best effort replay about
-// trivial-reduction axes in producer
-//
-// For example if we have producer: T0[i0, r1, r2, i3] and consumer:
-// T1[i0, i3]
-//
-// If producer transformations are:
-// -> T[i0, r1, r2, i3]
-// -> T[i0*r1, r2, i3]
-// -> T[i0*r1*r2, i3]
-//
-// forwarding_map would forward i0->i0*r1 and i0*r1->i0*r1*r2
-// compliment_map would have the i0->r1 and i0*r1->r2
-//
-// These two maps are used similarly as ConsumerForwardingInfo. See
-// its comments as well.
-struct ProducerForwardingInfo {
- public:
-  // Map IterDomain* axes that can safely be forwarded to their output.
-  std::unordered_map<IterDomain*, IterDomain*> forwarding_map;
-
-  // Given a forward id map id_input -> id_forwarded
-  // Track the other inputs in the expr that id_input is an input to. These will
-  // be used to adjust the replay's leaf tracking. Don't need to track one to
-  // many as currently transformations on IterDomains can only have maximum 2
-  // inputs, but maybe in the future we'll have more.
-  std::unordered_map<IterDomain*, std::vector<IterDomain*>> compliment_map;
-
-  ProducerForwardingInfo(
-      const TensorView* producer,
-      const TensorView* consumer) {
-    std::vector<Expr*> producer_history = StmtSort::getExprs(
-        FusionGuard::getCurFusion(),
-        std::vector<Val*>(
-            producer->domain()->domain().begin(),
-            producer->domain()->domain().end()));
-
-    // Collect which root axes are in producer that are not in consumer because
-    // of squeeze
-    std::unordered_set<IterDomain*> producer_bcast_roots_not_in_consumer;
-
-    const auto p2c_root_map =
-        PairwiseRootDomainMap(producer, consumer)
-            .mapProducerToConsumer(producer->domain(), consumer->domain());
-
-    for (auto producer_root_id : producer->getMaybeRFactorDomain()) {
-      if (producer_root_id->isBroadcast()) {
-        if (p2c_root_map.find(producer_root_id) == p2c_root_map.end()) {
-          producer_bcast_roots_not_in_consumer.emplace(producer_root_id);
-        }
-      }
-    }
-
-    // We have root axes in producer that don't exist in consumer, now forward
-    // those to include all id's in producer comprised of only axes not in
-    // consumer.
-    auto producer_bcast_ids_not_in_consumer =
-        producer_bcast_roots_not_in_consumer;
-
-    auto isIdOnlyInProducer =
-        [&producer_bcast_ids_not_in_consumer](IterDomain* input_id) {
-          return producer_bcast_ids_not_in_consumer.find(input_id) !=
-              producer_bcast_ids_not_in_consumer.end();
-        };
-
-    for (auto expr : producer_history) {
-      auto input_ids = ir_utils::filterByType<IterDomain>(expr->inputs());
-      // If expr inputs are all in producer_bcast_ids_not_in_consumer, than so
-      // are all outputs
-      if (std::all_of(input_ids.begin(), input_ids.end(), isIdOnlyInProducer)) {
-        // add all outputs to not being in producer
-        for (auto output_ids :
-             ir_utils::filterByType<IterDomain>(expr->outputs())) {
-          producer_bcast_ids_not_in_consumer.emplace(output_ids);
-        }
-      } else if (
-          expr->isA<Merge>() &&
-          std::any_of(input_ids.begin(), input_ids.end(), isIdOnlyInProducer)) {
-        auto merge_expr = expr->as<Merge>();
-        // If
-        // - one of the inputs is made of id's in producer that don't map to
-        // consumer (squeeze axes),
-        // - && the other input maps to an id in both consumer and producer
-        // - && this is a merge
-        //   for the sake of BestEffortReplay we can forward the input mapping
-        //   to both consumer and producer to the output of the expression
-        std::vector<IterDomain*> forwarded_ids;
-        std::vector<IterDomain*> compliment_ids;
-
-        for (auto input_id : input_ids) {
-          if (!isIdOnlyInProducer(input_id)) {
-            forwarded_ids.emplace_back(input_id);
-            forwarding_map.emplace(std::make_pair(input_id, merge_expr->out()));
-          } else {
-            compliment_ids.push_back(input_id);
-          }
-        }
-
-        // Set up compliment map
-        for (auto forwarded_id : forwarded_ids) {
-          compliment_map.emplace(std::make_pair(forwarded_id, compliment_ids));
+          active_compliment_map->emplace(
+              std::make_pair(forwarded_id, compliment_ids));
         }
       }
     }
@@ -994,22 +908,20 @@ BestEffortReplay BestEffortReplay::replayCasP(
       producer->domain(), consumer->domain(), producer_CA_root_ids);
 
   // See FusionAdvancedComputeAt7 for an example of the forwarding logic
-  ConsumerForwardingInfo consumer_forwarding_info(producer, consumer);
-
-  ProducerForwardingInfo producer_forwarding_info(producer, consumer);
+  ForwardingInfo forwarding_info(producer, consumer);
 
   auto consumer_replay = BestEffortReplay(
       consumer->domain()->domain(),
       producer_CA_ids,
       p2c_root_map,
-      consumer_forwarding_info.forwarding_map,
-      producer_forwarding_info.forwarding_map,
+      forwarding_info.consumer_forwarding_map,
+      forwarding_info.producer_forwarding_map,
       skip_consumer_swizzle,
       skip_producer_swizzle);
 
   consumer_replay.addComplimentLeafIDs(
-      consumer_forwarding_info.forwarding_map,
-      consumer_forwarding_info.compliment_map);
+      forwarding_info.consumer_forwarding_map,
+      forwarding_info.consumer_compliment_map);
 
   return consumer_replay;
 }
@@ -1049,9 +961,7 @@ BestEffortReplay BestEffortReplay::replayPasC(
   const auto c2p_root_map = root_map.mapConsumerToProducer(
       consumer->domain(), producer->domain(), consumer_CA_root_ids);
 
-  ConsumerForwardingInfo consumer_forwarding_info(producer, consumer);
-
-  ProducerForwardingInfo producer_forwarding_info(producer, consumer);
+  ForwardingInfo forwarding_info(producer, consumer);
 
   // Instead of replaying from the root, lets try to play forward the history
   // of producer if they match ops on consumer. Enforce if we modify an
@@ -1060,14 +970,14 @@ BestEffortReplay BestEffortReplay::replayPasC(
       producer->domain()->domain(),
       consumer_CA_ids,
       c2p_root_map,
-      producer_forwarding_info.forwarding_map,
-      consumer_forwarding_info.forwarding_map,
+      forwarding_info.producer_forwarding_map,
+      forwarding_info.consumer_forwarding_map,
       skip_producer_swizzle,
       skip_consumer_swizzle);
 
   producer_replay.addComplimentLeafIDs(
-      producer_forwarding_info.forwarding_map,
-      producer_forwarding_info.compliment_map);
+      forwarding_info.producer_forwarding_map,
+      forwarding_info.producer_compliment_map);
 
   return producer_replay;
 }

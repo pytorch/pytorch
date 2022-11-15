@@ -554,7 +554,7 @@ TvProperties getProperties(
   auto root_dom = tv->getRootDomain();
   bool fastest_dim_reduction = true;
 
-  // Is there a non trivial reduction on the inner most dimension or is there an
+  // Is there a reduction on the inner most dimension or is there an
   // iteration domain.
   for (size_t i = root_dom.size(); i > 0; i--) {
     if (root_dom[i - 1]->isBroadcast()) {
@@ -1419,7 +1419,6 @@ BroadcastMultipleInformation getBroadcastMultiples(
 
   // We always cacheBefore output at the beginning of the scheduling. And after
   // cacheBefore, the reference tensor will have all reduction IDs removed.
-  // TODO: clean this up when we kill trivial reduction.
   auto ref_root_domain =
       TensorDomain::noReductions(reference_tv->getMaybeRFactorDomain());
 
@@ -1456,8 +1455,7 @@ BroadcastMultipleInformation getBroadcastMultiples(
     for (const auto ref_i : c10::irange(ref_root_domain.size())) {
       auto ref_id = ref_root_domain[ref_i];
 
-      // If reference id is broadcast or reduction
-      if (ref_id->isBroadcast() || ref_id->isReduction()) {
+      if (ref_id->isBroadcast()) {
         continue;
       }
 
@@ -1493,7 +1491,7 @@ BroadcastMultipleInformation getBroadcastMultiples(
       }
 
       if (std::all_of(mapped_ids.begin(), mapped_ids.end(), [](IterDomain* id) {
-            return id->isReduction() || id->isBroadcast();
+            return id->isBroadcast();
           })) {
         continue;
       }

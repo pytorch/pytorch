@@ -112,7 +112,6 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
 
   // We always cacheBefore output at the beginning of the scheduling. And after
   // cacheBefore, the reference tensor will have all reduction IDs removed.
-  // TODO: clean this up when we kill trivial reduction.
   auto ref_root =
       TensorDomain::noReductions(largest_out->getMaybeRFactorDomain());
 

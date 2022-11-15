@@ -978,7 +978,7 @@ TEST_F(NVFuserTest, FusionTrivialReduction_CUDA) {
 
   TORCH_CHECK(
       ir_utils::getReductionOps(&fusion).empty(),
-      "Trivial reduction picked up by fusion");
+      "Trivial reduction not converted to squeeze.");
 
   const auto options =
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);

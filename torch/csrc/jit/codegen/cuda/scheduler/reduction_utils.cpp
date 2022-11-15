@@ -344,13 +344,6 @@ int idPos(const IterDomain* id) {
   int inner_most = std::numeric_limits<int>::max();
   int outer_most = std::numeric_limits<int>::min();
 
-  // Trivial reduction
-  if (id->isReduction() && id->getParallelType() == ParallelType::Serial &&
-      id->extent()->isOneInt()) {
-    return inner_most;
-  }
-  inner_most--;
-
   // Reduction and unrolled
   if (id->isReduction() &&
       (id->getParallelType() == ParallelType::Unroll ||

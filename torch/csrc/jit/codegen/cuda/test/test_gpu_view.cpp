@@ -1049,13 +1049,13 @@ TEST_F(NVFuserTest, FusionViewTransformCache_CUDA) {
   // Splits are done as splitting out left hand side, so left hand side
   // split changes can't reuse view, but right hand side split changes can.
   // Merges, since they don't bury hard values in can always be reshared.
-  // Need to make sure trivial reduction, and broadcast changes don't try to
-  // reuse view. What matches and what doesn't is very specific to the
-  // implementation of how the splits/merges are generated. This could be
-  // changed over time as there isn't a single set of transformations to
-  // potentially make a view. For example we could always merge all dimensions,
-  // then split out all dimensions. This would always be valid but would not be
-  // efficient for indexing.
+  // Need to make sure squeeze and broadcast changes don't try to reuse view.
+  // What matches and what doesn't is very specific to the implementation of how
+  // the splits/merges are generated. This could be changed over time as there
+  // isn't a single set of transformations to potentially make a view. For
+  // example we could always merge all dimensions, then split out all
+  // dimensions. This would always be valid but would not be efficient for
+  // indexing.
 
   // "Same"
   assert_matches(

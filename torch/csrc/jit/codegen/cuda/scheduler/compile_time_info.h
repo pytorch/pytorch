@@ -105,7 +105,7 @@ class UnrollableInputsAndOutputs {
 };
 
 //! Entry type definition class for `REDUCTION_TVS`,
-//!  stores the all tvs with non-trivial reduction axes in a fusion.
+//!  stores the all tvs with reduction axes in a fusion.
 class ReductionTVs {
  public:
   using DataType = std::vector<TensorView*>;

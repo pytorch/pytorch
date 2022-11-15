@@ -215,10 +215,6 @@ TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
       cpu_scalar_(src->cpu_scalar_),
       has_swizzle_op_(src->has_swizzle_op_) {}
 
-bool TensorView::hasAnyReduction() const {
-  return domain()->noReductions().size() != domain()->domain().size();
-}
-
 bool TensorView::hasReduction() const {
   return domain()->hasReduction();
 }

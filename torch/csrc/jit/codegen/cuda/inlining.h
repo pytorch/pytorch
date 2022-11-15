@@ -16,8 +16,7 @@ class MaxPosCalculator {
   // Root domains in producer that's unmappable to any of its consumers
   std::unordered_set<IterDomain*> unmappable_dims_;
 
-  // User set IterDomains to not inline, used in schedulers to avoid inlining
-  // trivial reductions
+  // User set IterDomains to not inline
   std::unordered_set<IterDomain*> uninlinable_ids_;
 
   // Iterate through all TVs and collect the dimensions of each TV that don't

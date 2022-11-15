@@ -2076,7 +2076,7 @@ class CombineReductions {
 
     // Collect segmented groups with reductions in them,
     //  Assuming running before any merge happened, so
-    //  should see exactly one non-trivial reduction in each group
+    //  should see exactly one reduction in each group
     for (auto group : segment_candidate_finder_->groups()) {
       if (auto rop_signature =
               ReductionSignature::makeReductionSignature(group)) {
@@ -2523,28 +2523,15 @@ class CombineReductions {
     template <typename REDUCTION = ReductionOp>
     ReductionSignature(REDUCTION* rop) {
       auto out_tv = rop->out()->template as<TensorView>();
-      has_reduction_ = out_tv->hasReduction();
       TORCH_INTERNAL_ASSERT(out_tv != nullptr);
+      has_reduction_ = out_tv->hasReduction();
       auto& root_domain = out_tv->getRootDomain();
       root_domain_size_ = root_domain.size();
 
-      // Trivial reduction i.e. squeeze is tricky here:
-      //  this pass doesn't want to touch any pure squeeze, i.e.:
-      //    T0 [R(1), I(i0), I(i1)]
-      //  meanwhile, for two reductions having
-      //  squeezes, we do require they have squeeze at the
-      //  same position so that they can be easily root domain mapped
-      //  So T0 and T1 are the same signature,
-      //    T0 [R(1), R(i0), I(i1)]
-      //    T1 [R(1), R(i0), I(i1)]
-      //  but T2 and T3 below are not
-      //    T0 [R(1), R(1), R(i0), I(i1)]
-      //    T1 [R(1), R(i0), I(i1)]
       for (const auto i : c10::irange(root_domain_size_)) {
         if (root_domain[i]->isReduction()) {
           reduction_axes_.push_back(i);
         }
-        has_reduction_ = true;
       }
     }
 

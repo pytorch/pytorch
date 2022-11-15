@@ -13,7 +13,7 @@ namespace cuda {
 namespace {
 
 //! Transform TensorView according to keep, merge, and split transformations.
-//! Trivial reduction and broadcast transformations are handled separately.
+//! Squeeze and broadcast transformations are handled separately.
 //! It is recommend to use the composite ops view function, which will call
 //! the analyzeView function to generate the appropriate transformations.
 //!
@@ -29,9 +29,9 @@ namespace {
 //!
 //! orig_tv is the tensor view originally coming in from user for the view
 //! operation. This is the tensor view all of the view analysis is relative to.
-//! View might be doing trivial reductions before sending into the view
-//! operation, so we want the actual input to the view operation to be
-//! potentially after the original view operation.
+//! View might be doing squeezes before sending into the view operation, so we
+//! want the actual input to the view operation to be potentially after the
+//! original view operation.
 TensorView* applyViewTransforms(
     TensorView* orig_tv,
     TensorView* post_reduce_tv,

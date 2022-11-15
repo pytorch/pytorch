@@ -36,7 +36,7 @@ TORCH_CUDA_CU_API void multiReductionInliner(
 //
 // [i-block dims, i-thread dims, i-non-constant sized, i-constant sized,
 //  r-block dims, r-thread dims, r-non-constant sized, r-constant sized,
-//  i/r-unswitched, i/r-unroll/vectorized, broadcasted dims, trivial reductions]
+//  i/r-unswitched, i/r-unroll/vectorized, broadcasted dims]
 //
 // Rfactored axes are reductions bound to grid or blocks. If no axes are bound
 // to a grid or block dimension it will rfactor the r-unswitch dimension.

@@ -1212,7 +1212,7 @@ class ReductionScheduler : public SchedulerEntry {
 
   //! Check if the reduction heuristics apply in given fusion
   static bool canScheduleCompileTime(Fusion* fusion) {
-    // Needs at least one non-trivial reduction to consider.
+    // Needs at least one reduction to consider.
     if (ir_utils::getReductionOps(fusion).empty()) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Reduction, "No reduction op to schedule");
@@ -1580,7 +1580,7 @@ class PersistentKernelScheduler : public SchedulerEntry {
   }
 
   static bool canScheduleCompileTime(Fusion* fusion) {
-    // Needs at least one non-trivial reduction to consider.
+    // Needs at least one reduction to consider.
     auto reduction_ops = ir_utils::getReductionOps(fusion);
     if (reduction_ops.empty()) {
       scheduler_debug_utils::canScheduleRejectReason(

@@ -754,30 +754,9 @@ std::vector<TensorView*> allTvsExcept(
 std::vector<Expr*> getReductionOps(Fusion* fusion) {
   std::vector<Expr*> red_ops;
 
-  auto isReduction = [](Val* out_val) {
-    if (out_val == nullptr || !out_val->isA<TensorView>()) {
-      return false;
-    }
-    auto out_tv = out_val->as<TensorView>();
-    return std::any_of(
-        out_tv->getRootDomain().begin(),
-        out_tv->getRootDomain().end(),
-        [](IterDomain* id) { return id->isReduction(); });
-  };
-
   for (auto expr : fusion->exprs()) {
-    bool is_reduction = false;
-    if (expr->isA<ReductionOp>()) {
-      is_reduction = isReduction(expr->as<ReductionOp>()->out());
-    } else if (expr->isA<GroupedReductionOp>()) {
-      is_reduction = std::any_of(
-          expr->as<GroupedReductionOp>()->outputs().begin(),
-          expr->as<GroupedReductionOp>()->outputs().end(),
-          isReduction);
-    } else if (expr->isA<WelfordOp>()) {
-      is_reduction = isReduction(expr->as<WelfordOp>()->outAvg());
-    }
-    if (is_reduction) {
+    if (expr->isA<ReductionOp>() || expr->isA<GroupedReductionOp>() ||
+        expr->isA<WelfordOp>()) {
       red_ops.push_back(expr);
     }
   }

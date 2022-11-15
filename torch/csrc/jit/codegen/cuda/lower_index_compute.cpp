@@ -33,8 +33,7 @@ std::unordered_map<IterDomain*, IterDomain*> mapAllProducerDomainsToConsumer(
     const TensorView* producer_tv,
     const TensorView* consumer_tv) {
   // This map has forwarded broadcast axes, it should only be used to compute
-  // the allocation position of the producer, and to figure out which producer
-  // indices are mapped to consumer trivial reductions.
+  // the allocation position of the producer
   std::unordered_map<IterDomain*, IterDomain*> p2c_alloc_map;
 
   //  We want to replay producer as consumer instead of the other way around

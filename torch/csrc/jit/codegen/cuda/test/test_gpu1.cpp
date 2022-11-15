@@ -7200,8 +7200,8 @@ TEST_F(NVFuserTest, FusionReductionScheduler_CUDA) {
 
 // This test checks if our system could correctly handles the case where both
 // reduction and trivial reduction exist in the fusion. Trivial reduction
-// deserve testing because trivial reduction is handled more like a broadcasting
-// rather than a reduction.
+// deserve testing because trivial reduction is handled by doing a squeeze
+// before doing a reduction.
 TEST_F(NVFuserTest, FusionReductionWithTrivialReduction_CUDA) {
   constexpr int bid_x = 80;
   constexpr int tid_x = 4096;

@@ -234,12 +234,6 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   bool hasBroadcast() const;
   bool hasRFactor() const;
 
-  //! This is the previous hasReduction logic,
-  //! kept here exclusively for lower loop pass will
-  //! deprecate when Fusion IR pass can convert
-  //! trivial reductions
-  bool hasAnyReduction() const;
-
   //! Returns true if this tensor is zero dimensional,
   //!  i.e. a wrapped scalar or an empty placeholder.
   bool isZeroDim() const {
