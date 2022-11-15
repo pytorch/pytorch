@@ -201,6 +201,9 @@ void initLazyBindings(PyObject* module) {
   lazy.def("_get_symbolic_shape_mode", []() {
     return FLAGS_ltc_enable_symbolic_shapes;
   });
+  lazy.def("_get_default_device_type", []() {
+    return getBackend()->GetDefaultDeviceType()->toString();
+  });
 
   lazy_ts_backend.def("_init", []() {
 #if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
@@ -302,15 +305,6 @@ void initLazyBindings(PyObject* module) {
 #endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
         return result;
       });
-
-#ifndef USE_DEPLOY
-  // When libtorch_python is loaded, we register the python frame getter
-  // otherwise, debug util simply omits python frames
-  // TODO(whc) can we make this work inside torch deploy interpreter?
-  // it doesn't work as-is, possibly becuase GetPythonFrames resolves to
-  // external cpython rather than embedded cpython
-  GetPythonFramesFunction() = GetPythonFrames;
-#endif
 }
 
 } // namespace lazy

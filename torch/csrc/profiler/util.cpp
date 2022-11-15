@@ -85,6 +85,24 @@ std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
   };
 }
 
+namespace {
+c10::optional<bool> soft_assert_raises_;
+} // namespace
+
+void setSoftAssertRaises(c10::optional<bool> value) {
+  soft_assert_raises_ = value;
+}
+
+bool softAssertRaises() {
+  return soft_assert_raises_.value_or(
+#ifdef NDEBUG
+      false
+#else
+      true
+#endif
+  );
+}
+
 // ----------------------------------------------------------------------------
 // -- NVTX --------------------------------------------------------------------
 // ----------------------------------------------------------------------------
@@ -180,7 +198,7 @@ std::vector<std::vector<int64_t>> flattenList(
     c10::List<c10::IValue> list,
     std::string fn_name) {
   std::vector<std::vector<int64_t>> tensor_dims;
-  for (const c10::IValue input : list) {
+  for (const c10::IValue& input : list) {
     if (input.isTensor()) {
       const at::Tensor& tensor = input.toTensor();
       if (tensor.defined()) {
@@ -504,7 +522,8 @@ uint64_t computeFlops(
           "Failed to compute flops for op aten::conv2d because stride must be size 2 and cannot be 0.");
       return 0;
     }
-    // format of the input is defined in torch.nn.quantized.functional.conv2d()
+    // format of the input is defined in
+    // torch.ao.nn.quantized.functional.conv2d()
     uint64_t minibatch = 0, in_channels = 0, input_h = 0, input_w = 0;
     uint64_t out_channels = 0, kernel_h = 0, kernel_w = 0;
     const uint64_t conv2d_multiply_factor = 2;

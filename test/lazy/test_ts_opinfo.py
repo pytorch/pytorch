@@ -33,6 +33,7 @@ def init_lists():
     with open(TS_NATIVE_FUNCTIONS_PATH) as f:
         yaml_ts = yaml.load(f, yaml.Loader)
     LAZY_OPS_LIST = set(remove_suffixes(itertools.chain(yaml_ts["full_codegen"], yaml_ts["supported"], yaml_ts["autograd"])))
+    HAS_SYMINT_SUFFIX = yaml_ts["symint"]
     FALLBACK_LIST = set(["clamp"])
     SKIP_RUNTIME_ERROR_LIST = set([
         'index_select',  # Empty output_sizes is not supported
@@ -58,6 +59,7 @@ def init_lists():
     # but run functionalized versions of the composite kernels in core.
     # This means that we don't expect the ops to show directly in the LTC metrics.
     FUNCTIONAL_DECOMPOSE_LIST = set([
+        'diag_embed',
         'block_diag',
         'new_empty_strided',
         'narrow_copy',
@@ -70,9 +72,19 @@ def init_lists():
         'logsumexp',
     ])
 
-    return (LAZY_OPS_LIST, FALLBACK_LIST, SKIP_RUNTIME_ERROR_LIST, SKIP_INCORRECT_RESULTS_LIST, FUNCTIONAL_DECOMPOSE_LIST)
+    return (LAZY_OPS_LIST,
+            FALLBACK_LIST,
+            SKIP_RUNTIME_ERROR_LIST,
+            SKIP_INCORRECT_RESULTS_LIST,
+            FUNCTIONAL_DECOMPOSE_LIST,
+            HAS_SYMINT_SUFFIX)
 
-(LAZY_OPS_LIST, FALLBACK_LIST, SKIP_RUNTIME_ERROR_LIST, SKIP_INCORRECT_RESULTS_LIST, FUNCTIONAL_DECOMPOSE_LIST) = init_lists()
+(LAZY_OPS_LIST,
+ FALLBACK_LIST,
+ SKIP_RUNTIME_ERROR_LIST,
+ SKIP_INCORRECT_RESULTS_LIST,
+ FUNCTIONAL_DECOMPOSE_LIST,
+ HAS_SYMINT_SUFFIX) = init_lists()
 
 torch.manual_seed(42)
 
@@ -134,6 +146,20 @@ class TestLazyTensor(JitTestCase):
         # out will have some pending mutations, which will be synced by the .cpu() call.
         torch.testing.assert_close(out_ref.cpu(), out.cpu())
 
+    def test_tensor_ctr(self):
+        test_device = get_test_device()
+        inp = torch.tensor([[1, 2, 3, 4, 5]], device=test_device)
+        inp_lazy = torch.tensor([[1, 2, 3, 4, 5]], device='lazy')
+
+        def foo(x):
+            # Calling a view op to ensure that functionalization wrapping occurs.
+            return x.view(-1)
+
+        out_ref = foo(inp)
+        out = foo(inp_lazy)
+        torch.testing.assert_close(out_ref.cpu(), out.cpu())
+
+
 class TestLazyOpInfo(TestCase):
 
     @ops([op for op in op_db
@@ -148,7 +174,7 @@ class TestLazyOpInfo(TestCase):
                 l.append(op.variant_test_name)
             return '.'.join(l)
 
-        global FALLBACK_LIST
+        global HAS_SYMINT_SUFFIX, FALLBACK_LIST
         samples = op.sample_inputs("lazy", dtype, requires_grad=False)
         sample = list(samples)[0]
         args = [sample.input] + list(sample.args)
@@ -161,11 +187,12 @@ class TestLazyOpInfo(TestCase):
         torch._lazy.mark_step()
         torch._lazy.wait_device_ops()
         prefix = "aten" if op.name in FALLBACK_LIST else "lazy"
-        found = f"{prefix}::{op.name}" in remove_suffixes(torch._lazy.metrics.counter_names())
+        symint_suffix = "_symint" if op.name in HAS_SYMINT_SUFFIX else ""
+        found = f"{prefix}::{op.name}{symint_suffix}" in remove_suffixes(torch._lazy.metrics.counter_names())
         # check aliases
         if not found:
             for alias in op.aliases:
-                alias_found = f"{prefix}::{alias.name}" in remove_suffixes(torch._lazy.metrics.counter_names())
+                alias_found = f"{prefix}::{alias.name}{symint_suffix}" in remove_suffixes(torch._lazy.metrics.counter_names())
                 found = found or alias_found
                 if found:
                     break

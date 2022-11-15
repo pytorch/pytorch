@@ -4,10 +4,17 @@
 #include <ATen/FunctionalInverses.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>
 
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_to_copy.h>
+#endif
 
 namespace at {
 
@@ -30,6 +37,10 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
   // to participate in the functorch transforms.
   key_set_ = key_set_ - c10::functorch_transforms_ks - c10::python_ks;
+  // We override a bunch of _custom(), so make sure they get called
+  // TODO: metadata copying may not actually be necessary then
+  set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
+  set_custom_device(true);
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
@@ -41,6 +52,10 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
     value_(value)
 {
   set_constructor_metadata();
+}
+
+void FunctionalTensorWrapper::freeze_storage() const {
+  functional_storage_impl()->freeze();
 }
 
 // Note [Functionalization: Alias Removal]
@@ -183,16 +198,13 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   value_ = other;
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
   // We need to propagate that metadata mutation to the wrapper (new size).
-  if (sizes() != value_.sizes() || strides() != value_.strides()) {
-    set_sizes_and_strides(value_.sizes(), value_.strides());
-  }
-  if (storage_offset() != value_.storage_offset()) {
-    set_storage_offset(value_.storage_offset());
-  }
+  set_sizes_and_strides(value_.sym_sizes(), value_.sym_strides(), value_.sym_storage_offset());
   if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
     // .to() should not re-entrantly go through functionalization.
     at::AutoDispatchSkipFunctionalize guard;
-    value_ = value_.to(c10::TensorOptions().dtype(dtype()).layout(layout()));
+    // and we want _to_copy() to show up in the graph, not the composite .to() operator
+    // (this can happen if autograd has already run by the time we enter this code)
+    value_ = at::_to_copy(value_, c10::TensorOptions().dtype(dtype()).layout(layout()));
   }
 }
 
@@ -275,19 +287,23 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_
     bool allow_tensor_metadata_change) const {
   if (key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
+    auto r = (*pyobj_interpreter_.load(std::memory_order_acquire))->detach(this);
     if (r) {
       r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
       return r;
     }
   }
+
   auto impl = c10::make_intrusive<FunctionalTensorWrapper>(value_);
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  impl->level_ = level_;
+  impl->generation_ = generation_;
+  impl->view_metas_ = view_metas_;
   impl->refresh_numel();
   impl->refresh_contiguous();
   return impl;
@@ -307,6 +323,9 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
       std::move(version_counter), allow_tensor_metadata_change);
 }
 
+c10::Device FunctionalTensorWrapper::device_custom() const {
+  return value_.unsafeGetTensorImpl()->device();
+}
 at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sizes();
 }
@@ -322,11 +341,17 @@ int64_t FunctionalTensorWrapper::numel_custom() const {
 bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format) const {
   return value_.unsafeGetTensorImpl()->is_contiguous();
 }
-c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes() const {
-  return value_.unsafeGetTensorImpl()->sym_sizes();
-}
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sym_sizes();
+}
+c10::SymIntArrayRef FunctionalTensorWrapper::sym_strides_custom() const {
+  return value_.unsafeGetTensorImpl()->sym_strides();
+}
+c10::SymInt FunctionalTensorWrapper::sym_size_custom(int64_t d) const {
+  return value_.unsafeGetTensorImpl()->sym_size(d);
+}
+c10::SymInt FunctionalTensorWrapper::sym_storage_offset_custom() const {
+  return value_.unsafeGetTensorImpl()->sym_storage_offset();
 }
 
 namespace functionalization {
@@ -346,14 +371,6 @@ c10::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor) 
   }
   return c10::nullopt;
 }
-c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list) {
-  c10::List<Tensor> outputs;
-  outputs.reserve(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(to_functional_tensor(t_list[i]));
-  }
-  return outputs;
-}
 c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list) {
   c10::List<c10::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
@@ -362,17 +379,11 @@ c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<c10::optio
   }
   return outputs;
 }
-std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list) {
-  std::vector<Tensor> outputs(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = to_functional_tensor(t_list[i]);
-  }
-  return outputs;
-}
-std::vector<Tensor> to_functional_tensor(const TensorList& t_list) {
-  std::vector<Tensor> outputs(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = to_functional_tensor(t_list[i]);
+std::vector<Tensor> to_functional_tensor(ITensorListRef t_list) {
+  std::vector<Tensor> outputs;
+  outputs.reserve(t_list.size());
+  for (const auto& tensor : t_list) {
+    outputs.push_back(to_functional_tensor(tensor));
   }
   return outputs;
 }
@@ -398,17 +409,17 @@ c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t, boo
   }
   return c10::nullopt;
 }
-c10::List<Tensor> from_functional_tensor(const c10::List<Tensor>& t_list) {
-  c10::List<Tensor> outputs;
+std::vector<Tensor> from_functional_tensor(ITensorListRef t_list) {
+  std::vector<Tensor> outputs;
   outputs.reserve(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
+  for (const auto& tensor : t_list) {
     // from_functional_tensor(Tensor) has asserts to make sure you don't accidentally call
     // it on a non-functional input,
     // but from_functional_tensor(TensorList) can recieve a list containing both
     // functional and non-functional tensors.
     // Example of when that can happen: torch.cat(function_input_tensor, global_state_tensor).
     // When that happens, we're okay with only unwrapping the functional tensors.
-    outputs.push_back(from_functional_tensor(t_list[i], /*assert_functional=*/false));
+    outputs.push_back(from_functional_tensor(tensor, /*assert_functional=*/false));
   }
   return outputs;
 }
@@ -417,13 +428,6 @@ c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::opt
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(from_functional_tensor(t_list[i], /*assert_functional=*/false));
-  }
-  return outputs;
-}
-std::vector<Tensor> from_functional_tensor(const TensorList& t_list) {
-  std::vector<Tensor> outputs(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = from_functional_tensor(t_list[i], /*assert_functional=*/false);
   }
   return outputs;
 }
@@ -450,13 +454,8 @@ void sync(const c10::optional<Tensor>& t) {
     sync(*t);
   }
 }
-void sync(const c10::List<Tensor> t_list) {
-  for (const auto i : c10::irange(t_list.size())) {
-    sync(t_list[i]);
-  }
-}
-void sync(const at::TensorList t_list) {
-  for (auto t: t_list) {
+void sync(ITensorListRef t_list) {
+  for (const auto& t : t_list) {
     sync(t);
   }
 }
@@ -471,22 +470,24 @@ void replace_(const Tensor& functional_tensor, const Tensor& other) {
   unsafeGetFunctionalWrapper(functional_tensor)->replace_(other);
 }
 
-void replace_(const TensorList functional_tensor, TensorList other) {
+void replace_(const ITensorListRef functional_tensor, ITensorListRef other) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_tensor.size() == other.size());
+  auto functional_tensor_it = functional_tensor.begin();
+  auto other_it = other.begin();
   for (const auto i : c10::irange(functional_tensor.size())) {
-    replace_(functional_tensor[i], other[i]);
+    (void)i; // Suppress unused variable warning
+    replace_(*functional_tensor_it++, *other_it++);
   }
 }
-
 
 void commit_update(const Tensor& functional_tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
   unsafeGetFunctionalWrapper(functional_tensor)->commit_update();
 }
 
-void commit_update(const TensorList functional_tensor) {
-  for (const auto i : c10::irange(functional_tensor.size())) {
-    commit_update(functional_tensor[i]);
+void commit_update(ITensorListRef functional_tensor) {
+  for (const auto& t : functional_tensor) {
+    commit_update(t);
   }
 }
 
@@ -502,61 +503,39 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
   }
 }
 
-bool isFunctionalTensor(const c10::List<Tensor>& t_list) {
-  if (t_list.size() == 0) return false;
-  auto functional_count = 0;
-  auto nonfunctional_count = 0;
-  for (const auto i : c10::irange(t_list.size())) {
-    if (!t_list[i].defined()) continue;
-    if (isFunctionalTensor(t_list[i])) {
-      ++functional_count;
-    } else {
-      ++nonfunctional_count;
-    }
-  }
-  TORCH_INTERNAL_ASSERT(
-       functional_count == 0 || nonfunctional_count == 0,
-      "Functionalization encountered a list of tensors where some are functional",
-      "and some are not, which is not currently unsupported.");
-  return functional_count > 0;
-}
-
 bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
   if (t_list.size() == 0) return false;
   auto functional_count = 0;
-  auto nonfunctional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
     if (!t_list[i].has_value() || !t_list[i]->defined()) continue;
     if (isFunctionalTensor(t_list[i])) {
       ++functional_count;
-    } else {
-      ++nonfunctional_count;
     }
   }
-  TORCH_INTERNAL_ASSERT(
-       functional_count == 0 || nonfunctional_count == 0,
-      "Functionalization encountered a list of tensors where some are functional",
-      "and some are not, which is not currently unsupported.");
   return functional_count > 0;
 }
 
-bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list) {
-  if (t_list.size() == 0) return false;
+template <typename T>
+bool isFunctionalTensorIListRef(c10::IListRef<T> list) {
+  if (list.size() == 0) return false;
   auto functional_count = 0;
-  auto nonfunctional_count = 0;
-  for (const auto i : c10::irange(t_list.size())) {
-    if (!t_list[i].defined()) continue;
-    if (isFunctionalTensor(t_list[i])) {
+  for (const auto& tensor : list) {
+    if (!tensor.defined()) continue;
+    if (isFunctionalTensor(tensor)) {
       ++functional_count;
-    } else {
-      ++nonfunctional_count;
     }
   }
-  TORCH_INTERNAL_ASSERT(
-       functional_count == 0 || nonfunctional_count == 0,
-      "Functionalization encountered a list of tensors where some are functional",
-      "and some are not, which is not currently unsupported.");
   return functional_count > 0;
+}
+
+bool isFunctionalTensor(ITensorListRef list) {
+  return isFunctionalTensorIListRef(list);
+}
+
+void freeze_functional_tensor(const Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(tensor));
+  auto functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+  functional_base_impl->freeze_storage();
 }
 
 Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {
@@ -572,18 +551,12 @@ Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, c
   return at::detail::make_tensor<FunctionalTensorWrapper>(view_to_wrap, functional_base_impl, meta);
 }
 
-std::vector<Tensor> create_functional_tensor_with_view_meta(const c10::List<at::Tensor>& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta) {
+std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorListRef view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta) {
   std::vector<Tensor> outputs(view_to_wrap.size());
-  for (const auto i : c10::irange(view_to_wrap.size())) {
-    outputs[i] = create_functional_tensor_with_view_meta(view_to_wrap[i], base, meta, i);
-  }
-  return outputs;
-}
-
-std::vector<Tensor> create_functional_tensor_with_view_meta(const std::vector<at::Tensor>& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta) {
-  std::vector<Tensor> outputs(view_to_wrap.size());
-  for (const auto i : c10::irange(view_to_wrap.size())) {
-    outputs[i] = create_functional_tensor_with_view_meta(view_to_wrap[i], base, meta, i);
+  int64_t i = 0;
+  for (const auto& tensor : view_to_wrap) {
+    outputs[i] = create_functional_tensor_with_view_meta(tensor, base, meta, i);
+    i++;
   }
   return outputs;
 }
@@ -599,8 +572,7 @@ void mutate_view_meta(const at::Tensor& self, functionalization::ViewMeta meta) 
 // calls each {view} reference implementations with meta tensors.
 // The output meta tensor's stride info serves as a reference for what the correct strides should be.
 void set_sizes_strides_offset(const Tensor& out, const Tensor& reference_out) {
-  out.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sizes(), reference_out.strides());
-  out.unsafeGetTensorImpl()->set_storage_offset(reference_out.storage_offset());
+  out.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sym_sizes(), reference_out.sym_strides(), reference_out.sym_storage_offset());
 }
 
 void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector<Tensor>& reference_outs) {

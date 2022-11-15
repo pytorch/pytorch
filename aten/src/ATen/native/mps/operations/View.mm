@@ -2,19 +2,9 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/Resize.h>
+#include <ATen/mps/MPSAllocator.h>
 
 namespace at {
-
-// these are from MPSAllocator
-namespace mps {
-  // to check the requested non-aligned size of an MTL buffer
-  ssize_t get_requested_buffer_size(void* ptr);
-  // to retrieve the shape of a base tensor from a view tensor
-  IntArrayRef get_buffer_shape(void* ptr);
-  // to set the shape of a base tensor from a view tensor
-  void set_buffer_shape(void* ptr, const IntArrayRef& shape);
-}
-
 namespace native {
 namespace mps {
 
@@ -35,8 +25,9 @@ static std::string getStridedKey(const ScalarType& dtype, const IntArrayRef& bas
          getArrayRefString(base_shape) + "]:[" + getArrayRefString(new_shape) + "]";
 }
 
-// initializes the MTLBuffers for tesnsor data and runs the MPSGraph for the view op
-static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor& output, bool needsScatter)
+// initializes the MTLBuffers for tensor data and runs the MPSGraph for the view op
+static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor& output,
+                            bool needsScatter, bool requires_sync = false)
 {
   const id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   const id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
@@ -52,7 +43,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
   MPSStream* stream = getCurrentMPSStream();
   @autoreleasepool {
     NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
-    // in case of scatter, we use ouput tensor as input buffer and write the results back to the source buffer
+    // in case of scatter, we use output tensor as input buffer and write the results back to the source buffer
     feeds[cachedGraph->inputTensor] = [[[MPSGraphTensorData alloc] initWithMTLBuffer: needsScatter ? outputBuffer : sourceBuffer
                                                                                shape: inputShape
                                                                             dataType: inputType] autorelease];
@@ -61,24 +52,36 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
                                                                                    shape: getMPSShape(src.numel())
                                                                                 dataType: inputType] autorelease];
     }
-    feeds[cachedGraph->storageOffsetTensor] = getMPSGraphTensorFromScalar(stream, Scalar(storage_offset), MPSDataTypeInt32);
+    MPSScalar storageOffsetScalar = getMPSScalar(storage_offset, ScalarType::Int);
+    feeds[cachedGraph->storageOffsetTensor] = getMPSGraphTensorFromScalar(stream, storageOffsetScalar);
+
+    std::vector<MPSScalar> strideScalars(sizes.size());
     for (int i = 0; i < sizes.size(); i++) {
-      feeds[cachedGraph->strideTensors[i]] = getMPSGraphTensorFromScalar(stream, Scalar(strides[i]), MPSDataTypeInt32);
+      strideScalars[i] = getMPSScalar(strides[i], ScalarType::Int);
+      feeds[cachedGraph->strideTensors[i]] = getMPSGraphTensorFromScalar(stream, strideScalars[i]);
+    }
+    // Workaround for MPSShaderLibrary bug
+    // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
+    auto outputType = getMPSDataType(output.scalar_type());
+    if (outputType ==  MPSDataTypeUInt8) {
+        outputType =  MPSDataTypeInt8;
     }
     MPSGraphTensorData* outputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer: outputBuffer
                                                                                     shape: outputShape
-                                                                                 dataType: getMPSDataType(output.scalar_type())] autorelease];
+                                                                                 dataType: outputType] autorelease];
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       cachedGraph->outputTensor : outputTensorData
     };
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    stream->executeMPSGraph(cachedGraph->graph(), feeds, results,
+                            requires_sync ? SyncType::COMMIT : SyncType::COMMIT_ADAPTIVE);
   }
   return output;
 }
 
 static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const IntArrayRef& size,
                                           const IntArrayRef& stride, int64_t offset,
-                                          const IntArrayRef& base_shape, bool needsScatter)
+                                          const IntArrayRef& base_shape, bool needsScatter,
+                                          const bool needsBoolCast)
 {
   MPSGraph* mpsGraph = cachedGraph->graph();
   MPSGraphTensor *outputTensor = nil;
@@ -118,14 +121,24 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const In
     indicesTensor = [mpsGraph additionWithPrimaryTensor: indicesTensor
                                         secondaryTensor: cachedGraph->storageOffsetTensor
                                                    name: nil];
-    MPSGraphTensor *reshapedInputTensor = [mpsGraph reshapeTensor: cachedGraph->inputTensor
+    MPSGraphTensor *inputTensor = cachedGraph->inputTensor;
+
+    // Workaround for bool scatter/gather deficiency
+    // See https://github.com/pytorch/pytorch/issues/82663
+    if (needsBoolCast) {
+      inputTensor = [mpsGraph castTensor:inputTensor
+                                  toType:MPSDataTypeInt8
+                                    name:@"Cast away from bool"];
+    }
+
+    MPSGraphTensor *reshapedInputTensor = [mpsGraph reshapeTensor: inputTensor
                                                         withShape: @[@-1]
                                                              name: nil];
     MPSGraphTensor *reshapedIndicesTensor = [mpsGraph reshapeTensor: indicesTensor
                                                           withShape: @[@-1]
                                                                name: nil];
     if (needsScatter) {
-      MPSGraphTensor* scatteredTensor = [mpsGraph scatterAlongAxis: 0
+      MPSGraphTensor* scatteredTensor = [mpsGraph scatterAlongAxis: (NSInteger) 0
                                                     withDataTensor: reshapedInputTensor
                                                      updatesTensor: cachedGraph->updatesTensor
                                                      indicesTensor: reshapedIndicesTensor
@@ -145,6 +158,14 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const In
       outputTensor =  [mpsGraph reshapeTensor: gatheredTensor
                               withShapeTensor: shapeTensor
                                          name: nil];
+    }
+
+    // Workaround for bool scatter/gather deficiency
+    // See https://github.com/pytorch/pytorch/issues/82663
+    if (needsBoolCast) {
+      outputTensor = [mpsGraph castTensor:outputTensor
+                                   toType:MPSDataTypeBool
+                                     name:@"Cast back to bool"];
     }
   }
   return outputTensor;
@@ -174,7 +195,9 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, In
     // IntArrayRef wouldn't own the data, so we use a static storage
     static const int64_t shape_1d = 1;
     // self.sizes().size() could be zero
-    base_shape = self.sizes().size() ? self.sizes() : IntArrayRef(&shape_1d, 1);
+    base_shape = self.sizes().size() ? self.sizes() :
+                      self.is_view() ? self._base().sizes() : IntArrayRef(&shape_1d, 1);
+
     // base_shape will be retained in MPSAllocator until buffer gets recycled
     if (self.storage().data())
       set_buffer_shape(self.storage().data(), base_shape);
@@ -191,16 +214,23 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, In
         @autoreleasepool {
             MPSGraph* mpsGraph = make_mps_graph();
             newCachedGraph = new ViewCachedGraph(mpsGraph);
+            // Workaround for MPSShaderLibrary bug
+            // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
+            auto inputType = getMPSScalarType(self.scalar_type());
+            if (inputType ==  MPSDataTypeUInt8) {
+                inputType =  MPSDataTypeInt8;
+            }
+            auto needsBoolCast = inputType == MPSDataTypeBool;
             // Self is the input tensor we are creating view of
-            newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(self.scalar_type()), getMPSShape(base_shape));
+            newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(base_shape));
             newCachedGraph->storageOffsetTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[@1]);
             for (int i = 0; i < size.size(); i++) {
               newCachedGraph->strideTensors.push_back(mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[@1]));
             }
             if (needsScatter) {
-              newCachedGraph->updatesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()));
+              newCachedGraph->updatesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, inputType);
             }
-            newCachedGraph->outputTensor = chainViewOperation(newCachedGraph, size, stride, storage_offset, base_shape, needsScatter);
+            newCachedGraph->outputTensor = chainViewOperation(newCachedGraph, size, stride, storage_offset, base_shape, needsScatter, needsBoolCast);
         }
         return newCachedGraph;
       }));
@@ -225,18 +255,20 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst)
     return Tensor();
   }
 
+  bool requires_sync = false;
   Tensor output;
-  if (!dst.has_storage())
+  if (!dst.has_storage()) {
     output = at::native::empty_mps(src.sizes(), src.scalar_type(), c10::nullopt, kMPS);
-
-  return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false);
+    requires_sync = true;
+  }
+  return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false, requires_sync);
 }
 
 Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output)
 {
   ViewCachedGraph* cachedGraph = createViewGraph(output, output.sizes(), output.strides(),
                                                  output.storage_offset(), /*needsScatter*/ true);
-  return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true);
+  return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true, /*requires_sync*/  true);
 }
 
 } // namespace mps

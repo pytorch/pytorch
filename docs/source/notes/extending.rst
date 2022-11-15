@@ -23,7 +23,7 @@ feature. A section at the end discusses the extensions for forward mode AD.
 When to use
 ^^^^^^^^^^^
 In general, implement a custom function if you want to perform computations in your model
-that are not differentiable or rely on non-Pytorch libraries (e.g., NumPy), but
+that are not differentiable or rely on non-PyTorch libraries (e.g., NumPy), but
 still wish for your operation to chain with other ops and work with the autograd engine.
 
 In some situations, custom functions can also be used to improve performance and
@@ -89,9 +89,10 @@ properly in order to ensure that the new :class:`Function` works properly with
 the autograd engine.
 
 - :meth:`~torch.autograd.function.FunctionCtx.save_for_backward` must be
-  used when saving input or output tensors of the forward to be used later in the backward.
-  Anything else, i.e., non-tensors and tensors that are neither input nor output
-  should be stored directly on `ctx`.
+  used to save any tensors to be used in the backward pass. Non-tensors should
+  be stored directly on `ctx`. If tensors that are neither input nor output
+  are saved for backward your :class:`~Function` may not support double backward
+  (see step 3).
 - :meth:`~torch.autograd.function.FunctionCtx.mark_dirty` must be used to
   mark any input that is modified inplace by the forward function.
 - :meth:`~torch.autograd.function.FunctionCtx.mark_non_differentiable` must
@@ -371,7 +372,7 @@ tensor, parametrized by the order ``N`` and value along the diagonal entries,
             self._value = value
 
         def __repr__(self):
-            return "DiagonalTensor(N={}, value={})".format(self._N, self._value)
+            return "ScalarTensor(N={}, value={})".format(self._N, self._value)
 
         def tensor(self):
             return self._value * torch.eye(self._N)
@@ -408,7 +409,7 @@ this time adding a ``__torch_function__`` implementation::
           self._value = value
 
       def __repr__(self):
-          return "DiagonalTensor(N={}, value={})".format(self._N, self._value)
+          return "ScalarTensor(N={}, value={})".format(self._N, self._value)
 
       def tensor(self):
           return self._value * torch.eye(self._N)
@@ -493,7 +494,7 @@ function correctly when either operand is a ``ScalarTensor`` or a regular
 
   >>> s = ScalarTensor(2, 2)
   >>> torch.add(s, s)
-  DiagonalTensor(N=2, value=4)
+  ScalarTensor(N=2, value=4)
   >>> t = torch.tensor([[1, 1,], [1, 1]])
   >>> torch.add(s, t)
   tensor([[3., 1.],

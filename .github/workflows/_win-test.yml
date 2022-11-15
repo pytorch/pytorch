@@ -27,15 +27,42 @@ env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
+  # This needs to be run right before the test starts so that it can gather the
+  # latest labels from the PR
+  filter:
+    runs-on: [self-hosted, linux.large]
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
   test:
-    # Don't run on forked repos.
-    if: github.repository_owner == 'pytorch'
+    needs: filter
+    # Don't run on forked repos or empty test matrix
+    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
     strategy:
-      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     steps:
+      - name: Enable git symlinks on Windows
+        shell: bash
+        run: |
+          git config --global core.symlinks true
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -48,9 +75,18 @@ jobs:
           cuda-version: ${{ inputs.cuda-version }}
 
       - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start monitoring script
+        id: monitor-script
+        shell: bash
+        run: |
+          python3 -m pip install psutil==5.9.1
+          python3 -m pip install pynvml==11.4.1
+          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download PyTorch Build Artifacts
         uses: seemethere/download-artifact-s3@v4
@@ -88,13 +124,21 @@ jobs:
           TEST_CONFIG: ${{ matrix.config }}
           PR_BODY: ${{ github.event.pull_request.body }}
           TORCH_CUDA_ARCH_LIST: "7.0"
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0'}}
         run: |
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
 
+          # sanitize the input commit message and PR body here:
+          #
           # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
           # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
-          export PR_BODY="${PR_BODY//[$'\n\r']}"
+          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          PR_BODY="${PR_BODY//[$'\n\r']}"
+
+          # then trim all special characters like single and double quotes to avoid unescaped inputs to
+          # wreak havoc internally
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
+          export PR_BODY="${PR_BODY//[\'\"]}"
 
           .jenkins/pytorch/win-test.sh
 
@@ -104,6 +148,15 @@ jobs:
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stop monitoring script
+        if: always() && steps.monitor-script.outputs.monitor-script-pid
+        shell: bash
+        continue-on-error: true
+        env:
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        run: |
+          kill "$MONITOR_SCRIPT_PID"
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts

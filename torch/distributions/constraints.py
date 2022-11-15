@@ -159,7 +159,7 @@ class _DependentProperty(property, _Dependent):
                 return constraints.interval(self.low, self.high)
 
     Args:
-        fn (callable): The function to be decorated.
+        fn (Callable): The function to be decorated.
         is_discrete (bool): Optional value of ``.is_discrete`` in case this
             can be computed statically. If not provided, access to the
             ``.is_discrete`` attribute will raise a NotImplementedError.

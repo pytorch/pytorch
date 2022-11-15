@@ -114,22 +114,17 @@
 //  - MSVC 19.14: https://godbolt.org/z/Dzd7gn (requires /std:c++latest)
 //  - Clang 8.0.0: https://godbolt.org/z/3PYL4Z (always advertises support)
 //  - gcc 8.3: https://godbolt.org/z/4tLMQS (always advertises support)
-#define C10_NODISCARD
-#if defined(__has_cpp_attribute)
-#if __has_cpp_attribute(nodiscard)
-#undef C10_NODISCARD
+#if C10_HAS_CPP_ATTRIBUTE(nodiscard)
 #define C10_NODISCARD [[nodiscard]]
-#endif
 // Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
 // error when __has_cpp_attribute is given a scoped attribute in C mode.
-#elif __cplusplus && defined(__has_cpp_attribute)
-#if __has_cpp_attribute(clang::warn_unused_result)
+#elif __cplusplus && C10_HAS_CPP_ATTRIBUTE(clang::warn_unused_result)
 // TODO: It's possible this is still triggering
 // https://github.com/pytorch/pytorch/issues/13118 on Windows; if it is, better
 // fix it.
-#undef C10_NODISCARD
 #define C10_NODISCARD [[clang::warn_unused_result]]
-#endif
+#else
+#define C10_NODISCARD
 #endif
 
 // suppress an unused variable.
@@ -243,8 +238,7 @@ using namespace c10::hip;
 #define C10_FALLTHROUGH
 #endif
 
-#include <sstream>
-#include <string>
+#include <cstdint>
 
 #ifdef __HIPCC__
 // Unlike CUDA, HIP requires a HIP header to be included for __host__ to work.
@@ -332,21 +326,34 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || defined(USE_ROCM)
+#if defined(__ANDROID__) || defined(__APPLE__) || \
+    (defined(USE_ROCM) && ROCM_VERSION < 40100)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
+#define SYCL_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
 extern "C" {
 C10_IMPORT
+#if defined(__SYCL_DEVICE_ONLY__)
+extern SYCL_EXTERNAL void _wassert(
+    const wchar_t* wexpr,
+    const wchar_t* wfile,
+    unsigned line);
+#else
 #if defined(__CUDA_ARCH__)
 __host__ __device__
 #endif // __CUDA_ARCH__
     void
     _wassert(wchar_t const* _Message, wchar_t const* _File, unsigned _Line);
+#endif // __SYCL_DEVICE_ONLY__
 }
-#endif
+#endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                                                 \
+  if (C10_UNLIKELY(!(cond))) {                                                                   \
+    (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
+  }
+#define SYCL_KERNEL_ASSERT(cond)                                                                 \
   if (C10_UNLIKELY(!(cond))) {                                                                   \
     (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
   }
@@ -360,26 +367,43 @@ extern SYCL_EXTERNAL void __assert_fail(
     unsigned int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
-#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
+#if (                                                                       \
+    defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)) && \
+    !defined(TORCH_DISABLE_GPU_ASSERTS))
+// CUDA supports __assert_fail function which are common for both device
+// and host side code.
 __host__ __device__
-#endif // __CUDA_ARCH__
+#endif
+
+    // This forward declaration matching the declaration of __assert_fail
+    // exactly how it is in glibc in case parts of the program are compiled with
+    // different NDEBUG settings. Otherwise we might get 'ambiguous declaration'
+    // error. Note: On ROCm - this declaration serves for host side compilation.
     void
     __assert_fail(
         const char* assertion,
         const char* file,
         unsigned int line,
-        const char* function) throw()
-// We match the declaration of __assert_fail exactly how it is in glibc in case
-// parts of the program are compiled with different NDEBUG settings. Otherwise
-// we might get 'ambiguous declaration' error.
-#ifdef __GNUC__
-        __attribute__((__noreturn__))
-#endif
-        ;
-#endif
+        const char* function) throw() __attribute__((__noreturn__));
+
+#if (defined(__HIP_ARCH__) || defined(__HIP__)) && \
+    !defined(TORCH_DISABLE_GPU_ASSERTS)
+// ROCm supports __assert_fail only as a device side function.
+__device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
+    const char* assertion,
+    const char* file,
+    unsigned int line,
+    const char* function);
+#endif // defined(__HIP_ARCH__) || defined(__HIP__)
+#endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                         \
+  if (C10_UNLIKELY(!(cond))) {                                           \
+    __assert_fail(                                                       \
+        #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
+  }
+#define SYCL_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
@@ -414,15 +438,6 @@ __host__ __device__
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
-#endif
-
-#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
-    __GNUC__ < 6
-#define CONSTEXPR_EXCEPT_GCC5
-#define IS_NOT_GCC5_CONSTEXPR 0
-#else
-#define CONSTEXPR_EXCEPT_GCC5 constexpr
-#define IS_NOT_GCC5_CONSTEXPR 1
 #endif
 
 #if defined(__CUDA_ARCH__)

@@ -96,6 +96,47 @@ class VectorOfUniqueEntries {
     return set_.find(entry) != set_.end();
   }
 
+  // Erase given entry from the containers if
+  //  there is a match.
+  void erase(T entry) {
+    vector_.erase(
+        std::remove_if(
+            vector_.begin(),
+            vector_.end(),
+            [entry](T val) { return val == entry; }),
+        vector_.end());
+
+    set_.erase(entry);
+  }
+
+  // Insert elements at the end of the container.
+  template <typename InputIt>
+  void insert(InputIt begin, InputIt end) {
+    for (auto it = begin; it != end; it++) {
+      pushBack(*it);
+    }
+  }
+
+  // Returns iterator pointing to the beginning of vector container
+  auto begin() const {
+    return vector().begin();
+  }
+
+  // Returns iterator pointing to the end of vector container
+  auto end() const {
+    return vector().end();
+  }
+
+  // Returns iterator pointing to the beginning of vector container
+  auto begin() {
+    return vector().begin();
+  }
+
+  // Returns iterator pointing to the end of vector container
+  auto end() {
+    return vector().end();
+  }
+
   std::string toString() {
     std::stringstream ss;
     ss << "{ ";
@@ -154,6 +195,10 @@ class DisjointSets {
   //
   // TODO: Return iterator
   void initializeSet(T entry) {
+    if (disjoint_set_maps_.find(entry) != disjoint_set_maps_.end()) {
+      return;
+    }
+
     disjoint_sets_.push_back(
         std::make_shared<VectorOfUniqueEntries<T, Hash>>());
     disjoint_sets_.back()->pushBack(entry);
@@ -257,17 +302,14 @@ class DisjointSets {
   std::string toString() const {
     std::stringstream ss;
     ss << "disjoint sets{\n";
+    const std::string sep("  ");
     for (auto s_ptr : disjoint_sets_) {
       auto& set = *s_ptr;
-      ss << "  { ";
+      ss << sep << "{\n";
       for (auto entry : set.vector()) {
-        ss << abstractToString(entry);
-        // DomainKey defines == but not !=
-        if (!(entry == set.back())) {
-          ss << "; ";
-        }
+        ss << sep << sep << abstractToString(entry) << "\n";
       }
-      ss << " }\n";
+      ss << sep << "}\n";
     }
     ss << "}";
     return ss.str();

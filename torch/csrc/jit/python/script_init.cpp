@@ -2,6 +2,7 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/Device.h>
@@ -15,9 +16,9 @@
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/quantization.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
-#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/python/module_python.h>
@@ -111,7 +112,7 @@ struct PythonResolver : public Resolver {
       const SourceRange& loc) override {
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
-    if (obj.is(py::none())) {
+    if (obj.is_none()) {
       return nullptr;
     }
     return toSugaredValue(obj, m, loc);
@@ -152,7 +153,7 @@ struct PythonResolver : public Resolver {
     }
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
-    if (obj.is(py::none())) {
+    if (obj.is_none()) {
       return nullptr;
     }
 
@@ -365,7 +366,7 @@ static StrongFunctionPtr script_compile_overloaded_function(
     const ResolutionCallback& rcb,
     const FunctionDefaults& implementation_defaults,
     const py::object& signature) {
-  if (signature.is(py::none())) {
+  if (signature.is_none()) {
     throw ErrorReport(overload_decl.range())
         << "Must explicitly add type annotations to overloaded functions";
   }
@@ -487,7 +488,12 @@ static void setInputTensorTypes(
   auto s_iter = stack.begin();
   size_t list_idx = 0;
   if (!param_count_list.empty()) {
-    TORCH_INTERNAL_ASSERT(input_values.size() == param_count_list.size());
+    TORCH_INTERNAL_ASSERT(
+        input_values.size() == param_count_list.size(),
+        " input_values:",
+        input_values.size(),
+        " vs param_count_list:",
+        param_count_list.size());
   }
   for (auto v : input_values) {
     // Leave packed param types alone. This is needed for downstream passes
@@ -1213,6 +1219,43 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("force_outplace"),
           py::arg("argument_names") = std::vector<std::string>())
       .def(
+          "_create_method_from_trace_with_dict",
+          [](Module& self,
+             const std::string& name,
+             const py::function& func,
+             const py::dict& input_dict,
+             const py::function& var_name_lookup_fn,
+             bool strict,
+             bool force_outplace,
+             const std::vector<std::string>& argument_names) {
+            // prereq: Module's buffers and parameters are unique
+            // this was ensured in python before calling this function
+            auto typed_inputs = toTraceableStack(input_dict);
+
+            std::shared_ptr<Graph> graph =
+                std::get<0>(tracer::createGraphByTracingWithDict(
+                    func,
+                    input_dict,
+                    typed_inputs,
+                    var_name_lookup_fn,
+                    strict,
+                    force_outplace,
+                    &self,
+                    argument_names));
+            const auto method_name = QualifiedName(*self.type()->name(), name);
+            auto fn = self._ivalue()->compilation_unit()->create_function(
+                method_name, graph);
+            self.type()->addMethod(fn);
+            didFinishEmitModule(self);
+          },
+          py::arg("name"),
+          py::arg("func"),
+          py::arg("input_dict"),
+          py::arg("var_name_lookup_fn"),
+          py::arg("strict"),
+          py::arg("force_outplace"),
+          py::arg("argument_names") = std::vector<std::string>())
+      .def(
           "_get_forward_hooks",
           [](const Module& m) {
             std::vector<StrongFunctionPtr> funcs;
@@ -1663,6 +1706,43 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("argument_names") = std::vector<std::string>());
 
   m.def(
+      "_create_function_from_trace_with_dict",
+      [](const std::string& qualname,
+         const py::function& func,
+         const py::dict& input_dict,
+         const py::function& var_name_lookup_fn,
+         bool strict,
+         bool force_outplace,
+         const std::vector<std::string>& argument_names) {
+        auto typed_inputs = toTraceableStack(input_dict);
+        std::shared_ptr<Graph> graph =
+            std::get<0>(tracer::createGraphByTracingWithDict(
+                func,
+                input_dict,
+                typed_inputs,
+                var_name_lookup_fn,
+                strict,
+                force_outplace,
+                /*self=*/nullptr,
+                argument_names));
+
+        auto cu = get_python_cu();
+        auto name = c10::QualifiedName(qualname);
+        auto result = cu->create_function(
+            std::move(name), std::move(graph), /*shouldMangle=*/true);
+        StrongFunctionPtr ret(std::move(cu), result);
+        didFinishEmitFunction(ret);
+        return ret;
+      },
+      py::arg("name"),
+      py::arg("func"),
+      py::arg("input_dict"),
+      py::arg("var_name_lookup_fn"),
+      py::arg("strict"),
+      py::arg("force_outplace"),
+      py::arg("argument_names") = std::vector<std::string>());
+
+  m.def(
       "_jit_script_class_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
@@ -1770,8 +1850,6 @@ void initJitScriptBindings(PyObject* module) {
     return Decl(p.parseTypeComment());
   });
 
-  m.def("_is_upgraders_enabled", &is_upgraders_enabled);
-
   m.def("_get_upgraders_map_size", &get_upgraders_map_size);
   m.def("_dump_upgraders_map", &dump_upgraders_map);
 
@@ -1791,7 +1869,7 @@ void initJitScriptBindings(PyObject* module) {
          py::object map_location,
          const py::dict& extra_files) {
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1811,7 +1889,7 @@ void initJitScriptBindings(PyObject* module) {
          py::object map_location,
          std::string ts_id) {
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1831,7 +1909,7 @@ void initJitScriptBindings(PyObject* module) {
          const py::dict& extra_files) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1846,7 +1924,7 @@ void initJitScriptBindings(PyObject* module) {
       "_load_for_lite_interpreter",
       [](const std::string& filename, py::object map_location) {
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1858,7 +1936,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& buffer, py::object map_location) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1950,6 +2028,12 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
     return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
   });
+  m.def(
+      "_quantize_ondevice_ptq_dynamic",
+      [](mobile::Module& m, const std::string& method_name) {
+        mobile::quantization::PTQQuanizationHelper ptq_helper;
+        ptq_helper.quantize_dynamic(m, method_name);
+      });
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);

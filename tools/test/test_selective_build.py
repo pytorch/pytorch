@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import unittest
 
 from torchgen.selective_build.operator import *
+from torchgen.model import Location, NativeFunction
 from torchgen.selective_build.selector import (
     combine_selective_builders,
     SelectiveBuilder,
@@ -279,3 +280,23 @@ include_all_non_op_selectives: True
         self.assertTrue(selector.is_kernel_dtype_selected("add_kernel", "int16"))
         self.assertTrue(selector.is_kernel_dtype_selected("add1_kernel", "int32"))
         self.assertTrue(selector.is_kernel_dtype_selected("add_kernel", "float"))
+
+    def test_custom_namespace_selected_correctly(self):
+        yaml_config = """
+operators:
+  aten::add.int:
+    is_used_for_training: No
+    is_root_operator: Yes
+    include_all_overloads: No
+  custom::add:
+    is_used_for_training: Yes
+    is_root_operator: No
+    include_all_overloads: Yes
+"""
+        selector = SelectiveBuilder.from_yaml_str(yaml_config)
+        native_function, _ = NativeFunction.from_yaml(
+            {"func": "custom::add() -> Tensor"},
+            loc=Location(__file__, 1),
+            valid_tags=set(),
+        )
+        self.assertTrue(selector.is_native_function_selected(native_function))

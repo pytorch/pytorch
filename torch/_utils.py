@@ -1,10 +1,10 @@
-import torch
-from typing import Optional, List, DefaultDict, Any
-import warnings
-from collections import defaultdict
 import sys
 import traceback
-import copyreg
+import warnings
+from collections import defaultdict
+from typing import Any, DefaultDict, List, Optional
+
+import torch
 
 
 def _type(self, dtype=None, non_blocking=False, **kwargs):
@@ -23,9 +23,9 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
         **kwargs: For compatibility, may contain the key ``async`` in place of
             the ``non_blocking`` argument. The ``async`` arg is deprecated.
     """
-    non_blocking = _get_async_or_non_blocking('type', non_blocking, kwargs)
+    non_blocking = _get_async_or_non_blocking("type", non_blocking, kwargs)
     if dtype is None:
-        return self.__module__ + '.' + self.__class__.__name__
+        return self.__module__ + "." + self.__class__.__name__
 
     if isinstance(dtype, str):
         dtype = _import_dotted_name(dtype)
@@ -34,11 +34,13 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
     if self.is_sparse:
         if not dtype.is_sparse:
             raise RuntimeError("Cannot cast sparse tensor to dense tensor")
-        new_module_name = dtype.__module__.replace('.sparse', '')
-        new_values_type_name = new_module_name + '.' + dtype.__name__
+        new_module_name = dtype.__module__.replace(".sparse", "")
+        new_values_type_name = new_module_name + "." + dtype.__name__
         new_values = torch.Tensor._values(self).type(new_values_type_name, non_blocking)
-        new_indices_type_name = new_module_name + '.LongTensor'
-        new_indices = torch.Tensor._indices(self).type(new_indices_type_name, non_blocking)
+        new_indices_type_name = new_module_name + ".LongTensor"
+        new_indices = torch.Tensor._indices(self).type(
+            new_indices_type_name, non_blocking
+        )
         return dtype(new_indices, new_values, self.size())
     if dtype.is_sparse:
         raise RuntimeError("Cannot cast dense tensor to sparse tensor")
@@ -59,7 +61,7 @@ def _cuda(self, device=None, non_blocking=False, **kwargs):
         **kwargs: For compatibility, may contain the key ``async`` in place of
             the ``non_blocking`` argument.
     """
-    non_blocking = _get_async_or_non_blocking('cuda', non_blocking, kwargs)
+    non_blocking = _get_async_or_non_blocking("cuda", non_blocking, kwargs)
     if self.is_cuda:
         if device is None:
             device = torch.cuda.current_device()
@@ -75,11 +77,15 @@ def _cuda(self, device=None, non_blocking=False, **kwargs):
             values = torch.Tensor._values(self).cuda(device, non_blocking)
             return new_type(indices, values, self.size())
         else:
-            return torch._UntypedStorage(self.size(), device=torch.device('cuda')).copy_(self, non_blocking)
+            untyped_storage = torch.UntypedStorage(
+                self.size(), device=torch.device("cuda")
+            )
+            untyped_storage.copy_(self, non_blocking)
+            return untyped_storage
 
 
 def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
-    """ Return the non-blocking flag given the function name and kwargs.
+    """Return the non-blocking flag given the function name and kwargs.
 
     Args:
         function_name (str): the name of the function being used.
@@ -88,12 +94,12 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
     """
     if not kwargs:
         return non_blocking
-    if len(kwargs) != 1 or 'async' not in kwargs:
+    if len(kwargs) != 1 or "async" not in kwargs:
         message = "{}() got an unexpected keyword argument '{}'"
         argument = list(kwargs.keys()).pop()
         raise TypeError(message.format(function_name, argument))
     warnings.warn("'async' is deprecated; use 'non_blocking'")
-    return kwargs['async']
+    return kwargs["async"]
 
 
 # Note [Don't serialize hooks]
@@ -134,14 +140,16 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 
 
 # TODO: Once we decide to break serialization FC, `storage` no longer needs to
-# be a _TypedStorage
+# be a TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
     # first construct a tensor with the correct dtype/device
-    t = torch.tensor([], dtype=storage.dtype, device=storage._untyped().device)
-    return t.set_(storage._untyped(), storage_offset, size, stride)
+    t = torch.tensor([], dtype=storage.dtype, device=storage.untyped().device)
+    return t.set_(storage.untyped(), storage_offset, size, stride)
 
 
-def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks):
+def _rebuild_tensor_v2(
+    storage, storage_offset, size, stride, requires_grad, backward_hooks
+):
     tensor = _rebuild_tensor(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
     # NB: This line exists only for backwards compatibility; the
@@ -167,19 +175,23 @@ def _validate_loaded_sparse_tensors():
     try:
         for t in _sparse_tensors_to_validate:
             if t.is_sparse:
-                torch._validate_sparse_coo_tensor_args(t._indices(), t._values(),
-                                                       t.size())
+                torch._validate_sparse_coo_tensor_args(
+                    t._indices(), t._values(), t.size()
+                )
             elif t.is_sparse_csr:
                 # TODO: Validation currently involves an expensive traversal
                 # on CPU, which may include a device transfer.
-                torch._validate_sparse_csr_tensor_args(t.crow_indices(), t.col_indices(),
-                                                       t.values(), t.size())
+                torch._validate_sparse_csr_tensor_args(
+                    t.crow_indices(), t.col_indices(), t.values(), t.size()
+                )
             else:
                 raise NotImplementedError(
-                    '_validate_loaded_sparse_tensors for layout `%s`' % (t.layout))
+                    "_validate_loaded_sparse_tensors for layout `%s`" % (t.layout)
+                )
 
     finally:
         _sparse_tensors_to_validate.clear()
+
 
 def _rebuild_sparse_tensor(layout, data):
     """
@@ -197,10 +209,13 @@ def _rebuild_sparse_tensor(layout, data):
 
     raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
 
+
 def _rebuild_sparse_csr_tensor(layout, data):
     if layout == torch.sparse_csr:
         crow_indices, col_indices, values, size = data
-        result = torch._sparse_csr_tensor_unsafe(crow_indices, col_indices, values, size)
+        result = torch._sparse_csr_tensor_unsafe(
+            crow_indices, col_indices, values, size
+        )
         _sparse_tensors_to_validate.append(result)
         return result
 
@@ -218,35 +233,71 @@ _rebuild_xla_tensor = _rebuild_device_tensor_from_numpy
 
 
 def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):
-    return torch.empty_strided(size, stride, dtype=dtype, device='meta', requires_grad=requires_grad)
+    return torch.empty_strided(
+        size, stride, dtype=dtype, device="meta", requires_grad=requires_grad
+    )
 
 
-def _rebuild_wrapper_subclass(cls, dtype, size, stride, storage_offset, layout, device, requires_grad):
+def _rebuild_wrapper_subclass(
+    cls, dtype, size, stride, storage_offset, layout, device, requires_grad
+):
     return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-        cls, size, strides=stride, storage_offset=storage_offset, layout=layout,
-        device=device, requires_grad=requires_grad)
+        cls,
+        size,
+        strides=stride,
+        storage_offset=storage_offset,
+        layout=layout,
+        device=device,
+        requires_grad=requires_grad,
+    )
 
 
 # TODO: Once we decide to break serialization FC, `storage` no longer needs to
-# be a _TypedStorage
-def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, requires_grad, backward_hooks):
+# be a TypedStorage
+def _rebuild_qtensor(
+    storage,
+    storage_offset,
+    size,
+    stride,
+    quantizer_params,
+    requires_grad,
+    backward_hooks,
+):
     qscheme = quantizer_params[0]
     if qscheme == torch.per_tensor_affine:
         _, scale, zero_point = quantizer_params
-        tensor = torch._empty_affine_quantized(size, scale=scale, zero_point=zero_point, dtype=storage.dtype, device=storage.device)
+        tensor = torch._empty_affine_quantized(
+            size,
+            scale=scale,
+            zero_point=zero_point,
+            dtype=storage.dtype,
+            device=storage.device,
+        )
     elif qscheme in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
         _, scales, zero_points, axis = quantizer_params
         if type(scales) is list and type(zero_points) is list:
             if qscheme == torch.per_channel_affine:
                 scales = torch.tensor(scales, dtype=torch.double, device=storage.device)
-                zero_points = torch.tensor(zero_points, dtype=torch.long, device=storage.device)
+                zero_points = torch.tensor(
+                    zero_points, dtype=torch.long, device=storage.device
+                )
             else:
                 scales = torch.tensor(scales, dtype=torch.float, device=storage.device)
-                zero_points = torch.tensor(zero_points, dtype=torch.float, device=storage.device)
+                zero_points = torch.tensor(
+                    zero_points, dtype=torch.float, device=storage.device
+                )
         tensor = torch._empty_per_channel_affine_quantized(
-            size, scales=scales, zero_points=zero_points, axis=axis, dtype=storage.dtype, device=storage.device)
+            size,
+            scales=scales,
+            zero_points=zero_points,
+            axis=axis,
+            dtype=storage.dtype,
+            device=storage.device,
+        )
     else:
-        raise RuntimeError("Can't deserialize quantized tensor with qscheme {}".format(qscheme))
+        raise RuntimeError(
+            "Can't deserialize quantized tensor with qscheme {}".format(qscheme)
+        )
     tensor.set_(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
     # NB: This line exists only for backwards compatibility; the
@@ -255,7 +306,7 @@ def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, re
     tensor._backward_hooks = backward_hooks
     return tensor
 
-# Should not be used, this is kept only for BC of loading old serialized Parameter
+
 def _rebuild_parameter(data, requires_grad, backward_hooks):
     param = torch.nn.Parameter(data, requires_grad)
     # NB: This line exists only for backwards compatibility; the
@@ -266,56 +317,8 @@ def _rebuild_parameter(data, requires_grad, backward_hooks):
     return param
 
 
-def _rebuild_parameter_v2(data, requires_grad, backward_hooks, state):
-    param = torch.nn.Parameter(data, requires_grad)
-    # NB: This line exists only for backwards compatibility; the
-    # general expectation is that backward_hooks is an empty
-    # OrderedDict.  See Note [Don't serialize hooks]
-    param._backward_hooks = backward_hooks
-
-    # Restore state on Parameter like python attr.
-    param = _set_obj_state(param, state)
-    return param
-
-def _get_obj_state(obj):
-    # Get the state of the Tensor or python subclass
-    # This loosely mimicks the function on the object class but since Tensor do not inherit
-    # from it, we cannot call that function directly
-    # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
-    getstate_fn = getattr(obj, "__getstate__", None)
-    if getstate_fn:
-        state = getstate_fn()
-    else:
-        slots_to_save = copyreg._slotnames(obj.__class__)  # type: ignore[attr-defined]
-        if slots_to_save:
-            state = (obj.__dict__, {name: getattr(obj, name) for name in slots_to_save if hasattr(obj, name)})
-        else:
-            state = obj.__dict__
-
-    return state
-
-
-def _set_obj_state(obj, state):
-    if isinstance(state, tuple):
-        if not len(state) == 2:
-            raise RuntimeError(f"Invalid serialized state: {state}")
-        dict_state = state[0]
-        slots_state = state[1]
-    else:
-        dict_state = state
-        slots_state = None
-
-    for k, v in dict_state.items():
-        setattr(obj, k, v)
-
-    if slots_state:
-        for k, v in slots_state.items():
-            setattr(obj, k, v)
-    return obj
-
-
 def _import_dotted_name(name):
-    components = name.split('.')
+    components = name.split(".")
     obj = __import__(components[0])
     for component in components[1:]:
         obj = getattr(obj, component)
@@ -324,7 +327,7 @@ def _import_dotted_name(name):
 
 # Taken from python 3.5 docs
 def _accumulate(iterable, fn=lambda x, y: x + y):
-    'Return running totals'
+    "Return running totals"
     # _accumulate([1,2,3,4,5]) --> 1 3 6 10 15
     # _accumulate([1,2,3,4,5], operator.mul) --> 1 2 6 24 120
     it = iter(iterable)
@@ -366,8 +369,12 @@ def _flatten_sparse_tensors(tensors):
         A tuple of two contiguous 1D buffers, one containing input tensors'
         indices and the other containing the values.
     """
-    flat_indices = torch._C._nn.flatten_dense_tensors([torch.Tensor._indices(t) for t in tensors])
-    flat_values = torch._C._nn.flatten_dense_tensors([torch.Tensor._values(t) for t in tensors])
+    flat_indices = torch._C._nn.flatten_dense_tensors(
+        [torch.Tensor._indices(t) for t in tensors]
+    )
+    flat_values = torch._C._nn.flatten_dense_tensors(
+        [torch.Tensor._values(t) for t in tensors]
+    )
     return flat_indices, flat_values
 
 
@@ -403,8 +410,12 @@ def _unflatten_sparse_tensors(flat, tensors):
         flat.
     """
     flat_indices, flat_values = flat
-    indices = torch._C._nn.unflatten_dense_tensors(flat_indices, [torch.Tensor._indices(t) for t in tensors])
-    values = torch._C._nn.unflatten_dense_tensors(flat_values, [torch.Tensor._values(t) for t in tensors])
+    indices = torch._C._nn.unflatten_dense_tensors(
+        flat_indices, [torch.Tensor._indices(t) for t in tensors]
+    )
+    values = torch._C._nn.unflatten_dense_tensors(
+        flat_values, [torch.Tensor._values(t) for t in tensors]
+    )
     outputs = []
     for t, i, v in zip(tensors, indices, values):
         outputs.append(t.new(i, v, t.size()))
@@ -451,7 +462,10 @@ def _take_tensors(tensors, size_limit):
         if tensor.is_sparse:
             indices = torch.Tensor._indices(tensor)
             values = torch.Tensor._values(tensor)
-            size = indices.numel() * indices.element_size() + values.numel() * values.element_size()
+            size = (
+                indices.numel() * indices.element_size()
+                + values.numel() * values.element_size()
+            )
         else:
             size = tensor.numel() * tensor.element_size()
         buf_and_size = buf_dict[t]
@@ -470,8 +484,9 @@ def _take_tensors(tensors, size_limit):
 def annotate(ret, **kwargs):
     def dec(fun):
         fun.__annotations__ = dict(kwargs)
-        fun.__annotations__['return'] = ret
+        fun.__annotations__["return"] = ret
         return fun
+
     return dec
 
 
@@ -483,14 +498,17 @@ def annotate(ret, **kwargs):
 # and the frame (which holds reference to all the object in its temporary scope)
 # holding reference the traceback.
 
+
 class KeyErrorMessage(str):
     r"""str subclass that returns itself in repr"""
+
     def __repr__(self):
         return self
 
 
 class ExceptionWrapper(object):
     r"""Wraps an exception plus traceback to communicate across threads"""
+
     def __init__(self, exc_info=None, where="in background"):
         # It is important that we don't store exc_info, see
         # NOTE [ Python Traceback Reference Cycle Problem ]
@@ -505,7 +523,8 @@ class ExceptionWrapper(object):
         # Format a message such as: "Caught ValueError in DataLoader worker
         # process 2. Original Traceback:", followed by the traceback.
         msg = "Caught {} {}.\nOriginal {}".format(
-            self.exc_type.__name__, self.where, self.exc_msg)
+            self.exc_type.__name__, self.where, self.exc_msg
+        )
         if self.exc_type == KeyError:
             # KeyError calls repr() on its argument (usually a dict key). This
             # makes stack traces unreadable. It will not be changed in Python
@@ -557,6 +576,7 @@ def _get_devices_properties(device_ids):
     # all device properties
     return [_get_device_attr(lambda m: m.get_device_properties(i)) for i in device_ids]
 
+
 def get_current_device_index() -> int:
     r"""Checks if there are CUDA devices available and
     returns the device index of the current default CUDA device.
@@ -567,7 +587,10 @@ def get_current_device_index() -> int:
         return torch.cuda.current_device()
     return -1
 
-def _get_device_index(device: Any, optional: bool = False, allow_cpu: bool = False) -> int:
+
+def _get_device_index(
+    device: Any, optional: bool = False, allow_cpu: bool = False
+) -> int:
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.
 
@@ -587,9 +610,9 @@ def _get_device_index(device: Any, optional: bool = False, allow_cpu: bool = Fal
         device = torch.device(device)
     device_idx: Optional[int] = None
     if isinstance(device, torch.device):
-        if not allow_cpu and device.type == 'cpu':
-            raise ValueError('Expected a non cpu device, but got: {}'.format(device))
-        device_idx = -1 if device.type == 'cpu' else device.index
+        if not allow_cpu and device.type == "cpu":
+            raise ValueError("Expected a non cpu device, but got: {}".format(device))
+        device_idx = -1 if device.type == "cpu" else device.index
     if isinstance(device, int):
         device_idx = device
     if device_idx is None:
@@ -604,8 +627,10 @@ def _get_device_index(device: Any, optional: bool = False, allow_cpu: bool = Fal
             else:
                 device_idx = _get_current_device_index()
         else:
-            raise ValueError('Expected a torch.device with a specified index '
-                             'or an integer, but got:{}'.format(device))
+            raise ValueError(
+                "Expected a torch.device with a specified index "
+                "or an integer, but got:{}".format(device)
+            )
     return device_idx
 
 
@@ -614,15 +639,20 @@ def _handle_complex(tensor):
     Returns a real view of a tensor if complex dtype else just the tensor
     need to check if a UninitializedParameter because otherwise checking is_complex is an error for a LazyModule
     """
-    return torch.view_as_real(tensor) if not isinstance(tensor,
-                                                        torch.nn.UninitializedParameter) and tensor.is_complex() else tensor
+    return (
+        torch.view_as_real(tensor)
+        if not isinstance(tensor, torch.nn.UninitializedParameter)
+        and tensor.is_complex()
+        else tensor
+    )
+
 
 def _element_size(dtype):
     """
     Returns the element size for a dtype, in bytes
     """
     if not isinstance(dtype, torch.dtype):
-        raise RuntimeError(f'expected torch.dtype, but got {type(dtype)}')
+        raise RuntimeError(f"expected torch.dtype, but got {type(dtype)}")
 
     if dtype.is_complex:
         return torch.finfo(dtype).bits >> 2
@@ -634,6 +664,7 @@ def _element_size(dtype):
     else:
         return torch.iinfo(dtype).bits >> 3
 
+
 class _ClassPropertyDescriptor:
     def __init__(self, fget, fset=None):
         self.fget = fget
@@ -642,6 +673,7 @@ class _ClassPropertyDescriptor:
         if owner is None:
             owner = type(instance)
         return self.fget.__get__(instance, owner)()
+
 
 def classproperty(func):
     if not isinstance(func, (classmethod, staticmethod)):

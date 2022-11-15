@@ -107,8 +107,6 @@ class TORCH_CUDA_CU_API WelfordResult {
       TensorView* in_avg,
       TensorView* in_var_sum,
       TensorView* in_n);
-
-  WelfordResult rFactor(const std::vector<int>& axes);
 };
 
 //! Welford operator on specified axes. This is currently the only scan op with
@@ -122,6 +120,52 @@ TORCH_CUDA_CU_API WelfordResult Welford(
     // Initializes to 0 in function definition, doing this so we don't have to
     // import IrBuilder just for this one interface.
     Int* init_N = nullptr);
+
+// RNG OPERATIONS
+TORCH_CUDA_CU_API TensorView* rand(
+    const std::vector<Val*>& shape,
+    DataType dtype);
+TORCH_CUDA_CU_API Val* rand_like(Val*);
+TORCH_CUDA_CU_API TensorView* rand_like(TensorView*);
+
+TORCH_CUDA_CU_API TensorView* uniform(
+    const std::vector<Val*>& shape,
+    Val* low,
+    Val* high,
+    DataType dtype);
+
+// TENSOR FACTORIES
+TORCH_CUDA_CU_API TensorView* full(
+    const std::vector<Val*>& shape,
+    Val* fill_value,
+    DataType dtype);
+TORCH_CUDA_CU_API TensorView* full_like(TensorView* tv, Val* fill_value);
+TORCH_CUDA_CU_API Val* full_like(Val* tv, Val* fill_value);
+TORCH_CUDA_CU_API TensorView* zeros(
+    const std::vector<Val*>& shape,
+    DataType dtype);
+TORCH_CUDA_CU_API TensorView* zeros_like(TensorView*);
+TORCH_CUDA_CU_API Val* zeros_like(Val*);
+TORCH_CUDA_CU_API TensorView* ones(
+    const std::vector<Val*>& shape,
+    DataType dtype);
+TORCH_CUDA_CU_API TensorView* ones_like(TensorView*);
+TORCH_CUDA_CU_API Val* ones_like(Val*);
+//! WARNING: giving invalid combinations of the start, end and step
+//! arguments can result in undefined behavior. Specifically, the
+//! signs of `end - start` and step must be the same.
+TORCH_CUDA_CU_API TensorView* arange(Val* end, DataType dtype = DataType::Int);
+TORCH_CUDA_CU_API TensorView* arange(
+    Val* start,
+    Val* end,
+    DataType dtype = DataType::Int);
+TORCH_CUDA_CU_API TensorView* arange(
+    Val* start,
+    Val* end,
+    Val* step,
+    DataType dtype = DataType::Int);
+TORCH_CUDA_CU_API TensorView* eye(Val* size, DataType dtype);
+TORCH_CUDA_CU_API TensorView* eye(Val* rows, Val* cols, DataType dtype);
 
 // UNARY OPERATIONS
 // abs
@@ -187,9 +231,6 @@ TORCH_CUDA_CU_API TensorView* log2(TensorView*);
 // neg
 TORCH_CUDA_CU_API Val* neg(Val*);
 TORCH_CUDA_CU_API TensorView* neg(TensorView*);
-// randlike
-TORCH_CUDA_CU_API Val* randlike(Val*);
-TORCH_CUDA_CU_API TensorView* randlike(TensorView*);
 // real
 TORCH_CUDA_CU_API Val* real(Val*);
 TORCH_CUDA_CU_API TensorView* real(TensorView*);
@@ -253,6 +294,9 @@ TORCH_CUDA_CU_API TensorView* isposinf(TensorView*);
 // isreal
 TORCH_CUDA_CU_API Val* isreal(Val*);
 TORCH_CUDA_CU_API TensorView* isreal(TensorView*);
+// print
+TORCH_CUDA_CU_API Val* print(Val*);
+TORCH_CUDA_CU_API TensorView* print(TensorView*);
 
 // Broadcasts inp based on bool vector. Size of broadcast bool vector should be
 // the number of dims desired in the broadcasted tensor. This vector should be
@@ -403,12 +447,14 @@ TORCH_CUDA_CU_API TensorView* sum(
 TORCH_CUDA_CU_API TensorView* max(
     TensorView* v1,
     const std::vector<int>& reduction_axes,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 TORCH_CUDA_CU_API TensorView* min(
     TensorView* v1,
     const std::vector<int>& reduction_axes,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 // COMPOUND OPERATIONS
 // add_alpha

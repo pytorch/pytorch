@@ -5,14 +5,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 toq = torch.ops.quantized
 
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
-import torch.nn.intrinsic.qat as nniqat
+import torch.ao.nn.intrinsic.qat as nniqat
 import torch.nn.intrinsic as nni
-import torch.nn.qat as nnqat
-import torch.nn.qat.dynamic as nnqatd
+import torch.ao.nn.qat as nnqat
+import torch.ao.nn.qat.dynamic as nnqatd
 from torch.ao.quantization.backend_config import get_native_backend_config_dict
 import torch.ao.quantization.fx._lower_to_native_backend as \
     _lower_to_native_backend
@@ -194,6 +194,10 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # F.hardswish
         set([
             F.hardswish,
+        ]),
+        # F.group_norm
+        set([
+            F.group_norm,
         ]),
         # F.instance_norm
         set([

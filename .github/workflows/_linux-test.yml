@@ -27,15 +27,36 @@ env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
+  # This needs to be run right before the test starts so that it can gather the
+  # latest labels from the PR
+  filter:
+    runs-on: [self-hosted, linux.large]
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
   test:
-    # Don't run on forked repos.
-    if: github.repository_owner == 'pytorch'
+    needs: filter
+    # Don't run on forked repos or empty test matrix
+    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
     strategy:
-      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     steps:
-      # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
@@ -43,17 +64,17 @@ jobs:
         uses: ./.github/actions/setup-linux
 
       - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.docker-image }}
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
         with:
           timeout_minutes: 10
@@ -62,6 +83,15 @@ jobs:
             set -ex
             bash .github/scripts/install_nvidia_utils_linux.sh
             echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+
+      - name: Start monitoring script
+        id: monitor-script
+        shell: bash
+        run: |
+          python3 -m pip install psutil==5.9.1
+          python3 -m pip install pynvml==11.4.1
+          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
@@ -87,10 +117,12 @@ jobs:
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           PR_BODY: ${{ github.event.pull_request.body }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0'}}
         timeout-minutes: 240
         run: |
           set -x
@@ -105,10 +137,17 @@ jobs:
 
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
 
+          # sanitize the input commit message and PR body here:
+          #
           # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
           # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
-          export PR_BODY="${PR_BODY//[$'\n\r']}"
+          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          PR_BODY="${PR_BODY//[$'\n\r']}"
+
+          # then trim all special characters like single and double quotes to avoid unescaped inputs to
+          # wreak havoc internally
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
+          export PR_BODY="${PR_BODY//[\'\"]}"
 
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
@@ -134,8 +173,10 @@ jobs:
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_S3_KEY_PREFIX \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+            -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
@@ -150,7 +191,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${TEST_COMMAND}"
+          docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
       - name: Get workflow job id
         id: get-job-id
@@ -158,6 +199,15 @@ jobs:
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stop monitoring script
+        if: always() && steps.monitor-script.outputs.monitor-script-pid
+        shell: bash
+        continue-on-error: true
+        env:
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        run: |
+          kill "$MONITOR_SCRIPT_PID"
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
@@ -199,5 +249,5 @@ jobs:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()

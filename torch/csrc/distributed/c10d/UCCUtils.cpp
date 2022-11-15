@@ -1,7 +1,12 @@
 #ifdef USE_C10D_UCC
 
-#include <c10d/UCCTracing.hpp>
-#include <c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/UCCTracing.hpp>
+#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
+
+#include <cctype>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace c10d {
 
@@ -11,75 +16,6 @@ constexpr char kTeamRank[] = "teamr";
 constexpr char kAllGatherDone[] = "ag_done";
 constexpr char kAllGatherFree[] = "ag_free";
 } // namespace
-
-CommUCX::CommUCX(
-    int comm_size,
-    const c10::intrusive_ptr<ProcessGroupUCCLogger>& logger)
-    : CommBase(logger) {
-  ucp_params_t params;
-  ucp_config_t* config;
-  ucs_status_t st;
-  ucp_worker_params_t worker_params;
-  ucp_lib_attr_t ucp_attr;
-
-  ucp_attr.field_mask = UCP_LIB_ATTR_FIELD_MAX_THREAD_LEVEL;
-  TORCH_UCX_CHECK(
-      ucp_lib_query(&ucp_attr), "failed to query UCP lib attributes");
-  TORCH_CHECK(
-      ucp_attr.max_thread_level == UCS_THREAD_MODE_MULTI,
-      "ucx library wasn't initialized with multithreading support, "
-      "please check ucx build options");
-  TORCH_UCX_CHECK(
-      ucp_config_read("TORCH", nullptr, &config), "failed to read UCP config");
-
-  memset(&params, 0, sizeof(ucp_params_t));
-  params.field_mask = UCP_PARAM_FIELD_FEATURES | UCP_PARAM_FIELD_REQUEST_SIZE |
-      UCP_PARAM_FIELD_ESTIMATED_NUM_EPS | UCP_PARAM_FIELD_TAG_SENDER_MASK |
-      UCP_PARAM_FIELD_REQUEST_INIT | UCP_PARAM_FIELD_REQUEST_CLEANUP;
-  params.request_size = sizeof(ucc_coll_req_t);
-  params.features = UCP_FEATURE_TAG;
-  params.estimated_num_eps = comm_size;
-  params.tag_sender_mask = TORCH_UCX_RANK_MASK;
-  params.request_init = [](void* request) {
-    static_cast<ucc_coll_req_h>(request)->status = UCC_INPROGRESS;
-  };
-  params.request_cleanup = [](void*) {};
-  TORCH_UCX_CHECK(
-      ucp_init(&params, config, &context), "failed to init UCP context");
-  ucp_config_release(config);
-
-  memset(&worker_params, 0, sizeof(ucp_worker_params_t));
-  worker_params.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
-  worker_params.thread_mode = UCS_THREAD_MODE_MULTI;
-  st = ucp_worker_create(context, &worker_params, &worker);
-  if (st != UCS_OK) {
-    TORCH_UCC_LOG_ERROR(
-        TORCH_UCC_INIT,
-        c10::str("UCX failed to create UCP worker:", ucs_status_string(st)));
-    ucp_cleanup(context);
-    throw std::runtime_error(ucs_status_string(st));
-  }
-}
-
-void CommUCX::progress() {
-  ucp_worker_progress(worker);
-}
-
-void CommUCX::free_request(ucc_coll_req_h request) {
-  request->status = UCC_INPROGRESS;
-  ucp_request_free(request);
-}
-
-CommUCX::~CommUCX() {
-  if (worker != nullptr) {
-    ucp_worker_destroy(worker);
-  }
-  if (context != nullptr) {
-    ucp_cleanup(context);
-  }
-  worker = nullptr;
-  context = nullptr;
-}
 
 ucc_status_t oob_allgather(
     void* sbuf,

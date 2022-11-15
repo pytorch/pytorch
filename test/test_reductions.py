@@ -1,5 +1,6 @@
 # Owner(s): ["module: tests"]
 
+import contextlib
 import torch
 import numpy as np
 
@@ -14,7 +15,7 @@ from torch._six import inf, nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, integral_types, complex_types, floating_types_and,
-    integral_types_and, floating_and_complex_types_and, all_types_and,
+    integral_types_and, floating_and_complex_types_and, all_types_and, all_types,
 )
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
@@ -825,15 +826,16 @@ class TestReductions(TestCase):
     def test_cumprod_integer_upcast(self, device):
         self._test_reduce_integer_upcast(lambda x, **kwargs: torch.cumprod(x, 0, **kwargs))
 
-    def test_mode(self, device):
+    @dtypes(*all_types())
+    def test_mode(self, device, dtype):
         SIZE = 10
-        x = torch.arange(1., SIZE * SIZE + 1, device=device).clone().resize_(SIZE, SIZE)
+        x = torch.arange(1., SIZE * SIZE + 1, device=device, dtype=dtype).clone().resize_(SIZE, SIZE)
         x[:2] = 1
         x[:, :2] = 1
         x0 = x.clone()
 
         # Pre-calculated results.
-        res1val = torch.ones(SIZE, device=device)
+        res1val = torch.ones(SIZE, device=device, dtype=dtype)
         # The indices are the position of the last appearance of the mode element.
         res1ind = torch.ones(SIZE, device=device, dtype=torch.long)
         res1ind[0] = SIZE - 1
@@ -844,7 +846,7 @@ class TestReductions(TestCase):
         self.assertEqual(res1ind, res2ind, atol=0, rtol=0)
 
         # Test use of result tensor
-        res2val = torch.tensor((), device=device)
+        res2val = torch.tensor((), device=device, dtype=dtype)
         res2ind = torch.tensor((), device=device, dtype=torch.long)
         torch.mode(x, keepdim=False, out=(res2val, res2ind))
         self.assertEqual(res1val, res2val, atol=0, rtol=0)
@@ -858,10 +860,10 @@ class TestReductions(TestCase):
         # input unchanged
         self.assertEqual(x, x0, atol=0, rtol=0)
 
-    def _test_mode_intervals(self, shape, intervals, device, v=1):
-        x = torch.arange(0, shape[0] * shape[1], device=device)
-        x[v] = x.numel()
-        x = x.resize_(shape)
+    def _test_mode_intervals(self, shape, intervals, device, dtype, v=1):
+        x = torch.arange(0, shape[1], device=device, dtype=dtype).expand(shape)
+        x = x.contiguous()
+        x[:, v] = intervals[0][0]
 
         # Set the value of each interval to the mode "v"
         for (beg, end) in intervals:
@@ -875,14 +877,15 @@ class TestReductions(TestCase):
         self.assertTrue((values == v).all().item())
 
     @onlyCUDA
-    def test_mode_large(self, device):
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    def test_mode_large(self, device, dtype):
         # i should be less than (d - 2) / 2
         def testset_for_shape(shape, i):
             d = shape[-1]
             # Mode only in the middle.
-            self._test_mode_intervals(shape, [(i, d - i)], device)
+            self._test_mode_intervals(shape, [(i, d - i)], device, dtype)
             # Mode in discontiguous parts of the input.
-            self._test_mode_intervals(shape, [(0, i), (i + 1, d - i - 1), (d - i, d)], device)
+            self._test_mode_intervals(shape, [(0, i), (i + 1, d - i - 1), (d - i, d)], device, dtype)
 
         # More than one line of (65535) thread blocks
         testset_for_shape((65536, 10), 3)
@@ -892,6 +895,32 @@ class TestReductions(TestCase):
 
         # Naive kernel for big slice sizes (> 2048)
         testset_for_shape((10, 4096), 10)
+
+    def test_mode_boolean(self, device):
+        shapes = [
+            (10, 10),
+            (4, 2048),
+            (1, 4096),
+        ]
+
+        for shape in shapes:
+            a = torch.zeros(shape, device=device, dtype=torch.bool)
+
+            a[:, (shape[1] - 1) // 2:] = True
+            values, indices = a.mode(-1)
+            self.assertEqual(values, torch.ones(shape[0], dtype=torch.bool))
+            print(indices)
+            indexed = a.gather(1, indices.unsqueeze(1)).squeeze(1)
+            self.assertEqual(values, indexed)
+
+            a.fill_(False)
+            a[:, shape[1] // 2 + 1:] = True
+            values, indices = a.mode(-1)
+            print(indices)
+            self.assertEqual(values, torch.zeros(shape[0], dtype=torch.bool))
+            indexed = a.gather(1, indices.unsqueeze(1)).squeeze(1)
+            self.assertEqual(values, indexed)
+
 
     @expectedFailureMeta  # mode only supports CPU and CUDA device type
     @onlyNativeDeviceTypes
@@ -1101,6 +1130,10 @@ class TestReductions(TestCase):
             torch.bincount(torch.tensor([1, 3], device=device),
                            torch.tensor([.2, .2], device=device),
                            minlength=-1)
+        # n-d weights, with n > 1 throws
+        with self.assertRaisesRegex(RuntimeError, '1-d'):
+            torch.bincount(torch.tensor([1, 0], device=device),
+                           torch.tensor([[1., 0.3], [1., 0.3]], device=device))
         # input and weights dim mismatch
         with self.assertRaisesRegex(RuntimeError, 'same length'):
             torch.bincount(torch.tensor([1, 0], device=device),
@@ -2513,11 +2546,7 @@ class TestReductions(TestCase):
             torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
         else:
             out = torch.empty(0, device=device, dtype=dtype)
-            try:
-                torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
-            except RuntimeError:
-                return
-            self.fail("Failed to hit RuntimeError!")
+            torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
 
         exact_dtype = input.dtype not in (torch.bfloat16, torch.complex32, torch.complex64, torch.complex128)
         self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
@@ -2771,9 +2800,14 @@ class TestReductions(TestCase):
             torch.histc(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device),
                         bins=4, max=3),
             torch.tensor([0, 1, 1, 0], dtype=torch.float, device=device))
-        # tensor with nan -- should throw a RuntimeError
+        # tensor with nan; min, max not provided -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, r'range of \[nan, nan\] is not finite'):
             torch.histc(torch.tensor([float("nan")], dtype=torch.float, device=device))
+        # tensor with nan; min, max provided -- nan is ignored
+        self.assertEqual(
+            torch.histc(torch.tensor([1., 2., float("nan")], dtype=torch.float, device=device),
+                        bins=4, max=3),
+            torch.tensor([0, 1, 1, 0], dtype=torch.float, device=device))
         # tensors with min > max -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, "max must be larger than min"):
             torch.histc(torch.tensor([1., 2., 3.], dtype=torch.float, device=device),
@@ -3337,7 +3371,7 @@ as the input tensor excluding its innermost dimension'):
             expected = op.ref(to_numpy(t), *sample_input.args,
                               **dict(
                                   # `identity` is mapped to numpy reduction `initial` argument
-                                  identity=torch._masked._reduction_identity(op.name, t),
+                                  identity=torch.masked._reduction_identity(op.name, t),
                                   **sample_input.kwargs))
 
             # Workaround https://github.com/pytorch/pytorch/issues/66556
@@ -3349,6 +3383,21 @@ as the input tensor excluding its innermost dimension'):
 
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 
+    @onlyCUDA
+    @largeTensorTest("8GB")
+    @dtypes(torch.half, torch.chalf, torch.bfloat16)
+    def test_reductions_large_half_tensors(self, device, dtype):
+        t = torch.ones(2**31, device=device, dtype=dtype)
+        t[2**30:] = -1
+        expected = torch.tensor(0, device=device, dtype=dtype)
+        self.assertEqual(torch.sum(t), expected)
+
+        # mean_cuda is not implemented for ComplexHalf
+        err_msg = "not implemented for 'ComplexHalf'"
+        ctx = self.assertRaisesRegex(
+            RuntimeError, err_msg) if dtype is torch.chalf else contextlib.nullcontext()
+        with ctx:
+            self.assertEqual(torch.mean(t), expected)
 
 instantiate_device_type_tests(TestReductions, globals())
 

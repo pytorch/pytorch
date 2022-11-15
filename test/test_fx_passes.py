@@ -1,5 +1,6 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["module: fx.passes"]
 
+from dataclasses import dataclass
 import operator
 import logging
 
@@ -9,6 +10,7 @@ from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
+from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 
 from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
 from torch.testing._internal.jit_utils import JitTestCase
@@ -158,16 +160,50 @@ class TestPartitionFunctions:
         out = torch.stack([add_1, add_2, add_3])
         return out
 
+    @staticmethod
+    def forward12(a, b, c):
+        b0 = a + 1.0
+        c0 = a + 1.5
+        x0 = b0.relu()
+        x1 = c0.relu()
+        b1 = b0 + x1
+        c1 = c0 + 1.2
+        # c2 has dependency on x0 & b0, when we merge {c0, c1, c2}
+        # this dependency should be updated to the fusion group and reflected
+        # on the decision to not fuse b0 & b1, which forms a cyclic dependency in
+        # the new graph
+        c2 = x0 + c0
+        return b1, c2
+
+    @staticmethod
+    def forward13(a, b, c):
+        a0, a1, a2, a3 = a.split(1, 0)
+        b1 = a0 + b
+        c1 = a1 + c
+        return b1 + c1
+
+    @staticmethod
+    def forward14(a, b, c):
+        a0, a1 = torch.ops.aten.std_mean(a)
+        out = a0 + 1.0
+        return out
+
 # A mock OperatorSupport class, where only operator.add is supported
 class MockOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {operator.add}
+        return node.op == "call_function" and node.target in {operator.add, operator.getitem, torch.ops.aten.std_mean}
 
+
+@instantiate_parametrized_tests
 class TestFXGraphPasses(JitTestCase):
 
     @parametrize("fn, expected_partition", [
         (TestPartitionFunctions.forward1, [["add_7", "add_6"], ["add_5", "add_4", "add_3"], ["add_2", "add_1", "add"]]),
         (TestPartitionFunctions.forward2, [["add_3", "add_2"], ["add_1", "add"]]),
+
+        # 1 horizontal fusion with common producer
+        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),
+        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),
 
         # 2 branches cases
         (TestPartitionFunctions.forward5, [["add_1", "add"]]),
@@ -179,6 +215,13 @@ class TestFXGraphPasses(JitTestCase):
         (TestPartitionFunctions.forward9, [['add_3', 'add_2', 'add_1', 'add']]),
         (TestPartitionFunctions.forward10, [['add_3', 'add_2', 'add', 'add_1']]),
         (TestPartitionFunctions.forward11, [['add_1'], ['add']]),
+
+        # 4 not necessarily the only partition, just to verify that there's no cyclic dependency after partition
+        (TestPartitionFunctions.forward12, [["add_2"], ["add_3", "add_4", "add_1"], ["add"]]),
+
+        # 5 getitem special case
+        (TestPartitionFunctions.forward13, [["add_2", "add_1", "add"]]),
+        (TestPartitionFunctions.forward14, [["add", "std_mean", "getitem", "getitem_1"]]),
     ])
     def test_partitioner(self, fn, expected_partition):
         traced = symbolic_trace(fn)
@@ -199,24 +242,6 @@ class TestFXGraphPasses(JitTestCase):
         expected = fn(a, b, c)
         result = fused_graph(a, b, c)
         torch.testing.assert_close(expected, result)
-
-
-    @parametrize("fn, expected_partition", [
-        # horizontal fusion without a common downstream node, not supported yet
-        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),
-        # horizontal fusion with a common downstream node, not supported yet
-        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),
-    ])
-    def test_partitioner_xfail(self, fn, expected_partition):
-        traced = symbolic_trace(fn)
-
-        supported_ops = MockOperatorSupport()
-        partitioner = CapabilityBasedPartitioner(traced, supported_ops, allows_single_node_partition=True)
-        partitions = partitioner.propose_partitions()
-
-        partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
-        with self.assertRaises(Exception):
-            assert len(partitions_name) == len(expected_partition)
 
     @parametrize("partition", [
         [['add', 'add_1'], ['add_5', 'add_6']],
@@ -270,7 +295,469 @@ class TestFXGraphPasses(JitTestCase):
         with self.assertRaises(Exception):
             fuse_by_partitions(gm, partitions)
 
-instantiate_parametrized_tests(TestFXGraphPasses)
+@dataclass
+class TestCase:
+    match_output: bool
+    match_placeholder: bool
+    num_matches: int
+    remove_overlapping_matches: bool = True
+
+class SingleNodePattern:
+    @staticmethod
+    def forward(x):
+        val = torch.neg(x)
+        return torch.add(val, val)
+
+    @staticmethod
+    def pattern(a):
+        return torch.neg(a)
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 1),
+        TestCase(True, False, 0),
+        TestCase(False, True, 1),
+        TestCase(True, True, 0)
+    ]
+class SimplePattern:
+    @staticmethod
+    def forward(x, w1, w2):
+        m1 = torch.cat([w1, w2]).sum()
+        m2 = torch.cat([w2, w1]).sum()
+        m3 = torch.cat([m1, m2]).sum()
+        return x + torch.max(m1) + torch.max(m2) + m3
+
+    @staticmethod
+    def pattern(a, b):
+        return torch.cat([a, b]).sum()
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 3),
+        TestCase(True, False, 0),
+        TestCase(False, True, 2),
+        TestCase(True, True, 0)
+    ]
+
+class SimpleFullGraphMatching:
+    @staticmethod
+    def forward(x):
+        a = torch.neg(x)
+        return torch.add(a, a)
+
+    @staticmethod
+    def pattern(x):
+        a = torch.neg(x)
+        return torch.add(a, a)
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 1),
+        TestCase(True, False, 1),
+        TestCase(False, True, 1),
+        TestCase(True, True, 1)
+    ]
+
+class DiamondShapePatternTestCase:
+    @staticmethod
+    def forward(x):
+        a = torch.neg(x)
+
+        a = a.relu()
+        left = a.sigmoid()
+        right = a.relu()
+        out = left + right
+
+        return out
+
+    @staticmethod
+    def pattern(a):
+        a = a.relu()
+        left = a.sigmoid()
+        right = a.relu()
+        out = left + right
+        return out
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 1),
+        TestCase(True, False, 1),
+        TestCase(False, True, 0),
+        TestCase(True, True, 0)
+    ]
+
+class NonFullyContainedMatches:
+    @staticmethod
+    def forward(x, w1, w2, b1, b2):
+        # fully contained matched subgraph
+        m1 = torch.cat([w1, w2])
+        m2 = torch.cat([x, b2])
+        t0 = torch.addmm(b1, m1, m2.t())
+        t0_sum = torch.sum(t0)   # use of t0 is not leaking
+
+        # leaking matched subgraph, m3 is leaked
+        m3 = torch.cat([w1, w2])
+        m4 = torch.cat([x, b2])
+        t1 = torch.addmm(b1, m3, m4.t())
+        m3_sum = torch.sum(m3)
+
+        return t0_sum, m3_sum
+
+    @staticmethod
+    def pattern(x, w1, w2, b1, b2):
+        m1 = torch.cat([w1, w2])
+        m2 = torch.cat([x, b2])
+        return torch.addmm(b1, m1, m2.t())
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 1),
+
+        TestCase(True, False, 0),
+
+        TestCase(False, True, 1),     # leaked used of placeholder is not leaking
+    ]
+
+class ChainRepeatedPattern:
+    @staticmethod
+    def forward(x):
+        x = torch.sigmoid(x)
+        x = torch.sigmoid(x)
+        x = torch.sigmoid(x)
+        return torch.sigmoid(x)
+
+    @staticmethod
+    def pattern(x):
+        return torch.sigmoid(torch.sigmoid(x))
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 3, remove_overlapping_matches=False),
+        TestCase(False, False, 2, remove_overlapping_matches=True),
+        TestCase(True, False, 1),
+        TestCase(False, True, 1),
+        TestCase(True, True, 0)
+    ]
+
+class QuantizationModel:
+    @staticmethod
+    def forward(x):
+        x += 3
+        x = x.dequantize()
+        x = torch.sigmoid(x)
+        x = x.to(torch.float16)
+        return x
+
+    @staticmethod
+    def pattern(x):
+        x = x.dequantize()
+        x = torch.sigmoid(x)
+        x = x.to(torch.float16)
+        return x
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 1),
+        TestCase(True, False, 1),
+        TestCase(False, True, 0),
+        TestCase(True, True, 0)
+    ]
+
+class MultipleOutputsWithDependency:
+    @staticmethod
+    def forward(x):
+        y = x.relu()
+        z = y.sigmoid()
+        return z, y
+
+    @staticmethod
+    def pattern(a):
+        b = a.relu()
+        c = b.sigmoid()
+        return b, c     # outputs have data dependency
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 1),
+        TestCase(True, False, 0),
+        TestCase(False, True, 1),
+        TestCase(True, True, 0)
+    ]
+
+class MultipleOutputsWithoutDependency:
+    @staticmethod
+    def forward(x):
+        x = x + 1
+
+        # target subgraph to match
+        x = x.relu()
+        z = x.sum()
+        y = x.sigmoid()
+
+        out = y.sigmoid() + z.sum()
+        return out
+
+    @staticmethod
+    def pattern(a):
+        a = a.relu()
+        b = a.sigmoid()
+        c = a.sum()
+        return b, c
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 1),
+        TestCase(True, False, 0),
+        TestCase(False, True, 0),
+        TestCase(True, True, 0)
+    ]
+
+class MultipleOutputsMultipleOverlappingMatches:
+    @staticmethod
+    def forward(x):
+        x = x + 1
+
+        # target subgraph to match
+        x = x.relu()
+        z = x.sum()
+        z1 = x.sum()
+        y = x.sigmoid()
+        y1 = x.sigmoid()
+
+        return z + z1 + y + y1
+
+    @staticmethod
+    def pattern(a):
+        a = a.relu()
+        b = a.sigmoid()
+        c = a.sum()
+        return a, b, c
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 4, remove_overlapping_matches=False),
+        TestCase(False, False, 1, remove_overlapping_matches=True),
+    ]
+
+class MultipleOutputsMultipleNonOverlappingMatches:
+    @staticmethod
+    def forward(x):
+        x = x + 1
+
+        # target subgraph to match
+        x = x.relu()
+        z = x.sum()
+        y = x.sigmoid()
+
+        x = x.relu()
+        z1 = x.sum()
+        y1 = x.sigmoid()
+
+        return z + z1 + y + y1
+
+    @staticmethod
+    def pattern(a):
+        a = a.relu()
+        b = a.sigmoid()
+        c = a.sum()
+        return b, c
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 1),
+    ]
+
+class MultipleOutputsIdenticalAnchor:
+    @staticmethod
+    def forward(x):
+        x = x + 1
+
+        # target subgraph to match
+        x = x.relu()
+        y = x.sigmoid()
+        y1 = x.sigmoid()
+
+        return y, y1
+
+    @staticmethod
+    def pattern(a):
+        a = a.relu()
+        b = a.sigmoid()
+        b1 = a.sigmoid()
+        return b, b1
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        # (False, False, 2),  # FIXME: currently still matches to 2, should fix to 1
+        TestCase(True, False, 1),
+        TestCase(False, True, 0),
+    ]
+
+
+class MultipleOutputsHorizontalPattern:
+    @staticmethod
+    def forward(x):
+        x = x + 1
+
+        # target subgraph to match
+        y1 = x.relu()
+        y2 = x.sigmoid()
+
+        return y1, y2
+
+    @staticmethod
+    def pattern(a):
+        b1 = a.relu()
+        b2 = a.sigmoid()
+
+        return b1, b2
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 1),
+        TestCase(True, False, 1),
+        TestCase(False, True, 0),
+        TestCase(True, True, 0)
+    ]
+
+class MultiOutputWithWithInvalidMatches:
+    @staticmethod
+    def forward(x):
+        res0 = torch.nn.functional.linear(x, torch.rand(3, 3))
+        res1 = torch.sigmoid(res0)
+        res2 = res0 * res1
+        res3 = torch.sum(res2, dim=1)
+        return res3
+
+    @staticmethod
+    def pattern(a, b, c):
+        lin_res = torch.nn.functional.linear(a, b)
+        mul_res = lin_res * c
+        return lin_res, mul_res
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 0),
+        TestCase(True, False, 0),
+        TestCase(False, True, 0),
+    ]
+
+class QuantizationFp8Pattern:
+    @classmethod
+    def setup(cls):
+        cls.quantization = torch.library.Library("fp8_quantization", "DEF")
+        cls.quantization.define("quantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
+        cls.quantization.define("dequantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
+
+    @classmethod
+    def tearDown(cls):
+        del cls.quantization
+
+    @staticmethod
+    def forward(self, arg0_1, arg1_1):
+        qt = torch.ops.fp8_quantization
+        _scale_0 = self._scale_0
+        quantize_per_tensor_affine_fp8 = qt.quantize_per_tensor_affine_fp8(arg0_1, 0, _scale_0)
+        dequantize_per_tensor_affine_fp8 = qt.dequantize_per_tensor_affine_fp8(quantize_per_tensor_affine_fp8, 0, _scale_0)
+        _scale_1 = self._scale_0
+        quantize_per_tensor_affine_fp8_1 = qt.quantize_per_tensor_affine_fp8(arg1_1, 0, _scale_1)
+        dequantize_per_tensor_affine_fp8_1 = qt.dequantize_per_tensor_affine_fp8(quantize_per_tensor_affine_fp8_1, 0, _scale_1)
+        add = torch.ops.aten.add.Tensor(dequantize_per_tensor_affine_fp8, dequantize_per_tensor_affine_fp8_1)
+        _scale_2 = self._scale_0
+        quantize_per_tensor_affine_fp8_2 = qt.quantize_per_tensor_affine_fp8(add, 0, _scale_2)
+        dequantize_per_tensor_affine_fp8_2 = qt.dequantize_per_tensor_affine_fp8(quantize_per_tensor_affine_fp8_2, 0, _scale_2)
+        return dequantize_per_tensor_affine_fp8_2
+
+    @staticmethod
+    def pattern(a, a_dtype, a_scale, b, b_dtype, b_scale, out_scale):
+        qt = torch.ops.fp8_quantization
+        a = qt.dequantize_per_tensor_affine_fp8(a, a_dtype, a_scale)
+        b = qt.dequantize_per_tensor_affine_fp8(b, b_dtype, b_scale)
+        output = torch.ops.aten.add.Tensor(a, b)
+
+        qt.dequantize_per_tensor_affine_fp8
+
+        output = qt.quantize_per_tensor_affine_fp8(output, a_dtype, out_scale)
+        return output
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 1),
+    ]
+
+class NoAnchorFound:
+    # This test case is for pattern where no matching anchor is found in the target graph
+    # `anchor` is the starting point of the pattern matching, it's usually the boundary returning nodes
+    @staticmethod
+    def forward(x):
+        x = x + 1
+        return x
+
+    @staticmethod
+    def pattern(a):
+        b1 = a.relu()
+        return b1
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 0),
+        TestCase(True, False, 0),
+        TestCase(False, True, 0),
+        TestCase(True, True, 0)
+    ]
+
+@instantiate_parametrized_tests
+class TestFXMatcherUtils(JitTestCase):
+
+    @parametrize("test_model", [
+        SingleNodePattern,
+        SimplePattern,
+        SimpleFullGraphMatching,
+        DiamondShapePatternTestCase,
+        NonFullyContainedMatches,
+        ChainRepeatedPattern,
+        QuantizationModel,
+        MultipleOutputsWithDependency,
+        MultipleOutputsWithoutDependency,
+        MultipleOutputsMultipleOverlappingMatches,
+        MultipleOutputsMultipleNonOverlappingMatches,
+        MultipleOutputsIdenticalAnchor,
+        MultipleOutputsHorizontalPattern,
+        MultiOutputWithWithInvalidMatches,
+        QuantizationFp8Pattern,
+        NoAnchorFound,
+    ])
+    def test_subgraph_matcher(self, test_model):
+
+        setup = getattr(test_model, "setup", None)
+        if callable(setup):
+            setup()
+
+        traced = symbolic_trace(test_model.forward)
+        pattern_traced = symbolic_trace(test_model.pattern)
+
+        for test_case in test_model.test_cases:
+
+            matcher = SubgraphMatcher(pattern_traced.graph,
+                                      match_output=test_case.match_output,
+                                      match_placeholder=test_case.match_placeholder,
+                                      remove_overlapping_matches=test_case.remove_overlapping_matches)
+            matches = matcher.match(traced.graph)
+
+            assert len(matches) == test_case.num_matches
+
+            for match in matches:
+                for node in pattern_traced.graph.nodes:
+                    if not test_case.match_placeholder and node.op == "placeholder":
+                        continue
+                    if not test_case.match_output and node.op == "output":
+                        continue
+                    assert node in match.nodes_map
+
+        tearDown = getattr(test_model, "tearDown", None)
+        if callable(setup):
+            tearDown()
+
 
 if __name__ == "__main__":
     run_tests()

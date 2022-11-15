@@ -1,6 +1,7 @@
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <ATen/native/vulkan/ops/Utils.h>
-#include <ATen/native/vulkan/ops/VulkanOpContext.h>
+
+#include <ATen/Context.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -42,7 +43,7 @@ vTensor pack_weights(const Tensor& weight_arg) {
       weight.options(),
   };
 
-  api::StagingBuffer staging(context, v_weight.buffer_bytes());
+  api::StorageBuffer staging(context, at::kFloat, v_weight.numcells());
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
@@ -105,7 +106,7 @@ vTensor pack_biases(
         bias_arg->options(),
     };
 
-    api::StagingBuffer staging(context, v_bias.buffer_bytes());
+    api::StorageBuffer staging(context, at::kFloat, v_bias.numcells());
     {
       api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
@@ -134,7 +135,7 @@ vTensor pack_biases(
         weight_arg.options(),
     };
 
-    api::StagingBuffer staging(context, v_bias.buffer_bytes());
+    api::StorageBuffer staging(context, at::kFloat, v_bias.numcells());
     {
       api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
@@ -178,60 +179,51 @@ bool available(const Tensor& weight, const c10::optional<Tensor>& bias) {
       true;
 }
 
-bool usable(
-    const Tensor& input,
-    const Tensor& weight,
-    const c10::optional<Tensor>& /* bias */) {
+bool usable(const Tensor& input, const IntArrayRef unpacked_weight_sizes) {
   return (2 == input.ndimension()) &&
       (c10::DeviceType::Vulkan == input.device().type()) &&
       (kFloat == input.scalar_type()) &&
       (input.size(Layout::Parameter::width) ==
-       weight.size(Layout::Parameter::height)) &&
+       unpacked_weight_sizes[Layout::Parameter::height]) &&
       !input.requires_grad() && true;
 }
 
-VulkanOpContext context_create(
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias) {
+static Tensor reshape_to_2d(const Tensor& input_arg) {
   TORCH_CHECK(
-      available(weight, bias),
-      "Vulkan Linear not available! "
-      "Reason: The provided (weight, bias) parameters are either invalid "
-      "individually or their combination is not supported by Vulkan Impl.");
-
-  c10::impl::GenericList packed_context{c10::AnyType::get()};
-  packed_context.reserve(2);
-  packed_context.emplace_back(convert(pack_weights(weight)));
-  packed_context.emplace_back(convert(pack_biases(weight, bias)));
-
-  c10::impl::GenericList unpacked_context{c10::AnyType::get()};
-  unpacked_context.reserve(2);
-  unpacked_context.emplace_back(weight);
-  unpacked_context.emplace_back(bias);
-
-  return VulkanOpContext::create(packed_context, unpacked_context);
+      input_arg.dim() >= 2,
+      "Vulkan Linear op only supports input tensor with dim >= 2");
+  const IntArrayRef input_sizes = input_arg.sizes();
+  const auto d =
+      c10::multiply_integers(input_sizes.cbegin(), input_sizes.end() - 1);
+  return input_arg.reshape({d, input_arg.size(-1)});
 }
 
-Tensor context_run(
+Tensor run_addmm_context(
     const Tensor& input_arg,
-    const c10::impl::GenericList& packed_context,
-    const c10::impl::GenericList& unpacked_context,
     const float alpha,
-    const float beta) {
+    const float beta,
+    const c10::intrusive_ptr<LinearPackedContext>& linear_context) {
   api::Context* const context = api::context();
 
-  const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
+  const Tensor input_arg_2d =
+      input_arg.dim() == 2 ? input_arg : reshape_to_2d(input_arg);
+  const Tensor input =
+      input_arg_2d.is_vulkan() ? input_arg_2d : input_arg_2d.vulkan();
   const vTensor& v_input = convert(input);
 
-  const vTensor& packed_v_weight = convert(packed_context.get(0).toTensor());
-  const vTensor& packed_v_bias = convert(packed_context.get(1).toTensor());
-  const Tensor& unpacked_weight = unpacked_context.get(0).toTensor();
-  const c10::optional<Tensor>& unpacked_bias =
-      unpacked_context.get(1).isTensor() ? unpacked_context.get(1).toTensor()
-                                         : c10::optional<Tensor>();
+  const vTensor& packed_v_weight = convert(
+      linear_context->get_val(LinearPackedContext::Packed::Weight).toTensor());
+  const vTensor& packed_v_bias = convert(
+      linear_context->get_val(LinearPackedContext::Packed::Bias).toTensor());
+  const std::vector<int64_t> unpacked_weight_sizes =
+      linear_context->get_val(LinearPackedContext::Packed::WeightSizes)
+          .toIntVector();
+  const bool bias_defined =
+      linear_context->get_val(LinearPackedContext::Packed::BiasDefined)
+          .toBool();
 
   TORCH_CHECK(
-      usable(input, unpacked_weight, unpacked_bias),
+      usable(input, unpacked_weight_sizes),
       "Vulkan Linear not usable! "
       "Reason: The provided input tensor is either invalid on its own, or its "
       "combination with the provided weight and bias tensors are unsupported by "
@@ -241,12 +233,12 @@ Tensor context_run(
       context,
       {
           v_input.sizes()[Layout::Parameter::height],
-          unpacked_weight.sizes()[Layout::Parameter::width],
+          unpacked_weight_sizes[Layout::Parameter::width],
       },
       input.options(),
   };
 
-  if (unpacked_bias && unpacked_bias->defined()) {
+  if (bias_defined) {
     const struct {
       uvec3 size;
       int32_t K;
@@ -272,7 +264,7 @@ Tensor context_run(
         // global work group size
         {
             safe_downcast<uint32_t>(div_up(
-                unpacked_weight.sizes()[Layout::Parameter::width], INT64_C(2))),
+                unpacked_weight_sizes[Layout::Parameter::width], INT64_C(2))),
             safe_downcast<uint32_t>(
                 div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
             1,
@@ -312,7 +304,7 @@ Tensor context_run(
         // global work group size
         {
             safe_downcast<uint32_t>(div_up(
-                unpacked_weight.sizes()[Layout::Parameter::width], INT64_C(2))),
+                unpacked_weight_sizes[Layout::Parameter::width], INT64_C(2))),
             safe_downcast<uint32_t>(
                 div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
             1,
@@ -332,7 +324,17 @@ Tensor context_run(
         params.buffer());
   }
 
-  return convert(v_output);
+  Tensor output = convert(v_output);
+  if (input_arg.dim() == 2) {
+    return output;
+  } else {
+    std::vector<int64_t> shape;
+    for (const auto i : c10::irange(input_arg.dim() - 1)) {
+      shape.emplace_back(input_arg.size(i));
+    }
+    shape.emplace_back(output.size(-1));
+    return output.reshape(shape);
+  }
 }
 
 Tensor addmm(
@@ -341,26 +343,21 @@ Tensor addmm(
     const Tensor& weight,
     const Scalar& beta,
     const Scalar& alpha) {
-  VulkanOpContext vulkan_context = context_create(weight, bias);
-
-  return context_run(
+  return run_addmm_context(
       input,
-      vulkan_context.get_packed(),
-      vulkan_context.get_unpacked(),
       alpha.to<float>(),
-      beta.to<float>());
+      beta.to<float>(),
+      c10::make_intrusive<LinearPackedContext>(
+          LinearPackedContext(weight, bias)));
 }
 
 Tensor mm(const Tensor& mat1_arg, const Tensor& mat2_arg) {
-  VulkanOpContext vulkan_context =
-      context_create(mat2_arg, c10::optional<Tensor>());
-
-  return context_run(
+  return run_addmm_context(
       mat1_arg,
-      vulkan_context.get_packed(),
-      vulkan_context.get_unpacked(),
       1.0f,
-      1.0f);
+      1.0f,
+      c10::make_intrusive<LinearPackedContext>(
+          LinearPackedContext(mat2_arg, c10::optional<Tensor>())));
 }
 
 #ifdef USE_VULKAN_API
@@ -374,82 +371,46 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 
 } // namespace
 
-VulkanOpContext linear_context_create(
+LinearPackedContext::LinearPackedContext(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias) {
-  return context_create(weight, bias);
+    const c10::optional<Tensor>& bias)
+    : unpacked_{c10::AnyType::get()} {
+  TORCH_CHECK(
+      available(weight, bias),
+      "Vulkan Linear not available! "
+      "Reason: The provided (weight, bias) parameters are either invalid "
+      "individually or their combination is not supported by Vulkan Impl.");
+
+  packed_.reserve(Packed::NumArgs);
+  packed_.emplace_back(convert(pack_weights(weight)));
+  packed_.emplace_back(convert(pack_biases(weight, bias)));
+  packed_.emplace_back(weight.sizes());
+  packed_.emplace_back(bias && bias->defined());
+
+  if (!at::globalContext().releaseWeightsWhenPrepacking()) {
+    unpacked_.reserve(Unpacked::NumArgs);
+    unpacked_.emplace_back(weight);
+    unpacked_.emplace_back(bias);
+  }
 }
 
-Tensor linear_context_run(
-    const Tensor& input_arg,
-    const c10::impl::GenericList& packed_context,
-    const c10::impl::GenericList& unpacked_context,
-    const float alpha,
-    const float beta) {
-  return context_run(input_arg, packed_context, unpacked_context, alpha, beta);
+LinearPackedContext LinearPackedContext::pack(c10::impl::GenericList unpacked) {
+  return LinearPackedContext(
+      unpacked.get(Unpacked::Weight).toTensor(),
+      get_optional_tensor(unpacked, Unpacked::Bias));
 }
 
-c10::intrusive_ptr<VulkanOpContext> create_linear_context(
+c10::intrusive_ptr<LinearPackedContext> create_linear_context(
     Tensor&& weight,
     c10::optional<Tensor>&& bias) {
-  return c10::make_intrusive<VulkanOpContext>(
-      linear_context_create(weight, bias));
+  return c10::make_intrusive<LinearPackedContext>(
+      LinearPackedContext(weight, bias));
 }
 
 Tensor run_linear_context(
     const Tensor& input,
-    const c10::intrusive_ptr<VulkanOpContext>& vulkan_context) {
-  return linear_context_run(
-      input,
-      vulkan_context->get_packed(),
-      vulkan_context->get_unpacked(),
-      1.0,
-      1.0);
-}
-
-/* Backwards compatibility */
-LinearOpContext::LinearOpContext(VulkanOpContext vulkan_context)
-    : vulkan_context_{std::move(vulkan_context)} {}
-
-LinearOpContext LinearOpContext::create(
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias) {
-  return LinearOpContext{linear_context_create(weight, bias)};
-}
-
-Tensor LinearOpContext::run(
-    const Tensor& input_arg,
-    const float alpha,
-    const float beta) const {
-  return linear_context_run(
-      input_arg,
-      vulkan_context_.get_packed(),
-      vulkan_context_.get_unpacked(),
-      alpha,
-      beta);
-}
-
-LinearOpContext::State LinearOpContext::unpack() const {
-  const c10::impl::GenericList unpacked_ =
-      std::get<1>(vulkan_context_.get_state());
-  const Tensor unpacked_weight = unpacked_.get(0).toTensor();
-  const c10::optional<Tensor> unpacked_bias = unpacked_.get(1).isTensor()
-      ? unpacked_.get(1).toTensor()
-      : c10::optional<Tensor>();
-  return LinearOpContext::State{unpacked_weight, unpacked_bias};
-}
-
-c10::intrusive_ptr<LinearOpContext> linear_prepack(
-    Tensor&& weight,
-    c10::optional<Tensor>&& bias) {
-  return c10::make_intrusive<LinearOpContext>(
-      LinearOpContext::create(std::move(weight), std::move(bias)));
-}
-
-Tensor linear_run(
-    const Tensor& input,
-    const c10::intrusive_ptr<LinearOpContext>& context) {
-  return context->run(input, 1.0, 1.0);
+    const c10::intrusive_ptr<LinearPackedContext>& linear_context) {
+  return run_addmm_context(input, 1.0f, 1.0f, linear_context);
 }
 
 } // namespace ops

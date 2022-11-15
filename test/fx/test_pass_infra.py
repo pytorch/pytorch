@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["module: fx"]
 
 import torch
 import torch.fx as fx
@@ -156,3 +156,18 @@ class TestPassManager(TestCase):
             _topological_sort_passes(passes, constraints)
         expected_error_msg = f"Circular dependency detected within the following passes: {passes}"
         self.assertEqual(e.exception.args[0], expected_error_msg)
+
+    def test_pass_manager_error(self):
+        """
+        Tests error catching + debug
+        """
+        def pass_fail(graph_module):
+            raise RuntimeError("bad")
+
+        m = AddModule()
+        traced_m = torch.fx.symbolic_trace(m)
+        pm = PassManager(passes=[replace_add_with_mul_pass, replace_mul_with_div_pass, pass_fail])
+
+        # Comment out this line to see the actual error message
+        with self.assertRaisesRegex(Exception, "pass_fail"):
+            pm(traced_m)

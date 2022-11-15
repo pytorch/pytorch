@@ -2,31 +2,9 @@
 
 #ifdef USE_C10D_UCC
 
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 #include <ucc/api/ucc.h>
-#include <ucp/api/ucp.h>
-
-#define TORCH_UCX_COMM_BITS 15
-#define TORCH_UCX_RANK_BITS 16
-#define TORCH_UCX_TAG_BITS 32
-#define TORCH_UCX_OOB_BITS 1
-
-#define TORCH_UCX_COMM_BITS_OFFSET 0
-#define TORCH_UCX_RANK_BITS_OFFSET TORCH_UCX_COMM_BITS
-#define TORCH_UCX_TAG_BITS_OFFSET (TORCH_UCX_COMM_BITS + TORCH_UCX_RANK_BITS)
-#define TORCH_UCX_OOB_BITS_OFFSET \
-  (TORCH_UCX_COMM_BITS + TORCH_UCX_RANK_BITS + TORCH_UCX_TAG_BITS)
-
-#define TORCH_UCX_MAX_COMM ((((uint64_t)1) << TORCH_UCX_COMM_BITS) - 1)
-#define TORCH_UCX_MAX_RANK ((((uint64_t)1) << TORCH_UCX_RANK_BITS) - 1)
-#define TORCH_UCX_MAX_TAG ((((uint64_t)1) << TORCH_UCX_TAG_BITS) - 1)
-#define TORCH_UCX_MAX_OOB ((((uint64_t)1) << TORCH_UCX_OOB_BITS) - 1)
-
-#define TORCH_UCX_COMM_MASK (TORCH_UCX_MAX_COMM << TORCH_UCX_COMM_BITS_OFFSET)
-#define TORCH_UCX_RANK_MASK (TORCH_UCX_MAX_RANK << TORCH_UCX_RANK_BITS_OFFSET)
-#define TORCH_UCX_TAG_MASK (TORCH_UCX_MAX_TAG << TORCH_UCX_TAG_BITS_OFFSET)
-#define TORCH_UCX_OOB_MASK (TORCH_UCX_MAX_OOB << TORCH_UCX_OOB_BITS_OFFSET)
 
 namespace c10d {
 
@@ -47,29 +25,6 @@ namespace c10d {
           result,                         \
           ": ",                           \
           ucc_status_string(result),      \
-          ", system error code ",         \
-          errno);                         \
-      TORCH_CHECK(false, err);            \
-    }                                     \
-  } while (0)
-
-// Macro to throw on a non-successful UCX return value.
-#define TORCH_UCX_CHECK(_cmd, _error_msg) \
-  do {                                    \
-    ucs_status_t result = _cmd;           \
-    if (result != UCS_OK) {               \
-      std::string err = c10::str(         \
-          "[",                            \
-          std::string(__FILE__),          \
-          ":",                            \
-          std::to_string(__LINE__),       \
-          "] ",                           \
-          logger->getLogPrefix(),         \
-          _error_msg,                     \
-          ", error code ",                \
-          result,                         \
-          ": ",                           \
-          ucs_status_string(result),      \
           ", system error code ",         \
           errno);                         \
       TORCH_CHECK(false, err);            \
@@ -148,21 +103,6 @@ class CommBase {
   virtual ~CommBase() {}
   c10::intrusive_ptr<ProcessGroupUCCLogger> logger;
 };
-
-class CommUCX : public CommBase {
- public:
-  ucp_context_h context{nullptr};
-  ucp_worker_h worker{nullptr};
-
- public:
-  void progress() override;
-  void free_request(ucc_coll_req_h request) override;
-  CommUCX(
-      int comm_size,
-      const c10::intrusive_ptr<ProcessGroupUCCLogger>& logger);
-  ~CommUCX();
-};
-
 class CommUCC : public CommBase {
  public:
   ucc_lib_h lib{nullptr};
@@ -187,6 +127,39 @@ ucc_status_t oob_allgather(
 ucc_status_t oob_allgather_test(void* req);
 
 ucc_status_t oob_allgather_free(void* req);
+
+// trim: remove spaces before and after the string view
+// implementation borrowed from https://stackoverflow.com/a/17976541
+inline c10::string_view trim(c10::string_view s) {
+  auto wsfront = std::find_if_not(
+      s.begin(), s.end(), [](int c) { return std::isspace(c); });
+  auto wsback = std::find_if_not(s.rbegin(), s.rend(), [](int c) {
+                  return std::isspace(c);
+                }).base();
+  return (
+      wsback <= wsfront ? "" : s.substr(wsfront - s.begin(), wsback - wsfront));
+}
+
+inline std::string tolower(c10::string_view s) {
+  std::string result;
+  result.reserve(s.size());
+  for (auto c : s) {
+    result.push_back(std::tolower(c));
+  }
+  return result;
+}
+
+inline std::vector<std::string> parse_list(std::string list) {
+  std::vector<std::string> result;
+  list = tolower(trim(list));
+  while (!list.empty()) {
+    const auto end_pos = list.find_first_of(',');
+    const auto token = trim(list.substr(0, end_pos));
+    result.push_back(std::string(token));
+    list = (end_pos != c10::string_view::npos) ? list.substr(end_pos + 1) : "";
+  }
+  return result;
+}
 
 } // namespace c10d
 

@@ -18,6 +18,11 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
+      arch:
+        required: true
+        type: string
+        description: |
+          Contains the architecture to run the tests with
 
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID:
@@ -27,17 +32,39 @@ on:
         required: true
         description: secret acess key for test stats upload
 
-# For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
-defaults:
-  run:
-    shell: bash -e -l {0}
-
 jobs:
+  # This needs to be run right before the test starts so that it can gather the
+  # latest labels from the PR
+  filter:
+    runs-on: [self-hosted, linux.large]
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
   test:
-    # Don't run on forked repos.
-    if: github.repository_owner == 'pytorch'
+    needs: filter
+    # Don't run on forked repos or empty test matrix
+    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
+    # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
+    # Also ensure that we always run with the right architecture
+    defaults:
+      run:
+        shell: arch -arch ${{ inputs.arch }} bash -e -l {0}
     strategy:
-      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
@@ -61,35 +88,66 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
+      - name: Setup miniconda (x86, py3.8)
+        if: ${{ runner.arch == 'X64' }}
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          auto-update-conda: true
           python-version: 3.8
-          activate-environment: build
-          miniconda-version: 4.7.12
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
+
+      - name: Setup miniconda (arm64, py3.9)
+        if: ${{ runner.arch == 'ARM64' }}
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: 3.9
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
+
+      - name: Start monitoring script
+        id: monitor-script
+        run: |
+          ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Install macOS homebrew dependencies
         run: |
           # Install dependencies
           brew install libomp
+          brew link --force libomp
 
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
+      - name: Pre-process arm64 wheels
+        if: inputs.build-environment == 'macos-12-py3-arm64'
+        run: |
+          # As wheels are cross-compiled they are reported as x86_64 ones
+          ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv "${ORIG_WHLNAME}" "${ARM_WHLNAME}"
+
       - name: Test
         id: test
+        env:
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0'}}
         run: |
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
 
+          # sanitize the input commit message and PR body here:
+          #
           # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
           # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
-          export PR_BODY="${PR_BODY//[$'\n\r']}"
+          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          PR_BODY="${PR_BODY//[$'\n\r']}"
 
-          python3 -mpip install dist/*.whl
-          .jenkins/pytorch/macos-test.sh
+          # then trim all special characters like single and double quotes to avoid unescaped inputs to
+          # wreak havoc internally
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
+          export PR_BODY="${PR_BODY//[\'\"]}"
+          arch
+
+          ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
+          ${CONDA_RUN} .jenkins/pytorch/macos-test.sh
 
       - name: Get workflow job id
         id: get-job-id
@@ -97,6 +155,14 @@ jobs:
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stop monitoring script
+        if: always() && ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        continue-on-error: true
+        env:
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        run: |
+          kill "$MONITOR_SCRIPT_PID"
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
@@ -124,9 +190,6 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
           GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
-        shell: bash
         run: |
           set -x
-          python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.19.12
-          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+          ${CONDA_RUN} python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test

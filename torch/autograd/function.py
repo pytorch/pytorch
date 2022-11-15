@@ -8,6 +8,9 @@ import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional
 
+__all__ = ["FunctionCtx", "BackwardCFunction", "FunctionMeta", "Function", "once_differentiable", "traceable",
+           "InplaceFunction", "NestedIOFunction"]
+
 # Formerly known as: _ContextMethodMixin
 class FunctionCtx(object):
 
@@ -22,6 +25,17 @@ class FunctionCtx(object):
         incorrect gradients and memory leaks, and enable the application of saved
         tensor hooks. See :class:`torch.autograd.graph.saved_tensors_hooks`.
 
+        Note that if intermediary tensors, tensors that are neither inputs
+        nor outputs of :func:`forward`, are saved for backward, your custom Function
+        may not support double backward.
+        Custom Functions that do not support double backward should decorate their
+        :func:`backward` method with ``@once_differentiable`` so that performing
+        double backward raises an error. If you'd like to support double backward,
+        you can either recompute intermediaries based on the inputs during backward
+        or return the intermediaries as the outputs of the custom Function. See the
+        `double backward tutorial <https://pytorch.org/tutorials/intermediate/custom_function_double_backward_tutorial.html>`_
+        for more details.
+
         In :func:`backward`, saved tensors can be accessed through the :attr:`saved_tensors`
         attribute. Before returning them to the user, a check is made to ensure
         they weren't used in any in-place operation that modified their content.
@@ -34,18 +48,19 @@ class FunctionCtx(object):
             >>> class Func(Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x: torch.Tensor, y: torch.Tensor, z: int):
-            >>>         w = x * y * z
-            >>>         out = x * y + y * z + w
+            >>>         w = x * z
+            >>>         out = x * y + y * z + w * y
             >>>         ctx.save_for_backward(x, y, w, out)
             >>>         ctx.z = z  # z is not a tensor
             >>>         return out
             >>>
             >>>     @staticmethod
+            >>>     @once_differentiable
             >>>     def backward(ctx, grad_out):
             >>>         x, y, w, out = ctx.saved_tensors
             >>>         z = ctx.z
             >>>         gx = grad_out * (y + y * z)
-            >>>         gy = grad_out * (x + z + x * z)
+            >>>         gy = grad_out * (x + z + w)
             >>>         gz = None
             >>>         return gx, gy, gz
             >>>
@@ -71,6 +86,7 @@ class FunctionCtx(object):
         See :ref:`extending-autograd` for more details on how to use this method.
 
         Example::
+            >>> # xdoctest: +SKIP
             >>> class Func(torch.autograd.Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x: torch.Tensor, y: torch.Tensor, z: int):
@@ -137,6 +153,7 @@ class FunctionCtx(object):
             >>> b = a * a
             >>> Inplace.apply(a)  # This would lead to wrong gradients!
             >>>                   # but the engine would not know unless we mark_dirty
+            >>> # xdoctest: +SKIP
             >>> b.backward() # RuntimeError: one of the variables needed for gradient
             >>>              # computation has been modified by an inplace operation
 
@@ -302,6 +319,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _Hook
         >>>         return grad_output * result
         >>>
         >>> # Use it by calling the apply method:
+        >>> # xdoctest: +SKIP
         >>> output = Exp.apply(input)
     """
     def __init__(self, *args, **kwargs):

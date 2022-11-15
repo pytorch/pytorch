@@ -22,10 +22,10 @@ class LRNOpBase : public Operator<Context> {
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),
         pre_pad_((size_ - 1) / 2) {
-    DCHECK_GT(size_, 0);
-    DCHECK_EQ(size_ % 2, 1);
-    DCHECK_GT(alpha_, 0);
-    DCHECK_GT(beta_, 0);
+    TORCH_DCHECK_GT(size_, 0);
+    TORCH_DCHECK_EQ(size_ % 2, 1);
+    TORCH_DCHECK_GT(alpha_, 0);
+    TORCH_DCHECK_GT(beta_, 0);
   }
 
   bool RunOnDevice() override {

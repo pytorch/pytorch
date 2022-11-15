@@ -23,11 +23,143 @@ namespace cuda {
 class ViewTransform;
 class Scope;
 class IrCloner;
+struct AnalyzeViewResult;
 
 //! Returns true if both v1 and v2 are scalars, are the same type of scalars,
 //! and dispatches to the inherited Val type's `->sameAs` call. e.g. if both
 //! vals are `Int` will dispatch to v1->as<Int>()->sameAs(v2.as<Int>())
 bool areEqualScalars(Val* v1, Val* v2);
+
+class TORCH_CUDA_CU_API FullOp : public Expr {
+ public:
+  FullOp(IrBuilderPasskey, Val* out, Val* fill_value, DataType dtype);
+
+  FullOp(const FullOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
+
+  bool sameAs(const Statement* other) const override;
+
+  DataType dtype() const {
+    return dtype_;
+  }
+
+  Val* getFillValue() const {
+    return fill_value_;
+  }
+
+ private:
+  const DataType dtype_;
+  Val* fill_value_;
+};
+
+class TORCH_CUDA_CU_API ARangeOp : public Expr {
+ public:
+  ARangeOp(
+      IrBuilderPasskey,
+      Val* out,
+      Val* start,
+      Val* end,
+      Val* step,
+      DataType dtype,
+      Val* linear_index = nullptr);
+
+  ARangeOp(const ARangeOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
+
+  bool sameAs(const Statement* other) const override;
+
+  DataType dtype() const {
+    return dtype_;
+  }
+
+  Val* start() const {
+    return start_;
+  }
+
+  Val* end() const {
+    return end_;
+  }
+
+  Val* step() const {
+    return step_;
+  }
+
+  Val* getLinearLogicalIndex() const {
+    return linear_index_;
+  }
+
+  void setLinearIndex(Val* index) {
+    linear_index_ = index;
+  }
+
+ private:
+  const DataType dtype_;
+  Val* start_;
+  Val* end_;
+  Val* step_;
+  Val* linear_index_ = nullptr;
+};
+
+// Tensor factory for generating identity matrices like
+//
+// [[1, 0, 0],
+//  [0, 1, 0],
+//  [0, 0, 1]]
+//
+// or
+//
+// [[1, 0, 0],
+//  [0, 1, 0],
+//  [0, 0, 1],
+//  [0, 0, 0]]
+//
+// or
+//
+// [[1, 0, 0, 0],
+//  [0, 1, 0, 0],
+//  [0, 0, 1, 0]]
+class TORCH_CUDA_CU_API EyeOp : public Expr {
+ public:
+  EyeOp(
+      IrBuilderPasskey,
+      Val* out,
+      DataType dtype,
+      Val* index1 = nullptr,
+      Val* index2 = nullptr);
+
+  EyeOp(const EyeOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
+
+  bool sameAs(const Statement* other) const override;
+
+  DataType dtype() const {
+    return dtype_;
+  }
+
+  Val* getIndex1() const {
+    return index1_;
+  }
+
+  void setIndex1(Val* index) {
+    index1_ = index;
+  }
+
+  Val* getIndex2() const {
+    return index2_;
+  }
+
+  void setIndex2(Val* index) {
+    index2_ = index;
+  }
+
+ private:
+  const DataType dtype_;
+  Val* index1_ = nullptr;
+  Val* index2_ = nullptr;
+};
 
 //! A specialization for Unary operations. Unary operations take in a single
 //! input and produce a single output. Examples include:
@@ -37,9 +169,16 @@ bool areEqualScalars(Val* v1, Val* v2);
 //!   4) split/merge
 class TORCH_CUDA_CU_API UnaryOp : public Expr {
  public:
-  UnaryOp(IrBuilderPasskey, UnaryOpType type, Val* out, Val* in);
+  UnaryOp(
+      IrBuilderPasskey,
+      UnaryOpType type,
+      Val* out,
+      Val* in,
+      int rng_offset = -1);
 
   UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   Val* out() const {
     return out_;
@@ -70,6 +209,8 @@ class TORCH_CUDA_CU_API BinaryOp : public Expr {
 
   BinaryOp(const BinaryOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   Val* out() const {
     return out_;
   }
@@ -93,6 +234,67 @@ class TORCH_CUDA_CU_API BinaryOp : public Expr {
   Val* const rhs_ = nullptr;
 };
 
+//! A specialization for random number generator (RNG) operations. RNG
+//! operations take in no tensor input and produce a single output.
+class TORCH_CUDA_CU_API RNGOp : public Expr {
+ public:
+  RNGOp(
+      IrBuilderPasskey,
+      RNGOpType type,
+      Val* out,
+      DataType dtype,
+      std::vector<Val*> parameters = {},
+      int rng_offset = 0,
+      Val* philox_index = nullptr);
+
+  RNGOp(const RNGOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
+
+  RNGOpType getRNGOpType() const {
+    return rng_op_type_;
+  }
+
+  DataType dtype() const {
+    return dtype_;
+  }
+
+  int getRNGOffset() const {
+    return rng_offset_;
+  }
+
+  void setRNGOffset(int val) {
+    rng_offset_ = val;
+  }
+
+  const std::vector<Val*>& getParameters() const {
+    return parameters_;
+  }
+
+  const std::vector<Val*>& getShape() const {
+    return shape_;
+  }
+
+  Val* getPhiloxIndex() const {
+    return philox_index_;
+  }
+
+  void setPhiloxIndex(Val* index) {
+    philox_index_ = index;
+  }
+
+  bool sameAs(const Statement* other) const override;
+
+ private:
+  const RNGOpType rng_op_type_;
+  const DataType dtype_;
+  std::vector<Val*> parameters_;
+  std::vector<Val*> shape_;
+  int rng_offset_ = -1;
+  // The index used to feed philox's subsequence and component
+  Val* philox_index_ = nullptr;
+};
+
 //! Broadcast in to match out. is_broadcast_dims are relative to out. Where
 //! is_broadcast_dims.size() == out->nDims().
 class TORCH_CUDA_CU_API BroadcastOp : public Expr {
@@ -107,6 +309,8 @@ class TORCH_CUDA_CU_API BroadcastOp : public Expr {
       std::vector<bool> is_broadcast_dims);
 
   BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   Val* out() const {
     return out_;
@@ -156,6 +360,8 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
 
   ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   Val* out() const {
     return out_;
   }
@@ -204,7 +410,11 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
 
   GroupedReductionOp(const GroupedReductionOp* src, IrCloner* ir_cloner);
 
-  size_t numReductions() const {
+  Expr* shallowCopy() const override;
+
+  //! Number of expressions grouped horizontally. It does not reflect
+  //! iteration grouping.
+  size_t numExprs() const {
     return reduction_op_types_.size();
   }
 
@@ -228,13 +438,139 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
     return is_allreduce_;
   }
 
+  //! Return the index of the corresponding reduction expression for
+  //! a given output val.
+  int getExprIndexOfOutput(Val* output_val) const;
+
   bool sameAs(const Statement* other) const override;
 
  private:
+  //! Reduction ops of grouped reductions
   const std::vector<BinaryOpType> reduction_op_types_;
+  //! Initial values of grouped reductions
   const std::vector<Val*> init_vals_;
   //! True if using the fused reduction kernel
   bool is_allreduce_ = false;
+};
+
+//! Average, variance and N (count) vals for Welford
+class TORCH_CUDA_CU_API WelfordTriplet {
+ public:
+  //! Names of the Welford triplet vals
+  enum class ValName { Avg, Var, N };
+
+  WelfordTriplet() = default;
+
+  WelfordTriplet(Val* avg, Val* var, Val* N) : vals_({avg, var, N}) {}
+
+  Val* const& avg() const {
+    return get(ValName::Avg);
+  }
+
+  Val*& avg() {
+    return get(ValName::Avg);
+  }
+
+  TensorView* avgTv() const {
+    TORCH_INTERNAL_ASSERT(avg()->isA<TensorView>());
+    return avg()->as<TensorView>();
+  }
+
+  Val* const& var() const {
+    return get(ValName::Var);
+  }
+
+  Val*& var() {
+    return get(ValName::Var);
+  }
+
+  TensorView* varTv() const {
+    TORCH_INTERNAL_ASSERT(var()->isA<TensorView>());
+    return var()->as<TensorView>();
+  }
+
+  Val* const& N() const {
+    return get(ValName::N);
+  }
+
+  Val*& N() {
+    return get(ValName::N);
+  }
+
+  TensorView* NTv() const {
+    TORCH_INTERNAL_ASSERT(N()->isA<TensorView>());
+    return N()->as<TensorView>();
+  }
+
+  //! Get the i-th val. Ordering is defined by ValName.
+  Val* const& get(int i) const {
+    return vals_.at(i);
+  }
+
+  //! Get the i-th val. Ordering is defined by ValName.
+  Val*& get(int i) {
+    return vals_.at(i);
+  }
+
+  Val* const& get(ValName name) const {
+    return get(valNameToIndex(name));
+  }
+
+  Val*& get(ValName name) {
+    return get(valNameToIndex(name));
+  }
+
+  //! Get the name of a given val in this triplet. None is returned if
+  //! not found.
+  c10::optional<ValName> getNameOf(Val* val) const;
+
+  //! Return a new triplet with outputs produced by a function applied
+  //! to each of this triplet
+  template <typename Func>
+  WelfordTriplet transform(Func func) const {
+    return WelfordTriplet(func(avg()), func(var()), func(N()));
+  }
+
+  bool sameAs(const WelfordTriplet& other) const;
+
+  WelfordTriplet clone(IrCloner* ir_cloner) const;
+
+  //! Clone a vector of triplets
+  static std::vector<WelfordTriplet> clone(
+      const std::vector<WelfordTriplet>& src,
+      IrCloner* ir_cloner);
+
+  auto begin() {
+    return vals_.begin();
+  }
+
+  auto begin() const {
+    return vals_.begin();
+  }
+
+  auto end() {
+    return vals_.end();
+  }
+
+  auto end() const {
+    return vals_.end();
+  }
+
+ private:
+  //! Convert a given val name to an index
+  static int valNameToIndex(ValName name) {
+    return static_cast<int>(name);
+  }
+
+  //! Convert a given index to a name
+  static ValName indexToValName(int index) {
+    TORCH_INTERNAL_ASSERT(index >= 0 && index < 3, "Invalid index: ", index);
+    return static_cast<ValName>(index);
+  }
+
+ private:
+  //! Holds avg, var and N in this order
+  std::array<Val*, 3> vals_ = {{nullptr, nullptr, nullptr}};
 };
 
 //! Welford Scan operation.
@@ -242,73 +578,92 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
  public:
   WelfordOp(
       IrBuilderPasskey,
+      const WelfordTriplet& output,
+      const WelfordTriplet& input,
+      const WelfordTriplet& init,
+      bool is_fused = false);
+
+  WelfordOp(
+      IrBuilderPasskey,
       Val* out_avg,
       Val* out_var,
       Val* out_N,
-      Val* init_avg,
-      Val* init_var,
-      Val* init_N,
       Val* in_avg,
       Val* in_var,
       Val* in_N,
+      Val* init_avg,
+      Val* init_var,
+      Val* init_N,
       bool is_fused = false);
 
   WelfordOp(const WelfordOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   Val* out() const {
-    return out_avg_;
+    return output().avg();
   }
 
   Val* in() const {
-    return in_avg_;
+    return input().avg();
   }
 
   bool sameAs(const Statement* const other) const override;
 
-  // Welford Accessors
-  // TODO clean up
+  const WelfordTriplet& output() const {
+    return output_;
+  }
+
   Val* outAvg() const {
-    return out_avg_;
+    return output().avg();
   }
 
   Val* outVar() const {
-    return out_var_;
+    return output().var();
   }
 
   Val* outN() const {
-    return out_N_;
+    return output().N();
+  }
+
+  const WelfordTriplet& input() const {
+    return input_;
   }
 
   Val* inAvg() const {
-    return in_avg_;
+    return input().avg();
   }
 
   Val* inVar() const {
-    return in_var_;
+    return input().var();
   }
 
   Val* inN() const {
-    return in_N_;
+    return input().N();
+  }
+
+  const WelfordTriplet& init() const {
+    return init_;
   }
 
   Val* initAvg() const {
-    return init_avg_;
+    return init().avg();
   }
 
   Val* initVar() const {
-    return init_var_;
+    return init().var();
   }
 
   Val* initN() const {
-    return init_N_;
+    return init().N();
   }
 
   bool singleValue() const {
-    return in_N_->isOneInt();
+    return inN()->isOneInt();
   }
 
   bool hasInit() const {
-    return !init_N_->isZeroInt();
+    return !initN()->isZeroInt();
   }
 
   bool isAllreduce() const {
@@ -317,23 +672,142 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
 
   std::vector<Val*> getInitVals() const;
 
+  //! Return the init val for an output val
+  Val* getInitValOfOutput(Val* output_val) const;
+
  private:
-  Val* const out_avg_;
-  Val* const out_var_;
-  Val* const out_N_;
-  Val* const init_avg_;
-  Val* const init_var_;
-  Val* const init_N_;
-  Val* const in_avg_;
-  Val* const in_var_;
-  Val* const in_N_;
+  const WelfordTriplet output_;
+  const WelfordTriplet input_;
+  const WelfordTriplet init_;
   //! True if using the fused reduction kernel (not implemented yet)
+  bool is_allreduce_ = false;
+};
+
+class TORCH_CUDA_CU_API GroupedWelfordOp : public Expr {
+ public:
+  GroupedWelfordOp(
+      IrBuilderPasskey,
+      std::vector<WelfordTriplet> output_vals,
+      std::vector<WelfordTriplet> input_vals,
+      std::vector<WelfordTriplet> init_vals,
+      bool is_allreduce = false,
+      ExprType expr_type = ExprType::GroupedWelfordOp);
+
+  GroupedWelfordOp(const GroupedWelfordOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
+
+  //! Number of expressions grouped horizontally. It does not reflect
+  //! iteration grouping. As horizontal grouping is not supported,
+  //! this always returns 1.
+  size_t numExprs() const {
+    return 1;
+  }
+
+  Val* out(size_t index) const {
+    return outAvg(index);
+  }
+
+  Val* in(size_t index) const {
+    return inAvg(index);
+  }
+
+  bool sameAs(const Statement* const other) const override;
+
+  const std::vector<WelfordTriplet>& outputVals() const {
+    return output_vals_;
+  }
+
+  const std::vector<WelfordTriplet>& inputVals() const {
+    return input_vals_;
+  }
+
+  const std::vector<WelfordTriplet>& initVals() const {
+    return init_vals_;
+  }
+
+  Val* outAvg(size_t index) const {
+    return outputVals().at(index).avg();
+  }
+
+  Val* outVar(size_t index) const {
+    return outputVals().at(index).var();
+  }
+
+  Val* outN(size_t index) const {
+    return outputVals().at(index).N();
+  }
+
+  Val* inAvg(size_t index) const {
+    return inputVals().at(index).avg();
+  }
+
+  Val* inVar(size_t index) const {
+    return inputVals().at(index).var();
+  }
+
+  Val* inN(size_t index) const {
+    return inputVals().at(index).N();
+  }
+
+  Val* initAvg(size_t index) const {
+    return initVals().at(index).avg();
+  }
+
+  Val* initVar(size_t index) const {
+    return initVals().at(index).var();
+  }
+
+  Val* initN(size_t index) const {
+    return initVals().at(index).N();
+  }
+
+  //! Return the index of the corresponding welford expression for
+  //! a given output val
+  int getExprIndexOfOutput(Val* output_val) const;
+
+  //! Return the init val for an output val
+  Val* getInitValOfOutput(Val* output_val) const;
+
+  bool singleValue(size_t index) const {
+    return inN(index)->isOneInt();
+  }
+
+  bool hasInit(size_t index) const {
+    return !initN(index)->isZeroInt();
+  }
+
+  bool isAllreduce() const {
+    return is_allreduce_;
+  }
+
+ private:
+  const std::vector<WelfordTriplet> output_vals_;
+  const std::vector<WelfordTriplet> input_vals_;
+  const std::vector<WelfordTriplet> init_vals_;
+  //! True if using the fused reduction kernel
   bool is_allreduce_ = false;
 };
 
 //! Fused Matmul operation
 class TORCH_CUDA_CU_API MmaOp : public Expr {
  public:
+  // This is a temporary data structure to for the
+  //  scheduling specific parameters that we still need
+  //  to store on an mma node. Eventually will only be
+  //  the mma macro type that will stay on the IR node
+  //  after additional cleaning ups.
+  struct OptionsInMma {
+    MmaOptions::MacroType macro = MmaOptions::MacroType::NoMMA;
+    MmaOptions::MmaInputLayout operand_layout = MmaOptions::MmaInputLayout::TT;
+    int accumulator_stride = 0;
+
+    bool operator==(const OptionsInMma& other) const {
+      return macro == other.macro && operand_layout == other.operand_layout &&
+          accumulator_stride == other.accumulator_stride;
+    }
+  };
+
   MmaOp(IrBuilderPasskey, Val* out, Val* in_a, Val* in_b, Val* init);
 
   MmaOp(
@@ -342,9 +816,11 @@ class TORCH_CUDA_CU_API MmaOp : public Expr {
       Val* in_a,
       Val* in_b,
       Val* init,
-      MmaOptions options);
+      OptionsInMma options);
 
   MmaOp(const MmaOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   Val* out() const {
     return out_;
@@ -375,7 +851,15 @@ class TORCH_CUDA_CU_API MmaOp : public Expr {
   }
 
   void configureOptions(MmaOptions options) {
-    options_ = options;
+    options_ = OptionsInMma();
+    TORCH_INTERNAL_ASSERT(
+        options.macro != MmaOptions::MacroType::NoMMA,
+        "Un-configured mma type from options.");
+    TORCH_INTERNAL_ASSERT(
+        options.accumulator_stride > 0, "Un-configured accumulator stride.");
+    options_->accumulator_stride = options.accumulator_stride;
+    options_->macro = options.macro;
+    options_->operand_layout = options.operand_layout;
   }
 
  private:
@@ -383,7 +867,7 @@ class TORCH_CUDA_CU_API MmaOp : public Expr {
   Val* const in_a_ = nullptr;
   Val* const in_b_ = nullptr;
   Val* const init_ = nullptr;
-  c10::optional<MmaOptions> options_ = c10::nullopt;
+  c10::optional<OptionsInMma> options_ = c10::nullopt;
 };
 
 class TORCH_CUDA_CU_API TransposeOp : public Expr {
@@ -395,6 +879,8 @@ class TORCH_CUDA_CU_API TransposeOp : public Expr {
       std::vector<int64_t> new2old);
 
   TransposeOp(const TransposeOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   TensorView* out() const {
     return out_;
@@ -426,6 +912,8 @@ class TORCH_CUDA_CU_API ExpandOp : public Expr {
 
   ExpandOp(const ExpandOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   TensorView* out() const {
     return out_;
   }
@@ -455,6 +943,8 @@ class TORCH_CUDA_CU_API TernaryOp : public Expr {
       Val* in3);
 
   TernaryOp(const TernaryOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   Val* out() const {
     return out_;
@@ -498,6 +988,8 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
       std::vector<int> pad_width);
 
   ShiftOp(const ShiftOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   Val* out() const {
     return out_;
@@ -548,6 +1040,8 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
 
   GatherOp(const GatherOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   Val* out() const {
     return out_;
   }
@@ -594,6 +1088,8 @@ class TORCH_CUDA_CU_API ViewAsScalar : public Expr {
 
   ViewAsScalar(const ViewAsScalar* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   Val* out() const {
     return out_;
   }
@@ -627,6 +1123,8 @@ class TORCH_CUDA_CU_API ViewOp : public Expr {
 
   ViewOp(const ViewOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   TensorView* out() const {
     return out_;
   }
@@ -651,6 +1149,8 @@ class TORCH_CUDA_CU_API LoadStoreOp : public Expr {
   LoadStoreOp(IrBuilderPasskey, LoadStoreOpType op_type, Val* out, Val* in);
 
   LoadStoreOp(const LoadStoreOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   Val* out() const {
     return out_;
@@ -848,19 +1348,22 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   }
 
   bool hasExpandedExtent() const {
-    TORCH_INTERNAL_ASSERT(
-        expanded_extent_ == nullptr || isBroadcast(),
-        "Expanded extent is only relevant for strided broadcast dimensions",
-        " yet found an expanded extent without a strided broadcast iter type.");
     return expanded_extent_ != nullptr;
   }
 
   // Returns the expanded extent of a strided broadcast entry.
   Val* expandedExtent() const {
     TORCH_INTERNAL_ASSERT(
-        isBroadcast(),
-        "Expanded extent is only relevant for strided broadcast dimensions.");
+        hasExpandedExtent(),
+        "Requested expanded extent, but none found on this dimension.");
     return expanded_extent_;
+  }
+
+  Val* getMaybeExpandedExtent() const {
+    if (hasExpandedExtent()) {
+      return expandedExtent();
+    }
+    return extent();
   }
 
   //! Dimension padding interface:
@@ -913,16 +1416,8 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   }
 
   //! Check if IterDomain is a reduction axis with size of 1, i.e.
-  //! a "squeeze" operator.
-  //!
-  //! NOTE: Detection of trivial reduction here is not
-  //! comprehensive. See detectTrivialReductionDerivedDomains for more
-  //! comprehensive analysis. We typically use this for root domain trivial
-  //! reduction checks. So we ship to the correct scheduler. It may
-  //! not be incredibly robust, but it makes sense to keep it for now.
-  bool isTrivialReduction() const {
-    return isReduction() && extent()->isOneInt();
-  }
+  //! a "squeeze" operator, or solely derived from such axes.
+  bool isTrivialReduction() const;
 
   //! Split for stride by a given factor. It effectively does an inner
   //! split by the factor and sets the inner domain as a Stride
@@ -957,6 +1452,14 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   bool isMma() const {
     return parallel_type_ == ParallelType::Mma;
   }
+
+  //! Applies 2D swizzle on a rectangular tile defined by
+  //!  a pair of iterdomains.
+  static std::pair<IterDomain*, IterDomain*> swizzle(
+      Swizzle2DType swizzle_type,
+      IterDomain* in_x,
+      IterDomain* in_y,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
 
   bool isMmaSwizzled() const {
     return is_mma_swizzled_;
@@ -1161,9 +1664,16 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   // Reorder axes according to map[old_pos] = new_pos
   void reorder(const std::unordered_map<int, int>& old2new);
 
+  //! Applies 2D swizzle on a rectangular tile defined by
+  //!  a pair of iterdomains contained in this domain.
+  void swizzle(
+      Swizzle2DType swizzle_type,
+      int x,
+      int y,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
+
   // Transform TensorView according to merge and split transformations
-  TensorDomain* view(
-      const std::vector<std::shared_ptr<ViewTransform>>& transforms);
+  TensorDomain* view(const AnalyzeViewResult& view_analysis);
 
   TensorDomain* flatten(int64_t start_dim, int64_t end_dim);
 
@@ -1212,6 +1722,8 @@ class TORCH_CUDA_CU_API Split : public Expr {
       Val* stop_offset = nullptr);
 
   Split(const Split* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   IterDomain* outer() const {
     return outer_;
@@ -1273,6 +1785,8 @@ class TORCH_CUDA_CU_API Merge : public Expr {
 
   Merge(const Merge* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   IterDomain* out() const {
     return out_;
   }
@@ -1289,6 +1803,106 @@ class TORCH_CUDA_CU_API Merge : public Expr {
   IterDomain* const out_ = nullptr;
   IterDomain* const outer_ = nullptr;
   IterDomain* const inner_ = nullptr;
+};
+
+//! Applies 2D swizzles on a rectangular tile defined by 2 iterdomains.
+class TORCH_CUDA_CU_API Swizzle2D : public Expr {
+ public:
+  Swizzle2D(
+      IrBuilderPasskey,
+      IterDomain* out_x,
+      IterDomain* out_y,
+      IterDomain* in_x,
+      IterDomain* in_y,
+      Swizzle2DType swizzle_type = Swizzle2DType::NoSwizzle,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
+
+  Swizzle2D(const Swizzle2D* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
+
+  IterDomain* outX() const {
+    return out_x_;
+  }
+
+  IterDomain* outY() const {
+    return out_y_;
+  }
+
+  IterDomain* inX() const {
+    return in_x_;
+  }
+
+  IterDomain* inY() const {
+    return in_y_;
+  }
+
+  auto swizzleType() const {
+    return swizzle_type_;
+  }
+
+  auto swizzleMode() const {
+    return swizzle_mode_;
+  }
+
+  bool sameAs(const Statement* other) const override;
+
+ private:
+  // Output iterdomain pair corresponding
+  //  to the original input iterdomain pair.
+  IterDomain* const out_x_ = nullptr;
+  IterDomain* const out_y_ = nullptr;
+
+  // Input iterdomain pair.
+  IterDomain* const in_x_ = nullptr;
+  IterDomain* const in_y_ = nullptr;
+
+  // The type of predefined 1-to-1 functions
+  //  used for swizzling math.
+  Swizzle2DType swizzle_type_ = Swizzle2DType::NoSwizzle;
+
+  // Swizzle mode of this swizzle instance.
+  // [Note on swizzle mode]
+  // On the current implementations we support two modes of
+  //  swizzle math, namely, data mode and loop mode.
+  // `Data` mode swizzling is a swizzle that will change the
+  //  data layout in shared memory, likely in global memory buffers
+  //  as well in the future. see also IndexSwizzle in index_compute.cpp.
+  //
+  //  Most important use cases are transpose bank conflict removal, and mma
+  //  swizzled shared memory layout. Example illustrated in 1D case:
+  //
+  // for (int i = 0; i<I; i++){
+  //   # This is a `Data` mode swizzle.
+  //  Tshared [swizzled(i)] = Tin[i];
+  // }
+  // # Now Tshared holds swizzled data, i.e. the data layout of
+  //    Tshared does not map to Tin with affine relationships.
+  //
+  // for(int i=0;i<I;i++){
+  //   Tout = Tshared[swizzled(i)];
+  // }
+  //
+  // `Loop` mode swizzling does not affect the data layout of any buffer
+  //   but only permutes the iteration order of serial or parallel loop.
+  // This is useful when we want to designate non-affine mapping of thread
+  //   to data or we want to generate non-affine loops.
+  // Exampe illustrated in 1D case:
+  //   for (int i = 0; i<I; i++){
+  //     # This is a `Loop` mode swizzle
+  //    Tshared [swizzled(i)] = Tin[swizzled(i)];
+  //   }
+  // # Now Tshared holds normal data, i.e. it still has
+  //   the same data layout as if the swizzle wasn't there.
+  //
+  // # Consumers of Tshared does not need to know about the
+  //   loop swizzle at previous op if not inlined.
+  // for(int i=0;i<I;i++){
+  //   Tout = Tshared[i];
+  // }
+  //  TODO: Loop swizzles eventually will be piped through in all mappings
+  //  and replay of the fusion IR infrastructure.
+  SwizzleMode swizzle_mode_ = SwizzleMode::Data;
 };
 
 //! Integer value which has a special name

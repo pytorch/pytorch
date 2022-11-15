@@ -96,6 +96,10 @@ coverage_ignore_functions = [
     "check_error",
     "cudart",
     "is_bf16_supported",
+    # torch.cuda._sanitizer
+    "format_log_message",
+    "zip_arguments",
+    "zip_by_key",
     # torch.distributed.autograd
     "is_available",
     # torch.distributed.elastic.events
@@ -134,8 +138,6 @@ coverage_ignore_functions = [
     "unregister_custom_op_symbolic",
     # torch.ao.quantization
     "default_eval_fn",
-    # torch.ao.quantization.backend_config
-    "validate_backend_config_dict",
     # torch.backends
     "disable_global_flags",
     "flags_frozen",
@@ -189,7 +191,10 @@ coverage_ignore_classes = [
     "DeserializationStorageContext",
     "DeviceObjType",
     "DictType",
+    "DispatchKey",
+    "DispatchKeySet",
     "EnumType",
+    "ExcludeDispatchKeyGuard",
     "ExecutionPlan",
     "FileCheck",
     "FloatType",
@@ -265,6 +270,15 @@ coverage_ignore_classes = [
     "ShortStorage",
     "ShortTensor",
     "cudaStatus",
+    # torch.cuda._sanitizer
+    "Access",
+    "AccessType",
+    "CUDASanitizer",
+    "CUDASanitizerDispatchMode",
+    "CUDASanitizerErrors",
+    "EventHandler",
+    "SynchronizationError",
+    "UnsynchronizedAccessError",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -316,12 +330,13 @@ coverage_ignore_classes = [
     "DDPCommHookType",
     # torch.jit.mobile
     "LiteScriptModule",
-    # torch.nn.quantized.modules
+    # torch.ao.nn.quantized.modules
     "DeQuantize",
     "Quantize",
     # torch.utils.backcompat
     "Warning",
-    "SymbolicIntNode"
+    "SymInt",
+    "SymFloat",
 ]
 
 # The suffix(es) of source filenames.
@@ -381,8 +396,34 @@ todo_include_todos = True
 # Disable docstring inheritance
 autodoc_inherit_docstrings = False
 
-# Disable displaying type annotations, these can be very verbose
-autodoc_typehints = 'none'
+# Show type hints in the description
+autodoc_typehints = 'description'
+
+# Add parameter types if the parameter is documented in the docstring
+autodoc_typehints_description_target = 'documented_params'
+
+# Type aliases for common types
+# Sphinx type aliases only works with Postponed Evaluation of Annotations
+# (PEP 563) enabled (via `from __future__ import annotations`), which keeps the
+# type annotations in string form instead of resolving them to actual types.
+# However, PEP 563 does not work well with JIT, which uses the type information
+# to generate the code. Therefore, the following dict does not have any effect
+# until PEP 563 is supported by JIT and enabled in files.
+autodoc_type_aliases = {
+    "_size_1_t": "int or tuple[int]",
+    "_size_2_t": "int or tuple[int, int]",
+    "_size_3_t": "int or tuple[int, int, int]",
+    "_size_4_t": "int or tuple[int, int, int, int]",
+    "_size_5_t": "int or tuple[int, int, int, int, int]",
+    "_size_6_t": "int or tuple[int, int, int, int, int, int]",
+    "_size_any_opt_t": "int or None or tuple",
+    "_size_2_opt_t": "int or None or 2-tuple",
+    "_size_3_opt_t": "int or None or 3-tuple",
+    "_ratio_2_t": "float or tuple[float, float]",
+    "_ratio_3_t": "float or tuple[float, float, float]",
+    "_ratio_any_t": "float or tuple",
+    "_tensor_list_t": "Tensor or tuple[Tensor]",
+}
 
 # Enable overriding of function signatures in the first line of the docstring.
 autodoc_docstring_signature = True
@@ -492,6 +533,51 @@ def coverage_post_process(app, exception):
             for o in output:
                 f.write(o)
 
+
+def process_docstring(app, what_, name, obj, options, lines):
+    """
+    Custom process to transform docstring lines Remove "Ignore" blocks
+
+    Args:
+        app (sphinx.application.Sphinx): the Sphinx application object
+
+        what (str):
+            the type of the object which the docstring belongs to (one of
+            "module", "class", "exception", "function", "method", "attribute")
+
+        name (str): the fully qualified name of the object
+
+        obj: the object itself
+
+        options: the options given to the directive: an object with
+            attributes inherited_members, undoc_members, show_inheritance
+            and noindex that are true if the flag option of same name was
+            given to the auto directive
+
+        lines (List[str]): the lines of the docstring, see above
+
+    References:
+        https://www.sphinx-doc.org/en/1.5.1/_modules/sphinx/ext/autodoc.html
+        https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
+    """
+    import re
+    remove_directives = [
+        # Remove all xdoctest directives
+        re.compile(r'\s*>>>\s*#\s*x?doctest:\s*.*'),
+        re.compile(r'\s*>>>\s*#\s*x?doc:\s*.*'),
+    ]
+    filtered_lines = [
+        line for line in lines
+        if not any(pat.match(line) for pat in remove_directives)
+    ]
+    # Modify the lines inplace
+    lines[:] = filtered_lines
+
+    # make sure there is a blank line at the end
+    if lines and lines[-1].strip():
+        lines.append('')
+
+
 # Called automatically by Sphinx, making this `conf.py` an "extension".
 def setup(app):
     # NOTE: in Sphinx 1.8+ `html_css_files` is an official configuration value
@@ -508,6 +594,7 @@ def setup(app):
         add_css(css_file)
 
     app.connect("build-finished", coverage_post_process)
+    app.connect('autodoc-process-docstring', process_docstring)
 
 # From PyTorch 1.5, we now use autogenerated files to document classes and
 # functions. This breaks older references since

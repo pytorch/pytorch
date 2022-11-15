@@ -1083,22 +1083,13 @@ class TestNamedTensor(TestCase):
     def test_unflatten(self):
         # test args: tensor, int, namedshape
         self.assertTrue(torch.equal(
-            torch.ones(4).unflatten(0, (('A', 2), ('B', 2))),
+            torch.ones(4, names=('A',)).unflatten('A', (('A', 2), ('B', 2))),
             torch.ones(2, 2, names=('A', 'B'))))
         self.assertTrue(torch.equal(
-            torch.ones(4).unflatten(0, [('A', 2), ('B', 2)]),
+            torch.ones(4, names=('A',)).unflatten('A', [('A', 2), ('B', 2)]),
             torch.ones(2, 2, names=('A', 'B'))))
         self.assertTrue(torch.equal(
-            torch.ones(4).unflatten(0, (['A', 2], ['B', 2])),
-            torch.ones(2, 2, names=('A', 'B'))))
-        self.assertTrue(torch.equal(
-            torch.ones(4).unflatten(-1, (['A', 2], ['B', 2])),
-            torch.ones(2, 2, names=('A', 'B'))))
-        self.assertTrue(torch.equal(
-            torch.ones(4).unflatten(-1, (['A', -1], ['B', 2])),
-            torch.ones(2, 2, names=('A', 'B'))))
-        self.assertTrue(torch.equal(
-            torch.ones(4).unflatten(-1, (['A', 2], ['B', -1])),
+            torch.ones(4, names=('A',)).unflatten('A', (['A', 2], ['B', 2])),
             torch.ones(2, 2, names=('A', 'B'))))
         self.assertTrue(torch.equal(
             torch.ones(2, 10, names=('A', 'B')).unflatten('B', (['B1', -1],)),
@@ -1112,18 +1103,13 @@ class TestNamedTensor(TestCase):
                  .unflatten('B', (['B1', 3], ['B2', -1], ['B3', 4])),
             torch.ones(2, 3, 0, 4, names=('A', 'B1', 'B2', 'B3'))))
 
-        # test args: namedtensor, int, namedshape
-        self.assertTrue(torch.equal(
-            torch.ones(2, 4, names=('A', 'B')).unflatten(1, (('B1', 2), ('B2', 2))),
-            torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
-
         # test args: namedtensor, str, namedshape
         self.assertTrue(torch.equal(
             torch.ones(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2))),
             torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
 
         # test invalid args: namedtensor, str, sizes
-        with self.assertRaisesRegex(TypeError, r"received an invalid combination of arguments"):
+        with self.assertRaisesRegex(TypeError, r"unflatten\(\): argument 'dim' \(position 1\) must be int, not str"):
             torch.tensor([1], names=('A',)).unflatten('A', (1, 1))
 
         # test invalid args: namedtensor, int, sizes
@@ -1195,7 +1181,17 @@ class TestNamedTensor(TestCase):
             check_output(op(t, 1), ['N', 'L'])
             check_output(op(t, -1), ['N', 'C'])
             check_output(op(t, 'C'), ['N', 'L'])
-            if op.__name__ in ['sum']:
+            ops_support_dim_none = [
+                'sum',
+                'mean',
+                'std',
+                'var',
+                'std_mean',
+                'var_mean',
+                'nanmean',
+                'nansum',
+            ]
+            if op.__name__ in ops_support_dim_none:
                 check_output(op(t, None), [])
             else:
                 with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):

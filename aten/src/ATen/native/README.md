@@ -47,10 +47,9 @@ signature.
   if one argument is a `FloatTensor`, all other arguments are checked
   to be `FloatTensor`s).
   `Tensor` or `Tensor?` must sometimes be annotated to indicate aliasing and mutability.
-  In general annotations can be defined via the following four situations:
-  - `Tensor(a)` - `a` is a set of Tensors that may alias to the same data.
+  In general annotations can be defined via the following situations:
+  - `Tensor(a)` - `a` is a set of Tensors that may alias to the same data. The set could have a size of one.
   - `Tensor(a!)` - members of `a` may be written to thus mutating the underlying data.
-  - `Tensor!` - shorthand for Tensor(fresh\_identifier!)
   - `Tensor(a! -> a|b)` - Tensor is in set `a`, written to, and after the write is in set `a` AND `b`.
   For more details on when and why this needs to happen, please see the section on annotations.
 - `Tensor[]`.  A `Tensor[]` argument translates into a C++ argument of type `ArrayRef<Tensor>`
@@ -445,7 +444,7 @@ By default, ATen code generation will generate device check,
 which will ensure all the tensor parameters passed to kernel are
 on the same device.
 
-However, in some cases, checking the device is unncessary, because,
+However, in some cases, checking the device is unnecessary, because,
 e.g., you call a function allows to work on multiple devices.
 In that case, code generation of the device check can be disabled by adding
 `device_check: NoCheck` to your function definition.
@@ -475,6 +474,28 @@ With this flag set, we will generate arguments for Tensors whose underlying data
 as `Tensor &`, which 1) allowed changing which `TensorImpl` the `Tensor` itself referred to and 2)
 was not necessary to allow the underlying data to change. (This was like using `T * const` when we
 wanted `const T*`.)
+
+### `autogen`
+
+```
+- func: my_op_(Tensor(a!) self) -> Tensor(a!)
+...
+  autogen: my_op, my_op.out
+```
+
+`autogen` keyword is being used to specify which native function the codegen system should generate
+implementations for.
+* For an in-place variant of a native function (op name ends with an `_`), we will generate a functional
+variant and an out= variant.
+* If a functional variant is given, we generate an out= variant.
+* We don't support `autogen` for view ops, ops that bypass the dispatcher as well as composite ops.
+
+We also generate kernels for generated ops, which merely copy and return the result from the base ops.
+These generated kernels can be found in `<gen-out>/aten/src/ATen/CompositeViewCopyKernels.cpp`.
+
+Also notice that for new operators being added to `native_functions.yaml`, if they satisfy the requirements
+mentioned above, they should include `autogen` keyword, since functionalization depends on it. We will
+enforce this in codegen.
 
 
 ## Writing an implementation in C++
@@ -534,7 +555,7 @@ Here're steps to follow to decide the right dispatch keyword:
       Note: to support training, you're required to write a formula in
       derivatives.yaml since your backend implementations don't support autograd.
 
-    - Yes: you're likely calling other `at::` ops in the implemetation. Go to step 2.
+    - Yes: you're likely calling other `at::` ops in the implementation. Go to step 2.
 
 2. Think about training: does your kernel support autograd? [check autograd support](#will-your-function-be-automatically-differentiable)
     - Yes: in other words, you're providing a `CompositeImplicitAutograd` kernel which supports both inference and autograd.
@@ -588,7 +609,7 @@ It shows for a certain operator, what the computed dispatch table looks like aft
 4. TODO: AutogradCPUOrCUDA
 
 Note that in native_functions.yaml you can mix using backend keywords and alias keywords above for one op:
-  - direct registration to backend always has higher precendence than alias
+  - direct registration to backend always has higher precedence than alias
   - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `CompositeExplicitAutograd > CompositeImplicitAutograd`,
     e.g. adding both `CompositeImplicitAutograd` and `CompositeExplicitAutograd` kernels for one op will completely ignore `CompositeImplicitAutograd` kernel for
     both inference and training. Thus this will trigger an error when native_functions.yaml is parsed.
@@ -606,7 +627,8 @@ the torch._C._nn (marked with `python_module: nn`),
 torch._C._fft (marked with `python_module: fft`),
 torch._C._linalg (marked with `python_module: linalg`) objects,
 torch._C._sparse (marked with `python_module: sparse`) objects,
-or torch._C._special (marked with `python_module: special`) objects.
+torch._C._special (marked with `python_module: special`) objects,
+or torch._C._nested (marked with `python_module: nested`) objects.
 
 ### Undefined tensor conventions
 

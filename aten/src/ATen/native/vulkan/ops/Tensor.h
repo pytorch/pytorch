@@ -2,7 +2,7 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <c10/util/accumulate.h>
@@ -34,10 +34,12 @@ class vTensorStorage final {
   vTensorStorage(
       api::Context* context,
       IntArrayRef sizes,
+      const api::StorageType storage_type,
       const TensorOptions& options);
   vTensorStorage(
       api::Context* context,
       IntArrayRef sizes,
+      const api::StorageType storage_type,
       const TensorOptions& options,
       double q_scale,
       int64_t q_zero_point);
@@ -66,6 +68,7 @@ class vTensorStorage final {
   int64_t q_zero_point{0u};
 
   // Image Texture
+  api::StorageType storage_type_;
   mutable api::VulkanImage image_;
 
   // Last Access - used to insert memory barriers
@@ -80,6 +83,11 @@ class vTensorStorage final {
 
   // Validation
   void verify() const;
+
+ public:
+  inline VkFormat texture_format() {
+    return image_.format();
+  }
 };
 
 class vTensor final {
@@ -91,9 +99,24 @@ class vTensor final {
       api::Context* context,
       IntArrayRef sizes,
       const TensorOptions& options);
+
+  vTensor(
+      api::Context* context,
+      IntArrayRef sizes,
+      const api::StorageType storage_type,
+      const TensorOptions& options);
+
   vTensor(
       api::Context* const context,
       const IntArrayRef sizes,
+      const TensorOptions& options,
+      double q_scale,
+      int64_t q_zero_point);
+
+  vTensor(
+      api::Context* const context,
+      const IntArrayRef sizes,
+      const api::StorageType storage_type,
       const TensorOptions& options,
       double q_scale,
       int64_t q_zero_point);
@@ -123,6 +146,10 @@ class vTensor final {
    Texture Access
   */
 
+  inline api::StorageType storage_type() const {
+    return view_->storage_type_;
+  }
+
   api::VulkanImage& image(api::PipelineBarrier&, const api::PipelineStageFlags)
       const&;
 
@@ -139,6 +166,13 @@ class vTensor final {
     return view_->extents_;
   }
 
+  /*
+   * Get a c10::ScalarType that corresponds to the image format of the texture
+   */
+  inline c10::ScalarType texture_dtype() const {
+    return api::c10_scalartype(view_->texture_format());
+  }
+
   inline const TensorOptions& options() const {
     return view_->options_;
   }
@@ -151,16 +185,36 @@ class vTensor final {
     return view_->strides_;
   }
 
+  inline void set_is_quantized() const {
+    view_->is_quantized_ = true;
+  }
+
   inline bool is_quantized() const {
     return view_->is_quantized_;
+  }
+
+  inline void set_scale(const double q_scale) const {
+    view_->q_scale = q_scale;
   }
 
   inline double get_scale() const {
     return view_->q_scale;
   }
 
+  inline float get_scale_float() const {
+    return api::utils::safe_downcast<float>(view_->q_scale);
+  }
+
+  inline void set_zero_point(const int64_t q_zero_point) const {
+    view_->q_zero_point = q_zero_point;
+  }
+
   inline int64_t get_zero_point() const {
     return view_->q_zero_point;
+  }
+
+  inline int32_t get_zero_point_int32() const {
+    return api::utils::safe_downcast<int32_t>(view_->q_zero_point);
   }
 
   inline size_t nbytes() const {
@@ -168,10 +222,28 @@ class vTensor final {
         c10::multiply_integers(sizes());
   }
 
-  inline VkDeviceSize buffer_bytes() {
-    return c10::elementSize(c10::typeMetaToScalarType(options().dtype())) *
-        view_->extents_.data[0u] * view_->extents_.data[1u] *
+  /*
+   * Number of texels in the image texture.
+   */
+  inline VkDeviceSize numtexels() {
+    return view_->extents_.data[0u] * view_->extents_.data[1u] *
+        view_->extents_.data[2u];
+  }
+
+  /*
+   * Number of "cells" in the image texture. 4 cells make up a texel.
+   */
+  inline VkDeviceSize numcells() {
+    return view_->extents_.data[0u] * view_->extents_.data[1u] *
         (4u * view_->extents_.data[2u]);
+  }
+
+  /*
+   * Number of bytes needed for a buffer to receive all data in the texture
+   */
+  inline VkDeviceSize buffer_bytes() {
+    return c10::elementSize(this->texture_dtype()) * view_->extents_.data[0u] *
+        view_->extents_.data[1u] * (4u * view_->extents_.data[2u]);
   }
 };
 

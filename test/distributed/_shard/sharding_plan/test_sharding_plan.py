@@ -8,7 +8,6 @@ import torch.nn as nn
 import torch.distributed as dist
 from torch.distributed._shard.sharded_optim import (
     ShardedOptimizer,
-    named_params_with_sharded_tensor,
 )
 from torch.testing._internal.common_distributed import (
     requires_nccl,
@@ -19,7 +18,10 @@ from torch.distributed._shard.sharding_plan import ShardingPlan, ShardingPlanner
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
-from torch.testing._internal.common_utils import TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    TEST_WITH_DEV_DBG_ASAN,
+    run_tests,
+)
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     TEST_GPU_NUM,
     ShardedTensorTestBase,
@@ -169,7 +171,7 @@ class TestShardingPlan(ShardedTensorTestBase):
             optim = torch.optim.SGD(local_megatron_lm.parameters(), lr=0.1)
             optim.step()
             sharded_optim = ShardedOptimizer(
-                dict(named_params_with_sharded_tensor(megatron_lm)),
+                dict(megatron_lm.named_parameters()),
                 torch.optim.SGD,
                 lr=0.1,
             )
@@ -360,3 +362,6 @@ class TestShardingPlan(ShardedTensorTestBase):
 
         if self.rank >= 2:
             shard_module(megatron_lm, sharding_plan, process_group=pg)
+
+if __name__ == "__main__":
+    run_tests()

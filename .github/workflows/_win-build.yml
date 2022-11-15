@@ -23,6 +23,18 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
+      test-matrix:
+        required: false
+        type: string
+        description: |
+          An option JSON description of what test configs to run later on. This
+          is moved here from the Linux test workflow so that we can apply filter
+          logic using test-config labels earlier and skip unnecessary builds
+
+    outputs:
+      test-matrix:
+        value: ${{ inputs.test-matrix }}
+        description: An optional JSON description of what test configs to run later on.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -46,7 +58,7 @@ jobs:
           cuda-version: ${{ inputs.cuda-version }}
 
       - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -61,7 +73,17 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Apply the filter logic to the build step too if the test-config label is already there
+      - name: Select all requested test configurations (if the test matrix is available)
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
       - name: Build
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
+        id: build
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
@@ -72,6 +94,7 @@ jobs:
           CUDA_VERSION: ${{ inputs.cuda-version }}
           PYTHON_VERSION: "3.8"
           SCCACHE_BUCKET: "ossci-compiler-cache"
+          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VC_YEAR: "2019"
@@ -88,6 +111,7 @@ jobs:
 
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3
+        if: steps.build.outcome != 'skipped'
         uses: seemethere/upload-artifact-s3@v5
         with:
           retention-days: 14
@@ -96,6 +120,7 @@ jobs:
           path: C:\${{ github.run_id }}\build-results
 
       - name: Upload sccache stats
+        if: steps.build.outcome != 'skipped'
         uses: seemethere/upload-artifact-s3@v5
         with:
           s3-prefix: |

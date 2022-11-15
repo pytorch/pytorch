@@ -3,6 +3,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/core/jit_type_base.h>
 #include <c10/util/irange.h>
 #include <c10/util/variant.h>
 #include <pybind11/pybind11.h>
@@ -11,9 +12,8 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Generator.h>
-#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/utils/python_numbers.h>
-#include <torch/csrc/utils/python_tuples.h>
+#include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 
 #include <stdexcept>
 #include <utility>
@@ -33,26 +33,17 @@ namespace detail {
 
 // torch.Tensor <-> at::Tensor conversions (without unwrapping)
 template <>
-struct type_caster<at::Tensor> {
+struct TORCH_PYTHON_API type_caster<at::Tensor> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(at::Tensor, _("at::Tensor"));
 
-  bool load(handle src, bool) {
-    PyObject* obj = src.ptr();
-    if (THPVariable_Check(obj)) {
-      value = THPVariable_Unpack(obj);
-      return true;
-    }
-    return false;
-  }
+  bool load(handle src, bool);
 
   static handle cast(
       const at::Tensor& src,
       return_value_policy /* policy */,
-      handle /* parent */) {
-    return handle(THPVariable_Wrap(src));
-  }
+      handle /* parent */);
 };
 
 // torch._StorageBase <-> at::Storage
@@ -103,46 +94,41 @@ struct type_caster<at::Generator> {
 };
 
 template <>
-struct type_caster<at::IntArrayRef> {
+struct TORCH_PYTHON_API type_caster<at::IntArrayRef> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(at::IntArrayRef, _("at::IntArrayRef"));
 
+  bool load(handle src, bool);
+  static handle cast(
+      at::IntArrayRef src,
+      return_value_policy /* policy */,
+      handle /* parent */);
+
+ private:
+  std::vector<int64_t> v_value;
+};
+
+template <>
+struct TORCH_PYTHON_API type_caster<at::MemoryFormat> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(at::MemoryFormat, _("at::MemoryFormat"));
+
   bool load(handle src, bool) {
-    PyObject* source = src.ptr();
-    auto tuple = PyTuple_Check(source);
-    if (tuple || PyList_Check(source)) {
-      // NOLINTNEXTLINE(bugprone-branch-clone)
-      const auto size =
-          tuple ? PyTuple_GET_SIZE(source) : PyList_GET_SIZE(source);
-      v_value.resize(size);
-      for (const auto idx : c10::irange(size)) {
-        PyObject* obj = tuple ? PyTuple_GET_ITEM(source, idx)
-                              : PyList_GET_ITEM(source, idx);
-        if (THPVariable_Check(obj)) {
-          v_value[idx] = THPVariable_Unpack(obj).item<int64_t>();
-        } else if (PyLong_Check(obj)) {
-          // use THPUtils_unpackLong after it is safe to include
-          // python_numbers.h
-          v_value[idx] = THPUtils_unpackLong(obj);
-        } else {
-          return false;
-        }
-      }
-      value = v_value;
+    PyObject* obj = src.ptr();
+    if (THPMemoryFormat_Check(obj)) {
+      value = reinterpret_cast<THPMemoryFormat*>(obj)->memory_format;
       return true;
     }
     return false;
   }
   static handle cast(
-      at::IntArrayRef src,
+      at::MemoryFormat src,
       return_value_policy /* policy */,
       handle /* parent */) {
-    return handle(THPUtils_packInt64Array(src.size(), src.data()));
+    return handle(torch::utils::getTHPMemoryFormat(src));
   }
-
- private:
-  std::vector<int64_t> v_value;
 };
 
 template <>
@@ -172,6 +158,57 @@ struct type_caster<at::Device> {
       handle /* parent */) {
     return handle(THPDevice_New(src));
   }
+};
+
+template <>
+struct type_caster<c10::DispatchKey>
+    : public type_caster_base<c10::DispatchKey> {
+  using base = type_caster_base<c10::DispatchKey>;
+  c10::DispatchKey tmp;
+
+ public:
+  bool load(handle src, bool convert) {
+    if (base::load(src, convert)) {
+      return true;
+    } else if (py::isinstance(
+                   src, py::module_::import("builtins").attr("str"))) {
+      tmp = c10::parseDispatchKey(py::cast<std::string>(src));
+      value = &tmp;
+      return true;
+    }
+    return false;
+  }
+
+  static handle cast(
+      c10::DispatchKey src,
+      return_value_policy policy,
+      handle parent) {
+    return base::cast(src, policy, parent);
+  }
+};
+
+template <>
+struct type_caster<c10::SymInt> {
+ public:
+  PYBIND11_TYPE_CASTER(c10::SymInt, _("SymInt"));
+  bool load(py::handle src, bool);
+
+  static py::handle cast(
+      c10::SymInt si,
+      return_value_policy /* policy */,
+      handle /* parent */);
+};
+
+template <>
+struct type_caster<c10::SymFloat> {
+ public:
+  PYBIND11_TYPE_CASTER(c10::SymFloat, _("SymFloat"));
+  bool load(py::handle src, bool);
+
+  static py::handle cast(
+      c10::SymFloat si,
+      return_value_policy /* policy */,
+      handle /* parent */);
 };
 
 // Pybind11 bindings for our optional and variant types.

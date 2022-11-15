@@ -32,6 +32,7 @@ class Multinomial(Distribution):
 
     Example::
 
+        >>> # xdoctest: +SKIP("FIXME: found invalid values")
         >>> m = Multinomial(100, torch.tensor([ 1., 1., 1., 1.]))
         >>> x = m.sample()  # equal probability of 0, 1, 2, 3
         tensor([ 21.,  24.,  30.,  25.])

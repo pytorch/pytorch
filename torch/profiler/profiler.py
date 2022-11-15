@@ -9,12 +9,12 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
-from torch._C._autograd import (
-    _ExperimentalConfig,
+from torch._C._profiler import (
     _add_execution_graph_observer,
-    _remove_execution_graph_observer,
-    _enable_execution_graph_observer,
     _disable_execution_graph_observer,
+    _enable_execution_graph_observer,
+    _ExperimentalConfig,
+    _remove_execution_graph_observer,
 )
 from torch.autograd import ProfilerActivity, kineto_available
 
@@ -108,6 +108,17 @@ class _KinetoProfile(object):
     def start_trace(self):
         assert self.profiler is not None
         self.profiler._start_trace()
+
+        if self.profile_memory:
+            self.add_metadata_json("profile_memory", "1")
+        if self.with_stack:
+            self.add_metadata_json("with_stack", "1")
+        if self.record_shapes:
+            self.add_metadata_json("record_shapes", "1")
+        if self.with_modules:
+            self.add_metadata_json("with_modules", "1")
+        if self.with_flops:
+            self.add_metadata_json("with_flops", "1")
 
         if kineto_available():
             dist_info = self._get_distributed_info()
@@ -281,9 +292,9 @@ class profile(_KinetoProfile):
         activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
             ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
             Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
-        schedule (callable): callable that takes step (int) as a single parameter and returns
+        schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
-        on_trace_ready (callable): callable that is called at each step when ``schedule``
+        on_trace_ready (Callable): callable that is called at each step when ``schedule``
             returns ``ProfilerAction.RECORD_AND_SAVE`` during the profiling.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation.

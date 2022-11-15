@@ -318,6 +318,7 @@ std::ostream& Node::print(
   if (kind() == prim::PythonOp) {
     auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
     out << "^" << pyOp->name();
+    printAttributes(out, /*ignore_subgraph=*/false);
     pyOp->writeScalars(out);
   } else if (hasAttribute(attr::Subgraph) && groups) {
     out << kind().toQualString() << "_" << groups->size();
@@ -1008,6 +1009,9 @@ Value* Node::namedInput(Symbol name) const {
 }
 
 bool Node::matches(const FunctionSchema& schema) const {
+  if (isBlockListedSchema(schema)) {
+    return false;
+  }
   // wrong name
   if (kind().toQualString() != schema.name()) {
     return false;
@@ -1144,40 +1148,25 @@ Operation Node::getOperation() const {
 }
 
 bool Node::isNondeterministic() const {
-  static const OperatorSet nondeterministic_ops = {
-      "aten::dropout(Tensor input, float p, bool train) -> Tensor",
-      "aten::_fused_dropout(Tensor self, float p, Generator? generator) -> (Tensor, Tensor)",
-      "aten::_standard_gamma(Tensor self, Generator? generator) -> Tensor",
-      "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
-      "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
-      "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator? generator) -> Tensor",
-      "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)",
-      "aten::normal(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
-      "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
-      "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
-      "aten::poisson(Tensor self, Generator? generator) -> Tensor",
-      "aten::binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor",
-      "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
-      "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
-      "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::rand_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randint_like(Tensor self, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randint_like(Tensor self, int low, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randn_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
-
-  if (!isMemberOf(nondeterministic_ops)) {
+  const auto schema = maybeSchema();
+  if (!kind().is_aten()) {
     return false;
   }
-  // Dropout with train = False is deterministic
-  if (matches("aten::dropout(Tensor input, float p, bool train) -> Tensor") &&
-      is_constant(attr::train) && !get<bool>(attr::train).value()) {
+  // All aten ops are expecte to have a schema. However this is left as a
+  // warning instead of an assert to ensure that previous use cases do not
+  // break.
+  if (!schema) {
+    TORCH_WARN("aten Schema not found.");
     return false;
   }
-  return true;
+  torch::utils::SchemaInfo schema_info(*schema);
+  if (hasNamedInput("train")) {
+    auto value = constant_as<bool>(namedInput("train"));
+    if (value.has_value()) {
+      schema_info.addArgumentValue("train", *value);
+    }
+  }
+  return schema_info.is_nondeterministic();
 }
 
 bool Node::hasSideEffects() const {

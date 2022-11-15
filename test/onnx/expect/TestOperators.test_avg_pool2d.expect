@@ -1,6 +1,6 @@
 ir_version: 7
 producer_name: "pytorch"
-producer_version: "CURRENT_VERSION"
+producer_version: "1.14.0"
 graph {
   node {
     output: "onnx::Pad_1"
@@ -33,11 +33,6 @@ graph {
     output: "3"
     name: "AveragePool_2"
     op_type: "AveragePool"
-    attribute {
-      name: "ceil_mode"
-      i: 0
-      type: INT
-    }
     attribute {
       name: "kernel_shape"
       ints: 3
@@ -106,5 +101,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }

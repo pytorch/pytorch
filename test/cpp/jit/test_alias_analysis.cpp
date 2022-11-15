@@ -1607,5 +1607,90 @@ TEST(AliasRegistrationTest, PureWithAnnotationsShouldError2) {
       [&graph] { AliasDb aliasDb(graph); },
       "Tried to register operator foo::rand12(Tensor(a) arg1) -> Tensor(b) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
+
+TEST(IRNonDeterminismTest, Basic) {
+  auto graph = std::make_shared<Graph>();
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %0 : int = prim::Constant[value=0]()
+    %1 : NoneType = prim::Constant()
+    %2 : Tensor = aten::bernoulli(%x, %1)
+    %3 : Tensor = aten::add(%x, %2, %0)
+    return (%3))IR";
+  parseIR(graph_string, graph.get());
+
+  for (Node* n : graph->nodes()) {
+    if (n->kind() == aten::bernoulli) {
+      ASSERT_TRUE(n->isNondeterministic());
+    } else {
+      ASSERT_FALSE(n->isNondeterministic());
+    }
+  }
+}
+
+TEST(IRNonDeterminismTest, DropoutSpecialCase) {
+  auto graph = std::make_shared<Graph>();
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %0 : bool = prim::Constant[value=0]()
+    %1 : bool = prim::Constant[value=1]()
+    %3 : int = prim::Constant[value=1]()
+    %3 : float = prim::Constant[value=1.0]()
+    %4 : Tensor = aten::dropout(%x, %3, %0)
+    %5 : Tensor = aten::dropout(%x, %3, %1)
+    %6 : Tensor = aten::add(%4, %5, %3)
+    return (%6))IR";
+  parseIR(graph_string, graph.get());
+
+  bool train = false;
+  for (Node* n : graph->nodes()) {
+    if (n->kind() == aten::dropout) {
+      if (!train) {
+        ASSERT_FALSE(n->isNondeterministic());
+        train = true;
+      } else {
+        ASSERT_TRUE(n->isNondeterministic());
+      }
+    } else {
+      ASSERT_FALSE(n->isNondeterministic());
+    }
+  }
+}
+
+TEST(NonDeterminismBackwardsCompatibility, BackwardsCompatibility) {
+  static const std::vector<std::string> nondeterministic_ops = {
+      "aten::dropout(Tensor input, float p, bool train) -> Tensor",
+      "aten::_fused_dropout(Tensor self, float p, Generator? generator) -> (Tensor, Tensor)",
+      "aten::_standard_gamma(Tensor self, Generator? generator) -> Tensor",
+      "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
+      "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
+      "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator? generator) -> Tensor",
+      "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)",
+      "aten::normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
+      "aten::normal.float_Tensor(float mean, Tensor std, *, Generator? generator) -> Tensor",
+      "aten::normal.Tensor_float(Tensor mean, float std, *, Generator? generator) -> Tensor",
+      "aten::poisson(Tensor self, Generator? generator) -> Tensor",
+      "aten::binomial(Tensor count, Tensor prob, Generator? generator=None) -> Tensor",
+      "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
+      "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
+      "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::rand_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::randint_like(Tensor self, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like(Tensor self, int low, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::randn_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
+  for (const std::string& op : nondeterministic_ops) {
+    const c10::FunctionSchema& schema = torch::jit::parseSchema(op);
+    const auto& op_handle = c10::Dispatcher::singleton().findOp(
+        c10::OperatorName(schema.name(), schema.overload_name()));
+    ASSERT_TRUE(op_handle->hasTag(at::Tag::nondeterministic_seeded));
+  }
+}
+
 } // namespace jit
 } // namespace torch

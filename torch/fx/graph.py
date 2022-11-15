@@ -1,9 +1,10 @@
+from collections import defaultdict
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
-import contextlib
 
+import contextlib
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
 from dataclasses import dataclass
 from contextlib import contextmanager
@@ -16,6 +17,7 @@ import math
 import warnings
 import inspect
 
+__all__ = ["PythonCode", "CodeGen", "Graph"]
 
 if TYPE_CHECKING:
     from .graph_module import GraphModule  # noqa: F401
@@ -92,7 +94,11 @@ def _is_from_torch(obj: Any) -> bool:
     module_name = getattr(obj, '__module__', None)
     if module_name is not None:
         base_module = module_name.partition('.')[0]
-        return base_module == 'torch'
+        return (
+            base_module == 'torch' and
+            not module_name.startswith("torch._dynamo.") and
+            not module_name.startswith("torch._inductor.")
+        )
 
     name = getattr(obj, '__name__', None)
     # exclude torch because torch.torch.torch.torch works. idk mang
@@ -115,7 +121,8 @@ class _Namespace:
     def __init__(self):
         self._obj_to_name: Dict[Any, str] = {}
         self._unassociated_names = set()
-        self._used_names: Dict[str, int] = {}
+        self._used_names: Set[str] = set()
+        self._base_count: Dict[str, int] = defaultdict(int)
 
         self._illegal_char_regex = re.compile('[^0-9a-zA-Z_]+')
         self._name_suffix_regex = re.compile(r"(.*)_(\d+)$")
@@ -133,6 +140,9 @@ class _Namespace:
         # delete all characters that are illegal in a Python identifier
         candidate = self._illegal_char_regex.sub('_', candidate)
 
+        if not candidate:
+            candidate = '_unnamed'
+
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
@@ -145,13 +155,15 @@ class _Namespace:
             num = int(num_str)
 
         candidate = base if num is None else f'{base}_{num}'
-        num = num if num else 0
+        if not num:
+            num = self._base_count[base]
 
         while candidate in self._used_names or self._is_illegal_name(candidate, obj):
             num += 1
             candidate = f'{base}_{num}'
 
-        self._used_names.setdefault(candidate, 0)
+        self._used_names.add(candidate)
+        self._base_count[base] = num
         if obj is None:
             self._unassociated_names.add(candidate)
         else:
@@ -183,6 +195,21 @@ class _Namespace:
 
         return False
 
+dtype_abbrs = {
+    torch.bfloat16: 'bf16',
+    torch.float64: 'f64',
+    torch.float32: 'f32',
+    torch.float16: 'f16',
+    torch.complex32: 'c32',
+    torch.complex64: 'c64',
+    torch.complex128: 'c128',
+    torch.int8: 'i8',
+    torch.int16: 'i16',
+    torch.int32: 'i32',
+    torch.int64: 'i64',
+    torch.bool: 'b8',
+    torch.uint8: 'u8',
+}
 
 @compatibility(is_backward_compatible=True)
 @dataclass
@@ -294,7 +321,7 @@ class CodeGen(object):
         """
         return []
 
-    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace) -> PythonCode:
+    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
@@ -408,9 +435,76 @@ class CodeGen(object):
             else:
                 body.append('\n')
 
+        prev_stacktrace = None
+
+        def append_stacktrace_summary(node : Node):
+            """
+            Append a summary of the stacktrace to the generated code. This is
+            useful for debugging.
+            """
+            nonlocal prev_stacktrace
+            pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
+
+            if node.op not in {'placeholder', 'output'}:
+                if node.stack_trace:
+                    if node.stack_trace != prev_stacktrace:
+                        prev_stacktrace = node.stack_trace
+
+                        lines = node.stack_trace.strip().split('\n')
+                        idx = 0
+                        context_lines = []
+                        while idx < len(lines):
+                            line = lines[idx].strip()
+                            if line.startswith('File '):
+                                break
+
+                            # Skip printing module stack
+                            if not line.startswith("Module stack"):
+                                context_lines.append(line)
+                            idx += 1
+
+                        summary_lines = []
+                        if context_lines:
+                            summary_lines.append(', '.join(context_lines))
+
+                        if idx + 1 < len(lines):
+                            matches = pattern.match(lines[idx].strip())
+                            if matches:
+                                file = matches.group(1)
+                                lineno = matches.group(2)
+                                lineage = f'File: {file}:{lineno}'
+                                summary_lines.append(lineage)
+
+                            code = f"code: {lines[idx + 1].strip()}"
+                            summary_lines.append(code)
+
+                        summary_str = ', '.join(summary_lines)
+                        body.append(f'\n# {summary_str}\n')
+                elif prev_stacktrace != "":
+                    prev_stacktrace = ""
+                    body.append('\n# No stacktrace found for following nodes\n')
+
+        def stringify_shape(shape : torch.Size) -> str:
+            return f"[{', '.join(str(x) for x in shape)}]"
 
         def emit_node(node : Node):
             maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
+
+            if verbose:
+                # override annotation with more detailed information
+                from torch._subclasses.fake_tensor import FakeTensor
+                from torch.fx.experimental.proxy_tensor import py_sym_types
+                from torch.fx.passes.shape_prop import TensorMetadata
+
+                meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
+
+                if isinstance(meta_val, FakeTensor):
+                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
+                elif isinstance(meta_val, py_sym_types):
+                    maybe_type_annotation = f': Sym({meta_val})'
+                elif isinstance(meta_val, TensorMetadata):
+                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
+
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
@@ -475,6 +569,8 @@ class CodeGen(object):
         for node in nodes:
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one
+            if verbose:
+                append_stacktrace_summary(node)
             emit_node(node)
             delete_unused_values(node)
 
@@ -500,7 +596,7 @@ class CodeGen(object):
 
         prologue = self.gen_fn_def(free_vars, maybe_return_annotation[0])
 
-        code = ''.join(body)
+        code = ''.join(body).lstrip('\n')
         code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""
 {wrap_stmts}
@@ -608,7 +704,6 @@ class Graph:
         self._insert = self._root.prepend
         self._len = 0
         self._graph_namespace = _Namespace()
-        self._owners = 0
         self._owning_module = owning_module
         self._tracer_cls = tracer_cls
         self._tracer_extras = tracer_extras
@@ -616,18 +711,11 @@ class Graph:
 
     @property
     def owning_module(self):
-        """
-        Return the module that owns this ``GraphModule``, if there is one,
-        ``None`` if there is no owning module or if there are multiple owning
-        modules.
-        """
         return self._owning_module
 
     @owning_module.setter
     def owning_module(self, mod: Optional["GraphModule"]):
-        if mod:
-            self._owning_module = mod if not self._owners else None
-            self._owners += 1
+        self._owning_module = mod
 
     @property
     def nodes(self) -> _node_list:
@@ -1089,7 +1177,7 @@ class Graph:
         return op
 
     @compatibility(is_backward_compatible=True)
-    def python_code(self, root_module: str) -> PythonCode:
+    def python_code(self, root_module: str, *, verbose: bool = False) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
 
@@ -1148,10 +1236,10 @@ class Graph:
                     node._repr_fn = orig_repr_fns[node]
 
         with override_node_repr(self):
-            return self._python_code(root_module, namespace)
+            return self._python_code(root_module, namespace, verbose=verbose)
 
-    def _python_code(self, root_module: str, namespace: _Namespace) -> PythonCode:
-        return self._codegen._gen_python_code(self.nodes, root_module, namespace)
+    def _python_code(self, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
+        return self._codegen._gen_python_code(self.nodes, root_module, namespace, verbose=verbose)
 
 
     def __str__(self) -> str:
@@ -1289,6 +1377,14 @@ class Graph:
 
             def forward(self, x):
                 return x + self.attr_1
+
+        .. warning::
+
+            Dead code elimination has some heuristics to avoid removing
+            side-effectful nodes (see Node.is_impure) but in general coverage
+            is very bad, so you should assume that this method is not sound
+            to call unless you know that your FX graph consists entirely
+            of functional operations.
         """
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.

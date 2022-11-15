@@ -27,7 +27,7 @@ if NO_MULTIPROCESSING_SPAWN:
 
 BACKEND = os.environ["BACKEND"]
 
-if BACKEND == "gloo" or BACKEND == "nccl":
+if BACKEND == "gloo" or BACKEND == "nccl" or BACKEND == "ucc":
     class TestDistBackendWithSpawn(TestDistBackend, DistributedTest._DistTestBase):
 
         def setUp(self):

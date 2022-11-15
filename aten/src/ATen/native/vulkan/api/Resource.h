@@ -3,7 +3,11 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Allocator.h>
-#include <c10/util/hash.h>
+#include <ATen/native/vulkan/api/Utils.h>
+
+#include <c10/core/ScalarType.h>
+#include <c10/util/flat_hash_map.h>
+#include <c10/util/typeid.h>
 
 #include <stack>
 
@@ -15,6 +19,8 @@ namespace api {
 typedef uint8_t MemoryAccessFlags;
 
 VkFormat vk_format(const caffe2::TypeMeta dtype);
+
+c10::ScalarType c10_scalartype(const VkFormat image_format);
 
 constexpr VmaAllocationCreateFlags DEFAULT_ALLOCATION_STRATEGY =
     VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT;
@@ -104,6 +110,10 @@ class VulkanBuffer final {
     return buffer_properties_.mem_range;
   }
 
+  inline VkDeviceSize mem_size() const {
+    return buffer_properties_.size;
+  }
+
   operator bool() const {
     return (allocation_ != VK_NULL_HANDLE);
   }
@@ -128,11 +138,16 @@ class MemoryMap final {
   VmaAllocator allocator_;
   VmaAllocation allocation_;
   void* data_;
+  VkDeviceSize data_len_;
 
  public:
   template <typename T>
   T* data() {
     return reinterpret_cast<T*>(data_);
+  }
+
+  inline size_t nbytes() {
+    return utils::safe_downcast<size_t>(data_len_);
   }
 
   void invalidate();
@@ -267,6 +282,10 @@ class VulkanImage final {
     return allocation_;
   }
 
+  inline VkFormat format() const {
+    return image_properties_.image_format;
+  }
+
   inline VkExtent3D extents() const {
     return image_properties_.image_extents;
   }
@@ -367,11 +386,13 @@ class MemoryAllocator final {
   VmaAllocator allocator_;
 
  public:
-  VulkanImage create_image3d(
+  VulkanImage create_image(
       const VkExtent3D&,
+      const VkFormat,
+      const VkImageType,
+      const VkImageViewType,
       const VulkanImage::SamplerProperties&,
       const VkSampler,
-      const caffe2::TypeMeta dtype,
       const bool allow_transfer = false);
 
   VulkanBuffer create_storage_buffer(

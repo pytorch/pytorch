@@ -26,6 +26,7 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
 , kernels_()
 , cpp_signature_()
+, sym_cpp_signature_()
 , is_observed_(ObservedOperators::isObserved(name_))
 {
   // Pick up any backend fallbacks that were registered prior to this
@@ -34,7 +35,10 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 }
 
 namespace {
-  void checkSchema(const OperatorName& name, const FunctionSchema& from_def, const std::string& from_def_debug, const FunctionSchema& inferred, const std::string& inferred_debug) {
+  void checkSchema(const OperatorName& name, const FunctionSchema& from_def_, const std::string& from_def_debug, const KernelFunction& kernel, const FunctionSchema& inferred_, const std::string& inferred_debug) {
+    // TODO: figure out if we can just directly save real schema at def time
+    FunctionSchema from_def = from_def_.cloneWithRealTypes(kernel.isValidSymUnboxed());
+    FunctionSchema inferred = inferred_.cloneWithRealTypes();
     c10::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
@@ -60,12 +64,24 @@ const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
   return kernel;
 }
 
+void OperatorEntry::assertSignatureIsCorrect(const CppSignature call_signature, bool has_symint) const {
+  if (has_symint) {
+    if (C10_UNLIKELY(sym_cpp_signature_.has_value() && (call_signature != sym_cpp_signature_->signature))) {
+      reportSignatureError(call_signature, *sym_cpp_signature_);
+    }
+  } else {
+    if (C10_UNLIKELY(cpp_signature_.has_value() && (call_signature != cpp_signature_->signature))) {
+      reportSignatureError(call_signature, *cpp_signature_);
+    }
+  }
+}
+
 void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug, std::vector<at::Tag> tags) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
   for (const auto& kernel : kernels_) {
     for (const auto &j : kernel.second) {
       if (j.inferred_function_schema != nullptr) {
-        checkSchema(name_, schema, debug, *j.inferred_function_schema, j.debug);
+        checkSchema(name_, schema, debug, j.kernel, *j.inferred_function_schema, j.debug);
       }
     }
   }
@@ -99,25 +115,26 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
   // which means if you could validly change the type of a cpp_signature, then
   // that would also invalidate the old TypedOperatorHandles.
   if (cpp_signature.has_value()) {
-    if (cpp_signature_.has_value()) {
-      TORCH_CHECK(*cpp_signature == cpp_signature_->signature,
+    auto& local_cpp_signature = kernel.isValidSymUnboxed() ? sym_cpp_signature_ : cpp_signature_;
+    if (local_cpp_signature.has_value()) {
+      TORCH_CHECK(*cpp_signature == local_cpp_signature->signature,
         "\nMismatch in kernel C++ signatures\n",
         "  operator: ", (this->schema_.has_value() ? toString(this->schema_->schema) : toString(name_)), "\n",
         "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
-        "  kernel 1: ", cpp_signature_->signature.name(), "\n",
-        "    dispatch key: ", toString(cpp_signature_->dispatch_key), "\n",
-        "    ", cpp_signature_->debug, "\n",
+        "  kernel 1: ", local_cpp_signature->signature.name(), "\n",
+        "    dispatch key: ", toString(local_cpp_signature->dispatch_key), "\n",
+        "    ", local_cpp_signature->debug, "\n",
         "  kernel 2: ", cpp_signature->name(), "\n",
         "    dispatch key: ", toString(dispatch_key), "\n",
         "    ", debug, "\n"
       );
     } else {
-      cpp_signature_ = CppSignatureWithDebug { *cpp_signature, debug, dispatch_key };
+      local_cpp_signature = CppSignatureWithDebug { *cpp_signature, debug, dispatch_key };
     }
   }
 
   if (schema_ && inferred_function_schema) {
-    checkSchema(name_, schema_->schema, schema_->debug, *inferred_function_schema, debug);
+    checkSchema(name_, schema_->schema, schema_->debug, kernel, *inferred_function_schema, debug);
   }
 
   // Add the kernel to the kernels list,
@@ -130,13 +147,17 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
 #else
   if (k.size() > 0) {
 #endif
-    TORCH_WARN("Overriding a previously registered kernel for the same operator and the same dispatch key\n",
-               "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
-               "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
-               "  dispatch key: ", toString(dispatch_key), "\n",
-               "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : "no debug info"), "\n",
-               "       new kernel: ", debug
-    );
+    // Suppress the warning for Meta key as we are overriding C++ meta functions with python meta functions
+    // for some ops
+    if (dispatch_key != DispatchKey::Meta) {
+      TORCH_WARN("Overriding a previously registered kernel for the same operator and the same dispatch key\n",
+            "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
+            "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
+            "  dispatch key: ", toString(dispatch_key), "\n",
+            "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : (sym_cpp_signature_.has_value() ? sym_cpp_signature_->debug : "no debug info")), "\n",
+            "       new kernel: ", debug
+      );
+    }
   }
 
 #ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
@@ -198,10 +219,24 @@ bool OperatorEntry::hasKernelForAnyDispatchKey(DispatchKeySet ks) const {
 
 bool OperatorEntry::hasKernelForDispatchKey(DispatchKey k) const {
   TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end());
-  for (auto& kv : kernels_) {
-    if (k == kv.first) return true;
-  }
-  return false;
+  auto it = kernels_.find(k);
+  if (it == kernels_.end()) return false;
+  return it->second.size() > 0;
+}
+
+const KernelFunction& OperatorEntry::kernelForDispatchKey(DispatchKey k) const {
+  auto it = kernels_.find(k);
+  TORCH_CHECK(it != kernels_.end() && it->second.size(), "no kernel for ", k, " on ", name_);
+  auto jt = it->second.begin();
+  TORCH_INTERNAL_ASSERT(jt->kernel.isValid())
+  return jt->kernel;
+}
+
+bool OperatorEntry::hasComputedKernelForDispatchKey(DispatchKey k) const {
+  TORCH_CHECK(!isAliasDispatchKey(k), "Alias keys do not have runtime kernel registrations.");
+  const auto dispatch_ix = getDispatchTableIndexForDispatchKey(k);
+  TORCH_INTERNAL_ASSERT(dispatch_ix >= 0 && dispatch_ix < c10::num_runtime_entries, toString(k), dispatch_ix);
+  return dispatchTable_[dispatch_ix].isValid();
 }
 
 const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispatch_key) const{
@@ -289,6 +324,19 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //      For AutogradOther, we return ambiguousAutogradOtherKernel() if there's registration
   //      to any of its backends.
   //      See Note [Undefined in dispatchTable_] for the special handling for Undefined.
+
+  // If the dispatch key is included in CompositeImplicitAutogradNestedTensor,
+  // then we register it to nested-tensor kernel rather than
+  // regular-tensor CompositeImplicitAutograd kernel.
+  // We have no intention to change the behavior of Undefined,
+  // so this nested-tensor branch requires `dispatch_key != DispatchKey::Undefined`
+  // to let the original CompositeImplicitAutograd handle Undefined
+  if (dispatch_key != DispatchKey::Undefined && isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutogradNestedTensor)) {
+    if (auto nested_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutogradNestedTensor)) {
+      return {*nested_registration, "nested kernel"};
+      }
+  }
+
   if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutograd)) {
     if (auto math_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutograd)) {
       if (dispatch_key == DispatchKey::AutogradOther
@@ -438,18 +486,34 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   return str.str();
 }
 
-void OperatorEntry::reportSignatureError(const CppSignature call_signature) const {
+void OperatorEntry::reportSignatureError(const CppSignature& call_signature, const CppSignatureWithDebug& saved_signature) const {
   TORCH_CHECK(false,
         "\nTried to access or call an operator with a wrong signature.\n",
         "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
         "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
-        "  correct signature:  ", cpp_signature_->signature.name(), "\n",
-        "    ", cpp_signature_->debug, "\n",
+        "  correct signature:  ", saved_signature.signature.name(), "\n",
+        "    ", saved_signature.debug, "\n",
         "  accessed/called as: ", call_signature.name(), "\n",
         "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
         "Please make sure that the function signature matches the signature in the operator registration call."
   );
 };
+
+std::string post_process_dispatch_key_str(std::string dispatch_key) {
+  const std::string substr = "PrivateUse1";
+  if (substr.size() <= dispatch_key.size() && std::equal(substr.rbegin(), substr.rend(), dispatch_key.rbegin())) {
+    auto privateuse1_backend = get_privateuse1_backend();
+    if (privateuse1_backend != "privateuseone") {
+      // remove trailing "*PrivateUse1"
+      dispatch_key.erase(dispatch_key.length() - substr.length());
+      // append the registered backend's name.
+      // AutogradPrivateUse1 -> AutogradFoo
+      auto backend_name = c10::get_privateuse1_backend();
+      dispatch_key = dispatch_key + backend_name;
+    }
+  }
+  return dispatch_key;
+}
 
 void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   // If there is an invariant problem, report it now.
@@ -465,7 +529,7 @@ void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   }
 
   TORCH_CHECK_NOT_IMPLEMENTED(false, "Could not run '", name_, "' with arguments",
-          " from the '", toString(dispatchKey), "' backend. This could be because "
+          " from the '", post_process_dispatch_key_str(toString(dispatchKey)), "' backend. This could be because "
           "the operator doesn't exist for this backend, or was omitted during ",
           "the selective/custom build process (if using custom build). If you are a ",
           "Facebook employee using PyTorch on mobile, please visit ",

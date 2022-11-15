@@ -61,6 +61,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/six.h>
 
 #include <ATen/PythonTorchFunctionTLS.h>
@@ -68,13 +69,25 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
-#include <c10/core/SymbolicIntNode.h>
+#include <c10/core/SymFloat.h>
+#include <c10/core/SymNodeImpl.h>
+
 #include <array>
 #include <cstddef>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
+
+inline bool THPUtils_checkScalar(PyObject* obj) {
+#ifdef USE_NUMPY
+  if (torch::utils::is_numpy_scalar(obj)) {
+    return true;
+  }
+#endif
+  return PyFloat_Check(obj) || PyLong_Check(obj) || PyComplex_Check(obj) ||
+      torch::is_symint(py::handle(obj)) || torch::is_symfloat(py::handle(obj));
+}
 
 namespace torch {
 
@@ -217,6 +230,7 @@ struct PythonArgs {
   inline std::vector<int64_t> intlist(int i);
   inline std::vector<c10::SymInt> symintlist(int i);
   inline c10::OptionalArray<int64_t> intlistOptional(int i);
+  inline c10::OptionalArray<c10::SymInt> symintlistOptional(int i);
   inline std::vector<int64_t> intlistWithDefault(
       int i,
       std::vector<int64_t> default_intlist);
@@ -234,6 +248,7 @@ struct PythonArgs {
   inline c10::optional<at::ScalarType> scalartypeOptional(int i);
   inline c10::optional<at::Scalar> scalarOptional(int i);
   inline c10::optional<int64_t> toInt64Optional(int i);
+  inline c10::optional<c10::SymInt> toSymIntOptional(int i);
   inline c10::optional<bool> toBoolOptional(int i);
   inline c10::optional<double> toDoubleOptional(int i);
   inline c10::OptionalArray<double> doublelistOptional(int i);
@@ -285,7 +300,8 @@ struct FunctionParameter {
   bool check(
       PyObject* obj,
       std::vector<py::handle>& overloaded_args,
-      int argnum);
+      int argnum,
+      int64_t* failed_idx = nullptr);
 
   void set_default_str(const std::string& str);
   std::string type_name() const;
@@ -346,7 +362,7 @@ inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
 
 inline bool PythonArgs::has_torch_function() {
   return !this->signature.overloaded_args.empty() ||
-      at::impl::PythonTorchFunctionTLS::get_mode();
+      at::impl::torch_function_mode_enabled();
 }
 
 inline std::string PythonArgs::get_func_name() {
@@ -474,23 +490,28 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
   return intlistWithDefault(i, signature.params[i].default_intlist);
 }
 
-inline bool is_symint_node(py::handle obj) {
-  auto static tp_symn = py::type::of<c10::SymbolicIntNode>();
-  // TODO: switch this to `isinstance`
-  if (obj.get_type().equal(tp_symn)) {
-    TORCH_CHECK(
-        !jit::tracer::isTracing(), "JIT tracing of SymInts isn't supported!");
-    return true;
-  }
-  return false;
-}
-
 inline PyObject* toPyObject(c10::SymInt symint) {
   if (symint.is_symbolic()) {
-    return py::cast(symint.toSymbolicIntNode()).release().ptr();
+    auto r = py::cast(symint).release().ptr();
+    TORCH_INTERNAL_ASSERT(r);
+    return r;
   } else {
-    return THPUtils_packInt64(symint.data());
+    return THPUtils_packInt64(symint.as_int_unchecked());
   }
+}
+
+inline void throw_intlist_exception(
+    const torch::PythonArgs* args,
+    size_t i,
+    PyObject* obj,
+    size_t idx) {
+  throw TypeError(
+      "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
+      args->signature.name.c_str(),
+      args->signature.params[i].name.c_str(),
+      args->signature.params[i].type_name().c_str(),
+      Py_TYPE(obj)->tp_name,
+      idx + 1);
 }
 
 inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
@@ -506,8 +527,8 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
         size1, c10::SymInt(THPUtils_unpackIndex(args[i])));
   }
 
-  if (size1 > 0 && torch::is_symint_node(py::handle(args[i]))) {
-    auto si = py::handle(args[i]).cast<c10::SymbolicIntNode*>()->toSymInt();
+  if (size1 > 0 && torch::is_symint(py::handle(args[i]))) {
+    auto si = py::handle(args[i]).cast<c10::SymInt>();
     return std::vector<c10::SymInt>(size1, si);
   }
 
@@ -520,30 +541,44 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   for (const auto idx : c10::irange(size2)) {
     PyObject* obj =
         tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
-    try {
-      if (is_symint_node(py::handle(obj))) {
-        res.push_back(
-            py::handle(obj).cast<c10::SymbolicIntNode*>()->toSymInt());
-      } else {
-        // Elements of torch.Size are tensors during tracing, and we need to
-        // record extra information before they are turned into an IntArrayRef
-        if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
-          auto& var = THPVariable_Unpack(obj);
-          jit::tracer::ArgumentStash::stashIntArrayRefElem(
-              signature.params[i].name, size2, idx, var);
-          res.push_back(var.item<int64_t>());
-          continue;
-        }
-        res.push_back(c10::SymInt(THPUtils_unpackIndex(obj)));
+
+    // Elements of torch.Size are tensors during tracing, and we need to
+    // record extra information before they are turned into an IntArrayRef
+    if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
+      auto& var = THPVariable_Unpack(obj);
+      jit::tracer::ArgumentStash::stashIntArrayRefElem(
+          signature.params[i].name, size2, idx, var);
+      try {
+        res.push_back(var.item<int64_t>());
+        continue;
+      } catch (std::exception& e) {
+        throw_intlist_exception(this, i, obj, idx);
       }
-    } catch (const std::exception& e) {
-      auto te = TypeError(
-          "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
-          signature.name.c_str(),
-          signature.params[i].name.c_str(),
-          signature.params[i].type_name().c_str(),
-          Py_TYPE(obj)->tp_name,
-          idx + 1);
+      continue;
+    } else {
+      // convert tensor to scalar outside of try / catch,
+      // so that Tensor subclass exceptions will not be caught.
+      if (THPVariable_Check(obj)) {
+        auto& var = THPVariable_Unpack(obj);
+        if (var.numel() != 1 ||
+            !at::isIntegralType(
+                var.dtype().toScalarType(), /*include_bool*/ true)) {
+          throw_intlist_exception(this, i, obj, idx);
+        }
+        // TODO: ideally, if this was a fake tensor this would
+        // result in a SymInt, but we don't have the API to do this
+        res.push_back(var.item<int64_t>());
+      } else {
+        try {
+          if (is_symint(py::handle(obj))) {
+            res.push_back(py::handle(obj).cast<c10::SymInt>());
+          } else {
+            res.push_back(c10::SymInt(THPUtils_unpackIndex(obj)));
+          }
+        } catch (std::exception& e) {
+          throw_intlist_exception(this, i, obj, idx);
+        }
+      }
     }
   }
 
@@ -568,26 +603,36 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
   for (const auto idx : c10::irange(size2)) {
     PyObject* obj =
         tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
-    try {
-      // Elements of torch.Size are tensors during tracing, and we need to
-      // record extra information before they are turned into an IntArrayRef
-      if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
-        auto& var = THPVariable_Unpack(obj);
-        jit::tracer::ArgumentStash::stashIntArrayRefElem(
-            signature.params[i].name, size2, idx, var);
+    // Elements of torch.Size are tensors during tracing, and we need to
+    // record extra information before they are turned into an IntArrayRef
+    if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
+      auto& var = THPVariable_Unpack(obj);
+      jit::tracer::ArgumentStash::stashIntArrayRefElem(
+          signature.params[i].name, size2, idx, var);
+      try {
         res[idx] = var.item<int64_t>();
         continue;
-      } else {
-        res[idx] = THPUtils_unpackIndex(obj);
+      } catch (std::exception& e) {
+        throw_intlist_exception(this, i, obj, idx);
       }
-    } catch (const std::exception& e) {
-      throw TypeError(
-          "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
-          signature.name.c_str(),
-          signature.params[i].name.c_str(),
-          signature.params[i].type_name().c_str(),
-          Py_TYPE(obj)->tp_name,
-          idx + 1);
+    } else {
+      // convert tensor to scalar outside of try / catch,
+      // so that Tensor subclass exceptions will not be caught.
+      if (THPVariable_Check(obj)) {
+        auto& var = THPVariable_Unpack(obj);
+        if (var.numel() != 1 ||
+            !at::isIntegralType(
+                var.dtype().toScalarType(), /*include_bool*/ true)) {
+          throw_intlist_exception(this, i, obj, idx);
+        }
+        res[idx] = var.item<int64_t>();
+      } else {
+        try {
+          res[idx] = THPUtils_unpackIndex(obj);
+        } catch (std::exception& e) {
+          throw_intlist_exception(this, i, obj, idx);
+        }
+      }
     }
   }
   return res;
@@ -598,6 +643,13 @@ inline c10::OptionalArray<int64_t> PythonArgs::intlistOptional(int i) {
     return {};
   }
   return intlist(i);
+}
+
+inline c10::OptionalArray<c10::SymInt> PythonArgs::symintlistOptional(int i) {
+  if (!args[i]) {
+    return {};
+  }
+  return symintlist(i);
 }
 
 inline std::vector<double> PythonArgs::getDoublelist(int i) {
@@ -714,8 +766,7 @@ inline at::Device toDevice(PyObject* obj) {
 
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
-    return at::Device(backendToDeviceType(
-        dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
+    return torch::tensors::get_default_device();
   }
   return toDevice(args[i]);
 }
@@ -854,10 +905,8 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
   }
-  if (torch::is_symint_node(py::handle(args[i]))) {
-    return py::handle(args[i]).cast<c10::SymbolicIntNode*>()->toSymInt();
-  }
-  return c10::SymInt(THPUtils_unpackLong(args[i]));
+
+  return py::cast<c10::SymInt>(py::handle(args[i]));
 }
 
 inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {
@@ -870,6 +919,12 @@ inline c10::optional<int64_t> PythonArgs::toInt64Optional(int i) {
   if (!args[i])
     return c10::nullopt;
   return toInt64(i);
+}
+
+inline c10::optional<c10::SymInt> PythonArgs::toSymIntOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
+  return toSymInt(i);
 }
 
 inline c10::optional<bool> PythonArgs::toBoolOptional(int i) {

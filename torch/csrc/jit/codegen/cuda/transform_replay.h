@@ -131,12 +131,14 @@ class TORCH_CUDA_CU_API TransformReplay {
   static std::pair<TensorDomain*, unsigned int> replayPasC(
       const TensorView* producer,
       const TensorView* consumer,
-      int consumer_compute_at_axis);
+      int consumer_compute_at_axis,
+      bool replay_swizzle = false);
   static std::pair<TensorDomain*, unsigned int> replayPasC(
       const TensorView* producer,
       const TensorView* consumer,
       int consumer_compute_at_axis,
-      const RootDomainMap& root_map);
+      const RootDomainMap& root_map,
+      bool replay_swizzle = false);
 
   // Replay producer as consumer, returns {replayed_consumer_domain,
   // consumer_compute_at_axis}.
@@ -154,16 +156,51 @@ class TORCH_CUDA_CU_API TransformReplay {
   static TensorDomain* fullSelfReplay(
       const TensorDomain* new_self_root,
       const TensorDomain* self);
+
+  // Returns the leaf position in producer that matches with `consumer_pos` in
+  // consumer. Returns -1 if matching is impossible. This function can be used
+  // to test if replay is needed for getting matching outer dims. This function
+  // should be consistent with `replayPasC`: if you pass the tensors just
+  // replayed by replayPasC as inputs, you should return exactly the same
+  // position as `replayPasC`. However, this function is more tolerant than
+  // fully matching `replayPasC`: if in the consumer, there are unmappable
+  // dimensions, these dimensions are just ignored.
+  static int getMatchedLeafPosWithoutReplayPasC(
+      const TensorView* producer,
+      const TensorView* consumer,
+      int consumer_pos);
+
+  // Returns the leaf position in consumer that matches with `producer_pos` in
+  // producer. Behavior similar to getMatchedLeafPosWithoutReplayPasC, except
+  // that we are also ignoring reductions in the producer.
+  static int getMatchedLeafPosWithoutReplayCasP(
+      const TensorView* consumer,
+      const TensorView* producer,
+      int producer_pos);
+
+  // tests if two tensors has fully matching transformations
+  static bool fullSelfMatching(
+      const TensorView* replay,
+      const TensorView* target);
 };
 
 class TORCH_CUDA_CU_API TransformPropagator
     : public MaxRootDomainInfoSpanningTree::Propagator {
+ protected:
   std::unordered_map<TensorView*, size_t> replayed_pos_;
 
  public:
-  virtual void propagateTvPasC(TensorView* from, TensorView* to) override;
-  virtual void propagateTvCasP(TensorView* from, TensorView* to) override;
+  virtual void propagateC2P(TensorView* from, TensorView* to) override;
+  virtual void propagateP2C(TensorView* from, TensorView* to) override;
+  virtual void propagateSibling(TensorView* from, TensorView* to) override;
   TransformPropagator(TensorView* from, int64_t pos = -1);
+};
+
+struct TORCH_CUDA_CU_API MostInlinedTransformPropagator
+    : public MaxRootDomainInfoSpanningTree::Propagator {
+  virtual void propagateC2P(TensorView* from, TensorView* to) override;
+  virtual void propagateP2C(TensorView* from, TensorView* to) override;
+  virtual void propagateSibling(TensorView* from, TensorView* to) override;
 };
 
 } // namespace cuda

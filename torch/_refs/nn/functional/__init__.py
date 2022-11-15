@@ -1,28 +1,30 @@
-import torch
+from typing import Callable, Optional, Union
 
+import torch
 import torch._prims as prims
-import torch._prims.utils as utils
-from torch._prims.utils import (
+import torch._prims_common as utils
+import torch._refs as refs
+from torch._decomp import register_decomposition
+from torch._decomp.decompositions import Reduction
+from torch._prims_common import (
     check,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    NumberType,
     ShapeType,
     TensorLike,
     TensorLikeType,
-    NumberType,
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
-import torch._refs as refs
-from torch._decomp import register_decomposition
-from torch._prims.wrappers import (
+from torch._prims_common.wrappers import (
     elementwise_type_promotion_wrapper,
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
 from torch._refs import (
-    _make_elementwise_unary_reference,
     _make_elementwise_binary_reference,
+    _make_elementwise_unary_reference,
 )
 
-from typing import Optional, Union
+from torch._subclasses.fake_tensor import FakeTensor
 
 __all__ = [
     "celu",
@@ -31,18 +33,28 @@ __all__ = [
     "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
+    "huber_loss",
     "l1_loss",
+    "log_softmax",
     "margin_ranking_loss",
     "mish",
+    "nll_loss",
     "mse_loss",
+    "poisson_nll_loss",
     "prelu",
     "relu",
     "relu6",
     "selu",
+    "softmax",
+    "softmin",
     "softplus",
     "softshrink",
     "tanhshrink",
     "threshold",
+    "triplet_margin_loss",
+    "glu",
+    "pairwise_distance",
+    "pdist",
 ]
 
 Tensor = torch.Tensor
@@ -229,6 +241,37 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return scale * torch.where(a > 0, a, rhs)
 
 
+# Forwarding alias: the functional variant doesn't support the out kwarg
+# CompositeImplicitAutograd - don't register decomp
+def softmax(
+    a: TensorLikeType,
+    dim: Optional[int] = None,
+    _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    # The error is for compat with regular PyTorch, which has this behavior
+    # deprecated.  For PrimTorch, it's fine to drop support for deprecated
+    # behavior because it requires explicit opt in.  This error is to inform
+    # users how to update their calls.
+    check(dim is not None, lambda: "implicit dim not supported, use dim=X")
+    return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
+# CompositeImplicitAutograd - don't register decomp
+def softmin(
+    a: TensorLikeType,
+    dim: Optional[int] = None,
+    _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    # The error is for compat with regular PyTorch, which has this behavior
+    # deprecated.  For PrimTorch, it's fine to drop support for deprecated
+    # behavior because it requires explicit opt in.  This error is to inform
+    # users how to update their calls.
+    check(dim is not None, lambda: "implicit dim not supported, use dim=X")
+    return torch.softmax(a=-a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
 # softplus is implemented specially because it has beta and threshold arguments
 @register_decomposition(torch.ops.aten.softplus)
 @out_wrapper()
@@ -297,6 +340,17 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
 
 
 # Losses
+def _reduction_int_to_str(reduction: int) -> str:
+    if reduction == Reduction.NONE.value:
+        return "none"
+    elif reduction == Reduction.MEAN.value:
+        return "mean"
+    elif reduction == Reduction.SUM.value:
+        return "sum"
+    else:
+        raise ValueError(f"{reduction} is not a valid value for reduction")
+
+
 def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeType:
     if reduction == "sum":
         return refs.sum(loss)
@@ -308,7 +362,7 @@ def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeTyp
 
 def _check_reduction_value(reduction: str):
     if reduction not in ("mean", "sum", "none"):
-        raise ValueError("{} is not a valid value for reduction".format(reduction))
+        raise ValueError(f"{reduction} is not a valid value for reduction")
 
 
 # This helper function maps depreciated arguments, "size_average" and "reduce"
@@ -329,7 +383,11 @@ def _get_string_reduction_arg(
     return ret
 
 
-@register_decomposition(torch.ops.aten.l1_loss)
+# CompositeImplicitAutograd - don't register decomp
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+)
 def l1_loss(
     input: TensorLikeType,
     target: TensorLikeType,
@@ -337,13 +395,33 @@ def l1_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.l1_loss
+    """
     if size_average is not None or reduce is not None:
-        # TODO: raise exception instead of converting value
+        # TODO: Raise exception instead of converting value.  This is only for
+        # primTorch since it can drop support for deprecated arguments.
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
     _check_reduction_value(reduction)
     loss = torch.abs(input - target)
     return _apply_loss_reduction(loss, reduction)
+
+
+# Forwarding alias: the functional variant doesn't support the out kwarg
+# CompositeImplicitAutograd - don't register decomp
+def log_softmax(
+    a: TensorLikeType,
+    dim: Optional[int] = None,
+    _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    # The error is for compat with regular PyTorch, which has this behavior
+    # deprecated.  For PrimTorch, it's fine to drop support for deprecated
+    # behavior because it requires explicit opt in.  This error is to inform
+    # users how to update their calls.
+    check(dim is not None, lambda: "implicit dim not supported, use dim=X")
+    return torch.log_softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
 @register_decomposition(torch.ops.aten.margin_ranking_loss)
@@ -382,7 +460,8 @@ def mse_loss(
     reduction: str = "mean",
 ) -> TensorLikeType:
     if size_average is not None or reduce is not None:
-        # TODO: raise exception instead of converting value
+        # TODO: Raise exception instead of converting value.  This is only for
+        # primTorch since it can drop support for deprecated arguments.
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
     _check_reduction_value(reduction)
@@ -406,6 +485,190 @@ def hinge_embedding_loss(
     output_self = refs.where(refs.ne(target, -1), input, 0)
     loss = refs.add(output_margin, output_self)
     return _apply_loss_reduction(loss, reduction)
+
+
+def _nll_loss_nd(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    weight: Optional[TensorLikeType],
+    reduction: str,
+    ignore_index: int,
+) -> TensorLikeType:
+    utils.check(
+        input.ndim > 0 and input.ndim <= 3,
+        lambda: f"Expected input dimension to be either [1, 2, 3] but recieved {input.ndim}.",
+    )
+
+    utils.check(
+        (input.ndim == 1) or (input.shape[0] == target.shape[0]),
+        lambda: f"Expected input batch size {input.shape[0]} to match target batch size {target.shape[0]}.",
+    )
+
+    _check_reduction_value(reduction)
+
+    flat_target = torch.flatten(target)
+    ignore_classes_mask = torch.eq(flat_target, ignore_index)
+
+    # TODO: Enable data-dependent checks with debug mode
+    # TODO: This check does not work with FakeTensor inputs; See Issue #85834
+    # Explicit cast for class_check to bool; See Issue #78071
+    """
+    num_classes = input.shape[1] if input.ndim > 1 else input.shape[0]
+    valid_classes_mask = torch.logical_and(
+        (flat_target >= 0), (flat_target < num_classes)
+    )
+    class_check = torch.all(torch.logical_or(ignore_classes_mask, valid_classes_mask))
+    utils.check(
+        isinstance(target, FakeTensor) or bool(class_check.item()),
+        lambda: "A target class is out-of-bounds and not the ignore index.",
+    )
+    """
+
+    ignore_class_weight = torch.scalar_tensor(0, dtype=input.dtype, device=input.device)
+    class_weight = (
+        torch.scalar_tensor(1, dtype=input.dtype, device=input.device)
+        if weight is None
+        else weight[flat_target]
+    )
+    current_weight = torch.where(
+        ignore_classes_mask,
+        ignore_class_weight,
+        class_weight,
+    )
+
+    if input.ndim == 1:
+        # implicit batch size = 1
+        # input (1 batch size, C classes)
+        loss = -input[target] * current_weight
+    elif input.ndim == 2:
+        # input (N batch size, C classes)
+        batch_size = input.shape[0]
+        loss = -input[torch.arange(batch_size), target] * current_weight
+    else:
+        # 3D case (N batch size, C classe, K dimensions)
+        # input (N batch size, C classes, K)
+        batch_size = input.shape[0]
+        extent = input.shape[2]
+        numel = batch_size * extent
+        indices = torch.arange(numel)
+        bdx = indices // extent
+        kdx = indices % extent
+        loss = -input[bdx, flat_target, kdx] * current_weight
+    loss = torch.reshape(loss, target.shape)
+
+    if reduction == "none":
+        return loss
+    elif reduction == "sum":
+        return torch.sum(loss)
+    else:
+        # calculate weighted mean of the loss function
+        return torch.sum(loss) / torch.sum(current_weight)
+
+
+@register_decomposition(torch.ops.aten.nll_loss)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+@out_wrapper()
+def nll_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    weight: Optional[TensorLikeType] = None,
+    size_average: Optional[bool] = None,
+    ignore_index: int = -100,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.nll_loss
+    """
+    utils.check(
+        input.ndim > 0,
+        lambda: f"Expected input tensor to have 1 or more dimensions (got {input.ndim})",
+    )
+
+    # TODO: raise exception instead of converting value
+    # msg = "size_average and reduce args are deprecated, please use reduction argument."
+    # Convert these options for consistency with the eager mode
+    if size_average is not None or reduce is not None:
+        reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
+
+    # The expected behavior when the target and input have zero elements:
+    #   reduction = 'none' --- tensor([])
+    #   reduction = 'sum'  --- tensor(0.)
+    #   reduction = 'mean' --- tensor(nan)
+    # Mean reduction on empty tensors produces NaN. See the discussion in
+    # https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+    if input.numel() == 0 and target.numel() == 0:
+        if reduction == "none":
+            return torch.zeros_like(target)
+        elif reduction == "sum":
+            return torch.empty_like(target)
+        else:
+            return torch.full_like(target, float("nan"))
+
+    # The _nll_loss_nd helper function handles the most common cases.
+    # ndim == 1 (Single Example)
+    #   => Batch Size: 1, Input: (C), Target: ()
+    # ndim == 2 (k = 1)
+    #   => Batch Size: N, Input: (N, C), Target: (N)
+    # ndim == 3 (k > 1)
+    #   => Batch Size: N, Input: (N, C, K), Target: (N, K)
+    if input.ndim <= 3:
+        return _nll_loss_nd(input, target, weight, reduction, ignore_index)
+
+    # For ndim > 3, we reshape the input and target to 3-D case.
+    # Input (N batch-size, C classes, k-dimensions)
+    # Target (N batch-size, k-dimensions)
+    utils.check(
+        input.ndim > 0 and target.ndim > 0 and target.shape[1:] == input.shape[2:],
+        lambda: f"Expected target shape {out_size} but got {target.shape}",
+    )
+
+    batch_size = input.shape[0]
+    num_classes = input.shape[1]
+    out_size = [batch_size] + list(target.shape[1:])
+
+    input = torch.reshape(input, [batch_size, num_classes, -1])
+    target = torch.reshape(target, [batch_size, -1])
+    if reduction != "none":
+        return _nll_loss_nd(input, target, weight, reduction, ignore_index)
+    else:
+        result = _nll_loss_nd(input, target, weight, reduction, ignore_index)
+        # reshape flattened inner-dim to original k-dimensions
+        return torch.reshape(result, out_size)
+
+
+# TODO: This ref supports int reduction and out kwarg to be compatible with ATen:
+# https://github.com/pytorch/pytorch/issues/83931
+# TODO: Could be rewritten to support complex:
+# https://github.com/pytorch/pytorch/pull/85041
+@register_decomposition(torch.ops.aten.huber_loss)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def huber_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    reduction: Union[str, int] = "mean",
+    delta: float = 1.0,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.huber_loss
+    """
+    if type(reduction) is int:
+        reduction = _reduction_int_to_str(reduction)
+    _check_reduction_value(reduction)  # type: ignore[arg-type]
+    check(
+        delta > 0,
+        lambda: "huber_loss does not support non-positive values for delta.",
+    )
+    z = (input - target).abs()
+    loss = torch.where(z < delta, 0.5 * z * z, delta * (z - 0.5 * delta))
+    return _apply_loss_reduction(loss, reduction)  # type: ignore[arg-type]
 
 
 # tanhshrink does not use _make_elementwise_unary_reference because it does not support out
@@ -444,6 +707,84 @@ def threshold(
         raise NotImplementedError
 
     return torch.where(a <= threshold, value, a)
+
+
+# CompositeImplicitAutograd - don't register decomp
+# No elementwise type promotion - core op doesn't explicitly type promote
+def triplet_margin_loss(
+    anchor: TensorLikeType,
+    positive: TensorLikeType,
+    negative: TensorLikeType,
+    margin: float = 1.0,
+    p: float = 2,
+    eps: float = 1e-6,
+    swap: bool = False,
+    size_average: Optional[bool] = None,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    if size_average is not None or reduce is not None:
+        # TODO: Raise exception instead of converting value.  This is only for
+        # primTorch since it can drop support for deprecated arguments.
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
+
+    # torch.nn.functional.triplet_margin_with_distance_loss has no ref defined
+    # since it's a pure Python implementation.  Use this helper instead.
+    return _triplet_margin_with_distance_loss(
+        anchor=anchor,
+        positive=positive,
+        negative=negative,
+        distance_function=lambda x, y: torch.pairwise_distance(x, y, p, eps),
+        margin=margin,
+        swap=swap,
+        reduction=reduction,
+    )
+
+
+# Pure Python impl - don't register decomp and don't add a ref.  Defined as a
+# helper here since triplet_margin_loss can be nicely implemented with it.
+def _triplet_margin_with_distance_loss(
+    anchor: TensorLikeType,
+    positive: TensorLikeType,
+    negative: TensorLikeType,
+    *,
+    distance_function: Optional[
+        Callable[[TensorLikeType, TensorLikeType], TensorLikeType]
+    ] = None,
+    margin: float = 1.0,
+    swap: bool = False,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    _check_reduction_value(reduction)
+
+    a_dim = anchor.ndim
+    p_dim = positive.ndim
+    n_dim = negative.ndim
+    check(
+        a_dim == p_dim and p_dim == n_dim,
+        lambda: (
+            f"The anchor, positive, and negative tensors are expected to have "
+            f"the same number of dimensions, but got: anchor {a_dim}D, "
+            f"positive {p_dim}D, and negative {n_dim}D inputs"
+        ),
+    )
+
+    if distance_function is None:
+        distance_function = torch.pairwise_distance
+
+    dist_pos = distance_function(anchor, positive)
+    dist_neg = distance_function(anchor, negative)
+    # The distance swap is described in the paper "Learning shallow
+    # convolutional feature descriptors with triplet losses" by V. Balntas, E.
+    # Riba et al.  If True, and if the positive example is closer to the
+    # negative example than the anchor is, swaps the positive example and the
+    # anchor in the loss computation.
+    if swap:
+        dist_swap = distance_function(positive, negative)
+        dist_neg = torch.minimum(dist_neg, dist_swap)
+    loss = torch.clamp_min(margin + dist_pos - dist_neg, 0)
+    return _apply_loss_reduction(loss, reduction)
 
 
 @register_decomposition(torch.ops.aten.hardtanh)
@@ -508,6 +849,44 @@ def gelu(a: TensorLikeType, approximate: str = "none") -> TensorLikeType:
         raise RuntimeError("approximate argument must be either none or tanh.")
 
 
+# CompositeImplicitAutograd - don't register decomp
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def poisson_nll_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    log_input: bool = True,
+    full: bool = False,
+    size_average: Optional[bool] = None,
+    eps: float = 1e-8,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.poisson_nll_loss
+    """
+    if size_average is not None or reduce is not None:
+        # TODO: Raise exception instead of converting value.  This is only for
+        # primTorch since it can drop support for deprecated arguments.
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
+    _check_reduction_value(reduction)
+    if log_input:
+        loss = torch.exp(input) - target * input
+    else:
+        loss = input - target * torch.log(input + eps)
+
+    if full:
+        stirling_term = (
+            target * torch.log(target) - target + 0.5 * torch.log(2 * torch.pi * target)
+        )
+        # avoid inplace add
+        loss = loss + stirling_term.masked_fill(target <= 1, 0)
+    return _apply_loss_reduction(loss, reduction)
+
+
 @register_decomposition(torch.ops.aten.prelu)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "weight"),
@@ -559,3 +938,53 @@ def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     # It may be better to use clamp here, but we use hardtanh to replicate
     # the behavior of the existing implementation
     return refs.nn.functional.hardtanh(a, 0, 6)
+
+
+@register_decomposition(torch.ops.aten.glu)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+@out_wrapper()
+def glu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
+    dim = utils.canonicalize_dims(a.ndim, dim)
+    check(
+        a.shape[dim] % 2 == 0,
+        lambda: f"Halving dimension must be even, but dimension {dim} is size {a.shape[dim]}",
+    )
+    b, c = torch.tensor_split(a, 2, dim)
+
+    return b * torch.sigmoid(c)
+
+
+@register_decomposition(torch.ops.aten.pairwise_distance)
+@out_wrapper()
+def pairwise_distance(
+    x1: TensorLikeType,
+    x2: TensorLikeType,
+    p: NumberType = 2.0,
+    eps: NumberType = 1e-6,
+    keepdim=False,
+) -> TensorLikeType:
+    return torch.linalg.vector_norm(x1 - x2 + eps, ord=p, dim=-1, keepdim=keepdim)
+
+
+@register_decomposition(torch.ops.aten.pdist)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+@out_wrapper()
+def pdist(a: TensorLikeType, p: float = 2) -> TensorLikeType:
+    check(a.ndim == 2, lambda: f"pdist only supports 2D tensors, got: {a.ndim}D")
+    check(p >= 0, lambda: "pdist only supports non-negative p values")
+    # For p == 2 we can use an efficient implementation, but other values of p
+    # require creating a much bigger tensor for an intermediate step
+    if p == 2:
+        aTa = torch.mm(a, a.T)
+        aTa_diag = torch.diag(aTa)
+        t = torch.sqrt(torch.clamp(aTa_diag + aTa_diag.unsqueeze(-1) - 2 * aTa, min=0))
+    else:
+        t = torch.linalg.vector_norm(a.unsqueeze(1) - a, ord=p, dim=2)
+    i = torch.triu_indices(t.shape[0], t.shape[1], offset=1, device=a.device)
+    return t.flatten().index_select(0, i[0] * t.shape[0] + i[1])

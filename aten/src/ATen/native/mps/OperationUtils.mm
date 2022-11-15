@@ -61,7 +61,7 @@ MPSGeneratorImpl* MPSGeneratorImpl::clone_impl() const {
 }
 
 void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
-  mpsStream->executeMPSGraph(mpsGraph, feeds, results);
+  mpsStream->executeMPSGraph(mpsGraph, feeds, results, SyncType::COMMIT_ADAPTIVE);
 }
 
 MPSDataType getMPSDataType(ScalarType scalar_type) {
@@ -130,9 +130,9 @@ std::string getMPSTypeString(ScalarType scalar_type) {
     case ScalarType::Short:
       return "Int16";
     case ScalarType::Char:
-      return "UInt8";
-    case ScalarType::Byte:
       return "Int8";
+    case ScalarType::Byte:
+      return "UInt8";
     case ScalarType::Bool:
       return "Bool";
     default:
@@ -163,7 +163,7 @@ std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value
         str += getMPSTypeString(tensor.scalar_type()) + "[";
         // if tensor is a scalar
         if (tensor.dim() == 0) {
-          str += (use_scalar_value ? std::to_string(getMPSScalarValue(tensor)) : "Scalar");
+          str += (use_scalar_value ? std::to_string(tensor.item().to<double>()) : "Scalar");
         } else {
           const NSString* ns_shape_key = [[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","];
           str += std::string(ns_shape_key.UTF8String);
@@ -176,26 +176,8 @@ std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value
     return str;
 }
 
-double getMPSScalarValue(const Tensor& t) {
-  assert (t.dim() == 0);  // only applicable for scalar types
-  auto other_value = t.item();
-  return other_value.to<double>();
-}
-
 MPSShape* getMPSShape(const Tensor& t) {
-  const int sz = t.dim();
-  const int sz_ = (sz > 0) ? sz : 1;
-
-  NSNumber* numbers[sz_];
-
-  for (int i = 0; i < sz_; i++)
-  {
-    NSInteger sz_i = (i < sz) ? t.size(i) : 1;
-
-    NSNumber* number = [NSNumber numberWithInteger:sz_i];
-    numbers[i] = number;
-  }
-  return [NSArray arrayWithObjects:numbers count:sz_];
+  return getMPSShape(t.sizes());
 }
 
 MPSShape* getMPSShape(c10::MaybeOwned<Tensor> t) {
@@ -207,16 +189,14 @@ MPSShape* getMPSShape(IntArrayRef sizes) {
   const int sz = sizes.size();
   const int sz_ = (sz > 0) ? sz : 1;
 
-  NSNumber* numbers[sz_];
+  std::vector<NSNumber*> numbers(sz_);
 
-  for (int i = 0; i < sz_; i++)
-  {
+  for (int i = 0; i < sz_; i++) {
     NSInteger sz_i = (i < sz) ? sizes[i] : 1;
-
     NSNumber* number = [NSNumber numberWithInteger:sz_i];
     numbers[i] = number;
   }
-  return [NSArray arrayWithObjects:numbers count:sz_];
+  return [NSArray arrayWithObjects:numbers.data() count:numbers.size()];
 }
 
 void printTensorNDArray(const Tensor& t) {
@@ -231,7 +211,12 @@ void printTensorNDArray(const Tensor& t) {
   MPSGraphTensorData* tdata = [[[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf
                                                             shape:selfShape
                                                          dataType:selfDType] autorelease];
+  C10_CLANG_DIAGNOSTIC_PUSH()
+  #if C10_CLANG_HAS_WARNING("-Wobjc-method-access")
+  C10_CLANG_DIAGNOSTIC_IGNORE("-Wobjc-method-access")
+  #endif
   [tdata printNDArray];
+  C10_CLANG_DIAGNOSTIC_POP()
 }
 
 Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSShape *mpsShape) : _tensor(src)
@@ -245,9 +230,9 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSS
     // use "_tensor" from Placeholder to retain view's output during its usage in other ops
     _tensor = gatherViewTensor(src, emptyShell);
     if (!_tensor.has_storage()) {
-      // if we cannot gather, we make the the tensor contiguous implicitly, and keep
+      // if we cannot gather, we make the tensor contiguous implicitly, and keep
       // it in placeholder to be able to retrieve it when we return from constructor
-      _tensor = src.contiguous();
+      _tensor = src.clone(MemoryFormat::Contiguous);
     }
     srcBuf = getMTLBufferStorage(_tensor);
   }
@@ -292,46 +277,36 @@ MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph,
   return result;
 }
 
-MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, const Scalar& scalar, MPSDataType dataType) {
-  union {
-    float f; // MPS doesn't support 'double'
-    at::Half h;
-    int64_t i;
-    bool b;
-  } v;
-  switch (dataType) {
-    case MPSDataTypeFloat32:
-      v.f = scalar.to<float>();
-      break;
-    case MPSDataTypeFloat16:
-      v.h = scalar.to<at::Half>();
-      break;
-    case MPSDataTypeInt64:
-      v.i = scalar.to<int64_t>();
-      break;
-    case MPSDataTypeInt32:
-      v.i = scalar.to<int32_t>();
-      break;
-    case MPSDataTypeInt16:
-      v.i = scalar.to<int16_t>();
-      break;
-    case MPSDataTypeInt8:
-      v.i = scalar.to<int8_t>();
-      break;
-    case MPSDataTypeUInt8:
-      v.i = scalar.to<uint8_t>();
-      break;
-    case MPSDataTypeBool:
-      v.b = scalar.to<bool>();
-      break;
+MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
+  switch (type) {
+    case ScalarType::Double:
+    case ScalarType::Float: return {.value.f = scalar.to<float>()   , .size = sizeof(float)  , .type = type};
+    case ScalarType::Half:  return {.value.h = scalar.to<at::Half>(), .size = sizeof(short)  , .type = type};
+    case ScalarType::Long:  return {.value.i = scalar.to<int64_t>() , .size = sizeof(int64_t), .type = type};
+    case ScalarType::Int:   return {.value.i = scalar.to<int32_t>() , .size = sizeof(int32_t), .type = type};
+    case ScalarType::Short: return {.value.i = scalar.to<int16_t>() , .size = sizeof(int16_t), .type = type};
+    case ScalarType::Char:  return {.value.i = scalar.to<int8_t>()  , .size = sizeof(int8_t) , .type = type};
+    case ScalarType::Byte:  return {.value.i = scalar.to<uint8_t>() , .size = sizeof(uint8_t), .type = type};
+    case ScalarType::Bool:  return {.value.b = scalar.to<bool>()    , .size = sizeof(bool)   , .type = type};
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unsupported scalar type on MPS backend.")
+      TORCH_INTERNAL_ASSERT(false, "Unsupported scalar type '", type, "' on MPS backend.");
   }
+}
 
-  MPSNDArrayDescriptor *tensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType shape:@[@1]];
-  MPSNDArray *tensorNDArray = [[[MPSNDArray alloc] initWithDevice:mpsStream->device() descriptor:tensorDesc] autorelease];
-  [tensorNDArray writeBytes:&v strideBytes:nil];
-  MPSGraphTensorData* result = [[[MPSGraphTensorData alloc] initWithMPSNDArray:tensorNDArray] autorelease];
+MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar) {
+  MPSGraphTensorData *result = nullptr;
+  // Scalar pools are only supported on devices with unified memory
+  if (mpsStream->device().hasUnifiedMemory) {
+    scalar.buffer = at::mps::allocate_scalar_buffer(&scalar.value, scalar.size);
+    result = [[[MPSGraphTensorData alloc] initWithMTLBuffer: scalar.getMTLBuffer()
+                                                      shape: @[@1]
+                                                   dataType: getMPSScalarType(scalar.type)] autorelease];
+  } else {
+    MPSNDArrayDescriptor *tensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:getMPSScalarType(scalar.type) shape:@[@1]];
+    MPSNDArray *tensorNDArray = [[[MPSNDArray alloc] initWithDevice:mpsStream->device() descriptor:tensorDesc] autorelease];
+    [tensorNDArray writeBytes:&scalar.value strideBytes:nil];
+    result = [[[MPSGraphTensorData alloc] initWithMPSNDArray:tensorNDArray] autorelease];
+  }
   return result;
 }
 

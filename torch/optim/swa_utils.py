@@ -5,7 +5,7 @@ import warnings
 
 import torch
 from torch.nn import Module
-from torch.optim.lr_scheduler import _LRScheduler
+from torch.optim.lr_scheduler import LRScheduler
 
 __all__ = ['AveragedModel', 'update_bn', 'SWALR']
 
@@ -34,6 +34,7 @@ class AveragedModel(Module):
             both the parameters and the buffers of the model. (default: ``False``)
 
     Example:
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> loader, optimizer, model, loss_fn = ...
         >>> swa_model = torch.optim.swa_utils.AveragedModel(model)
         >>> scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
@@ -59,9 +60,10 @@ class AveragedModel(Module):
     equally-weighted average of the weights.
 
     Example:
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> # Compute exponential moving averages of the weights and buffers
-        >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
-                            0.1 * averaged_model_parameter + 0.9 * model_parameter
+        >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged: (
+        ...                 0.1 * averaged_model_parameter + 0.9 * model_parameter)
         >>> swa_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg, use_buffers=True)
 
     .. note::
@@ -130,6 +132,11 @@ class AveragedModel(Module):
             else:
                 p_swa.detach().copy_(self.avg_fn(p_swa.detach(), p_model_,
                                                  self.n_averaged.to(device)))
+        if not self.use_buffers:
+            # If not apply running averages to the buffers,
+            # keep the buffers in sync with the source model.
+            for b_swa, b_model in zip(self.module.buffers(), model.buffers()):
+                b_swa.detach().copy_(b_model.detach().to(device))
         self.n_averaged += 1
 
 
@@ -150,6 +157,7 @@ def update_bn(loader, model, device=None):
             :attr:`device` before being passed into :attr:`model`.
 
     Example:
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> loader, model = ...
         >>> torch.optim.swa_utils.update_bn(loader, model)
 
@@ -188,7 +196,7 @@ def update_bn(loader, model, device=None):
     model.train(was_training)
 
 
-class SWALR(_LRScheduler):
+class SWALR(LRScheduler):
     r"""Anneals the learning rate in each parameter group to a fixed value.
 
     This learning rate scheduler is meant to be used with Stochastic Weight
@@ -210,6 +218,7 @@ class SWALR(_LRScheduler):
     as in the example below.
 
     Example:
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> loader, optimizer, model = ...
         >>> lr_lambda = lambda epoch: 0.9
         >>> scheduler = torch.optim.lr_scheduler.MultiplicativeLR(optimizer,

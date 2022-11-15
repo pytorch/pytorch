@@ -1,9 +1,8 @@
 #pragma once
 
+#include <ATen/AccumulateType.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/cuda/detail/TensorInfo.cuh>
 
 #include <c10/macros/Macros.h>
 
@@ -103,6 +102,60 @@ void im2col(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+template <typename accT, typename dt>
+__forceinline__ __device__ void col2im_device(
+    const int64_t index,
+    const dt* data_col,
+    const int64_t height,
+    const int64_t width,
+    const int64_t channels,
+    const int64_t kernel_h,
+    const int64_t kernel_w,
+    const int64_t pad_height,
+    const int64_t pad_width,
+    const int64_t stride_height,
+    const int64_t stride_width,
+    const int64_t dilation_height,
+    const int64_t dilation_width,
+    const int64_t height_col,
+    const int64_t width_col,
+    dt* data_im) {
+  accT val = static_cast<accT>(0);
+  const int64_t w_im = index % width + pad_width;
+  const int64_t h_im = (index / width) % height + pad_height;
+  const int64_t c_im = index / (width * height);
+  int64_t kernel_extent_w = (kernel_w - 1) * dilation_width + 1;
+  int64_t kernel_extent_h = (kernel_h - 1) * dilation_height + 1;
+  // compute the start and end of the output
+  const int64_t w_col_start = (w_im < kernel_extent_w)
+      ? 0
+      : (w_im - kernel_extent_w) / stride_width + 1;
+  const int64_t w_col_end = ::min(w_im / stride_width + 1, width_col);
+  const int64_t h_col_start = (h_im < kernel_extent_h)
+      ? 0
+      : (h_im - kernel_extent_h) / stride_height + 1;
+  const int64_t h_col_end = ::min(h_im / stride_height + 1, height_col);
+
+  // TODO: use LCM of stride and dilation to avoid unnecessary loops
+  for (int64_t h_col = h_col_start; h_col < h_col_end; h_col += 1) {
+    for (int64_t w_col = w_col_start; w_col < w_col_end; w_col += 1) {
+      int64_t h_k = (h_im - h_col * stride_height);
+      int64_t w_k = (w_im - w_col * stride_width);
+      if (h_k % dilation_height == 0 && w_k % dilation_width == 0) {
+        h_k /= dilation_height;
+        w_k /= dilation_width;
+        int64_t data_col_index =
+            (((c_im * kernel_h + h_k) * kernel_w + w_k) * height_col +
+              h_col) *
+                width_col +
+            w_col;
+        val += data_col[data_col_index];
+      }
+    }
+  }
+  data_im[index] = static_cast<dt>(val);
+}
+
 template <typename dt, typename accT>
 C10_LAUNCH_BOUNDS_1(512)
 __global__ void col2im_kernel(
@@ -123,40 +176,23 @@ __global__ void col2im_kernel(
     const int64_t width_col,
     dt* data_im) {
   CUDA_KERNEL_LOOP(index, n) {
-    accT val = static_cast<accT>(0);
-    const int64_t w_im = index % width + pad_width;
-    const int64_t h_im = (index / width) % height + pad_height;
-    const int64_t c_im = index / (width * height);
-    int64_t kernel_extent_w = (kernel_w - 1) * dilation_width + 1;
-    int64_t kernel_extent_h = (kernel_h - 1) * dilation_height + 1;
-    // compute the start and end of the output
-    const int64_t w_col_start = (w_im < kernel_extent_w)
-        ? 0
-        : (w_im - kernel_extent_w) / stride_width + 1;
-    const int64_t w_col_end = ::min(w_im / stride_width + 1, width_col);
-    const int64_t h_col_start = (h_im < kernel_extent_h)
-        ? 0
-        : (h_im - kernel_extent_h) / stride_height + 1;
-    const int64_t h_col_end = ::min(h_im / stride_height + 1, height_col);
-
-    // TODO: use LCM of stride and dilation to avoid unnecessary loops
-    for (int64_t h_col = h_col_start; h_col < h_col_end; h_col += 1) {
-      for (int64_t w_col = w_col_start; w_col < w_col_end; w_col += 1) {
-        int64_t h_k = (h_im - h_col * stride_height);
-        int64_t w_k = (w_im - w_col * stride_width);
-        if (h_k % dilation_height == 0 && w_k % dilation_width == 0) {
-          h_k /= dilation_height;
-          w_k /= dilation_width;
-          int64_t data_col_index =
-              (((c_im * kernel_h + h_k) * kernel_w + w_k) * height_col +
-               h_col) *
-                  width_col +
-              w_col;
-          val += data_col[data_col_index];
-        }
-      }
-    }
-    data_im[index] = static_cast<dt>(val);
+    col2im_device<accT>(
+        index,
+        data_col,
+        height,
+        width,
+        channels,
+        kernel_h,
+        kernel_w,
+        pad_height,
+        pad_width,
+        stride_height,
+        stride_width,
+        dilation_height,
+        dilation_width,
+        height_col,
+        width_col,
+        data_im);
   }
 }
 
@@ -200,6 +236,108 @@ void col2im(
           height_col,
           width_col,
           data_im);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+template <typename dt>
+C10_LAUNCH_BOUNDS_1(512)
+__global__ void col2im_batched_kernel(
+    const int64_t n,
+    const dt* data_col,
+    const int64_t col_batch_stride,
+    const int64_t nbatch,
+    const int64_t height,
+    const int64_t width,
+    const int64_t channels,
+    const int64_t kernel_h,
+    const int64_t kernel_w,
+    const int64_t pad_height,
+    const int64_t pad_width,
+    const int64_t stride_height,
+    const int64_t stride_width,
+    const int64_t dilation_height,
+    const int64_t dilation_width,
+    const int64_t height_col,
+    const int64_t width_col,
+    dt* data_im,
+    const int64_t im_batch_stride) {
+  using accT = at::acc_type<dt, /*is_cuda*/true>;
+  const auto im_numel = n * nbatch;
+
+  CUDA_KERNEL_LOOP_TYPE(index, im_numel, int64_t) {
+    const auto ibatch = index / n;
+    const auto slice_index = index % n;
+
+    col2im_device<accT>(
+        slice_index,
+        data_col + ibatch * col_batch_stride,
+        height,
+        width,
+        channels,
+        kernel_h,
+        kernel_w,
+        pad_height,
+        pad_width,
+        stride_height,
+        stride_width,
+        dilation_height,
+        dilation_width,
+        height_col,
+        width_col,
+        data_im + ibatch * im_batch_stride);
+  }
+}
+
+template <typename dt>
+void col2im_batched(
+    cudaStream_t stream,
+    const dt* data_col,
+    const int64_t col_batch_stride,
+    const int64_t nbatch,
+    const int64_t channels,
+    const int64_t height,
+    const int64_t width,
+    const int64_t height_col,
+    const int64_t width_col,
+    const int64_t patch_height,
+    const int64_t patch_width,
+    const int64_t pad_height,
+    const int64_t pad_width,
+    const int64_t stride_height,
+    const int64_t stride_width,
+    const int64_t dilation_height,
+    const int64_t dilation_width,
+    dt* data_im,
+    const int64_t im_batch_stride) {
+  const int64_t num_kernels = channels * height * width;
+  const int64_t output_numel = nbatch * num_kernels;
+  if (output_numel == 0) {
+    return;  // No work to do
+  }
+
+  // To avoid involving atomic operations, we will launch one kernel per
+  // bottom dimension, and then in the kernel add up the top dimensions.
+  // CUDA_NUM_THREADS = 1024
+  col2im_batched_kernel<<<GET_BLOCKS(output_numel, 512), 512, 0, stream>>>(
+          num_kernels,
+          data_col,
+          col_batch_stride,
+          nbatch,
+          height,
+          width,
+          channels,
+          patch_height,
+          patch_width,
+          pad_height,
+          pad_width,
+          stride_height,
+          stride_width,
+          dilation_height,
+          dilation_width,
+          height_col,
+          width_col,
+          data_im,
+          im_batch_stride);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 

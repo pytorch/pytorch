@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["module: fx"]
 
 import builtins
 import contextlib
@@ -43,6 +43,8 @@ from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
 from fx.test_fx_param_shape_control_flow import TestConstParamShapeInControlFlow  # noqa: F401
 from fx.test_pass_infra import TestPassManager  # noqa: F401
+from fx.test_common_passes import TestCommonPass  # noqa: F401
+from fx.test_cse_pass import TestCSEPass  # noqa: F401
 
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import AnnotationsTest  # noqa: F401
@@ -117,6 +119,16 @@ wrap('wrapped_with_submodule')
 def wrapped_with_submodule(x: torch.Tensor, batchnorm1d: torch.nn.BatchNorm1d):
     return batchnorm1d(x)
 
+def my_decorator(f):
+    @functools.wraps(f)
+    def wrapper_inside_decorator(*args, **kwargs):
+        return f(*args, **kwargs)
+    return wrapper_inside_decorator
+
+@wrap
+@my_decorator
+def wrapped_decorated_fn(x):
+    return x
 
 real_wrapped_via_decorator = wrapped_via_decorator
 real_a_lifed_leaf = a_lifted_leaf
@@ -221,7 +233,7 @@ class TestFX(JitTestCase):
         new_instance.__init__(gm3, gm3.graph)
 
         x = torch.randn(5, 3)
-        torch.testing.assert_allclose(new_instance(x), torch.relu(x))
+        torch.testing.assert_close(new_instance(x), torch.relu(x))
 
     def test_custom_import(self):
         graph = torch.fx.Graph()
@@ -445,6 +457,14 @@ class TestFX(JitTestCase):
         self.assertIn('wrapped_via_decorator', retraced.code)
         self.assertEqual(retraced(0), 1)
 
+    def test_wrap_decorated_function(self):
+        def to_trace(y):
+            return wrapped_decorated_fn(y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('wrapped_decorated_fn', m.code)
+        self.assertEqual(m(1), 1)
+
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -549,6 +569,25 @@ class TestFX(JitTestCase):
             new_node = graph.node_copy(node)
             self.assertTrue(new_node.stack_trace is not None)
             assert 'test_fx.py' in new_node.stack_trace
+
+    def test_stack_traces_with_transformer(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+
+        graph = tracer.trace(M())
+        gm = GraphModule(tracer.root, graph)
+        new_gm = Transformer(gm).transform()
+
+        # nodes after Transformer should still preserve the original node's stack trace
+        for node in new_gm.graph.nodes:
+            if node.op in {'placeholder', 'output'}:
+                continue
+            self.assertTrue(node.stack_trace is not None)
+            assert 'test_fx.py' in node.stack_trace
 
     def test_graph_unique_names_manual(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -769,7 +808,7 @@ class TestFX(JitTestCase):
         traced = torch.fx.symbolic_trace(ec)
 
         x = torch.randn(bs, d_hid)
-        torch.testing.assert_allclose(ec(x), traced(x))
+        torch.testing.assert_close(ec(x), traced(x))
 
 
     def test_node_tagging(self):
@@ -1086,7 +1125,7 @@ class TestFX(JitTestCase):
 
         traced = torch.fx.symbolic_trace(foo)
         x = (torch.randn(5, 3),)
-        torch.testing.assert_allclose(traced(x), x[0])
+        torch.testing.assert_close(traced(x), x[0])
 
         bio = io.BytesIO()
 
@@ -1096,7 +1135,7 @@ class TestFX(JitTestCase):
 
         loaded = torch.load(bio)
 
-        torch.testing.assert_allclose(loaded(x), x[0])
+        torch.testing.assert_close(loaded(x), x[0])
 
     def test_torch_fx_len(self):
         class FXLenTest(torch.nn.Module):
@@ -1766,7 +1805,7 @@ class TestFX(JitTestCase):
         interp = Interpreter(gm)
         x = torch.randn(5, 3)
         out = interp.run(x)
-        torch.testing.assert_allclose(out, x + 3.14159)
+        torch.testing.assert_close(out, x + 3.14159)
 
     def test_interpreter_not_enough_args(self):
         class Model(torch.nn.Module):
@@ -2275,8 +2314,8 @@ class TestFX(JitTestCase):
         traced1.recompile()
 
         x = torch.randn(15, 15)
-        torch.testing.assert_allclose(traced1(x), torch.relu(x))
-        torch.testing.assert_allclose(copied(x), torch.neg(x))
+        torch.testing.assert_close(traced1(x), torch.relu(x))
+        torch.testing.assert_close(copied(x), torch.neg(x))
 
     def test_direct_param_use(self):
         class TransposeTest(torch.nn.Module):
@@ -2659,7 +2698,7 @@ class TestFX(JitTestCase):
         replica = gm._replicate_for_data_parallel()
         out_replica = replica(x)
 
-        torch.testing.assert_allclose(out_replica, out)
+        torch.testing.assert_close(out_replica, out)
 
     def test_ast_rewriter_rewrites_assert(self):
         class M(torch.nn.Module):
@@ -2751,7 +2790,7 @@ class TestFX(JitTestCase):
 
     def test_profiler_ranges_side_effect(self):
         g = torch.fx.Graph()
-        handle = g.call_function(torch.ops.profiler._record_function_enter, ('test_range',))
+        handle = g.call_function(torch.ops.profiler._record_function_enter_new, ('test_range',))
         g.call_function(torch.ops.profiler._record_function_exit, (handle,))
         g.output(None)
 
@@ -2761,7 +2800,7 @@ class TestFX(JitTestCase):
                 found_targets.setdefault(node.target)
         self.assertEqual(
             list(found_targets.keys()),
-            [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit]
+            [torch.ops.profiler._record_function_enter_new, torch.ops.profiler._record_function_exit]
         )
 
         g.eliminate_dead_code()
@@ -2771,7 +2810,7 @@ class TestFX(JitTestCase):
                 found_targets.setdefault(node.target)
         self.assertEqual(
             list(found_targets.keys()),
-            [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit]
+            [torch.ops.profiler._record_function_enter_new, torch.ops.profiler._record_function_exit]
         )
 
     def test_ast_rewriter_wrapped_via_decorator(self):
@@ -3005,7 +3044,7 @@ class TestFX(JitTestCase):
         traced_graph = MyCustomTracer().trace(model)
         gm2 = torch.fx.GraphModule(model, traced_graph)
         gm2.delete_all_unused_submodules()
-        torch.testing.assert_allclose(gm2(inputs), model(inputs))
+        torch.testing.assert_close(gm2(inputs), model(inputs))
 
     def test_fx_stateless(self):
         class MockModule(torch.nn.Module):
@@ -3280,6 +3319,7 @@ class TestFX(JitTestCase):
             .run(scripted.code)
 
     @unittest.skipIf(IS_WINDOWS, "Python Windows bug? https://bugs.python.org/issue45108")
+    @unittest.skipIf(sys.version_info >= (3, 10), "Does not work on Python-3.10")
     def test_assert(self):
         def f(x):
             assert x > 1
@@ -3501,6 +3541,17 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         self.assertEqual(gm(2, 3), 6)
         self.assertIn("a *= b", gm.code)
 
+    def test_deepcopy_tracer(self):
+        def fn(x, y):
+            return (x + y).relu().sin()
+
+        tracer = Tracer()
+        tracer_before = copy.deepcopy(tracer)
+        tracer.trace(fn)
+        tracer_after = copy.deepcopy(tracer)
+
+        self.assertEqual(str(tracer.graph), str(tracer_after.graph))
+        self.assertTrue(not hasattr(tracer_before, 'graph') or str(tracer.graph) != str(tracer_before.graph))
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
@@ -3720,7 +3771,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         signature_strs.sort()
 
         try:
-            self.assertExpected('\n'.join(signature_strs), 'fx_backcompat_function_signatures')
+            self.assertExpected('\n'.join(signature_strs) + '\n', 'fx_backcompat_function_signatures')
         except AssertionError as e:
             msg = f"{e}\n****** ERROR ******\nAn FX function that has been marked " \
                   f"as backwards-compatible has experienced a signature change. See the " \
@@ -3879,6 +3930,8 @@ class TestFunctionalTracing(JitTestCase):
         "max_unpool1d": PROXY_ITERATED,
         "max_unpool2d": PROXY_ITERATED,
         "max_unpool3d": PROXY_ITERATED,
+        "fold": PROXY_ITERATED,
+        "unfold": PROXY_ITERATED,
 
         "adaptive_max_pool1d_with_indices": ARG_TYPE_MISMATCH,
         "fractional_max_pool2d_with_indices": ARG_TYPE_MISMATCH,
@@ -3903,7 +3956,6 @@ class TestFunctionalTracing(JitTestCase):
         "embedding": CONTROL_FLOW,
         "embedding_bag": CONTROL_FLOW,
         "feature_alpha_dropout": CONTROL_FLOW,
-        "fold": CONTROL_FLOW,
         "gaussian_nll_loss": CONTROL_FLOW,
         "glu": CONTROL_FLOW,
         "grid_sample": CONTROL_FLOW,
@@ -3940,7 +3992,6 @@ class TestFunctionalTracing(JitTestCase):
         "threshold": CONTROL_FLOW,
         "triplet_margin_loss": CONTROL_FLOW,
         "triplet_margin_with_distance_loss": CONTROL_FLOW,
-        "unfold": CONTROL_FLOW,
         "upsample": CONTROL_FLOW,
 
         "upsample_bilinear": INTERPOLATE_ARGS_CONFLICT,
@@ -4017,7 +4068,7 @@ class TestFunctionalTracing(JitTestCase):
 
         def functional_test(self):
             if func_name in self.UNTRACEABLE_FUNCTIONALS_PY38 and \
-                    sys.version_info >= (3, 8) and sys.version_info < (3, 10):
+                    sys.version_info >= (3, 8) and sys.version_info < (3, 11):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
                 with self.assertRaisesRegex(exc, err):
                     symbolic_trace(fn)
@@ -4109,9 +4160,9 @@ class TestVisionTracing(JitTestCase):
     }
 
     @classmethod
-    def generate_test_fn(cls, name, model_fn, x, kwargs):
+    def generate_test_fn(cls, name, x, kwargs):
         def run_test(self):
-            model = model_fn(**kwargs)
+            model = torchvision_models.get_model(name, **kwargs)
             model = model.eval()
             if name in self.UNTRACEABLE_MODELS:
                 err, exc = self.UNTRACEABLE_MODELS[name]
@@ -4137,43 +4188,43 @@ class TestVisionTracing(JitTestCase):
 
     @classmethod
     def generate_classification_tests(cls):
-        for k, v in torchvision_models.__dict__.items():
-            if callable(v) and k[0].lower() == k[0] and k[0] != "_" and k != 'get_weight':
-                test_name = 'test_torchvision_models_' + k
-                x = torch.rand(1, 3, 299, 299) if k in ['inception_v3'] else torch.rand(1, 3, 224, 224)
-                kwargs = dict(num_classes=50)
-                model_test = cls.generate_test_fn(k, v, x, kwargs)
-                setattr(cls, test_name, model_test)
+        for k in torchvision_models.list_models(module=torchvision_models):
+            test_name = 'test_torchvision_models_' + k
+            x = torch.rand(1, 3, 299, 299) if k in ['inception_v3'] else torch.rand(1, 3, 224, 224)
+            kwargs = dict(num_classes=50)
+            model_test = cls.generate_test_fn(k, x, kwargs)
+            setattr(cls, test_name, model_test)
 
     @classmethod
     def generate_segmentation_tests(cls):
-        for k, v in torchvision_models.segmentation.__dict__.items():
-            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
-                test_name = 'test_torchvision_models_segmentation_' + k
-                x = torch.rand(1, 3, 32, 32)
-                kwargs = dict(num_classes=10, pretrained_backbone=False)
-                model_test = cls.generate_test_fn(k, v, x, kwargs)
-                setattr(cls, test_name, model_test)
+        for k in torchvision_models.list_models(module=torchvision_models.segmentation):
+            test_name = 'test_torchvision_models_segmentation_' + k
+            x = torch.rand(1, 3, 32, 32)
+            kwargs = dict(num_classes=10, pretrained_backbone=False)
+            model_test = cls.generate_test_fn(k, x, kwargs)
+            setattr(cls, test_name, model_test)
 
     @classmethod
     def generate_detection_tests(cls):
-        for k, v in torchvision_models.detection.__dict__.items():
-            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
-                test_name = 'test_torchvision_models_detection_' + k
-                x = [torch.rand(3, 300, 300)]
-                kwargs = dict(num_classes=10, pretrained_backbone=False)
-                model_test = cls.generate_test_fn(k, v, x, kwargs)
-                setattr(cls, test_name, model_test)
+        for k in torchvision_models.list_models(module=torchvision_models.detection):
+            test_name = 'test_torchvision_models_detection_' + k
+            x = [torch.rand(3, 300, 300)]
+            kwargs = dict(num_classes=10, pretrained_backbone=False)
+            model_test = cls.generate_test_fn(k, x, kwargs)
+            setattr(cls, test_name, model_test)
 
     @classmethod
     def generate_video_tests(cls):
-        for k, v in torchvision_models.video.__dict__.items():
-            if callable(v) and k[0].lower() == k[0] and k[0] != "_":
-                test_name = 'test_torchvision_models_video_' + k
-                x = torch.rand(1, 3, 4, 112, 112) if k != 'mvit_v1_b' else torch.rand(1, 3, 16, 224, 224)
-                kwargs = dict(num_classes=50)
-                model_test = cls.generate_test_fn(k, v, x, kwargs)
-                setattr(cls, test_name, model_test)
+        for k in torchvision_models.list_models(module=torchvision_models.video):
+            test_name = 'test_torchvision_models_video_' + k
+            x = (
+                torch.rand(1, 3, 4, 112, 112)
+                if k not in {"mvit_v1_b", "mvit_v2_s", "s3d"}
+                else torch.rand(1, 3, 16, 224, 224)
+            )
+            kwargs = dict(num_classes=50)
+            model_test = cls.generate_test_fn(k, x, kwargs)
+            setattr(cls, test_name, model_test)
 
     @classmethod
     def generate_tests(cls):

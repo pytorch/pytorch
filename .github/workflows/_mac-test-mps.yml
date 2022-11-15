@@ -1,0 +1,78 @@
+name: mac-test-arm64
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
+
+jobs:
+  run_mps_test:
+    name: "Run MPS tests"
+    runs-on: macos-m1-12
+    steps:
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          quiet-checkout: true
+
+      - name: Clean checkout
+        shell: arch -arch arm64 bash {0}
+        run: |
+          git clean -fxd
+
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+          use-gha: true
+
+      # This is copied from the main macos test workflow. It was missed in the earlier fix because macos M1
+      # runners are shared and not ephemeral, so the issue wasn't manifested if the runners with the fix were
+      # used
+      - name: Install macOS homebrew dependencies
+        run: |
+          # Install dependencies
+          brew install libomp
+          brew link --force libomp
+
+      - name: Setup miniconda
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: 3.9
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
+
+      - name: Install PyTorch
+        env:
+          ENV_NAME: conda-test-env-${{ github.run_id }}
+          PY_VERS: 3.9
+        shell: arch -arch arm64 bash {0}
+        run: |
+          # shellcheck disable=SC1090
+          set -ex
+          # As wheels are cross-compiled they are reported as x86_64 ones
+          ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv ${ORIG_WHLNAME} ${ARM_WHLNAME}
+          ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
+
+      - name: Run MPS tests
+        env:
+          ENV_NAME: conda-test-env-${{ github.run_id }}
+        shell: arch -arch arm64 bash {0}
+        run: |
+          # shellcheck disable=SC1090
+          set -ex
+          # TODO(https://github.com/pytorch/pytorch/issues/79293)
+
+          ${CONDA_RUN} --cwd test python3 test_mps.py -v
+          ${CONDA_RUN} --cwd test python3 test_metal.py -v

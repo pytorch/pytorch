@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import enum
 from typing import Dict
 
-from torch import _C as _C
+from torch import _C
 
 
 class ExportTypes:
@@ -15,7 +16,7 @@ class ExportTypes:
 
 
 class SymbolicContext:
-    r"""Provides extra context for symbolic functions.
+    """Extra context for symbolic functions.
 
     Args:
         params_dict (Dict[str, _C.IValue]): Mapping from graph initializer name to IValue.
@@ -24,10 +25,28 @@ class SymbolicContext:
         onnx_block (_C.Block): Current ONNX block that converted nodes are being appended to.
     """
 
-    def __init__(self, params_dict, env, cur_node, onnx_block):
+    def __init__(
+        self,
+        params_dict: Dict[str, _C.IValue],
+        env: dict,
+        cur_node: _C.Node,
+        onnx_block: _C.Block,
+    ):
         self.params_dict: Dict[str, _C.IValue] = params_dict
         self.env: Dict[_C.Value, _C.Value] = env
         # Current node that is being converted.
         self.cur_node: _C.Node = cur_node
         # Current onnx block that converted nodes are being appended to.
         self.onnx_block: _C.Block = onnx_block
+
+
+@enum.unique
+class RuntimeTypeCheckState(enum.Enum):
+    """Runtime type check state."""
+
+    # Runtime type checking is disabled.
+    DISABLED = enum.auto()
+    # Runtime type checking is enabled but warnings are shown only.
+    WARNINGS = enum.auto()
+    # Runtime type checking is enabled.
+    ERRORS = enum.auto()

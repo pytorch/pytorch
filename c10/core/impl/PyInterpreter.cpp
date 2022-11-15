@@ -5,89 +5,98 @@
 namespace c10 {
 namespace impl {
 
-static std::string noop_name_fn(const PyInterpreter*) {
-  return "<unloaded interpreter>";
-}
+struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
+  std::string name() const override {
+    return "<unloaded interpreter>";
+  }
 
-static void noop_decref_fn(const PyInterpreter*, PyObject*, bool) {
-  // no-op
-}
+  void decref(PyObject* pyobj, bool is_tensor) const override {} // do nothing
 
-static c10::intrusive_ptr<TensorImpl> noop_detach_fn(
-    const PyInterpreter*,
-    const TensorImpl*) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to detach (shallow_copy_and_detach) Tensor with nontrivial PyObject after corresponding interpreter died");
-}
+#define PANIC(m)              \
+  TORCH_INTERNAL_ASSERT(      \
+      0,                      \
+      "attempted to call " #m \
+      " on a Tensor with nontrivial PyObject after corresponding interpreter died")
 
-static void noop_dispatch_fn(
-    const PyInterpreter*,
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
-}
+  c10::intrusive_ptr<TensorImpl> detach(const TensorImpl* self) const override {
+    PANIC(detach);
+  }
 
-static bool noop_is_contiguous_fn(const PyInterpreter*, const TensorImpl*) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to call `is_contiguous` on Tensor with nontrivial PyObject after corresponding interpreter died");
-}
+  void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
+      const override {
+    PANIC(dispatch);
+  }
 
-static c10::Device noop_device_fn(const PyInterpreter*, const TensorImpl*) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to call `device` on Tensor with nontrivial PyObject after corresponding interpreter died");
-}
+  void python_op_registration_trampoline(
+      const c10::OperatorHandle& op,
+      c10::DispatchKey,
+      torch::jit::Stack* stack) const override {
+    PANIC(python_op_registration_trampoline);
+  }
 
-static int64_t noop_dim_fn(const PyInterpreter*, const TensorImpl*) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to call `dim` on Tensor with nontrivial PyObject after corresponding interpreter died");
-}
+  void python_dispatcher(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet,
+      torch::jit::Stack* stack) const override {
+    PANIC(python_dispatcher);
+  }
 
-static c10::IntArrayRef noop_strides_fn(
-    const PyInterpreter*,
-    const TensorImpl*) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to call `strides` on Tensor with nontrivial PyObject after corresponding interpreter died");
-}
+  bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override {
+    PANIC(is_contiguous);
+  }
+  bool is_strides_like(const TensorImpl* self, at::MemoryFormat)
+      const override {
+    PANIC(is_strides_like);
+  }
+  bool is_non_overlapping_and_dense(const TensorImpl* self) const override {
+    PANIC(is_non_overlapping_and_dense);
+  }
+  c10::Device device(const TensorImpl* self) const override {
+    PANIC(device);
+  }
+  int64_t dim(const TensorImpl* self) const override {
+    PANIC(dim);
+  }
+  c10::IntArrayRef strides(const TensorImpl* self) const override {
+    PANIC(strides);
+  }
+  c10::IntArrayRef sizes(const TensorImpl* self) const override {
+    PANIC(sizes);
+  }
+  c10::SymIntArrayRef sym_sizes(const TensorImpl* self) const override {
+    PANIC(sym_sizes);
+  }
+  c10::Layout layout(const TensorImpl* self) const override {
+    PANIC(layout);
+  }
+  c10::SymInt sym_numel(const TensorImpl* self) const override {
+    PANIC(sym_numel);
+  }
+  c10::SymIntArrayRef sym_strides(const TensorImpl* self) const override {
+    PANIC(sym_strides);
+  }
+  c10::SymInt sym_storage_offset(const TensorImpl* self) const override {
+    PANIC(sym_storage_offset);
+  }
 
-static c10::IntArrayRef noop_sizes_fn(const PyInterpreter*, const TensorImpl*) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to call `sizes` on Tensor with nontrivial PyObject after corresponding interpreter died");
-}
-
-static c10::SymIntArrayRef noop_sym_sizes_fn(
-    const PyInterpreter*,
-    const TensorImpl*) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to call `sym_sizes` on Tensor with nontrivial PyObject after corresponding interpreter died");
-}
-
-static c10::Layout noop_layout_fn(const PyInterpreter*, const TensorImpl*) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to call `layout` on Tensor with nontrivial PyObject after corresponding interpreter died");
-}
+  // Just swallow the event, don't do anything
+  void trace_gpu_event_creation(uintptr_t event) const override {}
+  void trace_gpu_event_deletion(uintptr_t event) const override {}
+  void trace_gpu_event_record(uintptr_t event, uintptr_t stream)
+      const override {}
+  void trace_gpu_event_wait(uintptr_t event, uintptr_t stream) const override {}
+  void trace_gpu_memory_allocation(uintptr_t ptr) const override {}
+  void trace_gpu_memory_deallocation(uintptr_t ptr) const override {}
+  void trace_gpu_stream_creation(uintptr_t stream) const override {}
+  void trace_gpu_device_synchronization() const override {}
+  void trace_gpu_stream_synchronization(uintptr_t stream) const override {}
+  void trace_gpu_event_synchronization(uintptr_t event) const override {}
+};
 
 void PyInterpreter::disarm() noexcept {
-  name_fn_ = &noop_name_fn;
-  decref_fn_ = &noop_decref_fn;
-  detach_fn_ = &noop_detach_fn;
-  dispatch_fn_ = &noop_dispatch_fn;
-  is_contiguous_fn_ = &noop_is_contiguous_fn;
-  device_fn_ = &noop_device_fn;
-  dim_fn_ = &noop_dim_fn;
-  strides_fn_ = &noop_strides_fn;
-  sizes_fn_ = &noop_sizes_fn;
-  sym_sizes_fn_ = &noop_sym_sizes_fn;
-  layout_fn_ = &noop_layout_fn;
+  // Intentionally leaked
+  static PyInterpreterVTable* noop_vtable = new NoopPyInterpreterVTable();
+  vtable_ = noop_vtable;
 }
 
 } // namespace impl

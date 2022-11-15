@@ -60,6 +60,7 @@ class _PartialTensor(torch.Tensor):
     Examples:
         >>> # All tensors below are of torch.int64 type.
         >>> # We have 2 process groups, 2 ranks.
+        >>> # xdoctest: +SKIP
         >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
         >>> tensor = torch.cat([tensor, tensor + 2])
         >>> tensor

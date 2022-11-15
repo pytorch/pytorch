@@ -55,6 +55,11 @@ on:
         required: false
         type: string
         description: Desired python version
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS:
+        required: false
+        type: string
+        description: Extra install requirements
+        default: ""
     secrets:
       github-token:
         required: true
@@ -62,8 +67,8 @@ on:
 
 jobs:
   build:
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
+    runs-on: linux.12xlarge
+    timeout-minutes: 150
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
       BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
@@ -79,6 +84,7 @@ jobs:
       LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
       DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ inputs.PYTORCH_EXTRA_INSTALL_REQUIREMENTS }}
       # Needed for conda builds
       ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
       ANACONDA_USER: pytorch
@@ -97,7 +103,6 @@ jobs:
             echo "PYTORCH_ROOT=${{ env.PYTORCH_ROOT }}"
             echo "BUILDER_ROOT=${{ env.BUILDER_ROOT }}"
             echo "PACKAGE_TYPE=${{ env.PACKAGE_TYPE }}"
-
             echo "DESIRED_CUDA=${{ env.DESIRED_CUDA }}"
             echo "GPU_ARCH_VERSION=${{ env.GPU_ARCH_VERSION }}"
             echo "GPU_ARCH_TYPE=${{ env.GPU_ARCH_TYPE }}"
@@ -107,12 +112,13 @@ jobs:
             echo "LIBTORCH_VARIANT=${{ env.LIBTORCH_VARIANT }}"
             echo "DESIRED_DEVTOOLSET=${{ env.DESIRED_DEVTOOLSET }}"
             echo "DESIRED_PYTHON=${{ env.DESIRED_PYTHON }}"
-
+            echo "PYTORCH_EXTRA_INSTALL_REQUIREMENTS=${{ env.PYTORCH_EXTRA_INSTALL_REQUIREMENTS }}"
             echo "ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}"
             echo "ANACONDA_USER=${{ env.ANACONDA_USER }}"
             echo "AWS_DEFAULT_REGION=${{ env.AWS_DEFAULT_REGION }}"
             echo "BINARY_ENV_FILE=${{ env.BINARY_ENV_FILE }}"
             echo "BUILD_ENVIRONMENT=${{ env.BUILD_ENVIRONMENT }}"
+            echo "BUILD_NAME=${{ env.BUILD_NAME }}"
             echo "PR_NUMBER=${{ env.PR_NUMBER }}"
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
@@ -127,7 +133,7 @@ jobs:
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.github-token }}
       - name: Clean workspace
@@ -161,17 +167,10 @@ jobs:
           git clean -fxd
         working-directory: builder
 
-      - name: Set BUILD_SPLIT_CUDA
-        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && startsWith(inputs.GPU_ARCH_VERSION, '11') }}
-        shell: bash
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ inputs.DOCKER_IMAGE }}
       - name: Build PyTorch binary
         run: |
           set -x
@@ -180,7 +179,6 @@ jobs:
             -e BINARY_ENV_FILE \
             -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
@@ -192,6 +190,7 @@ jobs:
             -e PYTORCH_FINAL_PACKAGE_DIR \
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
+            -e PYTORCH_EXTRA_INSTALL_REQUIREMENTS \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -209,29 +208,17 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
-      - uses: seemethere/upload-artifact-s3@v5
+      - uses: actions/upload-artifact@v3
         with:
           name: ${{ inputs.build_name }}
-          retention-days: 14
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
 
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
+      - name: Teardown Linux
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+
       - name: Chown workspace
         if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+        uses: ./pytorch/.github/actions/chown-workspace

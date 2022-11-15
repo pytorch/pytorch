@@ -6,9 +6,23 @@ import torch.nn.qat as nnqat
 from abc import ABC, abstractmethod
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.fx.graph_module import GraphModule
-from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
-from torch.ao.quantization.qconfig import QConfig
+from torch.ao.quantization.qconfig import (
+    QConfig,
+    default_qconfig,
+    assert_valid_qconfig,
+)
+from torch.ao.quantization.observer import (
+    ObserverBase,
+    default_dynamic_quant_observer,
+    default_per_channel_weight_observer,
+    default_observer,
+    default_weight_observer,
+)
+from torch.ao.quantization.fx._equalize import (
+    default_equalization_qconfig,
+    EqualizationQConfig,
+)
 from torch.ao.quantization.quantize import is_activation_post_process
 
 # Names for observer insert keys
@@ -16,6 +30,84 @@ DETECTOR_TARGET_NODE_KEY = "target_node"
 DETECTOR_OBS_TO_INSERT_KEY = "observer_to_insert"
 DETECTOR_IS_POST_OBS_KEY = "is_post_observer"
 DETECTOR_OBS_ARGS_KEY = "observer_args"
+
+# Mapping related code
+class DetectorQConfigInfo():
+    r"""
+    This class contains the QConfig information for a single module.
+    The list of variables / values this contains can grow depending on the
+    extensibility of the qconfig mapping feature set but this currently includes:
+    - if activation observer is dynamic
+    - if weight observer is per channel
+
+
+    Args:
+        module_fqn (str): The fully qualified name (fqn) of the module that this
+            information contains info relavent to qconfig for
+    """
+
+    def __init__(self, module_fqn: str):
+        super().__init__()
+        self.module_fqn = module_fqn
+
+        # populate this section with all the variables we might find important
+        # change from none if your detector is actually using this
+        self.is_activation_dynamic = False
+        self.is_weight_per_channel = False
+
+        # equalization related options
+        self.is_equalization_recommended = False
+
+    def generate_quantization_qconfig(self, module: torch.nn.Module) -> QConfig:
+        r"""
+        Args:
+            module (torch.nn.Module) The module we are generating
+            the qconfig for
+
+        Returns the generated quantization QConfig according to what a valid configuration is
+        """
+        # Apply suggestions to new qconfig
+        module_qconfig = default_qconfig
+
+        # keep track of dynamic and per_channel recommendations
+        recommendations_list = []
+        # append as if a list of combinations
+        recommendations_list.append((self.is_activation_dynamic, self.is_weight_per_channel))
+        recommendations_list.append((self.is_activation_dynamic, False))  # only trying dynamic rec
+        recommendations_list.append((False, self.is_weight_per_channel))  # only trying dynamic
+
+        # now we try each of the combinations
+        for rec in recommendations_list:
+            # rec[0] -> dynamic recommended
+            # rec[1] -> per channel recommended
+            activation = default_dynamic_quant_observer if rec[0] else default_observer
+            weight = default_per_channel_weight_observer if rec[1] else default_weight_observer
+            test_config = QConfig(activation, weight)
+            try:
+                assert_valid_qconfig(test_config, module)
+                module_qconfig = test_config
+                break
+            except AssertionError:
+                # if not a valid configuration, we move on to the next one in priority
+                continue
+
+        # return the QConfig chosen
+        return module_qconfig
+
+    def generate_equalization_qconfig(self) -> EqualizationQConfig:
+        r"""
+        This returns the equalization configuration for a module.
+
+        For now, it just returns the default, but as more equalization options become
+        possible, this method can get more fleshed out with more nuanced granularity.
+
+
+        Returns the generated equalization QConfig according to what a valid configuration is
+        """
+        # in this case, we just return default equalization config
+        # we know this is valid because only valid modules would even
+        # have this option
+        return default_equalization_qconfig
 
 # Adding base class for detectors
 class DetectorBase(ABC):
@@ -31,6 +123,7 @@ class DetectorBase(ABC):
 
     def __init__(self):
         super().__init__()
+        self.detector_config_info = None
 
     @abstractmethod
     def determine_observer_insert_points(self, model) -> Dict:
@@ -46,6 +139,18 @@ class DetectorBase(ABC):
     @abstractmethod
     def get_detector_name(self) -> str:
         r""" Returns the name of the current detector """
+        pass
+
+
+    @abstractmethod
+    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        Args
+            model (nn.Module or subclass): model to find observer insertion points
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to:
+            A DetectorQConfigInfo with the information to generate a QConfig for a specific module
+        """
         pass
 
     def _get_targeting_node(self, prepared_fx_model: GraphModule, target_fqn: str) -> torch.fx.node.Node:
@@ -117,6 +222,7 @@ class PerChannelDetector(DetectorBase):
         "fbgemm": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
         "qnnpack": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
         "onednn": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
+        "x86": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
     }
 
     def __init__(self, backend: str = torch.backends.quantized.engine):
@@ -133,6 +239,31 @@ class PerChannelDetector(DetectorBase):
     def get_detector_name(self) -> str:
         r""" returns the string name of this detector"""
         return "per_channel_detector"
+
+    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        Args
+            model (nn.Module or subclass): model to find observer insertion points
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to:
+            A DetectorQConfigInfo with the information to generate a QConfig for a specific module
+        """
+        # run the helper function to populate the dictionary
+        per_channel_info = self._detect_per_channel_helper(model)
+
+        # we actually have a qconfig info object we are populating
+        module_fqn_to_detector_qconfig_info = {}
+
+        for module_fqn in per_channel_info:
+            # create a detector info instance
+            detector_qconfig_info = DetectorQConfigInfo(module_fqn)
+
+            # see if per channel quantization is supported
+            per_chan_supported: bool = per_channel_info[module_fqn][self.PER_CHAN_SUPPORTED_KEY]
+            detector_qconfig_info.is_weight_per_channel = per_chan_supported
+            module_fqn_to_detector_qconfig_info[module_fqn] = detector_qconfig_info
+
+        return module_fqn_to_detector_qconfig_info
 
     def determine_observer_insert_points(self, model: nn.Module) -> Dict:
         r"""
@@ -279,9 +410,13 @@ class DynamicStaticDetector(DetectorBase):
     POST_OBS_COMP_STAT_KEY = OUTPUT_ACTIVATION_PREFIX + "dynamic_static_comp_stat"
     PRE_OBS_DATA_DIST_KEY = INPUT_ACTIVATION_PREFIX + "dynamic_static_data_classification"
     POST_OBS_DATA_DIST_KEY = OUTPUT_ACTIVATION_PREFIX + "dynamic_static_data_classification"
+    IS_CURRENTLY_SUPPORTED_KEY = "is_dynamic_supported"
 
     # modules that are supported both dynamic and static for this report function
     DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED = set([nn.Linear])
+
+    # modules that will be supported soon for both
+    DEFAULT_DYNAMIC_STATIC_FUTURE_SUPPORTED = set([nn.Conv1d, nn.Conv2d, nn.Conv3d])
 
     def __init__(self, tolerance=0.5):
         super().__init__()
@@ -346,6 +481,32 @@ class DynamicStaticDetector(DetectorBase):
         r""" returns the string name of this detector"""
         return "dynamic_vs_static_detector"
 
+
+    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        Args
+            model (nn.Module or subclass): model to find observer insertion points
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to:
+            A DetectorQConfigInfo with the information to generate a QConfig for a specific module
+        """
+        # run the helper function to populate the dictionary
+        dynamic_static_info = self._generate_dict_info(model)
+
+        # we actually have a qconfig info object we are populating
+        module_fqn_to_detector_qconfig_info = {}
+
+        for module_fqn in dynamic_static_info:
+            # create a detector info instance
+            detector_qconfig_info = DetectorQConfigInfo(module_fqn)
+
+            # see if per channel quantization is supported
+            dynamic_static_recommended: bool = dynamic_static_info[module_fqn][self.DEFAULT_DYNAMIC_REC_KEY]
+            detector_qconfig_info.is_activation_dynamic = dynamic_static_recommended
+            module_fqn_to_detector_qconfig_info[module_fqn] = detector_qconfig_info
+
+        return module_fqn_to_detector_qconfig_info
+
     def _is_supported(self, module: nn.Module, insert: bool = False) -> bool:
         r"""Returns whether the given module is supported for observers
 
@@ -358,13 +519,19 @@ class DynamicStaticDetector(DetectorBase):
         # check to see if module is of a supported type
         is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
 
+        # check if it will be supported
+        future_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_FUTURE_SUPPORTED))) > 0
+
+        # supported
+        supported = is_supported_type or future_supported_type
+
         # this is check for observer insertion
         if insert:
-            return is_supported_type
+            return supported
         else:
             # this is for report gen and we also need to check if it contains observers
             has_obs = hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME) and hasattr(module, self.DEFAULT_POST_OBSERVER_NAME)
-            return is_supported_type and has_obs
+            return supported and has_obs
 
     def _generate_dict_info(self, model: GraphModule) -> Dict[str, Any]:
         r"""
@@ -381,6 +548,7 @@ class DynamicStaticDetector(DetectorBase):
                 their S metric of output of module
                 whether output of module is stationary or non-stationary
                 the tolerance level to decided whether input/output is stationary or non-stationary
+                whether it is currently supported or planned for the future
         """
         # store modules dynamic vs static information
         module_dynamic_static_info = {}
@@ -409,6 +577,9 @@ class DynamicStaticDetector(DetectorBase):
                 pre_obs_dist_classif = self.STATIONARY_STR if pre_stat > self.tolerance else self.NON_STATIONARY_STR
                 post_obs_dist_classif = self.STATIONARY_STR if post_stat > self.tolerance else self.NON_STATIONARY_STR
 
+                # check if current support or future support
+                is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
+
                 # store the set of important information for this module
                 module_info = {
                     self.TOLERANCE_KEY: self.tolerance,
@@ -417,6 +588,7 @@ class DynamicStaticDetector(DetectorBase):
                     self.PRE_OBS_DATA_DIST_KEY: pre_obs_dist_classif,
                     self.POST_OBS_COMP_STAT_KEY: post_stat,
                     self.POST_OBS_DATA_DIST_KEY: post_obs_dist_classif,
+                    self.IS_CURRENTLY_SUPPORTED_KEY: is_supported_type,
                 }
 
                 module_dynamic_static_info[fqn] = module_info
@@ -451,6 +623,7 @@ class DynamicStaticDetector(DetectorBase):
                 their S metric of output of module
                 whether output of module is stationary or non-stationary
                 the tolerance level to decided whether input/output is stationary or non-stationary
+                whether it is currently supported or planned for the future
         """
 
         # get the dictionary of the information to format the string report
@@ -460,6 +633,9 @@ class DynamicStaticDetector(DetectorBase):
 
         modules_added: bool = False  # check to make sure at least 1 module added.
 
+        dynamic_benefit = " You will get more accurate results if you use dynamic quantization"
+        static_benefit = " You can increase model efficiency if you use static quantization"
+        future_support_str = ". This layer is not yet supported for dynamic quantization"
         # This for loop goes through the information collected in module_dynamic_static_info and:
         #   Populates the string based report with the information from module_dynamic_static_info
         #   Compiles the complete report by appending relavent formatted strings
@@ -473,14 +649,12 @@ class DynamicStaticDetector(DetectorBase):
 
             # decide what string formatting values will be
             quantization_type = ""
-
             quantization_reasoning = "the distribution of data before {} is {} and the distribution after is {}."
-            dynamic_benefit = " You will get more accurate results if you use dynamic quantization"
-            static_benefit = " You can increase model efficiency if you use static quantization"
+
             benefit_str = ""
 
             # strings for if dynamic quantized per tensor is needed
-            recommend_per_tensor = " We recommend to add a {} before this module if it is static."
+            recommend_per_tensor = ". We recommend to add a {} before this module if it is static."
             rec_lay_to_add = "dynamic quantize per tensor layer"
             dynamic_per_tensor_string = recommend_per_tensor.format(rec_lay_to_add)
             dynamic_per_tensor_reasoning_string = (
@@ -490,7 +664,10 @@ class DynamicStaticDetector(DetectorBase):
             # start composing explanation
             if module_info[self.DEFAULT_DYNAMIC_REC_KEY]:
                 quantization_type = "dynamic"
+                # check if currently supported or future supported
                 benefit_str = dynamic_benefit
+                if not module_info[self.IS_CURRENTLY_SUPPORTED_KEY]:
+                    benefit_str += future_support_str
             else:
                 quantization_type = "static"
                 benefit_str = static_benefit
@@ -522,7 +699,7 @@ class DynamicStaticDetector(DetectorBase):
             dynamic_vs_static_string += module_suggestion_string
 
         if not modules_added:
-            dynamic_vs_static_string += "No applicable layers for suggestions. Only linear valid.\n"
+            dynamic_vs_static_string += "No applicable layers for suggestions. Only linear and conv are valid.\n"
 
         # return the string as well as the dictionary of information
         return (dynamic_vs_static_string, module_dynamic_static_info)
@@ -587,6 +764,9 @@ class InputWeightEqualizationDetector(DetectorBase):
     WEIGHT_STR = "weight"
     INPUT_STR = "input"
 
+    # default for what ratio we recommend input weight
+    DEFAULT_RECOMMEND_INPUT_WEIGHT_CHANNEL_RATIO = 0.4
+
     def __init__(self, ratio_threshold: float, ch_axis: int = 1):
         # ensure passed in inputs are valid
         if ratio_threshold <= 0 or ratio_threshold >= 1:
@@ -615,6 +795,41 @@ class InputWeightEqualizationDetector(DetectorBase):
             # this is for report gen and we also need to check if it contains observers
             has_obs = hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
             return is_supported_type and has_obs
+
+    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        Args
+            model (nn.Module or subclass): model to find observer insertion points
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to:
+            A DetectorQConfigInfo with the information to generate a QConfig for a specific module
+        """
+        # run the helper function to populate the dictionary
+        # find the range of inputs
+        input_values: Dict[str, Dict] = self._extract_input_info(model)
+
+        # find the range of weights
+        weight_values: Dict[str, Dict] = self._extract_weight_info(model)
+
+        # calculate per_channel comparision statistic s_c
+        comp_stats: Dict[str, torch.Tensor] = self._generate_comparision_values(input_values, weight_values)
+
+        # generate the return dictionary
+        input_weight_equalization_info: Dict[str, Dict] = self._generate_dict_info(input_values, weight_values, comp_stats)
+
+        # we actually have a qconfig info object we are populating
+        module_fqn_to_detector_qconfig_info = {}
+
+        for module_fqn in input_weight_equalization_info:
+            # create a detector info instance
+            detector_qconfig_info = DetectorQConfigInfo(module_fqn)
+
+            # see if per channel quantization is supported
+            input_weight_recommended: bool = input_weight_equalization_info[module_fqn][self.RECOMMENDED_KEY]
+            detector_qconfig_info.is_equalization_recommended = input_weight_recommended
+            module_fqn_to_detector_qconfig_info[module_fqn] = detector_qconfig_info
+
+        return module_fqn_to_detector_qconfig_info
 
     def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
         r"""Determines where observers need to be inserted for the Input Weight Equalization Detector.
@@ -717,11 +932,26 @@ class InputWeightEqualizationDetector(DetectorBase):
             if self._is_supported(module):
                 # we don't need actual observer, just the module weights
                 # calculate min and max vals
-                min_val, max_val = torch.aminmax(module.weight, dim=self.ch_axis)
+                min_val: torch.Tensor = torch.tensor([float('inf')])
+                max_val: torch.Tensor = torch.tensor([float('-inf')])
+                x_copy = module.weight
+                x_dim = x_copy.size()
 
-                # flatten entries since conv can have multiple dimensions
-                min_val = torch.flatten(min_val)
-                max_val = torch.flatten(max_val)
+                new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
+                new_axis_list[self.ch_axis] = 0
+                new_axis_list[0] = self.ch_axis
+                y = x_copy.permute(new_axis_list)
+
+                # Need to match dtype of min/max because the updates to buffers
+                # are done in place and types need to match for comparisons
+                y = y.to(min_val.dtype)
+                y = torch.flatten(y, start_dim=1)
+                if min_val.numel() == 0 or max_val.numel() == 0:
+                    min_val, max_val = torch.aminmax(y, dim=1)
+                else:
+                    min_val_cur, max_val_cur = torch.aminmax(y, dim=1)
+                    min_val = torch.min(min_val_cur, min_val)
+                    max_val = torch.max(max_val_cur, max_val)
 
                 weight_info[fqn] = {
                     self.WEIGHT_PREFIX + self.PER_CHANNEL_MAX_KEY: max_val,
@@ -789,10 +1019,20 @@ class InputWeightEqualizationDetector(DetectorBase):
             weight_ratio = self._calculate_range_ratio(weight_info[module_fqn], self.WEIGHT_STR, module_fqn)
             input_ratio = self._calculate_range_ratio(input_info[module_fqn], self.INPUT_STR, module_fqn)
 
+            # if mismatched size, because of grouping, we want to replicate weight enough times
+            weight_channels = len(weight_ratio)
+            input_channels = len(input_ratio)
+            if weight_channels != input_channels:
+                # we try to replicate
+                assert input_channels % weight_channels == 0, "input channels should be divisible by weight channels."
+                # get replication factor
+                rep_factor: int = input_channels // weight_channels
+
+                # weight ratio is (n,), input ratio is (k,), we just repeat weight ratio k // n
+                weight_ratio = weight_ratio.repeat(rep_factor)
+
             # calculate the s metric per channel
             s = torch.sqrt(weight_ratio) / torch.sqrt(input_ratio)
-
-            # add to dictionary
             module_fqn_to_channel[module_fqn] = s
 
         # return compiled observer ratios
@@ -819,7 +1059,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         # store modules input weight equalization info
         input_weight_equalization_info: Dict[str, Dict] = {}
 
-        # for each module we add seperate set of suggestions
+        # for each module we add separate set of suggestions
         for module_fqn in input_info:
 
             # get relavent info for this module
@@ -890,12 +1130,12 @@ class InputWeightEqualizationDetector(DetectorBase):
         input_weight_string = "Input-Weight Equalization suggestions: \n"
 
         # some strings to be formatted depending on module we are adding
-        module_suggestion_str = "For Module {} looked at with axis {} we suggest: \n"
-        channel_suggestion_str = "\tFor channel {}, we suggest {} input weight equalization because {}\n"
+        module_suggestion_str = "For Module {} looked at with axis {}: \n"
+        channel_suggestion_str = "\tWe suggest {} input weight equalization because {}\n"
         use_str = "to use"
         no_use_str = "to not use"
-        input_weight_benefit_str = "we expect significant reduction in quantization error."
-        input_weight_non_benefit_reasoning = "the scales of the input vs. weight with regards to their ranges."
+        input_weight_benefit_str = "{}/{} channels would benefit and we expect significant reduction in quantization error."
+        input_weight_non_benefit_reasoning = "{}/{} channels benefitting from input-weight equalization being applied."
         input_weight_non_benefit_str = "we don't expect much improvement from input-weight equalization based on {}"
 
         # added module check
@@ -910,15 +1150,19 @@ class InputWeightEqualizationDetector(DetectorBase):
 
             mod_info: Dict[str, Any] = input_weight_equalization_info[module_fqn]
 
-            # look at each individual channel and add a suggestion
-            for index, channel_suggested in enumerate(mod_info[self.RECOMMENDED_KEY]):
-                if channel_suggested:
-                    channel_str = channel_suggestion_str.format(index, use_str, input_weight_benefit_str)
-                    input_weight_string += channel_str
-                else:
-                    non_benefit_str = input_weight_non_benefit_str.format(input_weight_non_benefit_reasoning)
-                    channel_str = channel_suggestion_str.format(index, no_use_str, non_benefit_str)
-                    input_weight_string += channel_str
+            # gather info on how many channels would benefit from input weight and
+            recommendation_per_channel: torch.Tensor = mod_info[self.RECOMMENDED_KEY]
+            num_recs = sum(recommendation_per_channel)
+
+            if num_recs / len(recommendation_per_channel) >= self.DEFAULT_RECOMMEND_INPUT_WEIGHT_CHANNEL_RATIO:
+                input_benefit_formatted = input_weight_benefit_str.format(num_recs, len(recommendation_per_channel))
+                channel_str = channel_suggestion_str.format(use_str, input_benefit_formatted)
+                input_weight_string += channel_str
+            else:
+                non_benefit_reason_formatted = input_weight_non_benefit_reasoning.format(num_recs, len(recommendation_per_channel))
+                non_benefit_str = input_weight_non_benefit_str.format(non_benefit_reason_formatted)
+                channel_str = channel_suggestion_str.format(no_use_str, non_benefit_str)
+                input_weight_string += channel_str
 
         # if no modules looked at, amend return string
         if not added_module:
@@ -1030,6 +1274,17 @@ class OutlierDetector(DetectorBase):
         # check if the module has any children and isn't observer
         num_children = len(list(module.children()))
         return num_children == 0 and not is_activation_post_process(module)
+
+    def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
+        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        Args
+            model (nn.Module or subclass): model to find observer insertion points
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to:
+            A DetectorQConfigInfo with the information to generate a QConfig for a specific module
+        """
+        # currently doesn't do anything for outlier detector
+        return {}
 
     def _supports_report_gen(self, module: nn.Module) -> bool:
         r"""Returns whether the given module is supported for report generation

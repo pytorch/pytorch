@@ -5,21 +5,10 @@
 
 import contextlib
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generator,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    cast,
-)
+from typing import Any, Callable, cast, Dict, Generator, Optional, Set, Tuple, Type
 
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
-
 
 __all__ = [
     "always_wrap_policy",
@@ -41,11 +30,9 @@ def always_wrap_policy(*args, **kwargs) -> bool:
     """
     return True
 
+
 def lambda_auto_wrap_policy(
-    module: nn.Module,
-    recurse: bool,
-    unwrapped_params: int,
-    lambda_fn: Callable
+    module: nn.Module, recurse: bool, unwrapped_params: int, lambda_fn: Callable
 ) -> bool:
     """
     A convenient auto wrap policy to wrap submodules based on an arbitrary user
@@ -77,6 +64,7 @@ def lambda_auto_wrap_policy(
     else:
         # if not recursing, decide whether we should wrap for the leaf node or reminder
         return lambda_fn(module)
+
 
 def transformer_auto_wrap_policy(
     module: nn.Module,
@@ -112,7 +100,7 @@ def transformer_auto_wrap_policy(
 
        transformer_layer_cls (int):
            Submodules with one of the `transformer_layer_cls` names
-           will be wrapped as seperated FSDP units
+           will be wrapped as separated FSDP units
     """
     if recurse:
         # always recurse
@@ -120,6 +108,7 @@ def transformer_auto_wrap_policy(
     else:
         # if not recursing, decide whether we should wrap for the leaf node or reminder
         return isinstance(module, tuple(transformer_layer_cls))
+
 
 def _wrap_batchnorm_individually(
     module: nn.Module,
@@ -138,6 +127,7 @@ def _wrap_batchnorm_individually(
         # BN layer or not.
         return isinstance(module, _BatchNorm)
 
+
 def _or_policy(
     module: nn.Module,
     recurse: bool,
@@ -148,9 +138,7 @@ def _or_policy(
     A policy that wraps ``module`` if any policy in the passed in iterable of
     ``policies`` returns ``True``.
     """
-    return any(
-        policy(module, recurse, unwrapped_params) for policy in policies
-    )
+    return any(policy(module, recurse, unwrapped_params) for policy in policies)
 
 
 def size_based_auto_wrap_policy(
@@ -333,13 +321,14 @@ class ParamExecOrderWrapPolicy:
     ``full``, ``full_like``, ``eye``, ``empty``, ``tensor``). For those cases,
     users can set ``tracing_config = None`` to disable symbolic tracing.
     """
+
     init_policy: Callable = always_wrap_policy
     tracing_config: Any = None
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
     assert wrapper_cls is not None
-    if hasattr(module, '_wrap_overrides'):
+    if hasattr(module, "_wrap_overrides"):
         # If module has a _wrap_overrides attribute, we force overriding the
         # FSDP config with these attributes for this module. Currently this
         # is only used to disable mixed precision for BatchNorm when
@@ -357,7 +346,7 @@ def _recursive_wrap(
     ignored_modules: Set[nn.Module],
     ignored_params: Set[nn.Parameter],
     only_wrap_children: bool = False,
-    **kwargs: Any
+    **kwargs: Any,
 ) -> Tuple[nn.Module, int]:
     """
     Automatically wrap child modules of *module* that meet the given
@@ -389,9 +378,7 @@ def _recursive_wrap(
             pass
 
     # We count all params, assuming none of them are already wrapped.
-    num_params = sum(
-        p.numel() for p in module.parameters() if p not in ignored_params
-    )
+    num_params = sum(p.numel() for p in module.parameters() if p not in ignored_params)
 
     assert auto_wrap_policy is not None
     if auto_wrap_policy(module=module, recurse=True, unwrapped_params=num_params):

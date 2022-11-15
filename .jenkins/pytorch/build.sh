@@ -15,14 +15,12 @@ if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
+if [[ "$BUILD_ENVIRONMENT" == *-clang7-tsan* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-tsan.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *deploy* ]]; then
-  # Enabling DEPLOY build (embedded torch python interpreter, experimental)
-  # only on one config for now, can expand later
-  export USE_DEPLOY=ON
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
 echo "Python version:"
@@ -43,8 +41,12 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  # enable split torch_cuda build option in CMake
-  export BUILD_SPLIT_CUDA=ON
+  if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+    # TODO: there is a linking issue when building with UCC using clang,
+    # disable it for now and to be fix later.
+    export USE_UCC=1
+    export USE_SYSTEM_UCC=1
+  fi
 fi
 
 if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
@@ -58,20 +60,20 @@ elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
-# TODO: Don't run this...
-pip_install -r requirements.txt || true
-
 # Enable LLVM dependency for TensorExpr testing
-export USE_LLVM=/opt/llvm
-export LLVM_DIR=/opt/llvm/lib/cmake/llvm
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export USE_LLVM=/opt/rocm/llvm
+  export LLVM_DIR=/opt/rocm/llvm/lib/cmake/llvm
+else
+  export USE_LLVM=/opt/llvm
+  export LLVM_DIR=/opt/llvm/lib/cmake/llvm
+fi
 
-# TODO: Don't install this here
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
   # intel cpu and later run tests on machines with amd cpu.
   # Also leave out two builds to make sure non-mkldnn builds still work.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    pip_install mkl mkl-devel
     export USE_MKLDNN=1
   else
     export USE_MKLDNN=0
@@ -140,9 +142,9 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   if [[ -n "$CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
-      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds, if user doesn't override.
-      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
-      export PYTORCH_ROCM_ARCH="gfx900;gfx906"
+      # Set ROCM_ARCH to gfx906 for CI builds, if user doesn't override.
+      echo "Limiting PYTORCH_ROCM_ARCH to gfx906 for CI builds"
+      export PYTORCH_ROCM_ARCH="gfx906"
   fi
 
   # hipify sources
@@ -157,8 +159,11 @@ if [ -z "$MAX_JOBS" ]; then
   fi
 fi
 
-# Target only our CI GPU machine's CUDA arch to speed up the build
-export TORCH_CUDA_ARCH_LIST="5.2"
+# TORCH_CUDA_ARCH_LIST must be passed from an environment variable
+if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
+  echo "TORCH_CUDA_ARCH_LIST must be defined"
+  exit 1
+fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang
@@ -167,6 +172,10 @@ fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
   export USE_PER_OPERATOR_HEADERS=0
+fi
+
+if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
+    export USE_PRECOMPILED_HEADERS=1
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *linux-focal-py3.7-gcc7-build*  ]]; then
@@ -214,7 +223,7 @@ else
     else
       python setup.py bdist_wheel
     fi
-    python -mpip install dist/*.whl
+    pip_install_whl "$(echo dist/*.whl)"
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
@@ -294,6 +303,12 @@ else
     WERROR=1 VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
     popd
   fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then
+  # export test times so that potential sharded tests that'll branch off this build will use consistent data
+  # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
+  python tools/stats/export_test_times.py
 fi
 
 print_sccache_stats

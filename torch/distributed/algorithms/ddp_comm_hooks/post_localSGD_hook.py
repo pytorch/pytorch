@@ -82,6 +82,7 @@ def post_localSGD_hook(
         Future handler of the communication, which updates the gradients in place.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> state = PostLocalSGDState(process_group=process_group, subgroup=subgroup,
                                   start_localSGD_iter=10)
         >>> ddp_model.register_comm_hook(state, post_localSGD_hook)

@@ -55,8 +55,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Ensure we run conda in a directory that jenkins has write access to
   pushd /opt/conda
 
-  # Track latest conda update
-  as_jenkins conda update -y -n base conda
+  # Prevent conda from updating to 4.14.0, which causes docker build failures
+  # See https://hud.pytorch.org/pytorch/pytorch/commit/754d7f05b6841e555cea5a4b2c505dd9e0baec1d
+  # Uncomment the below when resolved to track the latest conda update
+  # as_jenkins conda update -y -n base conda
 
   # Install correct Python version
   as_jenkins conda install -y python="$ANACONDA_PYTHON_VERSION"
@@ -73,10 +75,11 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   }
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  # DO NOT install cmake here as it would install a version newer than 3.13, but
-  # we want to pin to version 3.13.
   CONDA_COMMON_DEPS="astunparse pyyaml mkl=2022.0.1 mkl-include=2022.0.1 setuptools cffi future six"
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
+    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
+  elif [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
     conda_install numpy=1.19.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
@@ -87,14 +90,19 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS} typing_extensions
   fi
 
+  # Use conda cmake in some cases. Conda cmake will be newer than our supported
+  # min version (3.5 for xenial and 3.10 for bionic), so we only do it in those
+  # following builds that we know should use conda. Specifically, Ubuntu bionic
+  # and focal cannot find conda mkl with stock cmake, so we need a cmake from conda
+  if [ -n "${CONDA_CMAKE}" ]; then
+    conda_install cmake
+  fi
+
   # Magma package names are concatenation of CUDA major and minor ignoring revision
   # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
   if [ -n "$CUDA_VERSION" ]; then
     conda_install magma-cuda$(TMP=${CUDA_VERSION/./};echo ${TMP%.*[0-9]}) -c pytorch
   fi
-
-  # TODO: This isn't working atm
-  conda_install nnpack -c killeent
 
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt

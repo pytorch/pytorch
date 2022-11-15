@@ -35,6 +35,10 @@ void codegenOutputQuery(
     int& major,
     int& minor,
     bool& compile_to_sass) {
+#ifdef USE_ROCM
+  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&major, &minor));
+  compile_to_sass = false;
+#else
   using CudaVersion = std::pair<int, int>;
   CudaVersion nvrtc_version;
   AT_CUDA_NVRTC_CHECK(
@@ -60,6 +64,8 @@ void codegenOutputQuery(
     max_dev_version = CudaVersion(7, 5);
   } else if (nvrtc_version == CudaVersion(11, 0)) { // 11.0 supports 3-8.0
     max_dev_version = CudaVersion(8, 0);
+  } else if (nvrtc_version.first == 11 && nvrtc_version.second < 8) {
+    max_dev_version = CudaVersion(8, 6);
   } else {
     // If the driver version is unknown (i.e. newer than this code)
     // assume the driver supports this device
@@ -75,6 +81,7 @@ void codegenOutputQuery(
     minor = dev_version.second;
     compile_to_sass = true;
   }
+#endif
 }
 
 // Compiles the specified kernel and stores the metadata required to run it

@@ -1,11 +1,16 @@
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/UnaryOps.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/clone.h>
+#endif
 
 namespace at {
 namespace native {
@@ -98,7 +103,6 @@ struct MathOpFallback {
           continue;
         }
         auto tensor = std::move(ivalue).toTensor();
-        TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), op_name, " fallback does not support meta tensors.");
         auto resolved_tensor = at::clone(tensor);
         if (mut_arg) {
           TORCH_CHECK(mutable_inputs_with_their_clones.empty(), op_name, " fallback does not support operators with more than one mutable tensors with ",

@@ -1,0 +1,39 @@
+name: Mac MPS
+
+on:
+  push:
+    tags:
+      - ciflow/mps/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  macos-12-py3-arm64-build:
+    name: macos-12-py3-arm64
+    uses: ./.github/workflows/_mac-build.yml
+    with:
+      sync-tag: macos-12-py3-arm64-build
+      build-environment: macos-12-py3-arm64
+      xcode-version: "13.3.1"
+      runner-type: macos-12-xl
+      build-generates-artifacts: true
+      # To match the one pre-installed in the m1 runners
+      python_version: 3.9.12
+      # We need to set the environment file here instead of trying to detect it automatically because
+      # MacOS arm64 is cross-compiled from x86-64. Specifically, it means that arm64 conda environment
+      # is needed when building PyTorch MacOS arm64 from x86-64
+      environment-file: .github/requirements/conda-env-macOS-ARM64
+    secrets:
+      MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
+      MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
+
+  macos-12-py3-arm64-mps-test:
+    name: macos-12-py3-arm64-mps
+    uses: ./.github/workflows/_mac-test-mps.yml
+    needs: macos-12-py3-arm64-build
+    with:
+      sync-tag: macos-12-py3-arm64-mps-test
+      build-environment: macos-12-py3-arm64

@@ -1,12 +1,9 @@
 #pragma once
 
+#include <c10/core/Device.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/python_headers.h>
-
-namespace c10 {
-struct Device;
-}
 
 namespace at {
 class Tensor;
@@ -31,6 +28,7 @@ void py_set_default_dtype(PyObject* dtype_obj);
 // change.  Probably only store ScalarType, as that's the only flex point
 // we support.
 c10::DispatchKey get_default_dispatch_key();
+at::Device get_default_device();
 
 // Gets the ScalarType for the default tensor type.
 at::ScalarType get_default_scalar_type();

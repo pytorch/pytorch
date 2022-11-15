@@ -32,7 +32,7 @@ if ! command -v aws >/dev/null; then
 fi
 
 if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-  DRIVER_FN="NVIDIA-Linux-x86_64-510.60.02.run"
+  DRIVER_FN="NVIDIA-Linux-x86_64-515.76.run"
   wget "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
   sudo /bin/bash "$DRIVER_FN" -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
   nvidia-smi

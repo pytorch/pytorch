@@ -1,20 +1,15 @@
+import math
+
+from typing import Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
+
+from typing_extensions import Literal
+
 import torch
 import torch._prims as prims
-import torch._prims.utils as utils
-from torch._prims.utils import (
-    check,
-    TensorLikeType,
-    ShapeType,
-    DimsType,
-)
-from torch._prims.wrappers import (
-    out_wrapper,
-)
+import torch._prims_common as utils
 from torch._decomp import register_decomposition
-
-from typing import Union, Tuple, Optional, Iterable, Sequence, NamedTuple, List
-from typing_extensions import Literal
-import math
+from torch._prims_common import check, DimsType, ShapeType, TensorLikeType
+from torch._prims_common.wrappers import _maybe_convert_to_dtype, out_wrapper
 
 __all__ = [
     # Transforms
@@ -81,9 +76,7 @@ def _maybe_promote_tensor_fft(
     """Helper to promote a tensor to a dtype supported by the FFT primitives"""
     cur_type = t.dtype
     new_type = _promote_type_fft(cur_type, require_complex)
-    if cur_type == new_type:
-        return t
-    return prims.convert_element_type(t, new_type)
+    return _maybe_convert_to_dtype(t, new_type)  # type: ignore[return-value]
 
 
 def _resize_fft_input(

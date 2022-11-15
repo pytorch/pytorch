@@ -16,6 +16,11 @@ on:
         type: boolean
         default: false
         description: If set, push the docs to the docs website.
+      run-doxygen:
+        required: false
+        type: boolean
+        default: false
+        description: If set, will enable C++ API doc generation using doxygen / breathe / exhale.
       sync-tag:
         required: false
         type: string
@@ -33,10 +38,26 @@ jobs:
   build-docs:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        docs_type: [cpp, python]
+        include:
+          - docs_type: cpp
+            # We recently seeing lots of exit code 137 running this in Docker indicating
+            # an OOM issue when running the job, so this upgrades the runner from 4xlarge
+            # to the next available tier of 12xlarge. So much memory just to generate cpp
+            # doc
+            runner: linux.12xlarge
+            # Nightly cpp docs take about 150m to finish, and the number is stable
+            timeout-minutes: 180
+          - docs_type: python
+            runner: linux.2xlarge
+            # It takes less than 30m to finish python docs unless there are issues
+            timeout-minutes: 30
+          - docs_type: functorch
+            runner: linux.2xlarge
+            # It takes less than 15m to finish functorch docs unless there are issues
+            timeout-minutes: 15
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -46,12 +67,12 @@ jobs:
         uses: ./.github/actions/setup-linux
 
       - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.docker-image }}
 
@@ -71,10 +92,13 @@ jobs:
           echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${RUNNER_TEMP}/.netrc"
 
       - name: Build ${{ matrix.docs_type }} docs
+        timeout-minutes: ${{ matrix.timeout-minutes }}
+        id: build-docs
         env:
           WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           DOCS_TYPE: ${{ matrix.docs_type }}
+          RUN_DOXYGEN: ${{ inputs.run-doxygen }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
         run: |
           set -ex
@@ -91,6 +115,7 @@ jobs:
             -e SHA1="$GITHUB_SHA" \
             -e DOCS_VERSION="${target}" \
             -e DOCS_TYPE \
+            -e RUN_DOXYGEN \
             -e WITH_PUSH \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
@@ -103,7 +128,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" bash -c "sudo chown -R jenkins . && pip install dist/*.whl && ./.circleci/scripts/${DOCS_TYPE}_doc_push_script.sh"
+          docker exec -t "${container_name}" bash -c "sudo chown -R jenkins . && pip install $(echo dist/*.whl)[opt-einsum] && ./.circleci/scripts/${DOCS_TYPE}_doc_push_script.sh"
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
@@ -111,7 +136,7 @@ jobs:
 
       - name: Upload Python Docs Preview
         uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
         with:
           retention-days: 14
           s3-bucket: doc-previews
@@ -121,10 +146,20 @@ jobs:
 
       - name: Upload C++ Docs Preview
         uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' }}
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
         with:
           retention-days: 14
           if-no-files-found: error
           s3-bucket: doc-previews
           path: cppdocs/
           s3-prefix: pytorch/${{ github.event.pull_request.number }}/cppdocs
+
+      - name: Upload functorch Docs Preview
+        uses: seemethere/upload-artifact-s3@v5
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'functorch' && steps.build-docs.outcome == 'success' }}
+        with:
+          retention-days: 14
+          s3-bucket: doc-previews
+          if-no-files-found: error
+          path: functorch_ghpages/nightly/
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}/functorchdocs

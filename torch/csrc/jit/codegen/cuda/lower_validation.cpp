@@ -714,7 +714,8 @@ std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> getLiveRangeOffsets
           // is visible to outside of the fusion.
           map.insert(
               {consumer_root,
-               {consumer_start_offset.value(), consumer_stop_offset.value()}});
+               {consumer_start_offset->as<int64_t>(),
+                consumer_stop_offset->as<int64_t>()}});
         } else {
           // When the range of this root domain is already set, it
           // must be set by its consumers. Make sure the required
@@ -722,9 +723,9 @@ std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> getLiveRangeOffsets
           // this root domain.
           auto& consumer_range = it->second;
           TORCH_INTERNAL_ASSERT(
-              consumer_start_offset.value() <= consumer_range.first);
+              consumer_start_offset->as<int64_t>() <= consumer_range.first);
           TORCH_INTERNAL_ASSERT(
-              consumer_stop_offset.value() <= consumer_range.second);
+              consumer_stop_offset->as<int64_t>() <= consumer_range.second);
         }
       }
 
@@ -852,7 +853,7 @@ namespace {
 //!  higher than provided major.minor.
 void validateMinimumArch(int major, int minor) {
   // Skip checking arch if disabled.
-  if (isDisabled(DisableOption::ArchCheck)) {
+  if (isOptionDisabled(DisableOption::ArchCheck)) {
     return;
   }
 
@@ -899,22 +900,42 @@ void validateMmaTensors(MmaOp* mma) {
   }
 
   // Note: this check will be relaxed in a follow up.
-  auto validate_operand_ids = [](const TensorView* tv) {
+  auto validate_operand = [](const TensorView* tv) {
+    TORCH_INTERNAL_ASSERT(
+        tv->getMemoryType() == MemoryType::Local,
+        "Only supporting register input for mma ops, up to sm80 all mma ops have to take register inputs.");
+
     TORCH_INTERNAL_ASSERT(
         std::all_of(
             tv->domain()->domain().begin() + tv->getComputeAtPosition(),
             tv->domain()->domain().end(),
             [](IterDomain* id) {
               return id->isMmaSwizzled() ||
-                  (id->isBroadcast() &&
+                  // MMA instructions can only take inputs from registers,
+                  //  so we always assume mma op inputs are located on
+                  //  registers.
+                  // Currently requiring that serial ids on the right of the
+                  //  CA axis are constant sized to ensure early detection of
+                  //  invalid mma schedules.
+                  ((id->isBroadcast() || id->extent()->isConstInt()) &&
                    id->getParallelType() == ParallelType::Serial);
             }),
         "All id's on the right of CA pos needs to be mma-swizzled by WarpMmaSwizzler\n",
         tv);
   };
 
-  validate_operand_ids(mma->inA()->as<TensorView>());
-  validate_operand_ids(mma->inB()->as<TensorView>());
+  validate_operand(mma->inA()->as<TensorView>());
+  validate_operand(mma->inB()->as<TensorView>());
+
+  // Additionally validate that mma is not directly taking a double buffered
+  //  register input as the double buffer indexing is currently not compatible
+  //  with fragment iteration. Would need to require a cache stage in this case.
+  TORCH_INTERNAL_ASSERT(
+      !mma->inA()->as<TensorView>()->isDoubleBuffered(),
+      "MMA op cannot directly take double buffered register input, put a set stage before.");
+  TORCH_INTERNAL_ASSERT(
+      !mma->inB()->as<TensorView>()->isDoubleBuffered(),
+      "MMA op cannot directly take double buffered register input, put a set stage before.");
 }
 
 //! Note and TODO:
@@ -1011,6 +1032,7 @@ void validateMma(Fusion* fusion) {
           validateMinimumArch(7, 0);
           break;
         case MmaOptions::MacroType::Turing_16_8_16:
+        case MmaOptions::MacroType::Turing_16_16_16:
           validateMinimumArch(7, 5);
 
           // Check that operands come from ldmatrix, can be
@@ -1019,6 +1041,7 @@ void validateMma(Fusion* fusion) {
           validateTuringMmaInput(mma->inB()->as<TensorView>());
           break;
         case MmaOptions::MacroType::Ampere_16_8_16:
+        case MmaOptions::MacroType::Ampere_16_16_16:
           validateMinimumArch(8, 0);
 
           // Check that operands come from ldmatrix, can be
@@ -1033,6 +1056,243 @@ void validateMma(Fusion* fusion) {
     }
     if (auto ldst = dynamic_cast<LoadStoreOp*>(expr)) {
       validateArchMemoryOp(ldst);
+    }
+  }
+}
+
+namespace {
+
+// Utility function to validate a loop swizzle:
+//  1. Throws an error if any output of the swizzle is not in leaf_domain set.
+//  2. Warns if any output of the swizzle is not the concrete id of the loop
+//  map.
+// The second case would make the codegen ignore this swizzle, as if it was not
+// there at all.
+void validateLoopSwizzle(
+    Expr* swizzle_expr,
+    std::unordered_set<IterDomain*>& leaf_domains) {
+  for (auto out_id :
+       ir_utils::filterByType<IterDomain>(swizzle_expr->outputs())) {
+    TORCH_INTERNAL_ASSERT(
+        leaf_domains.count(out_id),
+        "Loop swizzle can only be direct producer of leaf domains.");
+    if (GpuLower::current()->caMap()->getConcreteMappedID(
+            out_id, IdMappingMode::LOOP) != out_id) {
+      TORCH_WARN_ONCE("Ignored loop swizzle :", swizzle_expr->toString());
+    }
+  }
+}
+
+} // namespace
+
+void validateSwizzle(Fusion* fusion) {
+  auto used_vals = fusion->usedMathVals();
+  for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
+    if (tv->hasSwizzleOp()) {
+      std::unordered_set<IterDomain*> tv_leaf_domain_set(
+          tv->domain()->domain().begin(), tv->domain()->domain().end());
+
+      // Make sure no swizzle op is inlined:
+      auto inlined_swizzles = ir_utils::getAllSwizzlesBetween(
+          tv->getMaybeRFactorDomain(),
+          {tv->domain()->domain().begin(),
+           tv->domain()->domain().begin() + tv->getComputeAtPosition()});
+
+      auto not_inlined_swizzles = ir_utils::getAllSwizzlesBetween(
+          tv->getMaybeRFactorDomain(),
+          {tv->domain()->domain().begin() + tv->getComputeAtPosition(),
+           tv->domain()->domain().end()});
+
+      // Check inlined swizzles: only loop swizzles can be inlined currently
+      //  as inlining data swizzles would require addtional support of unswizzle
+      //  operator, which currently doesn't have important use cases.
+      for (auto swizzle_expr : inlined_swizzles) {
+        TORCH_INTERNAL_ASSERT(
+            swizzle_expr->as<Swizzle2D>()->swizzleMode() == SwizzleMode::Loop,
+            "Only support inlining loop swizzles");
+        validateLoopSwizzle(swizzle_expr, tv_leaf_domain_set);
+      }
+
+      std::unordered_set<Expr*> inlined_swizzle_set(
+          inlined_swizzles.begin(), inlined_swizzles.end());
+
+      // Check not inlined swizzles:
+      //  Apply the loop swizzle check when it applies, and
+      // also make sure that the no swizzle is also in inlined_swizzle set.
+      // The latter would mean that one output of the swizzle is inlined while
+      //  the other is not. Such case will not be supported.
+      for (auto swizzle_expr : not_inlined_swizzles) {
+        TORCH_INTERNAL_ASSERT(
+            !inlined_swizzle_set.count(swizzle_expr),
+            "Cannot partially inline across swizzle domains.",
+            swizzle_expr->toString());
+        if (swizzle_expr->as<Swizzle2D>()->swizzleMode() == SwizzleMode::Loop) {
+          validateLoopSwizzle(swizzle_expr, tv_leaf_domain_set);
+        }
+      }
+    }
+  }
+}
+
+void validateAndConvertIterDomainGrouping(Fusion* fusion) {
+  for (auto tv : ir_utils::allTvs(fusion)) {
+    bool is_grouped = false;
+    for (const auto id_idx : c10::irange(tv->nDims())) {
+      const auto id = tv->axis(id_idx);
+      auto ptype = GpuLower::current()
+                       ->caMap()
+                       ->getConcreteMappedID(id, IdMappingMode::LOOP)
+                       ->getParallelType();
+      if (ptype != ParallelType::Group) {
+        // Not a grouped ID
+        continue;
+      }
+
+      // Remember if a grouped ID is found
+      is_grouped = true;
+
+      // Grouping only makes sense for the normal iteration type
+      TORCH_CHECK(
+          id->getIterType() == IterType::Iteration,
+          "Invalid use of ParallelType::Group.",
+          " Grouping of ",
+          id->getIterType(),
+          " is not allowed. ",
+          tv->toString());
+
+      // Extent must be static
+      TORCH_CHECK(
+          id->extent()->getInt().has_value(),
+          "Invalid use of ParallelType::Group.",
+          " IterDomain must have a static extent: ",
+          id->toString());
+
+      // The CA position must be left of any grouped ID
+      TORCH_CHECK(
+          tv->getComputeAtPosition() <= id_idx,
+          "Invalid use of ParallelType::Group.",
+          " ComputeAt position must be left of grouped IDs: ",
+          tv->toString());
+
+      // Similarly, the produce-at position must be left of any grouped ID
+      TORCH_CHECK(
+          tv->getMaxProducerPosition() <= id_idx,
+          "Invalid use of ParallelType::Group.",
+          " ProduceAt position must be left of grouped IDs: ",
+          tv->toString());
+
+      // Halo is not allowed
+      TORCH_CHECK(
+          GpuLower::current()->haloInfo()->getExtent(id) == nullptr,
+          "Invalid use of ParallelType::Group.",
+          " Grouping of halo-extended IterDomain, ",
+          id->toString(),
+          ", is not supported. ",
+          tv->toString());
+    }
+
+    if (!is_grouped) {
+      continue;
+    }
+
+    // Must be defined by ReductionOp
+    auto def = tv->definition();
+    TORCH_CHECK(
+        def != nullptr,
+        "Invalid use of ParallelType::Group.",
+        " Definition of tv with ParallelType::Group not found. ",
+        tv->toString());
+
+    TORCH_CHECK(
+        tv->definition()->isA<ReductionOp>() ||
+            tv->definition()->isA<GroupedReductionOp>() ||
+            tv->definition()->isA<WelfordOp>() ||
+            tv->definition()->isA<GroupedWelfordOp>(),
+        "Invalid use of ParallelType::Group. Only ReductionOp, GroupedReductionOp, WelfordOp and GroupedWelfordOp are allowed. ",
+        tv->definition()->toString());
+
+    // Convert ReductionOp to GroupedReductionOp
+    if (tv->definition()->isA<ReductionOp>()) {
+      auto rop = def->as<ReductionOp>();
+      auto is_allreduce = rop->isAllreduce();
+
+      TORCH_CHECK(
+          is_allreduce,
+          "Invalid use of ParallelType::Group.",
+          " Only enabled for allreduce reductions: ",
+          rop->toString());
+
+      TORCH_CHECK(
+          tv->domain()->hasGridReduction(),
+          "Invalid use of ParallelType::Group.",
+          " Only enabled for grid reductions: ",
+          rop->toString());
+
+      std::vector<BinaryOpType> op_types({rop->getReductionOpType()});
+      std::vector<Val*> init_vals({rop->init()});
+      std::vector<Val*> outputs({rop->out()});
+      std::vector<Val*> inputs({rop->in()});
+
+      fusion->removeExpr(rop);
+      IrBuilder::create<GroupedReductionOp>(
+          static_cast<IrContainer*>(fusion),
+          op_types,
+          init_vals,
+          outputs,
+          inputs,
+          is_allreduce);
+    } else if (tv->definition()->isA<WelfordOp>()) {
+      // Convert WelfordOp to GroupedWelfordOp
+      auto wop = def->as<WelfordOp>();
+      auto is_allreduce = wop->isAllreduce();
+
+      TORCH_CHECK(
+          is_allreduce,
+          "Invalid use of ParallelType::Group.",
+          " Only enabled for allreduce reductions: ",
+          wop->toString());
+
+      TORCH_CHECK(
+          tv->domain()->hasGridReduction(),
+          "Invalid use of ParallelType::Group.",
+          " Only enabled for grid reductions: ",
+          wop->toString());
+
+      std::vector<WelfordTriplet> output_vals(
+          {{wop->outAvg(), wop->outVar(), wop->outN()}});
+      std::vector<WelfordTriplet> input_vals(
+          {{wop->inAvg(), wop->inVar(), wop->inN()}});
+      std::vector<WelfordTriplet> init_vals(
+          {{wop->initAvg(), wop->initVar(), wop->initN()}});
+      fusion->removeExpr(wop);
+      IrBuilder::create<GroupedWelfordOp>(
+          static_cast<IrContainer*>(fusion),
+          output_vals,
+          input_vals,
+          init_vals,
+          is_allreduce);
+    }
+  }
+}
+
+void validateGroupedReductions(Fusion* fusion) {
+  for (auto expr : StmtSort::getExprs(fusion)) {
+    if (auto grouped_reduction_op = dynamic_cast<GroupedReductionOp*>(expr)) {
+      const auto num_exprs = grouped_reduction_op->numExprs();
+      int num_grouped_iterations = 1;
+      auto out_tv = ir_utils::getTvOutput(grouped_reduction_op);
+      for (auto axis : out_tv->domain()->domain()) {
+        if (axis->getParallelType() == ParallelType::Group) {
+          num_grouped_iterations *= axis->extent()->getInt().value();
+        }
+      }
+      TORCH_CHECK(
+          num_exprs * num_grouped_iterations <= kMaxNumGroupedReductions,
+          "Too many grouped reductions: ",
+          grouped_reduction_op->toString(),
+          ". Up to ",
+          kMaxNumGroupedReductions,
+          " reductions are allowed.");
     }
   }
 }
