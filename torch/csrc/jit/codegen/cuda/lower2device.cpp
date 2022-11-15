@@ -321,7 +321,7 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // corresponding loop
   const auto exprs_lowered = LoopNestGenerator::loweredExprs(exprs_sorted);
 
-  // Replace trivial reductions, Transpose, Shift, Gather, and View ops with
+  // Replace squeezes, Transpose, Shift, Gather, and View ops with
   // unary ops since they're not separately processed in lowering.
   const auto exprs_unary_replaced = unarySetOpInserter(exprs_lowered);
 

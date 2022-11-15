@@ -13,10 +13,14 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-Val* IndexLowering::lowerSrcIndex(Val* src, Val* dst) const {
+Val* IndexLowering::lowerSrcIndex(
+    Val* src,
+    Val* dst,
+    const std::unordered_map<IterDomain*, Val*>& override_index) const {
   if (auto tv = dynamic_cast<TensorView*>(src)) {
     TORCH_INTERNAL_ASSERT(dst->isA<TensorView>());
-    return Index::getProducerIndex(tv, dst->as<TensorView>(), for_loops_);
+    return Index::getProducerIndex(
+        tv, dst->as<TensorView>(), for_loops_, override_index);
   } else {
     return src;
   }
@@ -190,6 +194,14 @@ void IndexLowering::handle(const TernaryOp* top) {
   pushBack(IrBuilder::create<TernaryOp>(
       top->getTernaryOpType(), out, in1, in2, in3));
   GpuLower::current()->propagateExprInfo(top, back());
+}
+
+void IndexLowering::handle(const SelectOp* sop) {
+  const auto input = lowerSrcIndex(
+      sop->input(0), sop->output(0), sop->getIndexOverridingMap());
+  const auto out = lowerDstIndex(sop->output(0));
+  pushBack(IrBuilder::create<UnaryOp>(UnaryOpType::Set, out, input));
+  GpuLower::current()->propagateExprInfo(sop, back());
 }
 
 void IndexLowering::handle(const ViewAsScalar* uop) {

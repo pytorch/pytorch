@@ -1219,6 +1219,22 @@ class ReductionScheduler : public SchedulerEntry {
       return false;
     }
 
+    // Check that inputs of all select ops are fusion inputs
+    for (auto select : ir_utils::getSelectOps(fusion)) {
+      if (!select->input(0)->isFusionInput()) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Reduction,
+            "Inputs of SelectOp must be fusion input.");
+        return false;
+      }
+      if (select->input(0)->uses().size() > 1) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Reduction,
+            "Inputs of SelectOp can only be used by SelectOp");
+        return false;
+      }
+    }
+
     auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
 
     if (reduction_tvs.size() == 0) {
@@ -1370,6 +1386,31 @@ class TransposeScheduler : public SchedulerEntry {
       return false;
     }
 
+    // Check that inputs of all select ops are fusion inputs
+    for (auto select : ir_utils::getSelectOps(fusion)) {
+      if (!select->input(0)->isFusionInput()) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Transpose,
+            "Inputs of SelectOp must be fusion input.");
+        return false;
+      }
+      if (select->input(0)->uses().size() > 1) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Transpose,
+            "Inputs of SelectOp can only be used by SelectOp");
+        return false;
+      }
+      auto root = TensorDomain::noReductions(
+          select->input(0)->as<TensorView>()->getMaybeRFactorDomain());
+      if (select->getSelectAxis() == root[root.size() - 1]) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Transpose,
+            "SelectOp on inner dim is not supported by transpose scheduler yet."
+            "In transpose scheduler, we want to leave the select dim alone, instead of creating a tile for it.");
+        return false;
+      }
+    }
+
     if (!hasAtLeastTwoValidGroups(fusion)) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Transpose,
@@ -1444,6 +1485,22 @@ class PointWiseScheduler : public SchedulerEntry {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::PointWise, "cannot find reference tensor");
       return false;
+    }
+
+    // Check that inputs of all select ops are fusion inputs
+    for (auto select : ir_utils::getSelectOps(fusion)) {
+      if (!select->input(0)->isFusionInput()) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::PointWise,
+            "Inputs of SelectOp must be fusion input.");
+        return false;
+      }
+      if (select->input(0)->uses().size() > 1) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::PointWise,
+            "Inputs of SelectOp can only be used by SelectOp");
+        return false;
+      }
     }
 
     if (ir_utils::getViewOps(fusion).size() > 0) {
@@ -1524,13 +1581,28 @@ class PersistentKernelScheduler : public SchedulerEntry {
 
   static bool canScheduleCompileTime(Fusion* fusion) {
     // Needs at least one non-trivial reduction to consider.
-    if (ir_utils::getReductionOps(fusion).empty()) {
+    auto reduction_ops = ir_utils::getReductionOps(fusion);
+    if (reduction_ops.empty()) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Persistent, "needs a reduction op");
       return false;
     }
 
-    auto reduction_ops = ir_utils::getReductionOps(fusion);
+    // Check that inputs of all select ops are fusion inputs
+    for (auto select : ir_utils::getSelectOps(fusion)) {
+      if (!select->input(0)->isFusionInput()) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Persistent,
+            "Inputs of SelectOp must be fusion input.");
+        return false;
+      }
+      if (select->input(0)->uses().size() > 1) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Persistent,
+            "Inputs of SelectOp can only be used by SelectOp");
+        return false;
+      }
+    }
 
     if (hasNonUniqueBcast(fusion)) {
       scheduler_debug_utils::canScheduleRejectReason(

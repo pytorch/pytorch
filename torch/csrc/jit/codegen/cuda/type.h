@@ -111,6 +111,7 @@ enum class ExprType {
   UnaryOp,
   BinaryOp,
   TernaryOp,
+  SelectOp,
   RNGOp,
   ReductionOp,
   GroupedReductionOp,

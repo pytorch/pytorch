@@ -1050,6 +1050,10 @@ TensorView* TensorView::cacheAfter(c10::optional<LoadStoreOpType> cache_op) {
       !hasComputeAt(),
       "Caching computed-at tensors is not allowed. Apply caching before computeAt.");
 
+  TORCH_CHECK(
+      !ir_utils::isSelectInput(this),
+      "Right now, caching tensors that are input to the select op is not allowed as they must be in global memory.")
+
   // It also did additional transformation when this tensor is an
   // input and the outputs of its consumers have computeAt. Make sure
   // we no longer rely on that behavior.

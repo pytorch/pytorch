@@ -15,9 +15,7 @@ namespace pointwise_utils {
 // that maps to all IterDomains in the fusion.
 class DomainMap {
  public:
-  DomainMap(Fusion* fusion) : fusion_(fusion), ca_map_(fusion) {
-    view_tvs_ = scheduler_utils::getViewTVs(fusion);
-  }
+  DomainMap(Fusion* fusion);
   virtual ~DomainMap() = default;
 
   const ComputeAtMap& getComputeAtMap() const {
@@ -27,6 +25,11 @@ class DomainMap {
   // Determine if a TensorView is a valid reference tensor for this fusion.
   // The reference tensor must map to all the iterDomains in each input.
   bool isValidReference(TensorView* tv) const;
+
+  // Determine if and ID is a selected ID of some SelectOp
+  bool isSelectId(IterDomain* id) const {
+    return select_ids_.count(id);
+  }
 
  protected:
   // Determine if all IterDomains are mapped between input and the given tvs
@@ -51,6 +54,7 @@ class DomainMap {
   Fusion* fusion_ = nullptr;
   ComputeAtMap ca_map_;
   std::vector<TensorView*> view_tvs_;
+  std::unordered_set<IterDomain*> select_ids_;
 };
 
 // Returns number of non-reduction/non-broadcast dims in rfactor domain

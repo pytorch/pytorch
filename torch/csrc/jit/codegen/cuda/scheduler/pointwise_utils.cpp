@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/pointwise_utils.h>
 
 namespace torch {
@@ -5,6 +6,13 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 namespace pointwise_utils {
+
+DomainMap::DomainMap(Fusion* fusion) : fusion_(fusion), ca_map_(fusion) {
+  view_tvs_ = scheduler_utils::getViewTVs(fusion);
+  for (auto select : ir_utils::getSelectOps(fusion)) {
+    select_ids_.emplace(select->getSelectAxis());
+  }
+}
 
 // Determine if all IterDomains in input are mapped to the given tensor
 bool DomainMap::areAllInputIdsMappedTo(TensorView* input_tv, TensorView* tv)
@@ -16,7 +24,8 @@ bool DomainMap::areAllInputIdsMappedTo(TensorView* input_tv, TensorView* tv)
     // like T0[I0, b] + T1[b, I1]
     auto concrete =
         ca_map_.getConcreteMappedID(in_id, IdMappingMode::PERMISSIVE);
-    if (!concrete->isBroadcast() && !in_id->isReduction()) {
+    if (!concrete->isBroadcast() && !in_id->isReduction() &&
+        !isSelectId(in_id)) {
       in_concrete_ids.insert(concrete);
     }
   }

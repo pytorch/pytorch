@@ -306,6 +306,8 @@ TORCH_CUDA_CU_API std::vector<TensorView*> allTvsExcept(
 
 TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(Fusion* fusion);
 
+TORCH_CUDA_CU_API std::vector<SelectOp*> getSelectOps(Fusion* fusion);
+
 // Returns the initialization value of tv or nullptr if not initialized.
 TORCH_CUDA_CU_API Val* getReductionInitValOf(TensorView* tv);
 
@@ -341,6 +343,9 @@ TORCH_CUDA_CU_API bool isSqueezedID(const TensorView* tv, const IterDomain* id);
 // Get all IDs of a tensor. Returned values are topologicaly ordered, and
 // unique.
 TORCH_CUDA_CU_API std::vector<IterDomain*> allIDsOf(const TensorView* tv);
+
+// Check if the given tv is an input of SelectOp
+TORCH_CUDA_CU_API bool isSelectInput(TensorView* tv);
 
 } // namespace ir_utils
 } // namespace cuda

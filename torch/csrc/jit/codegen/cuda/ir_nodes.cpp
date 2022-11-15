@@ -223,6 +223,42 @@ bool FullOp::sameAs(const Statement* other) const {
   return Expr::sameAs(other);
 }
 
+SelectOp::SelectOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* in,
+    IterDomain* select_id,
+    Val* index)
+    : Expr(passkey, ExprType::SelectOp), select_id_(select_id) {
+  addInput(in);
+  addInput(index);
+  addOutput(out);
+}
+
+SelectOp::SelectOp(const SelectOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner), select_id_(ir_cloner->clone(src->select_id_)) {}
+
+Expr* SelectOp::shallowCopy() const {
+  auto result =
+      IrBuilder::create<SelectOp>(output(0), input(0), select_id_, input(1));
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+bool SelectOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<SelectOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<SelectOp>();
+  if (!select_id_->sameAs(other_op->select_id_)) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
 ARangeOp::ARangeOp(
     IrBuilderPasskey passkey,
     Val* out,

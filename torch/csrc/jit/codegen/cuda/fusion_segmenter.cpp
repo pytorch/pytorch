@@ -2633,7 +2633,8 @@ ScheduleHeuristic SegmentCandidateFinder::deriveHeuristic(
     SegmentedGroup* group) {
   Fusion* fusion = segmented_fusion_->completeFusion();
   auto h = tryMerge(fusion, runtime_info_, group);
-  TORCH_INTERNAL_ASSERT(h.has_value());
+  TORCH_INTERNAL_ASSERT(
+      h.has_value(), "Can not find a scheduler to schedule fusion segment");
   return h.value();
 }
 

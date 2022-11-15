@@ -53,6 +53,33 @@ class TORCH_CUDA_CU_API FullOp : public Expr {
   Val* fill_value_;
 };
 
+class TORCH_CUDA_CU_API SelectOp : public Expr {
+ public:
+  SelectOp(
+      IrBuilderPasskey,
+      Val* out,
+      Val* in,
+      IterDomain* select_id,
+      Val* index);
+
+  SelectOp(const SelectOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
+
+  bool sameAs(const Statement* other) const override;
+
+  std::unordered_map<IterDomain*, Val*> getIndexOverridingMap() const {
+    return {{select_id_, input(1)}};
+  }
+
+  IterDomain* getSelectAxis() const {
+    return select_id_;
+  }
+
+ private:
+  IterDomain* select_id_;
+};
+
 class TORCH_CUDA_CU_API ARangeOp : public Expr {
  public:
   ARangeOp(

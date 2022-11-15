@@ -309,7 +309,8 @@ class Index {
   static std::vector<Val*> getNonGlobalProducerStridedIndices(
       TensorView* producer,
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops,
+      const std::unordered_map<IterDomain*, Val*>& override_index = {});
 
   // Consumer indexing if it's in shared or local memory
   static std::vector<Val*> getNonGlobalConsumerStridedIndices(
@@ -320,7 +321,8 @@ class Index {
   static std::vector<Val*> getGlobalProducerStridedIndices(
       TensorView* producer,
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops,
+      const std::unordered_map<IterDomain*, Val*>& override_index = {});
 
   // Consumer indexing if it's in global memory
   static std::vector<Val*> getGlobalConsumerStridedIndices(
@@ -344,7 +346,8 @@ class Index {
   static kir::TensorIndex* getProducerIndex(
       TensorView* producer,
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops,
+      const std::unordered_map<IterDomain*, Val*>& override_index = {});
 
   // Consumer index dispatch
   static kir::TensorIndex* getConsumerIndex(
@@ -358,7 +361,8 @@ class Index {
   static std::vector<Val*> getProducerStridedIndices(
       TensorView* producer,
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops,
+      const std::unordered_map<IterDomain*, Val*>& override_index = {});
 
   //! Returns a vector of strided indices mapped onto the (rfactor)
   //! root domain of a consumer tensor. The size of the returned

@@ -313,6 +313,8 @@ static const char* expr_type2string(ExprType t) {
       return "BinaryOp";
     case ExprType::TernaryOp:
       return "TernaryOp";
+    case ExprType::SelectOp:
+      return "SelectOp";
     case ExprType::RNGOp:
       return "RNGOp";
     case ExprType::ReductionOp:

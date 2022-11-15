@@ -143,6 +143,8 @@ TORCH_CUDA_CU_API WelfordResult WelfordRaw(
     // import IrBuilder just for this one interface.
     Int* init_N = nullptr);
 
+TORCH_CUDA_CU_API TensorView* select(TensorView* tv, int dim, Int* index);
+
 // RNG OPERATIONS
 TORCH_CUDA_CU_API TensorView* rand(
     const std::vector<Val*>& shape,
@@ -375,12 +377,14 @@ TORCH_CUDA_CU_API Val* atan2(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* atan2(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* atan2(Val* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* atan2(TensorView* v1, TensorView* v2);
-// div
+// div: promote to float for integer division, has the same semantics as the
+// python's operator /
 TORCH_CUDA_CU_API Val* div(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* div(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* div(Val* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* div(TensorView* v1, TensorView* v2);
-// cpp_div: similar to div, but don't promote to float
+// cpp_div: similar to div, but don't promote to float, this has the same
+// semantics as the C++'s operator /
 TORCH_CUDA_CU_API Val* cpp_div(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* cpp_div(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* cpp_div(Val* v1, TensorView* v2);

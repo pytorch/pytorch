@@ -89,6 +89,11 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
     squeeze_flags = sop->getSqueezeDimFlags();
   }
 
+  IterDomain* selected_id = nullptr;
+  if (SelectOp* sop = dynamic_cast<SelectOp*>(consumer_tv_->definition())) {
+    selected_id = sop->getSelectAxis();
+  }
+
   std::unordered_map<IterDomain*, IterDomain*> dom_map;
   const auto producer_root =
       TensorDomain::noReductions(producer->getMaybeRFactorDomain());
@@ -97,6 +102,13 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
   while (itc < consumer_root.size() && itp < producer_root.size()) {
     IterDomain* producer_id = producer_root[itp];
     IterDomain* consumer_id = consumer_root[itc];
+
+    // When the producer ID is the dim of a SelectOp, there is no
+    // mapping for it.
+    if (producer_id == selected_id) {
+      itp++;
+      continue;
+    }
 
     // When the consumer ID is a new broadcast domain, there is no
     // mapping for it.

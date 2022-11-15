@@ -453,6 +453,9 @@ PersistentBufferInfo persistentBuffers(Fusion* fusion) {
     std::vector<TensorView*> unmappable_consumers;
 
     for (auto consumer : consumers) {
+      if (dynamic_cast<SelectOp*>(consumer->definition())) {
+        continue;
+      }
       bool consumer_mappable = true;
       auto mappable_roots =
           root_map.getMappableDims(producer->domain(), consumer->domain());
@@ -972,7 +975,10 @@ std::vector<TensorView*> cacheInputs(Fusion* fusion, bool unroll) {
   // If we're going to unroll, make a cache of the inputs
   auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
   for (auto tv : in_tvs) {
-    if (tv->uses().empty() || tv->isFusionOutput()) {
+    if (tv->uses().empty() || tv->isFusionOutput() ||
+        ir_utils::isSelectInput(tv)) {
+      // Right now, tensors that are input to the select op can't be cached as
+      // they must be in global memory.
       continue;
     }
     auto cached_tv = tv->cacheAfter();

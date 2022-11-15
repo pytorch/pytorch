@@ -265,6 +265,24 @@ struct SubstituteInExpr : public OptInDispatch {
         in3);
   }
 
+  void handle(SelectOp* select_expr) final {
+    auto input = reference_->sameAs(select_expr->input(0))
+        ? substitute_
+        : select_expr->input(0);
+    auto index = reference_->sameAs(select_expr->input(1))
+        ? substitute_
+        : select_expr->input(1);
+    auto out = reference_->sameAs(select_expr->output(0))
+        ? substitute_
+        : select_expr->output(0);
+    expr_ = IrBuilder::create<SelectOp>(
+        select_expr->container(),
+        out,
+        input,
+        select_expr->getSelectAxis(),
+        index);
+  }
+
   void handle(RNGOp* rng_expr) final {
     std::vector<Val*> subsituted_params;
     for (auto v : rng_expr->getParameters()) {
@@ -767,6 +785,18 @@ std::vector<Expr*> getReductionOps(Fusion* fusion) {
   return red_ops;
 }
 
+std::vector<SelectOp*> getSelectOps(Fusion* fusion) {
+  std::vector<SelectOp*> select_ops;
+
+  for (auto expr : fusion->exprs()) {
+    if (expr->isA<SelectOp>()) {
+      select_ops.push_back(expr->as<SelectOp>());
+    }
+  }
+
+  return select_ops;
+}
+
 namespace {
 
 class ValReplacementMutator : private OptOutMutator {
@@ -1066,6 +1096,15 @@ std::vector<IterDomain*> allIDsOf(const TensorView* tv) {
   // Filter so we only have iteration domains (ignore Ints used in split)
   auto all_ids = ir_utils::filterByType<IterDomain>(all_vals);
   return std::vector<IterDomain*>(all_ids.begin(), all_ids.end());
+}
+
+bool isSelectInput(TensorView* tv) {
+  for (auto expr : tv->uses()) {
+    if (expr->isA<SelectOp>()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 } // namespace ir_utils

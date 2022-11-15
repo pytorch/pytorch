@@ -137,6 +137,23 @@ void OptOutMutator::mutate(FullOp* fop) {
   IrBuilder::create<FullOp>(container, out, fill_value, fop->dtype());
 }
 
+void OptOutMutator::mutate(SelectOp* sop) {
+  Val* out = maybeMutated(sop->output(0));
+  Val* in = maybeMutated(sop->input(0));
+  Val* index = maybeMutated(sop->input(1));
+  IterDomain* select_axis =
+      maybeMutated(sop->getSelectAxis())->as<IterDomain>();
+
+  if (out->sameAs(sop->output(0)) && in->sameAs(sop->output(0)) &&
+      index->sameAs(sop->output(1)) &&
+      select_axis->sameAs(sop->getSelectAxis())) {
+    return;
+  }
+  auto container = sop->container();
+  container->removeExpr(sop);
+  IrBuilder::create<SelectOp>(container, out, in, select_axis, index);
+}
+
 void OptOutMutator::mutate(ARangeOp* aop) {
   Val* out = maybeMutated(aop->output(0));
 

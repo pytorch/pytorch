@@ -442,6 +442,38 @@ TensorView* unaryOp(
   return unaryOp(type, cast_v1)->as<TensorView>();
 }
 
+TensorView* select(TensorView* tv, int dim, Int* index) {
+  auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
+  TORCH_CHECK(dom.size() > 0, "select can not be applied to 0d tensor.");
+
+  std::vector<IterDomain*> new_root;
+  new_root.reserve(dom.size() - 1);
+
+  if (dim < 0) {
+    dim += dom.size();
+  }
+
+  TORCH_CHECK(
+      dim >= 0 && dim < dom.size(),
+      "Select on invalid axis, received: ",
+      dim,
+      " however tensor view only has ",
+      dom.size(),
+      " non-reduction dims.");
+
+  for (auto i : c10::irange(dom.size())) {
+    if (i != dim) {
+      new_root.emplace_back(dom[i]->cloneWithoutRFactor());
+    }
+  }
+
+  auto td = IrBuilder::create<TensorDomain>(
+      new_root, TensorDomain::getContiguousContiguity(new_root));
+  auto out = IrBuilder::create<TensorView>(td, *tv->getDataType());
+  IrBuilder::create<SelectOp>(out, tv, dom[dim], index);
+  return out;
+}
+
 // TENSOR FACTORIES
 TensorView* rand(const std::vector<Val*>& shape, DataType dtype) {
   auto n = shape.size();

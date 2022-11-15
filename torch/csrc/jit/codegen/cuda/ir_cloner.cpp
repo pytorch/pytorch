@@ -112,6 +112,10 @@ void IrCloner::handle(const TernaryOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 
+void IrCloner::handle(const SelectOp* op) {
+  clone_ = IrBuilder::clone(op, this);
+}
+
 void IrCloner::handle(const RNGOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
