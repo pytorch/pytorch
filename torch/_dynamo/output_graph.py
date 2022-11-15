@@ -108,6 +108,8 @@ class OutputGraph(fx.Tracer):
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
         self.tensor_id_to_sym_shape_ref = {}
 
+        # Enables creating unique node names by tracking
+        # all current placeholder node names
         self.name_to_input = collections.OrderedDict()
 
     @property
