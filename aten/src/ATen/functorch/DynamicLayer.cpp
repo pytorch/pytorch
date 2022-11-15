@@ -214,7 +214,7 @@ bool areTransformsActive() {
   return !data.empty();
 }
 
-static DynamicLayer popDynamicLayer() {
+DynamicLayer popDynamicLayer() {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(dynamicLayerStack.size() > 0);
   auto result = dynamicLayerStack.back();
@@ -232,7 +232,7 @@ static DynamicLayer popDynamicLayer() {
   return result;
 }
 
-static int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
+int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   int64_t layerId = 1 + dynamicLayerStack.size();
   TORCH_INTERNAL_ASSERT(layerId == dynamic_layer.layerId());

@@ -28,7 +28,7 @@ static void checkForInvalidMutationOnCaptures(
       "as inputs.");
 }
 
-static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
+Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
   if (!tensor.defined()) {
     return tensor;
   }
@@ -42,6 +42,14 @@ static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_leve
     return tensor;
   }
   return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
+}
+
+Tensor GradInterpreterPtr::lift(const Tensor& tensor) const {
+  return materializeGradWrappers(tensor, level());
+}
+
+Tensor JvpInterpreterPtr::lift(const Tensor& tensor) const {
+  return materializeGradWrappers(tensor, level());
 }
 
 static void autogradBasedTransformProcess(
