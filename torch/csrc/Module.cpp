@@ -1408,10 +1408,10 @@ Call this whenever a new thread is created in order to propagate values from
          const at::Tensor& weight,
          const c10::optional<at::Tensor>& bias_opt,
          at::IntArrayRef stride_,
-         at::IntArrayRef padding_,
+         at::SymIntArrayRef padding_,
          at::IntArrayRef dilation_,
          bool transposed_,
-         at::IntArrayRef output_padding_,
+         at::SymIntArrayRef output_padding_,
          int64_t groups_) {
         return at::native::select_conv_backend(
             input,
@@ -1442,13 +1442,13 @@ Call this whenever a new thread is created in order to propagate values from
          const at::Tensor& weight,
          const c10::optional<at::Tensor>& bias,
          at::IntArrayRef stride_,
-         at::IntArrayRef padding_,
+         at::SymIntArrayRef padding_,
          at::IntArrayRef dilation_,
          bool transposed_,
-         at::IntArrayRef output_padding_,
+         at::SymIntArrayRef output_padding_,
          int64_t groups_,
-         c10::optional<std::vector<int64_t>> bias_sizes_opt) {
-        c10::OptionalArrayRef<int64_t> ref = c10::nullopt;
+         c10::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
+        c10::OptionalArrayRef<c10::SymInt> ref = c10::nullopt;
         if (bias_sizes_opt) {
           ref = (*bias_sizes_opt);
         }
