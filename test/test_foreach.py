@@ -1,4 +1,4 @@
-# Owner(s): ["modiule: mta"]
+# Owner(s): ["module: mta"]
 
 from numbers import Number
 import random
