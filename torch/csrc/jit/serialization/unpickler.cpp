@@ -532,6 +532,21 @@ PickleOpCode Unpickler::readInstruction() {
       }
       stack_.emplace_back(std::move(tensor));
     } break;
+    case PickleOpCode::SETITEM: {
+      // At this OpCode, stack looks like
+      // | Stack Bottom |
+      // | ......       |
+      // | Dict         | -> (stack_size - 3)
+      // | Key          | -> (stack_size - 2)
+      // | Value        | -> (stack_size - 1)
+      auto stack_size = stack_.size();
+      auto dict_pos = stack_size - 3;
+      auto key_pos = stack_size - 2;
+      auto val_pos = stack_size - 1;
+      auto dict = stack_.at(dict_pos).toGenericDict();
+      dict.insert_or_assign(stack_.at(key_pos), stack_.at(val_pos));
+      stack_.erase(stack_.begin() + (key_pos), stack_.end());
+    } break;
     default: {
       AT_ERROR(
           "Unknown opcode for unpickling at ",
@@ -546,6 +561,23 @@ PickleOpCode Unpickler::readInstruction() {
 void Unpickler::readGlobal(
     const std::string& module_name,
     const std::string& class_name) {
+  if (this->skip_next_read_global) {
+    // See [NOTE] skip_next_read_global
+    this->skip_next_read_global--;
+    if (this->skip_next_read_global == 1) {
+      // Pass through to the correct handler
+    } else if (this->skip_next_read_global == 0) {
+      // Corresponds to the type of `Tensor` being unpickled
+      if (module_name != "torch" || class_name != "Tensor") {
+        TORCH_WARN(
+            "Trying to load a Subclassed Tensor, it will be converted to at::Tensor in C++");
+      }
+      stack_.emplace_back(int64_t(globals_.size() - 1));
+      return;
+    } else {
+      TORCH_CHECK(false, "INVALID VALUES")
+    }
+  }
   // TODO [unpickler refactor] __main__ isn't used by the pickler anymore, this
   // is only here for bc-compatibility reasons
   if (module_name == "__main__") {
@@ -631,6 +663,12 @@ void Unpickler::readGlobal(
     // Unpickle a tensor
     bool quantized = class_name == "_rebuild_qtensor";
     rebuildTensor(quantized);
+  } else if (
+      module_name == "torch._tensor" &&
+      (class_name == "_rebuild_from_type_v2")) {
+    // Unpickle a Tensor with Python attributes or
+    // a Subclassed Tensor.
+    rebuildTensorFromTypeV2();
   } else if (
       module_name == "torch._utils" && class_name == "_rebuild_sparse_tensor") {
     rebuildSparseTensor();
@@ -823,14 +861,62 @@ void Unpickler::rebuildTensor(bool quantized) {
     } else {
       result = at::empty({0}, storage_tensor.options());
     }
-    bool requires_grad = elements.at(idx).toBool();
-    // elements[idx++] is empty backwards hooks
+    bool requires_grad = elements.at(idx++).toBool();
+    idx++; // backwards hooks is empty
     at::TensorImpl* impl = result.unsafeGetTensorImpl();
     impl->set_storage_keep_dtype(storage_tensor.storage());
     impl->set_storage_offset(storage_offset);
     impl->set_sizes_and_strides(size, stride);
     result = autograd::make_variable(result, requires_grad);
+
+    // Handle if math_bits were pickled.
+    // See `args` of _reduce_ex_internal
+    // for a regular tensor (final else case).
+    // Tensors pickled before this patch didn't
+    // have this argument for storing MathBits,
+    // in that case, we do nothing.
+    // NOTE: `math_bits` is the 7th arg.
+    // NOTE: This is only meant for regular tensor and not quantized
+    //       which also has 7 args serialized.
+    if (!quantized && elements.size() == 7) {
+      auto math_bits = elements.at(idx++).toGenericDict();
+      torch::jit::setTensorMetadata(result, math_bits);
+    }
+
     stack_.emplace_back(std::move(result));
+  });
+}
+
+void Unpickler::rebuildTensorFromTypeV2() {
+  // [NOTE] skip_next_read_global
+  // When rebuilding Tensor with Python Attr or Subclassed Tensor,
+  // we receive `(func, type(self), args, state)` on stack for
+  // `rebuildTensorFromTypeV2`.
+  // Thus next call to readGlobal corresponds to `func` which is
+  // the function to rebuild the base tensor.
+  // The call after `func` to readGlobal corresponds to `type` of the
+  // Tensor where we raise warning if the type is not `torch.Tensor`.
+  this->skip_next_read_global = 2;
+  auto curr_globals_idx = globals_.size();
+  globals_.emplace_back([this, curr_globals_idx] {
+    // args is a tuple with following data
+    //  (function to rebuild base tensor, type of tensor,
+    //   arguments to construct base tensor, Python State (as dict))
+    auto args = pop(stack_).toTuple();
+    size_t tup_idx = 0;
+    const auto args_elems = args->elements();
+    auto base_tensor_args = args_elems.at(tup_idx + 2).toTuple();
+    auto py_state = args_elems.at(tup_idx + 3).toGenericDict();
+    if (py_state.size() > 0) {
+      TORCH_WARN(
+          "Loading Tensor with Python attributes will return at::Tensor with Python attributes being discarded");
+    }
+    // This calls the function to rebuild the
+    // base tensor.
+    // Eg. `rebuildTensor`, `rebuildSpareTensor`.
+    stack_.emplace_back(base_tensor_args);
+    globals_[curr_globals_idx + 1]();
+    stack_.emplace_back(pop(stack_));
   });
 }
 
