@@ -17,7 +17,6 @@ import torchgen.api.structured as structured
 import torchgen.dest as dest
 
 from torchgen.api import cpp
-from torchgen.api import types
 from torchgen.api.translate import translate
 from torchgen.api.types import (
     Binding,

@@ -46,7 +46,7 @@ class Namespace:
         self.val = val
 
     def __str__(self) -> str:
-        return self.val
+        return self.val if self.val else ""
 
 
 class TensorNamespace(Namespace):
