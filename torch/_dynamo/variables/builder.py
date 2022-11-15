@@ -651,6 +651,7 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
     assert "example_value" not in proxy.node.meta
     if not config.dynamic_propagation:
         if isinstance(example_value, torch.Tensor):
+            breakpoint()
             options.update(target_cls.specialize(example_value))
         return target_cls(proxy, **options)
 
@@ -678,6 +679,7 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
                 example_value = get_real_value(proxy.node, tx.output)
 
         else:
+            # breakpoint()
             proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
             if use_fake_tensors:
                 fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
@@ -704,6 +706,7 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
         specialized_props["specialized_value"] = specialized_value
 
         options.update(specialized_props)
+        # breakpoint()
         return target_cls(proxy, **options)
     elif (
         hasattr(proxy.node.target, "__name__")

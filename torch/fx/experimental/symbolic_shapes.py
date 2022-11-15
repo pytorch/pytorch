@@ -203,6 +203,7 @@ class SymNode:
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
+        breakpoint()
         return int(self.shape_env.evaluate_expr(self.expr))
 
     def guard_float(self, file, line):
@@ -211,6 +212,7 @@ class SymNode:
         return float(self.shape_env.evaluate_expr(self.expr))
 
     def bool_(self):
+        # breakpoint()
         return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
 
 
@@ -524,6 +526,7 @@ class ShapeEnv(object):
         sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
         self.var_to_val[sympy_expr] = sympy.Integer(val)
         self.val_to_var[val] = sympy_expr
+        # breakpoint()
         return sympy_expr
 
     def evaluate_guards_for_args(self, *args):
