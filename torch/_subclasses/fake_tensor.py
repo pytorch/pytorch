@@ -856,30 +856,6 @@ class FakeTensorMode(TorchDispatchMode):
             with self:
                 return decomposition_table[func](*args, **kwargs)
 
-        # prims already wrap FakeTensor inputs to FakeTensor outputs
-        # and do device logic, we dont need do anything but run them
-        # and ensure that Meta kernels are dispatched to (see)
-        # Fake Tensor Dispatch Keys
-        if (
-            "prims::" in func._schema.name
-            and len(flat_arg_fake_tensors) != 0
-            and not hasattr(func, "prim_meta_impl")
-        ):
-            raise RuntimeError(
-                f"{func._schema.name} does not have a meta implementation"
-            )
-
-        # TODO - we should be use the prim aten impl
-        if (
-            "prims::" in func._schema.name
-            and len(flat_arg_fake_tensors) != 0
-            and hasattr(func, "prim_meta_impl")
-        ):
-            with self:
-                # Using func(*args, **kwargs) here would cause an infinite recursion
-                # prim_meta_impl is used to avoid that
-                return func.prim_meta_impl(*args, **kwargs)
-
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
         # and then afterwards wrapping them to a FakeTensor
