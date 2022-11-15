@@ -25,7 +25,7 @@ struct NCCLPreMulSumSupplement : _SupplementBase {
   at::Tensor tensor_factor;
   NCCLPreMulSumSupplement(double f) : double_factor{f} {}
   NCCLPreMulSumSupplement(at::Tensor t) : tensor_factor{std::move(t)} {
-    TORCH_CHECK_EQ(t.numel(), 1);
+    TORCH_CHECK_EQ(tensor_factor.numel(), 1);
   }
 };
 
