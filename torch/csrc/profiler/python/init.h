@@ -14,7 +14,6 @@ using torch::profiler::impl::TensorID;
   struct type_caster<T> : public strong_pointer_type_caster<T> {};
 
 STRONG_POINTER_TYPE_CASTER(torch::profiler::impl::StorageImplData);
-STRONG_POINTER_TYPE_CASTER(torch::profiler::impl::AllocationID);
 STRONG_POINTER_TYPE_CASTER(torch::profiler::impl::TensorImplAddress);
 STRONG_POINTER_TYPE_CASTER(torch::profiler::impl::PyModuleSelf);
 STRONG_POINTER_TYPE_CASTER(torch::profiler::impl::PyModuleCls);

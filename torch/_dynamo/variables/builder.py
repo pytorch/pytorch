@@ -506,7 +506,7 @@ class VariableBuilder:
                 )
             # Disable __torch_function__ to prevent cloning of `value` to hit
             # us
-            with torch._C.DisableTorchFunctionSubclass():
+            with torch._C.DisableTorchFunction():
                 if is_constant_source(self.get_source()):
                     return self.tx.output.register_attr_or_module(
                         value,

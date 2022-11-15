@@ -71,7 +71,7 @@ class TORCH_API TSLoweringContext : public LoweringContext {
   TSLoweringContext(
       const std::string& name,
       BackendDevice device,
-      c10::ArrayRef<const Node*> post_order,
+      c10::ArrayRef<Node*> post_order,
       Util::EmissionMap emit_status);
 
   size_t AddResult(const Output& output) override {

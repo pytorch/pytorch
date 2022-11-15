@@ -52,7 +52,7 @@ TEST(IrUtilTest, BasicTest) {
   dynamic_cast<IrUtilNode*>(b.get())->AddOperand(Value(d, 0));
   dynamic_cast<IrUtilNode*>(c.get())->AddOperand(Value(d, 0));
 
-  auto postorder = Util::ComputePostOrder({a.get()});
+  std::vector<Node*> postorder = Util::ComputePostOrder({a.get()});
   EXPECT_EQ(postorder.size(), 4);
   EXPECT_EQ(postorder.at(0), d.get());
   EXPECT_EQ(postorder.at(1), c.get());

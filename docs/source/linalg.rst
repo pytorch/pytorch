@@ -6,8 +6,6 @@ torch.linalg
 
 Common linear algebra operations.
 
-See :ref:`Linear Algebra Stability` for some common numerical edge-cases.
-
 .. automodule:: torch.linalg
 .. currentmodule:: torch.linalg
 
@@ -45,8 +43,6 @@ Decompositions
     svd
     svdvals
 
-.. _linalg solvers:
-
 Solvers
 -------
 
@@ -58,8 +54,6 @@ Solvers
     solve_triangular
     lu_solve
     lstsq
-
-.. _linalg inverses:
 
 Inverses
 --------

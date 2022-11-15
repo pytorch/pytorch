@@ -335,7 +335,7 @@ def template_codegen(scheduler, scheduler_node, epilogue):
                 break
         assert kernel_buf_replace_name is not None
 
-    kernel_name = "triton_template_" + wrapper.next_kernel_suffix()
+    kernel_name = wrapper.next_kernel_name()
     # code gen kernel
     wrapper.header.splice(
         kernel.codegen_kernel(

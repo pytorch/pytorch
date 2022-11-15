@@ -19,7 +19,6 @@
 #include <mutex>
 #include <regex>
 #include <set>
-#include <utility>
 #include <vector>
 
 namespace c10 {
@@ -883,7 +882,7 @@ class DeviceCachingAllocator {
             device_free,
             params.size(),
             params.stream(),
-            std::move(context));
+            context);
       }
       stats.num_ooms += 1;
 
@@ -2188,8 +2187,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       CaptureId_t graph_id,
       MempoolId_t mempool_id) override {
     assertValidDevice(device);
-    device_allocator[device]->notifyCaptureBegin(
-        graph_id, std::move(mempool_id));
+    device_allocator[device]->notifyCaptureBegin(graph_id, mempool_id);
   }
 
   void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) override {
@@ -2201,7 +2199,7 @@ class NativeCachingAllocator : public CUDAAllocator {
 
   void notifyCaptureDestroy(int device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
-    device_allocator[device]->notifyCaptureDestroy(std::move(mempool_id));
+    device_allocator[device]->notifyCaptureDestroy(mempool_id);
   }
 
   void* raw_alloc(size_t nbytes) override {

@@ -229,7 +229,7 @@ class BackendConfig:
 
         import torch
         from torch.ao.quantization.backend_config import BackendConfig, BackendPatternConfig, DTypeConfig, ObservationType
-        from torch.ao.quantization.fuser_method_mappings import _reverse_sequential_wrapper2
+        from torch.ao.quantization.fuser_method_mappings import reverse_sequential_wrapper2
 
         weighted_int8_dtype_config = DTypeConfig(
             input_dtype=torch.quint8,
@@ -248,7 +248,7 @@ class BackendConfig:
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
             .add_dtype_config(weighted_int8_dtype_config) \
             .set_fused_module(torch.nn.intrinsic.ConvReLU2d) \
-            .set_fuser_method(_reverse_sequential_wrapper2(torch.nn.intrinsic.ConvReLU2d))
+            .set_fuser_method(reverse_sequential_wrapper2(torch.nn.intrinsic.ConvReLU2d))
 
         backend_config = BackendConfig("my_backend") \
             .set_backend_pattern_config(linear_config) \

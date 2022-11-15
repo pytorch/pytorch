@@ -11,14 +11,13 @@
   short_description:
     text: Node is missing ONNX shape inference.
   full_description:
-    text: "Node is missing ONNX shape inference.
-      This usually happens when the node is not valid under standard ONNX operator spec."
+    text: ""
     markdown: |
       Node is missing ONNX shape inference.
       This usually happens when the node is not valid under standard ONNX operator spec.
   message_strings:
     default:
-      text: "The shape inference of {op_name} type is missing, so it may result in wrong shape inference for the exported graph.
+      text: "The shape inference of {0} type is missing, so it may result in wrong shape inference for the exported graph.
       Please consider adding it in symbolic function."
   help_uri:
   properties:
@@ -30,12 +29,12 @@
   short_description:
     text: Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX.
   full_description:
-    text: Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX.
+    text: ""
     markdown: |
       Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX.
   message_strings:
     default:
-      text: "ONNX export failed on an operator with unrecognized namespace {op_name}.
+      text: "ONNX export failed on an operator with unrecognized namespace {0}.
       If you are trying to export a custom operator, make sure you registered
       it with the right domain and version."
   help_uri:
@@ -48,13 +47,13 @@
   short_description:
     text: Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX.
   full_description:
-    text: Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX.
+    text: ""
     markdown: |
       Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX.
   message_strings:
     default:
-      text: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported.
-      Please feel free to request support or submit a pull request on PyTorch GitHub: {issue_url}."
+      text: "Exporting the operator '{0}' to ONNX opset version {1} is not supported.
+      Please feel free to request support or submit a pull request on PyTorch GitHub: {2}."
   help_uri:
   properties:
     deprecated: false
@@ -66,7 +65,7 @@
   short_description:
     text: Operator is supported in newer opset version.
   full_description:
-    text: Operator is supported in newer opset version.
+    text: ""
     markdown: |
       Operator is supported in newer opset version.
 
@@ -76,8 +75,8 @@
       ```
   message_strings:
     default:
-      text: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported.
-      Support for this operator was added in version {supported_opset_version}, try exporting with this version."
+      text: "Exporting the operator '{0}' to ONNX opset version {1} is not supported.
+      Support for this operator was added in version {2}, try exporting with this version."
   help_uri:
   properties:
     deprecated: false

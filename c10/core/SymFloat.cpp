@@ -1,7 +1,6 @@
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymNodeImpl.h>
 #include <array>
-#include <utility>
 
 namespace c10 {
 
@@ -10,9 +9,7 @@ SymNode SymFloat::toSymNodeImpl() const {
   return SymNode::reclaim_copy(toSymNodeImplUnowned());
 }
 
-static std::array<SymNode, 2> normalize_symfloats(
-    const SymFloat& a_,
-    const SymFloat& b_) {
+static std::array<SymNode, 2> normalize_symfloats(SymFloat a_, SymFloat b_) {
   SymNode a, b;
   if (a_.is_symbolic())
     a = a_.toSymNodeImpl();
@@ -26,10 +23,10 @@ static std::array<SymNode, 2> normalize_symfloats(
   if (!b) {
     b = common->wrap_float(b_.as_float_unchecked());
   }
-  return {std::move(a), std::move(b)};
+  return {a, b};
 }
 
-SymFloat SymFloat::operator+(const SymFloat& sci) const {
+SymFloat SymFloat::operator+(SymFloat sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return SymFloat(data_ + sci.data_);
   }
@@ -37,7 +34,7 @@ SymFloat SymFloat::operator+(const SymFloat& sci) const {
   return SymFloat(res[0]->add(res[1]));
 }
 
-SymFloat SymFloat::operator-(const SymFloat& sci) const {
+SymFloat SymFloat::operator-(SymFloat sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return SymFloat(data_ - sci.data_);
   }
@@ -45,7 +42,7 @@ SymFloat SymFloat::operator-(const SymFloat& sci) const {
   return SymFloat(res[0]->sub(res[1]));
 }
 
-SymFloat SymFloat::operator*(const SymFloat& sci) const {
+SymFloat SymFloat::operator*(SymFloat sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return SymFloat(data_ * sci.data_);
   }
@@ -53,7 +50,7 @@ SymFloat SymFloat::operator*(const SymFloat& sci) const {
   return SymFloat(res[0]->mul(res[1]));
 }
 
-SymFloat SymFloat::operator/(const SymFloat& sci) const {
+SymFloat SymFloat::operator/(SymFloat sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return SymFloat(data_ / sci.data_);
   }
@@ -61,7 +58,7 @@ SymFloat SymFloat::operator/(const SymFloat& sci) const {
   return SymFloat(res[0]->truediv(res[1]));
 }
 
-std::ostream& operator<<(std::ostream& os, const SymFloat& s) {
+std::ostream& operator<<(std::ostream& os, SymFloat s) {
   if (s.is_symbolic()) {
     os << s.toSymNodeImpl()->str();
   } else {

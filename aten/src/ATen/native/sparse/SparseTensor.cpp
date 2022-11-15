@@ -163,10 +163,10 @@ SparseTensor new_with_dims_sparse(
   return self;
 }
 
-SparseTensor new_with_dims_and_tensor_sparse_symint(
+SparseTensor new_with_dims_and_tensor_sparse(
     int64_t sparse_dim,
     int64_t dense_dim,
-    c10::SymIntArrayRef size,
+    ArrayRef<int64_t> size,
     const Tensor& indices,
     const Tensor& values,
     c10::optional<ScalarType> dtype,
@@ -444,9 +444,7 @@ Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& val
 
   Tensor values = expand_values_if_needed(values_);
 
-  // This guard is intentional: we don't support dynamic shapes along the
-  // indices dimension because that implies variable dimensionality
-  auto sparse_dim = indices.sym_size(0).guard_int(__FILE__, __LINE__);
+  auto sparse_dim = indices.sym_size(0);
   auto dense_dim = values.dim() - 1;
 
   return at::_sparse_coo_tensor_with_dims_and_tensors_symint(

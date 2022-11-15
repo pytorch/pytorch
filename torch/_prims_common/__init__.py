@@ -837,11 +837,10 @@ def type_to_dtype(typ: type) -> torch.dtype:
 
     if typ is bool:
         return torch.bool
-    if typ in [int, torch.SymInt]:
+    if typ is int:
         return torch.long
-    if typ in [float, torch.SymFloat]:
+    if typ is float:
         return torch.get_default_dtype()
-    # TODO: sym_complex_float?
     if typ is complex:
         return corresponding_complex_dtype(torch.get_default_dtype())
 

@@ -66,7 +66,6 @@ MPSDevice::MPSDevice(): _mtl_device(nil), _mtl_indexing_library(nil)  {
   // Create the MPSGraph and check method introduced in 12.3+
   // which is used by MPS backend.
   id mpsCD = NSClassFromString(@"MPSGraph");
-  _macos13plus = [mpsCD instancesRespondToSelector:@selector(cumulativeSumWithTensor:axis:name:)] == YES;
   if ([mpsCD instancesRespondToSelector:@selector(LSTMWithSourceTensor:
                                                        recurrentWeight:
                                                            inputWeight:
@@ -77,7 +76,6 @@ MPSDevice::MPSDevice(): _mtl_device(nil), _mtl_indexing_library(nil)  {
                                                                   name:)] == NO) {
     return;
   }
-
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0 ; i < [devices count] ; i++) {
     id<MTLDevice>  device = devices[i];
@@ -87,11 +85,6 @@ MPSDevice::MPSDevice(): _mtl_device(nil), _mtl_indexing_library(nil)  {
     }
   }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(_mtl_device);
-
-}
-
-bool MPSDevice::isMacOS13Plus() const {
-  return _macos13plus;
 }
 
 at::Allocator* getMPSSharedAllocator();
@@ -102,10 +95,6 @@ at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
 
 bool is_available() {
   return MPSDevice::getInstance()->device() != nil;
-}
-
-bool is_macos_13_or_newer() {
-  return MPSDevice::getInstance()->isMacOS13Plus();
 }
 
 } // namespace mps

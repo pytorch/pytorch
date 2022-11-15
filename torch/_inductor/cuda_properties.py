@@ -11,15 +11,10 @@ import torch
 
 @functools.lru_cache(None)
 def _properties():
-    if not torch.cuda.is_available():
-        return {}
-    try:
-        return {
-            i: torch.cuda.get_device_properties(i)
-            for i in range(torch.cuda.device_count())
-        }
-    except RuntimeError:
-        return {}
+    r = {
+        i: torch.cuda.get_device_properties(i) for i in range(torch.cuda.device_count())
+    }
+    return r
 
 
 _compile_worker_current_device = None

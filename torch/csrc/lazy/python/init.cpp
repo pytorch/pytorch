@@ -42,9 +42,9 @@ std::ptrdiff_t GetTensorId(const at::Tensor& tensor) {
 
 std::string GetTensorsDump(
     const std::vector<at::Tensor>& tensors,
-    const std::function<std::string(c10::ArrayRef<const torch::lazy::Node*>)>&
+    const std::function<std::string(c10::ArrayRef<torch::lazy::Node*>)>&
         coverter) {
-  std::vector<const torch::lazy::Node*> nodes;
+  std::vector<torch::lazy::Node*> nodes;
   std::vector<torch::lazy::Value> values;
   for (auto& tensor : tensors) {
     auto inner = at::functionalization::impl::from_functional_tensor(tensor);
@@ -142,7 +142,7 @@ void initLazyBindings(PyObject* module) {
   lazy.def(
       "_get_tensors_text",
       [](const std::vector<at::Tensor>& tensors) -> std::string {
-        auto coverter = [](c10::ArrayRef<const torch::lazy::Node*> nodes) {
+        auto coverter = [](c10::ArrayRef<torch::lazy::Node*> nodes) {
           return torch::lazy::DumpUtil::ToText(nodes);
         };
         return GetTensorsDump(tensors, coverter);
@@ -150,7 +150,7 @@ void initLazyBindings(PyObject* module) {
   lazy.def(
       "_get_tensors_dot",
       [](const std::vector<at::Tensor>& tensors) -> std::string {
-        auto coverter = [](c10::ArrayRef<const torch::lazy::Node*> nodes) {
+        auto coverter = [](c10::ArrayRef<torch::lazy::Node*> nodes) {
           return torch::lazy::DumpUtil::ToDot(nodes);
         };
         return GetTensorsDump(tensors, coverter);
@@ -222,7 +222,7 @@ void initLazyBindings(PyObject* module) {
       [](const std::vector<at::Tensor>& tensors)
           -> std::pair<std::vector<int64_t>, std::vector<at::IValue>> {
 #if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
-        std::vector<const Node*> roots;
+        std::vector<Node*> roots;
         for (auto& tensor : tensors) {
           auto xtensor = TryGetLtcTensor(tensor);
           roots.push_back(xtensor->GetIrValue().node.get());

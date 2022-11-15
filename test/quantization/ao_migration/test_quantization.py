@@ -177,9 +177,9 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             "default_qat_qconfig_v2",
             "get_default_qconfig",
             "get_default_qat_qconfig",
-            "_assert_valid_qconfig",
+            "assert_valid_qconfig",
             "QConfigAny",
-            "_add_module_to_qconfig_obs_ctr",
+            "add_module_to_qconfig_obs_ctr",
             "qconfig_equals"
         ]
         self._test_function_import('qconfig', function_list)
@@ -225,7 +225,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             "get_fuser_method",
         ]
         dict_list = [
-            "_DEFAULT_OP_LIST_TO_FUSER_METHOD"
+            "DEFAULT_OP_LIST_TO_FUSER_METHOD"
         ]
         self._test_function_import('fuser_method_mappings', function_list)
         self._test_dict_import('fuser_method_mappings', dict_list)
