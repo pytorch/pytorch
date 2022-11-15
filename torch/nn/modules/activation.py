@@ -1060,12 +1060,38 @@ class MultiheadAttention(Module):
         .. note::
             `batch_first` argument is ignored for unbatched inputs.
         """
-        is_batched = query.dim() == 3
+
+        is_batched = True
+        qsize = query.size()
+        ksize = key.size()
+        vsize = value.size()
+        if self.batch_first:
+            # make sure that the transpose op does not affect the "is" property
+            if key is value:
+                if query is key:
+                    query = key = value = query.view(-1, qsize[-2], qsize[-1])
+                else:
+                    query, key = [x.view(-1, xsize[-2], xsize[-1]) for x, xsize in ((query, qsize), (key, ksize))]
+                    value = key
+            else:
+                query, key, value = [x.view(-1, xsize[-2], xsize[-1]) for x,xsize in ((query, qsize), (key, ksize), (value, vsize))]
+        else:
+            # make sure that the transpose op does not affect the "is" property
+            if key is value:
+                if query is key:
+                    query = key = value = query.view(qsize[0], -1, qsize[-1])
+                else:
+                    query, key = [x.view(xsize[0], -1, xsize[-1]) for x, xsize in ((query, qsize), (key, ksize))]
+                    value = key
+            else:
+                query, key, value = [x.view(xsize[0], -1, xsize[-1]) for x, xsize in ((query, qsize), (key, ksize), (value, vsize))]
+
         if key_padding_mask is not None:
             _kpm_dtype = key_padding_mask.dtype
             if _kpm_dtype != torch.bool and not torch.is_floating_point(key_padding_mask):
                 raise AssertionError(
                     "only bool and floating types of key_padding_mask are supported")
+
         why_not_fast_path = ''
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
