@@ -7668,34 +7668,35 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         # Types to test different code paths in copy_impl.
         dtypes = (
-            # out_dtype, src_dtype, is_fbgemm
-            (torch.float32, torch.float16, True),  # fbgemm
-            (torch.float16, torch.float32, True),  # fbgemm
-            (torch.float32, torch.float32, False),  # TensorIterator
+            # out_dtype, src_dtype
+            (torch.float32, torch.float16),  # fbgemm
+            (torch.float16, torch.float32),  # fbgemm
+            (torch.float32, torch.float32),  # TensorIterator
         )
 
         # TODO: fbgemm and TensorIterator behave differently.
         cases = (
-            # out_shape, src_shape, ok_fbgemm, ok_ti
+            # out_shape, src_shape, is_ok
             # These cases used to crash with fbgemm, make sure these also raise
             # exceptions with TensorIterator.
-            ((1, 2, 3), (0, 2, 3), True, False),  # same strides, not allowed by TI
-            ((1, 5, 6), (4, 5, 6), False, False),  # same strides, not allowed by TI
-            (1, (0, 2, 3), True, False),  # different strides
-            ((4, 5, 6), (0, 2, 3), True, False),  # different strides
-            ((4, 5, 6), (1, 2, 3), True, False),  # different strides
+            ((1, 2, 3), (0, 2, 3), False),  # same strides, not allowed by TI
+            ((1, 5, 6), (4, 5, 6), False),  # same strides, not allowed by TI
+            (1, (0, 2, 3), False),  # different strides
+            ((4, 5, 6), (0, 2, 3), False),  # different strides
+            ((4, 5, 6), (1, 2, 3), False),  # different strides
+            ((4, 5, 6), (6, 5, 4), False),  # same numel
 
             # These cases should pass with fbgemm and TensorIterator.
-            ((4, 5, 6), (1, 5, 6), True, True),  # same strides
-            ((4, 5, 6), (4, 5, 6), True, True),  # same strides
-            ((0, 2, 3), 1, True, True),  # different strides, allowed by TI
-            ((4, 5, 6), (4, 5, 1), True, True),  # different strides, allowed by TI
+            ((4, 5, 6), (1, 5, 6), True),  # same strides
+            ((4, 5, 6), (4, 5, 6), True),  # same strides
+            ((0, 2, 3), 1, True),  # different strides, allowed by TI
+            ((4, 5, 6), (4, 5, 1), True),  # different strides, allowed by TI
         )
 
-        for (out_shape, src_shape, ok_fbgemm, ok_ti), (out_dtype, src_dtype, is_fbgemm) in itertools.product(cases, dtypes):
+        for (out_shape, src_shape, is_ok), (out_dtype, src_dtype) in itertools.product(cases, dtypes):
             out = torch.ones(out_shape, dtype=out_dtype)
             src = torch.ones(src_shape, dtype=src_dtype)
-            if (ok_fbgemm and is_fbgemm) or (ok_ti and not is_fbgemm):
+            if is_ok:
                 out.copy_(src)
             else:
                 self.assertRaises(RuntimeError, lambda: out.copy_(src))

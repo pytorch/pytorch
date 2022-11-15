@@ -124,9 +124,9 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // 1. Memory Format for source and destination tensors is contiguous.
   // 2. Device for both the source and destination tensor is CPU.
   // 3. dtype conversion between FP32->FP16 and FP16->FP32.
-  // To avoid out of bounds memory access, this also checks whether there's
-  // enough self.numel() storage before copying src.numel() items, see
-  // fbgemm::Float16ToFloat_ref.
+  // This checks that self.numel() == src.numel() because this code path doesn't
+  // support broadcasting. This also guards against out of bounds memory access
+  // when copying, see fbgemm::Float16ToFloat_ref.
   // https://github.com/pytorch/pytorch/issues/88543
   #ifdef USE_FBGEMM
     if (((self.dtype() == at::kFloat && src.dtype() == at::kHalf) ||
@@ -134,16 +134,17 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
         (self.device().is_cpu() && src.device().is_cpu()) &&
         ((self.is_contiguous() && src.is_contiguous()) ||
          (self.is_non_overlapping_and_dense() && self.strides() == src.strides())) &&
-        (self.numel() >= src.numel())) {
+        (self.numel() == src.numel()) &&
+        (self.sizes() == src.sizes())) {
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
         auto* output_ptr =
             reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
-        if (src.numel() < at::internal::GRAIN_SIZE) {
-          fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, src.numel());
+        if (self.numel() < at::internal::GRAIN_SIZE) {
+          fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, self.numel());
         } else {
           at::parallel_for(
               0,
-              src.numel(),
+              self.numel(),
               at::internal::GRAIN_SIZE,
               [&](int64_t begin, int64_t end) {
                 fbgemm::FloatToFloat16_simd(
@@ -156,12 +157,12 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
         auto in_data = reinterpret_cast<fbgemm::float16*>(
             src.data_ptr<at::Half>());
         auto* output_ptr = self.data_ptr<float>();
-        if (src.numel() < at::internal::GRAIN_SIZE) {
-          fbgemm::Float16ToFloat_simd(in_data, output_ptr, src.numel());
+        if (self.numel() < at::internal::GRAIN_SIZE) {
+          fbgemm::Float16ToFloat_simd(in_data, output_ptr, self.numel());
         } else {
           at::parallel_for(
               0,
-              src.numel(),
+              self.numel(),
               at::internal::GRAIN_SIZE,
               [&](int64_t begin, int64_t end) {
                 fbgemm::Float16ToFloat_simd(
