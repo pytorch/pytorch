@@ -21,7 +21,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, all_types_and, floating_and_complex_types,
-    floating_types, floating_and_complex_types_and, integral_types_and, get_all_dtypes
+    floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes
 )
 from torch.testing._creation import float_to_corresponding_complex_type_map
 
@@ -2538,6 +2538,19 @@ class TestTensorCreation(TestCase):
         end = .0315315723419189453125 + (0.444444444444j if dtype.is_complex else 0)
 
         for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
+            t = torch.linspace(start, end, steps, device=device, dtype=dtype)
+            a = np.linspace(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
+            t = t.cpu()
+            self.assertEqual(t, torch.from_numpy(a))
+            self.assertTrue(t[0].item() == a[0])
+            self.assertTrue(t[steps - 1].item() == a[steps - 1])
+
+    @dtypes(*integral_types())
+    def test_linspace_vs_numpy_integral(self, device, dtype):
+        start = 1
+        end = 127
+
+        for steps in [25, 50]:
             t = torch.linspace(start, end, steps, device=device, dtype=dtype)
             a = np.linspace(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
             t = t.cpu()
