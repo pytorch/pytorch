@@ -746,13 +746,15 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
     return repeats.new_empty(output_size)
 
 
-@register_meta([aten.complex.default, aten.complex.out])
+@register_meta([aten.complex.default, aten.complex.out, aten.polar.default, aten.polar.out])
 @out_wrapper()
-def meta_complex(real, imag):
-    assert real.dtype.is_floating_point
-    assert imag.dtype.is_floating_point
-    out_shape = _broadcast_shapes(real.shape, imag.shape)
-    return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
+def meta_complex(a, b):
+    def check_floating_point(input):
+        return a.dtype in (torch.half, torch.float, torch.double)
+    check(check_floating_point(a) and check_floating_point(b),
+    lambda: f"Expected both inputs to be Half, Float or Double tensors but got {a.dtype} and {b.dtype}")
+    out_shape = _broadcast_shapes(a.shape, b.shape)
+    return a.new_empty(out_shape, dtype=corresponding_complex_dtype(a.dtype))
 
 
 @register_meta(aten.vdot.default)
@@ -1221,7 +1223,6 @@ def meta_unary_impl(self, **kwargs):
     return _elementwise_meta(
         self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
     )
-
 
 @register_meta(aten.zero.default)
 def meta_zero(self):
