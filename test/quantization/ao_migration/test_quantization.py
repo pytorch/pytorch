@@ -118,7 +118,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
     def test_function_import_quant_type(self):
         function_list = [
             'QuantType',
-            'quant_type_to_str',
+            '_get_quant_type_to_str',
         ]
         self._test_function_import('quant_type', function_list)
 
@@ -225,7 +225,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             "get_fuser_method",
         ]
         dict_list = [
-            "DEFAULT_OP_LIST_TO_FUSER_METHOD"
+            "_DEFAULT_OP_LIST_TO_FUSER_METHOD"
         ]
         self._test_function_import('fuser_method_mappings', function_list)
         self._test_dict_import('fuser_method_mappings', dict_list)
