@@ -305,10 +305,6 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
   // THPVariable_clear).
   // 2. We are decref-ing some other Python object. We don't do
   // PyObject resurrection on non-Tensors, so we just carry on as usual
-  if (is_tensor) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        !c10::impl::HermeticPyObjectTLS::get_state());
-  }
   if (is_tensor && Py_REFCNT(pyobj) > 1) {
     // It's still alive!  This can happen if a weak ref resurrected
     // the PyObject without flipping ownership.  At this point it is
@@ -861,7 +857,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
     if (sizes_strides_policy.has_value()) {
       TORCH_CHECK(
           false,
-          "Setting sizes_strides_policy isn't suppored for this overload")
+          "Setting sizes_strides_policy isn't supported for this overload")
     }
   }
 
