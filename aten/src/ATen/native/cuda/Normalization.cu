@@ -562,14 +562,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_backward_cuda(const Tensor& grad_out, const Tensor& input, const c10::optional<Tensor>& weight_opt, Tensor& running_mean, Tensor& running_var, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt, bool train, double epsilon, std::array<bool,3> grad_input_mask) {
-  return batch_norm_backward_cuda(grad_out, input, weight_opt, running_mean, running_var, save_mean_opt, save_invstd_opt, train, epsilon, grad_input_mask);
-}
-
-std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_no_stats_backward_cuda(const Tensor& grad_out, const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt, bool train, double epsilon, std::array<bool,3> grad_input_mask) {
-  return batch_norm_backward_cuda(grad_out, input, weight_opt, Tensor(), Tensor(), save_mean_opt, save_invstd_opt, train, epsilon, grad_input_mask);
-}
-
 std::tuple<Tensor, Tensor> batch_norm_stats_cuda(const Tensor& self, double epsilon) {
   auto options = self.options().dtype(
       at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));

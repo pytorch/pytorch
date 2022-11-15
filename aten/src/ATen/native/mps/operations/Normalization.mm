@@ -826,32 +826,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
 
 }
 
-std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_backward_mps
-                  (const Tensor& grad_out,
-                   const Tensor& input,
-                   const c10::optional<Tensor>& weight_opt,
-                   Tensor& running_mean,
-                   Tensor& running_var,
-                   const c10::optional<Tensor>& save_mean_opt,
-                   const c10::optional<Tensor>& save_var_opt,
-                   bool train,
-                   double epsilon,
-                   std::array<bool,3> grad_input_mask) {
-  return batch_norm_backward_mps(grad_out, input, weight_opt, running_mean, running_var, save_mean_opt, save_var_opt, train, epsilon, grad_input_mask);
-}
-
-std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_no_stats_backward_mps
-                  (const Tensor& grad_out,
-                   const Tensor& input,
-                   const c10::optional<Tensor>& weight_opt,
-                   const c10::optional<Tensor>& save_mean_opt,
-                   const c10::optional<Tensor>& save_var_opt,
-                   bool train,
-                   double epsilon,
-                   std::array<bool,3> grad_input_mask) {
-  return batch_norm_backward_mps(grad_out, input, weight_opt, Tensor(), Tensor(), save_mean_opt, save_var_opt, train, epsilon, grad_input_mask);
-}
-
 // Layer norm forward for MPS
 std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(
     const Tensor& input,

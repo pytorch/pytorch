@@ -828,16 +828,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_ou
   });
 }
 
-std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_backward_cpu(const Tensor& grad_out, const Tensor& self, const c10::optional<Tensor>& weight_opt, Tensor& running_mean, Tensor& running_var, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt,
-                                                           bool train, double eps, std::array<bool,3> grad_input_mask) {
-  return batch_norm_backward_cpu(grad_out, self, weight_opt, running_mean, running_var, save_mean_opt, save_invstd_opt, train, eps, grad_input_mask);
-}
-
-std::tuple<Tensor, Tensor, Tensor> batch_norm_legit_no_stats_backward_cpu(const Tensor& grad_out, const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt,
-                                                           bool train, double eps, std::array<bool,3> grad_input_mask) {
-  return batch_norm_backward_cpu(grad_out, self, weight_opt, Tensor(), Tensor(), save_mean_opt, save_invstd_opt, train, eps, grad_input_mask);
-}
-
 TORCH_IMPL_FUNC(renorm_out)(const Tensor& self, const Scalar& p, int64_t dim,
                             const Scalar& maxnorm, const Tensor& out) {
   auto self_sizes = self.sizes();
