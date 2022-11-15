@@ -18,7 +18,7 @@ import jinja2
 import os
 import sys
 from typing_extensions import Literal, TypedDict
-import importlib.util
+
 
 Arch = Literal["windows", "linux", "macos"]
 
@@ -93,13 +93,16 @@ class OperatingSystem:
     MACOS_ARM64 = "macos-arm64"
 
 def import_module(modname: str, fname: str) -> ModuleType:
+    import importlib.util
     spec = importlib.util.spec_from_file_location(modname, fname)
     if spec is None:
         raise ImportError(f"Could not load spec for module '{modname}' at: {fname}. \
         Please run the regenerate.sh from .github folder before running generate_ci_workflows")
     module = importlib.util.module_from_spec(spec)
-    sys.modules[modname] = module
     try:
+        assert spec.loader is not None
+        assert module is not None
+        sys.modules[modname] = module
         spec.loader.exec_module(module)
     except FileNotFoundError as e:
         raise ImportError(f"{e.strerror}: {fname}") from e
