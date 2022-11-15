@@ -124,7 +124,6 @@ inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.ldl_factor": {f32, f64},  # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
-    "native_batch_norm": {f16},  # flaky
 }
 
 inductor_skips["cuda"] = {
@@ -134,6 +133,8 @@ inductor_skips["cuda"] = {
     "jiterator_binary": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
+    # flaky
+    "native_batch_norm": {f16, f32, f64},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
