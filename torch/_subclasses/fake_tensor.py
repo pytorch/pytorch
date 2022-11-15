@@ -861,11 +861,7 @@ class FakeTensorMode(TorchDispatchMode):
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
         # TODO - we should be use the prim aten impl
-        if (
-            "prims::" in func._schema.name
-            and len(flat_arg_fake_tensors) != 0
-            and hasattr(func, "prim_meta_impl")
-        ):
+        if "prims::" in func._schema.name and hasattr(func, "prim_meta_impl"):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
 
@@ -1081,7 +1077,9 @@ class FakeCopyMode(TorchFunctionMode):
 
         # clone will get called in Parameter deepcopy
         if func == torch._C._TensorBase.clone:
-            return func(self.fake_mode.from_tensor(args[0]), **kwargs)
+            return func(
+                self.fake_mode.from_tensor(args[0], static_shapes=True), **kwargs
+            )
         elif func == torch.Tensor.__deepcopy__:
             assert len(args) == 2 and len(kwargs) == 0
             tensor, memo = args
@@ -1089,7 +1087,7 @@ class FakeCopyMode(TorchFunctionMode):
             if id(tensor) in memo:
                 return memo[id(tensor)]
 
-            out = self.fake_mode.from_tensor(tensor)
+            out = self.fake_mode.from_tensor(tensor, static_shapes=True)
             memo[id(tensor)] = out
             return out
         else:

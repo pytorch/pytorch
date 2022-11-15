@@ -403,7 +403,7 @@ def _elementwise_meta(
         if seen_float:
             number = sym_float(number)
 
-    return TensorMeta(number)
+    return TensorMeta(number)  # type: ignore[arg-type]
 
 
 def _complex_only_elementwise_meta(*args, **kwargs):

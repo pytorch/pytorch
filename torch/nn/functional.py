@@ -3912,11 +3912,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             ]
         else:
             assert scale_factors is not None
-            from ..fx.experimental.symbolic_shapes import sym_int, sym_float
-            output_size = [
-                sym_int(math.floor(sym_float(input.size(i + 2)) * scale_factors[i]))
-                for i in range(dim)
-            ]
+            output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
         scale_factors = None
 
     if antialias and not (mode in ("bilinear", "bicubic") and input.ndim == 4):
