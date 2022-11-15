@@ -43,6 +43,8 @@
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/row_indices_native.h>
 #include <ATen/ops/select_native.h>
+#include <ATen/ops/select_copy.h>
+#include <ATen/ops/select_copy_native.h>
 #include <ATen/ops/sparse_compressed_tensor_native.h>
 #include <ATen/ops/sparse_csr_tensor_native.h>
 #include <ATen/ops/sparse_csc_tensor_native.h>
@@ -746,7 +748,8 @@ Tensor empty_like_sparse_csr(
   }
 }
 
-Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
+template <bool require_view, bool require_copy>
+Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) {
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
       self.layout(), "select()", []() { return; });
   TORCH_CHECK_INDEX(
@@ -766,6 +769,14 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
   if (index < 0) {
     index += size;
   }
+
+  auto select_strided = [](const Tensor& self, int64_t dim, int64_t index) {
+    if (require_copy) {
+      return at::select_copy(self, dim, index);
+    } else {
+      return self.select(dim, index);
+    }
+  };
 
   TORCH_INTERNAL_ASSERT(dim >= 0 && dim < self.dim());
 
@@ -792,7 +803,7 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
     return at::native::_sparse_compressed_tensor_unsafe(
         compressed_indices.select(dim, index),
         plain_indices.select(dim, index),
-        self.values().select(dim, index),
+        select_strided(self.values(), dim, index),
         new_sizes,
         optTypeMetaToScalarType(options.dtype_opt()),
         options.layout_opt(),
@@ -818,8 +829,12 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
 
     auto indices_options = compressed_indices.options();
     int64_t fast_dim = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "select", [&]() { return 0; }, [&]() { return 1; });
-    int64_t start = 0;
-    int64_t end = 0;
+    int64_t start = -1;
+    int64_t end = -1;
+    Tensor dim_indices;
+    Tensor indices;
+    Tensor values;
+    bool is_copy = false;
     if (dim == fast_dim) {
       Tensor start_end = compressed_indices.narrow(0, index / blocksize[0], 2).cpu();
       AT_DISPATCH_INDEX_TYPES(start_end.scalar_type(), "select", [&]() {
@@ -827,77 +842,59 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
         start = start_end_accessor[0];
         end = start_end_accessor[1];
       });
-    }
-
-    Tensor indices;
-    Tensor values;
-    AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "select()",
-        [&]() {
-          /* The following is equivalent to
-             self.to_sparse().select(dim, index) but can be several
-             orders of magnitude faster depending on the input shape
-             and select dim.
-          */
-          if (dim == fast_dim) {
-            indices = plain_indices.slice(0, start, end)
-              .unsqueeze(0)
-              .to(kLong);
-            // The resulting tensor is a view of the original tensor!
-            values = self.values().slice(0, start, end);
-          } else {
-            Tensor dim_indices = at::where(plain_indices.eq(index))[0];
-            indices = at::_convert_indices_from_csr_to_coo(compressed_indices, plain_indices)
-              .select(0, 0)
-              .index_select(0, dim_indices)
-              .unsqueeze(0)
-              .to(kLong);
-            // The resulting tensor is a copy of the original tensor
-            // due to index_select usage:
-            values = self.values().index_select(0, dim_indices);
-          }
-        },
-        [&]() {
-          int64_t blockindex = index % blocksize[0];
-          Tensor subblock_indices = at::arange(0, blocksize[1], indices_options);
-          if (dim == fast_dim) {
-            indices = plain_indices.slice(0, start, end)
-              .mul(blocksize[1])
-              .repeat_interleave(blocksize[1])
-              .add(subblock_indices.repeat(end - start))
-              .unsqueeze(0)
-              .to(kLong);
-            // The resulting tensor is a view or a copy of the
-            // original tensor due to flatten usage!
-            values = self.values()
-              .slice(0, start, end)
-              .select(1, blockindex)
-              .flatten(0, 1);
-          } else {
-            Tensor blockrow_indices = at::where(plain_indices.eq(index / blocksize[0]))[0];
-            if (blockrow_indices.numel() == 0) {
-              indices = at::empty({1, 0}, indices_options.dtype(kLong));
-              DimVector empty_values_shape = DimVector(self.values().sizes().slice(2, self.values().dim()-2));
-              empty_values_shape[0] = 0;
-              values = at::empty(empty_values_shape, self.values().options());
-            } else {
-              Tensor blockcol_indices = at::_convert_indices_from_csr_to_coo(compressed_indices, plain_indices)
-                .select(0, 0)
-                .index_select(0, blockrow_indices);
-              indices = blockcol_indices
-                .mul(blocksize[1])
-                .repeat_interleave(blocksize[1])
-                .add(subblock_indices.repeat(blockcol_indices.size(0)))
-                .unsqueeze(0)
-                .to(kLong);
-              // The resulting tensor is a copy of the original tensor
-              // due to index_select (and flatten) usage:
-              values = self.values()
-                .index_select(0, blockrow_indices)
-                .select(1, blockindex)
-                .flatten(0, 1);
-            }
+      indices = plain_indices.slice(0, start, end);
+      values = self.values().slice(0, start, end);
+    } else {
+      dim_indices = at::where(plain_indices.eq(index / blocksize[0]))[0];
+      int64_t n = dim_indices.numel();
+      if (n == 0) {
+        start = end = 0;
+      } else {
+        Tensor dim_indices_cpu = dim_indices.cpu();
+        AT_DISPATCH_INDEX_TYPES(dim_indices_cpu.scalar_type(), "select", [&]() {
+          auto accessor = dim_indices_cpu.accessor<index_t, 1>();
+          if (accessor[n-1] - accessor[0] == n - 1) {
+            start = accessor[0];
+            end = start + n;
           }
         });
+      }
+      indices = at::_convert_indices_from_csr_to_coo(compressed_indices, plain_indices)
+        .select(0, 0);
+      if (start != -1) {
+        indices = indices.slice(0, start, end);
+        values = self.values().slice(0, start, end);
+      } else {
+        indices = indices
+          .index_select(0, dim_indices);
+        // values is a copy due to index_select!
+        is_copy = true;
+        values = self.values().index_select(0, dim_indices);
+        // although `start == -1` here, will use `end - start` to hold
+        // the value of `indices.size(0)`
+        end = indices.size(0) + start;
+      }
+    }
+
+    AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "select()",
+        [&]() {},
+        [&]() {
+          Tensor subblock_indices = at::arange(0, blocksize[1], indices_options);
+          indices = indices.mul(blocksize[1])
+            .repeat_interleave(blocksize[1])
+            .add(subblock_indices.repeat(end - start));
+          // TODO: is flatten(0, 1) always a view?
+          values = values.select(1, index % blocksize[0]).flatten(0, 1);
+        });
+
+    if (require_view) {
+      TORCH_CHECK(!is_copy, "select(", dim, ", ", index, "): cannot return a view result for the given input and parameters");
+    }
+
+    indices = indices.unsqueeze(0).to(kLong);
+    if (require_copy && (dim == fast_dim || start != -1) && !is_copy) {
+      values = values.clone();
+    }
     return at::_sparse_coo_tensor_unsafe(indices, values, output_shape)._coalesced_(true);
   } else {
     // Selecting dense dimension
@@ -906,11 +903,20 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
         "select",
         // Non blocked layout (2 sparse dims become 1 nnz dim in values, so dim
         // is found one position to the left)
-        [&]() { return self.values().select(dim - 1, index); },
+        [&]() { return select_strided(self.values(), dim - 1, index); },
         // Block layout (2 sparse dims become 1 nnz dim + 2 block-shape dims in
         // values, so dim is found 1 position to the right)
-        [&]() { return self.values().select(dim + 1, index); });
+        [&]() { return select_strided(self.values(), dim + 1, index); });
   }
 }
+
+Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
+  return select_sparse_csr_worker<true, false>(self, dim, index);
+}
+
+Tensor select_copy_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
+  return select_sparse_csr_worker<false, true>(self, dim, index);
+}
+
 } // namespace native
 } // namespace at

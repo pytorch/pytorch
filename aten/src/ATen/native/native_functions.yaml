@@ -12875,6 +12875,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: select_copy_int
+    SparseCsrCPU, SparseCsrCUDA: select_copy_sparse_csr
   tags: view_copy
 
 - func: detach_copy(Tensor self) -> Tensor

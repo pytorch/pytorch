@@ -1840,7 +1840,7 @@ class TensorOrArrayPair(TensorLikePair):
             def partial_to_dense(tensor):
                 if tensor.layout not in compressed_sparse_layouts or tensor.values().ndim == 1:
                     return tensor.to_dense()
-                lst = [partial_to_dense(sub_tensor) for sub_tensor in tensor]
+                lst = [partial_to_dense(torch.select_copy(tensor, 0, i)) for i in range(len(tensor))]
                 return torch.stack(lst) if lst else tensor.to_dense()
 
             return partial_to_dense(tensor)
