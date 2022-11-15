@@ -110,6 +110,22 @@ struct TORCH_PYTHON_API type_caster<at::IntArrayRef> {
 };
 
 template <>
+struct TORCH_PYTHON_API type_caster<at::SymIntArrayRef> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(at::SymIntArrayRef, _("at::SymIntArrayRef"));
+
+  bool load(handle src, bool);
+  static handle cast(
+      at::SymIntArrayRef src,
+      return_value_policy /* policy */,
+      handle /* parent */);
+
+ private:
+  std::vector<int64_t> v_value;
+};
+
+template <>
 struct TORCH_PYTHON_API type_caster<at::MemoryFormat> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
