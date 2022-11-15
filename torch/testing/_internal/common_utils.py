@@ -770,6 +770,9 @@ def run_tests(argv=UNITTEST_ARGS):
                         # it stands for `verbose_str` captured in the closure
                         c.cell_contents = f"skip: {reason}"
 
+            def printErrors(self) -> None:
+                super().printErrors()
+                self.printErrorList("XPASS", self.unexpectedSuccesses)
         test_report_path = get_report_path()
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
