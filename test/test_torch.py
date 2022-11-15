@@ -7674,7 +7674,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             (torch.float32, torch.float32),  # TensorIterator
         )
 
-        # TODO: fbgemm and TensorIterator behave differently.
         cases = (
             # out_shape, src_shape, is_ok
             # These cases used to crash with fbgemm, make sure these also raise
