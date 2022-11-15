@@ -20,6 +20,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCUDAIfNoMagma
+from torch.utils._pytree import tree_flatten
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
@@ -3155,7 +3156,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             self.assertEqual(vmap_out, loop_out)
 
     def opinfo_vmap_test(self, device, dtype, op, check_has_batch_rule,
-                         skip_inplace=(), postprocess_fn=None):
+                         skip_inplace=(), postprocess_fn=None, noncontiguous=False):
         def test():
             # Error inputs check
             if op.error_inputs_func is not None:
@@ -3173,6 +3174,13 @@ class TestVmapOperatorsOpInfo(TestCase):
             aliases, inplace_aliases = discover_variants(op)
             check_shape_only = op.name in ('empty_like', 'new_empty')
             for sample_input in sample_inputs_itr:
+                if noncontiguous:
+                    sample_input = sample_input.noncontiguous()
+
+                    # Sanity check that all tensors are `non-contiguous`
+                    tensors = filter(lambda t: isinstance(t, torch.Tensor), tree_flatten(sample_input))
+                    assert all(map(lambda t: not t.is_contiguous(), tensors))
+
                 args = (sample_input.input,) + sample_input.args
                 kwargs = sample_input.kwargs
                 is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
@@ -3297,12 +3305,13 @@ class TestVmapOperatorsOpInfo(TestCase):
         # The error inputs are vectors, that pass when batched as they are treated as a matrix
         xfail('trace'),
     }))
-    def test_vmap_exhaustive(self, device, dtype, op):
+    @parametrize('noncontiguous', (False, True))
+    def test_vmap_exhaustive(self, device, dtype, op, noncontiguous):
         # needs to be fixed
         inplace_failure_list = (
         )
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False,
-                              skip_inplace=inplace_failure_list)
+                              skip_inplace=inplace_failure_list, noncontiguous=noncontiguous)
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', (
@@ -3454,7 +3463,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
     }))
-    def test_op_has_batch_rule(self, device, dtype, op):
+    @parametrize('noncontiguous', (False, True))
+    def test_op_has_batch_rule(self, device, dtype, op, noncontiguous):
         # needs to be fixed
         inplace_failures = (
             'abs',
@@ -3503,9 +3513,10 @@ class TestVmapOperatorsOpInfo(TestCase):
             'xlogy',
         )
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=True,
-                              skip_inplace=inplace_failures)
+                              skip_inplace=inplace_failures, noncontiguous=noncontiguous)
 
-    def test_linalg_svd(self, device):
+    @parametrize('noncontiguous', (False, True))
+    def test_linalg_svd(self, device, noncontiguous):
         # linalg_svd returns a tuple of three tensors, (U, S, Vh).
         # Given the same input, it may return different tensors,
         # because svd isn't unique. To test that the svd is correct, we multiply
@@ -3524,9 +3535,10 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         for op in opinfos:
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=True,
-                                  postprocess_fn=compute_A)
+                                  postprocess_fn=compute_A, noncontiguous=noncontiguous)
 
-    def test_linalg_eigh(self, device):
+    @parametrize('noncontiguous', (False, True))
+    def test_linalg_eigh(self, device, noncontiguous):
         # linalg_svd returns two tensors, (Q, L).
         # Given the same input, it may return different tensors,
         # because the eig decomposition isn't unique.
@@ -3546,7 +3558,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         for op in opinfos:
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=False,
-                                  postprocess_fn=compute_A)
+                                  postprocess_fn=compute_A, noncontiguous=noncontiguous)
 
     def test_slogdet(self, device):
         # There's no OpInfo for this
