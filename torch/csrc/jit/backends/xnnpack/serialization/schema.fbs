@@ -44,22 +44,22 @@ table XNNTensorValue {
   id_out:uint;
 }
 
-union NodeUnion {
+union XNodeUnion {
   XNNAdd,
 }
 
-union ValueUnion {
+union XValueUnion {
   XNNTensorValue,
 }
 
-table Node {
-  node:NodeUnion;
+table XNode {
+  xnode:XNodeUnion;
   // An int which can be linked back to the node in the origin graph
   debug_handle:uint;
 }
 
-table Value {
-  value:ValueUnion;
+table XValue {
+  xvalue:XValueUnion;
 }
 
 table XNNAdd {
@@ -72,8 +72,8 @@ table XNNAdd {
 table XNNGraph {
   // Schema version.
   version:string;
-  nodes:[Node];
-  values:[Value];
+  xnodes:[XNode];
+  xvalues:[XValue];
 
   // Ids of external inputs
   input_ids:[uint];
