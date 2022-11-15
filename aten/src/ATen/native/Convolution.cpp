@@ -82,6 +82,61 @@ constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+struct ConvParams {
+  std::vector<int64_t> stride;
+  std::vector<int64_t> padding;
+  std::vector<int64_t> dilation;
+  bool transposed;
+  std::vector<int64_t> output_padding;
+  int groups;
+  bool benchmark;
+  bool deterministic;
+  bool cudnn_enabled;
+  bool allow_tf32;
+
+  bool is_strided() const;
+  bool is_dilated() const;
+  bool is_padded() const;
+  bool is_output_padding_neg() const;
+  bool is_output_padding_big() const;
+  bool is_padding_neg() const;
+  bool is_stride_nonpos() const;
+  void view1d_as_2d();
+  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const c10::optional<at::Tensor>& bias) const;
+  bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const;
+  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight,
+                   const at::OptionalIntArrayRef bias_sizes_opt) const;
+  bool use_mps(const at::Tensor& input, const at::Tensor& weight) const;
+  bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
+};
+
+// Function to select the convolution backend based on the inputs and params.
+// This overload is used within the convolution internals but not exposed to python.
+// NB: The forward pass provides a bias tensor while the backward pass provides
+// a bool indicating whether the bias is defined. This is done to save memory by
+// avoiding saving the full bias tensor for backward.
+ConvBackend _select_conv_backend(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt,
+    const at::OptionalIntArrayRef bias_sizes_opt,
+    const bool need_backward,
+    const ConvParams& params);
+
+// For BC reasons, have a copy that does not require bias_opt
+ConvBackend select_conv_backend(
+    const Tensor& input,
+    const Tensor& weight,
+    const at::OptionalIntArrayRef bias_sizes_opt,
+    const bool need_backward,
+    const ConvParams& params);
+
 DEFINE_DISPATCH(conv_depthwise2d_backward_stub);
 DEFINE_DISPATCH(conv_depthwise3d_backward_stub);
 DEFINE_DISPATCH(cudnn_convolution_backward_stub);
