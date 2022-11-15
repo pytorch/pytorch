@@ -31,7 +31,7 @@ __global__ void MultiMarginLoss_forward_kernel(
   scalar_t *input_k = input + k*dim;
   scalar_t *output_k = output + k;
   int target_k = static_cast<int>(target[k]);
-  CUDA_KERNEL_ASSERT(target_k >= 0 && target_k < dim);
+  CUDA_KERNEL_ASSERT(target_k >= 0 && target_k < dim && "target index is out of bounds");
   scalar_t input_target_k = input_k[target_k];
 
   int i_start = threadIdx.x;
