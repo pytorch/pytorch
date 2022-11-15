@@ -3918,6 +3918,33 @@ class TestVmapOperatorsOpInfo(TestCase):
         with self.assertRaisesRegex(RuntimeError, "tensor 1 must be 2D but got 1D"):
             return vmap(torch.linalg.multi_dot)(inputs)
 
+    def test_vmap_escaped_error(self):
+        escaped = None
+        def f(x):
+            nonlocal escaped
+            escaped = x
+            return x ** 2
+
+        x = torch.randn(3)
+        vmap(f)(x)
+
+        with self.assertRaisesRegex(RuntimeError, "your tensor escaped from vmap"):
+            escaped.sin()
+
+    def test_vmap_escaped_error_inplace(self):
+        escaped = None
+        def f(x):
+            nonlocal escaped
+            escaped = x.sin_()
+            return x ** 2
+
+        x = torch.randn(3)
+        vmap(f)(x)
+
+        with self.assertRaisesRegex(RuntimeError, "your tensor escaped from vmap"):
+            escaped.sin()
+
+
 
 class TestRandomness(TestCase):
     def _reset_random(self, generator, orig_state, use_generator, seed):
