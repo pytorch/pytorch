@@ -740,6 +740,40 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
+    # Test that `TORCH_CHECK_TENSOR_ALL` raises errors that propagate from C++ to Python
+    def test_check_tensor(self, device):
+        test_sizes = [
+            (),
+            (1,),
+            (10,),
+            (1, 1),
+            (1, 10),
+            (10, 1),
+            (10, 10),
+            (1, 1, 1),
+            (10, 1, 1),
+            (1, 10, 1),
+            (10, 10, 10),
+        ]
+        for size in test_sizes:
+            t_all_true = torch.ones(size, dtype=torch.bool, device=device)
+            t_all_false = torch.zeros(size, dtype=torch.bool, device=device)
+
+            # Should not raise error
+            torch._test_check_tensor(t_all_true)
+
+            with self.assertRaisesRegex(RuntimeError, "Test message for TORCH_CHECK_TENSOR_ALL"):
+                torch._test_check_tensor(t_all_false)
+
+            if t_all_true.numel() > 1:
+                t_all_true_but_one = t_all_true.clone()
+                # Choose a random element to set to false
+                idx = (random.choice(range(dim_size)) for dim_size in size)
+                t_all_true_but_one[(..., *idx)] = False
+
+                with self.assertRaisesRegex(RuntimeError, "Test message for TORCH_CHECK_TENSOR_ALL"):
+                    torch._test_check_tensor(t_all_true_but_one)
+
     # Uses mismatched arange out size to trigger a warning
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref perturbs line numbering")

@@ -2035,6 +2035,10 @@ Tensor all(const Tensor& self, Dimname dim, bool keepdim) {
 Tensor& all_out(const Tensor &self, Dimname dim, bool keepdim, Tensor& result) {
   reportNYIDimnameOverload("all");
 }
+Tensor _is_all_true(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.scalar_type() == at::kBool);
+  return self.all();
+}
 Tensor logcumsumexp(const Tensor& self, Dimname dim) {
   return at::logcumsumexp(self, dimname_to_position(self, dim));
 }

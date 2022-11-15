@@ -10,6 +10,9 @@
 
 // These functions are NOT in Utils.h, because this file has a dep on Tensor.h
 
+#define TORCH_CHECK_TENSOR_ALL(cond, ...) \
+  TORCH_CHECK((cond)._is_all_true().item<bool>(), __VA_ARGS__);
+
 namespace at {
 
 // The following are utility functions for checking that arguments
