@@ -1013,6 +1013,7 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
         and ``Tensor`` s corresponding to the original parameters.
         """
         param_shapes = [None, None]
+        assert_equal_fn = self.assertEqual
 
         class Model(nn.Module):
             def __init__(self) -> None:
@@ -1026,16 +1027,15 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
                 assert (
                     param_shapes[0] is not None and param_shapes[1] is not None
                 ), "`param_sizes` should be set"
-                assert param_names == [
-                    "lin.weight",
-                    "lin.bias",
-                ], f"Expects ['lin.weight', 'lin.bias'] but got {param_names}"
-                assert (
-                    params[0].shape == param_shapes[0]
-                ), f"Expects {param_shapes[0]} but got {params[0].shape}"
-                assert (
-                    params[1].shape == param_shapes[1]
-                ), f"Expects {param_shapes[1]} but got {params[1].shape}"
+                assert_equal_fn(
+                    param_names,
+                    [
+                        "lin.weight",
+                        "lin.bias",
+                    ],
+                )
+                assert_equal_fn(params[0].shape, param_shapes[0])
+                assert_equal_fn(params[1].shape, param_shapes[1])
                 return self.lin(x)
 
         model = Model().cuda()
