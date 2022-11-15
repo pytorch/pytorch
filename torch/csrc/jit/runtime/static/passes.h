@@ -21,7 +21,7 @@ TORCH_API void ReplacePermuteWithCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable = true);
 
-TORCH_API void ReplaceWithMaybeCopy(
+void ReplaceWithMaybeCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable = true);
 

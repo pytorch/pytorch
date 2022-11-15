@@ -10,6 +10,6 @@ from torch.ao.quantization.fuser_method_mappings import (
     fuse_conv_bn,
     fuse_conv_bn_relu,
     fuse_linear_bn,
-    _DEFAULT_OP_LIST_TO_FUSER_METHOD,
+    DEFAULT_OP_LIST_TO_FUSER_METHOD,
     get_fuser_method,
 )

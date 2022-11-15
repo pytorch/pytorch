@@ -9,15 +9,7 @@ import torchgen.model
 import yaml
 
 from tools.autograd import gen_autograd_functions, load_derivatives
-from torchgen.api.types import (
-    BaseCType,
-    CppSignatureGroup,
-    DispatcherSignature,
-    ListCType,
-    tensorT,
-    using_container_namespace,
-    using_tensor_namespace,
-)
+from torchgen.api.types import CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager
 from torchgen.gen import (
     get_native_function_declarations,
@@ -35,6 +27,7 @@ from torchgen.model import (
 )
 from torchgen.native_function_generation import add_generated_native_functions
 from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.types import tensorT, ListCType, using_tensor_namespace, using_container_namespace
 
 
 class TestCreateDerivative(unittest.TestCase):
@@ -95,7 +88,7 @@ class TestCreateDerivative(unittest.TestCase):
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
 
         with self.assertRaisesRegex(
-            RuntimeError, 'illegally mixes use of "grad_RETURN_NAME"'
+                RuntimeError, 'illegally mixes use of "grad_RETURN_NAME"'
         ):
             load_derivatives.create_differentiability_info(
                 defn_dict={
@@ -193,8 +186,8 @@ class TestGenAutogradFunctions(unittest.TestCase):
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Invalid dispatch key AutogradRandomTensor in derivatives.yaml for",
+                RuntimeError,
+                "Invalid dispatch key AutogradRandomTensor in derivatives.yaml for",
         ):
             load_derivatives.create_differentiability_info(
                 defn_dict={
@@ -505,30 +498,23 @@ class TestStaticDispatchGeneratrion(unittest.TestCase):
 
 class TestNamespaceOverride(unittest.TestCase):
     def test_tensor_namespace_override_generates_correct_code(self) -> None:
-        self.assertEquals(str(tensorT), "at::Tensor")
         with using_tensor_namespace("custom"):
             self.assertEquals(str(tensorT), "custom::Tensor")
         self.assertEquals(str(tensorT), "at::Tensor")
 
     def test_container_namespace_override_generates_correct_code(self) -> None:
-        default_tensor_list = ListCType(BaseCType(tensorT))
-        self.assertEquals(default_tensor_list.cpp_type(), "c10::List<at::Tensor>")
         with using_container_namespace("custom"):
-            tensor_list = ListCType(BaseCType(tensorT))
-            self.assertEquals(tensor_list.cpp_type(), "custom::List<at::Tensor>")
-        default_tensor_list = ListCType(BaseCType(tensorT))
-        self.assertEquals(default_tensor_list.cpp_type(), "c10::List<at::Tensor>")
+            tensor_list = ListCType(tensorT)
+            self.assrtEquals(str(tensor_list), "custom::List<at::Tensor>")
+        default_tensor_list = ListCType(tensorT)
+        self.assertEquals(str(default_tensor_list), "c10::List<at::Tensor>")
 
-    def test_both_tensor_and_container_namespace_override_generates_correct_code(
-        self,
-    ) -> None:
-        default_tensor_list = ListCType(BaseCType(tensorT))
-        self.assertEquals(default_tensor_list.cpp_type(), "c10::List<at::Tensor>")
+    def test_both_tensor_and_container_namespace_override_generates_correct_code(self) -> None:
         with using_container_namespace("custom"), using_tensor_namespace("foo"):
-            tensor_list = ListCType(BaseCType(tensorT))
-            self.assertEquals(tensor_list.cpp_type(), "custom::List<foo::Tensor>")
-        default_tensor_list = ListCType(BaseCType(tensorT))
-        self.assertEquals(default_tensor_list.cpp_type(), "c10::List<at::Tensor>")
+            tensor_list = ListCType(tensorT)
+            self.assrtEquals(str(tensor_list), "custom::List<foo::Tensor>")
+        default_tensor_list = ListCType(tensorT)
+        self.assertEquals(str(default_tensor_list), "c10::List<at::Tensor>")
 
 
 # Represents the most basic NativeFunction. Use dataclasses.replace()

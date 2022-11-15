@@ -257,39 +257,6 @@ TEST(SerializeTest, Basic) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-TEST(SerializeTest, MathBits) {
-  torch::manual_seed(0);
-
-  auto options = torch::TensorOptions{}.dtype(torch::kComplexFloat);
-  auto x = torch::randn({5, 5}, options);
-  {
-    auto expected = torch::conj(x);
-    auto actual = save_and_load(expected);
-
-    ASSERT_TRUE(actual.defined());
-    ASSERT_EQ(actual.sizes().vec(), expected.sizes().vec());
-    ASSERT_TRUE(actual.allclose(expected));
-  }
-
-  {
-    auto expected = torch::_neg_view(x);
-    auto actual = save_and_load(expected);
-
-    ASSERT_TRUE(actual.defined());
-    ASSERT_EQ(actual.sizes().vec(), expected.sizes().vec());
-    ASSERT_TRUE(actual.allclose(expected));
-  }
-
-  {
-    auto expected = torch::conj(torch::_neg_view(x));
-    auto actual = save_and_load(expected);
-
-    ASSERT_TRUE(actual.defined());
-    ASSERT_EQ(actual.sizes().vec(), expected.sizes().vec());
-    ASSERT_TRUE(actual.allclose(expected));
-  }
-}
-
 TEST(SerializeTest, BasicToFile) {
   torch::manual_seed(0);
 

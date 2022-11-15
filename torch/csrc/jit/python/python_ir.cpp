@@ -382,11 +382,7 @@ void initPythonIRBindings(PyObject* module_) {
           "Find all nodes",
           py::arg("kind"),
           py::arg("recurse") = true)
-      .def(
-          "addInput",
-          [](Graph& g, const std::string& name) { return g.addInput(name); },
-          "Add input to graph with optional name seed",
-          py::arg("name") = "")
+      .def("addInput", [](Graph& g) { return g.addInput(); })
       .def("copy", [](Graph& g) { return g.copy(); })
       .GS(eraseInput)
       .GS(eraseOutput)

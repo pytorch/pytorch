@@ -271,8 +271,8 @@ class TestMkldnnFusion(JitTestCase):
         for pointwise_name, pointwise_fn in self._binary_list().items():
             for dim in [2, 3]:
                 channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
-                options = itertools.product([False, True], [True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last])
-                for fuse_relu, bias, dilation, groups, memory_format in options:
+                options = itertools.product([True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last])
+                for bias, dilation, groups, memory_format in options:
                     oC = 32 * groups
                     iC = 3 * groups
                     x_shape = (1, iC) + input_shapes[dim]
@@ -282,26 +282,12 @@ class TestMkldnnFusion(JitTestCase):
                     other = torch.randn_like(mod.conv(x))
                     with torch.no_grad():
                         ref = mod(x, other)
-                        unary_attr = None
-                        if fuse_relu:
-                            ref.relu_()
-                            unary_attr = "relu"
                         attr = pointwise_name
                         fused = torch.ops.mkldnn._convolution_pointwise(
                             x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
-                            mod.conv.groups, attr, None, unary_attr, [], None
+                            mod.conv.groups, attr
                         )
-                        # for binary add, we support inplace version.
-                        if attr == "add":
-                            fused_inplace = torch.ops.mkldnn._convolution_pointwise_(
-                                x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
-                                mod.conv.groups, attr, None, unary_attr, [], None
-                            )
-                            self.assertEqual(ref, other)
-                            self.assertEqual(ref, fused_inplace)
-
-                        self.assertEqual(ref, fused)
-
+                    self.assertEqual(ref, fused)
 
     def test_linear_binary_fusion_ops(self):
         class M(nn.Module):

@@ -1,7 +1,6 @@
 # Owner(s): ["module: onnx"]
 
 import numpy as np
-import pytorch_test_common
 
 import torch
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
@@ -20,7 +19,7 @@ def expect_tensor(scalar_type, shape=None):
     return verify
 
 
-class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
+class TestONNXShapeInference(common_utils.TestCase):
     def setUp(self):
         self.opset_version = _constants.ONNX_MAX_OPSET
         symbolic_helper._set_onnx_shape_inference(True)

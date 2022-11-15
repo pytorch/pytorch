@@ -7,14 +7,10 @@ import dataclasses
 # flake8: noqa
 from torch.onnx._internal.diagnostics import infra
 
-"""
-${generated_rule_class_comment}
-"""
-
-${rule_classes}
 
 @dataclasses.dataclass
 class _POERules(infra.RuleCollection):
 ${rules}
+
 
 rules = _POERules()

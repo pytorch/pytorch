@@ -14,7 +14,7 @@ from hypothesis import strategies as st
 import io
 import itertools
 
-from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_TSAN
+from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 @unittest.skipUnless(torch.backends.xnnpack.enabled,
                      " XNNPACK must be enabled for these tests."
@@ -987,7 +987,6 @@ class TestXNNPACKConv1dTransformPass(TestCase):
             torch.testing.assert_close(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
 
-    @unittest.skipIf(IS_FBCODE, "T137513244")
     def test_conv1d_basic(self):
         batch_size_list = range(1, 3)
         input_channels_per_group_list = range(10, 12)

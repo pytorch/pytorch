@@ -41,6 +41,7 @@ from torchgen.api.autograd import (
 from torchgen.api.types import (
     BaseCType,
     Binding,
+    containerNamespace,
     DispatcherSignature,
     intArrayRefT,
     iTensorListRefT,
@@ -1128,7 +1129,7 @@ def emit_body(
         for arg in differentiable_outputs:
             name = arg.name
             # TODO: should be `arg.type.is_tensor_like()`?
-            if arg.cpp_type == "at::Tensor" or arg.cpp_type in TENSOR_LIST_LIKE_CTYPES:
+            if arg.cpp_type == str(tensorT) or arg.cpp_type in TENSOR_LIST_LIKE_CTYPES:
                 body.append(f'throw_error_for_complex_autograd({name}, "{base_name}");')
         return body
 
@@ -1154,7 +1155,7 @@ def emit_body(
     def emit_original_self_definition() -> List[str]:
         body: List[str] = []
         if inplace:
-            body.append("c10::optional<at::Tensor> original_self;")
+            body.append(f"{containerNamespace}::optional<{tensorT}> original_self;")
 
             all_forward_grad_cond = []
             for derivative in fw_derivatives:

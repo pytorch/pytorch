@@ -12,7 +12,6 @@ uint64_t MPSGeneratorImpl::seed() {
   this->set_current_seed(random);
   return random;
 }
-
 uint64_t MPSGeneratorImpl::current_seed() const {
   return seed_;
 }
@@ -336,12 +335,6 @@ MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataTy
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tensor) {
     return [mpsGraph placeholderWithShape:getMPSShape(tensor)
                                  dataType:getMPSScalarType(tensor.scalar_type())
-                                     name:nil];
-}
-
-MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType) {
-    return [mpsGraph placeholderWithShape:@[@1]
-                                 dataType:dataType
                                      name:nil];
 }
 

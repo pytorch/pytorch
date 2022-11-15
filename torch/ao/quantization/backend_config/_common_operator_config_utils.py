@@ -15,9 +15,9 @@ from .backend_config import (
 )
 from ..fake_quantize import FixedQParamsFakeQuantize
 from ..fuser_method_mappings import (
-    _reverse_sequential_wrapper2,
-    _reverse2,
-    _reverse3,
+    reverse_sequential_wrapper2,
+    reverse2,
+    reverse3,
     fuse_conv_bn,
     fuse_conv_bn_relu,
     fuse_linear_bn,
@@ -115,13 +115,13 @@ def _get_linear_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPattern
     linear_configs.append(
         BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear))
             .set_dtype_configs(dtype_configs)  # noqa: E131
-            .set_fuser_method(_reverse_sequential_wrapper2(nni.LinearReLU))
+            .set_fuser_method(reverse_sequential_wrapper2(nni.LinearReLU))
             .set_fused_module(nni.LinearReLU))
     # linear relu, linear module + functional relu
     linear_configs.append(
         BackendPatternConfig((torch.nn.functional.relu, torch.nn.Linear))
             .set_dtype_configs(dtype_configs)  # noqa: E131
-            .set_fuser_method(_reverse_sequential_wrapper2(nni.LinearReLU))
+            .set_fuser_method(reverse_sequential_wrapper2(nni.LinearReLU))
             .set_fused_module(nni.LinearReLU))
 
     # 2.2 linear module + relu, fused module configs
@@ -158,7 +158,7 @@ def _get_linear_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPattern
     linear_configs.append(
         BackendPatternConfig((nn.BatchNorm1d, nn.Linear))
             .set_dtype_configs(dtype_configs)  # noqa: E131
-            .set_fuser_method(_reverse2(fuse_linear_bn))
+            .set_fuser_method(reverse2(fuse_linear_bn))
             .set_fused_module(nni.LinearBn1d))
 
     # 3.2 linear bn fused
@@ -218,13 +218,13 @@ def _get_conv_configs(dtype_configs):
         conv_configs.append(
             BackendPatternConfig((torch.nn.ReLU, convs.root))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(_reverse_sequential_wrapper2(convs.fused_conv_relu))
+                .set_fuser_method(reverse_sequential_wrapper2(convs.fused_conv_relu))
                 .set_fused_module(convs.fused_conv_relu))
         # conv relu fusion, conv module + functional relu
         conv_configs.append(
             BackendPatternConfig((F.relu, convs.root))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(_reverse_sequential_wrapper2(convs.fused_conv_relu))
+                .set_fuser_method(reverse_sequential_wrapper2(convs.fused_conv_relu))
                 .set_fused_module(convs.fused_conv_relu))
         # 2.2 conv module + relu fused module configs
         # conv relu, fused module
@@ -273,20 +273,20 @@ def _get_conv_configs(dtype_configs):
         conv_configs.append(
             BackendPatternConfig((convs.bn, convs.root))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(_reverse2(fuse_conv_bn))
+                .set_fuser_method(reverse2(fuse_conv_bn))
                 .set_fused_module(convs.fused_conv_bn))
         # conv + bn + relu module fusion
         conv_configs.append(
             BackendPatternConfig((nn.ReLU, (convs.bn, convs.root)))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(_reverse3(fuse_conv_bn_relu))
+                .set_fuser_method(reverse3(fuse_conv_bn_relu))
                 .set_fused_module(convs.fused_conv_bn_relu))
         # conv + bn + relu functional fusion
         conv_configs.append(
             BackendPatternConfig((F.relu, (convs.bn, convs.root)))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
                 .set_root_module(convs.root)
-                .set_fuser_method(_reverse3(fuse_conv_bn_relu))
+                .set_fuser_method(reverse3(fuse_conv_bn_relu))
                 .set_fused_module(convs.fused_conv_bn_relu))
         # TODO: we can add fusion for torch.relu as well
 
@@ -330,7 +330,7 @@ def _get_conv_configs(dtype_configs):
         conv_configs.append(
             BackendPatternConfig((convs.bn, convs.transpose))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(_reverse2(fuse_convtranspose_bn))
+                .set_fuser_method(reverse2(fuse_convtranspose_bn))
                 .set_root_module(convs.transpose)
                 .set_reference_quantized_module(convs.transpose_reference))
 
@@ -497,13 +497,13 @@ def _get_bn_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConf
         bn_configs.append(
             BackendPatternConfig((torch.nn.ReLU, bn))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(_reverse_sequential_wrapper2(fused_bn))
+                .set_fuser_method(reverse_sequential_wrapper2(fused_bn))
                 .set_fused_module(fused_bn))
         # bn module + F.relu fusion config
         bn_configs.append(
             BackendPatternConfig((torch.nn.functional.relu, bn))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(_reverse_sequential_wrapper2(bn_to_fused_bn[bn]))
+                .set_fuser_method(reverse_sequential_wrapper2(bn_to_fused_bn[bn]))
                 .set_fused_module(fused_bn))
         bn_configs.append(
             BackendPatternConfig(bn)

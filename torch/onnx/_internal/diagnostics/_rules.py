@@ -11,78 +11,22 @@ import dataclasses
 # flake8: noqa
 from torch.onnx._internal.diagnostics import infra
 
-"""
-GENERATED CODE - DO NOT EDIT DIRECTLY
-The purpose of generating a class for each rule is to override the `format_message`
-method to provide more details in the signature about the format arguments.
-"""
-
-
-class _NodeMissingOnnxShapeInference(infra.Rule):
-    """Node is missing ONNX shape inference."""
-
-    def format_message(self, op_name) -> str:  # type: ignore[override]
-        """Returns the formatted default message of this Rule.
-
-        Message template: 'The shape inference of {op_name} type is missing, so it may result in wrong shape inference for the exported graph. Please consider adding it in symbolic function.'
-        """
-        return self.message_default_template.format(op_name=op_name)
-
-
-class _MissingCustomSymbolicFunction(infra.Rule):
-    """Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX."""
-
-    def format_message(self, op_name) -> str:  # type: ignore[override]
-        """Returns the formatted default message of this Rule.
-
-        Message template: 'ONNX export failed on an operator with unrecognized namespace {op_name}. If you are trying to export a custom operator, make sure you registered it with the right domain and version.'
-        """
-        return self.message_default_template.format(op_name=op_name)
-
-
-class _MissingStandardSymbolicFunction(infra.Rule):
-    """Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX."""
-
-    def format_message(self, op_name, opset_version, issue_url) -> str:  # type: ignore[override]
-        """Returns the formatted default message of this Rule.
-
-        Message template: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Please feel free to request support or submit a pull request on PyTorch GitHub: {issue_url}."
-        """
-        return self.message_default_template.format(
-            op_name=op_name, opset_version=opset_version, issue_url=issue_url
-        )
-
-
-class _OperatorSupportedInNewerOpsetVersion(infra.Rule):
-    """Operator is supported in newer opset version."""
-
-    def format_message(self, op_name, opset_version, supported_opset_version) -> str:  # type: ignore[override]
-        """Returns the formatted default message of this Rule.
-
-        Message template: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Support for this operator was added in version {supported_opset_version}, try exporting with this version."
-        """
-        return self.message_default_template.format(
-            op_name=op_name,
-            opset_version=opset_version,
-            supported_opset_version=supported_opset_version,
-        )
-
 
 @dataclasses.dataclass
 class _POERules(infra.RuleCollection):
-    node_missing_onnx_shape_inference: _NodeMissingOnnxShapeInference = dataclasses.field(
-        default=_NodeMissingOnnxShapeInference.from_sarif(
+    node_missing_onnx_shape_inference: infra.Rule = dataclasses.field(
+        default=infra.Rule.from_sarif(
             **{
                 "id": "POE0001",
                 "name": "node-missing-onnx-shape-inference",
                 "short_description": {"text": "Node is missing ONNX shape inference."},
                 "full_description": {
-                    "text": "Node is missing ONNX shape inference. This usually happens when the node is not valid under standard ONNX operator spec.",
+                    "text": "",
                     "markdown": "Node is missing ONNX shape inference.\nThis usually happens when the node is not valid under standard ONNX operator spec.\n",
                 },
                 "message_strings": {
                     "default": {
-                        "text": "The shape inference of {op_name} type is missing, so it may result in wrong shape inference for the exported graph. Please consider adding it in symbolic function."
+                        "text": "The shape inference of {0} type is missing, so it may result in wrong shape inference for the exported graph. Please consider adding it in symbolic function."
                     }
                 },
                 "help_uri": None,
@@ -93,8 +37,8 @@ class _POERules(infra.RuleCollection):
     )
     """Node is missing ONNX shape inference."""
 
-    missing_custom_symbolic_function: _MissingCustomSymbolicFunction = dataclasses.field(
-        default=_MissingCustomSymbolicFunction.from_sarif(
+    missing_custom_symbolic_function: infra.Rule = dataclasses.field(
+        default=infra.Rule.from_sarif(
             **{
                 "id": "POE0002",
                 "name": "missing-custom-symbolic-function",
@@ -102,12 +46,12 @@ class _POERules(infra.RuleCollection):
                     "text": "Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX."
                 },
                 "full_description": {
-                    "text": "Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX.",
+                    "text": "",
                     "markdown": "Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX.\n",
                 },
                 "message_strings": {
                     "default": {
-                        "text": "ONNX export failed on an operator with unrecognized namespace {op_name}. If you are trying to export a custom operator, make sure you registered it with the right domain and version."
+                        "text": "ONNX export failed on an operator with unrecognized namespace {0}. If you are trying to export a custom operator, make sure you registered it with the right domain and version."
                     }
                 },
                 "help_uri": None,
@@ -118,8 +62,8 @@ class _POERules(infra.RuleCollection):
     )
     """Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX."""
 
-    missing_standard_symbolic_function: _MissingStandardSymbolicFunction = dataclasses.field(
-        default=_MissingStandardSymbolicFunction.from_sarif(
+    missing_standard_symbolic_function: infra.Rule = dataclasses.field(
+        default=infra.Rule.from_sarif(
             **{
                 "id": "POE0003",
                 "name": "missing-standard-symbolic-function",
@@ -127,12 +71,12 @@ class _POERules(infra.RuleCollection):
                     "text": "Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX."
                 },
                 "full_description": {
-                    "text": "Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX.",
+                    "text": "",
                     "markdown": "Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX.\n",
                 },
                 "message_strings": {
                     "default": {
-                        "text": "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Please feel free to request support or submit a pull request on PyTorch GitHub: {issue_url}."
+                        "text": "Exporting the operator '{0}' to ONNX opset version {1} is not supported. Please feel free to request support or submit a pull request on PyTorch GitHub: {2}."
                     }
                 },
                 "help_uri": None,
@@ -143,8 +87,8 @@ class _POERules(infra.RuleCollection):
     )
     """Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX."""
 
-    operator_supported_in_newer_opset_version: _OperatorSupportedInNewerOpsetVersion = dataclasses.field(
-        default=_OperatorSupportedInNewerOpsetVersion.from_sarif(
+    operator_supported_in_newer_opset_version: infra.Rule = dataclasses.field(
+        default=infra.Rule.from_sarif(
             **{
                 "id": "POE0004",
                 "name": "operator-supported-in-newer-opset-version",
@@ -152,12 +96,12 @@ class _POERules(infra.RuleCollection):
                     "text": "Operator is supported in newer opset version."
                 },
                 "full_description": {
-                    "text": "Operator is supported in newer opset version.",
+                    "text": "",
                     "markdown": "Operator is supported in newer opset version.\n\nExample:\n```python\ntorch.onnx.export(model, args, ..., opset_version=9)\n```\n",
                 },
                 "message_strings": {
                     "default": {
-                        "text": "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Support for this operator was added in version {supported_opset_version}, try exporting with this version."
+                        "text": "Exporting the operator '{0}' to ONNX opset version {1} is not supported. Support for this operator was added in version {2}, try exporting with this version."
                     }
                 },
                 "help_uri": None,

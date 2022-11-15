@@ -2,9 +2,8 @@
 
 import unittest
 
-import pytorch_test_common
-
 import torch
+
 from model_defs.dcgan import _netD, _netG, bsz, imgsz, nz, weights_init
 from model_defs.emb_seq import EmbeddingNetwork1, EmbeddingNetwork2
 from model_defs.mnist import MNIST
@@ -45,7 +44,7 @@ else:
 BATCH_SIZE = 2
 
 
-class TestModels(pytorch_test_common.ExportTestCase):
+class TestModels(common_utils.TestCase):
     opset_version = 9  # Caffe2 doesn't support the default.
     keep_initializers_as_inputs = False
 

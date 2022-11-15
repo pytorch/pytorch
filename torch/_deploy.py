@@ -23,7 +23,7 @@ def _save_storages(importer, obj):
             if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
                 # remove this case
-                storage = obj._untyped_storage
+                storage = obj._storage
                 dtype = obj.dtype
             else:
                 storage = obj

@@ -66,7 +66,6 @@ ARG INSTALL_CHANNEL=pytorch-nightly
 RUN /opt/conda/bin/conda update -y conda
 RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
 ARG TARGETPLATFORM
-ARG TRITON_VERSION
 
 # On arm64 we can only install wheel packages
 RUN case ${TARGETPLATFORM} in \
@@ -75,7 +74,6 @@ RUN case ${TARGETPLATFORM} in \
     esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic
-RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then /opt/conda/bin/pip install "torchtriton==${TRITON_VERSION}" --extra-index-url https://download.pytorch.org/whl/nightly/cpu ; fi
 
 FROM ${BASE_IMAGE} as official
 ARG PYTORCH_VERSION

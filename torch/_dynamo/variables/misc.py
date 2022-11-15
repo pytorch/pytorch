@@ -538,7 +538,7 @@ class GetAttrVariable(VariableTracker):
             options = VariableTracker.propagate(self, new_args, new_kwargs.values())
             # Disable __torch_function__ here to prevent the clone of the
             # example tensor from going into the override.
-            with torch._C.DisableTorchFunctionSubclass():
+            with torch._C.DisableTorchFunction():
                 if isinstance(args[0], TorchVariable):
                     return TensorVariable.create(
                         tx=tx,

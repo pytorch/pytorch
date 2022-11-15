@@ -391,10 +391,7 @@ class _RemoteModule(nn.Module):
         )
 
     def named_parameters(  # type: ignore[return]
-        self,
-        prefix: str = "",
-        recurse: bool = True,
-        remove_duplicate: bool = True
+        self, prefix: str = "", recurse: bool = True
     ) -> Iterator[Tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 

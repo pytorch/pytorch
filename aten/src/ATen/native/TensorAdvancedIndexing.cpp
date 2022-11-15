@@ -1512,6 +1512,10 @@ TORCH_IMPL_FUNC(scatter_src_out)
  const Tensor& index,
  const Tensor& src,
  const Tensor& out) {
+  // See note [Writing Nondeterministic Operations]
+  // Nondeterministic when index contains duplicate entries, src is a tensor,
+  // and reduce=None
+  at::globalContext().alertNotDeterministic("scatter with src tensor and reduce=None");
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
                scatter_stub);

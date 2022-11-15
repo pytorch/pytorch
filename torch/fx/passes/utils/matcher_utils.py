@@ -4,6 +4,7 @@ import copy
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
+import torch.utils._pytree as pytree
 from typing import Dict, List, Set, Any
 import logging
 import os
@@ -105,11 +106,12 @@ class SubgraphMatcher:
     def _is_contained(self, nodes_map: Dict[Node, Node]) -> bool:
         # `lookup` represents all the nodes in `original_graph`
         # that are part of `pattern`
-
-        # Placeholders can be used by other nodes in the graphs
-        lookup: Dict[Node, Node] = {gn : pn for pn, gn in nodes_map.items() if pn.op != "placeholder"}
-
+        lookup: Dict[Node, Node] = {gn : pn for pn, gn in nodes_map.items()}
         for gn, pn in lookup.items():
+            # Placeholders can be used by other nodes in the graphs
+            if pn.op == "placeholder":
+                continue
+
             # nodes returned by output are allowed to be used in other areas of the graph
             if pn in self.pattern_returning_nodes:
                 continue
@@ -186,20 +188,8 @@ class SubgraphMatcher:
         # match for `gn`
         match_found = True
 
-        def flatten_args(args) -> List[Any]:
-            # Recursively flatten args
-            result : List[Any] = []
-            for arg in args:
-                # flatten the list, if only it's a list/tuple of nodes
-                if isinstance(arg, (list, tuple)) and len(arg) > 0 and isinstance(arg[0], Node):
-                    result.extend(flatten_args(arg))
-                else:
-                    result.append(arg)
-
-            return result
-
-        pn_flatten_args = flatten_args(pn.args)
-        gn_flatten_args = flatten_args(gn.args)
+        pn_flatten_args, _ = pytree.tree_flatten(pn.args)
+        gn_flatten_args, _ = pytree.tree_flatten(gn.args)
 
         if pn.kwargs.keys() == gn.kwargs.keys():
             for key in pn.kwargs.keys():

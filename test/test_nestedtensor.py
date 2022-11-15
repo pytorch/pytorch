@@ -1,10 +1,9 @@
 # Owner(s): ["module: nestedtensor"]
 
-import unittest
-
-import numpy as np
 import torch
 import torch.nn
+import unittest
+import numpy as np
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -17,12 +16,11 @@ from torch.testing._internal.common_dtype import floating_types_and_half
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     gradcheck,
-    instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
     run_tests,
-    subtest,
     TestCase,
+    subtest,
 )
 
 # Tests are ported from pytorch/nestedtensor.
@@ -96,76 +94,6 @@ def random_nt(device, dtype, num_tensors, max_dims, min_dims=None):
 
 
 class TestNestedTensor(TestCase):
-    @parametrize("batch_size", [2, 4])
-    @parametrize("max_seq_len", [3, 5])
-    @parametrize("vocab_size", [10, 20])
-    def test_2d_nested_tensor(self, batch_size, max_seq_len, vocab_size):
-        data = []
-        nested_tensor_ref_list = []
-        for _ in range(batch_size):
-            if max_seq_len == 0:
-                length = 0
-            else:
-                length = np.random.randint(low=1, high=max_seq_len)
-            row = list(np.random.randint(low=0, high=vocab_size, size=(length,)))
-            data.append(row)
-            nested_tensor_ref_list.append(torch.tensor(row))
-        nested_tensor = torch.nested.nested_tensor(data, dtype=torch.int64)
-        nested_tensor_list = nested_tensor.unbind()
-        for id in range(batch_size):
-            self.assertEqual(
-                nested_tensor_list[id],
-                nested_tensor_ref_list[id].type(torch.int64)
-            )
-
-    @parametrize("batch_size", [2, 4])
-    @parametrize("max_seq_len", [3, 5])
-    @parametrize("vocab_size", [10, 20])
-    def test_3d_nested_tensor(self, batch_size, max_seq_len, vocab_size):
-        data = []
-        nested_tensor_ref_list = []
-        for _ in range(batch_size):
-            if max_seq_len == 0:
-                length = 0
-            else:
-                length = np.random.randint(low=1, high=max_seq_len)
-            row = list(np.random.randint(low=0, high=vocab_size, size=(length,)))
-            row = [list(item * np.arange(max_seq_len)) for item in row]
-            data.append(row)
-            nested_tensor_ref_list.append(torch.Tensor(row))
-        nested_tensor = torch.nested.nested_tensor(data, dtype=torch.int64)
-        nested_tensor_list = nested_tensor.unbind()
-        for id in range(batch_size):
-            self.assertEqual(
-                nested_tensor_list[id],
-                nested_tensor_ref_list[id].type(torch.int64)
-            )
-
-    @parametrize("batch_size", [2, 4])
-    @parametrize("max_seq_len", [3, 5])
-    @parametrize("vocab_size", [10, 20])
-    def test_3d_nested_tensor_float(self, batch_size, max_seq_len, vocab_size):
-        data = []
-        nested_tensor_ref_list = []
-        for _ in range(batch_size):
-            if max_seq_len == 0:
-                length = 0
-            else:
-                length = np.random.randint(low=1, high=max_seq_len)
-            row = list(
-                np.random.randint(low=0, high=vocab_size, size=(length,)).astype(float)
-            )
-            row = [list(item * np.arange(max_seq_len)) for item in row]
-            data.append(row)
-            nested_tensor_ref_list.append(torch.Tensor(row))
-        nested_tensor = torch.nested.nested_tensor(data, dtype=torch.float)
-        nested_tensor_list = nested_tensor.unbind()
-        for id in range(batch_size):
-            self.assertEqual(
-                nested_tensor_list[id],
-                nested_tensor_ref_list[id].type(torch.float)
-            )
-
 
     @torch.inference_mode()
     def _test_unbind_case(self, a, b):
@@ -223,6 +151,7 @@ class TestNestedTensor(TestCase):
 
     @torch.inference_mode()
     def test_nested_tensor(self):
+        self.assertRaises(TypeError, lambda: torch.nested.nested_tensor([3.0]))
         self.assertRaises(TypeError, lambda: torch.nested.nested_tensor(torch.tensor([3.0])))
         self.assertRaises(TypeError, lambda: torch.nested.nested_tensor(4.0))
 
@@ -298,7 +227,9 @@ class TestNestedTensor(TestCase):
             a1 = constructor([])
             self.assertRaisesRegex(
                 RuntimeError,
-                "NestedTensorImpl doesn't support sizes",
+                "Tensors of type NestedTensorImpl do not have sym sizes"
+                if IS_FBCODE
+                else "NestedTensorImpl doesn't support sizes",
                 lambda: a1.size(),
             )
 
@@ -800,10 +731,6 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt[1, ...], x1)
         self.assertRaises(IndexError, lambda: nt[1, 4, 2])
         self.assertRaises(NotImplementedError, lambda: nt[:, 1, 1])
-        # test select on the irregular dimension only
-        self.assertEqual(nt.select(1, 0)[0], x0.select(0, 0))
-        self.assertEqual(nt.select(1, 0)[1], x1.select(0, 0))
-        self.assertRaises(IndexError, lambda: nt.select(1, 3))
         # make sure indexing returns a view
         nt[0].fill_(100.0)
         answer = torch.tensor(100.0, device=device, dtype=dtype).expand((2, 5))
@@ -2314,7 +2241,6 @@ class TestNestedTensorAutograd(TestCase):
         self.assertEqual(nt.grad, expected_grad)
 
 
-instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 instantiate_device_type_tests(TestNestedTensorAutograd, globals())
 

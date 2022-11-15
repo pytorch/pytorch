@@ -198,9 +198,8 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         (torch.float32, torch.ops.aten.grid_sampler_2d.default) : (7e-6, 3e-5),
         # Exceeds tolerances on CUDA, likely due to fma
         (torch.float32, torch.ops.aten.mv.default) : (1e-5, 3e-5),
+        (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 1e-6),
         (torch.complex64, torch.ops.aten.mv.default): (5e-5, 5e-5),
-        (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 5e-4),
-        (torch.float64, torch.ops.aten.upsample_bicubic2d.default) : (1e-5, 5e-4),
     }
     if (test_dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]

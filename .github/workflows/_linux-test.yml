@@ -57,16 +57,16 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
@@ -74,8 +74,15 @@ jobs:
           docker-image: ${{ inputs.docker-image }}
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
 
       - name: Start monitoring script
         id: monitor-script
