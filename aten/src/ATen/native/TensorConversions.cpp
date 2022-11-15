@@ -250,8 +250,8 @@ Tensor _to_copy(
   if (at::sparse_csr::is_sparse_compressed(self)) {
       TORCH_CHECK(
           memory_format == MemoryFormat::Preserve,
-          "to(): ", at::sparse_csr::layoutToString(self.layout()),
-          "only supports memory format Preserve, but got ", memory_format,
+          "to(options): ", at::sparse_csr::layoutToString(self.layout()),
+          " only supports memory format Preserve, but got ", memory_format,
           " instead.");
 
       Tensor compressed_indices, plain_indices;
