@@ -339,7 +339,7 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                                                                 quant_min=0,
                                                                 quant_max=255),
                               weight=default_per_channel_weight_fake_quant)
-        if backend == 'x86':
+        elif backend == 'x86':
             qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                 quant_min=0,
                                                                 quant_max=255,
