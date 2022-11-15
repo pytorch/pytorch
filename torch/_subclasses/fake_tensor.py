@@ -297,8 +297,9 @@ def constructors(fake_mode, func, *args, **kwargs):
     out_device = new_kwargs.pop("device", None)
     out_device = out_device if out_device is not None else default_device
     new_kwargs["device"] = torch.device("meta")
-    # Not in_kernel_invocation_manager as no fake tensor inputs
-    with no_dispatch():
+    # _like constructors have fake tensor inputs (maybe this causes the non-like
+    # to fail? hmmm)
+    with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
     return FakeTensor(fake_mode, r, out_device)
 
