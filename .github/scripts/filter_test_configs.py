@@ -125,6 +125,9 @@ def set_periodic_modes(test_matrix: Dict[str, List[Any]]) -> Dict[str, List[Any]
     }
 
     for config in test_matrix.get("include", []):
+        # Also need to run the default mode
+        scheduled_test_matrix["include"].append(config.copy())
+
         for mode in SUPPORTED_PERIODICAL_MODES:
             cfg = config.copy()
             cfg[mode] = mode

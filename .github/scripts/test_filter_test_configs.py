@@ -109,7 +109,7 @@ class TestConfigFilter(TestCase):
             test_matrix = yaml.safe_load(case["test_matrix"])
             scheduled_test_matrix = set_periodic_modes(test_matrix)
             self.assertEqual(
-                len(test_matrix["include"]) * len(SUPPORTED_PERIODICAL_MODES),
+                len(test_matrix["include"]) * (len(SUPPORTED_PERIODICAL_MODES) + 1),
                 len(scheduled_test_matrix["include"])
             )
 
