@@ -1806,6 +1806,7 @@ class TestImports(TestCase):
             # And these both end up with transitive dependencies on distributed
             ignored_modules.append("torch.nn.parallel._replicated_tensor_ddp_interop")
             ignored_modules.append("torch.testing._internal.common_fsdp")
+            ignored_modules.append("torch.testing._internal.common_distributed")
 
         torch_dir = os.path.dirname(torch.__file__)
         for base, folders, files in os.walk(torch_dir):
