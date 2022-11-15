@@ -1381,6 +1381,7 @@ inplace_symbolic_tensor_failures = {
     xfail('remainder', ''),  # aten.remainder_.Tensor - couldn't find symbolic meta function/decomposition
     xfail('sigmoid', ''),  # aten.sigmoid_.default - couldn't find symbolic meta function/decomposition
     xfail('sign', ''),  # aten.sign_.default - couldn't find symbolic meta function/decomposition
+    xfail('sqrt', ''),  # aten.sqrt_.default - couldn't find symbolic meta function/decomposition
     xfail('square', ''),  # aten.pow_.Scalar - couldn't find symbolic meta function/decomposition
     xfail('squeeze', ''),  # aten.squeeze_.default - couldn't find symbolic meta function/decomposition
     xfail('t', ''),  # aten.t_.default - couldn't find symbolic meta function/decomposition
