@@ -122,7 +122,7 @@ struct TORCH_PYTHON_API type_caster<at::SymIntArrayRef> {
       handle /* parent */);
 
  private:
-  std::vector<int64_t> v_value;
+  std::vector<c10::SymInt> v_value;
 };
 
 template <>
