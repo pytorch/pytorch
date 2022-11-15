@@ -400,6 +400,23 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         return torch._dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
 
+    def test_is_tensor2(self):
+        def fn(x):
+            if torch.is_tensor(x):
+                return x + 1
+            else:
+                return torch.ones([2, 3])
+
+        x1 = {"input": torch.rand(2, 3)}
+        x2 = torch.rand(2, 3)
+        ref1 = fn(x1)
+        ref2 = fn(x2)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res1 = opt_fn(x1)
+        res2 = opt_fn(x2)
+        self.assertEqual(ref1, res1)
+        self.assertEqual(ref2, res2)
+
     def test_numel(self):
         def fn(a):
             return a + a.numel() + torch.numel(a)
@@ -579,8 +596,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(cnts.op_count, 0)
 
-    # KeyError: '__name__'
-    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_user_getattr1(self):
         class MyConfig(dict):
             def __getattr__(self, name):
@@ -1146,6 +1161,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.run()(fn2)(torch.randn(4))
         self.assertEqual(cnts2.frame_count, 0)
 
+    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_nested_disable_decorator(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1242,6 +1258,32 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_f = torch._dynamo.optimize(cnts, nopython=True)(f)
         res0 = opt_f(x)
         res1 = opt_f(4)
+        self.assertTrue(same(ref0, res0))
+        self.assertTrue(same(ref1, res1))
+
+    def test_is_tensor_like2(self):
+        class MyTensor(object):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                if func is torch.max:
+                    return torch.tensor(123)
+                return func(*args, **kwargs)
+
+        def fn(x):
+            if torch.overrides.is_tensor_like(x):
+                return torch.max(x)
+            else:
+                return torch.zeros(1)
+
+        x = MyTensor()
+        ref0 = fn(x)
+        ref1 = fn(4)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res0 = opt_fn(x)
+        res1 = opt_fn(4)
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
 
@@ -1408,6 +1450,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
+
+    def test_tensor_is_contiguous(self):
+        def fn(x):
+            input = torch.randn((1, 16, 1, 1))
+            weight = torch.randn((8, 16, 3, 3))
+            weight = weight.to(memory_format=x)
+            output = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
+            return output.is_contiguous(memory_format=x)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        for x in [torch.contiguous_format, torch.channels_last]:
+            self.assertEqual(fn(x), opt_fn(x))
 
     def test_python_slice(self):
         def f1(input):
@@ -1606,6 +1660,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 1)
 
     @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
+    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_unsupported_fake_tensor(self):
         def f(x):
             return torch.quantize_per_tensor(x, 0.1, 10, torch.quint8)
@@ -2798,6 +2853,22 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Detected that you are using FX"):
             gm = torch.fx.symbolic_trace(optimized)
+
+    @patch.object(torch._dynamo.config, "error_on_nested_fx_trace", False)
+    def test_no_error_on_nested_fx_trace(self):
+        input = torch.rand(2, 3)
+
+        def f(x):
+            x + x
+
+        real = f(input)
+
+        optimized = torch._dynamo.optimize("eager")(f)
+        self.assertTrue(same(optimized(input), real))
+
+        # should not error
+        gm = torch.fx.symbolic_trace(optimized)
+        self.assertTrue(same(gm(input), real))
 
     def test_inference_mode(self):
         @torch.inference_mode()

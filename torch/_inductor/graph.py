@@ -1,6 +1,7 @@
 import logging
 import operator
 import os
+import re
 import time
 
 import sympy
@@ -21,7 +22,7 @@ from .exc import (
 from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import lowerings, make_fallback, needs_realized_inputs
 from .sizevars import SizeVarAllocator
-from .utils import dynamo_utils
+from .utils import dynamo_utils, gather_origins
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -90,6 +91,9 @@ class GraphLowering(torch.fx.Interpreter):
             return self.name_to_buffer[buffer_name].get_dtype()
         if buffer_name in self.graph_inputs:
             return self.graph_inputs[buffer_name].get_dtype()
+        m = re.match(r"as_strided\(([a-zA-Z0-9_]+),", buffer_name)
+        if m:
+            return self.get_dtype(m.group(1))
         raise KeyError(f"could not find {buffer_name}")
 
     def random_seed_buffer(self, device: torch.device):
@@ -212,34 +216,35 @@ class GraphLowering(torch.fx.Interpreter):
         return tensor
 
     def call_function(self, target, args, kwargs):
-        if target is operator.getitem and isinstance(args[0], (list, tuple)):
-            return super().call_function(target, args, kwargs)
+        with ir.IRNode.current_origins(gather_origins(args, kwargs)):
+            if target is operator.getitem and isinstance(args[0], (list, tuple)):
+                return super().call_function(target, args, kwargs)
 
-        if target not in lowerings:
-            if config.implicit_fallbacks:
-                error = (
-                    MissingOperatorWithDecomp
-                    if get_decompositions([target])
-                    else MissingOperatorWithoutDecomp
-                )
-                log.warning(
-                    "Creating implicit fallback for:\n%s",
-                    error.operator_str(target, args, kwargs),
-                )
-                make_fallback(target)
-            elif get_decompositions([target]):
-                # There isn't a good way to dynamically patch this in
-                # since AOT Autograd already ran.  The error message tells
-                # the user how to fix it.
-                raise MissingOperatorWithDecomp(target, args, kwargs)
-            else:
-                raise MissingOperatorWithoutDecomp(target, args, kwargs)
+            if target not in lowerings:
+                if config.implicit_fallbacks:
+                    error = (
+                        MissingOperatorWithDecomp
+                        if get_decompositions([target])
+                        else MissingOperatorWithoutDecomp
+                    )
+                    log.warning(
+                        "Creating implicit fallback for:\n%s",
+                        error.operator_str(target, args, kwargs),
+                    )
+                    make_fallback(target)
+                elif get_decompositions([target]):
+                    # There isn't a good way to dynamically patch this in
+                    # since AOT Autograd already ran.  The error message tells
+                    # the user how to fix it.
+                    raise MissingOperatorWithDecomp(target, args, kwargs)
+                else:
+                    raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
-        try:
-            out = lowerings[target](*args, **kwargs)
-            return out
-        except Exception as e:
-            raise LoweringException(e, target, args, kwargs) from e
+            try:
+                out = lowerings[target](*args, **kwargs)
+                return out
+            except Exception as e:
+                raise LoweringException(e, target, args, kwargs) from e
 
     def get_attr(self, target, args, kwargs):
         # this is a constant

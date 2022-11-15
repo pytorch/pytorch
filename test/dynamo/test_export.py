@@ -71,6 +71,32 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_export_shape_control_flow_1(self):
+        def func(x):
+            if x.shape[0] > 10:
+                return x.cos()
+            return x.sin()
+
+        opt_func = torch._dynamo.optimize("eager")(func)
+        real_result = opt_func(torch.ones(6, 4))
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func, torch.ones(6, 4))
+        out_graph, out_guards = exported
+
+        dynamo_result = out_graph(torch.ones(6, 4))
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+        hit = False
+        for guard in out_guards:
+            if guard.name == "symbolic_shape_expression":
+                hit = True
+                self.assertTrue("x.size()[0] <= 10" in guard.code_list)
+
+        self.assertTrue(hit)
+
     def test_export_graph_bypass(self):
         inp = [
             torch.tensor([0.1, 0.1]),
@@ -1444,6 +1470,22 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         real_result_2 = mod.forward(pred, x)
         dynamo_result_2 = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
+
+    def test_export_meta_val(self):
+        def f(x, y, z):
+            return x * y + z
+
+        gm, _ = torch._dynamo.export(
+            f,
+            torch.ones(3, 2),
+            torch.zeros(3, 2),
+            torch.ones(3, 2),
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                self.assertIn("val", node.meta)
 
 
 if __name__ == "__main__":
