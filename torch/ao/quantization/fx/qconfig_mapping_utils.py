@@ -2,7 +2,7 @@ import torch
 from collections import defaultdict, OrderedDict
 from typing import Callable, Any, Dict, Tuple, Set, List
 from torch.ao.quantization import QConfig
-from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny, qconfig_equals
+from torch.ao.quantization.qconfig import _add_module_to_qconfig_obs_ctr, QConfigAny, qconfig_equals
 from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
@@ -23,14 +23,14 @@ from ..utils import (
     get_qconfig_dtypes,
 )
 from ..qconfig_mapping import (
-    OBJECT_TYPE_DICT_KEY,
-    MODULE_NAME_DICT_KEY,
-    MODULE_NAME_REGEX_DICT_KEY,
+    _OBJECT_TYPE_DICT_KEY,
+    _MODULE_NAME_DICT_KEY,
+    _MODULE_NAME_REGEX_DICT_KEY,
     QConfigMapping,
 )
 from ..qconfig_mapping_utils import (
-    get_object_type_qconfig,
-    maybe_adjust_qconfig_for_module_type_or_name,
+    _get_object_type_qconfig,
+    _maybe_adjust_qconfig_for_module_type_or_name,
 )
 
 
@@ -121,17 +121,17 @@ def generate_node_name_to_qconfig(
         qconfig = None
         if node.op == "get_attr":
             module_name, _ = _parent_name(node.target)
-            qconfig = maybe_adjust_qconfig_for_module_type_or_name(
+            qconfig = _maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_mapping, type(modules[module_name]), module_name, global_qconfig)
-            qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
+            qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
         elif node.op == "call_function":
             # precedence: module_name_qconfig
             # > function_qconfig > global_qconfig
             # module_name takes precedence over function qconfig
-            function_qconfig = get_object_type_qconfig(
+            function_qconfig = _get_object_type_qconfig(
                 qconfig_mapping, node.target, global_qconfig)
             module_path, module_type = node_name_to_scope[node.name]
-            qconfig = maybe_adjust_qconfig_for_module_type_or_name(
+            qconfig = _maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_mapping, module_type, module_path, function_qconfig)
 
             cur_object_type_idx = \
@@ -139,28 +139,28 @@ def generate_node_name_to_qconfig(
             submodule_to_object_type_to_cur_idx[module_path][node.target] += 1
             qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
                 qconfig_mapping, module_path, node.target, cur_object_type_idx, qconfig)
-            qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
+            qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
 
         elif node.op == "call_method":
             module_path, module_type = node_name_to_scope[node.name]
             # first use node.target (string) to get the qconfig
             # this is to support configs like
             # "object_type": [("reshpe", qconfig)]
-            qconfig = maybe_adjust_qconfig_for_module_type_or_name(
+            qconfig = _maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_mapping, node.target, module_path, global_qconfig)
             # if there is no special config for the method, we'll fall back to the
             # config for the module that contains the call_method node
-            qconfig = maybe_adjust_qconfig_for_module_type_or_name(
+            qconfig = _maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_mapping, module_type, module_path, qconfig)
             # currently call_method does not support modifying qconfig
             # by order, we can add this later if it is needed.
-            qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
+            qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
 
         elif node.op == 'call_module':
             # if the node is an observer, just continue - don't add it to the qconfig_map
             if is_activation_post_process(modules[node.target]):
                 continue
-            qconfig = maybe_adjust_qconfig_for_module_type_or_name(
+            qconfig = _maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_mapping, type(modules[node.target]), node.target, global_qconfig)
 
             module_path, module_type = node_name_to_scope[node.name]
@@ -174,7 +174,7 @@ def generate_node_name_to_qconfig(
             qconfig = maybe_adjust_qconfig_for_module_name_object_type_order(
                 qconfig_mapping, parent_name, module_type, cur_object_type_idx,
                 qconfig)
-            qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
+            qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
 
             # regex is not supported eager mode propagate_qconfig_, we'll
             # need to set the qconfig explicitly here in case regex
@@ -223,7 +223,7 @@ def compare_prepare_convert_qconfig_mappings(
         convert_qconfig_mapping.module_name_qconfigs,
         convert_qconfig_mapping.module_name_regex_qconfigs,
     ]
-    dict_names = [OBJECT_TYPE_DICT_KEY, MODULE_NAME_DICT_KEY, MODULE_NAME_REGEX_DICT_KEY]
+    dict_names = [_OBJECT_TYPE_DICT_KEY, _MODULE_NAME_DICT_KEY, _MODULE_NAME_REGEX_DICT_KEY]
     for i in range(len(prepare_dicts)):
         for name, qconfig in prepare_dicts[i].items():
             assert name in convert_dicts[i], "Missing key {} {} in convert QConfigMapping \

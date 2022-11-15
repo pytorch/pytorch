@@ -2,7 +2,7 @@ name: Upload test stats
 
 on:
   workflow_run:
-    workflows: [pull, trunk, periodic]
+    workflows: [pull, trunk, periodic, inductor]
     types:
       - completed
 
