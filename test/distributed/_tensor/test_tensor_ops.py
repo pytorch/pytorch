@@ -3,7 +3,7 @@
 
 import torch
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.common_dtensor import (
+from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorTestBase,
     with_comms,

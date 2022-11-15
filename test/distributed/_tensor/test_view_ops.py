@@ -3,7 +3,7 @@
 
 from typing import List, cast
 from torch.distributed._tensor.placement_types import Placement
-from torch.testing._internal.common_dtensor import (
+from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     redistribute_profiler,
     with_comms,
