@@ -78,7 +78,12 @@ concurrency:
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
           if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
+              if [[ $ngpu -eq 0 ]]; then
+                echo "Error: Failed to detect any GPUs on the runner"
+              else
+                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
+              fi
+              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
               exit 1
           fi
       - name: Runner health check disconnect on failure
