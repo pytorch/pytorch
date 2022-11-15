@@ -397,7 +397,7 @@ class VariableBuilder:
             return SkipFilesVariable(
                 value, guards=make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        elif istype(value, (type, ABCMeta)):
+        elif istype(value, (type, ABCMeta)) and not issubclass(value, torch.nn.Module):
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
             return UserDefinedClassVariable(
