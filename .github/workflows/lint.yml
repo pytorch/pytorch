@@ -164,7 +164,8 @@ jobs:
           pip install Jinja2==3.0.1 --user
       - name: Regenerate workflows
         id: generate_workflows
-        run: .github/scripts/generate_ci_workflows.py
+        run: |
+          .github/regenerate.sh
       - name: Assert that regenerating the workflows didn't change them
         run: |
           if ! .github/scripts/report_git_status.sh .github/workflows; then
