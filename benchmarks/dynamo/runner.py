@@ -866,7 +866,7 @@ class AccuracyRegressionTracker:
         title = "## Accuracy Regressions ##\n"
         body = (
             "For each relevant compiler, we compare the most recent 2 reports "
-            "(that run actually the compiler) to find models where previously "
+            "(that actually run the compiler) to find models where previously "
             "successful accuracy tests now fail.\n\n"
         )
         dtype = self.args.dtypes[0]
