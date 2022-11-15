@@ -36,6 +36,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from collections import defaultdict
 from datetime import datetime
 from os.path import abspath, exists
@@ -707,7 +708,12 @@ class ParsePerformanceLogs(Parser):
 
     def generate_warnings(self):
         title = "## Warnings ##"
-        body = ""
+        body = (
+            "We flag models where:\n\n"
+            " - speedup < 0.95x\n"
+            " - compilation latency > 120 sec.\n"
+            " - compression ratio < 0.9\n\n"
+        )
         for metric in [
             "speedup",
             "compilation_latency",
@@ -858,9 +864,14 @@ class AccuracyRegressionTracker:
 
     def generate_comment(self):
         title = "## Accuracy Regressions ##\n"
-        body = ""
+        body = (
+            "For each relevant compiler, we compare the most recent 2 reports "
+            "(that actually run the compiler) to find models where previously "
+            "successful accuracy tests now fail.\n\n"
+        )
         dtype = self.args.dtypes[0]
         device = self.args.devices[0]
+        regressions_present = False
         for suite in self.args.suites:
             dfs = []
             for compiler in self.args.flag_compilers:
@@ -893,6 +904,7 @@ class AccuracyRegressionTracker:
             df = pd.concat(dfs, axis=0)
             if df.empty:
                 continue
+            regressions_present = True
             tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
             str_io = io.StringIO()
             str_io.write("\n")
@@ -901,6 +913,9 @@ class AccuracyRegressionTracker:
             str_io.write(f"{tabform}\n")
             str_io.write("~~~\n")
             body += str_io.getvalue()
+
+        if not regressions_present:
+            body += "No accuracy regressions found.\n"
 
         comment = generate_dropdown_comment(title, body)
 
@@ -1016,6 +1031,24 @@ class DashboardUpdater:
         self.output_dir = args.output_dir
         self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
         assert os.path.exists(self.lookup_file)
+        try:
+            self.update_lookup_file()
+        except subprocess.CalledProcessError:
+            print("failed to update lookup file")
+
+    def update_lookup_file(self):
+        dtype = self.args.dtypes[0]
+        day, _ = archive_data(self.args.archive_name)
+        target_dir = (
+            default_archive_name(dtype)
+            if self.args.archive_name is None
+            else self.args.archive_name
+        )
+        # Update lookup csv the folder to arhived logs
+        subprocess.check_call(
+            f'echo "{day},performance,{dtype},{target_dir}" >> {self.lookup_file}',
+            shell=True,
+        )
 
     def archive(self):
         dtype = self.args.dtypes[0]
@@ -1025,18 +1058,6 @@ class DashboardUpdater:
             self.args.dashboard_archive_path,
             self.args.archive_name,
             dtype,
-        )
-        day, _ = archive_data(self.args.archive_name)
-        target_dir = (
-            default_archive_name(dtype)
-            if self.args.archive_name is None
-            else self.args.archive_name
-        )
-
-        # Update lookup csv the folder to arhived logs
-        subprocess.check_call(
-            f'echo "{day},performance,{dtype},{target_dir}" >> {self.lookup_file}',
-            shell=True,
         )
 
     def upload_graphs(self):
@@ -1079,6 +1100,10 @@ class DashboardUpdater:
         """
         Send a commment to dashboard
         """
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write(comment)
+            filename = f.name
+
         subprocess.check_call(
             [
                 self.args.dashboard_gh_cli_path,
@@ -1086,10 +1111,12 @@ class DashboardUpdater:
                 "comment",
                 "--repo=https://github.com/pytorch/torchdynamo.git",
                 "681",
-                "-b",
-                comment,
+                "-F",
+                filename,
             ]
         )
+
+        os.remove(filename)
 
     def update(self):
         self.upload_graphs()
