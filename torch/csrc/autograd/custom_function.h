@@ -300,7 +300,7 @@ auto Function<T>::apply(Args&&... args)
     TORCH_CHECK(
         false,
         "jvp is not implemented for the c++ API of custom Function yet.",
-        "Please open a feature request on Github if you need this.");
+        "Please open a feature request on GitHub if you need this.");
   };
 
   auto wrapped_outputs = _wrap_outputs(
