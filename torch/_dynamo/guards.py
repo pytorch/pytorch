@@ -624,6 +624,8 @@ class CheckFunctionManager:
                 # accesed. We need to install their TENSOR_MATCH guards
                 # so that the names are known for symbolic shape guarding.
                 # This is also probably good for correctness anyway.
+                # TODO(voz): Revisit to see if we need to be more judicious
+                # with which we create guards for due to perf...
                 continue
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder, guards)
