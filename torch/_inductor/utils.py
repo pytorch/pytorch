@@ -57,6 +57,83 @@ def conditional_product(*args):
     return functools.reduce(operator.mul, [x for x in args if x])
 
 
+def do_bench(
+    fn,
+    warmup=25,
+    rep=100,
+    grad_to_none=None,
+    percentiles=(0.5, 0.2, 0.8),
+    record_clocks=False,
+    fast_flush=False,
+):
+    """
+    Benchmark the runtime of the provided function. By default, return the median runtime of :code:`fn` along with
+    the 20-th and 80-th performance percentile.
+
+    :param fn: Function to benchmark
+    :type fn: Callable
+    :param warmup: Warmup time (in ms)
+    :type warmup: int
+    :param rep: Repetition time (in ms)
+    :type rep: int
+    :param grad_to_none: Reset the gradient of the provided tensor to None
+    :type grad_to_none: torch.tensor, optional
+    :param percentiles: Performance percentile to return in addition to the median.
+    :type percentiles: list[float]
+    :param fast_flush: Use faster kernel to flush L2 between measurements
+    :type fast_flush: bool
+    """
+
+    # Estimate the runtime of the function
+    fn()
+    torch.cuda.synchronize()
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    start_event.record()
+    for _ in range(5):
+        fn()
+    end_event.record()
+    torch.cuda.synchronize()
+    estimate_ms = start_event.elapsed_time(end_event) / 5
+    # compute number of warmup and repeat
+    n_warmup = max(1, int(warmup / estimate_ms))
+    n_repeat = max(1, int(rep / estimate_ms))
+    # We maintain a buffer of 256 MB that we clear
+    # before each kernel call to make sure that the L2
+    # doesn't contain any input data before the run
+    start_event = [torch.cuda.Event(enable_timing=True) for i in range(n_repeat)]
+    end_event = [torch.cuda.Event(enable_timing=True) for i in range(n_repeat)]
+    if fast_flush:
+        cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
+    else:
+        cache = torch.empty(int(256e6), dtype=torch.int8, device="cuda")
+    # Warm-up
+    for _ in range(n_warmup):
+        fn()
+    # Benchmark
+    for i in range(n_repeat):
+        # we don't want `fn` to accumulate gradient values
+        # if it contains a backward pass. So we clear the
+        # provided gradients
+        if grad_to_none is not None:
+            for x in grad_to_none:
+                x.grad = None
+        # we clear the L2 cache before each run
+        cache.zero_()
+        # record time of `fn`
+        start_event[i].record()
+        fn()
+        end_event[i].record()
+    # Record clocks
+    torch.cuda.synchronize()
+    times = torch.tensor([s.elapsed_time(e) for s, e in zip(start_event, end_event)])
+    if percentiles:
+        percentiles = torch.quantile(times, torch.tensor(percentiles)).tolist()
+        return tuple(percentiles)
+    else:
+        return torch.mean(times).item()
+
+
 def sympy_product(it):
     return functools.reduce(operator.mul, it, sympy.Integer(1))
 
@@ -178,6 +255,33 @@ def cache_on_self(fn):
     return wrapper
 
 
+def get_fused_kernel_name(node_schedule):
+    return "_".join(
+        ["fused"]
+        + [
+            str(origin.name)
+            for origin in functools.reduce(
+                operator.or_,
+                [node.node.origins for node in node_schedule if hasattr(node, "node")],
+            )
+            if origin.op == "call_function"
+        ][0 : config.kernel_name_max_ops]
+    )
+
+
+def gather_origins(args, kwargs):
+    import itertools
+
+    from .ir import ComputedBuffer, IRNode
+
+    def is_unrealized_node(n):
+        return isinstance(n, IRNode) and not isinstance(n, ComputedBuffer)
+
+    kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
+    arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
+    return set(itertools.chain(*arg_origins, *kwarg_origins))
+
+
 def sympy_str(expr: sympy.Expr):
     """
     Normal sympy str is very slow, this is a lot faster.  The result are
@@ -267,3 +371,7 @@ def fresh_inductor_cache(cache_entries=None):
                                 if ".lock" not in f
                             }
                         )
+
+
+def argsort(seq):
+    return sorted(range(len(seq)), key=seq.__getitem__)

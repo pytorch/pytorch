@@ -15,7 +15,7 @@ from ..utils import clone_inputs, fake_tensors_available
 if fake_tensors_available:
     from torch._subclasses import FakeTensorMode  # noqa: F401
 
-    from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor
+    from ..utils import deepcopy_to_fake_tensor
 
 
 class ShapeAliasingAndMutationProp(ShapeProp):
@@ -122,9 +122,26 @@ def has_mutation(gm, example_inputs, inputs_only=False):
     # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
 
     if fake_tensors_available and config.fake_tensor_propagation:
-        with FakeTensorMode() as fake_mode:
-            pass
-        fake_wrapper = functools.partial(wrap_to_fake_tensor, fake_mode=fake_mode)
+
+        def _wrap_to_fake_tensor(t, *, f_mode):
+            if type(t) in (torch.Tensor, torch.nn.Parameter):
+                static_shapes_ = config.dynamic_shapes is False
+                return fake_mode.from_tensor(
+                    t, static_shapes=config.dynamic_shapes is not False
+                )
+            else:
+                return t
+
+        # Our analysis pass should use dynamic shape tensor inputs
+        # when dynamic shapes are enabled.
+        # We don't actually care about the guards that are created
+        # on those shapes though, so just create a fresh ShapeEnv here.
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        fake_mode = FakeTensorMode(
+            shape_env=ShapeEnv() if config.dynamic_shapes else None
+        )
+        fake_wrapper = functools.partial(_wrap_to_fake_tensor, f_mode=fake_mode)
         example_inputs = tree_map(fake_wrapper, example_inputs)
         new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
         with fake_mode.restore() if hasattr(fake_mode, "restore") else fake_mode:
