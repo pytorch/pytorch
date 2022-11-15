@@ -3126,7 +3126,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
     def vmap_outplace_test(self, func, args, kwargs, in_dims, check_shape_only=False,
                            postprocess_fn=None):
-        for loop_out, vmap_out in compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
+        for vmap_out, loop_out in compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
             if postprocess_fn is not None:
                 loop_out = postprocess_fn(loop_out)
                 vmap_out = postprocess_fn(vmap_out)
@@ -3147,7 +3147,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                         func, args, kwargs, in_dims, compute_loop_out=False, clone_inputs=True):
                     pass
             return
-        for loop_out, vmap_out in compute_quantities_for_vmap_test(
+        for vmap_out, loop_out in compute_quantities_for_vmap_test(
                 func, args, kwargs, in_dims, clone_inputs=True):
             if postprocess_fn is not None:
                 loop_out = postprocess_fn(loop_out)

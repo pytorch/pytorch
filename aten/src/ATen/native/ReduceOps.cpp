@@ -90,6 +90,7 @@
 #include <ATen/ops/slice.h>
 #include <ATen/ops/special_logsumexp_native.h>
 #include <ATen/ops/sqrt.h>
+#include <ATen/ops/squeeze.h>
 #include <ATen/ops/stack.h>
 #include <ATen/ops/std.h>
 #include <ATen/ops/std_mean.h>
@@ -1372,23 +1373,11 @@ Tensor nanmean(
   return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
 }
 
-static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
-  int ndims = self.sizes().size();
-  auto dims_to_squeeze = at::dim_list_to_bitset(dims, ndims);
-  Tensor result = self;
-  for (int i = ndims - 1; i >= 0; --i) {
-    if (dims_to_squeeze[i]) {
-      result = result.squeeze(i);
-    }
-  }
-  return result;
-}
-
 static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
   // can't take max of empty tensor
   if (self.numel() != 0) {
     auto maxes = at::amax(self, dims, true);
-    auto maxes_squeezed = (keepdim ? maxes : squeeze_multiple(maxes, dims));
+    auto maxes_squeezed = (keepdim ? maxes : at::squeeze(maxes, dims));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
     at::sum_out(result, (self - maxes).exp_(), dims, keepdim);
     result.log_().add_(maxes_squeezed);

@@ -10625,6 +10625,7 @@ Args:
     {input}
     dim (int or tuple of ints, optional): if given, the input will be squeezed
            only in the specified dimensions.
+
         .. versionchanged:: 1.14
            :attr:`dim` now accepts tuples of dimensions.
 

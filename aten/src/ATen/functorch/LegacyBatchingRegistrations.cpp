@@ -144,6 +144,48 @@ std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntAr
   return result;
 }
 
+Tensor& squeeze_dims__batching_rule(Tensor& self, IntArrayRef dims) {
+  if (!participatesInCurrentLevel(self)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+    return self.squeeze_(dims);
+  }
+  auto* batched = maybeGetBatchedImpl(self);
+  const auto bdim = batched->bdim();
+  auto logical_dim = self.dim();
+
+  if (logical_dim == 0) {
+    TORCH_CHECK(
+        dims.size() == 0 || (dims.size() == 1 && dims[0] == 0),
+        "Dimension is out of range (expected to be in range of [-1, 0], but got ", dims);
+    return self;
+  }
+
+  // Adjust any dimensions higher than the batch dimension
+  DimVector adjusted_dims(dims.begin(), dims.end());
+  int64_t updated_batch_idx = bdim;
+  for (auto &d : adjusted_dims) {
+    auto actual_dim = c10::maybe_wrap_dim(d, logical_dim);
+    if (actual_dim < bdim) {
+      d = actual_dim;
+      if (batched->value().sym_size(actual_dim) == 1) {
+        // A column before batch dimension will be dropped so adjust accordingly.
+        --updated_batch_idx;
+      }
+    } else {
+      // Since dimension to be squeezed is after the batch dimension adjust by one to account
+      // for the original batch dimension. In this case batch dimension won't move.
+      d = actual_dim + 1;
+    }
+  }
+
+  batched->value().squeeze_(adjusted_dims);
+  if (updated_batch_idx != bdim) {
+    batched->unsafe_set_bdim(updated_batch_idx);
+  }
+  batched->refreshTensorMetadata();
+  return self;
+}
+
 Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
@@ -816,6 +858,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   // still legacy b/c needs special inplace rules
   m.impl("squeeze_", squeeze__batching_rule);
   m.impl("squeeze_.dim", squeeze_dim__batching_rule);
+  m.impl("squeeze_.dims", squeeze_dims__batching_rule);
   m.impl("unsqueeze_", unsqueeze__batching_rule);
   m.impl("transpose_", transpose__batching_rule);
 

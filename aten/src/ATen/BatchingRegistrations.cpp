@@ -294,6 +294,13 @@ Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor squeeze_dims_batching_rule(const Tensor& self, IntArrayRef dims) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dims_physical = self_physical.getPhysicalDims(dims);
+  auto result = self_physical.tensor().squeeze(dims_physical);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
 Tensor trace_batching_rule(const Tensor& self) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   // Batched Diagonal View
@@ -1114,6 +1121,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
   m.impl("squeeze", squeeze_batching_rule);
   m.impl("squeeze.dim", squeeze_dim_batching_rule);
+  m.impl("squeeze.dims", squeeze_dims_batching_rule);
   m.impl("t", native::t); // composite wrt autograd
   m.impl("trace", trace_batching_rule);
   m.impl("transpose.int", transpose_int_batching_rule);
