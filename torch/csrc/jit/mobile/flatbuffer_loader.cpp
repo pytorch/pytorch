@@ -718,7 +718,7 @@ void FlatbufferLoader::extractJitSourceAndConstants(
     std::vector<IValue>* constants) {
   AT_ASSERT(
       module_parsed_,
-      "Need to first parse a flatbuffer file before extracing jit_sources");
+      "Need to first parse a flatbuffer file before extracting jit_sources");
 
   const auto* ivalues = module_->ivalues();
   for (uint32_t i = mobile_ivalue_size_; i < ivalues->size(); i++) {
