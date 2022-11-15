@@ -48,8 +48,11 @@ bool is_mixed_type(const Tensor& input, const Args&... parameters) {
 }
 
 inline bool batch_norm_use_channels_last_kernels(const at::Tensor& self) {
-  return (self.is_contiguous(at::MemoryFormat::ChannelsLast) ||
-          (self.is_contiguous() && self.strides()[1] == 1));
+  return (
+    self.is_contiguous(at::MemoryFormat::ChannelsLast) ||
+    self.is_contiguous(at::MemoryFormat::ChannelsLast3d) ||
+    (self.is_contiguous() && self.strides()[1] == 1)
+  );
 }
 
 enum class Impl {
