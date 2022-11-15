@@ -61,12 +61,19 @@ comment_origin = False
 
 compile_threads = min(32, os.cpu_count()) if sys.platform != "win32" else 1
 
+# If kernel is fused, the name is generated from the origin node op names
+# for larger kernels limit this
+kernel_name_max_ops = 10
+
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = __name__.replace(".config", "")
 
 # How to import torchdynamo, either torchdynamo or torch.dynamo
 dynamo_import = inductor_import.replace("inductor", "dynamo")
 
+# Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
+shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
+alignment_size = 4
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -88,6 +95,7 @@ class cpp:
         "g++-10",
         "clang++",
         "g++",
+        "g++.par",
     )
 
 

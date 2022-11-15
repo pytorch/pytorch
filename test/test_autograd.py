@@ -5447,9 +5447,7 @@ for shape in [(1,), ()]:
 
         a = torch.ones(1, 1, 2, requires_grad=True)
         out = torch.nn.functional.interpolate(a, scale_factor=0.5, mode="linear")
-        self.assertIsNone(out.grad_fn._saved_output_size)
-        self.assertEqual(out.grad_fn._saved_scale_factors, (0.5,))
-        self.assertIsInstance(out.grad_fn._saved_scale_factors[0], float)
+        self.assertEqual(out.grad_fn._saved_scales, 0.5)
 
         a = torch.ones(2, 2, requires_grad=True)
         out = torch.pdist(a, p=1)
@@ -6778,6 +6776,20 @@ for shape in [(1,), ()]:
         # not leaf, not output
         test(lambda: (1 + torch.randn(5, requires_grad=True)), False)
 
+    def test_saved_variable_saved_original_inplace_detach(self):
+        # Detaching a tensor that is saved input raises
+        a = torch.tensor(1., requires_grad=True).clone()
+        b = a.sin()
+        a.detach_()
+        with self.assertRaisesRegex(RuntimeError, "Trying to use a saved tensor that has been detached"):
+            b.backward()
+
+        # Detaching a tensor that is saved as output is OK
+        a = torch.tensor(1., requires_grad=True).clone()
+        b = a.exp()
+        a.detach_()
+        b.backward()
+
     def test_saved_variable_packing_unpacking_did_not_save_original_with_hooks(self):
         # Tests that packing/unpacking a SavedVariable works correctly with user-defined hooks
         # The saved_original / did_not_save_original distinction corresponds to the `save_original`
@@ -6805,8 +6817,8 @@ for shape in [(1,), ()]:
         with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
             a = torch.ones(5, requires_grad=True)
 
-            warnings.simplefilter('always')
             with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter('always')
                 y = a * a
                 # should raise two warnings from a being saved twice
                 self.assertEqual(len(w), 2)
@@ -8780,6 +8792,184 @@ class TestAutogradDeviceType(TestCase):
         with self.assertWarnsRegex(UserWarning, "Warn from backward"):
             b.backward()
 
+class TestAllowMutationOnSaved(TestCase):
+    def assertClonedLenEqual(self, ctx, n):
+        self.assertEqual(len(list(ctx.cloned.items())), n)
+
+    def assertTIDMapLenEqual(self, ctx, n):
+        self.assertEqual(len(list(ctx.tid_to_weakhandle.items())), n)
+
+    def test_basic(self):
+        a = torch.rand(2, 3, requires_grad=True)
+
+        def fn(a):
+            b = a.clone()
+            out = (b**2).sum()
+            b.sin_()
+            out.sum().backward()
+            return a.grad
+        msg = "variables needed for gradient computation has been modified by an inplace"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(a)
+
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            da = fn(a)
+
+        self.assertTrue(torch.allclose(a * 2, da))
+        self.assertClonedLenEqual(ctx, 0)
+
+    def test_views(self):
+        a = torch.rand(2, 3, requires_grad=True)
+
+        def fn(a):
+            b = a.clone()
+            c = b.view_as(b)
+            out = (b**2).sum()  # How does this work?
+            c.sin_()
+            out.sum().backward()
+            return a.grad
+
+        msg = "variables needed for gradient computation has been modified by an inplace"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(a)
+
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            da = fn(a)
+
+        self.assertClonedLenEqual(ctx, 0)
+        self.assertTrue(torch.allclose(a * 2, da))
+
+    def test_save_base_and_modify_view(self):
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            a = torch.rand(2, 3, requires_grad=True)
+            b = a.clone()
+            c = b[:1]
+            out = b**2
+            # modify the view
+            c *= 10
+            # self.assertClonedLenEqual(ctx, 1)
+            out.sum().backward()
+            self.assertClonedLenEqual(ctx, 0)
+
+        self.assertClonedLenEqual(ctx, 0)
+        self.assertTrue(torch.allclose(a * 2, a.grad))
+
+    def test_save_view_modify_base(self):
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            a = torch.rand(2, 3, requires_grad=True)
+            b = a.clone()
+            c = b[:]
+            out = (c**2).sum()
+            b *= 2
+            out.backward()
+            self.assertTrue(torch.allclose(a * 2, a.grad))
+
+    def test_double_backward(self):
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            a = torch.rand(2, 3, requires_grad=True)
+            b = a.clone()
+            out = (b**2).sum()
+            b.sin_()
+            torch.autograd.grad(out, a, create_graph=True)
+            da, = torch.autograd.grad(out, a, create_graph=True)
+            d2a, = torch.autograd.grad(da.sum(), a)
+
+        self.assertTrue(torch.allclose(torch.ones_like(a) * 2, d2a))
+        self.assertClonedLenEqual(ctx, 0)
+
+    def test_saved_but_not_anymore(self):
+        # Make sure we don't clone if the tensor was once saved, but
+        # by the time we do in-place, it is no longer saved
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            a = torch.randn(2, 3, requires_grad=True).clone()
+            out = (a**2).sum()
+            self.assertTIDMapLenEqual(ctx, 1)
+            self.assertClonedLenEqual(ctx, 0)
+            out.backward()
+            a.sin_()
+            self.assertClonedLenEqual(ctx, 0)
+            out = (a**2).sum()
+            a.sin_()
+            self.assertClonedLenEqual(ctx, 1)
+            del out
+            self.assertClonedLenEqual(ctx, 0)
+
+    def test_saved_same_tensor_many_times(self):
+        # We should only clone once
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            a = torch.randn(2, 3, requires_grad=True).clone()
+            b = a**2
+            c = a**2
+            a.sin_()
+            self.assertClonedLenEqual(ctx, 1)
+            del b, c
+            self.assertClonedLenEqual(ctx, 0)
+
+    def test_saved_same_tensor_different_versions(self):
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            a = torch.randn(2, 3, requires_grad=True).clone()
+            b = a**2
+            a.sin_()
+            c = a**2
+            a.sin_()
+            self.assertClonedLenEqual(ctx, 2)
+            del b
+            self.assertClonedLenEqual(ctx, 1)
+            del c
+            self.assertClonedLenEqual(ctx, 0)
+
+    def test_with_math_views(self):
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            a = torch.tensor([1 + 1j], requires_grad=True).clone()
+            b = a.conj()
+            out = (b**2).sum()
+            a.sin_()
+            out.backward()
+
+            a = torch.tensor([1 + 1j], requires_grad=True).clone()
+            b = a.conj()
+            out = (b**2).sum()
+            # in this case, it is no longer a view it seems
+            b.sin_()
+            out.backward()
+
+    def test_with_out_variant(self):
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            a = torch.tensor([1.], requires_grad=True)
+            b = torch.tensor([1.])
+            c = torch.tensor([2.])
+            out = a * b
+            self.assertTIDMapLenEqual(ctx, 1)
+            torch.sin(c, out=b)
+            self.assertClonedLenEqual(ctx, 1)
+            out.backward()
+            self.assertClonedLenEqual(ctx, 0)
+
+    def test_backward_out_of_context(self):
+        # Out of context
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            a = torch.rand(2, 3, requires_grad=True)
+            out = (a**2).sum()
+
+        msg = "Trying to backward outside of the 'allow_mutation_on_saved_tensors' context"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            out.backward()
+
+        # Different context
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            a = torch.rand(2, 3, requires_grad=True)
+            out = (a**2).sum()
+
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            with self.assertRaisesRegex(RuntimeError, msg):
+                out.backward()
+
+    def test_disallow_nesting(self):
+        with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+            msg = "allow_mutation_on_saved_tensors contexts cannot be nested"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
+                    pass
 
 class TestAutogradInferenceMode(TestCase):
     def _is_inference_tensor(self, tensor):
