@@ -132,12 +132,13 @@ def is_mutated_arg(argument: Argument) -> bool:
     return argument.annotation is not None and argument.annotation.is_write
 
 
-def gen_check_escaped(check, what):
-  return f"""TORCH_CHECK(
+def gen_check_escaped(check: str, what: str) -> str:
+    return f"""TORCH_CHECK(
 {check},
 "oops your {what} tensor escaped from vmap ",
 "See https://pytorch.org/functorch/stable/ux_limitations.html"
   );"""
+
 
 def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> Optional[str]:
     # Assumptions:
