@@ -69,7 +69,7 @@ def parse_namespace(base):
         'linalg_': 'linalg',
         '_masked_': '_masked',
         'sparse_': 'sparse',
-        'speical_': 'special',
+        'special_': 'special',
     }
     for heading in mappings.keys():
         if base.startswith(heading):
