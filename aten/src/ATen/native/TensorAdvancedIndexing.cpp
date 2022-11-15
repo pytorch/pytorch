@@ -860,7 +860,9 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     }
     if (dim == (result.dim() - 1) && alpha.equal(1.0) && index_contig.scalar_type() == ScalarType::Long) {
       // Check whether result and source are matched apart from the dimension dim.
-      // Note that broadcast case is not applicable for scatter_add
+      // Note that the broadcast case:
+      // source.select(dim, i) is broadcast for result.select(dim, index_data[i])
+      // The broadcast case is not applicable for scatter_add
       auto check_sizes = [](IntArrayRef a, IntArrayRef b, int64_t dim) -> bool {
         if (a.size() != b.size())
           return false;
@@ -1534,10 +1536,6 @@ TORCH_IMPL_FUNC(scatter_src_out)
  const Tensor& index,
  const Tensor& src,
  const Tensor& out) {
-  // See note [Writing Nondeterministic Operations]
-  // Nondeterministic when index contains duplicate entries, src is a tensor,
-  // and reduce=None
-  at::globalContext().alertNotDeterministic("scatter with src tensor and reduce=None");
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
                scatter_stub);

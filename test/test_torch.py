@@ -1478,46 +1478,6 @@ else:
                 'put_',
                 torch.device(device).type == 'cuda')
 
-    @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
-    @onlyNativeDeviceTypes
-    def test_nondeterministic_alert_scatter(self, device):
-        a = torch.randn(10, device=device)
-        indices = torch.tensor([0, 0], device=device)
-        values = torch.tensor([0., 1.], device=device)
-        result = torch.empty_like(a)
-
-        error_msg = 'scatter with src tensor and reduce=None'
-
-        error_cases = [
-            lambda: torch.Tensor.scatter(a, 0, indices, values),
-            lambda: torch.Tensor.scatter_(a, 0, indices, values),
-            lambda: torch.scatter(a, 0, indices, values),
-            lambda: torch.scatter(a, 0, indices, values, out=result),
-        ]
-
-        no_error_cases = [
-            lambda: torch.Tensor.scatter(a, 0, indices, 0),
-            lambda: torch.Tensor.scatter_(a, 0, indices, 0),
-            lambda: torch.scatter(a, 0, indices, 0),
-            lambda: torch.scatter(a, 0, indices, 0, out=result),
-
-            lambda: torch.Tensor.scatter(a, 0, indices, values, reduce='add'),
-            lambda: torch.Tensor.scatter_(a, 0, indices, values, reduce='add'),
-            lambda: torch.scatter(a, 0, indices, values, reduce='add'),
-            lambda: torch.scatter(a, 0, indices, values, out=result, reduce='add'),
-        ]
-
-        for error_case in error_cases:
-            self.check_nondeterministic_alert(
-                error_case,
-                error_msg)
-
-        for no_error_case in no_error_cases:
-            self.check_nondeterministic_alert(
-                no_error_case,
-                error_msg,
-                False)
-
     @skipIfMps
     def test_nondeterministic_alert_histc(self, device):
         a = torch.tensor([], device=device)
@@ -5676,26 +5636,20 @@ class TestTorch(TestCase):
         # dim is -1, alpha is 1, and dtype of index is torch.long,
         # i.e., using scatter_add
         for dtype in all_types_and_complex_and(torch.half, torch.bfloat16):
-            if torch.cuda.is_available():
+            for device in get_all_device_types():
                 for size in [(20, 20), (5, 20, 20)]:
-                    index = torch.randint(0, 20, (20,), dtype=torch.long).cuda()
+                    index = torch.randint(0, 20, (20,), dtype=torch.long, device=device)
+                    tensor = torch.zeros(size, dtype=dtype, device=device)
                     if dtype.is_floating_point or dtype.is_complex:
-                        tensor = torch.rand(size, dtype=dtype).cuda()
-                        source = torch.rand(size, dtype=dtype).cuda()
+                        source = torch.rand(size, dtype=dtype, device=device)
                     elif dtype.is_signed:
-                        tensor = torch.randint(-5, 15, size, dtype=dtype).cuda()
-                        source = torch.randint(-5, 15, size, dtype=dtype).cuda()
+                        source = torch.randint(-5, 15, size, dtype=dtype, device=device)
                     else:
-                        tensor = torch.randint(0, 10, size, dtype=dtype).cuda()
-                        source = torch.randint(0, 10, size, dtype=dtype).cuda()
+                        source = torch.randint(0, 10, size, dtype=dtype, device=device)
 
-                    ref_out = tensor.index_add(-1, index, source)
-
-                    tensor = tensor.cpu()
-                    source = source.cpu()
-                    index = index.cpu()
+                    ref_out = tensor.index_add(-1, index, source, alpha=2) / 2
                     out = tensor.index_add(-1, index, source)
-                    self.assertEqual(out, ref_out)
+                    self.assertEqual(out.float(), ref_out.float())
 
             # Check bound
             result = torch.ones(3, 3)
