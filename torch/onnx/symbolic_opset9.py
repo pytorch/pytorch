@@ -705,11 +705,19 @@ def atan2(g: jit_utils.GraphContext, self, other):
             "atan2", "input dtype not accessible", self
         )
     atan = g.op("Atan", div(g, self, other))
-    cond = lt(g, other, g.op("Constant", value_t=torch.tensor(0, dtype=scalar_type.dtype())))
-    pi_factor = g.op("Where", cond,
-                     mul(g, sign(g, self),
-                         g.op("Constant", value_t=torch.tensor(math.pi, dtype=scalar_type.dtype()))),
-                     g.op("Constant", value_t=torch.tensor(0, dtype=scalar_type.dtype())))
+    cond = lt(
+        g, other, g.op("Constant", value_t=torch.tensor(0, dtype=scalar_type.dtype()))
+    )
+    pi_factor = g.op(
+        "Where",
+        cond,
+        mul(
+            g,
+            sign(g, self),
+            g.op("Constant", value_t=torch.tensor(math.pi, dtype=scalar_type.dtype())),
+        ),
+        g.op("Constant", value_t=torch.tensor(0, dtype=scalar_type.dtype())),
+    )
     return add(g, atan, pi_factor)
 
 
