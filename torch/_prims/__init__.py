@@ -391,7 +391,6 @@ def _elementwise_meta(
         return TensorMeta(device=device, shape=shape, strides=strides, dtype=dtype)
 
     # Number case
-    # NOTE: this case is not currently exercised
     # TODO: fix number type promotion (bool, complex->float)
 
     # For now for symint/float, just implementing the common / simple cases of (int,float,symint,symfloat)
