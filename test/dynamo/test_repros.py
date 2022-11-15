@@ -2054,7 +2054,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                     return input.sin()
                 return A.forward(self, input)
 
-        
         inp = torch.Tensor([3, 4, 5])
         cnt_for_c = torch._dynamo.testing.CompileCounter()
         cnt_for_b = torch._dynamo.testing.CompileCounter()
@@ -2064,7 +2063,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         opt_c = torch._dynamo.optimize(cnt_for_c, nopython=True)(c)
         opt_b = torch._dynamo.optimize(cnt_for_b, nopython=True)(b)
-        
+
         torch._dynamo.reset()
         self.assertTrue(same(c(inp), opt_c(inp)))
 
