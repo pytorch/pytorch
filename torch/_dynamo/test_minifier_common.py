@@ -52,8 +52,6 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
             ["python3", "-c", code], capture_output=True, cwd=self.DEBUG_DIR
         )
 
-        print(proc.stderr.decode("utf-8"))
-
         repro_dir_match = re.search(
             r"(\S+)minifier_launcher.py", proc.stderr.decode("utf-8")
         )
@@ -89,7 +87,6 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
             capture_output=True,
             cwd=repro_dir,
         )
-        print(launch_proc.stderr.decode("utf-8"))
 
         return launch_proc, launch_code
 
@@ -103,7 +100,6 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         repro_proc = subprocess.run(
             ["python3", repro_file], capture_output=True, cwd=repro_dir
         )
-        print(repro_proc.stderr.decode("utf-8"))
 
         return repro_proc, repro_code
 

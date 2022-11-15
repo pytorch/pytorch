@@ -69,7 +69,7 @@ def test_relu_custom_error(gm: torch.fx.GraphModule, example_inputs):
 """
 
 
-class MinfierTests(MinifierTestBase):
+class MinifierTests(MinifierTestBase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()

@@ -43,7 +43,7 @@ def triton_accuracy_error(x):
 """
 
 
-class MinfierTests(MinifierTestBase):
+class MinifierTests(MinifierTestBase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
