@@ -14,7 +14,7 @@ from torch.ao.quantization.backend_config import (
     ObservationType,
 )
 from torch.ao.quantization.fake_quantize import FixedQParamsFakeQuantize
-from torch.ao.quantization.fuser_method_mappings import reverse_sequential_wrapper2
+from torch.ao.quantization.fuser_method_mappings import _reverse_sequential_wrapper2
 from torch.ao.quantization.fx.quantization_patterns import _default_root_node_getter
 from torch.ao.quantization.observer import default_fixed_qparams_range_0to1_observer
 
@@ -106,7 +106,7 @@ class TestBackendConfig(QuantizationTestCase):
     #  BackendPatternConfig
     # ======================
 
-    _fuser_method = reverse_sequential_wrapper2(nni.LinearReLU)
+    _fuser_method = _reverse_sequential_wrapper2(nni.LinearReLU)
 
     _num_tensor_args_to_observation_type = {
         0: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,

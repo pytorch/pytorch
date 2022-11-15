@@ -35,6 +35,7 @@ from . import (
     Dataset,)
 
 from torch.utils.data.datapipes.datapipe import _IterDataPipeSerializationWrapper, _MapDataPipeSerializationWrapper
+from torch.utils.data.datapipes.iter.grouping import SHARDING_PRIORITIES
 
 from . import _utils
 
@@ -104,7 +105,6 @@ def _get_distributed_settings():
 
 
 def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
-    global_worker_id = worker_id
     info = torch.utils.data.get_worker_info()
     assert info is not None
     total_workers = info.num_workers
@@ -112,9 +112,10 @@ def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
     assert isinstance(datapipe, (IterDataPipe, MapDataPipe))
     # To distribute elements across distributed process evenly, we should shard data on distributed
     # processes first then shard on worker processes
-    total_workers *= world_size
-    global_worker_id = global_worker_id * world_size + rank_id
-    torch.utils.data.graph_settings.apply_sharding(datapipe, total_workers, global_worker_id)
+    torch.utils.data.graph_settings.apply_sharding(
+        datapipe, world_size, rank_id, sharding_group=SHARDING_PRIORITIES.DISTRIBUTED)
+    torch.utils.data.graph_settings.apply_sharding(
+        datapipe, total_workers, worker_id, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
     if worker_init_fn is not None:
         worker_init_fn(worker_id)
 
@@ -663,7 +664,8 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         # Adds forward compatibilities so classic DataLoader can work with DataPipes:
         #   Taking care of distributed sharding
         if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
-            torch.utils.data.graph_settings.apply_sharding(self._dataset, self._world_size, self._rank)
+            torch.utils.data.graph_settings.apply_sharding(
+                self._dataset, self._world_size, self._rank, sharding_group=SHARDING_PRIORITIES.DISTRIBUTED)
 
         self._dataset_fetcher = _DatasetKind.create_fetcher(
             self._dataset_kind, self._dataset, self._auto_collation, self._collate_fn, self._drop_last)

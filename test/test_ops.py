@@ -57,7 +57,6 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyNativeDeviceTypes,
     OpDTypes,
-    skipCUDAIfRocm,
     skipMeta,
 )
 from torch._subclasses.fake_tensor import (
@@ -393,7 +392,6 @@ class TestCommon(TestCase):
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
-    @skipCUDAIfRocm
     @ops(python_ref_db)
     @parametrize('executor', ['aten', 'nvfuser'])
     @skipIfTorchInductor("Takes too long for inductor")
@@ -417,9 +415,10 @@ class TestCommon(TestCase):
 
         # skip zero-dim tensors for some composites of reduction operations and view
         skip_zero_dim_ops = [
-            "_refs.softmax",
             "_refs.logsumexp",
             "_refs.log_softmax",
+            "_refs.native_group_norm",
+            "_refs.softmax",
             "_refs.sum_to_size",
             "ops.nvprims.view",
         ]
@@ -1659,11 +1658,13 @@ class TestRefsOpsInfo(TestCase):
         '_refs.index_add_',
         '_refs.index_copy_',
         '_refs.index_fill_',
+        '_refs.native_group_norm',
     }
 
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
+        '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
         '_refs.rsub',
         # duplicated due to efficiency concerns of the ref vs the decomp
@@ -1740,7 +1741,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.unflatten',
         '_refs.sum_to_size',
         # ref implementation missing kwargs
-        '_refs.full',  # missing "layout"
         '_refs.full_like',  # missing "layout"
         '_refs.ones_like',  # missing "layout"
         '_refs.round',  # missing "decimals"

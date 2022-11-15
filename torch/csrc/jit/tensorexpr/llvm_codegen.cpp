@@ -446,6 +446,9 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
       irb_(getContext()),
       kernel_func_name_(std::move(kernel_func_name)),
       bufsExtAlloc_(ExternalAllocBufFinder::find(stmt)) {
+#if LLVM_VERSION_MAJOR >= 15
+  context_->setOpaquePointers(false);
+#endif
   if (!triple) {
     triple = LLVMTargetTriple();
   }
@@ -691,7 +694,7 @@ void LLVMCodeGenImpl::visit(AddPtr v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateAdd(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Add", v);
+    throw malformed_input("llvm_codegen: bad type in Add", v);
   }
 }
 
@@ -709,7 +712,7 @@ void LLVMCodeGenImpl::visit(SubPtr v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSub(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Sub", v);
+    throw malformed_input("llvm_codegen: bad type in Sub", v);
   }
 }
 
@@ -727,7 +730,7 @@ void LLVMCodeGenImpl::visit(MulPtr v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateMul(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Mul", v);
+    throw malformed_input("llvm_codegen: bad type in Mul", v);
   }
 }
 
@@ -745,7 +748,7 @@ void LLVMCodeGenImpl::visit(DivPtr v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSDiv(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Div", v);
+    throw malformed_input("llvm_codegen: bad type in Div", v);
   }
 }
 
@@ -760,7 +763,7 @@ void LLVMCodeGenImpl::visit(AndPtr v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateAnd(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in And", v);
+    throw malformed_input("llvm_codegen: bad type in And", v);
   }
 }
 
@@ -775,7 +778,7 @@ void LLVMCodeGenImpl::visit(OrPtr v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateOr(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Or", v);
+    throw malformed_input("llvm_codegen: bad type in Or", v);
   }
 }
 
@@ -790,7 +793,7 @@ void LLVMCodeGenImpl::visit(XorPtr v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateXor(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Xor", v);
+    throw malformed_input("llvm_codegen: bad type in Xor", v);
   }
 }
 
@@ -805,7 +808,7 @@ void LLVMCodeGenImpl::visit(LshiftPtr v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateShl(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Lshift", v);
+    throw malformed_input("llvm_codegen: bad type in Lshift", v);
   }
 }
 
@@ -824,7 +827,7 @@ void LLVMCodeGenImpl::visit(RshiftPtr v) {
       value_ = irb_.CreateLShr(lhs, rhs);
     }
   } else {
-    throw malformed_input("llvm_codgen: bad type in Rshift", v);
+    throw malformed_input("llvm_codegen: bad type in Rshift", v);
   }
 }
 
@@ -839,7 +842,7 @@ void LLVMCodeGenImpl::visit(ModPtr v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateSRem(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codgen: bad type in Mod", v);
+    throw malformed_input("llvm_codegen: bad type in Mod", v);
   }
 }
 

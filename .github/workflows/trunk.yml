@@ -10,9 +10,11 @@ on:
     tags:
       - ciflow/trunk/*
   workflow_dispatch:
+  schedule:
+    - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 jobs:
@@ -109,6 +111,7 @@ jobs:
       build-environment: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
       build-generates-artifacts: false
+      runner: linux.4xlarge
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
   linux-bionic-cuda11_7-py3_10-gcc7-no-ops-build:

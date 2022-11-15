@@ -595,7 +595,7 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
         self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[3], torch.storage.TypedStorage))
-        self.assertTrue(isinstance(q_copy[3]._storage, torch.UntypedStorage))
+        self.assertTrue(isinstance(q_copy[3]._untyped_storage, torch.UntypedStorage))
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
@@ -2897,10 +2897,10 @@ torch.cuda.synchronize()
                 op, args = op_with_args[0], op_with_args[1]
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
-                should_error_from_cudnn = 'cudnn' in op and \
-                    ('TORCH_CUDNN_V8_API_DISABLED' in os.environ and
-                     int(os.environ['TORCH_CUDNN_V8_API_DISABLED']) or
-                     torch.cuda.get_device_capability() < (8, 0))
+                should_error_from_cudnn = 'cudnn' in op and not\
+                    ('TORCH_CUDNN_V8_API_ENABLED' in os.environ and
+                     int(os.environ['TORCH_CUDNN_V8_API_ENABLED']) and
+                     torch.cuda.get_device_capability() >= (8, 0))
                 should_error_from_not_implemented = should_error_from_cudnn or 'prelu' in op or 'thnn' in op \
                     or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
                 if not skip_test:
@@ -4767,10 +4767,14 @@ class TestCudaComm(TestCase):
         nelems = 21 * 1024 * 1024
         nbytes = 4 * nelems  # floats are 4 bytes
 
+        nelems_big = 100 * 1024 * 1024
+        nbytes_big = 4 * nelems_big  # floats are 4 bytes
+
         start_mem = torch.cuda.memory_stats()[key]
         torch.cuda.memory._set_allocator_settings("")
         x = torch.rand(nelems, device='cuda')
 
+        # test roundup_power2_divisions single value syntax
         reg_mem = torch.cuda.memory_stats()[key]
         torch.cuda.memory._set_allocator_settings("roundup_power2_divisions:4")
         y = torch.rand(nelems, device='cuda')
@@ -4792,6 +4796,26 @@ class TestCudaComm(TestCase):
         reg_mem = torch.cuda.memory_stats()[key]
         self.assertTrue(reg_mem - start_mem == nbytes)
 
+        # roundup_power2_divisions knob array syntax
+        torch.cuda.memory.empty_cache()
+        torch.cuda.memory._set_allocator_settings(
+            "garbage_collection_threshold:0.5,roundup_power2_divisions:[64:8,128:2,256:2,512:2,1024:1,>:1]")
+        start_mem = torch.cuda.memory_stats()[key]
+        w = torch.rand(nelems, device='cuda')
+
+        pow2_div8_mem = torch.cuda.memory_stats()[key]
+        if not TEST_CUDAMALLOCASYNC:
+            # not supported with the cudaMallocAsync backend
+            self.assertTrue(pow2_div8_mem - start_mem == power2_div(nbytes, 8))
+
+        torch.cuda.memory.empty_cache()
+        start_mem = torch.cuda.memory_stats()[key]
+        v = torch.rand(nelems_big, device='cuda')
+
+        pow2_div2_mem = torch.cuda.memory_stats()[key]
+        if not TEST_CUDAMALLOCASYNC:
+            # not supported with the cudaMallocAsync backend
+            self.assertTrue(pow2_div2_mem - start_mem == power2_div(nbytes_big, 2))
 
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
