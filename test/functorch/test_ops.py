@@ -1055,6 +1055,7 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
+        xfail("native_dropout_backward"),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1220,6 +1221,8 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'offsets'),  # NYI: forward-AD for segment_reduce
         xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
         xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
+        xfail('native_dropout_backward'),  # NYI
+
     }))
     @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
         tol1('masked.prod',
@@ -1377,6 +1380,7 @@ class TestOperators(TestCase):
         # input while the running_mean or running_var, which will be updated in
         # place, were not batched.
         xfail("native_batch_norm"),
+        xfail('native_dropout_backward',)
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
