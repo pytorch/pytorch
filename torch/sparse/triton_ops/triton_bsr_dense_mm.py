@@ -376,24 +376,52 @@ def bsr_dense_mm(
     out: torch.Tensor = None,
     max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
 ):
-    # TODO: insert checks
+    def check(cond, msg):
+        if not cond:
+            raise ValueError(msg)
+
+    check(
+        bsr.device == dense.device and bsr.device.type == "cuda",
+        "bsr_dense_mm(): all inputs are expected to be on the same GPU device.",
+    )
+    check(
+        bsr.dtype == dense.dtype
+        and bsr.dtype in (torch.half, torch.bfloat16, torch.float),
+        "bsr_dense_mm(): all inputs are expected to be of the same dtype "
+        "and one of (half, bfloat16, float32), "
+        f"but got bsr.dtype == {bsr.dtype} and dense.dtype == {dense.dtype}.",
+    )
+
+    check(
+        bsr.dim() >= 2 and dense.dim() >= 2,
+        "bsr_dense_mm(): all inputs are expected to be at least 2D, "
+        f"but got bsr.dim() == {bsr.dim()} and dense.dim() == {dense.dim()}.",
+    )
+
     m, kl = bsr.shape[-2:]
     kr, n = dense.shape[-2:]
-
-    # TODO: probably make sure that inputs are properly contiguous
+    check(
+        kl == kr,
+        "bsr_dense_mm(): argument sizes are not compatible for matrix multiplication, "
+        f"got bsr.shape[-1] == {kl} which is not equal to dense.shape[-2] == {kr}.",
+    )
 
     # Required to undo the fake batch dimension insertion.
     original_batch_dims_broadcasted = torch.broadcast_shapes(
         bsr.shape[:-2], dense.shape[:-2]
     )
 
+    if out is not None:
+        expected_out_shape = original_batch_dims_broadcasted + (m, n)
+        check(
+            out.shape == expected_out_shape,
+            "bsr_dense_mm(): `out` argument has wrong shape, "
+            f"expected {expected_out_shape}, but got {out.shape}.",
+        )
+
     # Short circuit if lhs is zero
     if bsr._nnz() == 0:
-        return torch.zeros(
-            original_batch_dims_broadcasted + (m, n),
-            dtype=dense.dtype,
-            device=dense.device,
-        )
+        return dense.new_zeros(original_batch_dims_broadcasted + (m, n))
 
     # TODO: insert switch
     if is_sparse_rowspace_mode is None:
@@ -406,10 +434,18 @@ def bsr_dense_mm(
         else:
             return t.unsqueeze(0)
 
+    def make_triton_contiguous(t):
+        # Triton does not distinguish between row- and col-majorness
+        # and will be fast as long as there is a contiguous dimension.
+        if t.stride(-1) != 1 and t.stride(-2) != 1:
+            return t.contiguous()
+        else:
+            return t
+
     crow_indices = unsqueeze_batch_dim(bsr.crow_indices(), 1)
     col_indices = unsqueeze_batch_dim(bsr.col_indices(), 1)
-    values = unsqueeze_batch_dim(bsr.values(), 3)
-    dense = unsqueeze_batch_dim(dense, 2)
+    values = make_triton_contiguous(unsqueeze_batch_dim(bsr.values(), 3))
+    dense = make_triton_contiguous(unsqueeze_batch_dim(dense, 2))
     nnz = values.shape[-3]
     blocksize = values.shape[-2:]
 
@@ -420,9 +456,7 @@ def bsr_dense_mm(
 
     # Allocate out
     if out is None:
-        out = torch.zeros(
-            batch_dims_broadcasted + (m, n), dtype=dense.dtype, device=dense.device
-        )
+        out = dense.new_zeros(batch_dims_broadcasted + (m, n))
 
     # Broadcast batch dimensions and squash
     def batch_broadcast_and_squash(t, batch_dims, invariant_dims):
