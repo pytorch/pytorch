@@ -15,7 +15,7 @@ from torch._prims_common import (
     FloatLike,
     IntLike,
 )
-from torch._prims import _elementwise_meta
+from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 
 from torch._prims_common.wrappers import out_wrapper
 from torch._refs import _broadcast_shapes
@@ -1169,7 +1169,7 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
 
 @register_meta([aten.round.default, aten.round.decimals])
 def meta_round(self, **kwargs):
-    return _elementwise_meta(input)
+    return _elementwise_meta(self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT)
 
 @register_meta(aten.zero.default)
 def meta_zero(self):
