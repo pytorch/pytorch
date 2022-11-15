@@ -1592,10 +1592,10 @@ except RuntimeError as e:
     def _test_index_bounds_cuda(idx):
         x = torch.arange(10, device="cuda")
         try:
-            y=x[torch.tensor([idx])]
+            y = x[torch.tensor([idx])]
             return f"x[torch.tensor([{idx})]={y}"
         except RuntimeError as err:
-          return err
+            return err
 
     @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
