@@ -235,6 +235,18 @@ inline c10::SymInt multiply_integers(const C& container) {
       [](const c10::SymInt& a, const c10::SymInt& b) { return a * b; });
 }
 
+inline SymInt operator+(int64_t a, const SymInt& b) { return c10::SymInt(a) + b; }
+inline SymInt operator-(int64_t a, const SymInt& b) { return c10::SymInt(a) - b; }
+inline SymInt operator*(int64_t a, const SymInt& b) { return c10::SymInt(a) * b; }
+inline SymInt operator/(int64_t a, const SymInt& b) { return c10::SymInt(a) / b; }
+inline SymInt operator%(int64_t a, const SymInt& b) { return c10::SymInt(a) % b; }
+inline bool operator==(int64_t a, const SymInt& b) { return c10::SymInt(a) == b; }
+inline bool operator!=(int64_t a, const SymInt& b) { return c10::SymInt(a) != b; }
+inline bool operator<(int64_t a, const SymInt& b) { return c10::SymInt(a) < b; }
+inline bool operator<=(int64_t a, const SymInt& b) { return c10::SymInt(a) <= b; }
+inline bool operator>(int64_t a, const SymInt& b) { return c10::SymInt(a) > b; }
+inline bool operator>=(int64_t a, const SymInt& b) { return c10::SymInt(a) >= b; }
+
 C10_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
 C10_API SymInt operator-(const SymInt& s);
 } // namespace c10
