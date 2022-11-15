@@ -64,7 +64,7 @@ containerNamespace = ContainerNamespace("c10")
 TENSOR_LIST_LIKE_CTYPES = [
     f"{tensorNamespace}::TensorList",
     f"const {containerNamespace}::List<{containerNamespace}::optional<{tensorNamespace}::Tensor>> &",
-    f"const {containerNamespace}::ITensorListRef &",
+    f"const {tensorNamespace}::ITensorListRef &",
 ]
 
 # Override default Tensor namespace
