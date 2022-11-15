@@ -1142,9 +1142,6 @@ zeta = _make_elementwise_binary_prim(
 
 #
 # View operations
-#
-# TODO: model view relationships
-# TODO: model storage
 def _as_strided_meta(
     a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int
 ) -> TensorLikeType:
@@ -1162,7 +1159,7 @@ def _as_strided_meta(
             a._typed_storage(), size, stride, storage_offset
         )
 
-    return TensorMeta(a, shape=size, strides=stride)
+    return torch.as_strided(a, size, stride, storage_offset)
 
 
 def _as_strided_aten(

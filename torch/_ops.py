@@ -270,11 +270,7 @@ class OpOverload(PyOperatorABC):
         )
 
     def __call__(self, *args, **kwargs):
-        try:
-            return self._op(*args, **kwargs or {})
-        except Exception:
-            logging.warning(f"Error when executing {self}")
-            raise
+        return self._op(*args, **kwargs or {})
 
     def __hash__(self):
         return hash(self._op)
