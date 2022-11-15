@@ -198,8 +198,9 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         (torch.float32, torch.ops.aten.grid_sampler_2d.default) : (7e-6, 3e-5),
         # Exceeds tolerances on CUDA, likely due to fma
         (torch.float32, torch.ops.aten.mv.default) : (1e-5, 3e-5),
-        (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 1e-6),
         (torch.complex64, torch.ops.aten.mv.default): (5e-5, 5e-5),
+        (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 5e-4),
+        (torch.float64, torch.ops.aten.upsample_bicubic2d.default) : (1e-5, 5e-4),
     }
     if (test_dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
@@ -293,6 +294,9 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "meshgrid"),
     # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
     (None, None, "diag"),
+
+    # _softmax_backward_data's CPU kernel for bfloat16 always return the grad_input as float32
+    ("cpu", torch.bfloat16, "_softmax_backward_data"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {

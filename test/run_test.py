@@ -101,9 +101,6 @@ TESTS = discover_tests(
         'test_jit_simple',
         'test_jit_string',
         'test_kernel_launch_checks',
-        'test_metal',
-        # Right now we have a separate CI job for running MPS
-        'test_mps',
         'test_nnapi',
         'test_segment_reductions',
         'test_static_runtime',
@@ -442,8 +439,11 @@ def run_test(
     if options.pytest:
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
     elif IS_CI:
+        ci_args = ["--import-slow-tests", "--import-disabled-tests"]
+        if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
+            ci_args.append("--rerun-disabled-tests")
         # use the downloaded test cases configuration, not supported in pytest
-        unittest_args.extend(["--import-slow-tests", "--import-disabled-tests"])
+        unittest_args.extend(ci_args)
 
     # Extra arguments are not supported with pytest
     executable = get_executable_command(
@@ -844,6 +844,14 @@ def parse_args():
         )
     )
     parser.add_argument(
+        "--mps",
+        "--mps",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run test_mps and test_metal"
+        )
+    )
+    parser.add_argument(
         "-core",
         "--core",
         action="store_true",
@@ -1051,6 +1059,12 @@ def get_selected_tests(options):
     else:
         # Exclude all functorch tests otherwise
         options.exclude.extend(FUNCTORCH_TESTS)
+
+    if options.mps:
+        selected_tests = ['test_mps', 'test_metal']
+    else:
+        # Exclude all mps tests otherwise
+        options.exclude.extend(['test_mps', 'test_metal'])
 
     # process reordering
     if options.bring_to_front:
