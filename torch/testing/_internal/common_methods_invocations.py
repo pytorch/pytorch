@@ -406,6 +406,21 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     # running_mean and running_var are required in evaluation mode (training: False) but not in training mode
     yield SampleInput(make_arg((1, 2, 3)), args=(None, None, None, None), kwargs={'training': True})
 
+def sample_inputs_softmax_backward_data(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    cases = [
+        ((S,), 0),
+        ((S, S), 0),
+        ((S, M, S), -1),
+    ]
+    input_dtypes = [dtype]
+    if dtype == torch.float and device == 'cuda':
+        input_dtypes += [torch.float16]
+
+    for (shape, dim), input_dtype in product(cases, input_dtypes):
+        yield SampleInput(make_arg(shape), make_arg(shape), dim, input_dtype)
 
 def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
@@ -1173,7 +1188,7 @@ def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
     cases = ((), (S, S, S), (S,))
 
     for shape in cases:
-        yield(SampleInput(make_arg(shape)))
+        yield SampleInput(make_arg(shape))
 
 # TODO: add reduction kwargs
 def sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
@@ -3745,8 +3760,8 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
 
     def shape(size, rank, with_batch_channel=True):
         if with_batch_channel:
-            return tuple([N, C] + ([size] * rank))
-        return tuple([size] * rank)
+            return torch.Size([N, C] + ([size] * rank))
+        return torch.Size([size] * rank)
 
     make_arg = partial(make_tensor, device=device, dtype=dtype,
                        requires_grad=requires_grad, low=-1, high=1)
@@ -5794,9 +5809,9 @@ def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=Fals
 
     if list_args:
         cases = (
-            ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],)),
-            ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], 2),),
-            ((S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], -2),)
+            ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]),)),
+            ((S, S, S), (torch.Size([int(S / 2), S - int(S / 2) * 2, int(S / 2)]), 2),),
+            ((S, S, S), (torch.Size([int(S / 2), S - int(S / 2) * 2, int(S / 2)]), -2),)
         )
     else:
         cases = (  # type: ignore[assignment]
@@ -5811,10 +5826,10 @@ def sample_inputs_split(op_info, device, dtype, requires_grad, *, list_args=Fals
 def sample_inputs_split_with_sizes(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    cases = (((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],)),
-             ((S, S, S), ([int(S / 3), S - int(S / 3), 0],)),
-             ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)], 2)),
-             ((S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)], -2)),
+    cases = (((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]),)),
+             ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3), 0]),)),
+             ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]), 2)),
+             ((S, S, S), (torch.Size([int(S / 3), S - int(S / 3) * 2, int(S / 3)]), -2)),
              )
 
     for shape, args in cases:
@@ -6190,7 +6205,7 @@ def sample_inputs_resize_ops(op_info, device, dtype, requires_grad, **kwargs):
         else:
             raise ValueError("sample_inputs_resize_ops is being used with incorrect operator")
 
-        yield(SampleInput(make_arg(shape, requires_grad=requires_grad), args=args))
+        yield SampleInput(make_arg(shape, requires_grad=requires_grad), args=args)
 
 def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -6446,7 +6461,7 @@ def sample_inputs_expand(op_info, device, dtype, requires_grad, **kwargs):
 
     for case in cases:
         shape, args = case
-        yield(SampleInput(make_arg(shape), args=(args, )))
+        yield SampleInput(make_arg(shape), args=(args,))
 
 def sample_inputs_conversion(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -6469,8 +6484,8 @@ def sample_inputs_expand_as(op_info, device, dtype, requires_grad, **kwargs):
              )
 
     for shape, shape_other in cases:
-        yield(SampleInput(make_arg(shape, requires_grad=requires_grad),
-                          args=(make_arg(shape_other, requires_grad=False), )))
+        yield SampleInput(make_arg(shape, requires_grad=requires_grad),
+                          args=(make_arg(shape_other, requires_grad=False),))
 
 
 def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
@@ -6588,8 +6603,8 @@ def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
         inputs.append(mixed)
 
     for input_t, as_tuple in product(inputs, [False, True]):
-        yield(SampleInput(input_t.clone().requires_grad_(requires_grad),
-                          kwargs=dict(as_tuple=as_tuple)))
+        yield SampleInput(input_t.clone().requires_grad_(requires_grad),
+                          kwargs=dict(as_tuple=as_tuple))
 
 def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -6600,7 +6615,7 @@ def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
 
     for case in cases:
         shape, args = case
-        yield(SampleInput(make_arg(shape), args=args))
+        yield SampleInput(make_arg(shape), args=args)
 
 def reference_inputs_chunk(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_chunk(op, device, dtype, requires_grad, **kwargs)
@@ -6678,6 +6693,15 @@ def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
         yield SampleInput(make_arg(case), p=p, training=training)
     yield SampleInput(make_arg(case))
 
+def sample_inputs_dropout_backward(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_mask = partial(make_tensor, device=device, dtype=torch.bool, requires_grad=False)
+
+    cases = ((S, S, S, S), (S,), ())
+    scale_vals = [0.0, 1.0, 2.0]
+
+    for case, scale in product(cases, scale_vals):
+        yield SampleInput(make_arg(case), make_mask(case), scale)
 
 def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape):
@@ -8095,7 +8119,7 @@ def reference_flatten(input, start_dim=0, end_dim=-1):
     in_shape = input.shape
     in_rank = len(in_shape)
     for d in start_dim, end_dim:
-        if not((in_rank == 0 and d in (-1, 0)) or -in_rank <= d < in_rank):
+        if not ((in_rank == 0 and d in (-1, 0)) or -in_rank <= d < in_rank):
             raise IndexError(f"Dimension out of range (expected to be in range of [{-in_rank}, {in_rank-1}], but got {d}")
     end_dim = end_dim if end_dim >= 0 else in_rank + end_dim
     start_dim = start_dim if start_dim >= 0 else in_rank + start_dim
@@ -8424,7 +8448,7 @@ op_db: List[OpInfo] = [
            variant_test_name='decomposed',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16] if(CUDA11OrLater or TEST_WITH_ROCM) else []),
+                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -10554,6 +10578,22 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=True),
+    OpInfo(
+        '_softmax_backward_data',
+        op=torch.ops.aten._softmax_backward_data,
+        aten_name='_softmax_backward_data',
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        sample_inputs_func=sample_inputs_softmax_backward_data,
+        assert_autodiffed=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+        ),
+    ),
     # `softmin` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     # https://github.com/pytorch/pytorch/issues/68752
@@ -15927,6 +15967,22 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_dropout,
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs, inplace=True)),
+    OpInfo(
+        "native_dropout_backward",
+        op=torch.ops.aten.native_dropout_backward.default,
+        aten_name="native_dropout_backward",
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_dropout_backward,
+        skips=(
+            DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
+            # Lazy tensor failures
+            DecorateInfo(unittest.skip('Skipped!'), 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+            DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
+            DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
+        ),
+    ),
     OpInfo(
         "nn.functional.dropout2d",
         op=lambda input, *args, **kwargs:
