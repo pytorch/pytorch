@@ -1006,6 +1006,47 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
         fsdp_buffer_names = [n for n, _ in fsdp_model.named_buffers()]
         self.assertEqual(buffer_names, fsdp_buffer_names)
 
+    @skip_if_lt_x_gpu(2)
+    def test_named_parameters_in_forward(self):
+        """
+        Tests that calling ``named_parameters()`` during forward returns FQNs
+        and ``Tensor`` s corresponding to the original parameters.
+        """
+        param_shapes = [None, None]
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = nn.Linear(5, 5)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                nonlocal param_shapes
+                param_names = [tup[0] for tup in self.named_parameters()]
+                params = [tup[1] for tup in self.named_parameters()]
+                assert (
+                    param_shapes[0] is not None and param_shapes[1] is not None
+                ), "`param_sizes` should be set"
+                assert param_names == [
+                    "lin.weight",
+                    "lin.bias",
+                ], f"Expects ['lin.weight', 'lin.bias'] but got {param_names}"
+                assert (
+                    params[0].shape == param_shapes[0]
+                ), f"Expects {param_shapes[0]} but got {params[0].shape}"
+                assert (
+                    params[1].shape == param_shapes[1]
+                ), f"Expects {param_shapes[1]} but got {params[1].shape}"
+                return self.lin(x)
+
+        model = Model().cuda()
+        # Save the *unsharded* original parameter shapes and check the shapes
+        # match in the forward pass
+        param_shapes[0] = model.lin.weight.shape
+        param_shapes[1] = model.lin.bias.shape
+        fsdp_model = FSDP(model, use_orig_params=True)
+        inp = torch.randn((2, 5), device=torch.device("cuda"))
+        fsdp_model(inp)
+
 
 instantiate_parametrized_tests(TestFSDPUseOrigParamsMultipleParamGroups)
 instantiate_parametrized_tests(TestFSDPUseOrigParamsUnshardReshard)
