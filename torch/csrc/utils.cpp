@@ -357,8 +357,7 @@ bool type_caster<at::SymIntArrayRef>::load(handle src, bool) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
     const auto size =
         tuple ? PyTuple_GET_SIZE(source) : PyList_GET_SIZE(source);
-    std::vector<c10::SymInt> res;
-    res.reserve(size);
+    v_value.resize(size);
     for (const auto idx : c10::irange(size)) {
       PyObject* obj =
           tuple ? PyTuple_GET_ITEM(source, idx) : PyList_GET_ITEM(source, idx);
@@ -366,16 +365,16 @@ bool type_caster<at::SymIntArrayRef>::load(handle src, bool) {
       if (THPVariable_Check(obj)) {
         // TODO: this is for consistency with IntArrayRef but arguably
         // we shouldn't really allow this on pybind11 casters
-        res.push_back(THPVariable_Unpack(obj).item<int64_t>());
+        v_value[idx] = THPVariable_Unpack(obj).item<int64_t>();
       } else if (torch::is_symint(py::handle(obj))) {
-        res.push_back(py::handle(obj).cast<c10::SymInt>());
+        v_value[idx] = py::handle(obj).cast<c10::SymInt>();
       } else if (PyLong_Check(obj)) {
-        res.push_back(c10::SymInt(THPUtils_unpackIndex(obj)));
+        v_value[idx] = c10::SymInt(THPUtils_unpackIndex(obj));
       } else {
         return false;
       }
     }
-    value = std::move(res);
+    value = v_value;
     return true;
   }
   return false;
