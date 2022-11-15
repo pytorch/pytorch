@@ -1576,6 +1576,38 @@ except RuntimeError as e:
         self._spawn_test_multinomial_invalid_probs_cuda([1., -inf, 1.])
         self._spawn_test_multinomial_invalid_probs_cuda([1., 1., nan])
 
+    @staticmethod
+    def _mute_init():
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
+
+    def _spawn_method(self, method, arg):
+        ctx = torch.multiprocessing.get_context("spawn")
+        with ctx.Pool(1, initializer=self._mute_init) as pool:
+            errors = pool.map(method, [arg])
+            for e in errors:
+                if 'device-side assert triggered' not in str(e):
+                    self.fail(e)
+
+    @staticmethod
+    def _test_index_bounds_cuda(idx):
+        x = torch.arange(10, device="cuda")
+        try:
+            y=x[torch.tensor([idx])]
+            return f"x[torch.tensor([{idx})]={y}"
+        except RuntimeError as err:
+          return err
+
+    @slowTest
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    @skipIfRocm
+    def test_index_out_of_bounds_exception_cuda(self):
+        test_method = TestCuda._test_index_bounds_cuda
+        # Test in-bound access works fine
+        self.assertEqual(test_method(1), "x[torch.tensor([1)]=tensor([1], device='cuda:0')")
+        # Test that indexing out of bounds causes assert
+        self._spawn_method(test_method, 11)
+
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_huge_index(self):
@@ -4875,20 +4907,6 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
         self.assertTrue(x)
-
-    def test_out_of_bounds_exception(self):
-        import subprocess
-        curdir = os.path.dirname(os.path.abspath(__file__))
-        test_path = os.path.join(curdir, 'bounds_test', 'cuda_bounds_test.py')
-
-        # Test in-bounds access succeeds
-        p = subprocess.run([sys.executable, test_path, '1'], capture_output=True, timeout=15)
-        self.assertEqual(p.returncode, 0, msg=f'run of {test_path} failed:{p.stdout}')
-        # Test out-of-bounds access fails
-        p = subprocess.run([sys.executable, test_path, '11'], capture_output=True, timeout=15)
-        self.assertNotEqual(p.returncode, 0, msg=f'run of {test_path} succeeded:{p.stdout}')
-        self.assertIn('cudaErrorAssert', p.stdout.decode('ascii'))
-        self.assertIn('"index out of bounds"', p.stderr.decode('ascii'))
 
 
 instantiate_parametrized_tests(TestCuda)
