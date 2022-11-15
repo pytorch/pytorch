@@ -20,7 +20,7 @@ import os
 from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, sym_float, guard_int, SymNode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, sym_float, guard_int, SymNode, sym_sqrt, sym_int, to_node
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch import SymInt
 
@@ -336,6 +336,45 @@ class TestPySymInt(TestCase):
         self.assertEqual(str(shape_env.guards[0][0]), "Eq(s0, 2)")
 
     @skipIfNoSympy
+    def test_sym_int(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 5)
+        r = sym_int(a0)
+        self.assertEqual(r, 5)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertEqual(str(shape_env.guards[0][0]), "Eq(s0, 5)")
+
+        a1 = create_symint(shape_env, 7)
+        r = sym_int(a1 / 2)
+        self.assertEqual(guard_int(r), 3)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertEqual(str(shape_env.guards[1][0]), "Eq(floor(s1/2), 3)")
+
+        a2 = create_symint(shape_env, -3)
+        r = sym_int(a2 / 2)
+        self.assertEqual(guard_int(r), -1)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertEqual(str(shape_env.guards[2][0]), "Eq(ceiling(-s2/2), -1)")
+
+    @skipIfNoSympy
+    def test_sym_sqrt(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 4)
+        r = sym_sqrt(a0)
+        self.assertEqual(r, 2)
+        self.assertIsInstance(r, torch.SymFloat, msg=type(r))
+        self.assertEqual(str(shape_env.guards[0][0]), "Eq(sqrt(s0), 2)")
+
+    @skipIfNoSympy
+    def test_sym_floor(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 5)
+        r = math.floor(a0 / 2)
+        self.assertEqual(r, 2)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertEqual(str(shape_env.guards[0][0]), "Eq(floor(s0/2), 2)")
+
+    @skipIfNoSympy
     def test_int_conversion(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
@@ -439,9 +478,9 @@ class TestSymNumberMagicMethods(TestCase):
 
         def get_sym_inp(inp):
             if isinstance(inp, int):
-                return torch.SymInt(seed_node.to_node(inp))
+                return torch.SymInt(to_node(seed_node, inp))
             else:
-                return torch.SymFloat(seed_node.to_node(inp))
+                return torch.SymFloat(to_node(seed_node, inp))
 
         def maybe_xfail(inp1, inp2):
             key = (fn, type(inp1).__name__, type(inp2).__name__)
@@ -526,7 +565,7 @@ class TestSymNumberMagicMethods(TestCase):
     @parametrize("first_type", ["int", "float"])
     @parametrize("second_type", ["int", "float"])
     def test_method(self, fn, first_type, second_type):
-        if first_type == "float" and fn in symbolic_shapes.magic_methods_not_on_float:
+        if first_type == "float":
             self.skipTest(f"{fn} is not a float magic method")
 
         is_unary_fn = fn in symbolic_shapes.unary_magic_methods

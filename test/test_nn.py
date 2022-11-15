@@ -13122,10 +13122,10 @@ class TestNNDeviceType(NNTestCase):
         s = exp.sum(dim=3, keepdim=True).expand(exp.size())
         return exp / s
 
-    def test_masked_softmax_mask_types_0_1(self, device):
-        # Test that mask type 0 (LxL attention mask) and mask type 1 (BxL padding mask)
-        # are processed correctly on the fast path and the results match explicit slow
-        # calculation.
+    def test_masked_softmax_mask_types(self, device):
+        # Test that mask type 0 (LxL attention mask), mask type 1 (BxL padding mask),
+        # and mask type 2 (generic BxHxLxL mask) are processed correctly on the
+        # fast path and the results match explicit slow calculation.
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
 
         for (B, num_heads, L) in sizes:
@@ -13138,7 +13138,12 @@ class TestNNDeviceType(NNTestCase):
             src_key_padding_mask_orig = torch.randint(0, 2, (B, L)).bool()
             src_key_padding_mask = src_key_padding_mask_orig.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
 
-            masks = [(src_mask_orig, src_mask, 0), (src_key_padding_mask_orig, src_key_padding_mask, 1)]
+            # mask_type == 2 =>  shape BxHxLxL
+            generic_mask = torch.randint(0, 2, (B, num_heads, L, L)).bool()
+            masks = [(src_mask_orig, src_mask, 0),
+                     (src_key_padding_mask_orig, src_key_padding_mask, 1),
+                     (generic_mask, generic_mask, 2)
+                     ]
             for dim in [0, 3]:
                 for mask_orig, mask, mask_type in masks:
                     if (self.device_type == "cuda") and (num_heads % 2) and (mask_type == 1):
@@ -13173,8 +13178,8 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     def test_masked_softmax_devices_parity(self):
-        # Test that softmax with mask type 0 (LxL attention mask) and mask type 1 (BxL padding mask)
-        # gives the same result on CPU and on CUDA
+        # Test that softmax with mask type 0 (LxL attention mask), mask type 1 (BxL padding mask),
+        # and mask type 2 (BxHxLxL generic mask) gives the same result on CPU and on CUDA.
 
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
         for (B, num_heads, L) in sizes:
@@ -13182,7 +13187,9 @@ class TestNNDeviceType(NNTestCase):
             src_mask = torch.randint(0, 2, (L, L)).bool()
             # mask_type == 1 => padding mask of shape BxL
             src_key_padding_mask = torch.randint(0, 2, (B, L)).bool()
-            masks = [(src_mask, 0), (src_key_padding_mask, 1)]
+            # mask_type == 2 => generic mask of shape BxHxLxL
+            generic_mask = torch.randint(0, 2, (B, num_heads, L, L)).bool()
+            masks = [(src_mask, 0), (src_key_padding_mask, 1), (generic_mask, 2)]
             input = torch.randn((B, num_heads, L, L))
             for dim in [0, 3]:
                 for mask, mask_type in masks:
@@ -13197,8 +13204,10 @@ class TestNNDeviceType(NNTestCase):
                         softmax_res = torch._masked_softmax(input_device, mask_device, dim, mask_type)
                         if mask_type == 0:
                             mask_expanded = mask_device.reshape(1, 1, L, L).expand(B, num_heads, L, L).bool()
-                        else:
+                        elif mask_type == 1:
                             mask_expanded = mask_device.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+                        else:
+                            mask_expanded = mask_device
                         # In result, should only fill the entirely masked out rows since those are non-deterministic (*may* be 0)
                         # Fill rows with all True's with 0
                         mask_out = mask_expanded.all(dim, keepdim=True).expand(mask_expanded.shape)
@@ -13208,6 +13217,93 @@ class TestNNDeviceType(NNTestCase):
                     cpu_res = softmax_on_device(mask, input, "cpu")
                     cuda_res = softmax_on_device(mask, input, "cuda")
                     self.assertEqual(cpu_res, cuda_res, exact_dtype=True)
+
+    def test_multihead_self_attn_two_masks_fast_path(self, device):
+        """
+        Multihead self-attention should give the same result on the fast path (BetterTransformer) as on the slow path
+        when both attention mask (mask type 0) and key padding mask (mask type 1) are provided
+        """
+        with torch.no_grad():
+            embed_dim = 14
+            num_heads = 7
+            batch_size = 8
+            src_len = 5
+
+            query = value = key = torch.rand(batch_size, src_len, embed_dim).to(device)
+            # Create masks of two different types
+            attn_mask = torch.randint(0, 2, (src_len, src_len)).bool().to(device)
+            key_padding_mask = torch.randint(0, 2, (batch_size, src_len)).bool().to(device)
+
+            # We'll need expanded versions of the masks for masking out the outputs below
+            attn_mask_expanded = attn_mask.reshape(1, 1, src_len, src_len) \
+                                          .expand(batch_size, num_heads, src_len, src_len)
+            key_padding_mask_expanded = key_padding_mask.reshape(batch_size, 1, 1, src_len) \
+                                                        .expand(batch_size, num_heads, src_len, src_len)
+            merged_mask = attn_mask_expanded.logical_or(key_padding_mask_expanded)
+
+            # Compute attention on the fast path
+            mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True, device=device)
+            mta_model.training = False
+            result_fast_path, _ = mta_model(query, key, value, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
+
+            # Compute attention on the slow path
+            result_ref, _ = torch.nn.functional.multi_head_attention_forward(query.transpose(0, 1),
+                                                                             key.transpose(0, 1),
+                                                                             value.transpose(0, 1),
+                                                                             embed_dim, num_heads,
+                                                                             mta_model.in_proj_weight,
+                                                                             mta_model.in_proj_bias,
+                                                                             mta_model.bias_k, mta_model.bias_v,
+                                                                             mta_model.add_zero_attn,
+                                                                             mta_model.dropout,
+                                                                             mta_model.out_proj.weight,
+                                                                             mta_model.out_proj.bias,
+                                                                             training=mta_model.training,
+                                                                             key_padding_mask=key_padding_mask,
+                                                                             need_weights=False,
+                                                                             attn_mask=attn_mask,
+                                                                             use_separate_proj_weight=False,
+                                                                             q_proj_weight=mta_model.q_proj_weight,
+                                                                             k_proj_weight=mta_model.k_proj_weight,
+                                                                             v_proj_weight=mta_model.v_proj_weight,
+                                                                             average_attn_weights=False,
+                                                                             )
+            result_ref = result_ref.transpose(0, 1)  # Convert to batch-first
+
+            # Rows which are completely masked out are nan, we need to exclude them from comparison
+            mask_out = merged_mask[:, 0, :, :].all(-1, keepdim=True).expand(batch_size, src_len, embed_dim)
+            result_fast_path_masked = result_fast_path.masked_fill(mask_out, 0)
+            result_ref_masked = result_ref.masked_fill(mask_out, 0)
+
+            self.assertEqual(result_fast_path_masked, result_ref_masked)
+
+    @torch.no_grad()
+    @unittest.skipIf(TEST_WITH_CROSSREF, 'CrossRef turns on TorchFunctionMode, and so disables fastpath.')
+    def test_multihead_self_attn_two_masks_fast_path_mock(self, device):
+        """
+        Multihead self-attention should take fast path when both attention mask (mask type 0)
+        and key padding mask (mask type 1) are provided at the same time on CPU and CUDA
+        """
+        if device not in ['cpu', 'cuda']:
+            self.skipTest("Fastpath only runs on CPU and CUDA.")
+        with torch.autocast(device_type=device, enabled=False):
+            embed_dim = 14
+            num_heads = 7
+            batch_size = 8
+            src_len = 5
+
+            query = value = key = torch.rand(batch_size, src_len, embed_dim).to(device)
+            # Create masks of two different types
+            attn_mask = torch.randint(0, 2, (src_len, src_len)).bool().to(device)
+            key_padding_mask = torch.randint(0, 2, (batch_size, src_len)).bool().to(device)
+
+            with mock.patch('torch._native_multi_head_attention') as fastpath_mock:
+                # Compute attention on the fast path
+                mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True, device=device).eval()
+                mta_model.training = False
+                mta_model(query, key, value, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
+                # If mock was called, fastpath was taken
+                self.assertTrue(fastpath_mock.called)
 
     def test_masked_softmax(self, device):
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
@@ -15567,21 +15663,31 @@ class TestNNDeviceType(NNTestCase):
         """
         Test transformer fast path on CPU with different valid mask types and shapes
         """
-        model = torch.nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=True, device=device, dtype=dtype)
+        d_model = 512
+        nhead = 8
+        batch_size = 32
+        src_len = 10
+
+        model = torch.nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True,
+                                                 device=device, dtype=dtype, dropout=0)
         model.eval()
 
         # Batched inputs
-        src = torch.rand(32, 10, 512)
+        src = torch.rand(batch_size, src_len, 512)
 
         # Attention mask of shape (src_len, src_len)
-        src_mask = torch.zeros(10, 10).to(torch.bool)
+        src_mask = torch.zeros(src_len, src_len).to(torch.bool)
         with torch.no_grad():
             model(src, src_mask=src_mask)
 
         # Padding mask of shape (batch_size, src_len)
-        src_key_padding_mask = torch.zeros(32, 10).to(torch.bool)
+        src_key_padding_mask = torch.zeros(batch_size, src_len).to(torch.bool)
         with torch.no_grad():
             model(src, src_key_padding_mask=src_key_padding_mask)
+
+        # Provide both masks
+        with torch.no_grad():
+            model(src, src_mask=src_mask, src_key_padding_mask=src_key_padding_mask)
 
 
     @dtypes(torch.float)
