@@ -1204,6 +1204,7 @@ class TestOperators(TestCase):
         xfail('logcumsumexp', ''),  # NYI: forward-AD for logcumsumexp
         xfail('nn.functional.embedding_bag', ''),  # NYI: forward-AD for _embedding_bag
         xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
+        xfail('grid_sampler_2d', ''),  # NYI: forward AD for grid_sampler_2d
         xfail('nn.functional.hardsigmoid', ''),  # NYI: forward AD for hardsigmoid_backward
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
         xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
@@ -1343,6 +1344,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.fractional_max_pool3d'),  # calls random op
         xfail('nn.functional.gaussian_nll_loss'),  # data depenedant flow
         xfail('nn.functional.grid_sample'),  # Forward AD not implemented and no decomposition
+        xfail('grid_sampler_2d'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.hardsigmoid'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.hinge_embedding_loss'),  # vmap: inplace into a regular tensor
         xfail('nn.functional.huber_loss'),  # Forward AD not implemented and no decomposition
