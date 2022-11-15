@@ -298,6 +298,11 @@ jobs:
       build-environment: linux-focal-rocm5.2-py3.8
       docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
       sync-tag: rocm-build
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+        ]}
 
   linux-focal-rocm5_2-py3_8-test:
     name: linux-focal-rocm5.2-py3.8
@@ -306,11 +311,7 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.8
       docker-image: ${{ needs.linux-focal-rocm5_2-py3_8-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
-        ]}
+      test-matrix: ${{ needs.linux-focal-rocm5_2-py3_8-build.outputs.test-matrix }}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}

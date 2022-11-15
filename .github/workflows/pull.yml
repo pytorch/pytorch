@@ -308,3 +308,8 @@ jobs:
       build-environment: linux-focal-rocm5.2-py3.8
       docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
       sync-tag: rocm-build
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+        ]}
