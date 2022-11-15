@@ -210,9 +210,6 @@ def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
         # is currently disabled. So they all need to be aggregated here
         success_tests.update(success)
 
-        if failure:
-            print(f"FOUND {len(failure)} FLAKY TESTS on {report}")
-
         for name, stats in failure.items():
             if name not in failure_tests:
                 failure_tests[name] = stats.copy()
