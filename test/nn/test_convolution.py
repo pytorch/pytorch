@@ -1019,16 +1019,22 @@ class TestConvolutionNNDeviceType(NNTestCase):
             i2 = i.detach()[:, 1:].clone().requires_grad_()
             output2 = m2(i2)
             output2.backward(grad_output[:, offset:].contiguous())
+            is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
+            atol, rtol = (3e-4, 3e-2) if dtype == torch.float32 and is_cuda_sm86 else (dtype2prec_DONTUSE[dtype], 0)
 
-            self.assertEqual(output, torch.cat([output1, output2], 1))
+            self.assertEqual(output, torch.cat([output1, output2], 1),
+                             atol=atol, rtol=rtol)
             self.assertEqual(i.grad.data,
-                             torch.cat([i1.grad.data, i2.grad.data], 1))
+                             torch.cat([i1.grad.data, i2.grad.data], 1),
+                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
             self.assertEqual(m.bias.grad.data,
                              torch.cat([m1.bias.grad.data,
-                                        m2.bias.grad.data], 0))
+                                        m2.bias.grad.data], 0),
+                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
             self.assertEqual(m.weight.grad.data,
                              torch.cat([m1.weight.grad.data,
-                                        m2.weight.grad.data], 0))
+                                        m2.weight.grad.data], 0),
+                             atol=atol, rtol=rtol)
 
 
     @onlyCUDA
