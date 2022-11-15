@@ -356,7 +356,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "linalg.vector_norm": {f64, f64},
     "kron": {f16},
     "nanquantile": {f32, f64},
-    "native_batch_norm": {f16, f32, f64},
     "nn.functional._scaled_dot_product_attention": {f16},
     "nn.functional.avg_pool2d": {f16, f32, f64},
     "nn.functional.batch_norm.without_cudnn": {f16},
