@@ -54,6 +54,8 @@ union ValueUnion {
 
 table Node {
   node:NodeUnion;
+  // An int which can be linked back to the node in the origin graph
+  debug_handle:uint;
 }
 
 table Value {
