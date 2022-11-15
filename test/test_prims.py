@@ -326,9 +326,9 @@ class TestPrims(TestCase):
             fake_cpu_scalar = FakeTensor(fake_mode, meta_scalar, torch.device("cpu"))
             fake_cuda_tensor = FakeTensor(fake_mode, meta_tensor, torch.device("cuda"))
 
-        # This was failing before because nvprims didn't support fake tensors
-        # properly
-        gm = make_fx(lambda a, b: torch.ops.nvprims.div(a, b))(fake_cuda_tensor, fake_cpu_scalar)
+        # This fails if op is called under in_kernel_invocation_manager context
+        for op in [torch.ops.prims.div, torch.ops.nvprims.div]:
+            gm = make_fx(lambda a, b: op(a, b))(fake_cuda_tensor, fake_cpu_scalar)
 
     @onlyCUDA
     @skipCUDAIfRocm
