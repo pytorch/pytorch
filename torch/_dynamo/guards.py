@@ -159,10 +159,11 @@ class Guard:
         ), "Guarded class id must be identical, or None"
         self.guarded_class_weakref = guarded_class
 
-        if not self.code_list:
-            self.code_list = code_list
-        else:
-            self.code_list.extend(code_list)
+        if code_list:
+            if not self.code_list:
+                self.code_list = code_list
+            else:
+                self.code_list.extend(code_list)
 
         assert self.obj_weakref in (
             obj_weakref,
@@ -448,26 +449,29 @@ class GuardBuilder:
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
-        else:
-            value = self.get(guard.name)
-            tensor_name = self.arg_ref(guard)
-            self.tensor_check_names.append(tensor_name)
-            self.tensor_check_examples.append(value)
+            if not config.dynamic_shapes:
+                # For dynamic shapes, we want to proceed to record tensor names
+                return 
 
-            # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
-            self.tensor_check_ids[tensor_name] = id(value)
+        value = self.get(guard.name)
+        tensor_name = self.arg_ref(guard)
+        self.tensor_check_names.append(tensor_name)
+        self.tensor_check_examples.append(value)
 
-            # Note: Guard code produced for tensor_match is a little different.
-            # We accumulate tensor names, then do a single install of `___check_tensors`.
-            # See _guards.cpp and TensorGuard for more information.
-            # TODO(voz): Add tensor matching code to export
-            # Note: this is a bit of a special case, and so does not use _produce_guard_code
-            guard.set_export_info(
-                "TENSOR_MATCH",
-                weakref.ref(type(value)),
-                None,
-                weakref.ref(value),
-            )
+        # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
+        self.tensor_check_ids[tensor_name] = id(value)
+
+        # Note: Guard code produced for tensor_match is a little different.
+        # We accumulate tensor names, then do a single install of `___check_tensors`.
+        # See _guards.cpp and TensorGuard for more information.
+        # TODO(voz): Add tensor matching code to export
+        # Note: this is a bit of a special case, and so does not use _produce_guard_code
+        guard.set_export_info(
+            "TENSOR_MATCH",
+            weakref.ref(type(value)),
+            None,
+            weakref.ref(value),
+        )
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(self, guard, code_list, provided_guarded_object=None):
@@ -613,7 +617,15 @@ class CheckFunctionManager:
         )
         global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if not config.guard_nn_modules and guard.is_nn_module():
+            if not config.guard_nn_modules and guard.is_nn_module() and guard.create_fn != GuardBuilder.TENSOR_MATCH:
+                # The `guard.create_fn != GuardBuilder.TENSOR_MATCH:` part is 
+                # an exception to not guarding on nn_module properties
+                # In dynamic shapes mode, we sometimes get "weights" "bias" or other registered/named buffers
+                # accesed. We need to install their TENSOR_MATCH guards
+                # so that the names are known for symbolic shape guarding.
+                # This is also probably good for correctness anyway.
+                # TODO(voz): Revisit to see if we need to be more judicious
+                # with which we create guards for due to perf...
                 continue
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder, guards)
