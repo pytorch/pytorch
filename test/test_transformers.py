@@ -1144,8 +1144,12 @@ class TestTransformers(NNTestCase):
             value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
             key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION
+            if SM80OrLater:
+                assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION
+            else:
+                assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
 
+            # Change dtype to float32 so that efficient attention should get chosen
             make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float32, packed=True)
             make_nt = partial(self.rand_nt, device=device, dtype=torch.float32, packed=True)
 
