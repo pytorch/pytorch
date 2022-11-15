@@ -824,19 +824,22 @@ class FakeTensorMode(TorchDispatchMode):
         from torch._decomp import decomposition_table
 
         if not has_symbolic_sizes:
-            with self:
-                # Decomposes CompositeImplicitAutograd ops
-                r = func.decompose(*args, **kwargs)
-                if r is not NotImplemented:
-                    return r
+            from torch._decomp import meta_table as meta_table
 
-            if (
-                func in decomposition_table
-                and torch_decomp_decompositions(func)
-                and all(not e.is_sparse for e in flat_arg_fake_tensors)
-            ):
+            if func not in meta_table:
+                if (
+                    func in decomposition_table
+                    and torch_decomp_decompositions(func)
+                    and all(not e.is_sparse for e in flat_arg_fake_tensors)
+                ):
+                    with self:
+                        return decomposition_table[func](*args, **kwargs)
+
                 with self:
-                    return decomposition_table[func](*args, **kwargs)
+                    # Decomposes CompositeImplicitAutograd ops
+                    r = func.decompose(*args, **kwargs)
+                    if r is not NotImplemented:
+                        return r
 
         else:
             with self:
