@@ -4224,6 +4224,20 @@ class CommonTemplate:
         ]
         self.common(forward, args)
 
+    def test_ctor_functions(self):
+        @torch._dynamo.optimize("inductor")
+        def foo():
+            data = torch.rand([3] * ndim, device=device, requires_grad=True)
+            grad = torch.rand([3] * ndim, device=device)
+            return data, grad
+
+        (data, grad) = foo()
+        self.assertTrue(data.requires_grad)
+        self.assertFalse(grad.requires_grad)
+        _ = module(data).backward(grad)
+        self.assertTrue(data.grad)
+        self.assertFalse(grad.grad)
+
     def test_zero_dim_reductions(self):
         for kd in [True, False]:
             inps0 = (torch.zeros(2, 0, device=self.device, dtype=torch.float16), 1, kd)

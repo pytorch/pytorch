@@ -11,7 +11,7 @@ import torch.onnx.operators
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
-from ..exc import unimplemented
+from ..exc import unimplemented, Unsupported
 from ..source import GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
@@ -171,6 +171,9 @@ class TorchVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import ConstantVariable, GradModeVariable, TensorVariable
+
+        if self.value in (torch.ones, torch.zeros, torch.rand):
+            raise Unsupported(f"constructor function {self.value} isn't supported")
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
