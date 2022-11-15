@@ -534,24 +534,25 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
         });
     });
   } else {
-    // Special case: horizontal flip with vectorization and input is contiguous and uint8
+    // Special case: horizontal flip with vectorization and input is contiguous
     // Context: horizontal flip leads to strides[0] < 0 and
-    // thus is_contiguous condition is not satisfied and non-vectorized code path is taken
-    // However, manual vectorization is slower auto-vectorization for large dtypes like double, long
+    // thus is_contiguous condition is not satisfied and non-vectorized code path is taken.
     auto output_strides = iter.strides(0);
     auto input_strides = iter.strides(1);
     if (iter.ndim() > 1 && output_strides[0] < 0 && input_strides[0] == iter.element_size(1)) {
       auto iter_dtype = iter.dtype();
       if (iter_dtype == kByte) {
-        cpu_hflip_vec<uint8_t>(iter);
-        return;
+        return cpu_hflip_vec<uint8_t>(iter);
       } else if (iter_dtype == kFloat) {
-        cpu_hflip_vec<float>(iter);
-        return;
+        return cpu_hflip_vec<float>(iter);
       } else if (iter_dtype == kInt) {
-        cpu_hflip_vec<int32_t>(iter);
-        return;
+        return cpu_hflip_vec<int32_t>(iter);
+      } else if (iter_dtype == kLong) {
+        return cpu_hflip_vec<int64_t>(iter);
+      } else if (iter_dtype == kDouble) {
+        return cpu_hflip_vec<double>(iter);
       }
+      // other dtypes are handled below with cpu_kernel_vec
     }
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
