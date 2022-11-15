@@ -73,24 +73,32 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
     return f'{module}.{name}'
 
-def _format_arg(arg, max_list_len=float('inf')) -> str:
+# TODO: max_list_len is not passed recursively; bug?
+def _format_arg(arg, max_list_len=float('inf'), *, detailed=False) -> str:
     if hasattr(arg, '_custom_fx_repr_fn'):
         return arg._custom_fx_repr_fn()
     elif isinstance(arg, list):
-        items = ', '.join(_format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len)
+        items = ', '.join(_format_arg(a, detailed=detailed) for idx, a in enumerate(arg) if idx < max_list_len)
         maybe_len = '' if len(arg) < max_list_len + 1 else f', ...[total_len={len(arg)}]'
         return f'[{items}{maybe_len}]'
     elif isinstance(arg, tuple):
-        items = ', '.join(_format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len)
+        items = ', '.join(_format_arg(a, detailed=detailed) for idx, a in enumerate(arg) if idx < max_list_len)
         maybe_len = '' if len(arg) < max_list_len + 1 else f', ...[total_len={len(arg)}]'
         maybe_comma = ',' if len(arg) == 1 else ''
         return f'({items}{maybe_comma}{maybe_len})'
     elif isinstance(arg, dict):
-        items_str = ', '.join(f'{k}: {_format_arg(v)}' for k, v in arg.items())
+        items_str = ', '.join(f'{k}: {_format_arg(v, detailed=detailed)}' for k, v in arg.items())
         return f'{{{items_str}}}'
 
     if isinstance(arg, Node):
-        return '%' + str(arg)
+        if detailed:
+            if 'val' in arg.meta:
+                a = arg.meta['val']
+                return f"%{arg} : Tensor[size={list(a.size())}, stride={list(a.stride())}]"
+            else:
+                return f"%{arg} : META IS MISSING, INVESTIGATE"
+        else:
+            return '%' + str(arg)
     else:
         return str(arg)
 
@@ -412,7 +420,9 @@ class Node:
     @compatibility(is_backward_compatible=True)
     def format_node(self,
                     placeholder_names: Optional[List[str]] = None,
-                    maybe_return_typename: Optional[List[str]] = None) -> Optional[str]:
+                    maybe_return_typename: Optional[List[str]] = None,
+                    *,
+                    detailed: bool = False) -> Optional[str]:
         """
         Return a descriptive string representation of ``self``.
 
@@ -463,7 +473,7 @@ class Node:
             maybe_typename = f'{_type_repr(self.type)} ' if self.type is not None else ''
             return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = ' \
                    f'{self.op}[target={self._pretty_print_target(self.target)}](' \
-                   f'args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})'
+                   f'args = {_format_arg(self.args, detailed=detailed)}, kwargs = {_format_arg(self.kwargs, detailed=detailed)})'
 
     @compatibility(is_backward_compatible=True)
     def replace_all_uses_with(self,
