@@ -8,6 +8,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/Tensor.h>
 
+#include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10d {
@@ -23,7 +24,9 @@ struct NCCLPreMulSumSupplement : _SupplementBase {
   double double_factor{0.0};
   at::Tensor tensor_factor;
   NCCLPreMulSumSupplement(double f) : double_factor{f} {}
-  NCCLPreMulSumSupplement(at::Tensor t) : tensor_factor{std::move(t)} {}
+  NCCLPreMulSumSupplement(at::Tensor t) : tensor_factor{std::move(t)} {
+    TORCH_CHECK_EQ(t.numel(), 1);
+  }
 };
 
 // Other ReduceOps that need different supplementary data can also
