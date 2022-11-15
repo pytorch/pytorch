@@ -1752,10 +1752,21 @@ def _should_aten_fallback(
     )
     is_caffe2_build = _C_onnx._CAFFE2_ATEN_FALLBACK
 
-    return name.startswith("aten::") and (
-        ((is_onnx_aten_export or is_aten_fallback_export) and not is_caffe2_build)
-        or (not is_exportable_aten_op and is_aten_fallback_export)
-    )
+    if not name.startswith("aten::"):
+        return False
+
+    if is_caffe2_build:
+        if (
+            is_onnx_aten_export or is_aten_fallback_export
+        ) and not is_exportable_aten_op:
+            return True
+    else:
+        if is_onnx_aten_export or (
+            is_aten_fallback_export and not is_exportable_aten_op
+        ):
+            return True
+
+    return False
 
 
 @_beartype.beartype

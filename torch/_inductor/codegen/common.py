@@ -285,6 +285,8 @@ class KernelArgs:
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
             return self.output_buffers[name]
+        if name in self.inplace_buffers:
+            return self.inplace_buffers[name].inner_name
         if name.startswith("seed"):
             return self._lookup("seed", self.input_buffers, name)
         return self._lookup("in_ptr", self.input_buffers, name)
@@ -292,6 +294,8 @@ class KernelArgs:
     def output(self, name):
         name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
+        if name in self.inplace_buffers:
+            return self.inplace_buffers[name].inner_name
         return self._lookup("out_ptr", self.output_buffers, name)
 
     def make_inplace(self, input_name, output_name):
@@ -393,6 +397,14 @@ class KernelArgs:
                     yield self.input_buffers[other], inplaced.inner_name
                 if other in self.output_buffers:
                     yield self.output_buffers[other], inplaced.inner_name
+
+    def is_removed(self, name):
+        def _is_removed(name, buffers):
+            return name not in buffers or buffers[name] == "REMOVED"
+
+        return _is_removed(name, self.output_buffers) and _is_removed(
+            name, self.inplace_buffers
+        )
 
 
 class CSE:
