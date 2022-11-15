@@ -375,6 +375,12 @@ def _check_dill_version(pickle_module) -> None:
                 pickle_module.__version__
             ))
 
+def _check_save_filelike(f):
+    if not isinstance(f, (str, os.PathLike)) and not hasattr(f, 'write'):
+        raise AttributeError((
+            "expected 'f' to be string, path, or a file-like object with "
+            "a 'write' attribute"))
+
 def save(
     obj: object,
     f: FILE_LIKE,
@@ -422,6 +428,7 @@ def save(
         >>> torch.save(x, buffer)
     """
     _check_dill_version(pickle_module)
+    _check_save_filelike(f)
 
     if _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_zipfile:

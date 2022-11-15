@@ -1195,8 +1195,10 @@
   device_check: NoCheck
   device_guard: False
 
-- func: broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
+- func: broadcast_to(Tensor(a) self, SymInt[] size) -> Tensor(a)
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: broadcast_to_symint
 
 - func: _sparse_broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
   variants: function
@@ -10593,15 +10595,17 @@
   autogen: _adaptive_avg_pool2d_backward.out
   tags: canonical
 
-- func: adaptive_avg_pool3d.out(Tensor self, int[3] output_size, *, Tensor(a!) out) -> Tensor(a!)
+- func: adaptive_avg_pool3d.out(Tensor self, SymInt[3] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: adaptive_avg_pool3d_out_cpu
     CUDA: adaptive_avg_pool3d_out_cuda
     QuantizedCPU: adaptive_avg_pool3d_out_quantized_cpu
 
-- func: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
+- func: adaptive_avg_pool3d(Tensor self, SymInt[3] output_size) -> Tensor
   python_module: nn
+  dispatch:
+    CompositeImplicitAutograd: adaptive_avg_pool3d_symint
 
 - func: _adaptive_avg_pool3d(Tensor self, SymInt[3] output_size) -> Tensor
   dispatch:
@@ -13282,6 +13286,11 @@
   variants: function
   dispatch:
     CUDA: _efficient_attention_forward
+
+- func: _efficient_attention_backward(Tensor grad, Tensor query, Tensor key, Tensor value, Tensor logsumexp, Tensor out, bool is_causal=False) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _efficient_attention_backward
 
 - func: _transformer_decoder_only_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None) -> (Tensor, Tensor, Tensor)
   variants: function
