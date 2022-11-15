@@ -1206,12 +1206,6 @@ def meta_unary_inplace(self, **kwargs):
     meta_tensor = _elementwise_meta(
         self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
     )
-    check(
-        not aten.is_non_overlapping_and_dense(meta_tensor),
-        lambda: "unsupported operation: \
-     more than one element of the written-to tensor refers to a single memory location. \
-     Please clone() the tensor before performing the operation.",
-    )
     # sanity check
     assert meta_tensor.stride() == self.stride()
     assert meta_tensor.dtype == self.dtype
