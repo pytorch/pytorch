@@ -838,7 +838,8 @@ class FlatParamHandle:
             return False
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
         already_unsharded = (
-            unsharded_flat_param._typed_storage()._size() == unsharded_flat_param.numel()
+            unsharded_flat_param._typed_storage()._size()
+            == unsharded_flat_param.numel()
         )
         return not already_unsharded
 
@@ -1306,6 +1307,8 @@ class FlatParamHandle:
                         assert tensor is not None  # mypy
                         param_var = tensor
                 setattr(module, param_name, param_var)
+                if self._use_orig_params and self._training_state == HandleTrainingState.FORWARD:
+                    module._parameters[param_name] = param_var  # type: ignore[assignment]
         for i, (
             param_name,
             module,
@@ -1336,6 +1339,8 @@ class FlatParamHandle:
                 module.register_parameter(param_name, prim_param)
             else:
                 setattr(module, param_name, prim_param)
+                if self._use_orig_params and self._training_state == HandleTrainingState.FORWARD:
+                    module._parameters[param_name] = prim_param  # type: ignore[assignment]
 
     def _use_unsharded_grad_views(self) -> None:
         """
