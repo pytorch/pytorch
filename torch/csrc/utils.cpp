@@ -388,7 +388,7 @@ handle type_caster<at::SymIntArrayRef>::cast(
   for (const auto i : c10::irange(src.size())) {
     t[i] = py::cast(src[i]);
   }
-  return std::move(t);
+  return t.release();
 }
 
 } // namespace detail
