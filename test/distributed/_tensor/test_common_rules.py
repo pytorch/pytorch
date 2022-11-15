@@ -12,7 +12,7 @@ from torch.distributed._tensor.ops.common_rules import (
     pointwise_rule,
 )
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.testing._internal.common_dtensor import (
+from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
