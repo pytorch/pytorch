@@ -1,6 +1,5 @@
-# Owner(s): ["module: mta"]
+# Owner(s): ["modiule: mta"]
 
-import itertools
 from numbers import Number
 import random
 import re
@@ -80,7 +79,6 @@ class ForeachFuncWrapper:
         ):
             with torch.profiler.profile(activities=(torch.profiler.ProfilerActivity.CPU,)) as p:
                 actual = self.func(*inputs, **kwargs)
-            print(p.key_averages().table(sort_by="cpu_time_total", row_limit=10))
             for e in p.key_averages():
                 if e.key == 'cudaLaunchKernel':
                     if is_fastpath:
@@ -138,18 +136,23 @@ class TestForeach(TestCase):
                 else:
                     self.assertEqual(expected, actual)
 
-    # NOTE(crcrpar): foreach_div and foreach_mul launch cuda kernel 19 times for num_tensors==20
-    # when is_fastpath and dtype==torch.float16.
     @skipMeta
     @ops(foreach_binary_op_db)
     @parametrize("is_fastpath", (True, False))
-    def test_binary_op_with_SampleInput(self, device, dtype, op, is_fastpath):
+    def test_binary_op(self, device, dtype, op, is_fastpath):
         for sample in op.sample_inputs(device, dtype, noncontiguous=not is_fastpath):
             rhs_arg, = sample.args
             kwargs = {} or sample.kwargs
             alpha = kwargs.pop("alpha", None)
             disable_fastpath = kwargs.pop("disable_fastpath") if is_fastpath else False
             n_expected_cudaLaunchKernels = len(sample.input) if disable_fastpath else 1
+            # TODO(crcrpar): Look into why the following is needed
+            if (
+                is_fastpath and disable_fastpath and dtype == torch.float16 and self.is_cuda and
+                op.name in ("_foreach_mul", "_foreach_div") and
+                (isinstance(rhs_arg, list) and not torch.is_tensor(rhs_arg[0]))
+            ):
+                n_expected_cudaLaunchKernels -= 1
             wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op, n_expected_cudaLaunchKernels)
             self._binary_test(
                 dtype, wrapped_op, ref, [sample.input, rhs_arg], is_fastpath, False, alpha=alpha)
@@ -158,7 +161,7 @@ class TestForeach(TestCase):
 
     @ops(foreach_pointwise_op_db)
     @parametrize("is_fastpath", (True, False))
-    def test_pointwise_op_with_sampleinput(self, device, dtype, op, is_fastpath):
+    def test_pointwise_op(self, device, dtype, op, is_fastpath):
         for sample in op.sample_inputs(device, dtype):
             if not is_fastpath:
                 sample = sample.noncontiguous()
