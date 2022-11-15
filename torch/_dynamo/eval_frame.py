@@ -351,6 +351,7 @@ def optimize(
         def toy_example(a, b):
             ...
     """
+    torch._C._log_api_usage_once("torch._dynamo.optimize")
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
     if sys.platform == "win32":
@@ -451,6 +452,7 @@ def explain(f, *args, **kwargs):
 def export(
     f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
 ):
+    torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
         assert (
             aten_graph
