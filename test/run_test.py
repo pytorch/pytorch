@@ -439,8 +439,11 @@ def run_test(
     if options.pytest:
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
     elif IS_CI:
+        ci_args = ["--import-slow-tests", "--import-disabled-tests"]
+        if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
+            ci_args.append("--rerun-disabled-tests")
         # use the downloaded test cases configuration, not supported in pytest
-        unittest_args.extend(["--import-slow-tests", "--import-disabled-tests"])
+        unittest_args.extend(ci_args)
 
     # Extra arguments are not supported with pytest
     executable = get_executable_command(
