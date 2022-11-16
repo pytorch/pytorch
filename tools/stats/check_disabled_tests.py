@@ -203,31 +203,21 @@ def save_results(
     # Log the results
     print(f"The following {len(failure_tests) + len(skipped_tests)} are still flaky:")
 
+    # Consolidate failure and skipped tests
     for test_id, count in failure_tests.items():
-        num_red = count
-        # See if there is any success
+        # Also see if there is any success
         num_green = success_tests.get(test_id, 0)
+        num_red = count
 
-        disabled_test_name, name, classname, filename = get_disabled_test_name(test_id)
-        print(
-            f"  {disabled_test_name} from {filename}, failing {num_red}/{num_red + num_green}"
-        )
+        if test_id not in skipped_tests:
+            skipped_tests[test_id] = defaultdict(int)
 
-        key, record = prepare_record(
-            workflow_id=workflow_id,
-            workflow_run_attempt=workflow_run_attempt,
-            name=name,
-            classname=classname,
-            filename=filename,
-            flaky=True,
-            num_green=num_green,
-            num_red=num_red,
-        )
-        records[key] = record
+        skipped_tests[test_id]["num_green"] += num_green
+        skipped_tests[test_id]["num_red"] += num_red
 
     for test_id, stats in skipped_tests.items():
-        num_red = stats["num_red"]
-        num_green = stats["num_green"]
+        num_green = stats.get("num_green", 0)
+        num_red = stats.get("num_red", 0)
 
         disabled_test_name, name, classname, filename = get_disabled_test_name(test_id)
         print(
