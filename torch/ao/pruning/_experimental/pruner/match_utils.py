@@ -1,3 +1,6 @@
+"""
+Contains utility functions to check if a pattern is in the graph and return the matching nodes
+"""
 import torch
 from torch import nn
 from torch.ao.quantization.fx.match_utils import (
@@ -7,7 +10,10 @@ from torch.fx import Node
 from torch.nn.utils import parametrize
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-def match(modules: Dict[str, nn.ModuleDict], node: Node, current: nn.Module) -> bool:
+def match(modules: Dict[str, nn.ModuleDict], node: Node, current: Union[nn.Module, Any]) -> bool:
+    r"""
+    checks to see if a single node of a pattern matches
+    """
     if isinstance(current, type) and issubclass(current, MatchAllNode):
         return True
     if not isinstance(node, Node):
@@ -30,6 +36,10 @@ def apply_match(
     node: Node,
     matched_node_pattern: List[Node],
 ) -> Optional[List[Node]]:
+    r"""
+    This function will return the matched nodes if the pattern matches the node given
+    If there is no match, it will return None
+    """
     if isinstance(pattern, tuple):
         if len(pattern) == 1:
             if match(modules, node, pattern[0]):

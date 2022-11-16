@@ -1,8 +1,12 @@
+"""
+Collection of conversion functions for linear / conv2d structured pruning
+Also contains utilities for bias propogation
+"""
 import torch
 from torch import nn
 from torch.nn.utils import parametrize
 
-
+# BIAS PROPOGATION
 def get_adjusted_next_layer_bias(next_layer, pruned_biases, mask):
     r"""Returns new adjusted bias for the second supported module"""
     if parametrize.is_parametrized(next_layer):
@@ -48,6 +52,7 @@ def get_adjusted_next_layer_bias(next_layer, pruned_biases, mask):
 
 
 def prune_module_bias(module, mask):
+    r"""Applies mask to given modules bias"""
     # prune bias along with weights, discard pruned indices of bias
     original_bias = getattr(module, "_bias", module.bias)
     if original_bias is not None:
@@ -59,6 +64,9 @@ def prune_module_bias(module, mask):
 
 
 def propogate_module_bias(module, mask):
+    r"""
+    In the case that we need to propogate biases, this function will return the biases we need
+    """
     # set current module bias
     if module.bias is not None:
         module.bias = nn.Parameter(module.bias[mask])

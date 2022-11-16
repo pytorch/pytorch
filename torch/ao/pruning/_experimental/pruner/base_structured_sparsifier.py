@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.fx import symbolic_trace
 from torch.nn.utils import parametrize
-from typing import Type, Set
+from typing import Type, Set, Dict, Callable, Tuple, Any
 
 from torch.ao.pruning import BaseSparsifier
 from .parametrization import FakeStructuredSparsity, BiasHook
@@ -74,12 +74,15 @@ SUPPORTED_ACTIVATION_MODULES = {
     nn.Tanhshrink,
 }
 
-def get_default_patterns():
-    patterns = {
-        #linear -> linear
+def get_default_structured_pruning_patterns():
+    """
+    Returns the patterns for conv2d / linear conversion for each element in the activation functions/modules defined above.
+    """
+    patterns: Dict[Tuple[Any, ...], Callable] = {
+        # linear -> linear
         (nn.Linear, "output"): convert_linear,
         (nn.Linear, nn.Linear): convert_linear_linear,
-        #conv2d -> conv2d
+        # conv2d -> conv2d
         (nn.Conv2d, "output"): convert_conv2d,
         (nn.Conv2d, nn.Conv2d): convert_conv2d_conv2d,
     }
@@ -108,6 +111,8 @@ def get_default_patterns():
         })
     return patterns
 
+SUPPORTED_STRUCTURED_PRUNING_PATTERNS = get_default_structured_pruning_patterns()
+
 
 class BaseStructuredSparsifier(BaseSparsifier):
     r"""Base class for structured pruning.
@@ -122,10 +127,8 @@ class BaseStructuredSparsifier(BaseSparsifier):
             be updated.
     """
 
-    def __init__(self, defaults, patterns=None):
+    def __init__(self, defaults, patterns=SUPPORTED_STRUCTURED_PRUNING_PATTERNS):
         super().__init__(defaults)
-        if patterns is None:
-            patterns = get_default_patterns()
         self.patterns = patterns
 
     def make_config_from_model(
@@ -173,7 +176,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
         defined in self.patterns (by default SUPPORTED_STRUCTURED_PRUNING_PATTERNS ).
 
         For each pattern, it will apply to corresponding conversion function, which will modify the output
-        and input size expected between each block
+        and input size expected by the modules within the pattern
         """
 
         self.traced = symbolic_trace(self.model)
@@ -187,7 +190,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                 if matched is not None:
                     first_module = modules.get(node.target)
 
-                    #check if first module has a FakeStructuredSparsity parameterization, otherwise skip
+                    # check if first module exists and has a FakeStructuredSparsity parameterization, otherwise skip
                     if (
                         first_module is not None
                         and parametrize.is_parametrized(first_module)
