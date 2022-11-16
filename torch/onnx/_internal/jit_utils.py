@@ -382,3 +382,13 @@ def parse_node_kind(kind: str) -> Tuple[str, str]:
 def is_aten(domain: str) -> bool:
     """Check if the domain is official."""
     return domain == "aten"
+
+@_beartype.beartype
+def is_prim(domain: str) -> bool:
+    """Check if the domain is official."""
+    return domain == "prim"
+
+@_beartype.beartype
+def is_onnx(domain: str) -> bool:
+    """Check if the domain is official."""
+    return domain == "onnx"

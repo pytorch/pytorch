@@ -538,7 +538,6 @@ If an operator is not a standard ONNX op, but can be composed of multiple existi
 You can export it by following this example::
 
     import onnxscript
-    # target on opset version 15, as CatsLike supported since 15
     # There are three opset version needed to be aligned
     # This is (1) the opset version in ONNX function
     from onnxscript.onnx_opset import opset15 as op
@@ -551,8 +550,6 @@ You can export it by following this example::
 
     @onnxscript.script(custom_opset)
     def Selu(X):
-        # onnx/ort doesn't support default values for now
-        # you can move this to parameters when they do
         alpha = 1.67326  # auto wrapped as Constants
         gamma = 1.0507
         alphaX = op.CastLike(alpha, X)
@@ -583,7 +580,7 @@ You can export it by following this example::
         "model.onnx",
         opset_version=opset_version,
         # only needed if you want to specify an opset version > 1.
-        custom_opsets={"custom_domain": 2}
+        custom_opsets={"onnx-script": 2}
     )
 
 The example above exports it as a custom operator in the "onnx-script" opset.
