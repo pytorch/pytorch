@@ -1,7 +1,6 @@
 import contextlib
 import ctypes
 import inspect
-import logging
 import sys
 import types
 from abc import ABC
