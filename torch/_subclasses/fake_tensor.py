@@ -821,31 +821,6 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        # If there's a Python meta, prefer that over the decomposition
-        from torch._decomp import meta_table as meta_table
-
-        if func not in meta_table and not self.cpp_meta_supports_symint(func):
-            from torch._decomp import decomposition_table
-
-            # Prefer Python decompositions over C++ ones
-            if func in decomposition_table and (
-                has_symbolic_sizes
-                or (
-                    # TODO: Remove these exclusions, so that we can remove
-                    # this leg entirely
-                    torch_decomp_decompositions(func)
-                    and all(not e.is_sparse for e in flat_arg_fake_tensors)
-                )
-            ):
-                with self:
-                    return decomposition_table[func](*args, **kwargs)
-
-            with self:
-                # Decomposes CompositeImplicitAutograd ops
-                r = func.decompose(*args, **kwargs)
-                if r is not NotImplemented:
-                    return r
-
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
         # and ensure that Meta kernels are dispatched to (see)
