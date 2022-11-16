@@ -33,6 +33,7 @@ jobs:
       build-environment: linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck
       docker-image: ${{ needs.linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build.outputs.test-matrix }}
+      timeout-minutes: 300
 
   linux-focal-rocm5_2-py3_8-slow-build:
     name: linux-focal-rocm5.2-py3.8-slow
