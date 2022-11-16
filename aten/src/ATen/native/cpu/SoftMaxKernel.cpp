@@ -46,13 +46,13 @@ inline void _vec_log_softmax_lastdim(
       (int64_t)1, (int64_t)(BLOCK_SIZE / (sizeof(scalar_t) * dim_size)));
   // usually, we'll use all the threads in the OpenMP thread pool
   int64_t grain_size = (outer_size - 1) / (at::get_num_threads() - 1);
-  // assign fewer threads if computations are not large enough
+  // assign fewer threads if the number of computations is not large enough
   int64_t num_computations = 16 * outer_size * dim_size;
   if ((num_computations < at::get_num_threads() * at::internal::GRAIN_SIZE) &&
       (num_computations >= 2 * at::internal::GRAIN_SIZE)) {
     int64_t fewer_threads = num_computations / at::internal::GRAIN_SIZE + 1;
     grain_size = outer_size / (fewer_threads - 1);
-  } else if (16 * outer_size * dim_size <= at::internal::GRAIN_SIZE) {
+  } else if (num_computations <= at::internal::GRAIN_SIZE) {
     // only 1 thread will be used
     grain_size = outer_size;
   }
