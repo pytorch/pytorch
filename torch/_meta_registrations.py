@@ -1781,7 +1781,6 @@ def meta_scatter_add(self, dim, index, src):
     scatter_meta_impl(self, dim, index, src, "add")
     return self.new_empty(self.shape)
 
-
 def rnn_cell_checkSizes(
     input_gates, hidden_gates, input_bias, hidden_bias, factor, prev_hidden
 ):
@@ -1953,22 +1952,13 @@ def multiply_integers(vs):
 
 
 def upsample_2d_common_check(input_size, output_size):
-    check(
-        len(output_size) == 2,
-        lambda: f"It is expected output_size equals to 2, but got size {len(output_size)}",
-    )
-    check(
-        len(input_size) == 4,
-        lambda: f"It is expected input_size equals to 4, but got size {len(input_size)}",
-    )
+    check(len(output_size) == 2, lambda: f"It is expected output_size equals to 2, but got size {len(output_size)}")
+    check(len(input_size) == 4, lambda: f"It is expected input_size equals to 4, but got size {len(input_size)}")
 
     output_height, output_width = output_size
     nbatch, channels, input_height, input_width = input_size
 
-    check(
-        input_height > 0 and input_width > 0 and output_height > 0 and output_width > 0,
-        f"Input and output sizes should be greater than 0, but got input (H: {input_height}, W: {input_width}), output (H: {output_height}), W: {output_width})",
-    )
+    check(input_height > 0 and input_width > 0 and output_height > 0 and output_width > 0, f"Input and output sizes should be greater than 0, but got input (H: {input_height}, W: {input_width}), output (H: {output_height}), W: {output_width})")
 
     return (nbatch, channels, output_height, output_width)
 
@@ -1976,13 +1966,9 @@ def upsample_2d_common_check(input_size, output_size):
 @register_meta(aten.upsample_nearest2d.default)
 def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
     full_output_size = upsample_2d_common_check(input.size(), output_size)
-    check(
-        input.numel() != 0 or multiply_integers(input.size()[1:]),
-        lambda: "Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
-    )
-    return input.new_empty(full_output_size).to(
-        memory_format=utils.suggest_memory_format(input)
-    )
+    check(input.numel() != 0 or multiply_integers(input.size()[1:]),
+        lambda: "Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}")
+    return input.new_empty(full_output_size).to(memory_format=utils.suggest_memory_format(input))
 
 
 @register_meta([aten.sort.default, aten.sort.stable])
@@ -2073,9 +2059,7 @@ def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has
     if grad_hy is None and grad_cy is None:
         return None, None, None
     checkLSTMBackwardSizes(grad_hy, grad_cy, cx, cy, workspace)
-    grad_gates = torch.empty_like(
-        workspace, memory_format=legacy_contiguous_memory_format
-    )
+    grad_gates = torch.empty_like(workspace, memory_format=legacy_contiguous_memory_format)
     grad_cx = torch.empty_like(cx, memory_format=legacy_contiguous_memory_format)
     grad_bias = grad_gates.sum(0, keepdim=False) if has_bias else None
     return grad_gates, grad_cx, grad_bias
