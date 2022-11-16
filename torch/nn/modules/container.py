@@ -286,7 +286,7 @@ class ModuleList(Module, Sequence[T]):
         ...
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: Union[int, slice]) -> Union[T, 'ModuleList'[T]]:
+    def __getitem__(self, idx: Union[int, slice]) -> Union[T, 'ModuleList[T]']:
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
         else:
@@ -314,10 +314,10 @@ class ModuleList(Module, Sequence[T]):
     def __iter__(self) -> Iterator[T]:
         return iter(self._modules.values())
 
-    def __iadd__(self, modules: Iterable[T]) -> 'ModuleList'[T]:
+    def __iadd__(self, modules: Iterable[T]) -> 'ModuleList[T]':
         return self.extend(modules)
 
-    def __add__(self, other: Iterable[T]) -> 'ModuleList'[T]:
+    def __add__(self, other: Iterable[T]) -> 'ModuleList[T]':
         combined: ModuleList[T] = ModuleList()
         for i, module in enumerate(chain(self, other)):
             combined.add_module(str(i), module)
@@ -340,7 +340,7 @@ class ModuleList(Module, Sequence[T]):
             self._modules[str(i)] = self._modules[str(i - 1)]
         self._modules[str(index)] = module
 
-    def append(self, module: T) -> 'ModuleList'[T]:
+    def append(self, module: T) -> 'ModuleList[T]':
         r"""Appends a given module to the end of the list.
 
         Args:
@@ -357,12 +357,12 @@ class ModuleList(Module, Sequence[T]):
     def pop(self, key: slice) -> 'ModuleList[T]':
         ...
 
-    def pop(self, key: Union[int, slice]) -> Union[T, 'ModuleList'[T]]:
+    def pop(self, key: Union[int, slice]) -> Union[T, 'ModuleList[T]']:
         v = self[key]
         del self[key]
         return v
 
-    def extend(self, modules: Iterable[T]) -> 'ModuleList'[T]:
+    def extend(self, modules: Iterable[T]) -> 'ModuleList[T]':
         r"""Appends modules from a Python iterable to the end of the list.
 
         Args:
