@@ -4085,44 +4085,57 @@ def new_full(
 
 @register_decomposition(torch.ops.aten.empty_like)
 def empty_like(
-    a: TensorLikeType,
+    self: TensorLikeType,
     *,
     dtype: Optional[torch.dtype] = None,
     device: Optional[torch.device] = None,
     layout: Optional[torch.layout] = None,
-    pin_memory: bool = False,
+    pin_memory: Optional[bool] = None,
+    memory_format: Optional[torch.memory_format] = None,
+    # NB: this is never set from ATen
     requires_grad: bool = False,
-    memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
 
-    dtype = a.dtype if dtype is None else dtype
-    layout = a.layout if layout is None else layout
-    device = a.device if device is None else device
+    dtype = self.dtype if dtype is None else dtype
+    layout = self.layout if layout is None else layout
+    device = self.device if device is None else device
+    pin_memory = False if pin_memory is None else pin_memory
 
-    strides: Tuple[int, ...]
+    # does NOT include memory format
+    options = {
+        "dtype": dtype,
+        "layout": layout,
+        "device": device,
+        "pin_memory": pin_memory,
+    }
 
-    if memory_format != torch.preserve_format:
-        return torch.empty(
-            a.shape,
-            dtype=dtype,
-            layout=layout,
-            device=device,
-            requires_grad=requires_grad,
-            pin_memory=pin_memory,
-            memory_format=memory_format,
-        )
-
-    # memory_format == torch.preserve_format
-    strides = utils.compute_elementwise_output_strides(a)
-    return torch.empty_strided(
-        a.shape,
-        strides,
-        dtype=dtype,
-        layout=layout,
-        device=device,
-        pin_memory=pin_memory,
-        requires_grad=requires_grad,
+    check(
+        not (layout != torch.strided and memory_format is not None),
+        lambda: "memory format option is only supported by strided tensors",
     )
+
+    memory_format = (
+        memory_format if memory_format is not None else torch.preserve_format
+    )
+
+    if memory_format == torch.preserve_format:
+        if utils.is_non_overlapping_and_dense(self):
+            result = torch.empty_strided(self.size(), self.stride(), **options)
+        # TODO: test if support_as_strided()
+        elif self.layout == torch.strided:
+            strides = utils.compute_elementwise_output_strides(self)
+            result = torch.empty_strided(self.size(), strides, **options)
+        else:
+            result = torch.empty(
+                self.size(), memory_format=utils.suggest_memory_format(self), **options
+            )
+    else:
+        result = torch.empty(self.size(), memory_format=memory_format, **options)
+
+    if requires_grad:
+        result.requires_grad_(requires_grad)
+
+    return result
 
 
 @register_decomposition(

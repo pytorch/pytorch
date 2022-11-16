@@ -823,12 +823,6 @@ class FakeTensorMode(TorchDispatchMode):
 
         from torch._decomp import decomposition_table
 
-        with self:
-            # Decomposes CompositeImplicitAutograd ops
-            r = func.decompose(*args, **kwargs)
-            if r is not NotImplemented:
-                return r
-
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
         if has_symbolic_sizes and not self.cpp_meta_supports_symint(func):
             from torch._decomp import meta_table as meta_table
