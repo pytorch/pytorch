@@ -149,9 +149,10 @@ Tensor repeat_interleave_mps(const Tensor& repeats,c10::optional<int64_t> output
   NSNumber repeats_shape;
 
   if (output_size.has_value()) {
-    repeats_shape = output_size.value();
+    repeats_shape = [NSNumber numberWithInteger:output_size.value()];
   } else {
-    repeats_shape = cumsum[-1].item<int64_t>();
+    Tensor cumsum = repeats.cumsum(0);
+    repeats_shape = [NSNumber numberWithInteger:cumsum[-1].item<int64_t>()];
     TORCH_CHECK(
         (repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
   }
@@ -159,7 +160,7 @@ Tensor repeat_interleave_mps(const Tensor& repeats,c10::optional<int64_t> output
 
   @autoreleasepool {
     // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types etc match the earlier created MPSGraph
-    string key = "repeat_interleave_mps:" + ":" + getTensorsStringKey({repeats}) + output_size;
+    string key = "repeat_interleave_mps:" + getTensorsStringKey({repeats})+ ":" + string([repeats_shape UTF8String]);
 
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
