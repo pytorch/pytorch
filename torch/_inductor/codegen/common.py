@@ -417,6 +417,12 @@ class CSEVariable:
     def __str__(self):
         return self.name
 
+    def __hash__(self) -> int:
+        return hash(self.name)
+
+    def __eq__(self, other) -> bool:
+        return type(other) == type(self) and other.name == self.name
+
     def update_on_args(self, args, kwargs):
         pass
 
