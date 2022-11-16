@@ -160,7 +160,7 @@ Tensor repeat_interleave_mps(const Tensor& repeats,c10::optional<int64_t> output
 
   @autoreleasepool {
     // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types etc match the earlier created MPSGraph
-    string key = "repeat_interleave_mps:" + getTensorsStringKey({repeats})+ ":" + string([repeats_shape UTF8String]);
+    string key = "repeat_interleave_mps:" + getTensorsStringKey({repeats})+ ":" + string(repeats_shape);
 
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
