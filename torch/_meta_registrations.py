@@ -1522,7 +1522,12 @@ def zeros_like(
         res._coalesced_(True)
         return res
     return aten.empty_like.default(
-        self, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory, memory_format=memory_format
+        self,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
     )
 
 
