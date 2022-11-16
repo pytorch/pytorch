@@ -23,7 +23,7 @@ install_ubuntu() {
 
 install_binary() {
   echo "Downloading sccache binary from S3 repo"
-  curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache
+  curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache
 }
 
 mkdir -p /opt/cache/bin
@@ -33,7 +33,7 @@ export PATH="/opt/cache/bin:$PATH"
 
 # Setup compiler cache
 if [ -n "$ROCM_VERSION" ]; then
-  curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
+  curl --retry 3 --retry-all-errors http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
 else
   ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
   case "$ID" in

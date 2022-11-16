@@ -16,7 +16,7 @@ _swiftshader_file_targz=swiftshader-abe07b943-prebuilt.tar.gz
 mkdir -p $_swiftshader_dir
 _tmp_swiftshader_targz="/tmp/${_swiftshader_file_targz}"
 
-curl --silent --show-error --location --fail --retry 3 \
+curl --silent --show-error --location --fail --retry 3 --retry-all-errors \
   --output "${_tmp_swiftshader_targz}" "$_https_amazon_aws/${_swiftshader_file_targz}"
 
 tar -C "${_swiftshader_dir}" -xzf "${_tmp_swiftshader_targz}"
