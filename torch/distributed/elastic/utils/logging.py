@@ -46,19 +46,21 @@ def _derive_module_name(depth: int = 1) -> Optional[str]:
         depth: The position of the frame in the stack.
     """
     try:
-        stack = inspect.stack()
-        assert depth < len(stack)
-        # FrameInfo is just a named tuple: (frame, filename, lineno, function, code_context, index)
-        frame_info = stack[depth]
+        frame = inspect.currentframe()
+        i = 0
+        while i < depth:
+            assert frame is not None
+            frame = frame.f_back
+            i += 1
 
-        module = inspect.getmodule(frame_info[0])
+        module = inspect.getmodule(frame)
         if module:
             module_name = module.__name__
         else:
             # inspect.getmodule(frame_info[0]) does NOT work (returns None) in
             # binaries built with @mode/opt
             # return the filename (minus the .py extension) as modulename
-            filename = frame_info[1]
+            filename = frame.f_code.co_filename
             module_name = os.path.splitext(os.path.basename(filename))[0]
         return module_name
     except Exception as e:
