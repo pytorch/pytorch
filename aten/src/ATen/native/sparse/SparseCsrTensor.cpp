@@ -750,16 +750,17 @@ Tensor empty_like_sparse_csr(
 
 template <bool require_view, bool require_copy>
 Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) {
+  constexpr auto select_name = (require_view ? "select()" : "select_copy()");
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
-      self.layout(), "select()", []() { return; });
+      self.layout(), select_name, []() { return; });
   TORCH_CHECK_INDEX(
-      self.dim() != 0, "select() cannot be applied to a 0-dim tensor.");
+      self.dim() != 0, select_name, " cannot be applied to a 0-dim tensor.");
   dim = maybe_wrap_dim(dim, self.dim());
   auto size = self.size(dim);
   if (index < -size || index >= size) {
     TORCH_CHECK_INDEX(
         false,
-        "select(): index ",
+        select_name, ": index ",
         index,
         " out of range for tensor of size ",
         self.sizes(),
@@ -789,7 +790,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
   std::tie(compressed_indices, plain_indices) =
       AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
           self.layout(),
-          "select",
+          select_name,
           [&]() {
             return std::make_pair(self.crow_indices(), self.col_indices());
           },
@@ -813,11 +814,11 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
     // Selecting sparse dimension
     TORCH_CHECK(
         n_batch == 0,
-        "select(): selecting sparse dimensions is not implemented for batched sparse compressed tensors.")
+        select_name, ": selecting sparse dimensions is not implemented for batched sparse compressed tensors.")
     TORCH_INTERNAL_ASSERT(dim == 0 || dim == 1);
 
     DimVector blocksize{1, 1};
-    AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "select()", [&] {}, [&] {
+    AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), select_name, [&] {}, [&] {
       blocksize[0] = std::max<int64_t>(1, self.values().size(n_batch + 1));
       blocksize[1] = std::max<int64_t>(1, self.values().size(n_batch + 2));
     });
@@ -828,67 +829,98 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
     }
 
     auto indices_options = compressed_indices.options();
-    int64_t fast_dim = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "select", [&]() { return 0; }, [&]() { return 1; });
+    int64_t fast_dim = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(self.layout(), select_name, [&]() { return 0; }, [&]() { return 1; });
     int64_t start = -1;
     int64_t end = -1;
+    int64_t select_nnz{};
     Tensor dim_indices;
     Tensor indices;
     Tensor values;
     bool is_copy = false;
     if (dim == fast_dim) {
+      // select is always a view operation
       Tensor start_end = compressed_indices.narrow(0, index / blocksize[0], 2).cpu();
-      AT_DISPATCH_INDEX_TYPES(start_end.scalar_type(), "select", [&]() {
-        auto start_end_accessor = start_end.accessor<index_t, 1>();
-        start = start_end_accessor[0];
-        end = start_end_accessor[1];
+      AT_DISPATCH_INDEX_TYPES(start_end.scalar_type(), select_name, [&]() {
+        auto accessor = start_end.accessor<index_t, 1>();
+        start = accessor[0];
+        end = accessor[1];
       });
       indices = plain_indices.slice(0, start, end);
       values = self.values().slice(0, start, end);
+      select_nnz = end - start;
     } else {
       dim_indices = at::where(plain_indices.eq(index / blocksize[0]))[0];
-      int64_t n = dim_indices.numel();
-      if (n == 0) {
+      // Assume that dim_indices is a sorted sequence of non-negative
+      // distinct integers. Below we'll try to solve `dim_indices ==
+      // arange(start, stop, step)`. If the solution exists then the
+      // select will be a view operation also for the `dim !=
+      // fast_dim` case.
+      select_nnz = dim_indices.numel();
+      int64_t step = -1;
+      if (select_nnz == 0) {
+        // trivial solution
         start = end = 0;
+        step = 1;
       } else {
         Tensor dim_indices_cpu = dim_indices.cpu();
-        AT_DISPATCH_INDEX_TYPES(dim_indices_cpu.scalar_type(), "select", [&]() {
+        AT_DISPATCH_INDEX_TYPES(dim_indices_cpu.scalar_type(), select_name, [&]() {
           auto accessor = dim_indices_cpu.accessor<index_t, 1>();
-          if (accessor[n-1] - accessor[0] == n - 1) {
+          if (accessor[select_nnz-1] - accessor[0] == select_nnz - 1) {
+            // special solution, avoids scanning dim_indices content
             start = accessor[0];
-            end = start + n;
+            end = start + select_nnz;
+            step = 1;
+          } else if (select_nnz > 1) {
+            // general solution, must scan the dim_indices content
+            int64_t step_candidate = accessor[1] - accessor[0];
+            for (int i=2; i<select_nnz; i++) {
+              if (accessor[i] - accessor[i-1] != step_candidate) {
+                step_candidate = 0;  // no solution
+                break;
+              }
+            }
+            if (step_candidate != 0) {
+              // found a general solution:
+              start = accessor[0];
+              end = start + select_nnz * step_candidate;
+              step = step_candidate;
+            }
           }
         });
       }
       indices = at::_convert_indices_from_csr_to_coo(compressed_indices, plain_indices)
         .select(0, 0);
       if (start != -1) {
-        indices = indices.slice(0, start, end);
-        values = self.values().slice(0, start, end);
+        indices = indices.slice(0, start, end, step);
+        values = self.values().slice(0, start, end, step);
       } else {
+        // select will be a copy operation due to index_select usage!
         indices = indices
           .index_select(0, dim_indices);
-        // values is a copy due to index_select!
         is_copy = true;
         values = self.values().index_select(0, dim_indices);
-        // although `start == -1` here, will use `end - start` to hold
-        // the value of `indices.size(0)`
-        end = indices.size(0) + start;
       }
     }
 
-    AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "select()",
+    AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), select_name,
         [&]() {},
         [&]() {
           Tensor subblock_indices = at::arange(0, blocksize[1], indices_options);
           indices = indices.mul(blocksize[1])
             .repeat_interleave(blocksize[1])
-            .add(subblock_indices.repeat(end - start));
-          // TODO: is flatten(0, 1) always a view?
+            .add(subblock_indices.repeat(select_nnz));
           values = values.select(1, index % blocksize[0]).flatten(0, 1);
+          // flatten(0, 1) can be a view or a copy operation. If view
+          // is required, it will be checked below via is_alias_of,
+          // otherwise, we'll check if copy is made here to avoid
+          // unnecessary clone below:
+          if (require_copy) {
+            is_copy = !values.is_alias_of(self.values());
+          }
         });
 
     if (require_view) {
-      TORCH_CHECK(!is_copy, "select(", dim, ", ", index, "): cannot return a view result for the given input and parameters");
+      TORCH_CHECK(values.is_alias_of(self.values()), select_name, ": no view exists for the given input");
     }
 
     indices = indices.unsqueeze(0).to(kLong);
@@ -900,7 +932,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
     // Selecting dense dimension
     return AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
         self.layout(),
-        "select",
+        select_name,
         // Non blocked layout (2 sparse dims become 1 nnz dim in values, so dim
         // is found one position to the left)
         [&]() { return select_strided(self.values(), dim - 1, index); },
