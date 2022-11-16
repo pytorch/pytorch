@@ -1468,7 +1468,7 @@ class TestSparseCSR(TestCase):
 
         def mm_kernel(*args, **kwargs):
             kernel_run[0] = True
-            return bsr_dense_mm(*args, **kwargs)
+            return bsr_dense_mm(*args, skip_checks=True, **kwargs)
 
         # Kernel overwrite
         lib = torch.library.Library("aten", "IMPL")
