@@ -84,7 +84,11 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
   if ((strided.scalar_type() == ScalarType::Half
     || strided.scalar_type() == ScalarType::BFloat16)
    && is_power_of_2(blocksize[0]) && is_power_of_2(blocksize[1])
-   && (blocksize[0] >= 16) && (blocksize[1] >= 16)) {
+   && (blocksize[0] >= 16) && (blocksize[1] >= 16)
+   // lhs is retiled to (b0, b1) while rhs is to (b1, b0),
+   // so the result is tiled to (b0, b0) and we need to make
+   // sure that dense.size(-1) is divisible by b0.
+   && n % blocksize[0] == 0) {
     const auto triton_kernel = c10::Dispatcher::singleton()
       .findOp(torch::jit::parseName("aten::_triton_bsr_dense_mm"));
     // Call Triton only if dispatch key was overwritten.

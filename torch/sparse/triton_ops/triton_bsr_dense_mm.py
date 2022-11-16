@@ -372,46 +372,62 @@ def bsr_dense_mm(
     bsr: torch.Tensor,
     dense: torch.Tensor,
     *,
+    skip_checks: bool = False,
     is_sparse_rowspace_mode: Optional[bool] = None,
-    out: torch.Tensor = None,
     max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+    out: Optional[torch.Tensor] = None,
 ):
+    m, kl = bsr.shape[-2:]
+    kr, n = dense.shape[-2:]
+
     def check(cond, msg):
         if not cond:
             raise ValueError(msg)
 
-    check(
-        bsr.device == dense.device and bsr.device.type == "cuda",
-        "bsr_dense_mm(): all inputs are expected to be on the same GPU device.",
-    )
-    check(
-        bsr.dtype == dense.dtype
-        and bsr.dtype in (torch.half, torch.bfloat16, torch.float),
-        "bsr_dense_mm(): all inputs are expected to be of the same dtype "
-        "and one of (half, bfloat16, float32), "
-        f"but got bsr.dtype == {bsr.dtype} and dense.dtype == {dense.dtype}.",
-    )
+    if not skip_checks:
+        check(
+            bsr.layout == torch.sparse_bsr,
+            "bsr_dense_mm(): only BSR sparse format is supported for the sparse argument.",
+        )
 
-    check(
-        bsr.dim() >= 2 and dense.dim() >= 2,
-        "bsr_dense_mm(): all inputs are expected to be at least 2D, "
-        f"but got bsr.dim() == {bsr.dim()} and dense.dim() == {dense.dim()}.",
-    )
+        check(
+            bsr.device == dense.device and bsr.device.type == "cuda",
+            "bsr_dense_mm(): all inputs are expected to be on the same GPU device.",
+        )
 
-    m, kl = bsr.shape[-2:]
-    kr, n = dense.shape[-2:]
-    check(
-        kl == kr,
-        "bsr_dense_mm(): argument sizes are not compatible for matrix multiplication, "
-        f"got bsr.shape[-1] == {kl} which is not equal to dense.shape[-2] == {kr}.",
-    )
+        check(
+            bsr.dtype == dense.dtype
+            and bsr.dtype in (torch.half, torch.bfloat16, torch.float),
+            "bsr_dense_mm(): all inputs are expected to be of the same dtype "
+            "and one of (half, bfloat16, float32), "
+            f"but got bsr.dtype == {bsr.dtype} and dense.dtype == {dense.dtype}.",
+        )
+
+        check(
+            bsr.dim() >= 2 and dense.dim() >= 2,
+            "bsr_dense_mm(): all inputs are expected to be at least 2D, "
+            f"but got bsr.dim() == {bsr.dim()} and dense.dim() == {dense.dim()}.",
+        )
+
+        check(
+            kl == kr,
+            "bsr_dense_mm(): argument sizes are not compatible for matrix multiplication, "
+            f"got bsr.shape[-1] == {kl} which is not equal to dense.shape[-2] == {kr}.",
+        )
+
+        row_block = bsr.values().shape[-2]
+        check(
+            not n % row_block,
+            f"bsr_dense_mm(): dense.size(-1) == {n} should be divisible by "
+            f"blocksize[0] == {row_block}.",
+        )
 
     # Required to undo the fake batch dimension insertion.
     original_batch_dims_broadcasted = torch.broadcast_shapes(
         bsr.shape[:-2], dense.shape[:-2]
     )
 
-    if out is not None:
+    if out is not None and not skip_checks:
         expected_out_shape = original_batch_dims_broadcasted + (m, n)
         check(
             out.shape == expected_out_shape,
