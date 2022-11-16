@@ -546,7 +546,6 @@ def get_fqn_to_example_inputs(
         torch.nn.Module.__call__ = orig_module_call
     return fqn_to_example_inputs
 
-
 __all__ = [
     "NodePattern",
     "Pattern",
