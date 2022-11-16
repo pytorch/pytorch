@@ -8740,7 +8740,7 @@ op_db: List[OpInfo] = [
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    active_if=TEST_WITH_ROCM, device_type='cuda'),
+                                    active_if=TEST_WITH_ROCM, device_type='cuda', dtypes=[torch.complex64, torch.complex128]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     active_if=TEST_WITH_ROCM, device_type='cuda', dtypes=[torch.complex128]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
@@ -9312,9 +9312,6 @@ op_db: List[OpInfo] = [
            skips=(
                # cumprod does not handle correctly out= dtypes
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               # RuntimeError: "prod_cpu" not implemented for 'BFloat16'
-               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
-                            dtypes=(torch.bfloat16,), device_type='cpu'),
            ),
            # gradgradcheck fails in fast_mode=True: #56275
            sample_inputs_func=sample_inputs_cumprod,
@@ -9937,21 +9934,6 @@ op_db: List[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-
-               # cpu implementation is wrong on some integral types
-               # https://github.com/pytorch/pytorch/issues/81996
-               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
-               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
-               # cuda implementation is off-by-one on some inputs due to precision issues
-               # https://github.com/pytorch/pytorch/issues/82230
-               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
-                            dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
-                            device_type="cuda"),
-               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
-                            dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
-                            device_type="cuda"),
                # UserWarning: CUDA caching allocator reports a memory leak not verified by the driver API
                # in __main__.TestJitCUDA.test_variant_consistency_jit_logspace_cuda_complex64!
                # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
@@ -13320,9 +13302,6 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=(IS_MACOS or IS_WINDOWS)),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cuda', dtypes=[torch.float64],
-                                    active_if=TEST_WITH_ROCM),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    ),
@@ -13841,11 +13820,7 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon'),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    active_if=TEST_WITH_ROCM),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    active_if=TEST_WITH_ROCM),),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 2}, {'n': 2}),
                    # polygamma functions have multiple singularities at x <= 0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
@@ -13888,11 +13863,7 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon'),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    active_if=TEST_WITH_ROCM),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    active_if=TEST_WITH_ROCM),),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 4}, {'n': 4}),
                    # polygamma functions have multiple singularities at x <= 0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
@@ -16467,7 +16438,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         promotes_int_to_int64=True,
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-        dtypes=all_types_and_complex_and(torch.bool),
+        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_prod,
         ref=reference_reduction_numpy(np.prod),
@@ -16976,9 +16947,9 @@ python_ref_db = [
             # cpu implementation is wrong on some integral types
             # https://github.com/pytorch/pytorch/issues/81996
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
+                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64), device_type="cpu"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
+                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64), device_type="cpu"),
 
             # cuda implementation is off-by-one on some inputs due to precision issues
             # https://github.com/pytorch/pytorch/issues/82230
