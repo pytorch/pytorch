@@ -7693,10 +7693,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         )
 
         for (out_shape, src_shape, is_ok), (out_dtype, src_dtype) in itertools.product(cases, dtypes):
-            out = torch.ones(out_shape, dtype=out_dtype)
-            src = torch.ones(src_shape, dtype=src_dtype)
+            out = torch.zeros(out_shape, dtype=out_dtype, device=torch.device('cpu'))
+            src = torch.ones(src_shape, dtype=src_dtype, device=torch.device('cpu'))
             if is_ok:
-                out.copy_(src)
+                res = out.copy_(src)
+                out_cuda = torch.zeros(out_shape, dtype=out_dtype, device=torch.device('cuda'))
+                src_cuda = torch.ones(src_shape, dtype=src_dtype, device=torch.device('cuda'))
+                res_cuda = out_cuda.copy_(src_cuda)
+                self.assertEqual(res, res_cuda)
             else:
                 self.assertRaises(RuntimeError, lambda: out.copy_(src))
 
