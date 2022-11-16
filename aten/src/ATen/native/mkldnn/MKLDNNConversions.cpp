@@ -183,7 +183,8 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    c10::OptionalArrayRef<int64_t> input_size) {
   TORCH_CHECK(false, "mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
 }
 

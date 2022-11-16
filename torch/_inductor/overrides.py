@@ -738,7 +738,10 @@ def packed_module(gm: torch.fx.GraphModule):
             assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in computation_op_packed_map:
-                computation_node_input_size = node.args[0].meta.get("tensor_meta").shape
+                computation_node_input_meta = node.args[0].meta.get("tensor_meta")
+                if computation_node_input_meta.dtype != torch.float32:
+                    continue
+                computation_node_input_size = computation_node_input_meta.shape
                 new_module = computation_op_packed_map[type(cur_module)](
                     cur_module, computation_node_input_size
                 )
