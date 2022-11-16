@@ -358,7 +358,6 @@ Tensor mkl_linear(
   auto M = std::accumulate(
       input_size.begin(), input_size.end() - 1, static_cast<int64_t>(0));
   if (M == prepack_batch_size && mkl_weight_t.is_mkldnn()) {
-    std::cout << "begin running.................." << std::endl;
     auto self_ = self.is_contiguous() ? self : self.contiguous();
     auto K = origin_weight_t.size(1);
     auto N = origin_weight_t.size(0);
