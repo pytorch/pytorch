@@ -619,10 +619,6 @@ def create_aot_dispatcher_function(
     """
 
     # This is the main entry point.
-    # TODO: Chillee argues that dynamo itself should pass in fake tensors to
-    # the list of arguments when compiling; at the moment we do not do this
-    # NOTE: see note [On the state of aot_autograd caching]
-
     if aot_config.decompositions is None:
         aot_config.decompositions = {}
 
@@ -692,22 +688,6 @@ class PytreeThunk:
 
 KNOWN_TYPES = [torch.Tensor, int, str, float, bool, torch.SymInt, torch.SymFloat]
 
-
-# NOTE: This is here temporarily until we unify dynamo and functorch configs
-def _produce_or_verify_shape_env(shape_env):
-    if shape_env is not None:
-        # TODO(voz): Merge this config w/ dynamo config?
-        assert config.use_dynamic_shapes, "ShapeEnv propogated but dynamic shapes not enabled"
-
-    if config.use_dynamic_shapes:
-        assert config.use_fake_tensor, "Dynamic shapes only works with fake tensor"
-
-    if shape_env is None:
-        global _enforce_shape_env_passed_in
-        assert (_enforce_shape_env_passed_in == False), "Shape env must be passed in"
-        shape_env = ShapeEnv() if config.use_dynamic_shapes else None
-
-    return shape_env
 
 def aot_function(
     fn: Callable,
@@ -823,7 +803,7 @@ def aot_function(
                 out_spec.set(spec)
                 return flat_out
 
-            shape_env = _produce_or_verify_shape_env(None)
+            shape_env = ShapeEnv() if config.use_dynamic_shapes else None
             fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
             # create_aot_dispatcher_function assumes fake inputs
             # aot_function is the "public" entrypoint, so we need to process here
@@ -927,8 +907,11 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
     params_flat = tuple(params_flat)
     params_len = len(params_flat)
 
-    shape_env = _produce_or_verify_shape_env(top_kwargs["shape_env"])
-    fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
+
+    fake_mode = None
+    if "fake_mode" in top_kwargs and config.use_fake_tensor:
+        fake_mode = top_kwargs["fake_mode"]
+
     # TODO(voz): Pull up to dynamo
     def fakify_params_and_buffers(flat_args):
         if config.use_fake_tensor:
@@ -964,7 +947,7 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
                 "have tuple outputs or use aot_module instead."
             )
         return out
-        
+
 
     def aot_function_simplified(
         fn: Callable,
@@ -974,7 +957,7 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
         decompositions: Optional[Dict] = None,
         hasher_type=None,
         static_argnums=None,
-        shape_env: Optional[ShapeEnv] = None
+        fake_mode = None
     ) -> Callable:
         assert static_argnums is None
         if bw_compiler is None:

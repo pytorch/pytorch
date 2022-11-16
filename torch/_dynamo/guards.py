@@ -451,7 +451,7 @@ class GuardBuilder:
             self.ID_MATCH(guard)
             if not config.dynamic_shapes:
                 # For dynamic shapes, we want to proceed to record tensor names
-                return 
+                return
 
         value = self.get(guard.name)
         tensor_name = self.arg_ref(guard)
@@ -617,8 +617,12 @@ class CheckFunctionManager:
         )
         global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if not config.guard_nn_modules and guard.is_nn_module() and guard.create_fn != GuardBuilder.TENSOR_MATCH:
-                # The `guard.create_fn != GuardBuilder.TENSOR_MATCH:` part is 
+            if (
+                not config.guard_nn_modules
+                and guard.is_nn_module()
+                and guard.create_fn != GuardBuilder.TENSOR_MATCH
+            ):
+                # The `guard.create_fn != GuardBuilder.TENSOR_MATCH:` part is
                 # an exception to not guarding on nn_module properties
                 # In dynamic shapes mode, we sometimes get "weights" "bias" or other registered/named buffers
                 # accesed. We need to install their TENSOR_MATCH guards

@@ -88,12 +88,12 @@ class AotAutogradStrategy(object):
     """Base class for backend strategies that use AOT Autograd"""
 
     @classmethod
-    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs, shape_env=None):
+    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs, fake_mode=None):
         if count_calls(gm.graph) < 2:
             return gm  # no point for tiny graphs
-        return cls(gm, example_inputs, shape_env).verified_candidate()
+        return cls(gm, example_inputs, fake_mode).verified_candidate()
 
-    def __init__(self, gm: torch.fx.GraphModule, example_inputs, shape_env):
+    def __init__(self, gm: torch.fx.GraphModule, example_inputs, fake_mode):
         import functorch.compile
 
         functorch.compile.config.use_functionalize = True
@@ -104,7 +104,7 @@ class AotAutogradStrategy(object):
         self.use_fallback = False
         self.original_example_inputs = example_inputs
         self.gm = gm
-        self.shape_env = shape_env
+        self.fake_mode = fake_mode
 
         if not functorch.compile.config.use_functionalize and config.normalize_ir:
             try:
@@ -119,7 +119,13 @@ class AotAutogradStrategy(object):
 
     @property
     def example_inputs(self):
-        return self.original_example_inputs
+        if config.fake_tensor_propagation:
+            # clone_inputs just recreates the tensors, as far as I can see,
+            # with their respective sizes and strides except with zeros
+            # with fake tensors, there is no need to do so, and in fact, it can throw
+            # on some of the `needed_size` logic if size is backed by a SymInt
+            return self.original_example_inputs
+        return clone_inputs(self.original_example_inputs)
 
     def verified_candidate(self):
         if self.use_fallback:
@@ -149,7 +155,7 @@ class AotNop(AotAutogradStrategy):
             self.gm,
             self.example_inputs,
             fw_compiler=debug_nop if DEBUG else nop,
-            shape_env=self.shape_env,
+            fake_mode=self.fake_mode,
         )
 
 

@@ -266,19 +266,18 @@ class WrapperBackend:
     def example_inputs(self):
         return clone_inputs(self.original_example_inputs)
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs, shape_env):
-
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs, fake_mode):
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
-        needs_shape_env = False
+        needs_fake_tensor = False
         # This is temporary, hopefully, while we decide if we want the
         # user provided compiler signature to have a **kwargs
-        if shape_env and "shape_env" in signature(self.backend).parameters.keys():
-            needs_shape_env = True
+        if fake_mode and "fake_mode" in signature(self.backend).parameters.keys():
+            needs_fake_tensor = True
             self.candidate = self.backend(
-                copy_gm, self.original_example_inputs, shape_env
+                copy_gm, self.original_example_inputs, fake_mode
             )
         else:
             self.candidate = self.backend(copy_gm, self.original_example_inputs)
@@ -294,8 +293,8 @@ class WrapperBackend:
             correct = self.gm.forward(*self.example_inputs)
             # This is temporary, hopefully, while we decide if we want the
             # user provided compiler signature to have a **kwargs
-            if needs_shape_env:
-                result = self.candidate(*self.example_inputs, shape_env=shape_env)
+            if needs_fake_tensor:
+                result = self.candidate(*self.example_inputs, fake_tensor=fake_tensor)
             else:
                 result = self.candidate(*self.example_inputs)
 
@@ -511,7 +510,7 @@ def export(
         out_guards = guards
 
     def dynamo_normalization_capturing_compiler(
-        gm: torch.fx.GraphModule, example_inputs, shape_env
+        gm: torch.fx.GraphModule, example_inputs, fake_tensor
     ):
         nonlocal graph
 

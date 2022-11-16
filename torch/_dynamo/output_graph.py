@@ -429,7 +429,7 @@ class OutputGraph(fx.Tracer):
         name = unique_id("__compiled_fn")
 
         compiled_fn = self.call_user_compiler(gm)
-        
+
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
@@ -461,9 +461,9 @@ class OutputGraph(fx.Tracer):
                 else ""
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            if "shape_env" in signature(self.compiler_fn).parameters.keys():
+            if "fake_mode" in signature(self.compiler_fn).parameters.keys():
                 compiled_fn = self.compiler_fn(
-                    gm, self.example_inputs(), shape_env=self.shape_env
+                    gm, self.example_inputs(), fake_mode=self.fake_mode
                 )
             else:
                 compiled_fn = self.compiler_fn(gm, self.example_inputs())
