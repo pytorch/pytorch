@@ -583,7 +583,7 @@ class TapeManagerContainer(object):
             output_refs = tape.recorded_outputs_weakrefs
 
         return [
-            t
+            t()
             for sublist in output_refs
             for t in sublist
             if t is not None and t() is not None
