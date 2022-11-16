@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
 #include <tuple>
+#include <typeinfo>
 
 namespace torch {
 namespace jit {
@@ -82,12 +83,12 @@ bool IterDomainGraph::exprsMap(
     return false;
   }
 
-  if (first->etype() != second->etype()) {
+  if (typeid(*first) != typeid(*second)) {
     return false;
   }
 
   TORCH_INTERNAL_ASSERT(
-      first->etype() == ExprType::Merge || first->etype() == ExprType::Split,
+      first->isA<Merge>() || first->isA<Split>(),
       "Merge and split are the only expressions supported through rfactor operations in compute at map, but found:\n",
       first->toString());
 
@@ -1119,7 +1120,7 @@ void ComputeAtMap::buildConcreteIds() {
 }
 
 bool ComputeAtMap::areExactExprs(Expr* expr_1, Expr* expr_2) {
-  if (expr_1->getExprType() != expr_2->getExprType()) {
+  if (typeid(*expr_1) != typeid(*expr_2)) {
     return false;
   }
 

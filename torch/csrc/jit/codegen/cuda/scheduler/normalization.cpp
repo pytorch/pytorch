@@ -821,8 +821,7 @@ TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getPersistentHeuristics(
   const auto red_expr = first_red_tv->definition();
 
   TORCH_INTERNAL_ASSERT(
-      red_expr->getExprType() != c10::nullopt &&
-          ir_utils::isReductionOp(red_expr),
+      ir_utils::isReductionOp(red_expr),
       "TensorView doesn't have a reduction.");
 
   auto tv_inps = ir_utils::filterByType<TensorView>(fusion->inputs());

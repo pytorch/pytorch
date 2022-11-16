@@ -580,7 +580,7 @@ Expr* Fusion::definition(const Val* val) const {
 // Indicate to kernel to set itself up to generate random numbers
 bool Fusion::isStochastic() {
   for (auto expr : exprs()) {
-    if (expr->getExprType() == ExprType::RNGOp) {
+    if (expr->isA<RNGOp>()) {
       return true;
     }
   }
@@ -661,8 +661,8 @@ void Fusion::aliasOutputToInput(Val* output, Val* input) {
 
   if (!input->isFusionInput()) {
     auto input_expr = input->definition();
-    // TORCH_INTERNAL_ASSERT(input_def.etype() == ExprType::UnaryOp, "expected
-    // unary op for aliased input");
+    // TORCH_INTERNAL_ASSERT(input_def->isA<UnaryOp>(),
+    //     "expected unary op for aliased input");
     TORCH_INTERNAL_ASSERT(
         input_expr->isA<UnaryOp>(), "expected unary op for aliased input");
     auto input_uop = input_expr->as<UnaryOp>();

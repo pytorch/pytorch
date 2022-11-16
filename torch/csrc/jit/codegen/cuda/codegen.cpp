@@ -10,6 +10,8 @@
 #include <array>
 #include <cmath>
 #include <sstream>
+#include <typeindex>
+#include <typeinfo>
 #include <vector>
 
 namespace torch {
@@ -120,20 +122,20 @@ class ExprFinder : kir::ConstIrVisitor {
   //! expr_types
   static bool exists(
       const Expr* expr,
-      const std::unordered_set<ExprType>& expr_types) {
+      const std::unordered_set<std::type_index>& expr_types) {
     ExprFinder finder(expr_types);
     finder.handle(std::vector<const Expr*>{expr});
     return finder.is_found_;
   }
 
  private:
-  ExprFinder(const std::unordered_set<ExprType>& expr_types)
+  ExprFinder(const std::unordered_set<std::type_index>& expr_types)
       : expr_types_(expr_types) {}
 
   using kir::ConstIrVisitor::handle;
 
   void handle(const Expr* expr) final {
-    if (expr_types_.find(expr->etype()) != expr_types_.end()) {
+    if (expr_types_.find(typeid(*expr)) != expr_types_.end()) {
       is_found_ = true;
       return;
     }
@@ -141,7 +143,7 @@ class ExprFinder : kir::ConstIrVisitor {
   }
 
  private:
-  const std::unordered_set<ExprType>& expr_types_;
+  const std::unordered_set<std::type_index>& expr_types_;
   bool is_found_ = false;
 };
 
@@ -2415,7 +2417,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       return false;
     }
     return ExprFinder::exists(
-        loop, {ExprType::GroupedGridReduction, ExprType::GroupedGridWelford});
+        loop,
+        {typeid(kir::GroupedGridReduction), typeid(kir::GroupedGridWelford)});
   }
 
   void handle(const kir::ForLoop* loop) final {

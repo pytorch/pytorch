@@ -117,33 +117,34 @@ bool isTvOp(const Expr* expr) {
           expr->outputs().begin(),
           expr->outputs().end(),
           [](Val* v) { return isTV(v); }) &&
-      (expr->getExprType().value() == ExprType::UnaryOp ||
-       expr->getExprType().value() == ExprType::BinaryOp ||
-       expr->getExprType().value() == ExprType::TernaryOp ||
-       expr->getExprType().value() == ExprType::SelectOp ||
-       expr->getExprType().value() == ExprType::RNGOp ||
-       expr->getExprType().value() == ExprType::FullOp ||
-       expr->getExprType().value() == ExprType::ARangeOp ||
-       expr->getExprType().value() == ExprType::EyeOp ||
-       expr->getExprType().value() == ExprType::ReductionOp ||
-       expr->getExprType().value() == ExprType::GroupedReductionOp ||
-       expr->getExprType().value() == ExprType::WelfordOp ||
-       expr->getExprType().value() == ExprType::GroupedWelfordOp ||
-       expr->getExprType().value() == ExprType::LoadStoreOp ||
-       expr->getExprType().value() == ExprType::MmaOp ||
-       expr->getExprType().value() == ExprType::BroadcastOp ||
-       expr->getExprType().value() == ExprType::SqueezeOp ||
-       expr->getExprType().value() == ExprType::TransposeOp ||
-       expr->getExprType().value() == ExprType::ExpandOp ||
-       expr->getExprType().value() == ExprType::ShiftOp ||
-       expr->getExprType().value() == ExprType::GatherOp ||
-       expr->getExprType().value() == ExprType::ViewAsScalar ||
-       expr->getExprType().value() == ExprType::ViewOp ||
-       expr->getExprType().value() == ExprType::GridReduction ||
-       expr->getExprType().value() == ExprType::GroupedGridReduction ||
-       expr->getExprType().value() == ExprType::GridBroadcast ||
-       expr->getExprType().value() == ExprType::GridWelford ||
-       expr->getExprType().value() == ExprType::GroupedGridWelford)) {
+      (expr->isOneOf<
+          UnaryOp,
+          BinaryOp,
+          TernaryOp,
+          SelectOp,
+          RNGOp,
+          FullOp,
+          ARangeOp,
+          EyeOp,
+          ReductionOp,
+          GroupedReductionOp,
+          WelfordOp,
+          GroupedWelfordOp,
+          LoadStoreOp,
+          MmaOp,
+          BroadcastOp,
+          SqueezeOp,
+          TransposeOp,
+          ExpandOp,
+          ShiftOp,
+          GatherOp,
+          ViewAsScalar,
+          ViewOp,
+          kir::GridReduction,
+          kir::GroupedGridReduction,
+          kir::GridBroadcast,
+          kir::GridWelford,
+          kir::GroupedGridWelford>())) {
     return true;
   }
   return false;
@@ -582,10 +583,7 @@ std::vector<Expr*> getAllSwizzlesBetween(
       all_expr.begin(),
       all_expr.end(),
       std::back_inserter(all_swizzles),
-      [](Expr* expr) {
-        return expr->getExprType().has_value() &&
-            (expr->etype() == ExprType::Swizzle2D);
-      });
+      [](Expr* expr) { return expr->isA<Swizzle2D>(); });
 
   return all_swizzles;
 }

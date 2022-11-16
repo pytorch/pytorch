@@ -422,7 +422,7 @@ class VectorizeValidator : public OptInDispatch {
       if (tv->getMemoryType() == MemoryType::Global) {
         checkContiguity(validator.domains_, tv);
       } else if (
-          tv->definition()->getExprType() == ExprType::UnaryOp &&
+          tv->definition()->isA<UnaryOp>() &&
           tv->definition()->as<UnaryOp>()->getUnaryOpType() ==
               UnaryOpType::Set) {
         auto input = tv->definition()->input(0);

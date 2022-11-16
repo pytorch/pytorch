@@ -187,7 +187,7 @@ FullOp::FullOp(
     Val* out,
     Val* fill_value,
     DataType dtype)
-    : Expr(passkey, ExprType::FullOp), dtype_(dtype), fill_value_(fill_value) {
+    : Expr(passkey), dtype_(dtype), fill_value_(fill_value) {
   if (out->isA<TensorView>()) {
     auto tv_root = out->as<TensorView>()->getRootDomain();
     for (auto id : tv_root) {
@@ -229,7 +229,7 @@ SelectOp::SelectOp(
     Val* in,
     IterDomain* select_id,
     Val* index)
-    : Expr(passkey, ExprType::SelectOp), select_id_(select_id) {
+    : Expr(passkey), select_id_(select_id) {
   addInput(in);
   addInput(index);
   addOutput(out);
@@ -267,7 +267,7 @@ ARangeOp::ARangeOp(
     Val* step,
     DataType dtype,
     Val* linear_index)
-    : Expr(passkey, ExprType::ARangeOp),
+    : Expr(passkey),
       dtype_(dtype),
       start_(start),
       end_(end),
@@ -330,10 +330,7 @@ EyeOp::EyeOp(
     DataType dtype,
     Val* index1,
     Val* index2)
-    : Expr(passkey, ExprType::EyeOp),
-      dtype_(dtype),
-      index1_(index1),
-      index2_(index2) {
+    : Expr(passkey), dtype_(dtype), index1_(index1), index2_(index2) {
   if (out->isA<TensorView>()) {
     addInput(out->as<TensorView>()->getRootDomain()[0]->extent());
     if (out->as<TensorView>()->getRootDomain()[1] !=
@@ -388,10 +385,7 @@ UnaryOp::UnaryOp(
     Val* out,
     Val* in,
     int rng_offset)
-    : Expr(passkey, ExprType::UnaryOp),
-      unary_op_type_{type},
-      out_{out},
-      in_{in} {
+    : Expr(passkey), unary_op_type_{type}, out_{out}, in_{in} {
   addOutput(out);
   addInput(in);
 }
@@ -428,11 +422,7 @@ BinaryOp::BinaryOp(
     Val* out,
     Val* lhs,
     Val* rhs)
-    : Expr(passkey, ExprType::BinaryOp),
-      binary_op_type_{type},
-      out_{out},
-      lhs_{lhs},
-      rhs_{rhs} {
+    : Expr(passkey), binary_op_type_{type}, out_{out}, lhs_{lhs}, rhs_{rhs} {
   addOutput(out);
   addInput(lhs);
   addInput(rhs);
@@ -472,7 +462,7 @@ TernaryOp::TernaryOp(
     Val* in1,
     Val* in2,
     Val* in3)
-    : Expr(passkey, ExprType::TernaryOp),
+    : Expr(passkey),
       ternary_op_type_{type},
       out_{out},
       in1_{in1},
@@ -521,7 +511,7 @@ RNGOp::RNGOp(
     std::vector<Val*> parameters,
     int rng_offset,
     Val* philox_index)
-    : Expr(passkey, ExprType::RNGOp),
+    : Expr(passkey),
       rng_op_type_(type),
       dtype_(dtype),
       parameters_(std::move(parameters)),
@@ -596,7 +586,7 @@ BroadcastOp::BroadcastOp(
     Val* out,
     Val* in,
     std::vector<bool> is_broadcast_dims)
-    : Expr(passkey, ExprType::BroadcastOp),
+    : Expr(passkey),
       out_(out),
       in_(in),
       is_broadcast_dims_(std::move(is_broadcast_dims)) {
@@ -681,7 +671,7 @@ SqueezeOp::SqueezeOp(
     Val* out,
     Val* in,
     std::vector<bool> is_squeeze_dims)
-    : Expr(passkey, ExprType::SqueezeOp),
+    : Expr(passkey),
       out_(out),
       in_(in),
       is_squeeze_dims_(std::move(is_squeeze_dims)) {
@@ -765,9 +755,8 @@ ReductionOp::ReductionOp(
     Val* init,
     Val* out,
     Val* in,
-    bool is_allreduce,
-    ExprType expr_type)
-    : Expr(passkey, expr_type),
+    bool is_allreduce)
+    : Expr(passkey),
       reduction_op_type_(reduction_op_type),
       init_(init),
       out_(out),
@@ -809,7 +798,7 @@ ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
 
 Expr* ReductionOp::shallowCopy() const {
   auto result = IrBuilder::create<ReductionOp>(
-      reduction_op_type_, init_, out_, in_, is_allreduce_, etype());
+      reduction_op_type_, init_, out_, in_, is_allreduce_);
   result->copyPredicatesFrom(this);
   return result;
 }
@@ -835,9 +824,8 @@ GroupedReductionOp::GroupedReductionOp(
     std::vector<Val*> init_vals,
     std::vector<Val*> outputs,
     std::vector<Val*> inputs,
-    bool is_fused,
-    ExprType expr_type)
-    : Expr(passkey, expr_type),
+    bool is_fused)
+    : Expr(passkey),
       reduction_op_types_(std::move(reduction_op_types)),
       init_vals_(std::move(init_vals)),
       is_allreduce_(is_fused) {
@@ -860,12 +848,7 @@ GroupedReductionOp::GroupedReductionOp(
 
 Expr* GroupedReductionOp::shallowCopy() const {
   auto result = IrBuilder::create<GroupedReductionOp>(
-      reduction_op_types_,
-      init_vals_,
-      outputs(),
-      inputs(),
-      is_allreduce_,
-      etype());
+      reduction_op_types_, init_vals_, outputs(), inputs(), is_allreduce_);
   result->copyPredicatesFrom(this);
   return result;
 }
@@ -910,7 +893,7 @@ WelfordOp::WelfordOp(
     const WelfordTriplet& input,
     const WelfordTriplet& init,
     bool is_fused)
-    : Expr(passkey, ExprType::WelfordOp),
+    : Expr(passkey),
       output_(output),
       input_(input),
       init_(init),
@@ -1084,9 +1067,8 @@ GroupedWelfordOp::GroupedWelfordOp(
     std::vector<WelfordTriplet> output_vals,
     std::vector<WelfordTriplet> input_vals,
     std::vector<WelfordTriplet> init_vals,
-    bool is_allreduce,
-    ExprType expr_type)
-    : Expr(passkey, expr_type),
+    bool is_allreduce)
+    : Expr(passkey),
       output_vals_(std::move(output_vals)),
       input_vals_(std::move(input_vals)),
       init_vals_(std::move(init_vals)),
@@ -1202,7 +1184,7 @@ GroupedWelfordOp::GroupedWelfordOp(
 
 Expr* GroupedWelfordOp::shallowCopy() const {
   auto result = IrBuilder::create<GroupedWelfordOp>(
-      output_vals_, input_vals_, init_vals_, is_allreduce_, etype());
+      output_vals_, input_vals_, init_vals_, is_allreduce_);
   result->copyPredicatesFrom(this);
   return result;
 }
@@ -1257,11 +1239,7 @@ MmaOp::MmaOp(
     Val* in_a,
     Val* in_b,
     Val* init)
-    : Expr(passkey, ExprType::MmaOp),
-      out_(out),
-      in_a_(in_a),
-      in_b_(in_b),
-      init_(init) {
+    : Expr(passkey), out_(out), in_a_(in_a), in_b_(in_b), init_(init) {
   // Check output type
   TORCH_INTERNAL_ASSERT(
       out->getValType().value() == ValType::TensorView ||
@@ -1325,10 +1303,7 @@ TransposeOp::TransposeOp(
     TensorView* out,
     TensorView* in,
     std::vector<int64_t> new2old)
-    : Expr(passkey, ExprType::TransposeOp),
-      out_(out),
-      in_(in),
-      new2old_(std::move(new2old)) {
+    : Expr(passkey), out_(out), in_(in), new2old_(std::move(new2old)) {
   // Sanity check of the input parameters. Maybe not necessary as they
   // should be checked at function transpose.
 
@@ -1384,7 +1359,7 @@ ExpandOp::ExpandOp(
     TensorView* out,
     TensorView* in,
     std::vector<Val*> _expanded_extents)
-    : Expr(passkey, ExprType::ExpandOp),
+    : Expr(passkey),
       out_(out),
       in_(in),
       expanded_extents_(std::move(_expanded_extents)) {
@@ -1421,7 +1396,7 @@ ShiftOp::ShiftOp(
     Val* in,
     std::vector<int> offsets,
     std::vector<int> pad_width)
-    : Expr(passkey, ExprType::ShiftOp),
+    : Expr(passkey),
       out_(out),
       in_(in),
       offsets_(std::move(offsets)),
@@ -1488,7 +1463,7 @@ GatherOp::GatherOp(
     Val* in,
     std::vector<int> window_shape,
     std::vector<std::vector<int>> pad_width)
-    : Expr(passkey, ExprType::GatherOp),
+    : Expr(passkey),
       out_(out),
       in_(in),
       window_shape_(std::move(window_shape)),
@@ -1567,11 +1542,7 @@ ViewAsScalar::ViewAsScalar(
     Val* in,
     IterDomain* vector_id,
     Val* index)
-    : Expr(passkey, ExprType::ViewAsScalar),
-      out_(out),
-      in_(in),
-      vector_id_(vector_id),
-      index_(index) {
+    : Expr(passkey), out_(out), in_(in), vector_id_(vector_id), index_(index) {
   addOutput(out);
   addInput(in);
 }
@@ -1590,7 +1561,7 @@ Expr* ViewAsScalar::shallowCopy() const {
 }
 
 ViewOp::ViewOp(IrBuilderPasskey passkey, TensorView* out, TensorView* in)
-    : Expr(passkey, ExprType::ViewOp), out_(out), in_(in) {
+    : Expr(passkey), out_(out), in_(in) {
   addOutput(out);
   addInput(in);
 }
@@ -1611,10 +1582,7 @@ LoadStoreOp::LoadStoreOp(
     LoadStoreOpType op_type,
     Val* out,
     Val* in)
-    : Expr(passkey, ExprType::LoadStoreOp),
-      load_store_type_(op_type),
-      out_(out),
-      in_(in) {
+    : Expr(passkey), load_store_type_(op_type), out_(out), in_(in) {
   addOutput(out);
   addInput(in);
 }
@@ -2704,7 +2672,7 @@ Split::Split(
     bool inner_split,
     Val* start_offset,
     Val* stop_offset)
-    : Expr(passkey, ExprType::Split),
+    : Expr(passkey),
       outer_{outer},
       inner_{inner},
       in_{in},
@@ -2776,7 +2744,7 @@ Merge::Merge(
     IterDomain* out,
     IterDomain* outer,
     IterDomain* inner)
-    : Expr(passkey, ExprType::Merge), out_{out}, outer_{outer}, inner_{inner} {
+    : Expr(passkey), out_{out}, outer_{outer}, inner_{inner} {
   addOutput(out);
   addInput(outer);
   addInput(inner);
@@ -2812,7 +2780,7 @@ Swizzle2D::Swizzle2D(
     IterDomain* in_y,
     Swizzle2DType swizzle_type,
     SwizzleMode swizzle_mode)
-    : Expr(passkey, ExprType::Swizzle2D),
+    : Expr(passkey),
       out_x_{out_x},
       out_y_{out_y},
       in_x_{in_x},

@@ -18,6 +18,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <typeinfo>
 #include <unordered_map>
 
 namespace torch {
@@ -284,16 +285,6 @@ bool Val::isOneInt() const {
   return int_val.has_value() && int_val.value() == 1;
 }
 
-bool Val::isDefinitionType(ExprType expression_type) const {
-  if (definition() != nullptr) {
-    auto def_expr_type = definition()->getExprType();
-    if (def_expr_type.has_value() && def_expr_type.value() == expression_type) {
-      return true;
-    }
-  }
-  return false;
-}
-
 c10::optional<DataType> Val::getDataType() const {
   TORCH_INTERNAL_ASSERT(
       dtype_ != DataType::Null, "Value does not have a data type.");
@@ -319,12 +310,10 @@ bool Val::isConsumerOf(const Val* other) const {
 
 // We don't register with the active fusion in Expr as this needs to be done
 // after inputs and outputs are registered with the Expr
-Expr::Expr(IrBuilderPasskey passkey, ExprType etype)
-    : Statement(passkey), etype_{etype} {}
+Expr::Expr(IrBuilderPasskey passkey) : Statement(passkey) {}
 
 Expr::Expr(const Expr* src, IrCloner* ir_cloner)
     : Statement(src, ir_cloner),
-      etype_(src->etype_),
       inputs_(ir_cloner->clone(src->inputs_)),
       outputs_(ir_cloner->clone(src->outputs_)) {}
 
@@ -336,7 +325,7 @@ bool Expr::sameAs(const Statement* other) const {
     return false;
   }
   const Expr* other_expr = other->as<Expr>();
-  if (getExprType() != other_expr->getExprType()) {
+  if (typeid(*this) != typeid(*other_expr)) {
     return false;
   }
   if (inputs().size() != other_expr->inputs().size() ||

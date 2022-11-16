@@ -765,7 +765,7 @@ struct DummyExpr : public Expr {
       Val* _outrhs,
       Val* _lhs,
       Val* _rhs)
-      : Expr(passkey, ExprType::UnaryOp) // Not terribly safe...
+      : Expr(passkey) // terribly safe :-D
   {
     addOutput(_outlhs);
     addOutput(_outrhs);
@@ -776,6 +776,9 @@ struct DummyExpr : public Expr {
   DummyExpr& operator=(const DummyExpr& other) = delete;
   DummyExpr(DummyExpr&& other) = delete;
   DummyExpr& operator=(DummyExpr&& other) = delete;
+  virtual const char* getOpString() const override {
+    return "DummyExpr";
+  }
   Expr* shallowCopy() const override {
     return nullptr;
   }
@@ -955,7 +958,7 @@ TEST_F(NVFuserTest, FusionTVSplit_CUDA) {
   Expr* outer = tv->axis(2)->extent()->definition();
 
   TORCH_CHECK(
-      outer->getExprType().value() == ExprType::BinaryOp &&
+      outer->isA<BinaryOp>() &&
       static_cast<BinaryOp*>(outer)->getBinaryOpType() ==
           BinaryOpType::CeilDiv &&
       static_cast<BinaryOp*>(outer)->lhs()->sameAs(
@@ -980,7 +983,7 @@ TEST_F(NVFuserTest, FusionTVMerge_CUDA) {
   Expr* axisOp = tv->axis(1)->extent()->definition();
 
   TORCH_CHECK(
-      tv->nDims() == 2 && axisOp->getExprType() == ExprType::BinaryOp &&
+      tv->nDims() == 2 && axisOp->isA<BinaryOp>() &&
       static_cast<BinaryOp*>(axisOp)->getBinaryOpType() == BinaryOpType::Mul &&
       static_cast<BinaryOp*>(axisOp)->lhs() ==
           tv->getRootDomain()[1]->extent() &&

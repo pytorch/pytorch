@@ -299,95 +299,6 @@ static const char* predicate_type2string(PredicateType t) {
   }
 }
 
-static const char* expr_type2string(ExprType t) {
-  switch (t) {
-    case ExprType::FullOp:
-      return "FullOp";
-    case ExprType::ARangeOp:
-      return "ARangeOp";
-    case ExprType::EyeOp:
-      return "EyeOp";
-    case ExprType::UnaryOp:
-      return "UnaryOp";
-    case ExprType::BinaryOp:
-      return "BinaryOp";
-    case ExprType::TernaryOp:
-      return "TernaryOp";
-    case ExprType::SelectOp:
-      return "SelectOp";
-    case ExprType::RNGOp:
-      return "RNGOp";
-    case ExprType::ReductionOp:
-      return "ReductionOp";
-    case ExprType::GroupedReductionOp:
-      return "GroupedReductionOp";
-    case ExprType::BroadcastOp:
-      return "BroadcastOp";
-    case ExprType::SqueezeOp:
-      return "SqueezeOp";
-    case ExprType::WelfordOp:
-      return "WelfordOp";
-    case ExprType::GroupedWelfordOp:
-      return "GroupedWelfordOp";
-    case ExprType::LoadStoreOp:
-      return "LoadStoreOp";
-    case ExprType::MmaOp:
-      return "MmaOp";
-    case ExprType::TransposeOp:
-      return "TransposeOp";
-    case ExprType::ExpandOp:
-      return "ExpandOp";
-    case ExprType::ShiftOp:
-      return "ShiftOp";
-    case ExprType::GatherOp:
-      return "GatherOp";
-    case ExprType::ViewAsScalar:
-      return "ViewAsScalar";
-    case ExprType::ViewOp:
-      return "ViewOp";
-    case ExprType::Split:
-      return "Split";
-    case ExprType::Merge:
-      return "Merge";
-    case ExprType::Allocate:
-      return "Allocate";
-    case ExprType::BlockSync:
-      return "BlockSync";
-    case ExprType::GridSync:
-      return "GridSync";
-    case ExprType::CpAsyncWait:
-      return "CpAsyncWait";
-    case ExprType::CpAsyncCommit:
-      return "CpAsyncCommit";
-    case ExprType::InitMagicZero:
-      return "InitMagicZero";
-    case ExprType::UpdateMagicZero:
-      return "UpdateMagicZero";
-    case ExprType::ForLoop:
-      return "ForLoop";
-    case ExprType::IfThenElse:
-      return "IfThenElse";
-    case ExprType::GridReduction:
-      return "GridReduction";
-    case ExprType::GroupedGridReduction:
-      return "GroupedGridReduction";
-    case ExprType::GridBroadcast:
-      return "GridBroadcast";
-    case ExprType::GridWelford:
-      return "GridWelford";
-    case ExprType::GroupedGridWelford:
-      return "GroupedGridWelford";
-    case ExprType::Swizzle2D:
-      return "Swizzle2D";
-    case ExprType::Swizzle2DInt:
-      return "Swizzle2DInt";
-    case ExprType::PairSelect:
-      return "PairSelect";
-    default:
-      TORCH_INTERNAL_ASSERT(false, "No string found for expr type.");
-  }
-}
-
 bool needFloatSuffix(UnaryOpType t) {
   switch (t) {
     case UnaryOpType::Abs:
@@ -1083,10 +994,6 @@ std::ostream& operator<<(std::ostream& out, const PredicateType ptype) {
 
 std::ostream& operator<<(std::ostream& out, const DataType dtype) {
   return out << data_type2string(dtype);
-}
-
-std::ostream& operator<<(std::ostream& out, const ExprType etype) {
-  return out << expr_type2string(etype);
 }
 
 std::ostream& operator<<(std::ostream& out, const UnaryOpType uotype) {

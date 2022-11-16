@@ -1208,7 +1208,7 @@ std::unique_ptr<Fusion> SegmentedFusion::makeFusion(SegmentedGroup* sg) {
   for (auto inp : getAllInputs(sg)) {
     auto clone_tv = complete_to_segment_map.clone(inp);
     fusion_segment->addInput(clone_tv);
-    if (inp->isDefinitionType(ExprType::ViewOp)) {
+    if (inp->isDefinitionType<ViewOp>()) {
       TORCH_INTERNAL_ASSERT(clone_tv != nullptr && clone_tv->isA<TensorView>());
       view_tvs.push_back(clone_tv->as<TensorView>());
     }
@@ -2671,7 +2671,7 @@ void SegmentCandidateFinder::findSegments() {
     std::deque<Expr*> to_visit;
     for (auto inp : completeFusion()->inputs()) {
       if (std::all_of(inp->uses().begin(), inp->uses().end(), [](Expr* expr) {
-            return expr->getExprType().value() == ExprType::UnaryOp;
+            return expr->isA<UnaryOp>();
           })) {
         to_visit.insert(to_visit.end(), inp->uses().begin(), inp->uses().end());
       }
@@ -2680,8 +2680,7 @@ void SegmentCandidateFinder::findSegments() {
     while (!to_visit.empty()) {
       auto expr = to_visit.front();
       to_visit.pop_front();
-      if (expr->getExprType().value() != ExprType::UnaryOp ||
-          expr->output(0)->isFusionOutput()) {
+      if (expr->isA<UnaryOp>() || expr->output(0)->isFusionOutput()) {
         continue;
       }
 

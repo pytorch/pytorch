@@ -40,6 +40,10 @@ class TORCH_CUDA_CU_API FullOp : public Expr {
 
   bool sameAs(const Statement* other) const override;
 
+  virtual const char* getOpString() const override {
+    return "FullOp";
+  }
+
   DataType dtype() const {
     return dtype_;
   }
@@ -67,6 +71,10 @@ class TORCH_CUDA_CU_API SelectOp : public Expr {
   Expr* shallowCopy() const override;
 
   bool sameAs(const Statement* other) const override;
+
+  virtual const char* getOpString() const override {
+    return "SelectOp";
+  }
 
   std::unordered_map<IterDomain*, Val*> getIndexOverridingMap() const {
     return {{select_id_, input(1)}};
@@ -96,6 +104,10 @@ class TORCH_CUDA_CU_API ARangeOp : public Expr {
   Expr* shallowCopy() const override;
 
   bool sameAs(const Statement* other) const override;
+
+  virtual const char* getOpString() const override {
+    return "ARangeOp";
+  }
 
   DataType dtype() const {
     return dtype_;
@@ -162,6 +174,10 @@ class TORCH_CUDA_CU_API EyeOp : public Expr {
 
   bool sameAs(const Statement* other) const override;
 
+  virtual const char* getOpString() const override {
+    return "EyeOp";
+  }
+
   DataType dtype() const {
     return dtype_;
   }
@@ -207,6 +223,10 @@ class TORCH_CUDA_CU_API UnaryOp : public Expr {
 
   Expr* shallowCopy() const override;
 
+  virtual const char* getOpString() const override {
+    return "UnaryOp";
+  }
+
   Val* out() const {
     return out_;
   }
@@ -237,6 +257,10 @@ class TORCH_CUDA_CU_API BinaryOp : public Expr {
   BinaryOp(const BinaryOp* src, IrCloner* ir_cloner);
 
   Expr* shallowCopy() const override;
+
+  virtual const char* getOpString() const override {
+    return "BinaryOp";
+  }
 
   Val* out() const {
     return out_;
@@ -277,6 +301,10 @@ class TORCH_CUDA_CU_API RNGOp : public Expr {
   RNGOp(const RNGOp* src, IrCloner* ir_cloner);
 
   Expr* shallowCopy() const override;
+
+  virtual const char* getOpString() const override {
+    return "RNGOp";
+  }
 
   RNGOpType getRNGOpType() const {
     return rng_op_type_;
@@ -337,6 +365,10 @@ class TORCH_CUDA_CU_API BroadcastOp : public Expr {
 
   BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner);
 
+  virtual const char* getOpString() const override {
+    return "BroadcastOp";
+  }
+
   Expr* shallowCopy() const override;
 
   Val* out() const {
@@ -385,6 +417,10 @@ class TORCH_CUDA_CU_API SqueezeOp : public Expr {
 
   SqueezeOp(const SqueezeOp* src, IrCloner* ir_cloner);
 
+  virtual const char* getOpString() const override {
+    return "SqueezeOp";
+  }
+
   Expr* shallowCopy() const override;
 
   Val* out() const {
@@ -430,10 +466,13 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
       Val* init,
       Val* out,
       Val* in,
-      bool is_allreduce = false,
-      ExprType expr_type = ExprType::ReductionOp);
+      bool is_allreduce = false);
 
   ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
+
+  virtual const char* getOpString() const override {
+    return "ReductionOp";
+  }
 
   Expr* shallowCopy() const override;
 
@@ -480,10 +519,13 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
       std::vector<Val*> init,
       std::vector<Val*> out,
       std::vector<Val*> in,
-      bool is_allreduce = false,
-      ExprType expr_type = ExprType::GroupedReductionOp);
+      bool is_allreduce = false);
 
   GroupedReductionOp(const GroupedReductionOp* src, IrCloner* ir_cloner);
+
+  virtual const char* getOpString() const override {
+    return "GroupedReductionOp";
+  }
 
   Expr* shallowCopy() const override;
 
@@ -673,6 +715,10 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
 
   WelfordOp(const WelfordOp* src, IrCloner* ir_cloner);
 
+  virtual const char* getOpString() const override {
+    return "WelfordOp";
+  }
+
   Expr* shallowCopy() const override;
 
   Val* out() const {
@@ -765,10 +811,13 @@ class TORCH_CUDA_CU_API GroupedWelfordOp : public Expr {
       std::vector<WelfordTriplet> output_vals,
       std::vector<WelfordTriplet> input_vals,
       std::vector<WelfordTriplet> init_vals,
-      bool is_allreduce = false,
-      ExprType expr_type = ExprType::GroupedWelfordOp);
+      bool is_allreduce = false);
 
   GroupedWelfordOp(const GroupedWelfordOp* src, IrCloner* ir_cloner);
+
+  virtual const char* getOpString() const override {
+    return "GroupedWelfordOp";
+  }
 
   Expr* shallowCopy() const override;
 
@@ -895,6 +944,10 @@ class TORCH_CUDA_CU_API MmaOp : public Expr {
 
   MmaOp(const MmaOp* src, IrCloner* ir_cloner);
 
+  virtual const char* getOpString() const override {
+    return "MmaOp";
+  }
+
   Expr* shallowCopy() const override;
 
   Val* out() const {
@@ -955,6 +1008,10 @@ class TORCH_CUDA_CU_API TransposeOp : public Expr {
 
   TransposeOp(const TransposeOp* src, IrCloner* ir_cloner);
 
+  virtual const char* getOpString() const override {
+    return "TransposeOp";
+  }
+
   Expr* shallowCopy() const override;
 
   TensorView* out() const {
@@ -987,6 +1044,10 @@ class TORCH_CUDA_CU_API ExpandOp : public Expr {
 
   ExpandOp(const ExpandOp* src, IrCloner* ir_cloner);
 
+  virtual const char* getOpString() const override {
+    return "ExpandOp";
+  }
+
   Expr* shallowCopy() const override;
 
   TensorView* out() const {
@@ -1018,6 +1079,10 @@ class TORCH_CUDA_CU_API TernaryOp : public Expr {
       Val* in3);
 
   TernaryOp(const TernaryOp* src, IrCloner* ir_cloner);
+
+  virtual const char* getOpString() const override {
+    return "TernaryOp";
+  }
 
   Expr* shallowCopy() const override;
 
@@ -1063,6 +1128,10 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
       std::vector<int> pad_width);
 
   ShiftOp(const ShiftOp* src, IrCloner* ir_cloner);
+
+  virtual const char* getOpString() const override {
+    return "ShiftOp";
+  }
 
   Expr* shallowCopy() const override;
 
@@ -1115,6 +1184,10 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
 
   GatherOp(const GatherOp* src, IrCloner* ir_cloner);
 
+  virtual const char* getOpString() const override {
+    return "GatherOp";
+  }
+
   Expr* shallowCopy() const override;
 
   Val* out() const {
@@ -1163,6 +1236,10 @@ class TORCH_CUDA_CU_API ViewAsScalar : public Expr {
 
   ViewAsScalar(const ViewAsScalar* src, IrCloner* ir_cloner);
 
+  virtual const char* getOpString() const override {
+    return "ViewAsScalar";
+  }
+
   Expr* shallowCopy() const override;
 
   Val* out() const {
@@ -1198,6 +1275,10 @@ class TORCH_CUDA_CU_API ViewOp : public Expr {
 
   ViewOp(const ViewOp* src, IrCloner* ir_cloner);
 
+  virtual const char* getOpString() const override {
+    return "ViewOp";
+  }
+
   Expr* shallowCopy() const override;
 
   TensorView* out() const {
@@ -1224,6 +1305,10 @@ class TORCH_CUDA_CU_API LoadStoreOp : public Expr {
   LoadStoreOp(IrBuilderPasskey, LoadStoreOpType op_type, Val* out, Val* in);
 
   LoadStoreOp(const LoadStoreOp* src, IrCloner* ir_cloner);
+
+  virtual const char* getOpString() const override {
+    return "LoadStoreOp";
+  }
 
   Expr* shallowCopy() const override;
 
@@ -1834,6 +1919,10 @@ class TORCH_CUDA_CU_API Split : public Expr {
 
   Split(const Split* src, IrCloner* ir_cloner);
 
+  virtual const char* getOpString() const override {
+    return "Split";
+  }
+
   Expr* shallowCopy() const override;
 
   IterDomain* outer() const {
@@ -1896,6 +1985,10 @@ class TORCH_CUDA_CU_API Merge : public Expr {
 
   Merge(const Merge* src, IrCloner* ir_cloner);
 
+  virtual const char* getOpString() const override {
+    return "Merge";
+  }
+
   Expr* shallowCopy() const override;
 
   IterDomain* out() const {
@@ -1929,6 +2022,10 @@ class TORCH_CUDA_CU_API Swizzle2D : public Expr {
       SwizzleMode swizzle_mode = SwizzleMode::Data);
 
   Swizzle2D(const Swizzle2D* src, IrCloner* ir_cloner);
+
+  virtual const char* getOpString() const override {
+    return "Swizzle2D";
+  }
 
   Expr* shallowCopy() const override;
 

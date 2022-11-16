@@ -945,7 +945,7 @@ std::vector<TensorView*> getViewTVs(Fusion* fusion) {
   for (auto producer_tv : ir_utils::filterByType<TensorView>(fusion_vals)) {
     auto consumer_tvs = ir_utils::consumerTvsOf(producer_tv);
     for (auto consumer_tv : consumer_tvs) {
-      if (consumer_tv->isDefinitionType(ExprType::ViewOp)) {
+      if (consumer_tv->isDefinitionType<ViewOp>()) {
         view_tvs.push_back(consumer_tv);
       }
     }

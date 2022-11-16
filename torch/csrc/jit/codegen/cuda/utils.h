@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/ir/ir.h>
 
+#include <typeinfo>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -151,7 +153,7 @@ class PolymorphicBase {
     return downcast_ptr;
   }
 
-  //! Check if the runtime time is T (or derived from T)
+  //! Check if the runtime type is T (or derived from T)
   //!
   //! \note Don't use this for conditional casts. Instead, use:
   //!
@@ -164,6 +166,46 @@ class PolymorphicBase {
   template <class T>
   bool isA() const {
     return dynamic_cast<const T*>(this) != nullptr;
+  }
+
+  //! Check if the runtime type is strictly T. Returns false for classes
+  //! derived from T
+  template <class T>
+  bool isStrictlyA() const {
+    return typeid(*this) == typeid(T);
+  }
+
+ private:
+  template <int> // unused template argument
+  bool isOneOf() const {
+    return false;
+  }
+  template <int, class T1, class... T>
+  bool isOneOf() const {
+    return isA<T1>() || isOneOf<0, T...>();
+  }
+  template <int> // unused template argument
+  bool isStrictlyOneOf() const {
+    return false;
+  }
+  template <int, class T1, class... T>
+  bool isStrictlyOneOf() const {
+    return isStrictlyA<T1>() || isStrictlyOneOf<0, T...>();
+  }
+
+ public:
+  //! Check if the runtime type is one of the given types (or derived from
+  //! one of the given types)
+  template <class... T>
+  bool isOneOf() const {
+    return isOneOf<0, T...>();
+  }
+
+  //! Check if the runtime type is strictly one of the given types. Derived
+  //! types not in the given list does not count.
+  template <class... T>
+  bool isStrictlyOneOf() const {
+    return isStrictlyOneOf<0, T...>();
   }
 };
 

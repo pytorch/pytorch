@@ -526,9 +526,6 @@ bool ComputeAtRootDomainMap::canMap(
   // except when a id_b concrete is broadcast.
   const bool key_a_bcast =
       key_a.concreteId() && key_a.concreteId()->isBroadcast();
-  const bool key_a_reduction =
-      (key_a.concreteId() && key_a.concreteId()->isReduction()) ||
-      key_a.id()->isReduction();
   bool mappable_pair_found = false;
   for (const auto& key_b : getConcretizedKeys(td_b, id_b)) {
     const bool mappable = canMap(key_a, key_b);
@@ -764,7 +761,7 @@ void ComputeAtRootDomainMapBuilder::initializeBcastMap(
   TORCH_INTERNAL_ASSERT(
       tv->isFusionOutput() || ir_utils::isSqueezeInput(tv) ||
           tv->definition()->outputs().size() > 1 ||
-          tv->isDefinitionType(ExprType::ViewOp),
+          tv->isDefinitionType<ViewOp>(),
       "Invalid tensor to initialize bcast map t",
       tv->name(),
       " in tensor ",
@@ -895,8 +892,8 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
   }
 
   // Broadcast is handled separately, so e should never be BroadcastOp.
-  TORCH_INTERNAL_ASSERT(e->getExprType() != ExprType::BroadcastOp);
-  TORCH_INTERNAL_ASSERT(e->getExprType() != ExprType::SqueezeOp);
+  TORCH_INTERNAL_ASSERT(!e->isA<BroadcastOp>());
+  TORCH_INTERNAL_ASSERT(!e->isA<SqueezeOp>());
 
   TORCH_INTERNAL_ASSERT(e->outputs().size() >= 1);
   const TensorView* out_tv = e->output(0)->as<TensorView>();
@@ -923,7 +920,7 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
             e->isA<WelfordOp>() || e->isA<GroupedReductionOp>() ||
                 e->isA<GroupedWelfordOp>(),
             "Unknown multi-output Expr type ",
-            e->getExprType().value(),
+            e->getOpString(),
             " is found");
         for (auto out : e->outputs()) {
           auto out_tv = out->as<TensorView>();

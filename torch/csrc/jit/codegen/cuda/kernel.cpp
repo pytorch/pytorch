@@ -416,8 +416,8 @@ std::string KernelPerformanceProfile::toString(const at::Tensor& buffer) const {
     auto count = buffer[index][1].item<int64_t>();
     auto cycles_per_call = count == 0 ? 0.0 : cycles / count;
     auto us_per_call = cycles_per_call / kilo_freq * 1000.0;
-    ss << expr->getExprType().value() << ", T" << out_tv->name() << ", "
-       << us_per_call << " us, " << count << "\n";
+    ss << expr->getOpString() << ", T" << out_tv->name() << ", " << us_per_call
+       << " us, " << count << "\n";
   }
 
   return ss.str();

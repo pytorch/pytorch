@@ -564,15 +564,9 @@ void IndexCompute::handle(Swizzle2D* swizzle_2d) {
 }
 
 void IndexCompute::handle(Expr* e) {
-  switch (e->getExprType().value()) {
-    case (ExprType::Split):
-    case (ExprType::Merge):
-    case (ExprType::Swizzle2D):
-      break;
-    default:
-      TORCH_INTERNAL_ASSERT(
-          false, "Invalid expr type found in transform traversal.");
-  }
+  auto is_expected_type = e->isOneOf<Split, Merge, Swizzle2D>();
+  TORCH_INTERNAL_ASSERT(
+      is_expected_type, "Invalid expr type found in transform traversal.");
   BackwardVisitor::handle(e);
 }
 

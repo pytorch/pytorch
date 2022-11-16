@@ -209,7 +209,7 @@ class PredicateChcker : public IterVisitor {
       return;
     }
 
-    // Check ExprType-specific conditions
+    // Check expr type-specific conditions
     IterVisitor::handle(expr);
   }
 

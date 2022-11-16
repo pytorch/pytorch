@@ -88,7 +88,7 @@ Val* TensorIndex::index(int i) const {
 }
 
 BlockSync::BlockSync(IrBuilderPasskey passkey, bool war_sync)
-    : Expr(passkey, ExprType::BlockSync), war_sync_(war_sync) {
+    : Expr(passkey), war_sync_(war_sync) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -104,9 +104,7 @@ GridSync::GridSync(
     IrBuilderPasskey passkey,
     ParallelTypeBitmap sync_dims,
     Val* sync_buffer)
-    : Expr(passkey, ExprType::GridSync),
-      sync_dims_(sync_dims),
-      sync_buffer_(sync_buffer) {}
+    : Expr(passkey), sync_dims_(sync_dims), sync_buffer_(sync_buffer) {}
 
 Expr* GridSync::shallowCopy() const {
   auto result = IrBuilder::create<GridSync>(sync_dims_, sync_buffer_);
@@ -115,7 +113,7 @@ Expr* GridSync::shallowCopy() const {
 }
 
 CpAsyncWait::CpAsyncWait(IrBuilderPasskey passkey, unsigned int keep_stages)
-    : Expr(passkey, ExprType::CpAsyncWait), keep_stages_(keep_stages) {
+    : Expr(passkey), keep_stages_(keep_stages) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -127,8 +125,7 @@ Expr* CpAsyncWait::shallowCopy() const {
   return result;
 }
 
-CpAsyncCommit::CpAsyncCommit(IrBuilderPasskey passkey)
-    : Expr(passkey, ExprType::CpAsyncCommit) {
+CpAsyncCommit::CpAsyncCommit(IrBuilderPasskey passkey) : Expr(passkey) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -140,8 +137,7 @@ Expr* CpAsyncCommit::shallowCopy() const {
   return result;
 }
 
-InitMagicZero::InitMagicZero(IrBuilderPasskey passkey)
-    : Expr(passkey, ExprType::InitMagicZero) {
+InitMagicZero::InitMagicZero(IrBuilderPasskey passkey) : Expr(passkey) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -153,8 +149,7 @@ Expr* InitMagicZero::shallowCopy() const {
   return result;
 }
 
-UpdateMagicZero::UpdateMagicZero(IrBuilderPasskey passkey)
-    : Expr(passkey, ExprType::UpdateMagicZero) {
+UpdateMagicZero::UpdateMagicZero(IrBuilderPasskey passkey) : Expr(passkey) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -237,7 +232,7 @@ ForLoop::ForLoop(
     Val* vectorize_shift,
     bool unroll_required,
     DoubleBufferLoopStage double_buffer_loop_stage)
-    : Expr(passkey, ExprType::ForLoop),
+    : Expr(passkey),
       iter_domain_{iter_domain},
       index_(index),
       start_(start),
@@ -431,7 +426,7 @@ bool ForLoop::isTrivial() const {
 }
 
 IfThenElse::IfThenElse(IrBuilderPasskey passkey, Predicate* cond)
-    : Expr(passkey, ExprType::IfThenElse), then_body_(this), else_body_(this) {
+    : Expr(passkey), then_body_(this), else_body_(this) {
   setPredicate(cond);
   addInput(cond);
 }
@@ -451,7 +446,7 @@ Allocate::Allocate(
     std::vector<Val*> shape,
     bool zero_init,
     const Allocate* alias)
-    : Expr(passkey, ExprType::Allocate),
+    : Expr(passkey),
       buffer_(buffer),
       memory_type_(memory_type),
       shape_(std::move(shape)),
@@ -530,14 +525,7 @@ GridReduction::GridReduction(
     Val* entrance_index,
     Val* entrances,
     bool is_allreduce)
-    : ReductionOp(
-          passkey,
-          reduction_op_type,
-          init,
-          out,
-          in,
-          is_allreduce,
-          ExprType::GridReduction),
+    : ReductionOp(passkey, reduction_op_type, init, out, in, is_allreduce),
       reduction_buffer_(reduction_buffer),
       sync_buffer_(sync_buffer),
       entrance_index_(entrance_index),
@@ -581,8 +569,7 @@ GroupedGridReduction::GroupedGridReduction(
           std::move(init_vals),
           std::move(outputs),
           std::move(inputs),
-          is_allreduce,
-          ExprType::GroupedGridReduction),
+          is_allreduce),
       reduction_buffers_(std::move(reduction_buffers)),
       sync_buffer_(sync_buffer),
       entrance_index_(entrance_index),
@@ -615,7 +602,7 @@ GridBroadcast::GridBroadcast(
     BroadcastOp* broadcast_op,
     Allocate* broadcast_buffer,
     Allocate* sync_buffer)
-    : Expr(passkey, ExprType::GridBroadcast),
+    : Expr(passkey),
       broadcast_op_(broadcast_op),
       broadcast_buffer_(broadcast_buffer),
       sync_buffer_(sync_buffer) {
@@ -640,7 +627,7 @@ GridWelford::GridWelford(
     Allocate* sync_buffer,
     Val* entrance_index,
     Val* entrances)
-    : Expr(passkey, ExprType::GridWelford),
+    : Expr(passkey),
       welford_op_(welford_op),
       var_buffer_(var_buffer),
       avg_buffer_(avg_buffer),
@@ -683,8 +670,7 @@ GroupedGridWelford::GroupedGridWelford(
           std::move(output_vals),
           std::move(input_vals),
           std::move(init_vals),
-          is_allreduce,
-          ExprType::GroupedGridWelford),
+          is_allreduce),
       reduction_buffers_(std::move(reduction_buffers)),
       sync_buffer_(sync_buffer),
       entrance_index_(entrance_index),
@@ -714,8 +700,7 @@ Expr* GroupedGridWelford::shallowCopy() const {
 AllocateFusedReduction::AllocateFusedReduction(
     IrBuilderPasskey passkey,
     GridReduction* grid_reduction)
-    : Expr(passkey, ExprType::AllocateFusedReduction),
-      grid_expr_(grid_reduction) {
+    : Expr(passkey), grid_expr_(grid_reduction) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -724,8 +709,7 @@ AllocateFusedReduction::AllocateFusedReduction(
 AllocateFusedReduction::AllocateFusedReduction(
     IrBuilderPasskey passkey,
     GridWelford* grid_welford)
-    : Expr(passkey, ExprType::AllocateFusedReduction),
-      grid_expr_(grid_welford) {
+    : Expr(passkey), grid_expr_(grid_welford) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -734,8 +718,7 @@ AllocateFusedReduction::AllocateFusedReduction(
 AllocateFusedReduction::AllocateFusedReduction(
     IrBuilderPasskey passkey,
     GroupedGridReduction* grouped_grid_reduction)
-    : Expr(passkey, ExprType::AllocateFusedReduction),
-      grid_expr_(grouped_grid_reduction) {
+    : Expr(passkey), grid_expr_(grouped_grid_reduction) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -744,8 +727,7 @@ AllocateFusedReduction::AllocateFusedReduction(
 AllocateFusedReduction::AllocateFusedReduction(
     IrBuilderPasskey passkey,
     GroupedGridWelford* grouped_grid_welford)
-    : Expr(passkey, ExprType::AllocateFusedReduction),
-      grid_expr_(grouped_grid_welford) {
+    : Expr(passkey), grid_expr_(grouped_grid_welford) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");

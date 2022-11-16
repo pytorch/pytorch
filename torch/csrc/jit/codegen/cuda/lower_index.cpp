@@ -1131,29 +1131,24 @@ void IndexLowering::allocateUniqueFusedReduction(
   }
 
   kir::AllocateFusedReduction* fused_reduction_alloc_reduction = nullptr;
-  switch (expr->getExprType().value()) {
-    case ExprType::GridReduction:
-      fused_reduction_alloc_reduction =
-          IrBuilder::create<kir::AllocateFusedReduction>(
-              expr->as<kir::GridReduction>());
-      break;
-    case ExprType::GridWelford:
-      fused_reduction_alloc_reduction =
-          IrBuilder::create<kir::AllocateFusedReduction>(
-              expr->as<kir::GridWelford>());
-      break;
-    case ExprType::GroupedGridReduction:
-      fused_reduction_alloc_reduction =
-          IrBuilder::create<kir::AllocateFusedReduction>(
-              expr->as<kir::GroupedGridReduction>());
-      break;
-    case ExprType::GroupedGridWelford:
-      fused_reduction_alloc_reduction =
-          IrBuilder::create<kir::AllocateFusedReduction>(
-              expr->as<kir::GroupedGridWelford>());
-      break;
-    default:
-      TORCH_INTERNAL_ASSERT(false, "Invalid expr: ", expr->toString());
+  if (expr->isStrictlyA<kir::GridReduction>()) {
+    fused_reduction_alloc_reduction =
+        IrBuilder::create<kir::AllocateFusedReduction>(
+            expr->as<kir::GridReduction>());
+  } else if (expr->isStrictlyA<kir::GridWelford>()) {
+    fused_reduction_alloc_reduction =
+        IrBuilder::create<kir::AllocateFusedReduction>(
+            expr->as<kir::GridWelford>());
+  } else if (expr->isStrictlyA<kir::GroupedGridReduction>()) {
+    fused_reduction_alloc_reduction =
+        IrBuilder::create<kir::AllocateFusedReduction>(
+            expr->as<kir::GroupedGridReduction>());
+  } else if (expr->isStrictlyA<kir::GroupedGridWelford>()) {
+    fused_reduction_alloc_reduction =
+        IrBuilder::create<kir::AllocateFusedReduction>(
+            expr->as<kir::GroupedGridWelford>());
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "Invalid expr: ", expr->toString());
   }
 
   fused_reduction_map_.emplace(out_tv, fused_reduction_alloc_reduction);

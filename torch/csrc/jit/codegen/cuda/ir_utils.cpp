@@ -886,9 +886,13 @@ Val* getReductionInitValOf(TensorView* tv) {
 // reduction?
 bool isReductionOp(const Expr* expr) {
   // Note that GridReduction inherits ReductionOp
-  return expr->isA<ReductionOp>() || expr->isA<GroupedReductionOp>() ||
-      expr->isA<WelfordOp>() || expr->isA<GroupedWelfordOp>() ||
-      expr->isA<kir::GridWelford>() || expr->isA<kir::GroupedGridWelford>();
+  return expr->isOneOf<
+      ReductionOp,
+      GroupedReductionOp,
+      WelfordOp,
+      GroupedWelfordOp,
+      kir::GridWelford,
+      kir::GroupedGridWelford>();
 }
 
 bool isReductionTvOp(const Expr* expr) {
@@ -963,17 +967,10 @@ struct ReplaceValInIndexVal : public OptInDispatch {
     // Recursively traverse its defining expr
     auto def = val->definition();
     if (def != nullptr) {
-      switch (def->etype()) {
-        case ExprType::UnaryOp:
-        case ExprType::BinaryOp:
-        case ExprType::TernaryOp:
-        case ExprType::Swizzle2DInt:
-        case ExprType::PairSelect:
-          handle(val->definition());
-          break;
-        default:
-          TORCH_INTERNAL_ASSERT(
-              false, "Unexpected definition: ", def->toString())
+      if (def->isOneOf<UnaryOp, BinaryOp, TernaryOp>()) {
+        handle(val->definition());
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "Unexpected definition: ", def->toString())
       }
       // last_visited_val_ is set in the expr handlers
     } else {

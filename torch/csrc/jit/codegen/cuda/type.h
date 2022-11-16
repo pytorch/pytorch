@@ -103,52 +103,6 @@ DataType getTypeFromComplexType(DataType dtype);
 // Return if the datatype is supported on the current device
 TORCH_CUDA_CU_API bool isSupportedTypeByDevice(DataType dtype);
 
-enum class ExprType {
-  Invalid,
-  FullOp,
-  ARangeOp,
-  EyeOp,
-  UnaryOp,
-  BinaryOp,
-  TernaryOp,
-  SelectOp,
-  RNGOp,
-  ReductionOp,
-  GroupedReductionOp,
-  BroadcastOp,
-  SqueezeOp,
-  WelfordOp,
-  GroupedWelfordOp,
-  MmaOp,
-  TransposeOp,
-  ExpandOp,
-  ShiftOp,
-  GatherOp,
-  ViewOp,
-  LoadStoreOp,
-  Split,
-  ViewAsScalar,
-  Merge,
-  Swizzle2D,
-  Swizzle2DInt,
-  PairSelect,
-  Allocate,
-  BlockSync,
-  GridSync,
-  CpAsyncWait,
-  CpAsyncCommit,
-  InitMagicZero,
-  UpdateMagicZero,
-  ForLoop,
-  IfThenElse,
-  GridReduction,
-  GroupedGridReduction,
-  GridBroadcast,
-  GridWelford,
-  GroupedGridWelford,
-  AllocateFusedReduction
-};
-
 enum class UnaryOpType {
   Abs,
   Acos,
@@ -378,7 +332,6 @@ TORCH_CUDA_CU_API at::ScalarType data_type_to_aten(const DataType& data_type);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ValType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const PredicateType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const DataType);
-TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ExprType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const TernaryOpType);

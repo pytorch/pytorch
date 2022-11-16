@@ -106,16 +106,13 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   virtual c10::optional<DataType> getDataType() const {
     return c10::nullopt;
   }
-  virtual c10::optional<ExprType> getExprType() const {
-    return c10::nullopt;
-  }
 
   // Short cut to figure out if it is a value/expression
   bool isVal() const {
     return getValType() != c10::nullopt;
   }
   bool isExpr() const {
-    return getExprType() != c10::nullopt;
+    return isA<Expr>();
   }
 
   // Make sure this is a Val and return it as a Val*
@@ -148,11 +145,7 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   void setName(IrBuilderPasskey, StmtNameType name);
 
   virtual bool sameType(const Statement* const other) {
-    if (isVal() && other->isVal())
-      return getValType().value() == other->getValType().value();
-    if (isExpr() && other->isExpr())
-      return getExprType().value() == other->getExprType().value();
-    return false;
+    return typeid(*this) == typeid(*other);
   }
 
   // Return if this statement is the same as another statement
@@ -312,7 +305,8 @@ class TORCH_CUDA_CU_API Val : public Statement {
   }
 
   // Determine if value definition matches given expression type
-  bool isDefinitionType(ExprType expression_type) const;
+  template <typename T>
+  inline bool isDefinitionType() const;
 
   const std::vector<Expr*>& uses() const;
 
@@ -433,27 +427,18 @@ class TORCH_CUDA_CU_API Val : public Statement {
 //!  4) Printing functions should be added to ir_iostream.h/.cpp
 //!  5) Lower case convenience functions should be added to arith.h/.cpp (If
 //!     user facing)
-//!  6) An enum value must be added to ExprType in type.h
 //!  7) A string entry must be added in expr_type_string_map
 //!  8) Entry added to ir_graphviz .cpp/.h
 //!
 class TORCH_CUDA_CU_API Expr : public Statement {
  public:
-  explicit Expr(IrBuilderPasskey, ExprType type);
+  explicit Expr(IrBuilderPasskey);
 
   Expr(const Expr* src, IrCloner* ir_cloner);
 
   // Creates a new instance of the expression with all its field copied.
   // Note that unlike IrCloner, this function only do a shallow copy
   virtual Expr* shallowCopy() const = 0;
-
-  c10::optional<ExprType> getExprType() const override {
-    return etype_;
-  }
-
-  ExprType etype() const {
-    return etype_;
-  }
 
   bool sameAs(const Statement* other) const override;
 
@@ -499,6 +484,9 @@ class TORCH_CUDA_CU_API Expr : public Statement {
   // TODO: Protect based on being in kernel container
   Expr* withWritePredicate(kir::Predicate* write_predicate);
 
+  // Get the name of an expression
+  virtual const char* getOpString() const = 0;
+
  protected:
   // TODO: Protect based on being in kernel container
   void setPredicate(kir::Predicate* predicate);
@@ -525,7 +513,6 @@ class TORCH_CUDA_CU_API Expr : public Statement {
   }
 
  private:
-  ExprType etype_ = ExprType::Invalid;
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
 
@@ -534,6 +521,14 @@ class TORCH_CUDA_CU_API Expr : public Statement {
   // Only used for reduction-related expressions
   kir::Predicate* write_predicate_ = nullptr;
 };
+
+template <typename T>
+bool Val::isDefinitionType() const {
+  if (definition() != nullptr) {
+    return definition()->isA<T>();
+  }
+  return false;
+}
 
 } // namespace cuda
 } // namespace fuser

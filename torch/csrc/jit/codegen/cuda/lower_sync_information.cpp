@@ -685,12 +685,11 @@ SyncMap::SyncMap(Fusion* fusion) {
           // we'll flag it on RAW which will trigger the WAR.
           // See test FusionValidateParallelizeShift_CUDA for a
           // concrete example where this sync is required.
-          if ((expr->getExprType() == ExprType::GatherOp ||
-               expr->getExprType() == ExprType::ShiftOp) &&
+          if ((expr->isOneOf<GatherOp, ShiftOp>()) &&
               producer->getMemoryType() == MemoryType::Shared &&
               isParallelTypeThreadDim(producer_ptype)) {
             std::unordered_set<Val*> shifted_rfactor_ids;
-            if (expr->getExprType() == ExprType::GatherOp) {
+            if (expr->isA<GatherOp>()) {
               auto gather_op = expr->as<GatherOp>();
               for (auto root_i :
                    c10::irange(producer->getMaybeRFactorDomain().size())) {
@@ -701,7 +700,7 @@ SyncMap::SyncMap(Fusion* fusion) {
                   shifted_rfactor_ids.insert(rfactor_id);
                 }
               }
-            } else if (expr->getExprType() == ExprType::ShiftOp) {
+            } else if (expr->isA<ShiftOp>()) {
               auto shift_op = expr->as<ShiftOp>();
               for (auto root_i :
                    c10::irange(producer->getMaybeRFactorDomain().size())) {

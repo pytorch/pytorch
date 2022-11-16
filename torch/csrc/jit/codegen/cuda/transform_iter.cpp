@@ -3,6 +3,8 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 
+#include <typeinfo>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -10,15 +12,9 @@ namespace cuda {
 
 // Transform dispatch
 void ReplayTransformations::handle(Expr* e) {
-  switch (e->getExprType().value()) {
-    case (ExprType::Split):
-    case (ExprType::Merge):
-    case (ExprType::Swizzle2D):
-      break;
-    default:
-      TORCH_INTERNAL_ASSERT(
-          false, "Invalid expr type found in transform traversal.");
-  }
+  auto is_supported_expr = e->isOneOf<Split, Merge, Swizzle2D>();
+  TORCH_INTERNAL_ASSERT(
+      is_supported_expr, "Invalid expr type found in transform traversal.");
   IterVisitor::handle(e);
 }
 
@@ -501,8 +497,7 @@ BestEffortReplay::BestEffortReplay(
 
     // If there isn't an rfactor id in the replay's inputs and there's a
     // mismatch in replay_expr's and target_expr's expression type, continue
-    if (replay_expr->getExprType().value() !=
-        target_expr->getExprType().value()) {
+    if (typeid(*replay_expr) != typeid(*target_expr)) {
       TORCH_INTERNAL_ASSERT(!replay_has_rfactor_inp, err_str);
       continue;
     }
@@ -510,7 +505,7 @@ BestEffortReplay::BestEffortReplay(
     // If there isn't an rfactor id in the replay's inputs and there's a
     // mismatch in replay_expr's and target_expr's split factor (if a split
     // expr), continue
-    if (replay_expr->getExprType().value() == ExprType::Split) {
+    if (replay_expr->isA<Split>()) {
       auto r_split = replay_expr->as<Split>();
       auto t_split = target_expr->as<Split>();
       if (!r_split->factor()->sameAs(t_split->factor()) ||
@@ -525,7 +520,7 @@ BestEffortReplay::BestEffortReplay(
     // Need to match swizzle type and parameters if
     //  not skipping swizzles in this mapping pass.
     if (!(skip_replay_swizzle_ || skip_target_swizzle_) &&
-        replay_expr->etype() == ExprType::Swizzle2D) {
+        replay_expr->isA<Swizzle2D>()) {
       auto r_swizzle_2d = replay_expr->as<Swizzle2D>();
       auto t_swizzle_2d = target_expr->as<Swizzle2D>();
       if (!(r_swizzle_2d->swizzleType() == t_swizzle_2d->swizzleType())) {
@@ -766,10 +761,9 @@ IterDomain* getSwizzleFinalOutput(
       break;
     }
 
-    if (expr_it->second->etype() == ExprType::Swizzle2D) {
+    if (auto expr = dynamic_cast<Swizzle2D*>(expr_it->second)) {
       // In the case of 2D swizzle ops, just forward
       //  inX to outX and inY to outY.
-      auto expr = expr_it->second->as<Swizzle2D>();
       if (id == expr->inX()) {
         id = expr->outX();
       } else {
@@ -799,7 +793,7 @@ bool isSwizzleInput(
     return false;
   }
 
-  return user_expr_it->second->etype() == ExprType::Swizzle2D;
+  return user_expr_it->second->isA<Swizzle2D>();
 }
 
 } // namespace
