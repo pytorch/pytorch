@@ -21,8 +21,11 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     IS_WINDOWS,
     slowTest,
-    set_default_dtype
+    set_default_dtype,
+    gradcheck
 )
+
+from torch.testing._internal.common_methods_invocations import wrapper_set_seed
 from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater
 
 if TEST_FAIRSEQ:
@@ -860,10 +863,21 @@ class TestTransformers(NNTestCase):
                     actual = torch.ops.aten._scaled_dot_product_attention(
                         query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
 
-            # freeze_rng_state() doesn't seem to work outside of CPU, so dropout makes the results incomparable.
-            # TODO: Do this skipping in a nicer way once the granular test skipping logic lands.
-            if dropout_p == 0.0 or device == 'cpu':
                 self.assertEqual(actual, expected)
+
+        if attn_mask_dim is None:
+            q = q.double().clone()
+            k = k.double().clone()
+            v = v.double().clone()
+            q.requires_grad_()
+            k.requires_grad_()
+            v.requires_grad_()
+
+            assert gradcheck(lambda *args, **kwargs: wrapper_set_seed(sdp_ref, *args, **kwargs),
+                             (q, k, v, attn_mask, dropout_p))
+            assert gradcheck(lambda *args, **kwargs:
+                             wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs),
+                             (q, k, v, attn_mask, dropout_p))
 
     @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
     @torch.no_grad()
@@ -1079,6 +1093,28 @@ class TestTransformers(NNTestCase):
         self.assertEqual(math_ref_test, math_ref_lp_test, atol=7e-3, rtol=7e-3)
         self.assertEqual(actual_test, math_ref_test, atol=5e-3, rtol=5e-3)
 
+    @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM or IS_WINDOWS, "Flash Attention was not built for this system")
+    @parametrize("contiguous_inputs", [True, False])
+    def test_efficient_attention_gradcheck(self, contiguous_inputs: bool):
+
+        batch_size, seq_len, num_heads, head_dim = 8, 8, 4, 64
+        query, key, value = torch.rand((batch_size, seq_len, 3 * num_heads * head_dim),
+                                       device="cuda", dtype=torch.float32, requires_grad=True).chunk(3, -1)
+        query = query.view(batch_size, -1, num_heads, head_dim)
+        key = key.view(batch_size, -1, num_heads, head_dim)
+        value = value.view(batch_size, -1, num_heads, head_dim)
+
+        if contiguous_inputs:
+            query = query.contiguous()
+            key = key.contiguous()
+            value = value.contiguous()
+
+        # Normally we would transpose the inputs but the fused kernels expect
+        # (batch, seq_len, num_heads, head_dim) bump the tolerance since we can only run kernel
+        # in fp32
+        assert gradcheck(lambda *args, **kwargs:
+                         wrapper_set_seed(torch.ops.aten._efficient_attention_forward, *args, **kwargs),
+                         (query, key, value, None, None, None, True, False), fast_mode=True, atol=8e-5, rtol=1e-3)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_sdp_runtime_dispatch(self):
@@ -1131,6 +1167,15 @@ class TestTransformers(NNTestCase):
             # Non-None attention mask
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, torch.ones_like(q), 0.0, False, False))
+
+    # Test failing MHA when bias was NoneType
+    def test_bias_is_none(self):
+        x = torch.rand((1, 5, 10))
+        model = torch.nn.modules.activation.MultiheadAttention(10, 1, bias=False, batch_first=True)
+        model.eval()
+        model(x, x, x)
+        # completes without error
+
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.
