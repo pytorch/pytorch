@@ -3587,9 +3587,6 @@ class MKLPackedLinear(ExternKernelAlloc):
         kernel = "torch.ops.mkl._mkl_linear"
         x = cls.require_stride1(cls.realize_input(x))
         orign_w = cls.require_stride1(cls.realize_input(orig_w))
-        import pdb
-
-        pdb.set_trace()
         *m, _ = x.get_size()
         oc, _ = orign_w.get_size()
 
