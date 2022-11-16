@@ -1068,7 +1068,10 @@ class CppKernelProxy(CppKernel):
         main_loop_range = ir.IndexingDiv(
             most_inner_loop.size, self.picked_vec_isa.nelements()
         )
-        if sympy.simplify(main_loop_range) <= 0:
+        loop_interval = sympy.simplify(main_loop_range)
+        # TODO(Eikan): To support dynamic shape.
+        if not loop_interval.is_integer or loop_interval <= 0:
+            metrics.generated_cpp_vec_kernel_count -= 1
             return self.simd_omp_kernel.codegen_loops(code, worksharing)
 
         # TODO(jansel): detect stride-1 dimension and vectorize that
@@ -1117,6 +1120,7 @@ class CppKernelProxy(CppKernel):
         if reduction_par_depth > 0 and reduction_par_depth != len(
             loops_nest_reduce.loops
         ):
+            metrics.generated_cpp_vec_kernel_count -= 1
             return self.simd_omp_kernel.codegen_loops(code, worksharing)
 
         with contextlib.ExitStack() as stack:
