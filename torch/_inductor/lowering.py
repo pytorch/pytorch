@@ -1194,18 +1194,6 @@ def philox_rand_like(x, seed, offset):
     )
 
 
-def _apply_constraint(f, constraint):
-    def inner(*args, **kwargs):
-        args, kwargs = constraint(*args, **kwargs)
-        return f(*args, **kwargs)
-
-    return inner
-
-
-def apply_constraint(constraint):
-    return functools.partial(_apply_constraint, constraint=constraint)
-
-
 def require_dense(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
         ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs)
