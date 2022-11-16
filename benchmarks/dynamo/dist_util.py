@@ -25,9 +25,14 @@ from transformers.models.t5.modeling_t5 import T5Block
 
 
 def setup(rank, world_size):
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    # set defaults in case torchrun isn't used; no idea why the if is needed, but it hangs torchrun otherwise
+    if not os.getenv("MASTER_ADDR"):
+        os.environ["MASTER_ADDR"] = os.getenv("MASTER_ADDR", "localhost")
+    if not os.getenv("MASTER_PORT"):
+        os.environ["MASTER_PORT"] = os.getenv("MASETER_PORT", "12355")
+    os.environ["RANK"] = os.getenv("RANK", "0")
+    os.environ["WORLD_SIZE"] = os.getenv("WORLD_SIZE", "1")
+    dist.init_process_group("nccl")
 
 
 def cleanup():
