@@ -234,6 +234,9 @@ class Sequential(Module):
         return self
 
 
+# `Sequence` but not a `MutableSequence` since as currently implemented, the signatures
+# of the mutable methods are incompatible, e.g. `append` returns `self` and `pop` takes
+# a slice.
 class ModuleList(Module, Sequence[T]):
     r"""Holds submodules in a list.
 
