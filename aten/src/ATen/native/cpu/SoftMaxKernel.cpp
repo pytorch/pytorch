@@ -49,7 +49,7 @@ inline void _vec_log_softmax_lastdim(
   // assign fewer threads if the number of computations is not large enough
   int64_t num_computations = 16 * outer_size * dim_size;
   if ((num_computations < at::get_num_threads() * at::internal::GRAIN_SIZE) &&
-      (num_computations >= 2 * at::internal::GRAIN_SIZE)) {
+      (num_computations > at::internal::GRAIN_SIZE)) {
     int64_t fewer_threads = num_computations / at::internal::GRAIN_SIZE + 1;
     grain_size = outer_size / (fewer_threads - 1);
   } else if (num_computations <= at::internal::GRAIN_SIZE) {
