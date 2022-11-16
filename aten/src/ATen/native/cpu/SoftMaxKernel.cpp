@@ -23,7 +23,7 @@
 // a very rough approximation of the number of computations per dim_size element
 // by counting simple computations (*, +, -) as 1 and exp or log as 4.
 //
-// We use a chunk size of (number of threads) for all dtypes.
+// We use a chunk size such that it'd fit in L1D.
 // Prior to https://github.com/pytorch/pytorch/issues/80252, the chunk-size was
 // a multiple of vector-length, which made chunk-size 256 for FP32, FP16, BF16
 // when AVX2 was used, but 512 when AVX512 was used.
