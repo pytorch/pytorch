@@ -590,16 +590,26 @@ class TapeManagerContainer(object):
         ]
 
 
-# TODO - actually make thread local - need to register at TLS that gets copied over
-# in aten/ThreadLocalState
-tape_manager_container = TapeManagerContainer()
+local = threading.local()
+local.tape_manager_container = TapeManagerContainer()
+
+# We need to register this as an object that will be copied over as TLS when new
+# threads are created in autograd
+torch._C._stash_obj_in_tls("tape_manager_container", local.tape_manager_container)
+
+
+def get_container():
+    if hasattr(local, "tape_manager_container"):
+        return local.tape_manager_container
+    assert torch._C._key_in_tls("tape_manager_container")
+    return torch._C._get_obj_in_tls("tape_manager_container")
 
 
 class CudaGraphify(object):
     def __init__(self, model, inputs, static_input_idxs=()):
 
         assert isinstance(inputs, (list, tuple))
-        self.tape_manager = tape_manager_container.get_tape_manager(self)
+        self.tape_manager = get_container().get_tape_manager(self)
         assert self.tape_manager is not None
         self.graph_id = self.tape_manager.increment_recording_tape()
         self.model = model
@@ -842,7 +852,7 @@ class CudaGraphify(object):
 
 
 def cudagraphify_impl(model, inputs, static_input_idxs=()):
-    manager = tape_manager_container.get_tape_manager()
+    manager = get_container().get_tape_manager()
 
     if manager is None or not manager.valid_begin_of_recording():
         return model
