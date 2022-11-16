@@ -47,6 +47,7 @@ from torch.distributed.fsdp.flat_param import (
     HandleConfig,
     HandleShardingStrategy,
 )
+from torch.distributed.fsdp.wrap import _FSDPPolicy
 from torch.distributed.utils import _sync_params_and_buffers
 from torch.utils.hooks import RemovableHandle
 
@@ -213,10 +214,8 @@ def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_type = StateDictType.FULL_STATE_DICT
     state_dict_config: StateDictConfig = FullStateDictConfig()
     state._state_dict_config = state_dict_config
-    full_param_ctx: Optional[Generator] = None
-    # TODO: For composable API, this should be a dict that maps from a module to
-    # handles.
-    state._full_param_ctx = full_param_ctx
+    unshard_params_ctx: Dict[nn.Module, Generator] = {}
+    state._unshard_params_ctx = unshard_params_ctx
     return state
 
 
@@ -264,7 +263,7 @@ def _init_param_handle_from_module(
 def _init_param_handles_from_module(
     state: _FSDPState,
     root_module: nn.Module,
-    auto_wrap_policy: Callable,
+    policy: _FSDPPolicy,
     device_id: Optional[Union[int, torch.device]],
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
@@ -275,7 +274,7 @@ def _init_param_handles_from_module(
     """
     submodule_to_states = _get_submodule_to_states(
         root_module,
-        auto_wrap_policy,
+        policy,
         state._ignored_modules,
         state._ignored_params,
     )

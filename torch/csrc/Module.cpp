@@ -1594,10 +1594,6 @@ Call this whenever a new thread is created in order to propagate values from
       (PyObject*)THPDefaultCPUGenerator,
       /* incref= */ false));
   ASSERT_TRUE(set_module_attr(
-      "DisableTorchFunctionSubclass",
-      (PyObject*)THPModule_DisableTorchFunctionSubclassType(),
-      /* incref= */ false));
-  ASSERT_TRUE(set_module_attr(
       "DisableTorchFunction",
       (PyObject*)THPModule_DisableTorchFunctionType(),
       /* incref= */ false));
