@@ -1437,7 +1437,7 @@ def _is_observer_script_module(mod, obs_type_name):
 def _is_activation_post_process(module):
     return (
         isinstance(module, torch.ao.quantization.ObserverBase)
-        or isinstance(module, torch.ao.quantization.FakeQuantize)
+        or isinstance(module, torch.ao.quantization.FakeQuantizeBase)
         or _is_observer_script_module(module, "quantization.observer")
     )
 
