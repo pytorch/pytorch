@@ -2,9 +2,10 @@ import argparse
 import json
 import os
 import xml.etree.ElementTree as ET
+from collections import defaultdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Dict, Generator, Set, Tuple
+from typing import Any, Dict, Generator, Tuple
 
 from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
@@ -27,21 +28,27 @@ def is_rerun_disabled_tests(root: ET.ElementTree) -> bool:
     return skipped is not None and TARGET_WORKFLOW in skipped.attrib.get("message", "")
 
 
-def process_report(report: Path) -> Tuple[Set[str], Dict[str, Dict[str, int]]]:
+def process_report(
+    report: Path,
+) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, Dict[str, int]]]:
     """
     Return a list of disabled tests that should be re-enabled and those that are still
-    failing
+    failing and flaky (skipped)
     """
     root = ET.parse(report)
 
     # A test should be re-enable if it's green after rerunning in all platforms where it
     # is currently disabled
-    success_tests: Set[str] = set()
-    # Also want to keep num_red and num_green here for additional stats
-    failure_tests: Dict[str, Dict[str, int]] = {}
+    success_tests: Dict[str, int] = defaultdict(int)
+    # Also keep track of failures because pytest-flakefinder is used to run the same test
+    # multiple times, some could fails
+    failure_tests: Dict[str, int] = defaultdict(int)
+    # Skipped tests are flaky tests (unittest), so we want to keep num_red and num_green
+    # here for additional stats
+    skipped_tests: Dict[str, Dict[str, int]] = {}
 
     if not is_rerun_disabled_tests(root):
-        return success_tests, failure_tests
+        return success_tests, failure_tests, skipped_tests
 
     for test_case in root.iter(TESTCASE_TAG):
         parsed_test_case = process_xml_element(test_case)
@@ -64,23 +71,28 @@ def process_report(report: Path) -> Tuple[Set[str], Dict[str, Dict[str, int]]]:
         if not name or not classname or not filename:
             continue
 
+        # Check if the test is a failure
+        failure = parsed_test_case.get("failure", None)
+
         disabled_test_id = SEPARATOR.join([name, classname, filename])
-        # Under --rerun-disabled-tests mode, if a test is not skipped, it's counted
-        # as a success. Otherwise, it's still flaky or failing
+        # Under --rerun-disabled-tests mode, if a test is not skipped or failed, it's
+        # counted as a success. Otherwise, it's still flaky or failing
         if skipped:
             try:
                 stats = json.loads(skipped.get("message", ""))
             except json.JSONDecodeError:
                 stats = {}
 
-            failure_tests[disabled_test_id] = {
+            skipped_tests[disabled_test_id] = {
                 "num_green": stats.get("num_green", 0),
                 "num_red": stats.get("num_red", 0),
             }
+        elif failure:
+            failure_tests[disabled_test_id] += 1
         else:
-            success_tests.add(disabled_test_id)
+            success_tests[disabled_test_id] += 1
 
-    return success_tests, failure_tests
+    return success_tests, failure_tests, skipped_tests
 
 
 def get_test_reports(
@@ -111,79 +123,128 @@ def get_test_reports(
             yield report
 
 
+def get_disabled_test_name(test_id: str) -> Tuple[str, str, str, str]:
+    """
+    Follow flaky bot convention here, if that changes, this will also need to be updated
+    """
+    name, classname, filename = test_id.split(SEPARATOR)
+    return f"{name} (__main__.{classname})", name, classname, filename
+
+
+def prepare_record(
+    workflow_id: int,
+    workflow_run_attempt: int,
+    name: str,
+    classname: str,
+    filename: str,
+    flaky: bool,
+    num_red: int = 0,
+    num_green: int = 0,
+) -> Tuple[Any, Dict[str, Any]]:
+    """
+    Prepare the record to save onto S3
+    """
+    key = (
+        workflow_id,
+        workflow_run_attempt,
+        name,
+        classname,
+        filename,
+    )
+
+    record = {
+        "workflow_id": workflow_id,
+        "workflow_run_attempt": workflow_run_attempt,
+        "name": name,
+        "classname": classname,
+        "filename": filename,
+        "flaky": flaky,
+        "num_green": num_green,
+        "num_red": num_red,
+    }
+
+    return key, record
+
+
 def save_results(
     workflow_id: int,
     workflow_run_attempt: int,
-    should_be_enabled_tests: Set[str],
-    failure_tests: Dict[str, Dict[str, int]],
+    success_tests: Dict[str, int],
+    failure_tests: Dict[str, int],
+    skipped_tests: Dict[str, Dict[str, int]],
 ) -> None:
     """
     Save the result to S3, so it can go to Rockset
     """
+    should_be_enabled_tests = {
+        name
+        for name in success_tests.keys()
+        if name not in failure_tests and name not in skipped_tests
+    }
     records = {}
 
     # Log the results
     print(f"The following {len(should_be_enabled_tests)} tests should be re-enabled:")
 
     for test_id in should_be_enabled_tests:
-        name, classname, filename = test_id.split(SEPARATOR)
-
-        # Follow flaky bot convention here, if that changes, this will also need to be updated
-        disabled_test_name = f"{name} (__main__.{classname})"
+        disabled_test_name, name, classname, filename = get_disabled_test_name(test_id)
         print(f"  {disabled_test_name} from {filename}")
 
-        key = (
-            workflow_id,
-            workflow_run_attempt,
-            name,
-            classname,
-            filename,
+        key, record = prepare_record(
+            workflow_id=workflow_id,
+            workflow_run_attempt=workflow_run_attempt,
+            name=name,
+            classname=classname,
+            filename=filename,
+            flaky=False,
         )
-
-        records[key] = {
-            "workflow_id": workflow_id,
-            "workflow_run_attempt": workflow_run_attempt,
-            "name": name,
-            "classname": classname,
-            "filename": filename,
-            "flaky": False,
-            "num_red": 0,
-            "num_green": 0,
-        }
+        records[key] = record
 
     # Log the results
-    print(f"The following {len(failure_tests)} are still flaky:")
+    print(f"The following {len(failure_tests) + len(skipped_tests)} are still flaky:")
 
-    for test_id, stats in failure_tests.items():
-        name, classname, filename = test_id.split(SEPARATOR)
+    for test_id, count in failure_tests.items():
+        num_red = count
+        # See if there is any success
+        num_green = success_tests.get(test_id, 0)
 
-        num_red = stats["num_red"]
-        num_green = stats["num_green"]
-
-        # Follow flaky bot convention here, if that changes, this will also need to be updated
-        disabled_test_name = f"{name} (__main__.{classname})"
+        disabled_test_name, name, classname, filename = get_disabled_test_name(test_id)
         print(
             f"  {disabled_test_name} from {filename}, failing {num_red}/{num_red + num_green}"
         )
 
-        key = (
-            workflow_id,
-            workflow_run_attempt,
-            name,
-            classname,
-            filename,
+        key, record = prepare_record(
+            workflow_id=workflow_id,
+            workflow_run_attempt=workflow_run_attempt,
+            name=name,
+            classname=classname,
+            filename=filename,
+            flaky=True,
+            num_green=num_green,
+            num_red=num_red,
+        )
+        records[key] = record
+
+    for test_id, stats in skipped_tests.items():
+        num_red = stats["num_red"]
+        num_green = stats["num_green"]
+
+        disabled_test_name, name, classname, filename = get_disabled_test_name(test_id)
+        print(
+            f"  {disabled_test_name} from {filename}, failing {num_red}/{num_red + num_green}"
         )
 
-        records[key] = {
-            "workflow_id": workflow_id,
-            "workflow_run_attempt": workflow_run_attempt,
-            "name": name,
-            "classname": classname,
-            "filename": filename,
-            "flaky": True,
-            "num_red": num_red,
-            "num_green": num_green,
-        }
+        key, record = prepare_record(
+            workflow_id=workflow_id,
+            workflow_run_attempt=workflow_run_attempt,
+            name=name,
+            classname=classname,
+            filename=filename,
+            flaky=True,
+            num_green=num_green,
+            num_red=num_red,
+        )
+        records[key] = record
 
     upload_to_s3(
         workflow_id,
@@ -197,29 +258,42 @@ def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
     """
     Find the list of all disabled tests that should be re-enabled
     """
-    success_tests: Set[str] = set()
-    # Also want to keep num_red and num_green here for additional stats
-    failure_tests: Dict[str, Dict[str, int]] = {}
+    # A test should be re-enable if it's green after rerunning in all platforms where it
+    # is currently disabled
+    success_tests: Dict[str, int] = defaultdict(int)
+    # Also keep track of failures because pytest-flakefinder is used to run the same test
+    # multiple times, some could fails
+    failure_tests: Dict[str, int] = defaultdict(int)
+    # Skipped tests are flaky tests (unittest), so we want to keep num_red and num_green
+    # here for additional stats
+    skipped_tests: Dict[str, Dict[str, int]] = {}
 
     for report in get_test_reports(
         args.repo, args.workflow_run_id, args.workflow_run_attempt
     ):
-        success, failure = process_report(report)
+        success, failure, skipped = process_report(report)
 
         # A test should be re-enable if it's green after rerunning in all platforms where it
         # is currently disabled. So they all need to be aggregated here
-        success_tests.update(success)
+        for name, count in success.items():
+            success_tests[name] += count
 
-        for name, stats in failure.items():
+        for name, count in failure.items():
+            failure_tests[name] += count
+
+        for name, stats in skipped.items():
             if name not in failure_tests:
-                failure_tests[name] = stats.copy()
+                skipped_tests[name] = stats.copy()
             else:
-                failure_tests[name]["num_green"] += stats["num_green"]
-                failure_tests[name]["num_red"] += stats["num_red"]
+                skipped_tests[name]["num_green"] += stats["num_green"]
+                skipped_tests[name]["num_red"] += stats["num_red"]
 
-    should_be_enabled_tests = success_tests.difference(set(failure_tests.keys()))
     save_results(
-        workflow_run_id, workflow_run_attempt, should_be_enabled_tests, failure_tests
+        workflow_run_id,
+        workflow_run_attempt,
+        success_tests,
+        failure_tests,
+        skipped_tests,
     )
 
 
