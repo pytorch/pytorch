@@ -752,7 +752,7 @@ template <bool require_view, bool require_copy>
 Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) {
   constexpr const char* select_name = (require_view ? "select()" : "select_copy()");
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
-      self.layout(), select_name, []() { return; });
+      self.layout(), "select", []() { return; });
   TORCH_CHECK_INDEX(
       self.dim() != 0, select_name, " cannot be applied to a 0-dim tensor.");
   dim = maybe_wrap_dim(dim, self.dim());
@@ -790,7 +790,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
   std::tie(compressed_indices, plain_indices) =
       AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
           self.layout(),
-          select_name,
+          "select",
           [&]() {
             return std::make_pair(self.crow_indices(), self.col_indices());
           },
@@ -818,7 +818,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
     TORCH_INTERNAL_ASSERT(dim == 0 || dim == 1);
 
     DimVector blocksize{1, 1};
-    AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), select_name, [&] {}, [&] {
+    AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "select", [&] {}, [&] {
       blocksize[0] = std::max<int64_t>(1, self.values().size(n_batch + 1));
       blocksize[1] = std::max<int64_t>(1, self.values().size(n_batch + 2));
     });
@@ -829,7 +829,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
     }
 
     auto indices_options = compressed_indices.options();
-    int64_t fast_dim = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(self.layout(), select_name, [&]() { return 0; }, [&]() { return 1; });
+    int64_t fast_dim = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "select", [&]() { return 0; }, [&]() { return 1; });
     int64_t start = -1;
     int64_t end = -1;
     int64_t select_nnz{};
@@ -840,7 +840,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
     if (dim == fast_dim) {
       // select is always a view operation
       Tensor start_end = compressed_indices.narrow(0, index / blocksize[0], 2).cpu();
-      AT_DISPATCH_INDEX_TYPES(start_end.scalar_type(), select_name, [&]() {
+      AT_DISPATCH_INDEX_TYPES(start_end.scalar_type(), "select", [&]() {
         auto accessor = start_end.accessor<index_t, 1>();
         start = accessor[0];
         end = accessor[1];
@@ -863,7 +863,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
         step = 1;
       } else {
         Tensor dim_indices_cpu = dim_indices.cpu();
-        AT_DISPATCH_INDEX_TYPES(dim_indices_cpu.scalar_type(), select_name, [&]() {
+        AT_DISPATCH_INDEX_TYPES(dim_indices_cpu.scalar_type(), "select", [&]() {
           auto accessor = dim_indices_cpu.accessor<index_t, 1>();
           if (accessor[select_nnz-1] - accessor[0] == select_nnz - 1) {
             // special solution, avoids scanning dim_indices content
@@ -902,7 +902,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
       }
     }
 
-    AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), select_name,
+    AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "select",
         [&]() {},
         [&]() {
           Tensor subblock_indices = at::arange(0, blocksize[1], indices_options);
@@ -932,7 +932,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
     // Selecting dense dimension
     return AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
         self.layout(),
-        select_name,
+        "select",
         // Non blocked layout (2 sparse dims become 1 nnz dim in values, so dim
         // is found one position to the left)
         [&]() { return select_strided(self.values(), dim - 1, index); },

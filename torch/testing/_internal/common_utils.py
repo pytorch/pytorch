@@ -2638,7 +2638,7 @@ class TestCase(expecttest.TestCase):
                   [0, 5, 0, 6, 6, 6],
                   [5, 0, 5, 6, 6, 6],
                   [0, 0, 0, 0, 8, 8],
-                  [7, 7, 7, 0, 8, 8]], [(2, 3)], [(), (4, 5)]),
+                  [7, 7, 7, 0, 8, 8]], [(2, 3)], [(), (4, 5)] if enable_hybrid else [()]),
                 # batch tensor with variable NSE
                 # Requires https://github.com/pytorch/pytorch/pull/84843 or similar.
                 ([[[1, 2],
