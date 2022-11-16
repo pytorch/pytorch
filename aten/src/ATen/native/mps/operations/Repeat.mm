@@ -145,8 +145,8 @@ Tensor repeat_interleave_mps(const Tensor& repeats,c10::optional<int64_t> output
   };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-  
-  NSNumber repeats_shape;
+
+  NSNumber *repeats_shape;
 
   if (output_size.has_value()) {
     repeats_shape = [NSNumber numberWithInteger:output_size.value()];
