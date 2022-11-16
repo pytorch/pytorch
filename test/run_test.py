@@ -751,7 +751,7 @@ def run_test_ops(test_module, test_directory, options):
         # failure
         rerun_options = ["-x", "--reruns=2"]
 
-    default_unittest_args=[
+    default_unittest_args = [
         "--use-pytest",
         "-vv",
         "-rfEX"
