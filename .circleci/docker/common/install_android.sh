@@ -12,7 +12,7 @@ apt-get autoclean && apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 pushd /tmp
-curl -Os --retry 3 --retry-all-errors $_https_amazon_aws/android-ndk-${ANDROID_NDK}-linux-x86_64.zip
+curl -Os --retry 3 $_https_amazon_aws/android-ndk-${ANDROID_NDK}-linux-x86_64.zip
 popd
 _ndk_dir=/opt/ndk
 mkdir -p "$_ndk_dir"
@@ -52,7 +52,7 @@ _android_home=/opt/android/sdk
 
 rm -rf $_android_home
 sudo mkdir -p $_android_home
-curl --silent --show-error --location --fail --retry 3 --retry-all-errors --output /tmp/android-sdk-linux.zip $_https_amazon_aws/android-sdk-linux-tools3859397-build-tools2803-2902-platforms28-29.zip
+curl --silent --show-error --location --fail --retry 3 --output /tmp/android-sdk-linux.zip $_https_amazon_aws/android-sdk-linux-tools3859397-build-tools2803-2902-platforms28-29.zip
 sudo unzip -q $_tmp_sdk_zip -d $_android_home
 rm $_tmp_sdk_zip
 
@@ -70,7 +70,7 @@ _gradle_home=/opt/gradle
 sudo rm -rf $gradle_home
 sudo mkdir -p $_gradle_home
 
-curl --silent --output /tmp/gradle.zip --retry 3 --retry-all-errors $_https_amazon_aws/gradle-${GRADLE_VERSION}-bin.zip
+curl --silent --output /tmp/gradle.zip --retry 3 $_https_amazon_aws/gradle-${GRADLE_VERSION}-bin.zip
 
 sudo unzip -q /tmp/gradle.zip -d $_gradle_home
 rm /tmp/gradle.zip
