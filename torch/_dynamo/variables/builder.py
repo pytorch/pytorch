@@ -123,7 +123,8 @@ class GraphArg:
 
     def get_fake_examples(self):
         assert config.fake_tensor_propagation
-        assert isinstance(self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
+        if self.fake_tensor is not None:
+            assert isinstance(self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
         return [self.fake_tensor]
 
     def __len__(self):

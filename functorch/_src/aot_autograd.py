@@ -413,6 +413,7 @@ def disable_autocast_manager():
     finally:
         del guard
 
+
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     # Deduplicate inputs.  Suppose you have:
     #
@@ -556,6 +557,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 x for (i, x) in enumerate(fw_outs[0:num_outs]) if CompiledFunction.flat_outs_not_requiring_grad[i]
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+
             return tuple(fw_outs[0:num_outs])
 
         @staticmethod
@@ -589,6 +591,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         return CompiledFunction.apply(*remove_dupe_args(args))
 
     return compiled_function
+
 
 @dynamo_timed
 def create_aot_dispatcher_function(
@@ -880,6 +883,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
     return AOTModule()
 
+
 def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -977,11 +981,13 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
         @wraps(fn)
         def new_func(*args):
             return compiled_fn(args)
+
         return new_func
 
     compiled_f = aot_function_simplified(functional_call, *top_args, **top_kwargs)
 
     if top_kwargs:
+
         def forward(*args, **kwargs):
             return compiled_f(
                 *params_flat,
@@ -990,6 +996,7 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
             )
 
     else:
+
         def forward(*args):
             return compiled_f(
                 *params_flat,

@@ -510,7 +510,7 @@ def export(
         out_guards = guards
 
     def dynamo_normalization_capturing_compiler(
-        gm: torch.fx.GraphModule, example_inputs, fake_tensor
+        gm: torch.fx.GraphModule, example_inputs, fake_mode
     ):
         nonlocal graph
 
