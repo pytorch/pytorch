@@ -927,8 +927,8 @@ bool ExprSegmentationSorter::interIterUpdate() {
     // If we didn't finish and we tried the fallback, throw.
     TORCH_INTERNAL_ASSERT(
         !fallback_mode_enabled_,
-        "Couldn't succcessfully sort out the fusion expressions. ",
-        "There are remaining connections of the heirarchical segmentation which should have been ",
+        "Couldn't successfully sort out the fusion expressions. ",
+        "There are remaining connections of the hierarchical segmentation which should have been ",
         "flattened to a single ordered group, or disjoint ordered groups.");
     // We didn't finish, but we haven't tried the fallback, try again with that.
     fallback_mode_enabled_ = true;
@@ -1066,7 +1066,7 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
       }
     }
 
-    std::cerr << "Depdencies: " << std::endl;
+    std::cerr << "Dependencies: " << std::endl;
     for (const auto& dep_entry : concrete_id_dependencies) {
       std::cerr << "  Deps of " << dep_entry.first->toString() << std::endl
                 << "   ";
