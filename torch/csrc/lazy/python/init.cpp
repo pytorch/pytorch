@@ -306,9 +306,9 @@ void initLazyBindings(PyObject* module) {
         return result;
       });
 
-    // When libtorch_python is loaded, we register the python frame getter
-    // otherwise, debug util simply omits python frames
-    GetPythonFramesFunction() = GetPythonFrames;
+  // When libtorch_python is loaded, we register the python frame getter
+  // otherwise, debug util simply omits python frames
+  GetPythonFramesFunction() = GetPythonFrames;
 }
 
 } // namespace lazy
