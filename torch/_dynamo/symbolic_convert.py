@@ -252,6 +252,11 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
                 + if_next
                 + if_jump
             )
+        elif isinstance(value, NNModuleVariable):
+            # Equivant of "self.nn_module is not None"
+            if truth_fn(value):
+                push and self.push(value)
+                self.jump(inst)
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):

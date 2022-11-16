@@ -2885,6 +2885,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertTrue(same(x, x1))
 
+    def test_if_cond_nn_mod(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self, output_relu=True):
+                super(MockModule, self).__init__()
+                self.relu = torch.nn.ReLU() if output_relu else None
+
+            def forward(self, x):
+                x = torch.sin(x)
+                if self.relu:
+                    x = self.relu(x)
+                return x
+
+        model = MockModule()
+        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+
+        x = torch.rand(4)
+        ref = model(x)
+        res = opt_model(x)
+        self.assertTrue(same(ref, res))
+
+        model = MockModule(output_relu=False)
+        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+
+        x = torch.rand(4)
+        ref = model(x)
+        res = opt_model(x)
+        self.assertTrue(same(ref, res))
+
 
 class CustomFunc(torch.autograd.Function):
     @staticmethod
