@@ -1059,6 +1059,11 @@ class TestTransformers(NNTestCase):
 
         if fused_kernel == "flash":
             with sdp_kernel(enable_mem_efficient=False, enable_math=False):
+                # TODO Flash for the nested path is currently not working due to cuda memory issues
+                if type == "nested":
+                    self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                        query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False))
+                    return
                 actual = torch.nn.functional._scaled_dot_product_attention(
                     query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
         elif fused_kernel == "mem_efficient":
@@ -1100,7 +1105,7 @@ class TestTransformers(NNTestCase):
     def test_efficient_attention_gradcheck(self, contiguous_inputs: bool):
 
         batch_size, seq_len, num_heads, head_dim = 8, 8, 4, 64
-        rand_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float16, requires_grad=True, packed=True)
+        rand_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float32, requires_grad=True, packed=True)
 
         qkv = rand_tensor((batch_size, seq_len, num_heads, head_dim))
         query, key, value = qkv.chunk(3, dim=-1)
@@ -1118,7 +1123,39 @@ class TestTransformers(NNTestCase):
         # in fp32
         assert gradcheck(lambda *args, **kwargs:
                          wrapper_set_seed(torch.ops.aten._efficient_attention_forward, *args, **kwargs),
-                         (query, key, value, None, None, None, True, False), fast_mode=True, atol=8e-5, rtol=1e-3)
+                         (query, key, value, None, None, None, True, False), fast_mode=False, atol=8e-5, rtol=1e-3)
+
+    @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM or IS_WINDOWS, "Flash Attention was not built for this system")
+    @parametrize("contiguous_inputs", [True, False])
+    @parametrize("kernel", ["math", "efficient"])
+    def test_sdp_gradcheck(self, contiguous_inputs: bool, kernel: str):
+
+        batch_size, seq_len, num_heads, head_dim = 8, 8, 4, 64
+        rand_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float32, requires_grad=True, packed=True)
+
+        qkv = rand_tensor((batch_size, seq_len, num_heads, head_dim))
+        query, key, value = qkv.chunk(3, dim=-1)
+
+        query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+        if contiguous_inputs:
+            query = query.contiguous()
+            key = key.contiguous()
+            value = value.contiguous()
+
+        if kernel == "math":
+            with sdp_kernel(enable_math=True, enable_mem_efficient=False, enable_flash=False):
+                assert gradcheck(lambda *args, **kwargs:
+                                 wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs),
+                                 (query, key, value, None, 0.0, False, False), fast_mode=False, atol=8e-5, rtol=1e-3)
+        if kernel == "efficient":
+            with sdp_kernel(enable_math=False, enable_mem_efficient=True, enable_flash=False):
+                assert gradcheck(lambda *args, **kwargs:
+                                 wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs),
+                                 (query, key, value, None, 0.0, False, False), fast_mode=False, atol=8e-5, rtol=1e-3)
+
 
     @parametrize("type", ["dense", "nested"])
     def test_fused_sdp_choice(self, type: str):
@@ -1144,7 +1181,7 @@ class TestTransformers(NNTestCase):
             value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
             key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-            if SM80OrLater:
+            if SM80OrLater and not type == "nested":
                 assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION
             else:
                 assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
