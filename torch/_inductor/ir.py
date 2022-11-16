@@ -3564,6 +3564,54 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         )
 
 
+class MKLPackedLinear(ExternKernelAlloc):
+    kernel = "torch.ops.mkl._mkl_linear"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkl._mkl_linear",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+
+    @classmethod
+    def create(cls, x, packed_w, orig_w, b, batch_size):
+        kernel = "torch.ops.mkl._mkl_linear"
+        x = cls.require_stride1(cls.realize_input(x))
+        orign_w = cls.require_stride1(cls.realize_input(orig_w))
+        import pdb
+
+        pdb.set_trace()
+        *m, _ = x.get_size()
+        oc, _ = orign_w.get_size()
+
+        inputs = [x, packed_w, orign_w]
+        constant_args = [batch_size]
+        if b is not None:
+            b = cls.require_stride1(cls.realize_input(b))
+            inputs.append(b)
+        else:
+            constant_args.insert(0, b)
+        output_size = (list(m) + [oc],)
+        output_stride = make_contiguous_strides_for(*output_size)
+        return MKLPackedLinear(
+            layout=FixedLayout(
+                x.get_device(), x.get_dtype(), output_size, output_stride
+            ),
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+
 class LinearUnary(ExternKernelAlloc):
     kernel = "torch.ops.mkldnn._linear_pointwise"
 

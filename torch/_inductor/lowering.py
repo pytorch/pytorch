@@ -1013,6 +1013,19 @@ def register_onednn_fusion_ops():
 register_onednn_fusion_ops()
 
 
+@register_lowering(torch.ops.mkl._mkl_linear)
+def mkl_packed_linear(
+    x: TensorBox,
+    packed_w: TensorBox,
+    orig_w: TensorBox,
+    b: TensorBox,
+    batch_size,
+):
+    return TensorBox.create(
+        ir.MKLPackedLinear.create(x, packed_w, orig_w, b, batch_size)
+    )
+
+
 def fallback_handler(kernel, inps_hook=None):
     fallbacks.add(kernel)
 

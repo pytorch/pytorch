@@ -6592,6 +6592,13 @@
     MkldnnCPU: mkldnn_reorder_conv3d_weight
   autogen: mkldnn_reorder_conv3d_weight.out
 
+- func: reorder_linear_weight(Tensor self, int? batch_size) -> Tensor
+  variants: function
+  python_module: nn
+  dispatch:
+    MkldnnCPU: reorder_linear_weight
+  autogen: reorder_linear_weight.out
+
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
 
 - func: quantize_per_tensor_dynamic(Tensor self, ScalarType dtype, bool reduce_range) -> Tensor
