@@ -109,12 +109,17 @@ jobs:
           brew link --force libomp
 
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
+        uses: nick-fields/retry@v2.8.2
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-        run: |
-          sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-          sudo chmod +x /usr/local/bin/sccache
-          echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
-          echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+            echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
 
       - name: Get workflow job id
         id: get-job-id
