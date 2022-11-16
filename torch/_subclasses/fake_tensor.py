@@ -842,14 +842,6 @@ class FakeTensorMode(TorchDispatchMode):
                 if func in decomposition_table:
                     return decomposition_table[func](*args, **kwargs)
 
-        if (
-            func in decomposition_table
-            and torch_decomp_decompositions(func)
-            and all(not e.is_sparse for e in flat_arg_fake_tensors)
-        ):
-            with self:
-                return decomposition_table[func](*args, **kwargs)
-
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
         # and ensure that Meta kernels are dispatched to (see)
