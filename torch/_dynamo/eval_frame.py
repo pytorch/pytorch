@@ -63,20 +63,7 @@ class OptimizedModule(torch.nn.Module):
         return getattr(self._orig_mod, name)
 
     def forward(self, *args, **kwargs):
-        # This will be monkey patched later
-        raise RuntimeError("Should not be here")
-
-    def __deepcopy__(self, memo):
-        # Default deepcopy fails because of monkey patched fwd
-        cls = self.__class__
-        result = cls.__new__(cls)
-        memo[id(self)] = result
-        for k, v in self.__dict__.items():
-            setattr(result, k, copy.deepcopy(v, memo))
-        # Monkey patch deep copied module's forward funtion
-        result.forward = self.dynamo_ctx(result._orig_mod.forward)
-        result._torchdynamo_orig_callable = result._orig_mod.forward
-        return result
+        return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
 
 
 def remove_from_cache(f):
@@ -154,7 +141,6 @@ class _TorchDynamoContext:
         if isinstance(fn, torch.nn.Module):
             mod = fn
             new_mod = OptimizedModule(mod, self)
-            new_mod.forward = self(mod.forward)
             # Save the function pointer to find the original callable while nesting
             # of decorators.
             new_mod._torchdynamo_orig_callable = mod.forward

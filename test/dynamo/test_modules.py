@@ -945,6 +945,14 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Ensure that there is a recompilation
         self.assertEqual(cnt.frame_count, 2)
 
+        # Ensure that there is no recompilation
+        opt_mod(x)
+        self.assertEqual(cnt.frame_count, 2)
+
+        torch._dynamo.reset()
+        opt_mod(x)
+        self.assertEqual(cnt.frame_count, 3)
+
     def test_attr(self):
         class MockModule(torch.nn.Module):
             def __init__(self):
