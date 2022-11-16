@@ -1448,31 +1448,10 @@ class TestTorchFunctionMode(TestCase):
 
         x = B(torch.randn(5))
         with A():
-            with torch._C.DisableTorchFunctionSubclass():
-                self.assertNotIsInstance(torch.sum(x), B)
-
-        self.assertTrue(called)
-
-    def test_disable_subclass_mode(self):
-        called = False
-
-        class A(TorchFunctionMode):
-            def __torch_function__(self, func, types, args=(), kwargs=None):
-                nonlocal called
-                if kwargs is None:
-                    kwargs = {}
-                called = True
-                return func(*args, **kwargs)
-
-        class B(torch.Tensor):
-            pass
-
-        x = B(torch.randn(5))
-        with A():
             with torch._C.DisableTorchFunction():
                 self.assertNotIsInstance(torch.sum(x), B)
 
-        self.assertFalse(called)
+        self.assertTrue(called)
 
     def test_disable_enable_subclass(self):
         called = False
@@ -1481,7 +1460,7 @@ class TestTorchFunctionMode(TestCase):
             pass
 
         x = A(torch.randn(5))
-        with torch._C.DisableTorchFunctionSubclass():
+        with torch._C.DisableTorchFunction():
             g = torch._C._EnableTorchFunction()
             try:
                 self.assertIsInstance(torch.sum(x), A)

@@ -92,6 +92,7 @@ class cpp:
         "g++-10",
         "clang++",
         "g++",
+        "g++.par",
     )
 
 
