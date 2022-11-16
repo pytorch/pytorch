@@ -7696,11 +7696,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             out = torch.zeros(out_shape, dtype=out_dtype, device=torch.device('cpu'))
             src = torch.ones(src_shape, dtype=src_dtype, device=torch.device('cpu'))
             if is_ok:
+                if torch.cuda.is_available():
+                    out_cuda = out.cuda()
+                    src_cuda = src.cuda()
                 res = out.copy_(src)
-                out_cuda = torch.zeros(out_shape, dtype=out_dtype, device=torch.device('cuda'))
-                src_cuda = torch.ones(src_shape, dtype=src_dtype, device=torch.device('cuda'))
-                res_cuda = out_cuda.copy_(src_cuda)
-                self.assertEqual(res, res_cuda)
+                if torch.cuda.is_available():
+                    res_cuda = out_cuda.copy_(src_cuda)
+                    self.assertEqual(res, res_cuda)
             else:
                 self.assertRaises(RuntimeError, lambda: out.copy_(src))
 
