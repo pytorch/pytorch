@@ -723,10 +723,10 @@ def nan_to_num(
         nan = 0.0
 
     if posinf is None:
-        posinf = prims.maximum_value(a.dtype)
+        posinf = torch.finfo(a.dtype).max
 
     if neginf is None:
-        neginf = prims.minimum_value(a.dtype)
+        neginf = torch.finfo(a.dtype).min
 
     result = where(isnan(a), nan, a)
 
@@ -2820,6 +2820,12 @@ def _unsqueeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeT
     return x
 
 
+def _squeeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
+    for dim in reversed(sorted(dimensions)):
+        x = torch.squeeze(x, dim)
+    return x
+
+
 @register_decomposition(torch.ops.aten.native_group_norm.default)
 def native_group_norm(
     input: Tensor,
@@ -2868,8 +2874,8 @@ def native_group_norm(
     rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
 
     # remove broadcast dimensions from mean and rstd
-    mean = prims.squeeze(mean, reduction_dims)
-    rstd = prims.squeeze(rstd, reduction_dims)
+    mean = _squeeze_multiple(mean, reduction_dims)
+    rstd = _squeeze_multiple(rstd, reduction_dims)
     return (out, mean, rstd)
 
 
@@ -4198,19 +4204,22 @@ def linspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    result_dtype = utils.type_to_dtype(utils.get_higher_type(type(start), type(end)))
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
+        default_complex_dtype = utils.corresponding_complex_dtype(
+            torch.get_default_dtype()
+        )
         if dtype is None:
-            dtype = utils.corresponding_complex_dtype(torch.get_default_dtype())
+            dtype = default_complex_dtype
         else:
             check(
                 utils.is_complex_dtype(dtype),
-                lambda: f"linspace(): inferred dtype {result_dtype} can't be safely cast to passed dtype {dtype}",
+                lambda: f"linspace(): inferred dtype {default_complex_dtype} can't be safely cast to passed dtype {dtype}",
             )
     else:
         dtype = dtype or torch.get_default_dtype()
     assert isinstance(dtype, torch.dtype)
 
+    # steps does not participate in the computation of the dtype
     check(
         isinstance(steps, IntLike),
         lambda: "steps must be int, not float",
@@ -4227,24 +4236,26 @@ def linspace(
     }
     if steps == 0:
         return torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
-    elif steps == 1:
+    if steps == 1:
         return torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
-    elif start == end:
+    if start == end:
         return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
-    else:
-        step_size = 1 / (steps - 1)
-        eps = step_size / 2
-        # torch.arange is a reduction, so we need precision here
-        rg = torch.arange(
-            0, 1 + eps, step_size, dtype=torch.float64, **factory_kwargs  # type: ignore[arg-type]
-        )
-        float_dtype = (
-            torch.complex128 if utils.is_complex_dtype(dtype) else torch.float64
-        )
-        rg = _maybe_convert_to_dtype(rg, float_dtype)  # type: ignore[assignment]
-        cast = partial(torch.full, (1,), dtype=float_dtype, **factory_kwargs)
-        out = torch.lerp(cast(start), cast(end), rg)
-        return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
+
+    # arange returns values in the interval [start, end) so we add an an eps to make it [start, end]
+    # The eps is small enough as to always add just the element end
+    step_size = 1 / (steps - 1)
+    eps = step_size / 2
+    # arange returns a tensor of size divup(end - start, step) and thus, for the arguemnts below
+    # ceil(div(1 + step_size/2,  1/(steps - 1)) = steps - 1  + ceil(1 / 2) = steps
+    # torch.arange is an scan algorithm, so we need a high-precision dtype
+    rg = torch.arange(
+        0, 1 + eps, step_size, dtype=torch.float64, **factory_kwargs  # type: ignore[arg-type]
+    )
+    double_dtype = torch.complex128 if utils.is_complex_dtype(dtype) else torch.float64
+    rg = _maybe_convert_to_dtype(rg, double_dtype)  # type: ignore[assignment]
+    cast = partial(torch.full, (1,), dtype=double_dtype, **factory_kwargs)
+    out = torch.lerp(cast(start), cast(end), rg)
+    return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
 
 @register_decomposition(torch.ops.aten.logspace)
