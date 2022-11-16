@@ -391,7 +391,6 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
     @wraps(compiled_fw)
     def new_fn(args):
-        nonlocal compiled_fw
         return call_func_with_args(compiled_fw, args, disable_amp=disable_amp)
 
     return new_fn
