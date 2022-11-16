@@ -5011,6 +5011,20 @@ if HAS_CUDA:
             result = forward(*args)
             assert same(result, torch.sort(args[0], descending=True, dim=1)[0])
 
+        @requires_cuda()
+        def test_scalar_triton_index(self):
+            # The indirect indexing via a scalar like below used to lead to
+            # bad triton code that made triton segfault when compiling.
+            # See https://github.com/pytorch/torchdynamo/issues/1515
+            def fn(a):
+                zero = torch.zeros((16,), device=a.device, dtype=torch.int64)
+                return (a[zero],)
+
+            a = torch.randn((8,), dtype=torch.float32, device="cuda")
+
+            fn_optimized = torch._dynamo.optimize("inductor")(fn)
+            assert same(fn(a), fn_optimized(a))
+
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_ops.autotune import CachingAutotuner
 
