@@ -36,6 +36,8 @@ from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 import torch.nn.utils.parametrize as parametrize
 import torch.nn.utils.prune as prune
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
+from torch.nn.utils.fusion import fuse_conv_bn_weights
+from torch.nn.utils.fusion import fuse_linear_bn_weights
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes
@@ -16267,6 +16269,32 @@ class TestStateDictHooks(TestCase):
             m.load_state_dict(sd)
             self.assertTrue(called)
 
+class TestFusionUtils(TestCase):
+    def test_fuse_conv_bn_requires_grad(self):
+        conv = torch.nn.Conv2d(3, 3, 3)
+        bn = torch.nn.BatchNorm2d(3)
+        cases = itertools.product([True, False], [True, False])
+        for w_rg, b_rg in cases:
+            conv.weight.requires_grad = w_rg
+            conv.bias.requires_grad = b_rg
+            weight, bias = \
+                fuse_conv_bn_weights(conv.weight, conv.bias,
+                                     bn.running_mean, bn.running_var, bn.eps, bn.weight, bn.bias)
+            self.assertEqual(weight.requires_grad, w_rg)
+            self.assertEqual(bias.requires_grad, b_rg)
+
+    def test_fuse_linear_bn_requires_grad(self):
+        linear = torch.nn.Linear(3, 3)
+        bn = torch.nn.BatchNorm1d(3)
+        cases = itertools.product([True, False], [True, False])
+        for w_rg, b_rg in cases:
+            linear.weight.requires_grad = w_rg
+            linear.bias.requires_grad = b_rg
+            weight, bias = \
+                fuse_linear_bn_weights(linear.weight, linear.bias,
+                                       bn.running_mean, bn.running_var, bn.eps, bn.weight, bn.bias)
+            self.assertEqual(weight.requires_grad, w_rg)
+            self.assertEqual(bias.requires_grad, b_rg)
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 instantiate_parametrized_tests(TestNN)
