@@ -18,15 +18,23 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
     const bool profile_memory,
     const bool with_stack,
     const bool with_flops,
-    const bool with_modules)
+    const bool with_modules,
+    std::vector<std::string> events)
     : m_(m), trace_file_name_(fname) {
+  torch::profiler::impl::ExperimentalConfig experimental_config;
+  // Enable hardware counters
+  if (events.size()) {
+    experimental_config.performance_events = std::move(events);
+  }
+
   torch::profiler::impl::ProfilerConfig config(
       torch::profiler::impl::ProfilerState::KINETO,
       report_input_shapes,
       profile_memory,
       with_stack,
       with_flops,
-      with_modules);
+      with_modules,
+      experimental_config);
   torch::autograd::profiler::prepareProfiler(
       config, {torch::autograd::profiler::ActivityType::CPU});
   if (with_modules || with_stack) {

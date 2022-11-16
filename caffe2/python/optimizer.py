@@ -39,6 +39,7 @@ class Optimizer(object):
         self._lr_multiplier = None
         self._local_lr_multiplier = None
         self._local_lr_multiplier_on_gpu = False
+        self._use_dedicated_lr_iteration_counter = False
 
     """
     Adds optimization operators to the net for given parameter and its gradient
@@ -86,6 +87,14 @@ class Optimizer(object):
         del attr["_instance_num"]
         return attr
 
+    @property
+    def use_dedicated_lr_iteration_counter(self):
+        return self._use_dedicated_lr_iteration_counter
+
+    @use_dedicated_lr_iteration_counter.setter
+    def use_dedicated_lr_iteration_counter(self, val):
+        self._use_dedicated_lr_iteration_counter = val
+
     def make_unique_blob_name(self, base_str):
         """
         Returns a blob name that will be unique to the current device
@@ -115,7 +124,17 @@ class Optimizer(object):
         if learning_rate_blob is None:
             learning_rate_blob = self.make_unique_blob_name("lr")
 
-        iteration = utils.BuildUniqueMutexIter(param_init_net, net, iter_val=iter_val)
+        if self._use_dedicated_lr_iteration_counter:
+            iteration = utils.BuildUniqueMutexIter(
+                param_init_net,
+                net,
+                iter=utils.OPTIMIZER_ITERATION_LR_NAME,
+                iter_mutex=utils.ITERATION_MUTEX_LR_NAME,
+                iter_val=iter_val,
+            )
+            logger.info(f"Created dedicated learning rate iteration counter: {iteration}")
+        else:
+            iteration = utils.BuildUniqueMutexIter(param_init_net, net, iter_val=iter_val)
 
         if not net.BlobIsDefined(learning_rate_blob):
             # There is one interesting thing here: since we are minimizing, we are
@@ -162,6 +181,36 @@ class Optimizer(object):
             )
 
         return lr, iteration
+
+    def build_non_lr_iter(
+        self,
+        net,
+        param_init_net,
+        iter_val=0,
+    ):
+        assert (
+            self._use_dedicated_lr_iteration_counter
+        ), "This method should be only called when dedicated learning rate iteration counter is used."
+
+        iteration = utils.BuildUniqueMutexIter(param_init_net, net, iter_val=iter_val)
+        logger.info(f"Created iteration counter for non learning rate purposes: {iteration}")
+
+        # We need to create a dummy learning rate operator to enforce that
+        # iteration counter blob being placed in the trainer nodes. Otherwise,
+        # the Automatic Device Placement (ADP) algorithm for Hierachical
+        # Training (HT) will encounter issues to distribute blobs across group
+        # parameter servers. Note that this learning rate operator will not be
+        # used for any other purpose.
+        learning_rate_blob = self.make_unique_blob_name("iter_placement_hint")
+        if not net.BlobIsDefined(learning_rate_blob):
+            net.LearningRate(
+                [iteration],
+                learning_rate_blob,
+                base_lr=1.0,
+                policy="fixed",
+            )
+
+        return iteration
 
     def add_lr_multiplier(self, lr_multiplier):
         """
@@ -582,6 +631,7 @@ class AdagradOptimizer(Optimizer):
         ema_options=None,
         weight_scale=None,
         counter_halflife=-1,
+        use_dedicated_lr_iteration_counter=False,
         **kwargs
     ):
         super(AdagradOptimizer, self).__init__()
@@ -599,6 +649,7 @@ class AdagradOptimizer(Optimizer):
         self.counter_halflife = counter_halflife
         self.init_kwargs = kwargs
         self.weight_scale = weight_scale
+        self.use_dedicated_lr_iteration_counter = use_dedicated_lr_iteration_counter
 
         self._process_pruning_options(pruning_options)
         self._process_swa_options(swa_options)
@@ -727,7 +778,12 @@ class AdagradOptimizer(Optimizer):
             policy=self.policy,
             **(self.init_kwargs)
         )
-        iteration = lr_iteration
+        iteration = (
+            self.build_non_lr_iter(net, param_init_net, iter_val=0)
+            if self._use_dedicated_lr_iteration_counter
+            else lr_iteration
+        )
+
         if self.counter_halflife > 0:
             self._aux_params.shared.append(iteration)
 
@@ -970,7 +1026,7 @@ class AdagradOptimizer(Optimizer):
             logger.debug("using {} for {}".format(op, str(param)))
 
             if self.prune_delays:
-                input_args += [lr_iteration, last_mask_updated_iter]
+                input_args += [iteration, last_mask_updated_iter]
                 output_args += [mask_blob, last_mask_updated_iter]
 
             if weight_decay > 0 and self.counter_halflife == -1:
@@ -1020,7 +1076,7 @@ class AdagradOptimizer(Optimizer):
                 input_args += [mask_blob]
 
             if self.prune_delays:
-                input_args += [lr_iteration, last_mask_updated_iter]
+                input_args += [iteration, last_mask_updated_iter]
                 output_args += [mask_blob, last_mask_updated_iter]
 
             if self.use_mask:
@@ -1063,7 +1119,7 @@ class AdagradOptimizer(Optimizer):
                         self._aux_params.local.append(param_swa)
 
                     net.SWA(
-                        [param, param_swa, lr_iteration],
+                        [param, param_swa, iteration],
                         [param, param_swa],
                         avg_start=self.swa_avg_start_it,
                         avg_end=self.swa_avg_end_it,
@@ -1079,7 +1135,7 @@ class AdagradOptimizer(Optimizer):
                 self._aux_params.local.append(param_ema)
 
             net.EMA(
-                [param, param_ema, lr_iteration],
+                [param, param_ema, iteration],
                 [param, param_ema],
                 ema_start=self.ema_start,
                 ema_end=self.ema_end,
@@ -1089,7 +1145,7 @@ class AdagradOptimizer(Optimizer):
 
         if self.weight_scale:
             net.WeightScale(
-                [param, lr_iteration],
+                [param, iteration],
                 [param],
                 stepsize=self.weight_scale.stepsize,
                 upper_bound_iter=self.weight_scale.upper_bound_iter,
@@ -1097,7 +1153,7 @@ class AdagradOptimizer(Optimizer):
             )
             if self.weight_scale.to_aux:
                 net.WeightScale(
-                    [param_squared_sum, lr_iteration],
+                    [param_squared_sum, iteration],
                     [param_squared_sum],
                     stepsize=self.weight_scale.stepsize,
                     upper_bound_iter=self.weight_scale.upper_bound_iter,

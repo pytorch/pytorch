@@ -184,8 +184,8 @@ c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
   }
   const auto& tup_elems = iv.toTupleRef().elements();
   TORCH_CHECK(tup_elems.size() == 2);
-  std::string type_name = tup_elems[0].toString()->string();
-  std::string instance_name = tup_elems[1].toString()->string();
+  std::string type_name = tup_elems[0].toStringRef();
+  std::string instance_name = tup_elems[1].toStringRef();
   // type_name might be empty string ""
   // In that case type_ptr should be just nullptr
   auto type_ptr = cu->get_class(type_name);

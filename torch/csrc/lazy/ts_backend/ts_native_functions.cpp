@@ -407,7 +407,7 @@ at::Tensor LazyNativeFunctions::_unsafe_view(
     at::IntArrayRef size) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   return LazyNativeFunctions::view_copy_symint(
-      self, c10::fromIntArrayRef(size));
+      self, c10::fromIntArrayRefSlow(size));
 }
 
 // This is needed by the torch.tensor constructor.
@@ -442,7 +442,7 @@ at::Tensor LazyNativeFunctions::new_empty_strided_symint(
     c10::optional<at::Device> device,
     c10::optional<bool> pin_memory) {
   return at::functionalization::
-      functionalize_aten_op<ATEN_OP(new_empty_strided)>::call(
+      functionalize_aten_op_symint<ATEN_OP(new_empty_strided)>::call(
           self, size, stride, dtype, layout, device, pin_memory);
 }
 
@@ -451,7 +451,7 @@ at::Tensor LazyNativeFunctions::narrow_copy_symint(
     int64_t dim,
     c10::SymInt start,
     c10::SymInt length) {
-  return at::functionalization::functionalize_aten_op<ATEN_OP(
+  return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
       narrow_copy)>::call(self, dim, start, length);
 }
 at::Tensor LazyNativeFunctions::pixel_shuffle(
@@ -466,12 +466,12 @@ at::Tensor LazyNativeFunctions::pixel_unshuffle(
   return at::functionalization::functionalize_aten_op<ATEN_OP(
       pixel_unshuffle)>::call(self, downscale_factor);
 }
-at::Tensor LazyNativeFunctions::select_backward(
+at::Tensor LazyNativeFunctions::select_backward_symint(
     const at::Tensor& grad_output,
-    at::IntArrayRef input_sizes,
+    c10::SymIntArrayRef input_sizes,
     int64_t dim,
     int64_t index) {
-  return at::functionalization::functionalize_aten_op<ATEN_OP(
+  return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
       select_backward)>::call(grad_output, input_sizes, dim, index);
 }
 at::Tensor LazyNativeFunctions::_trilinear(
@@ -522,24 +522,33 @@ at::Tensor& LazyNativeFunctions::logsumexp_out(
   return out;
 }
 
-at::Tensor LazyNativeFunctions::diagonal_backward(
-    const at::Tensor& grad_output,
-    at::IntArrayRef input_sizes,
+at::Tensor LazyNativeFunctions::diag_embed(
+    const at::Tensor& self,
     int64_t offset,
     int64_t dim1,
     int64_t dim2) {
   return at::functionalization::functionalize_aten_op<ATEN_OP(
+      diag_embed)>::call(self, offset, dim1, dim2);
+}
+
+at::Tensor LazyNativeFunctions::diagonal_backward_symint(
+    const at::Tensor& grad_output,
+    at::SymIntArrayRef input_sizes,
+    int64_t offset,
+    int64_t dim1,
+    int64_t dim2) {
+  return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
       diagonal_backward)>::call(grad_output, input_sizes, offset, dim1, dim2);
 }
 
-at::Tensor LazyNativeFunctions::slice_backward(
+at::Tensor LazyNativeFunctions::slice_backward_symint(
     const at::Tensor& grad_output,
-    at::IntArrayRef input_sizes,
+    at::SymIntArrayRef input_sizes,
     int64_t dim,
-    int64_t start,
-    int64_t end,
-    int64_t step) {
-  return at::functionalization::functionalize_aten_op<ATEN_OP(
+    c10::SymInt start,
+    c10::SymInt end,
+    c10::SymInt step) {
+  return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
       slice_backward)>::call(grad_output, input_sizes, dim, start, end, step);
 }
 

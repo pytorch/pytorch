@@ -6,6 +6,9 @@
 #include <ATen/Parallel.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/cpu/vec/vec256/vec256.h>
+#include <ATen/native/transformers/attention.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
+
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -14,7 +17,6 @@
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
-
 namespace at {
 
 namespace native {
@@ -106,6 +108,17 @@ void transform_bias_rescale_qkv_inner_loop(
   }
 }
 
+Tensor transform_0213(const Tensor& a) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(a.size(1));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(a.size(3));
+  return a.permute({0, 2, 1, 3})
+      .contiguous()
+      .view({a.size(0), a.size(2), a.size(1) * a.size(3)});
+}
+
+} // namespace
+
+
 Tensor bmm_nt(const Tensor& a, const Tensor& b) {
   auto a_ = a.view({a.size(0) * a.size(1), a.size(2), a.size(3)});
   auto b_ = b.view({b.size(0) * b.size(1), b.size(2), b.size(3)});
@@ -118,7 +131,7 @@ Tensor masked_softmax(
     Tensor& attn_scores,
     c10::optional<Tensor> attn_mask,
     const Tensor& query,
-    c10::optional<int64_t> mask_type = NULL) {
+    c10::optional<int64_t> mask_type) {
   if (query.is_nested() && !attn_mask) {
     return at::_nested_tensor_softmax_with_shape(attn_scores, query);
   }
@@ -127,15 +140,6 @@ Tensor masked_softmax(
         "Converting mask without torch.bool dtype to bool; this will "
         "negatively affect performance. Prefer to use a boolean mask directly.");
     attn_mask = attn_mask->to(at::kBool);
-  }
-  if (attn_scores.is_cpu() && attn_mask && attn_mask->dim() == 2) {
-    // TODO: CPU path does not support transformer mask yet.
-    const auto batch_size = attn_scores.sizes()[0];
-    const auto seq_len = attn_scores.sizes()[3];
-    TORCH_CHECK(attn_mask->sizes()[0] == batch_size);
-    TORCH_CHECK(attn_mask->sizes()[1] == seq_len);
-    attn_mask = attn_mask->view({batch_size, 1, 1, seq_len});
-    attn_mask = at::expand_inplace(attn_scores, *attn_mask)->contiguous();
   }
   if (attn_mask) {
     return _masked_softmax(attn_scores, *attn_mask, attn_scores.dim() - 1, mask_type);
@@ -156,13 +160,6 @@ Tensor bmm_nn(Tensor& out, const Tensor& a, const Tensor& b) {
   return c_.view({a.size(0), a.size(1), a.size(2), b.size(3)});
 }
 
-Tensor transform_0213(const Tensor& a) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(a.size(1));
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(a.size(3));
-  return a.permute({0, 2, 1, 3})
-      .contiguous()
-      .view({a.size(0), a.size(2), a.size(1) * a.size(3)});
-}
 
 Tensor transform0213_gemm_nt_bias(
     const Tensor& a,
@@ -254,15 +251,13 @@ Tensor qkv_projection(
   return qkv;
 }
 
-} // namespace
-
 // compute q = (q + q_bias) / sqrt(dim_per_head), k = k + k_bias, v = v + v_bias
 std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
     const Tensor& qkv,
     const Tensor& qkv_bias,
     const int64_t num_head) {
   auto qkv_ = qkv.is_nested()
-    ? c10::MaybeOwned<Tensor>::owned(nested_to_padded_tensor(qkv, 0))
+    ? c10::MaybeOwned<Tensor>::owned(qkv.to_padded_tensor(0))
     : c10::MaybeOwned<Tensor>::borrowed(qkv);
   auto B = qkv_->size(0);
   auto T = qkv_->size(1);
@@ -312,7 +307,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
   return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
 }
 
-std::tuple<Tensor, Tensor> native_multi_head_attention(
+std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -685,13 +680,51 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
+        if (query_.requires_grad() || key.requires_grad() || value.requires_grad()){
+          return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+        }
+        return at::_scaled_dot_product_attention_forward(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+}
+
+int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal){
+  return static_cast<int64_t>(sdp::SDPBackend::math);
+}
+
+std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_math(
+    const Tensor& query_,
+    const Tensor& key,
+    const Tensor& value,
+    const c10::optional<Tensor>& attn_mask_,
+    double dropout_p,
+    bool need_attn_weights,
+    bool is_causal) {
+  return at::_scaled_dot_product_attention_math(
+      query_,
+      key,
+      value,
+      attn_mask_,
+      dropout_p,
+      need_attn_weights,
+      is_causal);
+}
+
+std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
+        const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
+  if (query_.is_nested() || key.is_nested() || value.is_nested()) {
+    TORCH_CHECK(
+        query_.is_contiguous() && key.is_contiguous() &&
+            value.is_contiguous(),
+        "scaled_dot_product_attention: If inputs are nested tensors they must be contiguous");
+  }
     auto attn_mask = attn_mask_;
-    TORCH_CHECK(!attn_mask.has_value() || attn_mask->dtype() == at::kBool,
-            "_scaled_dot_product_attention: Only boolean attention masks are currently supported, but found: ",
-            attn_mask->dtype())
     // Naive, composite implementation defined here.
     const auto embed_size = query_.size(-1);
-    const auto query = query_ * (1. / ::sqrt(static_cast<double>(embed_size)));
+
+    // Scale q,k before matmul for stability see https://tinyurl.com/sudb9s96 for math
+    const double scaling_factor = ::sqrt(::sqrt(static_cast<double>(embed_size)));
+    const auto query = query_ / scaling_factor;
     if (is_causal) {
         TORCH_CHECK(!attn_mask.has_value(),
                 "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
@@ -707,20 +740,23 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
                 "_scaled_dot_product_attention: Nested tensors for query / key are not supported "
                 "when an explicit attn_mask is set");
         // Convert boolean mask to additive mask; need to invert mask to indicate what to mask *out*.
-        auto new_attn_mask = at::zeros_like(*attn_mask, query.dtype());
-        new_attn_mask.masked_fill_(attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
-        attn_mask = new_attn_mask;
+        if (attn_mask->dtype() == at::kBool){
+          auto new_attn_mask = at::zeros_like(*attn_mask, query.dtype());
+          new_attn_mask.masked_fill_(attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
+          attn_mask = new_attn_mask;
+        }
+        // Otherwise, attn_mask represents an additive attention tensor
     }
-    auto attn = at::matmul(query, key.transpose(-2, -1));
+    auto attn = at::matmul(query, key.transpose(-2, -1)/scaling_factor);
     if (attn_mask.has_value()) {
         attn.add_(*attn_mask);
     }
     attn = at::softmax(attn, -1);
     if (dropout_p > 0.0) {
-        at::dropout_(attn, dropout_p, true);
+      attn = at::dropout(attn, dropout_p, true);
     }
     const auto output = at::matmul(attn, value);
-    return (need_attn_weights ? std::make_tuple(output, attn) : std::make_tuple(output, Tensor()));
+    return std::make_tuple(output, attn);
 }
 
 Tensor triton_multi_head_attention(

@@ -309,6 +309,7 @@ c10::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
   if (diff != 0) {
     auto deeper_scope = diff > 0 ? a : b;
     auto other_scope = diff > 0 ? b : a;
+    diff = std::abs(diff);
     while (diff > 0) {
       deeper_scope = deeper_scope->parent();
       diff--;
@@ -1169,7 +1170,7 @@ void ONNXTrackScopeAttributes(
     } else if (v.isBool()) {
       attr_node->i_(k, v.toBool());
     } else if (v.isString()) {
-      attr_node->s_(k, v.toString()->string());
+      attr_node->s_(k, v.toStringRef());
     } else if (v.isIntList()) {
       attr_node->is_(k, v.toIntList().vec());
     } else if (v.isBoolList()) {

@@ -20,13 +20,31 @@ from torch.ao.quantization.quantization_mappings import (
 from .utils import get_qparam_dict, has_no_children_ignoring_parametrizations
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.ao.quantization.qconfig import (
-    add_module_to_qconfig_obs_ctr,
+    _add_module_to_qconfig_obs_ctr,
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
     float_qparams_weight_only_qconfig_4bit,
-    activation_is_memoryless)
+    _activation_is_memoryless)
 from torch.nn.utils.parametrize import type_before_parametrizations
+
+__all__ = [
+    "get_default_custom_config_dict",
+    "is_activation_post_process",
+    "propagate_qconfig_",
+    "register_activation_post_process_hook",
+    "add_observer_",
+    "get_unique_devices_",
+    "add_quant_dequant",
+    "prepare",
+    "quantize",
+    "quantize_dynamic",
+    "prepare_qat",
+    "quantize_qat",
+    "convert",
+    "swap_module",
+    "get_observer_dict",
+]
 
 _DEFAULT_CUSTOM_CONFIG_DICT = {
     'float_to_observed_custom_module_class': {
@@ -73,9 +91,9 @@ def _propagate_qconfig_helper(module, qconfig_dict,
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
 
-    torch.ao.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
+    torch.ao.quantization.qconfig._assert_valid_qconfig(module_qconfig, module)
 
-    qconfig_with_device_check = add_module_to_qconfig_obs_ctr(module_qconfig, module)
+    qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(module_qconfig, module)
     module.qconfig = qconfig_with_device_check
 
     for name, child in module.named_children():
@@ -183,7 +201,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
                 m.qconfig, device, special_act_post_process))
             # Register observer as the first entry in the hook list
             # All post forward hooks are preserved and will be executed after the observer before convert
-            register_activation_post_process_hook(m, pre_hook=activation_is_memoryless(m.qconfig))
+            register_activation_post_process_hook(m, pre_hook=_activation_is_memoryless(m.qconfig))
 
     for name, child in module.named_children():
         # TODO remove Dropout special after codebase stable
@@ -196,12 +214,12 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             # activation_post_process are now added directly to nn.Sequentail/_FusedModule
             if needs_observation(child):
                 insert_activation_post_process(child)
-        elif _has_special_act_post_process(child):
-            special_act_post_process = _get_special_act_post_process(child)
-            insert_activation_post_process(child, special_act_post_process)
         elif non_leaf_module_list is not None and type_before_parametrizations(child) in non_leaf_module_list:
             if needs_observation(child):
                 insert_activation_post_process(child)
+        elif _has_special_act_post_process(child):
+            special_act_post_process = _get_special_act_post_process(child)
+            insert_activation_post_process(child, special_act_post_process)
         elif needs_observation(child) and type_before_parametrizations(child) in custom_module_class_mapping:
             observed_child = custom_module_class_mapping[type_before_parametrizations(child)].from_float(child)
             setattr(module, name, observed_child)

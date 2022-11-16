@@ -129,7 +129,7 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
   // 3.1
   TORCH_CHECK(
               static_cast<int>(size.size()) == batch_ndim + base_ndim + dense_ndim,
-              "tensor dimensionality must be sum of batch, base, and dense dimensionalites (=",
+              "tensor dimensionality must be sum of batch, base, and dense dimensionalities (=",
               batch_ndim, " + ", base_ndim, " + ", dense_ndim, ") but got ", size.size());
 
   // For CSR/CSC formats, we define blocksize=(1, 1) so that checking
@@ -380,7 +380,7 @@ DimVector _estimate_sparse_compressed_tensor_size(
   }
   TORCH_CHECK(
               static_cast<int>(size.size()) == batch_ndim + base_ndim + dense_ndim,
-              "tensor dimensionality must be sum of batch, base, and dense dimensionalites (=",
+              "tensor dimensionality must be sum of batch, base, and dense dimensionalities (=",
               batch_ndim, " + ", base_ndim, " + ", dense_ndim, ") but got ", size.size());
   return size;
 }
@@ -559,13 +559,13 @@ Tensor& copy_sparse_compressed_(Tensor& self, const Tensor& src, bool non_blocki
                 "torch.copy_: expected shapes of self and src to match along dimension ",
                 self_compressed_dim, " for ",
                 self.layout(), " layout but the corresponding dimensions of self and src are ",
-                self_compressed_dims, " and ", src_compressed_dims, ", respecitvely.");
+                self_compressed_dims, " and ", src_compressed_dims, ", respectively.");
   } else {
     TORCH_CHECK(self_compressed_dims == src_compressed_dims,
                 "torch.copy_: expected shapes of self and src to match along dimensions ",
                 self_compressed_dim, " and ", src_compressed_dim, ", respectively, for ",
                 self.layout(), " layout but the corresponding dimensions of self and src are ",
-                self_compressed_dims, " and ", src_compressed_dims, ", respecitvely.");
+                self_compressed_dims, " and ", src_compressed_dims, ", respectively.");
   }
   AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "copy_sparse_compressed_",
                                               [&]{},
@@ -576,7 +576,7 @@ Tensor& copy_sparse_compressed_(Tensor& self, const Tensor& src, bool non_blocki
                                                 auto src_blocksize = DimVector(src_values.sizes().slice(src_values.dim()-2, 2));
                                                 TORCH_CHECK(self_blocksize == src_blocksize,
                                                             "torch.copy_: copy of sparse compressed tensors having different block sizes is not supported.",
-                                                            " self and src block sizes are ", self_blocksize, " and ", src_blocksize, ", respectivly.");
+                                                            " self and src block sizes are ", self_blocksize, " and ", src_blocksize, ", respectively.");
                                               });
   AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "copy_sparse_compressed_",
                                             [&]{
@@ -632,25 +632,24 @@ int64_t dense_dim_sparse_csr(const SparseCsrTensor& self) {
   return get_sparse_csr_impl(self)->dense_dim();
 }
 
-bool _is_same_size_as_sparse_csr(
+bool _is_same_size_as_sparse_compressed(
     const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
   return self.sizes().equals(src.sizes());
 }
 
-const SparseCsrTensor& resize_as_sparse_csr_(
+const SparseCsrTensor& resize_as_sparse_compressed_(
     const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
-  TORCH_CHECK(
-      src.is_sparse_csr() && self.is_sparse_csr(),
-      "resize_as_sparse_csr_: layout for self and src must be sparse_csr but got ",
-      self.layout(),
-      " for self, and ",
-      src.layout(),
-      " for src");
-  if (!_is_same_size_as_sparse_csr(self, src)) {
-    get_sparse_csr_impl(self)->resize_as_sparse_csr_tensor_(src);
-  }
+  auto src_layout = src.layout();
+  auto self_layout = self.layout();
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
+      src_layout, "resize_as_sparse_compressed_: src ", []() {});
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
+      self_layout, "resize_as_sparse_compressed_: self ", []() {});
+  // Note: The impl method does all required checking to see if resize/data copy
+  // on member tensors is required.
+  get_sparse_csr_impl(self)->resize_as_sparse_compressed_tensor_(src);
   return self;
 }
 

@@ -10,10 +10,11 @@ from torch.ao.quantization.backend_config import (
     BackendConfig,
     BackendPatternConfig,
     DTypeConfig,
+    DTypeWithConstraints,
     ObservationType,
 )
 from torch.ao.quantization.fake_quantize import FixedQParamsFakeQuantize
-from torch.ao.quantization.fuser_method_mappings import reverse_sequential_wrapper2
+from torch.ao.quantization.fuser_method_mappings import _reverse_sequential_wrapper2
 from torch.ao.quantization.fx.quantization_patterns import _default_root_node_getter
 from torch.ao.quantization.observer import default_fixed_qparams_range_0to1_observer
 
@@ -37,32 +38,75 @@ class TestBackendConfig(QuantizationTestCase):
         is_dynamic=True
     )
 
-    dtype_config_dict1 = {
+    activation_dtype_with_constraints = DTypeWithConstraints(
+        dtype=torch.quint8,
+        quant_min_lower_bound=0,
+        quant_max_upper_bound=127,
+        scale_min_lower_bound=2 ** -12,
+    )
+
+    weight_dtype_with_constraints = DTypeWithConstraints(
+        dtype=torch.qint8,
+        quant_min_lower_bound=-128,
+        quant_max_upper_bound=127,
+        scale_min_lower_bound=2 ** -12,
+    )
+
+    dtype_config3 = DTypeConfig(
+        input_dtype=activation_dtype_with_constraints,
+        output_dtype=activation_dtype_with_constraints,
+        weight_dtype=weight_dtype_with_constraints,
+    )
+
+    dtype_config_dict1_legacy = {
         "input_dtype": torch.quint8,
         "output_dtype": torch.quint8,
         "weight_dtype": torch.qint8,
         "bias_dtype": torch.float,
     }
 
-    dtype_config_dict2 = {
+    dtype_config_dict2_legacy = {
         "input_dtype": torch.float16,
         "output_dtype": torch.float,
         "is_dynamic": True,
     }
 
+    dtype_config_dict1 = {
+        "input_dtype": DTypeWithConstraints(dtype=torch.quint8),
+        "output_dtype": DTypeWithConstraints(torch.quint8),
+        "weight_dtype": DTypeWithConstraints(torch.qint8),
+        "bias_dtype": torch.float,
+    }
+
+    dtype_config_dict2 = {
+        "input_dtype": DTypeWithConstraints(dtype=torch.float16),
+        "output_dtype": DTypeWithConstraints(dtype=torch.float),
+        "is_dynamic": True,
+    }
+
+    dtype_config_dict3 = {
+        "input_dtype": activation_dtype_with_constraints,
+        "output_dtype": activation_dtype_with_constraints,
+        "weight_dtype": weight_dtype_with_constraints,
+    }
+
     def test_dtype_config_from_dict(self):
+        self.assertEqual(DTypeConfig.from_dict(self.dtype_config_dict1_legacy), self.dtype_config1)
+        self.assertEqual(DTypeConfig.from_dict(self.dtype_config_dict2_legacy), self.dtype_config2)
         self.assertEqual(DTypeConfig.from_dict(self.dtype_config_dict1), self.dtype_config1)
         self.assertEqual(DTypeConfig.from_dict(self.dtype_config_dict2), self.dtype_config2)
+        self.assertEqual(DTypeConfig.from_dict(self.dtype_config_dict3), self.dtype_config3)
 
     def test_dtype_config_to_dict(self):
         self.assertEqual(self.dtype_config1.to_dict(), self.dtype_config_dict1)
         self.assertEqual(self.dtype_config2.to_dict(), self.dtype_config_dict2)
+        self.assertEqual(self.dtype_config3.to_dict(), self.dtype_config_dict3)
 
     # ======================
     #  BackendPatternConfig
     # ======================
 
-    _fuser_method = reverse_sequential_wrapper2(nni.LinearReLU)
+    _fuser_method = _reverse_sequential_wrapper2(nni.LinearReLU)
 
     _num_tensor_args_to_observation_type = {
         0: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,

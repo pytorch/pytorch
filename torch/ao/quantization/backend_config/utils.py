@@ -4,7 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .backend_config import BackendConfig, DTypeConfig
-from ..quantization_types import Pattern
+from ..utils import Pattern
+from ..observer import _PartialWrapper
 
 __all__ = [
     "get_pattern_to_dtype_configs",
@@ -84,6 +85,13 @@ def get_fusion_pattern_to_root_node_getter(backend_config: BackendConfig) -> Dic
         if config._root_node_getter is not None:
             root_node_getter_mapping[pattern] = config._root_node_getter
     return root_node_getter_mapping
+
+def get_fixed_qparams_op_to_overwrite_output_observer(backend_config: BackendConfig) -> Dict[Union[Callable, str], _PartialWrapper]:
+    fixed_qparam_op_to_overwrite_output_observer: Dict[Union[Callable, str], _PartialWrapper] = {}
+    for pattern, config in backend_config.configs.items():
+        if config._overwrite_output_observer is not None:
+            fixed_qparam_op_to_overwrite_output_observer[pattern] = config._overwrite_output_observer  # type: ignore[index]
+    return fixed_qparam_op_to_overwrite_output_observer
 
 def get_fusion_pattern_to_extra_inputs_getter(backend_config: BackendConfig) -> Dict[Pattern, Callable]:
     """ Get a map from fusion pattern to a function that returns extra input nodes

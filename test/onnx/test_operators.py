@@ -1,5 +1,11 @@
 # Owner(s): ["module: onnx"]
 
+"""
+Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
+          --no-onnx: no onnx python dependency
+          --produce-onnx-test-data: generate onnx test data
+          --accept: accept onnx updates and overwrite models
+"""
 import glob
 import inspect
 import io
@@ -7,6 +13,9 @@ import itertools
 import os
 import shutil
 import tempfile
+
+# Full diff for expect files
+import unittest
 
 import torch
 import torch.nn as nn
@@ -22,6 +31,7 @@ from pytorch_test_common import (
 )
 from torch.autograd import Function, Variable
 from torch.nn import functional, Module
+from torch.onnx._internal import diagnostics
 from torch.onnx.symbolic_helper import (
     _get_tensor_dim_size,
     _get_tensor_sizes,
@@ -29,15 +39,6 @@ from torch.onnx.symbolic_helper import (
 )
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfCaffe2, skipIfNoLapack
-
-"""Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
-          --no-onnx: no onnx python dependence
-          --produce-onnx-test-data: generate onnx test data
-          --accept: accept onnx updates and overwrite models
-"""
-
-# Full diff for expect files
-import unittest
 
 unittest.TestCase.maxDiff = None
 
@@ -71,6 +72,10 @@ class FuncModule(Module):
 
 
 class TestOperators(common_utils.TestCase):
+    def setUp(self):
+        super().setUp()
+        diagnostics.engine.clear()
+
     def assertONNX(self, f, args, params=None, **kwargs):
         if params is None:
             params = ()

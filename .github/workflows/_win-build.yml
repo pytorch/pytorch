@@ -46,6 +46,11 @@ jobs:
     runs-on: [self-hosted, windows.4xlarge]
     timeout-minutes: 240
     steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -56,11 +61,6 @@ jobs:
         uses: ./.github/actions/setup-win
         with:
           cuda-version: ${{ inputs.cuda-version }}
-
-      - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Parse ref
         id: parse-ref

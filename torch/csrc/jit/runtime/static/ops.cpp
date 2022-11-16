@@ -10,6 +10,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/Fill.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
@@ -44,7 +45,7 @@
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
     true,
-    "If on, static runtime may use use optimizations that cause accurary loss "
+    "If on, static runtime may use use optimizations that cause accuracy loss "
     "vs the jit interpreter");
 
 namespace at {

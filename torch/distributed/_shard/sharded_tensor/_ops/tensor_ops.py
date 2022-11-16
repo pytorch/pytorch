@@ -20,6 +20,7 @@ _register_default_op(torch.Tensor.dim, _sharded_op_impl)
 _register_default_op(torch.Tensor.ndim.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 _register_default_op(torch.Tensor.is_contiguous, _sharded_op_impl)
 _register_default_op(torch.Tensor.contiguous, _sharded_op_impl)
+_register_default_op(torch.Tensor.is_floating_point, _sharded_op_impl)
 
 # __reduce_ex__ to dispatch to get_state/set_state
 _register_default_op(torch.Tensor.__reduce_ex__, _sharded_op_impl)
@@ -43,6 +44,11 @@ def tensor_device(types, args=(), kwargs=None, pg=None):
         raise TypeError("input needs to be a ShardedTensor")
 
     return self_st.local_shards()[0].tensor.device
+
+
+@_sharded_op_impl(torch.Tensor.is_meta.__get__)  # type: ignore[attr-defined]
+def st_is_meta(types, args=(), kwargs=None, pg=None):
+    return args[0].local_tensor().is_meta
 
 
 def sharded_type_as_check(*args, **kwargs):

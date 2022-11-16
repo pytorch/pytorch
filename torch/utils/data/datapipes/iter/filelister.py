@@ -14,7 +14,7 @@ __all__ = ["FileListerIterDataPipe", ]
 class FileListerIterDataPipe(IterDataPipe[str]):
     r"""
     Given path(s) to the root directory, yields file pathname(s) (path + filename) of files within the root directory.
-    Multiple root directories can be provided.
+    Multiple root directories can be provided (functional name: ``list_files``).
 
     Args:
         root: Root directory or a sequence of root directories

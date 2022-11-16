@@ -2,7 +2,7 @@ import math
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer
+from .optimizer import Optimizer, _use_grad_for_differentiable
 from typing import List, Optional
 
 __all__ = ['RAdam', 'radam']
@@ -61,7 +61,8 @@ class RAdam(Optimizer):
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, foreach: Optional[bool] = None):
+                 weight_decay=0, *, foreach: Optional[bool] = None,
+                 differentiable: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -73,20 +74,21 @@ class RAdam(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay,
-                        foreach=foreach)
+                        foreach=foreach, differentiable=differentiable)
         super(RAdam, self).__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('foreach', None)
+            group.setdefault('differentiable', False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
         if not step_is_tensor:
             for s in state_values:
                 s['step'] = torch.tensor(float(s['step']))
 
-    @torch.no_grad()
+    @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -137,7 +139,8 @@ class RAdam(Optimizer):
                   lr=group['lr'],
                   weight_decay=group['weight_decay'],
                   eps=group['eps'],
-                  foreach=group['foreach'])
+                  foreach=group['foreach'],
+                  differentiable=group['differentiable'])
 
         return loss
 
@@ -150,6 +153,7 @@ def radam(params: List[Tensor],
           # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
           # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
           foreach: bool = None,
+          differentiable: bool = False,
           *,
           beta1: float,
           beta2: float,
@@ -185,7 +189,8 @@ def radam(params: List[Tensor],
          beta2=beta2,
          lr=lr,
          weight_decay=weight_decay,
-         eps=eps)
+         eps=eps,
+         differentiable=differentiable)
 
 
 def _single_tensor_radam(params: List[Tensor],
@@ -198,7 +203,8 @@ def _single_tensor_radam(params: List[Tensor],
                          beta2: float,
                          lr: float,
                          weight_decay: float,
-                         eps: float):
+                         eps: float,
+                         differentiable: bool):
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -230,8 +236,12 @@ def _single_tensor_radam(params: List[Tensor],
         if rho_t > 5.:
             # Compute the variance rectification term and update parameters accordingly
             rect = math.sqrt((rho_t - 4) * (rho_t - 2) * rho_inf / ((rho_inf - 4) * (rho_inf - 2) * rho_t))
-            adaptive_lr = math.sqrt(bias_correction2) / exp_avg_sq.sqrt().add_(eps)
-
+            exp_avg_sq_sqrt = exp_avg_sq.sqrt()
+            if differentiable:
+                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
+            else:
+                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
+            adaptive_lr = math.sqrt(bias_correction2) / exp_avg_sq_sqrt
             param.add_(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
         else:
             param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
@@ -247,10 +257,13 @@ def _multi_tensor_radam(params: List[Tensor],
                         beta2: float,
                         lr: float,
                         weight_decay: float,
-                        eps: float):
+                        eps: float,
+                        differentiable: bool):
 
     if len(params) == 0:
         return
+
+    assert not differentiable, "_foreach ops don't support autograd"
 
     # Update steps
     torch._foreach_add_(state_steps, 1)

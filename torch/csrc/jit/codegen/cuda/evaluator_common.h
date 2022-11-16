@@ -1,4 +1,6 @@
 #pragma once
+#include <torch/csrc/jit/codegen/cuda/dynamic_type.h>
+#include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -62,28 +64,28 @@ class KernelIRContext {
 };
 
 template <typename IRContext>
-class PrecomputedIntegersBase;
+class PrecomputedValuesBase;
 
-//! NaiveIntegerMachine:
+//! NaiveValueMachine:
 //!  This is an un-optimized runtime for evaluating a
-//!   set of integers in one run. The runtime contains
+//!   set of values in one run. The runtime contains
 //!   a vector of instructions inferred from IR at compile-time
 //!   and it currently must be associated with an instance of
-//!   PrecomputedIntegersBase that will provide the workspace
-//!   containing the concrete values for the integers.
+//!   PrecomputedValuesBase that will provide the workspace
+//!   containing the concrete values for the values.
 template <typename IRContext>
-class NaiveIntegerMachine {
+class NaiveValueMachine {
   //! The generic types of instructions supported for this
   //!  machine, currently only binary and unary.
   enum class InstructionType { UNARY_OP, BINARY_OP };
 
  public:
-  //! Constructor lowers all the expr IR nodes stored in precomputed_integer
+  //! Constructor lowers all the expr IR nodes stored in precomputed_values
   //!  and stores them in the private state.
-  NaiveIntegerMachine(PrecomputedIntegersBase<IRContext>& precomputed_integers);
+  NaiveValueMachine(PrecomputedValuesBase<IRContext>& precomputed_values);
 
   //! Runs all the instructions and write results to the associated
-  //!  precomputed_integers.
+  //!  precomputed_values.
   void run();
 
  private:
@@ -109,12 +111,12 @@ class NaiveIntegerMachine {
   void runBinaryOp(int index);
 
  private:
-  friend PrecomputedIntegersBase<IRContext>;
+  friend PrecomputedValuesBase<IRContext>;
 
-  //! Reference to the PrecomputedInteger workspace associated with
+  //! Reference to the PrecomputedValues workspace associated with
   //!   this runtime. All the instructions will read and write the
   //!   values in this workspace.
-  PrecomputedIntegersBase<IRContext>& precomputed_integers_;
+  PrecomputedValuesBase<IRContext>& precomputed_values_;
 
   //! Instruction buffer. All states are in separate vectors and
   //!  the entry of each vector at the same index correspond to
@@ -130,6 +132,10 @@ class NaiveIntegerMachine {
   //! Unary operator type if applicable, contains a default
   //!  value at each index corresponding to a binary op.
   std::vector<UnaryOpType> uop_type_;
+
+  //! Data type for unary op of type UnaryOpType::Cast, contains a default
+  //!  value at each index corresponding other ops.
+  std::vector<DataType> data_type_;
 
   //! Unary operator type if applicable, contains a default
   //!  value at each index corresponding to a unary op.
@@ -150,33 +156,33 @@ class NaiveIntegerMachine {
   std::vector<int> dest_;
 };
 
-//! PrecomputedIntegersBase:
-//!  A class to support optimized evaluation of integers
+//! PrecomputedValuesBase:
+//!  A class to support optimized evaluation of values
 //!  at runtime.
-//!    At compile time all necessary integers are collected
+//!    At compile time all necessary values are collected
 //!  from given IR nodes and a runtime and a workspace containing
 //!  the concrete values is created and pre-allocated.
-//!    At runtime the integer vm is used to evaluate all the
-//!  integers and store them in the workspace ahead of time.
+//!    At runtime the value vm is used to evaluate all the
+//!  values and store them in the workspace ahead of time.
 template <typename IRContext>
-class PrecomputedIntegersBase {
-  using INTEGER_MACHINE = NaiveIntegerMachine<IRContext>;
+class PrecomputedValuesBase {
+  using VALUE_MACHINE = NaiveValueMachine<IRContext>;
 
  public:
-  explicit PrecomputedIntegersBase() = default;
+  explicit PrecomputedValuesBase() = default;
 
   //! Returns if the workspace contains evaluated results.
   bool ready() {
     return has_valid_values_;
   }
 
-  //! Runs the internal integer machine that will compute
+  //! Runs the internal value machine that will compute
   //!  the values allocated in the workspace.
   void evaluate();
 
   //! Returns value for the given IR node if it's stored
   //!  in the workspace and has been evaluated.
-  c10::optional<int64_t> getMaybeValueFor(const Val* val);
+  c10::optional<IntOrDouble> getMaybeValueFor(const Val* val);
 
   //! Debugging helper, prints all the currently known values
   void print() const;
@@ -191,7 +197,7 @@ class PrecomputedIntegersBase {
 
   //! Bind concrete value to the given index
   //!  if the index is valid.
-  void bindValue(int index, int64_t value) {
+  void bindValue(int index, IntOrDouble value) {
     if (index < 0 || is_constant_[index]) {
       return;
     }
@@ -213,10 +219,10 @@ class PrecomputedIntegersBase {
     return symbols_;
   }
 
-  //! Initialize the integer runtime that will
+  //! Initialize the value runtime that will
   //!  infer instructions from the workspace.
   void initializeIntegerMachine() {
-    integer_machine_ = std::make_unique<INTEGER_MACHINE>(*this);
+    value_machine_ = std::make_unique<VALUE_MACHINE>(*this);
   }
 
   bool hasValidValues() {
@@ -236,7 +242,7 @@ class PrecomputedIntegersBase {
   }
 
  private:
-  friend INTEGER_MACHINE;
+  friend VALUE_MACHINE;
 
   //! Marks if an evaluation has finished
   bool has_valid_values_ = false;
@@ -253,7 +259,7 @@ class PrecomputedIntegersBase {
   std::vector<bool> is_constant_;
 
   //! Stores the concrete values at each index.
-  std::vector<int64_t> values_;
+  std::vector<IntOrDouble> values_;
 
   //! Stores the IR nodes corresponding to each index.
   std::vector<Val*> symbols_;
@@ -261,50 +267,48 @@ class PrecomputedIntegersBase {
   //! An internal log to keep track of all the bindings
   //!  used in each evaluation cycle. To be used for
   //!  consistency check.
-  std::vector<std::pair<int, int64_t>> binding_log_;
+  std::vector<std::pair<int, IntOrDouble>> binding_log_;
 
-  //! Integer runtime for realizing the integer computations.
-  std::unique_ptr<INTEGER_MACHINE> integer_machine_;
+  //! Integer runtime for realizing the values computations.
+  std::unique_ptr<VALUE_MACHINE> value_machine_;
 };
 
-//! PreComputedInteger workspace in Fusion IR context,
-//!  defines the set of integers to be collected in each
+//! PrecomputedValues workspace in Fusion IR context,
+//!  defines the set of values to be collected in each
 //!  fusion graph and the input value binding given each
 //!  fusion runtime input.
-class FusionPrecomputedIntegers
-    : public PrecomputedIntegersBase<FusionIRContext> {
-  using precomputedIntegersBaseType = PrecomputedIntegersBase<FusionIRContext>;
+class FusionPrecomputedValues : public PrecomputedValuesBase<FusionIRContext> {
+  using precomputedValuesBaseType = PrecomputedValuesBase<FusionIRContext>;
 
  public:
-  FusionPrecomputedIntegers(Fusion* fusion);
+  FusionPrecomputedValues(Fusion* fusion);
 
   //! Bind concrete values from fusion runtime inputs
-  void bindFusionInputs(const at::ArrayRef<IValue>& aten_inputs);
+  void bindFusionInputs(const KernelArgumentHolder& args);
 
  private:
-  void bindTensorMetaData(TensorView* tv, const at::Tensor& at_tensor);
+  void bindTensorMetaData(
+      TensorView* tv,
+      const TensorArgAbstract* tensor_arg_abstract);
 
  private:
   Fusion* fusion_ = nullptr;
 };
-//! PreComputedInteger workspace in Fusion IR context,
-//!  defines the set of integers to be collected in each
+//! PrecomputedValues workspace in Fusion IR context,
+//!  defines the set of values to be collected in each
 //!  kernel IR sequence and the input value binding given each
 //!  fusion runtime input and launch constraints.
-class KernelPrecomputedIntegers
-    : public PrecomputedIntegersBase<KernelIRContext> {
-  using precomputedIntegersBaseType = PrecomputedIntegersBase<KernelIRContext>;
+class KernelPrecomputedValues : public PrecomputedValuesBase<KernelIRContext> {
+  using precomputedValuesBaseType = PrecomputedValuesBase<KernelIRContext>;
 
  public:
   using ParallelExtentMap =
       std::unordered_map<ParallelType, std::vector<const Val*>, TypeHash>;
 
-  KernelPrecomputedIntegers(kir::Kernel* kernel);
+  KernelPrecomputedValues(kir::Kernel* kernel);
 
   //! Bind concrete values from fusion runtime inputs
-  void bindKernelInputs(
-      kir::Kernel* kernel,
-      const at::ArrayRef<IValue>& aten_inputs);
+  void bindKernelInputs(kir::Kernel* kernel, const KernelArgumentHolder& args);
 
   //! Bind concrete values from launch constraints
   void bindParallelExtents(
@@ -317,7 +321,9 @@ class KernelPrecomputedIntegers
   void bindConcreteParallelTypeValue(ParallelType pt, int64_t value);
 
  private:
-  void bindTensorMetaData(TensorView* tv, const at::Tensor& at_tensor);
+  void bindTensorMetaData(
+      TensorView* tv,
+      const TensorArgAbstract* tensor_arg_abstract);
 
   //! Iterate through all the named scalars corresponding
   //!  to thread sizes and pre-group them by their parallel

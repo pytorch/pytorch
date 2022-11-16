@@ -64,7 +64,7 @@ Tensor view(const Tensor& input, c10::SymIntArrayRef sym_size) {
 
 Tensor reshape(const Tensor& input, IntArrayRef shape) {
   TORCH_CHECK(input.is_metal());
-  return view(input, c10::fromIntArrayRef(shape));
+  return view(input, c10::fromIntArrayRefSlow(shape));
 }
 
 Tensor flatten_using_ints(

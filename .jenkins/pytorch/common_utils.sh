@@ -49,6 +49,12 @@ function assert_git_not_dirty() {
     fi
 }
 
+function pip_install_whl() {
+  # This is used to install PyTorch and other build artifacts wheel locally
+  # without using any network connection
+  python3 -mpip install --no-index --no-deps "$@"
+}
+
 function pip_install() {
   # retry 3 times
   # old versions of pip don't have the "--progress-bar" flag
@@ -123,21 +129,78 @@ function clone_pytorch_xla() {
   fi
 }
 
-function install_torchdynamo() {
-  local commit
-  commit=$(get_pinned_commit torchdynamo)
-  pip_install --user "git+https://github.com/pytorch/torchdynamo.git@${commit}"
+function install_filelock() {
+  pip_install filelock
 }
 
-function checkout_install_torchdynamo() {
+function install_triton() {
   local commit
-  commit=$(get_pinned_commit torchdynamo)
+  if [[ "${TEST_CONFIG}" == *rocm* ]]; then
+    echo "skipping triton due to rocm"
+  else
+    commit=$(get_pinned_commit triton)
+    pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+    pip_install --user jinja2
+  fi
+}
+
+function setup_torchdeploy_deps(){
+  conda install -y cmake
+  conda install -y -c conda-forge libpython-static=3.10
+  local CC
+  local CXX
+  CC="$(which gcc)"
+  CXX="$(which g++)"
+  export CC
+  export CXX
+  pip install --upgrade pip
+}
+
+function checkout_install_torchdeploy() {
+  local commit
+  setup_torchdeploy_deps
   pushd ..
-  git clone https://github.com/pytorch/torchdynamo
-  pushd torchdynamo
-  git checkout "${commit}"
-  time python setup.py develop
+  git clone --recurse-submodules https://github.com/pytorch/multipy.git
+  pushd multipy
+  python multipy/runtime/example/generate_examples.py
+  pip install -e . --install-option="--cudatests"
   popd
+  popd
+}
+
+function test_torch_deploy(){
+ pushd ..
+ pushd multipy
+ ./multipy/runtime/build/test_deploy
+ ./multipy/runtime/build/test_deploy_gpu
+ popd
+ popd
+}
+
+function install_huggingface() {
+  local commit
+  commit=$(get_pinned_commit huggingface)
+  pip_install pandas
+  pip_install scipy
+  pip_install "git+https://github.com/huggingface/transformers.git@${commit}#egg=transformers"
+}
+
+function install_timm() {
+  local commit
+  commit=$(get_pinned_commit timm)
+  pip_install pandas
+  pip_install scipy
+  pip_install "git+https://github.com/rwightman/pytorch-image-models@${commit}"
+}
+
+function checkout_install_torchbench() {
+  local commit
+  commit=$(get_pinned_commit torchbench)
+  git clone https://github.com/pytorch/benchmark torchbench
+  pushd torchbench
+  git checkout "${commit}"
+  python install.py
+  pip_install gym==0.25.2  # workaround issue in 0.26.0
   popd
 }
 

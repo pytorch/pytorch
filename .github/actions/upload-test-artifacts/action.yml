@@ -111,7 +111,7 @@ runs:
 
     # GHA upload
     - name: Store Test Downloaded JSONs on Github
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       if: inputs.use-gha
       with:
         # Add the run attempt, see [Artifact run attempt]
@@ -121,7 +121,7 @@ runs:
         path: test/**/*.json
 
     - name: Store Test Reports on Github
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       if: inputs.use-gha
       with:
         # Add the run attempt, see [Artifact run attempt]
@@ -129,3 +129,14 @@ runs:
         retention-days: 14
         if-no-files-found: error
         path: test/**/*.xml
+
+    - name: Store Usage Logs on Github
+      uses: actions/upload-artifact@v3
+      if: inputs.use-gha
+      with:
+        # Add the run attempt, see [Artifact run attempt]
+        name: usage-log-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
+        retention-days: 14
+        if-no-files-found: ignore
+        path: usage_log.txt
+      continue-on-error: true

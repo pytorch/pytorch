@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer
+from .optimizer import Optimizer, _use_grad_for_differentiable
 from typing import List, Optional
 
 __all__ = ['Rprop', 'rprop']
@@ -45,7 +45,7 @@ class Rprop(Optimizer):
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
-        etas (Tuple[float, float], optional): pair of (etaminus, etaplis), that
+        etas (Tuple[float, float], optional): pair of (etaminus, etaplus), that
             are multiplicative increase and decrease factors
             (default: (0.5, 1.2))
         step_sizes (Tuple[float, float], optional): a pair of minimal and
@@ -57,13 +57,14 @@ class Rprop(Optimizer):
     """
 
     def __init__(self, params, lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50),
-                 foreach: Optional[bool] = None, maximize: bool = False):
+                 *, foreach: Optional[bool] = None, maximize: bool = False,
+                 differentiable: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 < etas[0] < 1.0 < etas[1]:
             raise ValueError("Invalid eta values: {}, {}".format(etas[0], etas[1]))
 
-        defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes, foreach=foreach, maximize=maximize)
+        defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes, foreach=foreach, maximize=maximize, differentiable=differentiable)
         super(Rprop, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -71,8 +72,9 @@ class Rprop(Optimizer):
         for group in self.param_groups:
             group.setdefault('foreach', None)
             group.setdefault('maximize', False)
+            group.setdefault('differentiable', False)
 
-    @torch.no_grad()
+    @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -131,7 +133,8 @@ class Rprop(Optimizer):
                   etaminus=etaminus,
                   etaplus=etaplus,
                   foreach=foreach,
-                  maximize=maximize)
+                  maximize=maximize,
+                  differentiable=group['differentiable'])
 
         return loss
 
@@ -144,6 +147,7 @@ def rprop(params: List[Tensor],
           # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
           foreach: bool = None,
           maximize: bool = False,
+          differentiable: bool = False,
           *,
           step_size_min: float,
           step_size_max: float,
@@ -174,7 +178,8 @@ def rprop(params: List[Tensor],
          step_size_max=step_size_max,
          etaminus=etaminus,
          etaplus=etaplus,
-         maximize=maximize)
+         maximize=maximize,
+         differentiable=differentiable)
 
 
 def _single_tensor_rprop(params: List[Tensor],
@@ -186,7 +191,8 @@ def _single_tensor_rprop(params: List[Tensor],
                          step_size_max: float,
                          etaminus: float,
                          etaplus: float,
-                         maximize: bool):
+                         maximize: bool,
+                         differentiable: bool):
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -199,8 +205,10 @@ def _single_tensor_rprop(params: List[Tensor],
             prev = torch.view_as_real(prev)
             param = torch.view_as_real(param)
             step_size = torch.view_as_real(step_size)
-
-        sign = grad.mul(prev).sign()
+        if differentiable:
+            sign = grad.mul(prev.clone()).sign()
+        else:
+            sign = grad.mul(prev).sign()
         sign[sign.gt(0)] = etaplus
         sign[sign.lt(0)] = etaminus
         sign[sign.eq(0)] = 1
@@ -215,7 +223,6 @@ def _single_tensor_rprop(params: List[Tensor],
 
         # update parameters
         param.addcmul_(grad.sign(), step_size, value=-1)
-
         prev.copy_(grad)
 
 
@@ -228,10 +235,13 @@ def _multi_tensor_rprop(params: List[Tensor],
                         step_size_max: float,
                         etaminus: float,
                         etaplus: float,
-                        maximize: bool):
+                        maximize: bool,
+                        differentiable: bool):
 
     if len(params) == 0:
         return
+
+    assert not differentiable, "_foreach ops don't support autograd"
 
     # Handle complex params
     def _view_complex_as_real(tensor_list):

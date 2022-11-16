@@ -28,25 +28,25 @@ jobs:
           activate-environment: build
 
       - name: Install dependencies
-        uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
+        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
         with:
           timeout_minutes: 10
           max_attempts: 5
           command: |
             conda install -y \
-              cffi \
-              cmake \
-              mkl \
-              mkl-include \
-              ninja \
-              numpy \
-              pyyaml \
-              requests \
-              setuptools \
-              typing_extensions
+              cffi=1.15.1 \
+              cmake=3.22.1 \
+              mkl=2022.1.0 \
+              mkl-include=2022.1.0 \
+              ninja=1.10.2 \
+              numpy=1.23.3 \
+              pyyaml=6.0 \
+              requests=2.28.1 \
+              setuptools=65.5.0 \
+              typing_extensions=4.3.0
 
       - name: Install Buck
-        uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
+        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
         with:
           timeout_minutes: 10
           max_attempts: 5
@@ -56,7 +56,7 @@ jobs:
             sudo apt install ./buck.2021.01.12.01_all.deb
 
       - name: Download third party libraries and generate wrappers
-        uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
+        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
         with:
           timeout_minutes: 10
           max_attempts: 5

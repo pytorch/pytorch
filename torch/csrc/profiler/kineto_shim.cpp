@@ -116,7 +116,7 @@ TraceWrapper::operator bool() const {
 
 ActivityTraceWrapper::ActivityTraceWrapper(
     std::unique_ptr<interface_trace_t>&& trace)
-    : trace_(std::move(trace)), saved_{false} {}
+    : trace_(std::move(trace)) {}
 
 ActivityTraceWrapper::operator bool() const {
 #ifdef USE_KINETO

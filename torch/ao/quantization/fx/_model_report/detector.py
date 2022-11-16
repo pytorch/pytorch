@@ -10,7 +10,7 @@ from torch.ao.quantization.fx._model_report.model_report_observer import ModelRe
 from torch.ao.quantization.qconfig import (
     QConfig,
     default_qconfig,
-    assert_valid_qconfig,
+    _assert_valid_qconfig,
 )
 from torch.ao.quantization.observer import (
     ObserverBase,
@@ -84,7 +84,7 @@ class DetectorQConfigInfo():
             weight = default_per_channel_weight_observer if rec[1] else default_weight_observer
             test_config = QConfig(activation, weight)
             try:
-                assert_valid_qconfig(test_config, module)
+                _assert_valid_qconfig(test_config, module)
                 module_qconfig = test_config
                 break
             except AssertionError:
@@ -222,6 +222,7 @@ class PerChannelDetector(DetectorBase):
         "fbgemm": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
         "qnnpack": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
         "onednn": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
+        "x86": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
     }
 
     def __init__(self, backend: str = torch.backends.quantized.engine):
