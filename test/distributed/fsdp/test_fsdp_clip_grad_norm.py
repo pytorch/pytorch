@@ -218,9 +218,10 @@ class TestClipGradNorm(FSDPTest):
         # Run a few more iterations
         # TODO: We cannot run too many iterations, or else there is drift:
         # https://github.com/pytorch/pytorch/issues/89136
-        for _ in range(3):
-            ddp_optim.zero_grad(set_to_none=True)
-            fsdp_optim.zero_grad(set_to_none=True)
+        for i in range(3):
+            set_to_none = i % 2 == 0  # exercise both
+            ddp_optim.zero_grad(set_to_none=set_to_none)
+            fsdp_optim.zero_grad(set_to_none=set_to_none)
             inp = ddp_model.module.get_input(device)
             for model in (ddp_model, fsdp_model):
                 out = model(*inp)

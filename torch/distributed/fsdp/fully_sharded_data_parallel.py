@@ -1161,7 +1161,8 @@ class FullyShardedDataParallel(nn.Module):
             self._streams["unshard"],
             self._streams["pre_unshard"],
         )
-        # Check for an early return if every FSDP instance uses `NO_SHARD`
+        # If every FSDP instance uses `NO_SHARD`, then we can directly use
+        # the normal `nn.utils` one targeting local gradients
         all_no_shard = all(
             not handle.uses_sharded_strategy
             for handle in FullyShardedDataParallel._fsdp_handles(self)
