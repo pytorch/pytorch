@@ -4,6 +4,7 @@ from torch._prims_common import (
     NumberType,
     TensorLike,
     TensorLikeType,
+    ShapeType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 import torch._prims_common as utils
@@ -11,8 +12,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten
 
 from typing import Callable, Sequence, Union, Tuple, NamedTuple
 import inspect
-from functools import wraps, reduce
-import operator
+from functools import wraps
 import warnings
 from itertools import chain
 
@@ -129,9 +129,9 @@ class elementwise_type_promotion_wrapper(object):
 
 
 # TODO: handle tuples of tensors
-def _maybe_resize_out(out: TensorLikeType, shape):
+def _maybe_resize_out(out: TensorLikeType, shape: ShapeType):
     # If the shapes are correct there's nothing to do
-    if out.shape == shape:
+    if utils.same_shape(out.shape, shape):
         return out
     else:
         if out.numel() != 0:
