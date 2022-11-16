@@ -1,11 +1,20 @@
-from collections import defaultdict, abc as container_abcs
+from collections import OrderedDict, defaultdict, abc as container_abcs
+from re import A
 import torch
 from copy import deepcopy
 from itertools import chain
 import warnings
 import functools
 
+from typing import Callable, Dict, Optional
+
+import torch.utils.hooks as hooks
+from torch.utils.hooks import RemovableHandle
+
 __all__ = ['Optimizer']
+_global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
+_global_optimizer_post_hooks: Dict[int, Callable] = OrderedDict()
+
 
 class _RequiredParameter(object):
     """Singleton class representing a required parameter for an Optimizer."""
@@ -13,7 +22,6 @@ class _RequiredParameter(object):
         return "<required parameter>"
 
 required = _RequiredParameter()
-
 
 def _use_grad_for_differentiable(func):
     def _use_grad(self, *args, **kwargs):
@@ -25,6 +33,22 @@ def _use_grad_for_differentiable(func):
             torch.set_grad_enabled(prev_grad)
         return ret
     return _use_grad
+
+
+def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
+    r"""Register a pre hook common to all optimizers.
+    """
+    handle = hooks.RemovableHandle(_global_optimizer_pre_hooks)
+    _global_optimizer_pre_hooks[handle.id] = hook
+    return handle
+
+
+def register_optimizer_step_post_hook(hook: Callable[..., None]) -> RemovableHandle:
+    r"""Register a post hook common to all optimizers.
+    """
+    handle = hooks.RemovableHandle(_global_optimizer_post_hooks)
+    _global_optimizer_post_hooks[handle.id] = hook
+    return handle
 
 
 class Optimizer(object):
@@ -42,11 +66,14 @@ class Optimizer(object):
             options (used when a parameter group doesn't specify them).
     """
 
+    _optimizer_step_pre_hooks: Dict[int, Callable]
+    _optimizer_step_post_hooks: Dict[int, Callable]
+
     def __init__(self, params, defaults):
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
-
-        self._hook_for_profile()
+        super().__setattr__('_optimizer_step_pre_hooks', OrderedDict())
+        super().__setattr__('_optimizer_step_post_hooks', OrderedDict())
 
         if isinstance(params, torch.Tensor):
             raise TypeError("params argument given to the optimizer should be "
@@ -80,7 +107,11 @@ class Optimizer(object):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        self._hook_for_profile()  # To support multiprocessing pickle/unpickle.
+        if '_optimizer_step_pre_hooks' not in self.__dict__:
+            self._optimizer_step_pre_hooks = OrderedDict()
+        if '_optimizer_step_post_hooks' not in self.__dict__:
+            self._optimizer_step_post_hooks = OrderedDict()
+        self._hook_for_profile()  # To support multiprocessing pickle/unpickle
         self.defaults.setdefault('differentiable', False)
 
     def __repr__(self):
@@ -147,6 +178,23 @@ class Optimizer(object):
         if not hooked:
             self.__class__.step = profile_hook_step(self.__class__.step)
             self.__class__.step.hooked = True
+
+    def register_step_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+        r"""Register an optimizer step pre hook which will be called before optimizer step.
+        """
+        handle = hooks.RemovableHandle(self._optimizer_step_pre_hooks)
+        self._optimizer_step_pre_hooks[handle.id] = hook
+        return handle
+
+    def register_step_post_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+        r"""Register an optimizer step post hook which will be called after optimizer step.
+        """
+        handle = hooks.RemovableHandle(self._optimizer_step_post_hooks)
+        self._optimizer_step_post_hooks[handle.id] = hook
+        return handle
+
+    def step_with_hook(self):
+        pass
 
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
