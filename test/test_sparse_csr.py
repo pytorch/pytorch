@@ -1456,23 +1456,12 @@ class TestSparseCSR(TestCase):
                   *[torch.bfloat16] if SM80OrLater else [])
     def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
         from functools import partial
-        from torch.sparse.triton_ops import bsr_dense_mm
 
         # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
         # Tensor params
         batches = [(), (2,)]
         size = [128, 256]
-
-        kernel_run = [False]
-
-        def mm_kernel(*args, **kwargs):
-            kernel_run[0] = True
-            return bsr_dense_mm(*args, skip_checks=True, **kwargs)
-
-        # Kernel overwrite
-        lib = torch.library.Library("aten", "IMPL")
-        lib.impl("aten::_triton_bsr_dense_mm", mm_kernel, "SparseCsrCUDA")
 
         for bd, bs, m, n, k in itertools.product(batches, batches, size, size, size):
             bsr = tensor(bs + (m, k)).to_sparse_bsr(block_size)
@@ -1486,9 +1475,7 @@ class TestSparseCSR(TestCase):
                 # since nn.linear does not support bsr.dim() > 2.
                 res_tri = torch._triton_bsr_dense_mm(bsr, dense.transpose(-2, -1))
                 res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
-            self.assertTrue(kernel_run[0])
             self.assertEqual(res_tri, res_dense)
-            kernel_run[0] = False
 
             res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
             # check whether bsr_dense_mm handles different grid sizes
@@ -1496,16 +1483,13 @@ class TestSparseCSR(TestCase):
             grid_size = (None, 2, 4)
             grid_gen = itertools.product(grid_size, repeat=3)
             for is_sparse_rowspace, grid in itertools.product((True, False), grid_gen):
-                res_tri = bsr_dense_mm(
+                res_tri = torch.sparse.triton_ops.bsr_dense_mm(
                     bsr,
                     dense.transpose(-2, -1),
                     max_grid=grid,
                     is_sparse_rowspace_mode=is_sparse_rowspace
                 )
                 self.assertEqual(res_tri, res_dense)
-
-        # clean-up
-        del lib
 
     # TODO: block_size 1 is broken
     @parametrize("block_size", [2, 3])
