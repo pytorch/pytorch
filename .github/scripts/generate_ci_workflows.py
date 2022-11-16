@@ -127,19 +127,18 @@ generate_binary_build_matrix = import_module(
     Path(__file__).parent / ".tools" / "generate_binary_build_matrix.py"
 )
 
-bin_bld_matrix : Dict[OperatingSystem, Dict[PackageType, List[Dict[str, str]]]]
+bin_bld_matrix : Dict[OperatingSystem, Dict[PackageType, List[Dict[str, str]]]] = {}
 for osys in OperatingSystem:
+    bin_bld_matrix[osys] = {}
     for package in PackageType:
         command = ["--channel", CHANNEL, "--operating-system", osys.value, "--package-type", package.value]
         if osys == OperatingSystem.MACOS_ARM64 and package == PackageType.LIBTORCH:
             continue
         elif osys == OperatingSystem.LINUX and package == PackageType.WHEEL:
             command += ["--with-py311", ENABLE, "--with-pypi-cudnn", ENABLE]
-
         f = io.StringIO()
         with redirect_stdout(f):
             generate_binary_build_matrix.main(command)
-
         bin_bld_matrix[osys][package] = json.loads(f.getvalue())["include"]
 
 
