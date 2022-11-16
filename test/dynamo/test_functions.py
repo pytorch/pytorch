@@ -6,6 +6,7 @@ import inspect
 import itertools
 import operator
 from typing import Any
+from unittest.mock import patch
 
 import torch
 
@@ -327,6 +328,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_ndim(x):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
             return x + 1
+
+    @make_test
+    def test_T(x):
+        return torch.ones_like(x.T)
 
     @make_test
     def test_is_sparse(x):

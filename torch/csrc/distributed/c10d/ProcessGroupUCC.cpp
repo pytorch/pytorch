@@ -169,6 +169,11 @@ void read_config() {
   for (auto op : parse_blocking_wait(blocking_wait_str)) {
     torch_ucc_config.blocking_wait[(std::uint8_t)op] = true;
   }
+  // barrier is always blocking
+  torch_ucc_config.blocking_wait[(std::uint8_t)OpType::BARRIER] = true;
+
+  // barrier is always blocking
+  torch_ucc_config.blocking_wait[(std::uint8_t)OpType::BARRIER] = true;
 
   torch_ucc_config.use_future =
       std::stoi(torch_ucc_envs_map.at("TORCH_UCC_USE_FUTURE"));
@@ -758,9 +763,10 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::collective_post(
     std::vector<at::Tensor>& inputTensors,
     std::vector<at::Tensor>& outputTensors,
     const char* prof_title) {
+  seq_++;
   set_timeout(coll);
   auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCC>(
-      opType, prof_title, inputTensors, logger);
+      opType, seq_, prof_title, inputTensors, logger);
 
   if (opType == OpType::RECV) {
     work->sourceRank_ = coll.root;
@@ -1567,6 +1573,12 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::recv(
       tensors,
       tensors,
       "ucc:recv");
+}
+
+void ProcessGroupUCC::setSequenceNumberForGroup() {}
+
+uint64_t ProcessGroupUCC::getSequenceNumberForGroup() {
+  return seq_;
 }
 
 c10::intrusive_ptr<ProcessGroup> ProcessGroupUCC::createProcessGroupUCC(

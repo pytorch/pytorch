@@ -58,9 +58,6 @@ struct IrBuilder {
       const Value& input0,
       const std::vector<int64_t>& size,
       const bool& is_scalar_expand) const = 0;
-  virtual NodePtr MakeView(
-      const Value& input0,
-      const std::vector<int64_t>& output_size) const = 0;
   virtual NodePtr MakeCast(
       const Value& input0,
       const at::ScalarType& dtype,
@@ -72,59 +69,6 @@ struct IrBuilder {
       const Shape& shape,
       const size_t& num_outputs = 1,
       const hash_t& hash_seed = static_cast<uint32_t>(0x5a2d296e9)) const = 0;
-
-  // View op nodes
-  virtual NodePtr MakeAsStridedViewUpdate(
-      const Value& input0,
-      const Value& input1,
-      const std::vector<int64_t>& size,
-      const std::vector<int64_t>& stride,
-      const int64_t& storage_offset) const = 0;
-  virtual NodePtr MakeAsStrided(
-      const Value& input0,
-      const std::vector<int64_t>& size,
-      const std::vector<int64_t>& stride,
-      const int64_t& storage_offset) const = 0;
-  virtual NodePtr MakeDiagonalViewUpdate(
-      const Value& input0,
-      const Value& input1,
-      const int64_t& offset,
-      const int64_t& dim1,
-      const int64_t& dim2) const = 0;
-  virtual NodePtr MakeDiagonal(
-      const Value& input0,
-      const int64_t& offset,
-      const int64_t& dim1,
-      const int64_t& dim2) const = 0;
-  virtual NodePtr MakeNarrowViewUpdate(
-      const Value& input0,
-      const Value& input1,
-      const std::vector<int64_t>& base_indices) const = 0;
-  virtual NodePtr MakeNarrow(
-      const Value& input0,
-      const std::vector<int64_t>& base_indices,
-      const std::vector<int64_t>& sizes) const = 0;
-  virtual NodePtr MakePermute(
-      const Value& input0,
-      const std::vector<int64_t>& dims) const = 0;
-  virtual NodePtr MakeResize(
-      const Value& input0,
-      const std::vector<int64_t>& size) const = 0;
-  virtual NodePtr MakeSelectViewUpdate(
-      const Value& input0,
-      const Value& input1,
-      const int64_t& dim,
-      const int64_t& start,
-      const int64_t& end,
-      const int64_t& stride) const = 0;
-  virtual NodePtr MakeSelect(
-      const Value& input0,
-      const int64_t& dim,
-      const int64_t& start,
-      const int64_t& end,
-      const int64_t& stride) const = 0;
-  virtual NodePtr MakeSqueeze(const Value& input0, const int& dim) const = 0;
-  virtual NodePtr MakeUnsqueeze(const Value& input0, const int& dim) const = 0;
 
   // dynamic ir nodes
   virtual NodePtr MakeSizeNode(const Value& input, size_t dim) const = 0;
@@ -149,11 +93,6 @@ static inline NodePtr MakeExpand(
     const bool& is_scalar_expand) {
   return getIrBuilder()->MakeExpand(input0, size, is_scalar_expand);
 }
-static inline NodePtr MakeView(
-    const Value& input0,
-    const std::vector<int64_t>& output_size) {
-  return getIrBuilder()->MakeView(input0, output_size);
-}
 static inline NodePtr MakeCast(
     const Value& input0,
     const at::ScalarType& dtype,
@@ -173,86 +112,6 @@ static inline NodePtr MakeGeneric(
       op, operands, shape, num_outputs, hash_seed);
 }
 
-// View op nodes
-static inline NodePtr MakeAsStridedViewUpdate(
-    const Value& input0,
-    const Value& input1,
-    const std::vector<int64_t>& size,
-    const std::vector<int64_t>& stride,
-    const int64_t& storage_offset) {
-  return getIrBuilder()->MakeAsStridedViewUpdate(
-      input0, input1, size, stride, storage_offset);
-}
-static inline NodePtr MakeAsStrided(
-    const Value& input0,
-    const std::vector<int64_t>& size,
-    const std::vector<int64_t>& stride,
-    const int64_t& storage_offset) {
-  return getIrBuilder()->MakeAsStrided(input0, size, stride, storage_offset);
-}
-static inline NodePtr MakeDiagonalViewUpdate(
-    const Value& input0,
-    const Value& input1,
-    const int64_t& offset,
-    const int64_t& dim1,
-    const int64_t& dim2) {
-  return getIrBuilder()->MakeDiagonalViewUpdate(
-      input0, input1, offset, dim1, dim2);
-}
-static inline NodePtr MakeDiagonal(
-    const Value& input0,
-    const int64_t& offset,
-    const int64_t& dim1,
-    const int64_t& dim2) {
-  return getIrBuilder()->MakeDiagonal(input0, offset, dim1, dim2);
-}
-static inline NodePtr MakeNarrowViewUpdate(
-    const Value& input0,
-    const Value& input1,
-    const std::vector<int64_t>& base_indices) {
-  return getIrBuilder()->MakeNarrowViewUpdate(input0, input1, base_indices);
-}
-static inline NodePtr MakeNarrow(
-    const Value& input0,
-    const std::vector<int64_t>& base_indices,
-    const std::vector<int64_t>& sizes) {
-  return getIrBuilder()->MakeNarrow(input0, base_indices, sizes);
-}
-static inline NodePtr MakePermute(
-    const Value& input0,
-    const std::vector<int64_t>& dims) {
-  return getIrBuilder()->MakePermute(input0, dims);
-}
-static inline NodePtr MakeResize(
-    const Value& input0,
-    const std::vector<int64_t>& size) {
-  return getIrBuilder()->MakeResize(input0, size);
-}
-static inline NodePtr MakeSelectViewUpdate(
-    const Value& input0,
-    const Value& input1,
-    const int64_t& dim,
-    const int64_t& start,
-    const int64_t& end,
-    const int64_t& stride) {
-  return getIrBuilder()->MakeSelectViewUpdate(
-      input0, input1, dim, start, end, stride);
-}
-static inline NodePtr MakeSelect(
-    const Value& input0,
-    const int64_t& dim,
-    const int64_t& start,
-    const int64_t& end,
-    const int64_t& stride) {
-  return getIrBuilder()->MakeSelect(input0, dim, start, end, stride);
-}
-static inline NodePtr MakeSqueeze(const Value& input0, const int& dim) {
-  return getIrBuilder()->MakeSqueeze(input0, dim);
-}
-static inline NodePtr MakeUnsqueeze(const Value& input0, const int& dim) {
-  return getIrBuilder()->MakeUnsqueeze(input0, dim);
-}
-
 // dynamic ir nodes
 static inline NodePtr MakeSizeNode(const Value& input, size_t dim) {
   return getIrBuilder()->MakeSizeNode(input, dim);
@@ -269,10 +128,10 @@ static inline NodePtr MakeSizeDiv(const Value& a, const Value& b) {
 
 inline Value GetSymIntValue(c10::SymInt a) {
   return Value(
-      a.is_symbolic() ? dynamic_cast<torch::lazy::SymIntNodeImpl*>(
-                            a.toSymIntNodeImpl().get())
-                            ->node_
-                      : MakeScalar(a.as_int_unchecked(), at::kLong),
+      a.is_symbolic()
+          ? dynamic_cast<torch::lazy::SymNodeImpl*>(a.toSymNodeImpl().get())
+                ->node_
+          : MakeScalar(a.as_int_unchecked(), at::kLong),
       0);
 }
 

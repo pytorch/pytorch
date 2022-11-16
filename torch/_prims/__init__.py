@@ -31,6 +31,7 @@ from torch._prims_common import (
 )
 from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import sym_float
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
@@ -306,6 +307,7 @@ def _make_prim(
         p.schema = schema
         p.prim_impl = _prim_impl
         p.prim_meta_impl = meta
+        p.impl_aten = impl_aten
 
     return _prim
 
@@ -335,7 +337,7 @@ def _elementwise_meta(
 
     args_ = list(args)
     if args_with_fixed_dtypes is not None:
-        args_.extend(args_with_fixed_dtypes)
+        args_ = list(args_with_fixed_dtypes) + args_
 
     utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
     utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)
@@ -389,11 +391,18 @@ def _elementwise_meta(
         return TensorMeta(device=device, shape=shape, strides=strides, dtype=dtype)
 
     # Number case
-    # NOTE: this case is not currently exercised
     # TODO: fix number type promotion (bool, complex->float)
-    assert not isinstance(number, torch.SymIntNode), "NYI"
-    assert not isinstance(number, torch.SymFloatNode), "NYI"
-    return TensorMeta(number)
+
+    # For now for symint/float, just implementing the common / simple cases of (int,float,symint,symfloat)
+    seen_float = False
+    if isinstance(number, (torch.SymInt, torch.SymFloat)):
+        for a in args:
+            assert isinstance(a, (int, float, torch.SymInt, torch.SymFloat)), "NYI"
+            seen_float = seen_float or isinstance(a, (float, torch.SymFloat))
+        if seen_float:
+            number = sym_float(number)
+
+    return TensorMeta(number)  # type: ignore[arg-type]
 
 
 def _complex_only_elementwise_meta(*args, **kwargs):
@@ -931,7 +940,7 @@ bitwise_xor = _make_elementwise_binary_prim(
 # div prim performs truncation division on integer inputs
 #   and true division for floating and complex inputs
 def _div_aten(a, b):
-    is_integral = isinstance(a, (bool, int, torch.SymIntNode)) or (
+    is_integral = isinstance(a, (bool, int, torch.SymInt)) or (
         isinstance(a, torch.Tensor) and utils.is_integer_dtype(a.dtype)
     )
 
@@ -1157,7 +1166,9 @@ def _as_strided_meta(
         # as_strided to shapes with no elements are trivially valid, so it's OK
         pass
     elif isinstance(a, torch.Tensor):
-        utils.check_in_bounds_for_storage(a.storage(), size, stride, storage_offset)
+        utils.check_in_bounds_for_storage(
+            a._typed_storage(), size, stride, storage_offset
+        )
 
     return TensorMeta(a, shape=size, strides=stride)
 
@@ -1878,7 +1889,8 @@ reshape = _make_prim(
 
 def _rev_meta(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     utils.validate_dimension_indices(a.ndim, dims)
-    return TensorMeta(a)
+    out = torch.empty_like(a, memory_format=torch.preserve_format)
+    return TensorMeta(out)
 
 
 _rev_doc = """
