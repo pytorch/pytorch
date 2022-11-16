@@ -108,13 +108,13 @@ def has_proxy(obj):
 
 def set_meta(proxy, val):
     if isinstance(val, FakeTensor):
-        proxy.node.meta['val'] = val
+        proxy.node.meta['val'] = val.detach()
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     elif isinstance(val, py_sym_types):
         proxy.node.meta['val'] = val
     elif isinstance(val, list) or isinstance(val, tuple):
         if all(isinstance(x, FakeTensor) for x in val):
-            proxy.node.meta['val'] = val
+            proxy.node.meta['val'] = [x.detach() for x in val]
     elif isinstance(val, torch.Tensor):
         if not val.is_sparse:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
