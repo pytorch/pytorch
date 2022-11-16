@@ -55,7 +55,7 @@ XNNExecutor XNNCompiler::compileModel(std::string ser_model) {
         auto buffer_idx = tensor_value->constant_buffer_idx();
         if (buffer_idx != 0) {
           // TODO: @maxren implement data handling
-          TORCH_CHECK(false, "Cosntant data handling not yet implemented")
+          TORCH_CHECK(false, "Constant data handling not yet implemented")
         }
         std::vector<size_t> dims_data;
         for (auto dim : *tensor_value->dims()) {

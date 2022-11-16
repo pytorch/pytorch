@@ -858,7 +858,10 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     if (numel == 0) {
       return;
     }
-    if (dim == (result.dim() - 1) && alpha.equal(1.0) && index_contig.scalar_type() == ScalarType::Long) {
+    if (dim == (result.dim() - 1) && alpha.equal(1.0) &&
+        index_contig.scalar_type() == ScalarType::Long &&
+        // Heuristic value that scatter_add has higher performance.
+        result.numel() > at::internal::GRAIN_SIZE * 4) {
       // Check whether result and source are matched apart from the dimension dim.
       // Note that the broadcast case:
       // source.select(dim, i) is broadcast for result.select(dim, index_data[i])

@@ -5650,7 +5650,7 @@ class TestTorch(TestCase):
                     ref_out = tensor.index_add(-1, index, source, alpha=2) / 2
                     out = tensor.index_add(-1, index, source)
                     if device == 'cuda':
-                        self.assertEqual(out.float(), ref_out.float(), atol=1e-3, rtol=1e-3)
+                        self.assertEqual(out.float(), ref_out.float(), atol=1e-2, rtol=1e-2)
                     else:
                         self.assertEqual(out.float(), ref_out.float())
 
