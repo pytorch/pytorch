@@ -533,7 +533,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   Tensor mean;
   TORCH_INTERNAL_ASSERT(save_mean->defined(), "save_mean should always be defined\n");
   if (save_mean->numel() != 0) {
-    mean = *save_mean;
+    mean = (save_mean->scalar_type() == acc_type) ?
+        *save_mean : save_mean->to(acc_type);
   } else if (needs_reduction) {
     TORCH_CHECK(!train && running_mean->defined());
     mean = (running_mean->scalar_type() == acc_type) ?
@@ -543,7 +544,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
   Tensor invstd;
   TORCH_INTERNAL_ASSERT(save_invstd->defined(), "save_invstd should always be defined\n");
   if (save_invstd->numel() != 0) {
-    invstd = *save_invstd;
+    invstd = (save_invstd->scalar_type() == acc_type) ?
+        *save_invstd : save_invstd->to(acc_type);
   } else {
     TORCH_CHECK(!train && running_var->defined());
     auto n_channels = input.sizes()[1];
