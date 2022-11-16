@@ -195,7 +195,8 @@ class _TorchDynamoContext:
                         """
 
                         torch._dynamo.optimize is called on a non function object.
-                        If this is a callable class, please optimize the individual methods that you are interested in optimizing.
+                        If this is a callable class, please wrap the relevant code into a function and optimize the
+                        wrapper function.
 
                         >> class CallableClass:
                         >>     def __init__(self):
@@ -210,10 +211,15 @@ class _TorchDynamoContext:
                         >>
                         >> mod = CallableClass()
 
-                        If you want to optimize the __call__ function
+                        If you want to optimize the __call__ function and other code, wrap that up in a function
 
-                        >> mod.__call__ = torch._dynamo.optimize(mod.__call__)
+                        >> def wrapper_fn(x):
+                        >>     y = mod(x)
+                        >>     return y.sum()
 
+                        and then optimize the wrapper_fn
+
+                        >> opt_wrapper_fn = torch._dynamo.optimize(wrapper_fn)
                         """
                     )
                 )
