@@ -10,6 +10,7 @@ from typing import Dict, List
 import numpy as np
 
 import torch
+from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
@@ -26,7 +27,7 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .dicts import ConstDictVariable
-from .tensor import DynamicShapeVariable, FakeItemVariable
+from .tensor import DynamicShapeVariable, FakeItemVariable, UnspecializedPythonVariable
 
 log = logging.getLogger(__name__)
 
@@ -226,6 +227,7 @@ class BuiltinVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         constant_args = check_constant_args(args, kwargs)
         tensor_args = self.tensor_args(*args, **kwargs)
@@ -234,7 +236,7 @@ class BuiltinVariable(VariableTracker):
         has_constant_handler = self.can_constant_fold_through() and (
             constant_args or unspec_python_args
         )
-        assert isinstance(args, list)
+        assert isinstance(args, (list, tuple))
         assert isinstance(kwargs, dict)
 
         if (
@@ -274,7 +276,8 @@ class BuiltinVariable(VariableTracker):
                     "call_function", fn, *proxy_args_kwargs(args, kwargs), current_tx=tx
                 )
                 if any([isinstance(arg, FakeItemVariable) for arg in args]):
-                    return variables.FakeItemVariable.create(
+                    return wrap_fx_proxy_cls(
+                        FakeItemVariable,
                         tx,
                         proxy,
                         **options,
@@ -282,7 +285,8 @@ class BuiltinVariable(VariableTracker):
                 elif self.unspec_numpy_args(*args, **kwargs):
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
                     raw_value = self.fn(*_args, **_kwargs)
-                    return variables.UnspecializedNumpyVariable.create(
+                    return wrap_fx_proxy_cls(
+                        variables.UnspecializedNumpyVariable,
                         tx,
                         proxy,
                         raw_value=raw_value,
@@ -298,7 +302,8 @@ class BuiltinVariable(VariableTracker):
                         if isinstance(x, variables.UnspecializedPythonVariable)
                     )
 
-                    return variables.UnspecializedPythonVariable.create(
+                    return wrap_fx_proxy_cls(
+                        UnspecializedPythonVariable,
                         tx,
                         proxy,
                         raw_value=raw_value,
@@ -312,14 +317,27 @@ class BuiltinVariable(VariableTracker):
                         args[0], variables.UnspecializedPythonVariable
                     ):
                         args[0] = args[0].convert_to_constant(tx)
-                    return variables.TensorVariable.create(tx, proxy, **options)
+                    return wrap_fx_proxy(tx, proxy, **options)
 
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
 
         # Handle cases like int(torch.seed())
-        if self.fn is int and isinstance(args[0], DynamicShapeVariable):
-            return args[0]
+        # Also handle sym_float to sym_int cases
+        if self.fn in (int, float) and isinstance(args[0], DynamicShapeVariable):
+            fn_ = sym_int if self.fn is int else sym_float
+            out = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    fn_,
+                    (args[0].as_proxy(),),
+                    {},
+                    current_tx=tx,
+                ),
+                **options,
+            )
+            return out
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
         if handler:
@@ -353,7 +371,6 @@ class BuiltinVariable(VariableTracker):
                 ),
                 **options,
             )
-
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, a, b):
@@ -368,7 +385,9 @@ class BuiltinVariable(VariableTracker):
 
             # Dynamic input does not get resolved, rather, gets stored as call_function
             if isinstance(a, DynamicShapeVariable):
-                return variables.TensorVariable.create(
+                from .builder import wrap_fx_proxy
+
+                return wrap_fx_proxy(
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_function",
@@ -437,7 +456,13 @@ class BuiltinVariable(VariableTracker):
                 return variables.ConstantVariable(max(a.value, b.value))
             else:
                 return variables.ConstantVariable(min(a.value, b.value))
+        elif isinstance(a, DynamicShapeVariable) or isinstance(b, DynamicShapeVariable):
+            proxy = tx.output.create_proxy(
+                "call_function", self.fn, *proxy_args_kwargs([a, b], {})
+            )
+            return DynamicShapeVariable.create(tx, proxy, None)
         else:
+
             unimplemented(f"unsupported min / max over args {str(a)}, {str(b)}")
 
     call_min = _call_min_max
@@ -454,11 +479,48 @@ class BuiltinVariable(VariableTracker):
                     **{k: v.value for k, v in kwargs.items()},
                 ),
             )
+        elif self._dynamic_args(*args, **kwargs):
+            assert len(kwargs) == 0
+
+            def guard_if_dyn(arg):
+                if isinstance(arg, DynamicShapeVariable):
+                    return arg.evaluate_expr(tx.output)
+                return arg
+
+            args = [guard_if_dyn(arg) for arg in args]
+            value = self.fn(*args)
+            return variables.RangeVariable(value=value)
+        # None no-ops this handler and lets the driving function proceed
+        return None
+
+    def _dynamic_args(self, *args, **kwargs):
+        return any([isinstance(x, DynamicShapeVariable) for x in args]) or any(
+            [isinstance(x, DynamicShapeVariable) for x in kwargs.values()]
+        )
 
     def call_slice(self, tx, *args):
         return variables.SliceVariable(args)
 
-    def _call_iter_tuple_list(self, tx, obj=None):
+    def _dyn_proxy(self, tx, *args, **kwargs):
+        assert self._dynamic_args(*args, **kwargs)
+        from .builder import wrap_fx_proxy
+
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function", self.fn, *proxy_args_kwargs(args, kwargs)
+            ),
+            **options,
+        )
+
+    def call_mod(self, tx, *args, **kwargs):
+        if self._dynamic_args(*args, **kwargs):
+            return self._dyn_proxy(tx, *args, **kwargs)
+
+    def _call_iter_tuple_list(self, tx, obj=None, *args, **kwargs):
+        if self._dynamic_args(*args, **kwargs):
+            return self._dyn_proxy(tx, *args, **kwargs)
         cls = variables.BaseListVariable.cls_for(self.fn)
         if obj is None:
             return cls(
@@ -551,6 +613,7 @@ class BuiltinVariable(VariableTracker):
 
     def call_isinstance(self, tx, arg, isinstance_type):
         arg_type = arg.python_type()
+
         isinstance_type = isinstance_type.as_python_constant()
 
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
