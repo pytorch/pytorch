@@ -1451,6 +1451,7 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
     # See [Real vs Fake Parms] below
     def fakify_params_and_buffers(flat_args):
         if config.use_fake_tensor:
+            assert fake_mode, "Fake Mode must be passed in"
             def convert(x):
                 if not isinstance(x, torch.Tensor):
                     return x

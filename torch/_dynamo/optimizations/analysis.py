@@ -125,7 +125,7 @@ def has_mutation(gm, example_inputs, fake_mode, inputs_only=False):
     if fake_tensors_available and config.fake_tensor_propagation:
         assert fake_mode, "Fake mode must be passed in"
         new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
-        with enable_python_dispatcher():
+        with fake_mode, enable_python_dispatcher():
             ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     else:
         # Clone the inputs such that intermediate tensors (not leaf tensors) with
