@@ -1654,7 +1654,7 @@ def _export_file(
             for k, v in export_map.items():
                 z.writestr(k, v)
     elif export_type == _exporter_states.ExportTypes.DIRECTORY:
-        if isinstance(io.BytesIO, type(f)) or not os.path.isdir(f):  # type: ignore[arg-type]
+        if isinstance(f, io.BytesIO) or not os.path.isdir(f):  # type: ignore[arg-type]
             raise ValueError(
                 f"f should be directory when export_type is set to DIRECTORY, instead get type(f): {type(f)}"
             )
@@ -1730,9 +1730,12 @@ def _find_onnxscript_op(
                 )
         # Only custom Op with ONNX function and aten with symbolic_fn should be found in registry
         onnx_function_group = registration.registry.get_function_group(node_kind)
+        # Ruled out corner cases: onnx/prim in registry
         if (
             node.domain
             and not jit_utils.is_aten(node.domain)
+            and not jit_utils.is_prim(node.domain)
+            and not jit_utils.is_onnx(node.domain)
             and onnx_function_group is not None
             and node_kind not in included_node_func
         ):
