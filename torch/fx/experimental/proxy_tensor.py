@@ -125,6 +125,8 @@ def set_meta(proxy, val):
                 proxy.node.meta['val'] = fake_tensor_mode.from_tensor(val)
             except UnsupportedFakeTensorException:
                 pass
+            except NotImplementedError:  # FIXME: Happens with efficientzerotensor
+                pass
     return proxy
 
 def thunkify(f, *args, **kwargs):
