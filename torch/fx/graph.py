@@ -499,11 +499,11 @@ class CodeGen(object):
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
 
                 if isinstance(meta_val, FakeTensor):
-                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
+                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}, {stringify_shape(meta_val.stride())}'
                 elif isinstance(meta_val, py_sym_types):
                     maybe_type_annotation = f': Sym({meta_val})'
                 elif isinstance(meta_val, TensorMetadata):
-                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
+                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}, {stringify_shape(meta_val.stride)}'
 
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
