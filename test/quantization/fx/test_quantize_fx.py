@@ -55,7 +55,6 @@ from torch.ao.quantization import (
     get_default_qat_qconfig,
     get_default_qconfig_mapping,
     get_default_qat_qconfig_mapping,
-    is_activation_post_process,
     fuse_modules,
     fuse_modules_qat,
     prepare,
@@ -148,6 +147,7 @@ from torch.ao.quantization.observer import (
     default_fixed_qparams_range_0to1_observer,
     default_fixed_qparams_range_neg1to1_observer,
     MinMaxObserver,
+    _is_activation_post_process,
 )
 
 # test utils
@@ -3249,7 +3249,7 @@ class TestQuantizeFx(QuantizationTestCase):
                     _check_node_not_observed(model, new_node, node)
             elif arg_node.op == "call_module":
                 self.assertTrue(
-                    not is_activation_post_process(getattr(model, arg_node.target)),
+                    not _is_activation_post_process(getattr(model, arg_node.target)),
                     "Arg: {0} of node: {1} is observed but is not a float tensor".format(
                         arg_node, node
                     ),
@@ -4933,7 +4933,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 qconfig_dict = func(backend)
                 m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 1, 1, 1)))
                 for name, mod in m.named_modules():
-                    if is_activation_post_process(mod) and mod.dtype == torch.quint8:
+                    if _is_activation_post_process(mod) and mod.dtype == torch.quint8:
                         if backend == "fbgemm":
                             lower_bnd = 0
                             upper_bnd = 127
@@ -6792,9 +6792,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
             M(), data, quant_type, custom_qconfig_dict=qconfig_mapping,
             expected_node_occurrence=node_occurrence, is_reference=True)
 
-    def test_fixed_qparams_ops_qconfig_error(self):
-        """ Test that a proper error message is shown when user don't specify the correct
-        qconfig for fixed qaprams ops
+    def test_fixed_qparams_ops_wrong_qconfig(self):
+        """ Test that wrong qconfigs for fixed qparams ops results in the ops not being quantized.
         """
         class M(torch.nn.Module):
             def __init__(self):
@@ -6814,8 +6813,15 @@ class TestQuantizeFxOps(QuantizationTestCase):
         data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
         qconfig_mapping = QConfigMapping().set_global(default_qconfig)
         m = M().eval()
-        with self.assertRaisesRegex(ValueError, "get_default_qconfig_mapping"):
-            m = prepare_fx(m, qconfig_mapping, data)
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 0,
+            ns.call_method("dequantize"): 0,
+        }
+        self.checkGraphModeFxOp(
+            m, data, QuantType.STATIC, custom_qconfig_dict=qconfig_mapping,
+            expected_node_occurrence=node_occurrence, is_reference=True)
+        self.assertTrue(isinstance(m.sigmoid, torch.nn.Sigmoid))
+        self.assertTrue(isinstance(m.tanh, torch.nn.Tanh))
 
     @skipIfNoFBGEMM
     def test_general_shape_ops(self):

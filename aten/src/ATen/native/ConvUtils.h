@@ -110,8 +110,8 @@ enum class ConvBackend {
 // This overload is exposed to python for testing, etc.
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
-    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
-    bool transposed, IntArrayRef output_padding, int64_t groups, const at::OptionalIntArrayRef bias_sizes_opt);
+    IntArrayRef stride, SymIntArrayRef padding, IntArrayRef dilation,
+    bool transposed, SymIntArrayRef output_padding, int64_t groups, const at::OptionalSymIntArrayRef bias_sizes_opt);
 
 TORCH_API at::MemoryFormat _determine_backend_memory_format(const Tensor& input,
     const Tensor& weight,
@@ -200,15 +200,16 @@ static void convolution_shape_check(
 // as conv_output_size loses information; this is why conv_input_size
 // takes an extra output_padding argument to resolve the ambiguity.
 
-static inline std::vector<int64_t> conv_output_size(
-    IntArrayRef input_size, IntArrayRef weight_size,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
+template <typename T>
+static inline std::vector<T> _conv_output_size(
+    ArrayRef<T> input_size, ArrayRef<T> weight_size,
+    ArrayRef<T> padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
 ) {
   // ASSERT(input_size.size() > 2)
   // ASSERT(input_size.size() == weight_size.size())
   bool has_dilation = dilation.size() > 0;
   auto dim = input_size.size();
-  std::vector<int64_t> output_size(dim);
+  std::vector<T> output_size(dim);
   output_size[0] = input_size[input_batch_size_dim];
   output_size[1] = weight_size[weight_output_channels_dim];
   for (const auto d : c10::irange(2, dim)) {
@@ -219,38 +220,82 @@ static inline std::vector<int64_t> conv_output_size(
   return output_size;
 }
 
-static inline std::vector<int64_t> conv_input_size(
-    IntArrayRef output_size, IntArrayRef weight_size,
-    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
+static inline std::vector<int64_t> conv_output_size(
+    IntArrayRef input_size, IntArrayRef weight_size,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
+) {
+  return _conv_output_size(input_size, weight_size, padding, stride, dilation);
+}
+
+static inline std::vector<c10::SymInt> conv_output_size(
+    SymIntArrayRef input_size, SymIntArrayRef weight_size,
+    SymIntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
+) {
+  return _conv_output_size(input_size, weight_size, padding, stride, dilation);
+}
+
+template <typename T>
+std::vector<T> _conv_input_size(
+    ArrayRef<T> output_size, ArrayRef<T> weight_size,
+    ArrayRef<T> padding, ArrayRef<T> output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
   // ASSERT(output_size.size() > 2)
   // ASSERT(output_size.size() == weight_size.size())
   auto dim = output_size.size();
-  std::vector<int64_t> input_size(dim);
+  std::vector<T> input_size(dim);
   input_size[0] = output_size[output_batch_size_dim];
   input_size[1] = weight_size[weight_input_channels_dim] * groups;
   for (const auto d : c10::irange(2, dim)) {
-    int kernel = dilation[d - 2] * (weight_size[d] - 1) + 1;
-    input_size[d] = (output_size[d] - 1) * stride[d - 2] - (2 * padding[d - 2]) +
+    auto kernel = (weight_size[d] - 1) * dilation[d - 2] + 1;
+    input_size[d] = (output_size[d] - 1) * stride[d - 2] - (padding[d - 2] * 2) +
                      kernel + output_padding[d - 2];
   }
   return input_size;
+}
+
+static inline std::vector<c10::SymInt> conv_input_size(
+    SymIntArrayRef output_size, SymIntArrayRef weight_size,
+    SymIntArrayRef padding, SymIntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
+) {
+  return _conv_input_size(output_size, weight_size, padding, output_padding, stride, dilation, groups);
+}
+
+static inline std::vector<int64_t> conv_input_size(
+    IntArrayRef output_size, IntArrayRef weight_size,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
+) {
+  return _conv_input_size(output_size, weight_size, padding, output_padding, stride, dilation, groups);
+}
+
+template <typename T>
+std::vector<T> _conv_weight_size(
+    ArrayRef<T> input_size, ArrayRef<T> output_size,
+    ArrayRef<T> padding, ArrayRef<T> output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
+) {
+  auto dim = input_size.size();
+  std::vector<T> weight_size(dim);
+  weight_size[0] = output_size[1];
+  weight_size[1] = input_size[1] / groups;
+  for (const auto d : c10::irange(2, dim)) {
+    auto kernel = input_size[d] - (output_size[d] - 1) * stride[d - 2]
+               + padding[d - 2] * 2 - output_padding[d - 2];
+    weight_size[d] = (kernel - 1) / dilation[d - 2] + 1;
+  }
+  return weight_size;
+}
+
+static inline std::vector<c10::SymInt> conv_weight_size(
+    SymIntArrayRef input_size, SymIntArrayRef output_size,
+    SymIntArrayRef padding, SymIntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
+) {
+  return _conv_weight_size(input_size, output_size, padding, output_padding, stride, dilation, groups);
 }
 
 static inline std::vector<int64_t> conv_weight_size(
     IntArrayRef input_size, IntArrayRef output_size,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
-  auto dim = input_size.size();
-  std::vector<int64_t> weight_size(dim);
-  weight_size[0] = output_size[1];
-  weight_size[1] = input_size[1] / groups;
-  for (const auto d : c10::irange(2, dim)) {
-    int kernel = input_size[d] - (output_size[d] - 1) * stride[d - 2]
-               + 2 * padding[d - 2] - output_padding[d - 2];
-    weight_size[d] = (kernel - 1) / dilation[d - 2] + 1;
-  }
-  return weight_size;
+  return _conv_weight_size(input_size, output_size, padding, output_padding, stride, dilation, groups);
 }
 
 static inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
