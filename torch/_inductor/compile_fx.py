@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 import sys
+from contextlib import nullcontext
 from typing import List
 
 import functorch
@@ -334,10 +335,14 @@ def count_tangents(fx_g: torch.fx.GraphModule):
 _graph_counter = itertools.count(0)
 
 
-def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
+def compile_fx(
+    model_: torch.fx.GraphModule,
+    example_inputs_: List[torch.Tensor],
+    fake_mode=nullcontext,
+):
     """Main entrypoint to a compile given FX graph"""
 
-    if not is_aot_autograd_safe_to_run(model_, example_inputs_):
+    if not is_aot_autograd_safe_to_run(model_, example_inputs_, fake_mode):
         log.warning("Aot Autograd is not safe to run, so falling back to eager")
         return model_
 
@@ -390,4 +395,5 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
+            fake_mode=fake_mode,
         )

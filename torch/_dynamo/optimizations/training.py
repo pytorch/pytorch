@@ -22,7 +22,7 @@ from .normalize import normalize_ir
 log = logging.getLogger(__name__)
 
 
-def is_aot_autograd_safe_to_run(gm, example_inputs):
+def is_aot_autograd_safe_to_run(gm, example_inputs, fake_mode):
     """
     There are some known issues with Aot Autograd. This is a workaround to catch
     such cases, and fallback to eager. We should fix these quickly.
@@ -61,9 +61,9 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
                 #   to avoid AotAutograd on the mutated inputs, or if we some how
                 #   get custom autograd function to reflect metadata changes to the
                 #   original tensor)
-                mutated = has_mutation(gm, example_inputs, inputs_only=True)
+                mutated = has_mutation(gm, example_inputs, fake_mode, inputs_only=True)
             else:
-                mutated = has_mutation(gm, example_inputs)
+                mutated = has_mutation(gm, example_inputs, fake_mode)
         else:
             log.info(
                 "inference_mode enabled. TorchDynamo could not check for mutation."
@@ -114,7 +114,7 @@ class AotAutogradStrategy(object):
                 self.use_fallback = True
                 pass
 
-        if not is_aot_autograd_safe_to_run(gm, example_inputs):
+        if not is_aot_autograd_safe_to_run(gm, example_inputs, fake_mode):
             self.use_fallback = True
 
     @property

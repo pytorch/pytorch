@@ -9,8 +9,6 @@ from dataclasses import dataclass
 from inspect import signature
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from functorch._src import aot_autograd
-
 import torch.nn
 from torch import fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -350,6 +348,7 @@ class OutputGraph(fx.Tracer):
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
+            and False
         ):
 
             # optimization to generate better code in a common case
