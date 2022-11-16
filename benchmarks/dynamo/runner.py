@@ -133,6 +133,7 @@ def flag_compilation_latency(x):
 def flag_compression_ratio(x):
     return x < 0.9
 
+
 def flag_accuracy(x):
     return "pass" not in x
 
@@ -225,7 +226,7 @@ def parse_args():
         "--update-dashboard-test",
         action="store_true",
         default=False,
-        help="Do not udpate lookup file or upload images/comments when --update-dashboard is specified"
+        help="Do not udpate lookup file or upload images/comments when --update-dashboard is specified",
     )
     parser.add_argument(
         "--dashboard-image-uploader",
@@ -840,9 +841,9 @@ def find_last_2_with_filenames(lookup_file, dashboard_archive_path, dtype, filen
     last2 = []
     for path in df["path"]:
         output_dir = os.path.join(dashboard_archive_path, path)
-        fullpaths = [os.path.join(
-            dashboard_archive_path, path, name
-        ) for name in filenames]
+        fullpaths = [
+            os.path.join(dashboard_archive_path, path, name) for name in filenames
+        ]
         if all([os.path.exists(fullpath) for fullpath in fullpaths]):
             last2.append(output_dir)
         if len(last2) >= 2:
@@ -886,19 +887,27 @@ class SummaryStatDiffer:
         )
         dtype = self.args.dtypes[0]
         last2 = find_last_2_with_filenames(
-            self.lookup_file, self.args.dashboard_archive_path, dtype, ["geomean.csv", "passrate.csv"]
+            self.lookup_file,
+            self.args.dashboard_archive_path,
+            dtype,
+            ["geomean.csv", "passrate.csv"],
         )
 
         if last2 is None:
             body += "Could not find most 2 recent reports.\n\n"
         else:
+            for state, path in zip(("Current", "Previous"), last2):
+                body += f"{state} report name: {path}\n\n"
             body += self.generate_diff(last2, "passrate.csv", "Passrate diff")
-            body += self.generate_diff(last2, "geomean.csv", "Geometric mean speedup diff")
-        
+            body += self.generate_diff(
+                last2, "geomean.csv", "Geometric mean speedup diff"
+            )
+
         comment = generate_dropdown_comment(title, body)
 
         with open(f"{self.args.output_dir}/gh_summary_diff.txt", "w") as gh_fh:
             gh_fh.write(comment)
+
 
 class RegressionDetector:
     """
@@ -910,22 +919,6 @@ class RegressionDetector:
         self.args = args
         self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
         assert os.path.exists(self.lookup_file)
-
-    def find_last_2(self, suite, device, dtype, compiler, filenames):
-        last2 = find_last_2_with_filenames(
-            self.lookup_file, self.args.dashboard_archive_path, dtype, filenames
-        )
-        if last2 is not None:
-            return [ParsePerformanceLogs(
-                [suite],
-                [device],
-                [dtype],
-                [compiler],
-                [compiler],
-                get_mode(self.args),
-                output_dir,
-            ) for output_dir in last2]
-        return None
 
     def generate_comment(self):
         title = "## Recent Regressions ##\n"
@@ -939,15 +932,37 @@ class RegressionDetector:
         device = self.args.devices[0]
         for suite in self.args.suites:
             body += f"### Regressions for {suite} ###\n"
-            last2 = {compiler: self.find_last_2(
-                suite,
-                device,
-                dtype,
-                compiler,
-                [generate_csv_name(
-                    self.args, dtype, suite, device, compiler, testing
-                ) for testing in ["performance", "accuracy"]],
-            ) for compiler in self.args.flag_compilers}
+            last2 = {}
+
+            for compiler in self.args.flag_compilers:
+                filenames = [
+                    generate_csv_name(
+                        self.args, dtype, suite, device, compiler, testing
+                    )
+                    for testing in ["performance", "accuracy"]
+                ]
+                compiler_last2 = find_last_2_with_filenames(
+                    self.lookup_file, self.args.dashboard_archive_path, dtype, filenames
+                )
+                if compiler_last2 is not None:
+                    last2[compiler] = [
+                        ParsePerformanceLogs(
+                            [suite],
+                            [device],
+                            [dtype],
+                            [compiler],
+                            [compiler],
+                            get_mode(self.args),
+                            output_dir,
+                        )
+                        for output_dir in compiler_last2
+                    ]
+                    for state, path in zip(("Current", "Previous"), compiler_last2):
+                        body += (
+                            f"{state} report name (compiler: {compiler}, "
+                            f"suite: {suite}): {path}\n\n"
+                        )
+
             for metric in [
                 "accuracy",
                 "speedup",
@@ -961,13 +976,20 @@ class RegressionDetector:
                         continue
 
                     df_cur, df_prev = [
-                        last2[compiler][i].untouched_parsed_frames[suite][metric] for i in (0, 1)
+                        last2[compiler][i].untouched_parsed_frames[suite][metric]
+                        for i in (0, 1)
                     ]
-                    df_merge = df_cur.merge(df_prev, on="name", suffixes=("_cur", "_prev"))
+                    df_merge = df_cur.merge(
+                        df_prev, on="name", suffixes=("_cur", "_prev")
+                    )
                     flag_fn = FLAG_FNS[metric]
                     flag = np.logical_and(
-                        df_merge[compiler + "_prev"].apply(lambda x : not pd.isna(x) and not flag_fn(x)),
-                        df_merge[compiler + "_cur"].apply(lambda x : not pd.isna(x) and flag_fn(x))
+                        df_merge[compiler + "_prev"].apply(
+                            lambda x: not pd.isna(x) and not flag_fn(x)
+                        ),
+                        df_merge[compiler + "_cur"].apply(
+                            lambda x: not pd.isna(x) and flag_fn(x)
+                        ),
                     )
                     df_bad = df_merge[flag]
                     dfs.append(
@@ -987,7 +1009,9 @@ class RegressionDetector:
                 if df.empty:
                     continue
                 regressions_present = True
-                tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
+                tabform = tabulate(
+                    df, headers="keys", tablefmt="pretty", showindex="never"
+                )
                 str_io = io.StringIO()
                 str_io.write("\n")
                 str_io.write(f"{get_metric_title(metric)} regressions\n")
@@ -1150,7 +1174,9 @@ class DashboardUpdater:
             for name in glob.glob(self.output_dir + "/*png"):
                 if "over_time" not in name:
                     output = (
-                        subprocess.check_output([self.args.dashboard_image_uploader, name])
+                        subprocess.check_output(
+                            [self.args.dashboard_image_uploader, name]
+                        )
                         .decode("ascii")
                         .rstrip()
                     )
