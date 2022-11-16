@@ -136,6 +136,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def python_type(self):
         return self.value_type
 
+    def as_python_constant(self):
+        return self.value
+
     @staticmethod
     @functools.lru_cache(None)
     def _supported_random_functions():
