@@ -94,6 +94,12 @@ class saved_tensors_hooks():
         torch._C._autograd._pop_saved_tensors_default_hooks()
 
 
+class _Handle2():
+    max_level_ = -1
+
+    def __init__(self, max_level):
+        self.max_level_ = max_level
+
 class save_on_cpu(saved_tensors_hooks):
     """Context-manager under which tensors saved by the forward pass will be
     stored on cpu, then retrieved for backward.
@@ -140,8 +146,16 @@ class save_on_cpu(saved_tensors_hooks):
         tid_to_weakhandle: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
         def pack_to_cpu(tensor):
-            unwrapped, rewrap_fn = torch.unwrap(tensor)
-            tid = _get_tid(unwrapped)
+            # Invariant? One layer of wrapping per level
+
+            # Save level - 1 because we plan to unwrap
+            level = torch._C._functorch.maybe_get_level(tensor) - 1
+            # Always unwrap one layer, because the outer layer contains first-order
+            # graph information that we don't need anymore.
+            # TODO: Actually get saved tensor hooks to detach, but maybe this is OK for now
+            unwrapped = torch._C._functorch._unwrap_for_grad(tensor, level)
+            fully_unwrapped, _unused_rewrap_fn = torch.unwrap(tensor)
+            tid = _get_tid(fully_unwrapped)
             device = unwrapped.device
 
             if tid not in tid_to_weakhandle:
@@ -155,19 +169,31 @@ class save_on_cpu(saved_tensors_hooks):
                         pin_memory=(torch.cuda.is_available() and not unwrapped.is_sparse))
                     unwrapped_copy.copy_(unwrapped)
 
-                handle = _Handle()
+                # Better naming for Handle? it also stores max wrapping level information
+                handle = _Handle2(level)
                 unwrapped_copies[handle] = unwrapped_copy
                 tid_to_weakhandle[tid] = handle
             else:
                 # Store an additional strong reference to the handle
                 handle = tid_to_weakhandle[tid]
-            return (device, handle, rewrap_fn)
+            return (device, handle, level)
 
         def unpack_from_cpu(packed):
-            device, handle, rewrap_fn = packed
+            device, handle, level = packed
+            max_level = handle.max_level_
+            # FIXME: naming is very bad, unwrapped means outer TensorWrapper layer unwrapped
             unwrapped = unwrapped_copies[handle]
-            # FIXME: calling .to automatically wraps this tensor for some reason
-            ret = rewrap_fn(torch.unwrap(unwrapped.to(device, non_blocking=pin_memory))[0])
+            for i in range(max_level, level, -1):
+                print("start:", i)
+                # Only support grad transform for now
+                actual_level = torch._C._functorch.maybe_get_level(unwrapped)
+                print("actual_level:", actual_level)
+                unwrapped = torch._C._functorch._unwrap_for_grad(unwrapped, level)
+                print("done:", i)
+
+            # Hopefully if we unwrapped properly, we are OK here
+            ret = unwrapped.to(device, non_blocking=pin_memory)
+
             return ret
 
         super().__init__(pack_to_cpu, unpack_from_cpu)
