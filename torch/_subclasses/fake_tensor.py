@@ -828,7 +828,7 @@ class FakeTensorMode(TorchDispatchMode):
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table as meta_table
 
-        if func not in meta_table:
+        if func not in meta_table and not self.cpp_meta_supports_symint(func):
             from torch._decomp import decomposition_table
 
             # Prefer Python decompositions over C++ ones
