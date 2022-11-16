@@ -745,10 +745,10 @@ def run_test_ops(test_module, test_directory, options):
     if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status
-        rerun_option = '--count=50'
+        rerun_option = "--count=50"
     else:
         # When under the normal mode, retry a failed test 2 more times
-        rerun_option = '--reruns=2'
+        rerun_option = "--reruns=2"
 
     if 'slow-gradcheck' in os.getenv("BUILD_ENVIRONMENT", ""):
         # there are a lot of tests that take up a lot of space in slowgrad check, so don't bother parallelizing
