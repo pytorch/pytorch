@@ -5,8 +5,6 @@ from contextlib import contextmanager, nullcontext
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from torch.fx.experimental.proxy_tensor import is_sym_node
-import copy
-import math
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -24,7 +22,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
-import sympy
 
 try:
     from torchdynamo import disable as disable_torchdynamo
@@ -802,9 +799,11 @@ def aot_function(
 
             shape_env = ShapeEnv() if config.use_dynamic_shapes else None
             fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
+
             # create_aot_dispatcher_function assumes fake inputs
             # aot_function is the "public" entrypoint, so we need to process here
             # For internal entrypoint with already populated fake tensors, see aot_function_simplified
+            
             def process_inputs(flat_args):
                 if config.use_fake_tensor:
                     def convert(idx, x):
