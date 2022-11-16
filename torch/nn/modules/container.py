@@ -314,10 +314,10 @@ class ModuleList(Module, Sequence[T]):
     def __iter__(self) -> Iterator[T]:
         return iter(self._modules.values())
 
-    def __iadd__(self, modules: Iterable[T]) -> 'ModuleList':
+    def __iadd__(self, modules: Iterable[T]) -> 'ModuleList'[T]:
         return self.extend(modules)
 
-    def __add__(self, other: Iterable[T]) -> 'ModuleList':
+    def __add__(self, other: Iterable[T]) -> 'ModuleList'[T]:
         combined = ModuleList()
         for i, module in enumerate(chain(self, other)):
             combined.add_module(str(i), module)
@@ -340,7 +340,7 @@ class ModuleList(Module, Sequence[T]):
             self._modules[str(i)] = self._modules[str(i - 1)]
         self._modules[str(index)] = module
 
-    def append(self, module: T) -> 'ModuleList':
+    def append(self, module: T) -> 'ModuleList'[T]:
         r"""Appends a given module to the end of the list.
 
         Args:
@@ -349,12 +349,20 @@ class ModuleList(Module, Sequence[T]):
         self.add_module(str(len(self)), module)
         return self
 
-    def pop(self, key: Union[int, slice]) -> T:
+    @overload
+    def pop(self, key: int) -> T:
+        ...
+
+    @overload
+    def pop(self, key: slice) -> 'ModuleList[T]':
+        ...
+
+    def pop(self, key: Union[int, slice]) -> Union[T, 'ModuleList'[T]]:
         v = self[key]
         del self[key]
         return v
 
-    def extend(self, modules: Iterable[T]) -> 'ModuleList':
+    def extend(self, modules: Iterable[T]) -> 'ModuleList'[T]:
         r"""Appends modules from a Python iterable to the end of the list.
 
         Args:
