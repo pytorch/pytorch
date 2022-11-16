@@ -202,7 +202,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
     def _create_process_group_ucc(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupUCC(store, self.rank, self.world_size)
-        dist.barrier(group=pg)
+        # dist.barrier(group=pg)
         return pg
 
     def setUp(self):
