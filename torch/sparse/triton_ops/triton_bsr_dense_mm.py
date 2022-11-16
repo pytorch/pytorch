@@ -570,7 +570,6 @@ if __name__ == "__main__":
     torch.manual_seed(13)
     dtype = torch.float32
     p = 0.5
-    batch_size_bsr = (10,)
     mask_size = (8, 8)
     block_size = (64, 64)
     size = (mask_size[0] * block_size[0], mask_size[1] * block_size[1])
