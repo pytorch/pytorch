@@ -40,8 +40,9 @@ class XNNPackBackend : public PyTorchBackendInterface {
     auto dict = processed.toGenericDict();
 
     // Compiling and wrapping exeuction object
-    std::string ser_model = dict.at("ser_model").toStringRef();
-    XNNExecutor executor = XNNCompiler::compileModel(ser_model);
+    const std::string& ser_model = dict.at("ser_model").toStringRef();
+    XNNExecutor executor =
+        XNNCompiler::compileModel(ser_model.data(), ser_model.length());
 
     auto model_ptr = c10::make_intrusive<XNNModelWrapper>(std::move(executor));
     auto runtime_handle = IValue::make_capsule(model_ptr);

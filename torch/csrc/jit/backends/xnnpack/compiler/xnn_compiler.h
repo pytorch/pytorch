@@ -16,7 +16,7 @@ class XNNCompiler {
   // Takes Flatbuffer Serialized XNNPack Model and rebuilds the xnn-subgraph
   // returns an executor object that holds the xnn runtime object which we
   // can then use to set inputs and run inference using the xnn graph.
-  static XNNExecutor compileModel(std::string ser_model);
+  static XNNExecutor compileModel(const void* buffer_pointer, size_t num_bytes);
 };
 
 } // namespace delegate

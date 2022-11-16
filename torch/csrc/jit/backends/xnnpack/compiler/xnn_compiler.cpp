@@ -11,9 +11,9 @@ namespace jit {
 namespace xnnpack {
 namespace delegate {
 
-XNNExecutor XNNCompiler::compileModel(std::string ser_model) {
-  const char* buffer_pointer = ser_model.data();
-
+XNNExecutor XNNCompiler::compileModel(
+    const void* buffer_pointer,
+    size_t num_bytes) {
   auto output_min = -std::numeric_limits<float>::infinity();
   auto output_max = std::numeric_limits<float>::infinity();
 
