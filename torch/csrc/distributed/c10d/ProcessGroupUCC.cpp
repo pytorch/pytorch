@@ -789,7 +789,9 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::collective_post(
         work->future_ = c10::make_intrusive<at::ivalue::Future>(
             c10::ListType::create(c10::TensorType::get()));
       }
+      preproc();
       comm->enqueue_collective(std::move(data), work, coll, team);
+      postproc();
       return work;
     }
 #ifdef USE_CUDA
