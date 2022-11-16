@@ -750,7 +750,7 @@ Tensor empty_like_sparse_csr(
 
 template <bool require_view, bool require_copy>
 Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) {
-  constexpr auto select_name = (require_view ? "select()" : "select_copy()");
+  constexpr const char* select_name = (require_view ? "select()" : "select_copy()");
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
       self.layout(), select_name, []() { return; });
   TORCH_CHECK_INDEX(
