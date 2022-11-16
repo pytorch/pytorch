@@ -5023,19 +5023,19 @@ def multi_head_attention_forward(
             query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
 
         merged_mask, mask_type = _merge_masks(attn_mask, key_padding_mask, query, num_heads)
-        in_proj_weight_ = cast(torch.Tensor, in_proj_weight)
-        in_proj_bias_ = cast(torch.Tensor, in_proj_bias)
-        out_proj_bias_ = cast(torch.Tensor, out_proj_bias)
+        assert in_proj_weight is not None
+        assert in_proj_bias is not None
+        assert out_proj_bias is not None
         attn_output, attn_output_weights = torch._native_multi_head_attention(
             query,
             key,
             value,
             embed_dim_to_check,
             num_heads,
-            in_proj_weight_,
-            in_proj_bias_,
+            in_proj_weight,
+            in_proj_bias,
             out_proj_weight,
-            out_proj_bias_,
+            out_proj_bias,
             merged_mask,
             need_weights,
             average_attn_weights,
