@@ -10,7 +10,7 @@ import itertools
 import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
-    IS_ARM64, parametrize, TEST_WITH_ASAN
+    IS_ARM64, parametrize, TEST_WITH_ASAN, noncontiguous_like
 import torch
 from torch import Tensor
 import functools
@@ -335,6 +335,19 @@ aliasing_ops_list_return = {
     # 'tensor_split' not composite compliant, see vjp_fail
 }
 
+jvp_fail = {
+    # Composite ops that do bad things. Need to be fixed in PyTorch core.
+    # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
+    xfail('tensor_split'),
+
+    # BUG: silent incorrectness: runs and produces numerical differences
+    skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
+    skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
+    skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
+    xfail("native_batch_norm"),
+
+    xfail('nn.functional.rrelu')  # in-place test errors out with no formula implemented
+}
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 class TestOperators(TestCase):
@@ -390,29 +403,7 @@ class TestOperators(TestCase):
 
             self.assertEqual(result, expected)
 
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestOperators', 'test_jvp', set({
-        # Composite ops that do bad things. Need to be fixed in PyTorch core.
-        # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
-        xfail('tensor_split'),
-
-        # BUG: silent incorrectness: runs and produces numerical differences
-        skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
-        skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
-        skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
-        xfail("native_batch_norm"),
-
-        xfail('nn.functional.rrelu')  # in-place test errors out with no formula implemented
-    }))
-    @opsToleranceOverride('TestOperators', 'test_jvp', (
-        tol1('nn.functional.conv_transpose3d',
-             {torch.float32: tol(atol=1e-04, rtol=1.3e-06)}, device_type='cuda'),
-        tol1('nn.functional.binary_cross_entropy_with_logits',
-             {torch.float32: tol(atol=4e-04, rtol=4e-04)}),
-        tol1('nn.functional.batch_norm',
-             {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
-    ))
-    def test_jvp(self, device, dtype, op):
+    def _jvp_helper(self, device, dtype, op, noncontiguous):
         # TODO: get rid of vjp_decomp when we add decomposition support to
         # PyTorch's forward-mode ad. Currently the decomposition support only
         # works for functorch.jvp
@@ -434,27 +425,66 @@ class TestOperators(TestCase):
         inplace_variant = op.inplace_variant if op.supports_inplace_autograd else None
 
         for sample in samples:
+            if noncontiguous:
+                sample = sample.noncontiguous()
             args = (sample.input,) + sample.args
             kwargs = sample.kwargs
             if outplace_variant:
                 self.jvp_opinfo_test(outplace_variant, args, kwargs,
                                      sample.output_process_fn_grad,
                                      clone_inputs=False,
-                                     fixme_ref_jvp_local=fixme_ref_jvp_local)
+                                     fixme_ref_jvp_local=fixme_ref_jvp_local,
+                                     noncontiguous=noncontiguous)
             if is_valid_inplace_sample_input(sample, op, inplace_variant):
                 self.jvp_opinfo_test(inplace_variant, args, kwargs,
                                      sample.output_process_fn_grad,
                                      clone_inputs=True,
-                                     fixme_ref_jvp_local=fixme_ref_jvp_local)
+                                     fixme_ref_jvp_local=fixme_ref_jvp_local,
+                                     noncontiguous=noncontiguous)
+
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestOperators', 'test_jvp', jvp_fail)
+    @opsToleranceOverride('TestOperators', 'test_jvp', (
+        tol1('nn.functional.conv_transpose3d',
+             {torch.float32: tol(atol=1e-04, rtol=1.3e-06)}, device_type='cuda'),
+        tol1('nn.functional.binary_cross_entropy_with_logits',
+             {torch.float32: tol(atol=4e-04, rtol=4e-04)}),
+        tol1('nn.functional.batch_norm',
+             {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+    ))
+    def test_jvp(self, device, dtype, op):
+        self._jvp_helper(device, dtype, op, noncontiguous=False)
+
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestOperators', 'test_jvp_noncontiguous', jvp_fail.union({
+        # This is expected to fail as the operator
+        # expects last dim to have stride=1
+        xfail('view_as_complex'),
+        # BUG
+        # RuntimeError: !self.requires_grad() || self.is_contiguous()
+        # INTERNAL ASSERT FAILED
+        xfail('as_strided_scatter'),
+    }))
+    @opsToleranceOverride('TestOperators', 'test_jvp_noncontiguous', (
+        tol1('nn.functional.conv_transpose3d',
+             {torch.float32: tol(atol=1e-04, rtol=1.3e-06)}, device_type='cuda'),
+        tol1('nn.functional.binary_cross_entropy_with_logits',
+             {torch.float32: tol(atol=4e-04, rtol=4e-04)}),
+        tol1('nn.functional.batch_norm',
+             {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+    ))
+    def test_jvp_noncontiguous(self, device, dtype, op):
+        self._jvp_helper(device, dtype, op, noncontiguous=True)
 
     def jvp_opinfo_test(self, fn, args, kwargs, output_process_fn,
-                        clone_inputs, fixme_ref_jvp_local):
+                        clone_inputs, fixme_ref_jvp_local, noncontiguous=False):
         # NB: we used requires_grad=True to determine where the primals are,
         # but don't need that information otherwise
         fn, primals = normalize_op_input_output2(
             fn, args, kwargs, output_process_fn, requires_grad=True)
         orig_primals = tree_map(lambda x: x.detach(), primals)
-        orig_tangents = tree_map(lambda x: torch.randn_like(x), primals)
+        tangent_gen_fn = noncontiguous_like if noncontiguous else torch.randn_like
+        orig_tangents = tree_map(lambda x: tangent_gen_fn(x), primals)
 
         def maybe_clone_inputs():
             if clone_inputs:
