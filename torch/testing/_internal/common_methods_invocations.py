@@ -9312,9 +9312,6 @@ op_db: List[OpInfo] = [
            skips=(
                # cumprod does not handle correctly out= dtypes
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               # RuntimeError: "prod_cpu" not implemented for 'BFloat16'
-               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
-                            dtypes=(torch.bfloat16,), device_type='cpu'),
            ),
            # gradgradcheck fails in fast_mode=True: #56275
            sample_inputs_func=sample_inputs_cumprod,
@@ -16441,7 +16438,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         promotes_int_to_int64=True,
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-        dtypes=all_types_and_complex_and(torch.bool),
+        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_prod,
         ref=reference_reduction_numpy(np.prod),
