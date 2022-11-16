@@ -226,40 +226,6 @@ jobs:
             false
           fi
 
-  check-labels:
-    name: Check labels
-    runs-on: linux.20_04.16x
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          submodules: false
-          fetch-depth: 1
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.8'
-          architecture: x64
-          check-latest: false
-          cache: pip
-          cache-dependency-path: |
-            **/.github/requirements-gha-cache.txt
-
-      - name: Install requirements
-        id: requirements
-        run: |
-          pip install -r .github/requirements-gha-cache.txt --user
-
-      - name: Check labels
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUM: ${{ github.event.number }}
-        run: |
-          set -ex
-          python3 .github/scripts/check_labels.py "${PR_NUM}"
-
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}

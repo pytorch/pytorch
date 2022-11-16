@@ -35,10 +35,10 @@ class C10_API SymFloat {
     return data_;
   }
 
-  SymFloat operator+(SymFloat) const;
-  SymFloat operator-(SymFloat) const;
-  SymFloat operator*(SymFloat) const;
-  SymFloat operator/(SymFloat) const;
+  SymFloat operator+(const SymFloat&) const;
+  SymFloat operator-(const SymFloat&) const;
+  SymFloat operator*(const SymFloat&) const;
+  SymFloat operator/(const SymFloat&) const;
 
   // N.B. It's important to keep this definition in the header
   // as we expect if checks to be folded for mobile builds
@@ -57,5 +57,5 @@ class C10_API SymFloat {
   SymNode ptr_;
 };
 
-C10_API std::ostream& operator<<(std::ostream& os, SymFloat s);
+C10_API std::ostream& operator<<(std::ostream& os, const SymFloat& s);
 } // namespace c10

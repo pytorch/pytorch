@@ -19,7 +19,10 @@ namespace delegate {
 // }
 // or
 // {
-//     "forward" : {"inputs" : c10::List<at::Tensor>}
+//     "forward" : {
+//                  "inputs" : c10::List<at::Tensor>,
+//                  "outputs" : c10::List<at::Tensor>
+//                  }
 // }
 // in which the value for "inputs" is the input shape to the module.
 // The module fed to the xnnpack backend must first be traced in order
@@ -87,8 +90,37 @@ c10::IValue preprocess(
   // inp above has been confirmed to be either Tensor or TensorList
   XNNGraph graph_builder;
   graph_builder.buildXNNGraph(graph, example_inputs);
+  // at this point graph is complete, for the sake of testing preprocess at this
+  // point we will do runtime setup and run with some default values
 
-  compiled.insert("Answer", at::empty({1}, c10::ScalarType::Float));
+  // grabbing the inputs from compile spec for testing
+
+  // gather sample inputs from compile spec
+  std::vector<at::Tensor> inputs;
+  auto input_list = inp.toList();
+
+  for (int i = 0; i < input_list.size(); i++) {
+    inputs.push_back(input_list.get(i).toTensor());
+  }
+  std::vector<at::Tensor> outputs;
+  auto output_list = out.toList();
+  std::vector<c10::IntList> output_shapes;
+
+  // gather sample outputs from compile spec
+  for (int i = 0; i < output_list.size(); i++) {
+    auto sample_output = output_list.get(i).toTensor();
+    outputs.push_back(sample_output);
+    // also gather output shapes to forward along to device
+    output_shapes.push_back(sample_output.sizes());
+  }
+
+  // sample run on sample inputs
+  graph_builder.runGraphOnInputs(inputs, outputs);
+  c10::List<c10::IntList> shapes_list(output_shapes);
+
+  compiled.insert("ser_model", graph_builder.serializedXNNGraph());
+  compiled.insert("outputs", shapes_list);
+  compiled.insert("Answer", outputs);
 
   return compiled;
 }

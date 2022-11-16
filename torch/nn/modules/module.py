@@ -737,7 +737,7 @@ class Module:
         if you need to store extra state. This function is called when building the
         module's `state_dict()`.
 
-        Note that extra state should be pickleable to ensure working serialization
+        Note that extra state should be picklable to ensure working serialization
         of the state_dict. We only provide provide backwards compatibility guarantees
         for serializing Tensors; other objects may break backwards compatibility if
         their serialized pickled form changes.
@@ -1737,7 +1737,7 @@ class Module:
         ``strict=True`` are affected by modifications the hook makes to
         ``missing_keys`` or ``unexpected_keys``, as expected. Additions to either
         set of keys will result in an error being thrown when ``strict=True``, and
-        clearning out both missing and unexpected keys will avoid an error.
+        clearing out both missing and unexpected keys will avoid an error.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -1958,7 +1958,12 @@ class Module:
         for name, param in self.named_parameters(recurse=recurse):
             yield param
 
-    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Parameter]]:
+    def named_parameters(
+            self,
+            prefix: str = '',
+            recurse: bool = True,
+            remove_duplicate: bool = True
+    ) -> Iterator[Tuple[str, Parameter]]:
         r"""Returns an iterator over module parameters, yielding both the
         name of the parameter as well as the parameter itself.
 
@@ -1967,6 +1972,8 @@ class Module:
             recurse (bool): if True, then yields parameters of this module
                 and all submodules. Otherwise, yields only parameters that
                 are direct members of this module.
+            remove_duplicate (bool, optional): whether to remove the duplicated
+                parameters in the result. Defaults to True.
 
         Yields:
             (str, Parameter): Tuple containing the name and parameter
@@ -1981,7 +1988,7 @@ class Module:
         """
         gen = self._named_members(
             lambda module: module._parameters.items(),
-            prefix=prefix, recurse=recurse)
+            prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
         for elem in gen:
             yield elem
 

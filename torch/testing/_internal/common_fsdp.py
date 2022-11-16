@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import functools
 import itertools
 import sys
 from abc import ABC, abstractmethod
@@ -21,11 +20,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from torch.distributed.fsdp.wrap import (
-    always_wrap_policy,
-    transformer_auto_wrap_policy,
-    wrap,
-)
+from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy, wrap
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import MultiProcessTestCase, TEST_SKIPS
@@ -285,8 +280,8 @@ class TransformerWithSharedParams(FSDPTestModel):
             fsdp_init_mode (FSDPInitMode): If ``NO_FSDP``, then does not wrap
                 any modules with FSDP. If ``RECURSIVE``, then wraps with
                 top-level FSDP. By default, the top-level FSDP uses the
-                ``transformer_auto_wrap_policy()`` for encoder and decoder
-                layers, but a different auto wrap policy may be specified via
+                ``ModuleWrapPolicy`` for encoder and decoder layers, but a
+                different auto wrap policy may be specified via
                 ``fsdp_kwargs``.
             cuda_init_mode (CUDAInitMode): Determines model movement to CUDA.
             fsdp_kwargs (Optional[Dict[str, Any]]): Optional keyword arguments
@@ -302,14 +297,13 @@ class TransformerWithSharedParams(FSDPTestModel):
                 group, cuda_init_mode, add_bn, deterministic
             )
         elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
-            # Default to the `transformer_auto_wrap_policy()`
+            # Default to the `ModuleWrapPolicy`
             if "auto_wrap_policy" not in fsdp_kwargs:
-                auto_wrap_policy = functools.partial(
-                    transformer_auto_wrap_policy,
-                    transformer_layer_cls={
+                auto_wrap_policy = ModuleWrapPolicy(
+                    {
                         TransformerEncoderLayer,
                         TransformerDecoderLayer,
-                    },
+                    }
                 )
             else:
                 auto_wrap_policy = fsdp_kwargs.pop("auto_wrap_policy")
@@ -615,19 +609,22 @@ class MixtureOfExperts(NestedWrappedModule):
         if self.delay_before_free_ms > 0:
             expert = self.module[2]
             if isinstance(expert, FSDP):
-                orig_reshard = self.module[2]._reshard
+                orig_reshard = torch.distributed.fsdp._runtime_utils._reshard
 
-                def _free_full_params_with_delay(*args):
+                def _delayed_reshard(*args, **kwargs):
                     torch.cuda._sleep(
                         int(self.delay_before_free_ms * get_cycles_per_ms())
                     )
-                    return orig_reshard(*args)
+                    return orig_reshard(*args, **kwargs)
 
-                assert hasattr(
-                    expert, "_reshard"
-                ), "expert FSDP module should have a `_reshard()` method"
-                with mock.patch.object(
-                    expert, "_reshard", _free_full_params_with_delay
+                # The first patch covers any `from torch... import _reshard`
+                # uses in `fully_sharded_data_parallel.py`, and the second
+                # patch covers any `import torch..._reshard` uses in general.
+                with mock.patch(
+                    "torch.distributed.fsdp.fully_sharded_data_parallel._reshard",
+                    _delayed_reshard,
+                ), mock.patch(
+                    "torch.distributed.fsdp._runtime_utils._reshard", _delayed_reshard
                 ):
                     return self.module(x)
 
@@ -1001,7 +998,9 @@ class FSDPTest(MultiProcessTestCase):
             for param in fsdp_model.parameters():
                 self.assertEqual(param.device, cpu_device)
         context = (
-            self.assertRaisesRegex(AssertionError, "Expected param to be on CPU")
+            self.assertRaisesRegex(
+                AssertionError, "Expects the `FlatParameter` to be offloaded to CPU"
+            )
             if expects_device_error
             else suppress()
         )
@@ -1028,7 +1027,9 @@ class FSDPTest(MultiProcessTestCase):
                 self.assertEqual(param.device, cpu_device)
             fsdp_loss = fsdp_loss.cuda()
         fsdp_unsharded_params = get_full_params(fsdp_model)
-        torch.testing.assert_allclose(ref_loss, fsdp_loss)
+        # TODO: Are mismatching dtypes actually ok here or did this pass silently before, because `check_dtype=False`
+        #  was the default?
+        torch.testing.assert_close(ref_loss, fsdp_loss, check_dtype=False)
         # Do not check for parameter parity if using mixed precision since (1)
         # the DDP parameters are in FP16 (from `half()`) while the FSDP
         # parameters are in FP32 (from `summon_full_params()`) and (2) DDP runs

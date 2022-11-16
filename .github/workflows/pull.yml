@@ -9,9 +9,11 @@ on:
       - release/*
       - landchecks/*
   workflow_dispatch:
+  schedule:
+    - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 jobs:
@@ -75,7 +77,7 @@ jobs:
           { config: "default", shard: 1, num_shards: 5, runner: "linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 5, runner: "linux.2xlarge" },
           { config: "default", shard: 3, num_shards: 5, runner: "linux.2xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "linux.2xlarge" },
+          { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge" },
           { config: "default", shard: 5, num_shards: 5, runner: "linux.2xlarge" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}

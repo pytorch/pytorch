@@ -795,7 +795,7 @@ def configure_extension_build():
         # /EHsc is about standard C++ exception handling
         # /DNOMINMAX removes builtin min/max functions
         # /wdXXXX disables warning no. XXXX
-        extra_compile_args = ['/MD', '/EHsc', '/DNOMINMAX',
+        extra_compile_args = ['/MD', '/FS', '/EHsc', '/DNOMINMAX',
                               '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
                               '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
                               '/wd4275']
@@ -1036,6 +1036,7 @@ def main():
         'lib/*.pdb',
         'lib/torch_shm_manager',
         'lib/*.h',
+        'include/*.h',
         'include/ATen/*.h',
         'include/ATen/cpu/*.h',
         'include/ATen/cpu/vec/vec256/*.h',

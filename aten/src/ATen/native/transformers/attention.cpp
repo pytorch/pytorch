@@ -7,6 +7,7 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/cpu/vec/vec256/vec256.h>
 #include <ATen/native/transformers/attention.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
 
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -139,15 +140,6 @@ Tensor masked_softmax(
         "Converting mask without torch.bool dtype to bool; this will "
         "negatively affect performance. Prefer to use a boolean mask directly.");
     attn_mask = attn_mask->to(at::kBool);
-  }
-  if (attn_scores.is_cpu() && attn_mask && attn_mask->dim() == 2) {
-    // TODO: CPU path does not support transformer mask yet.
-    const auto batch_size = attn_scores.sizes()[0];
-    const auto seq_len = attn_scores.sizes()[3];
-    TORCH_CHECK(attn_mask->sizes()[0] == batch_size);
-    TORCH_CHECK(attn_mask->sizes()[1] == seq_len);
-    attn_mask = attn_mask->view({batch_size, 1, 1, seq_len});
-    attn_mask = at::expand_inplace(attn_scores, *attn_mask)->contiguous();
   }
   if (attn_mask) {
     return _masked_softmax(attn_scores, *attn_mask, attn_scores.dim() - 1, mask_type);
@@ -692,6 +684,11 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
           return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
         }
         return at::_scaled_dot_product_attention_forward(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+}
+
+int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal){
+  return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_math(
