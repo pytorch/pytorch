@@ -20,7 +20,7 @@ import weakref
 import operator
 
 from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporarily, _get_current_dispatch_mode
-from torch._subclasses import FakeTensor
+from torch._subclasses import FakeTensor, UnsupportedFakeTensorException
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
 from torch import SymInt, SymFloat
@@ -118,8 +118,13 @@ def set_meta(proxy, val):
     elif isinstance(val, torch.Tensor):
         if not val.is_sparse:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
-            proxy.node.meta['val'] = fake_tensor_mode.from_tensor(val)
+            # NB: Kinda hacky, but we should try to get val as the metadata
+            # everywhere
+            try:
+                fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+                proxy.node.meta['val'] = fake_tensor_mode.from_tensor(val)
+            except UnsupportedFakeTensorException:
+                pass
     return proxy
 
 def thunkify(f, *args, **kwargs):
