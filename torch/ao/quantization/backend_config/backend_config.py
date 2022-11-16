@@ -229,7 +229,7 @@ class BackendConfig:
 
         import torch
         from torch.ao.quantization.backend_config import BackendConfig, BackendPatternConfig, DTypeConfig, ObservationType
-        from torch.ao.quantization.fuser_method_mappings import reverse_sequential_wrapper2
+        from torch.ao.quantization.fuser_method_mappings import _reverse_sequential_wrapper2
 
         weighted_int8_dtype_config = DTypeConfig(
             input_dtype=torch.quint8,
@@ -248,7 +248,7 @@ class BackendConfig:
             .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT) \
             .add_dtype_config(weighted_int8_dtype_config) \
             .set_fused_module(torch.nn.intrinsic.ConvReLU2d) \
-            .set_fuser_method(reverse_sequential_wrapper2(torch.nn.intrinsic.ConvReLU2d))
+            .set_fuser_method(_reverse_sequential_wrapper2(torch.nn.intrinsic.ConvReLU2d))
 
         backend_config = BackendConfig("my_backend") \
             .set_backend_pattern_config(linear_config) \
@@ -341,9 +341,17 @@ class BackendPatternConfig:
 
     def set_observation_type(self, observation_type: ObservationType) -> BackendPatternConfig:
         """
-        Set how observers should be inserted for this pattern.
-        See :class:`~torch.ao.quantization.backend_config.ObservationType` for details
+        Set how observers should be inserted in the graph for this pattern.
+        There are two observation types:
 
+            `OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT` (default): the output observer instance will be
+            different from the input. This is the most common observation type.
+
+            `OUTPUT_SHARE_OBSERVER_WITH_INPUT`: the output observer instance will be the same as the input.
+            This is useful for operators like `cat`.
+
+        Note: This will be renamed in the near future, since we will soon insert QuantDeQuantStubs with
+        observers (and fake quantizes) attached instead of observers themselves.
         """
         self.observation_type = observation_type
         return self
@@ -395,6 +403,11 @@ class BackendPatternConfig:
     def set_fuser_method(self, fuser_method: Callable) -> BackendPatternConfig:
         """
         Set the function that specifies how to fuse the pattern for this pattern.
+
+        The first argument of this function should be `is_qat`, and the rest of the arguments
+        should be the items in the tuple pattern, e.g. (`torch.nn.ReLU`, `torch.nn.Linear`)
+        will have a function with three arguments, `is_qat`, `relu`, and `linear`.
+        The return value of this function should be the resulting fused module.
         """
         self.fuser_method = fuser_method
         return self

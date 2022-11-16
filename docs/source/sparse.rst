@@ -117,7 +117,7 @@ Operator overview
 Fundamentally, operations on Tensor with sparse storage formats behave the same as
 operations on Tensor with strided (or other) storage formats. The particularities of
 storage, that is the physical layout of the data, influences the performance of
-an operation but shhould not influence the semantics.
+an operation but should not influence the semantics.
 
 
 We are actively increasing operator coverage for sparse tensors. Users should not

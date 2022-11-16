@@ -33,11 +33,11 @@ __all__ = [
 
 
 # TODO: replace all usages with these constants
-GLOBAL_DICT_KEY = ""
-OBJECT_TYPE_DICT_KEY = "object_type"
-MODULE_NAME_REGEX_DICT_KEY = "module_name_regex"
-MODULE_NAME_DICT_KEY = "module_name"
-MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY = "module_name_object_type_order"
+_GLOBAL_DICT_KEY = ""
+_OBJECT_TYPE_DICT_KEY = "object_type"
+_MODULE_NAME_REGEX_DICT_KEY = "module_name_regex"
+_MODULE_NAME_DICT_KEY = "module_name"
+_MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY = "module_name_object_type_order"
 
 _FIXED_QPARAMS_OP_TO_OBSERVER: Dict[Union[Callable, str], _PartialWrapper] = {
     torch.nn.Hardsigmoid: default_fixed_qparams_range_0to1_observer,
@@ -126,9 +126,9 @@ def get_default_qconfig_mapping(backend="fbgemm", version=0) -> QConfigMapping:
     Return the default QConfigMapping for post training quantization.
 
     Args:
-      * ``backend`` : the quantization backend for the default qconfig mapping, should be
+      * ``backend`` (str) : the quantization backend for the default qconfig mapping, should be
          one of ["x86", "fbgemm" (default), "qnnpack", "onednn"]
-      * ``version`` : the version for the default qconfig mapping
+      * ``version`` (int) : the version for the default qconfig mapping
     """
     # TODO: add assert for backend choices
     return _get_default_qconfig_mapping(False, backend, version)
@@ -138,9 +138,9 @@ def get_default_qat_qconfig_mapping(backend="fbgemm", version=1) -> QConfigMappi
     Return the default QConfigMapping for quantization aware training.
 
     Args:
-      * ``backend`` : the quantization backend for the default qconfig mapping, should be
+      * ``backend`` (str) : the quantization backend for the default qconfig mapping, should be
          one of ["x86", "fbgemm" (default), "qnnpack", "onednn"]
-      * ``version`` : the version for the default qconfig mapping
+      * ``version`` (int) : the version for the default qconfig mapping
     """
     return _get_default_qconfig_mapping(True, backend, version)
 
@@ -274,11 +274,11 @@ class QConfigMapping:
         The values of this dictionary are lists of tuples.
         """
         return {
-            GLOBAL_DICT_KEY: self.global_qconfig,
-            OBJECT_TYPE_DICT_KEY: list(self.object_type_qconfigs.items()),
-            MODULE_NAME_REGEX_DICT_KEY: list(self.module_name_regex_qconfigs.items()),
-            MODULE_NAME_DICT_KEY: list(self.module_name_qconfigs.items()),
-            MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY: [
+            _GLOBAL_DICT_KEY: self.global_qconfig,
+            _OBJECT_TYPE_DICT_KEY: list(self.object_type_qconfigs.items()),
+            _MODULE_NAME_REGEX_DICT_KEY: list(self.module_name_regex_qconfigs.items()),
+            _MODULE_NAME_DICT_KEY: list(self.module_name_qconfigs.items()),
+            _MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY: [
                 (*k, v) for k, v in self.module_name_object_type_order_qconfigs.items()
             ],
         }
@@ -302,14 +302,14 @@ class QConfigMapping:
         The values of this dictionary are expected to be lists of tuples.
         """
         conf = cls()
-        if GLOBAL_DICT_KEY in qconfig_dict:
-            conf.set_global(qconfig_dict[GLOBAL_DICT_KEY])
-        for object_type, qconfig in qconfig_dict.get(OBJECT_TYPE_DICT_KEY, []):
+        if _GLOBAL_DICT_KEY in qconfig_dict:
+            conf.set_global(qconfig_dict[_GLOBAL_DICT_KEY])
+        for object_type, qconfig in qconfig_dict.get(_OBJECT_TYPE_DICT_KEY, []):
             conf.set_object_type(object_type, qconfig)
-        for module_name_regex, qconfig in qconfig_dict.get(MODULE_NAME_REGEX_DICT_KEY, []):
+        for module_name_regex, qconfig in qconfig_dict.get(_MODULE_NAME_REGEX_DICT_KEY, []):
             conf.set_module_name_regex(module_name_regex, qconfig)
-        for module_name, qconfig in qconfig_dict.get(MODULE_NAME_DICT_KEY, []):
+        for module_name, qconfig in qconfig_dict.get(_MODULE_NAME_DICT_KEY, []):
             conf.set_module_name(module_name, qconfig)
-        for module_name, object_type, index, qconfig in qconfig_dict.get(MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY, []):
+        for module_name, object_type, index, qconfig in qconfig_dict.get(_MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY, []):
             conf.set_module_name_object_type_order(module_name, object_type, index, qconfig)
         return conf

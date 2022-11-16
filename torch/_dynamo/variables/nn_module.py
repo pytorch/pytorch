@@ -14,7 +14,13 @@ from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
 from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource
-from ..utils import is_lazy_module, istype, proxy_args_kwargs
+from ..utils import (
+    is_lazy_module,
+    is_safe_constant,
+    istensor,
+    istype,
+    proxy_args_kwargs,
+)
 from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lists import SliceVariable
@@ -139,6 +145,9 @@ class NNModuleVariable(VariableTracker):
                 return variables.UserFunctionVariable(subobj.__get__(base), **options)
             elif istype(subobj, types.FunctionType):
                 return variables.UserMethodVariable(subobj, self, **options)
+            elif is_safe_constant(subobj) or istensor(subobj):
+                # Support possibly common cases of class members
+                return VariableBuilder(tx, NNModuleSource(source))(subobj)
             else:
                 unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
 
@@ -188,8 +197,9 @@ class NNModuleVariable(VariableTracker):
                 # The module type will change after it is called
                 if is_lazy:
                     self.module_type = mod.cls_to_become
+                from .builder import wrap_fx_proxy
 
-                return variables.TensorVariable.create(
+                return wrap_fx_proxy(
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_module",
@@ -314,6 +324,13 @@ class NNModuleVariable(VariableTracker):
             ):
                 result.append(named_embed(name, param))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+        elif name == "named_buffers":
+            result = []
+            for name, buffer in module.named_buffers(
+                **get_kwargs("prefix", "recurse", "remove_duplicate")
+            ):
+                result.append(named_embed(name, buffer))
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "named_modules":
             result = []
             for name, submod in module.named_modules(
@@ -321,6 +338,8 @@ class NNModuleVariable(VariableTracker):
             ):
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+        elif name == "modules":
+            return wrap_values(module.named_modules())
         elif name == "parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
         elif name == "values":
@@ -436,7 +455,9 @@ class NNModuleVariable(VariableTracker):
 
             proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
 
-            return variables.TensorVariable.create(
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method",

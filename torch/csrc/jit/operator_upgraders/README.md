@@ -1,6 +1,6 @@
 # Guidance for Operator Developer
 
-PyTorch’s operators sometimes require changes for different reasons (e.g. from improving their usability to fixing bugs). These changes can be backward compatibility (BC) breaking, where older programs will no longer run as expected (or at all) on the latest version of PyTorch (an old program / new runtime problem), or forward compatibility (FC) breaking, where new programs will not run on older versions of PyTorch (a new program / old runtime problem). This guidance focuses on the requirements for maintaining backwards comatibility when making changes to an operator.
+PyTorch’s operators sometimes require changes for different reasons (e.g. from improving their usability to fixing bugs). These changes can be backward compatibility (BC) breaking, where older programs will no longer run as expected (or at all) on the latest version of PyTorch (an old program / new runtime problem), or forward compatibility (FC) breaking, where new programs will not run on older versions of PyTorch (a new program / old runtime problem). This guidance focuses on the requirements for maintaining backwards compatibility when making changes to an operator.
 In order to do this we introduce the concept of the *upgrader*: a method to adapt the new operator to mimic the old operator behavior.
 When a new runtime reads an old program containing the old operator definition, the upgrader will adapt the old operator definition to comply with the new operator implementation. As you would expect, an upgrader is only applied when an old operation definition is encountered (i.e. if there are no "old" operators in the program, no upgrader would be used).
 For more details on the reasoning behind this new requirement please refer to the [PyTorch Operator Versioning RFC](https://github.com/pytorch/rfcs/blob/master/RFC-0017-PyTorch-Operator-Versioning.md).
@@ -177,7 +177,7 @@ When making changes to the operators, the first thing to identify is if it's BC/
             except Exception as e:
                 self.skipTest("Failed to load fixture!")
 
-            # Step4. Load the new model and it won't apply the ugprader
+            # Step4. Load the new model and it won't apply the upgrader
             current_mobile_module_float = self._save_load_mobile_module(MyModuleFloat)
             current_server_module_float = self._save_load_module(MyModuleFloat)
 

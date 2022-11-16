@@ -1,10 +1,10 @@
 # Owner(s): ["module: dynamo"]
 import os
 import shutil
+import unittest
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -25,6 +25,28 @@ class MockModule(torch.nn.Module):
 
 
 class MinfierTests(torch._dynamo.test_case.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._exit_stack.enter_context(
+            unittest.mock.patch.object(
+                torch._dynamo.config,
+                "debug_dir_root",
+                "/tmp/_torchdynamo_debug_/",
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(torch._dynamo.config.debug_dir_root, ignore_errors=True)
+        cls._exit_stack.close()
+
+    def setUp(self):
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+
     def test_after_dynamo(self):
         @create_backend
         def bad_dynamo_backend(subgraph):
@@ -43,12 +65,9 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
 
         mod = MockModule()
         opt_mod = torch._dynamo.optimize("bad_dynamo_backend")(mod)
-        repro_dir = "/tmp/test_minifier"
-        repro_file = os.path.join(repro_dir, "minifier_launcher.py")
-        shutil.rmtree(repro_dir, ignore_errors=True)
+        repro_file = torch._dynamo.debug_utils.get_minifier_repro_path()
 
         @patch.object(torch._dynamo.config, "repro_after", "dynamo")
-        @patch.object(torch._dynamo.config, "repro_dir", repro_dir)
         def inner():
             x = torch.randn(4)
             try:
@@ -65,14 +84,11 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
     def _test_around_aot(self, error_at_aot):
         mod = MockModule()
         opt_mod = torch._dynamo.optimize("inductor")(mod)
-        repro_dir = "/tmp/test_minifier"
-        repro_file = os.path.join(repro_dir, "minifier_launcher.py")
-        shutil.rmtree(repro_dir, ignore_errors=True)
 
+        repro_file = torch._dynamo.debug_utils.get_minifier_repro_path()
         repro_after = "dynamo" if error_at_aot else "aot"
 
         @patch.object(torch._dynamo.config, "repro_after", repro_after)
-        @patch.object(torch._dynamo.config, "repro_dir", repro_dir)
         def inner():
             x = torch.randn(4)
             x.requires_grad = error_at_aot
