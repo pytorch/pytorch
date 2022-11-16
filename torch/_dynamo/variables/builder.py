@@ -8,8 +8,8 @@ import numbers
 import operator
 import re
 import types
-import typing
 from abc import ABCMeta
+from typing import Any, Union
 
 import numpy as np
 from functorch.experimental.ops import PyOperator
@@ -43,6 +43,7 @@ from ..utils import (
     global_key_name,
     is_namedtuple,
     is_numpy_int_type,
+    is_typing,
     istensor,
     istype,
     odict_values,
@@ -106,7 +107,7 @@ class _missing:
 @dataclasses.dataclass
 class GraphArg:
     source: Source
-    example: typing.Any
+    example: Any
     is_unspecialized: bool
 
     def __post_init__(self):
@@ -360,7 +361,7 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif isinstance(value, typing._SpecialGenericAlias):
+        elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             return TypingVariable(
                 value,
@@ -510,7 +511,7 @@ class VariableBuilder:
             )
         )
 
-    def wrap_sym(self, value: typing.Union[torch.SymInt, torch.SymFloat]):
+    def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
         if not is_constant_source(self.get_source()):
             self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
         elif is_constant_source(self.get_source()):
