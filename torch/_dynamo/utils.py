@@ -684,7 +684,7 @@ try:
     def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
         fake_tensor = fake_mode.from_tensor(e, static_shapes=static_shapes)
         if tx is not None:
-            from functorch._src.guards import TensorReference
+            from torch._dynamo.guards import TensorReference
 
             def _record(tensor_ref):
                 if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:

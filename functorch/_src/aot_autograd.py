@@ -825,6 +825,9 @@ def aot_function(
 
             shape_env = _produce_or_verify_shape_env(None)
             fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
+            # create_aot_dispatcher_function assumes fake inputs
+            # aot_function is the "public" entrypoint, so we need to process here
+            # For internal entrypoint with already populated fake tensors, see aot_function_simplified
             def process_inputs(flat_args):
                 if config.use_fake_tensor:
                     def convert(idx, x):
@@ -846,7 +849,7 @@ def aot_function(
                 flat_fn,
                 fake_flat_tensor_args,
                 aot_config,
-                shape_env,
+                fake_mode,
             )
             cached_res = (compiled_fn, out_spec)
         cached_fn, out_spec = cached_res
@@ -999,9 +1002,7 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
             return compiled_fn(args)
         return new_func
 
-    fn_call = functional_call
-    fn_call.mod = mod
-    compiled_f = aot_function_simplified(fn_call, *top_args, **top_kwargs)
+    compiled_f = aot_function_simplified(functional_call, *top_args, **top_kwargs)
 
     if top_kwargs:
         def forward(*args, **kwargs):

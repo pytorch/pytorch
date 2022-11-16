@@ -462,7 +462,6 @@ class OutputGraph(fx.Tracer):
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             if "shape_env" in signature(self.compiler_fn).parameters.keys():
-                # breakpoint()
                 compiled_fn = self.compiler_fn(
                     gm, self.example_inputs(), shape_env=self.shape_env
                 )
@@ -478,9 +477,12 @@ class OutputGraph(fx.Tracer):
     def example_inputs(self):
         result = []
         for arg in self.graphargs:
-            example = arg.get_fake_examples()
-            if example:
-                result.extend(example)
+            if config.fake_tensor_propagation:
+                example = arg.get_fake_examples()
+                if example:
+                    result.extend(example)
+                else:
+                    result.extend(arg.get_examples())
             else:
                 result.extend(arg.get_examples())
         return result

@@ -578,7 +578,6 @@ class VariableBuilder:
                     subclass_torch_function__func,
                     subclass_type,
                 )
-            # TODO(voz): Do not land this lol
             return tensor_variable
 
     def wrap_unspecialized_primitive(self, value):

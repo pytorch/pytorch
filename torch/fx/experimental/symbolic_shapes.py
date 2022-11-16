@@ -534,28 +534,6 @@ class ShapeEnv(object):
         pytree.tree_map_only(torch.Tensor, partial(meta_converter, shape_env=new_env), args)
         return all(guard.xreplace(new_env.var_to_val) for guard, _ in self.guards)
 
-    def guards_not_overlapping(self, guards):
-        """
-        Given a set of guards `guards` in the same structure as self.guards, return all current
-        guards on the shape_env that are not found in the provided list `guards`.
-
-        NOTE: Order does not matter
-        NOTE: provided guards can be a superset, subset, empty, or totally disjoint
-        NOTE: This does not modify the underlying shape_env guards
-
-        ex:
-        shape_env.guards = [foo, bar, baz]
-        shape_env.guards_not_overlapping([foo]) -> [bar, baz]
-        shape_env.guards_not_overlapping([bar]) -> [foo, baz]
-        shape_env.guards_not_overlapping([]) -> [foo, bar, baz]
-        shape_env.guards_not_overlapping([baz, foo, bar, cat]) -> []
-        """
-        curr_guards = dict(self.guards)
-        for guard, _ in guards:
-            if guard in curr_guards:
-                del curr_guards[guard]
-        return [(k, v) for k, v in curr_guards.items()]
-
     @staticmethod
     def and_chain_guards(guards):
         """

@@ -555,11 +555,6 @@ def aot_autograd(subgraph, **kwargs):
         return disable(disable(bw_compiler)(*args, **kwargs))
 
     bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
-    kwargs["bw_compiler"] = _wrapped_bw_compiler
-    if "shape_env" in kwargs:
-        from functorch._src import config as functorch_config
-
-        functorch_config.use_dynamic_shapes = True
 
     from functorch.compile import aot_module_simplified
 
