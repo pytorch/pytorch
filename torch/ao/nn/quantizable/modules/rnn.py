@@ -54,6 +54,8 @@ class LSTMCell(torch.nn.Module):
 
         self.initial_hidden_state_qparams: Tuple[float, int] = (1.0, 0)
         self.initial_cell_state_qparams: Tuple[float, int] = (1.0, 0)
+        self.hidden_state_dtype: torch.dtype = torch.quint8
+        self.cell_state_dtype: torch.dtype = torch.quint8
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         if hidden is None or hidden[0] is None or hidden[1] is None:
@@ -85,8 +87,8 @@ class LSTMCell(torch.nn.Module):
         if is_quantized:
             (h_scale, h_zp) = self.initial_hidden_state_qparams
             (c_scale, c_zp) = self.initial_cell_state_qparams
-            h = torch.quantize_per_tensor(h, scale=h_scale, zero_point=h_zp, dtype=torch.quint8)
-            c = torch.quantize_per_tensor(c, scale=c_scale, zero_point=c_zp, dtype=torch.quint8)
+            h = torch.quantize_per_tensor(h, scale=h_scale, zero_point=h_zp, dtype=self.hidden_state_dtype)
+            c = torch.quantize_per_tensor(c, scale=c_scale, zero_point=c_zp, dtype=self.cell_state_dtype)
         return h, c
 
     def _get_name(self):

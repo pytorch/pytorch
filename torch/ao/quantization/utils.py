@@ -619,11 +619,13 @@ def _get_lstm_with_individually_observed_parts(
                 obs = cell_state_obs_ctr()
                 if hasattr(obs, "scale") and hasattr(obs, "zero_point"):
                     cell.initial_cell_state_qparams = (obs.scale, obs.zero_point)
+                cell.cell_state_dtype = obs.dtype
             if hidden_state_obs_ctr is not None:
                 cell.ogate_cy.qconfig = make_qconfig(hidden_state_obs_ctr)
                 obs = hidden_state_obs_ctr()
                 if hasattr(obs, "scale") and hasattr(obs, "zero_point"):
                     cell.initial_hidden_state_qparams = (obs.scale, obs.zero_point)
+                cell.hidden_state_dtype = obs.dtype
 
     # Insert the observers based on the previously attached QConfigs
     # Pass in non_leaf_module_list to prevent the observers for sigmoid/tanh from being overridden
