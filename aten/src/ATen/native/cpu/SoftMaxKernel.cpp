@@ -60,7 +60,7 @@ inline void _vec_log_softmax_lastdim(
   parallel_for(
       0,
       outer_size,
-      CHUNK_SIZE,
+      grain_size,
       [&](int64_t begin, int64_t end) {
         // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
         scalar_t tmp_sum_scalar[CHUNK_SIZE];
