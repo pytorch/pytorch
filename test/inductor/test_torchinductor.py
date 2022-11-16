@@ -20,7 +20,6 @@ from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
-    IS_FBCODE,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -41,7 +40,7 @@ try:
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
-    from torch._inductor.utils import has_torchvision_roi_align, has_triton, timed
+    from torch._inductor.utils import has_torchvision_roi_align, timed
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
@@ -53,25 +52,10 @@ except (ImportError, AssertionError) as e:
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-HAS_CPU = False
-try:
-    from subprocess import CalledProcessError
-
-    from torch._inductor.codecache import CppCodeCache
-
-    CppCodeCache.load("")
-    HAS_CPU = not IS_FBCODE
-except (
-    CalledProcessError,
-    OSError,
-    torch._inductor.exc.InvalidCxxCompiler,
-    torch._inductor.exc.CppCompileError,
-):
-    pass
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
 
-HAS_CUDA = has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 torch._inductor.config.triton.autotune = False  # too slow
