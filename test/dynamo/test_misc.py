@@ -1388,7 +1388,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
     def test_torch_profiler(self):
-        # wrap torch.profiler.* as ProfilerContextWrapperVariable and do nothing
+        # wrap torch.profiler.* as NullContextVariable and do nothing
         def fn(x):
             y = x**2
             with torch.profiler.profile():
@@ -1408,7 +1408,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
 
     def test_autograd_profiler(self):
-        # wrap torch.autograd.profiler.* as ProfilerContextWrapperVariable and do nothing
+        # wrap torch.autograd.profiler.* as NullContextVariable and do nothing
         def fn(x):
             y = x**2
             with torch.autograd.profiler.profile():
@@ -2884,6 +2884,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_func(x1, y)
         self.assertTrue(same(ref, res))
         self.assertTrue(same(x, x1))
+
+    def test_if_cond_nn_mod(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self, output_relu=True):
+                super(MockModule, self).__init__()
+                self.relu = torch.nn.ReLU() if output_relu else None
+
+            def forward(self, x):
+                x = torch.sin(x)
+                if self.relu:
+                    x = self.relu(x)
+                return x
+
+        model = MockModule()
+        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+
+        x = torch.rand(4)
+        ref = model(x)
+        res = opt_model(x)
+        self.assertTrue(same(ref, res))
+
+        model = MockModule(output_relu=False)
+        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+
+        x = torch.rand(4)
+        ref = model(x)
+        res = opt_model(x)
+        self.assertTrue(same(ref, res))
 
 
 class CustomFunc(torch.autograd.Function):

@@ -10,6 +10,7 @@
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <ATen/NestedTensorImpl.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
 
 #include <functional>
 #include <unordered_set>
@@ -26,8 +27,6 @@ struct sdp_params {
   bool need_attn_weights;
   bool is_causal;
 };
-
-enum class SDPBackend { flash_attention, efficient_attention, math, error };
 
 template <typename dtype_vector>
 inline bool check_tensor_dtype(
@@ -62,6 +61,15 @@ inline bool check_for_attn_weights(sdp_params params, bool debug) {
   }
   return true;
 }
+
+inline bool check_for_non_zero_dropout(sdp_params params, bool debug) {
+  if (params.dropout != 0.0) {
+    TORCH_CHECK(!debug, "Mem_efficient does not support non_zero dropout. Dropout_p: ", params.dropout);
+    return false;
+  }
+  return true;
+}
+
 inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
   if (!params.query.is_nested()) {
     return true;
@@ -230,7 +238,8 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_for_attn_weights,
       check_tensor_shapes,
       check_for_attn_mask,
-      check_for_seq_len_1_nested_tensor};
+      check_for_seq_len_1_nested_tensor,
+      check_for_non_zero_dropout};
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
