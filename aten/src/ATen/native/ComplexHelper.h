@@ -18,7 +18,7 @@ namespace at { namespace native {
 // View tensor with new dtype, storage offset, sizes and strides
 inline Tensor view_tensor(
     const Tensor &tensor, ScalarType dtype,
-    SymInt offset, c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
+    c10::SymInt offset, SymIntArrayRef sizes, SymIntArrayRef strides) {
   Storage storage = tensor.storage();
   auto key_set = tensor.key_set().remove(DispatchKey::Conjugate);
   auto new_tensor = detail::make_tensor<TensorImpl>(
@@ -28,7 +28,7 @@ inline Tensor view_tensor(
   return new_tensor;
 }
 
-inline SymDimVector computeStrideForViewAsReal(c10::SymIntArrayRef oldstride) {
+inline SymDimVector computeStrideForViewAsReal(SymIntArrayRef oldstride) {
   SymDimVector res(oldstride.size() + 1);
   for (const auto i : c10::irange(oldstride.size())) {
     res[i] = oldstride[i] * 2;
@@ -60,7 +60,7 @@ Tensor view_as_real(const Tensor& self) {
 }
 
 inline SymDimVector computeStrideForViewAsComplex(SymIntArrayRef oldstride) {
-  const auto dim = oldstride.size();
+  const int64_t dim = oldstride.size();
   TORCH_CHECK(oldstride[dim-1] == 1, "Tensor must have a last dimension with stride 1");
 
   SymDimVector res(dim - 1);

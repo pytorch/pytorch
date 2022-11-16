@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import functools
 import itertools
 import sys
 from typing import Union
@@ -8,11 +7,12 @@ from typing import Union
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload
+from torch.distributed.fsdp import ShardingStrategy
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    CPUOffload,
     FullyShardedDataParallel as FSDP,
 )
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -23,9 +23,9 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 if not dist.is_available():
@@ -43,16 +43,13 @@ if TEST_WITH_DEV_DBG_ASAN:
 class TestClipGradNorm(FSDPTest):
     """Tests :meth:`FullyShardedDataParallel.clip_grad_norm_`."""
 
-    @property
-    def world_size(self) -> int:
-        return 2
-
     @skip_if_lt_x_gpu(2)
     def test_non_root(self):
         """
         Tests that calling ``clip_grad_norm_()`` on a non-root FSDP instance
         raises an error.
         """
+
         class Model(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -80,6 +77,11 @@ class TestClipGradNorm(FSDPTest):
             {
                 "max_norm": [1, 2.5],
                 "norm_type": [1, 2, float("inf")],
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.NO_SHARD,
+                    "mixed_strategy",
+                ],
                 "use_orig_params": [False, True],
                 "offload_params": [False, True],
             },
@@ -90,8 +92,9 @@ class TestClipGradNorm(FSDPTest):
         self,
         max_norm: Union[float, int],
         norm_type: Union[float, int],
-        offload_params: bool,
+        sharding_strategy: Union[ShardingStrategy, str],
         use_orig_params: bool,
+        offload_params: bool,
     ):
         local_model = TransformerWithSharedParams.init(
             self.process_group,
@@ -101,23 +104,52 @@ class TestClipGradNorm(FSDPTest):
         )
         ddp_model = DDP(local_model, device_ids=[self.rank])
         fsdp_kwargs = {
-            "auto_wrap_policy": functools.partial(
-                transformer_auto_wrap_policy,
-                transformer_layer_cls={
-                    TransformerEncoderLayer,
-                    TransformerDecoderLayer,
-                },
-            ),
             "cpu_offload": CPUOffload(offload_params=offload_params),
             "use_orig_params": use_orig_params,
         }
-        fsdp_model = TransformerWithSharedParams.init(
-            self.process_group,
-            FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
-            deterministic=True,
-            fsdp_kwargs=fsdp_kwargs,
-        )
+        if sharding_strategy == "mixed_strategy":
+            fsdp_model = TransformerWithSharedParams.init(
+                self.process_group,
+                FSDPInitMode.NO_FSDP,
+                CUDAInitMode.CUDA_BEFORE,
+                deterministic=True,
+            )
+            # Apply `NO_SHARD` to the encoder
+            fsdp_model.transformer.encoder = FSDP(
+                fsdp_model.transformer.encoder,
+                sharding_strategy=ShardingStrategy.NO_SHARD,
+                **fsdp_kwargs,
+            )
+            # Apply `FULL_SHARD` to the decoder
+            fsdp_model.transformer.decoder = FSDP(
+                fsdp_model.transformer.decoder,
+                sharding_strategy=ShardingStrategy.FULL_SHARD,
+                **fsdp_kwargs,
+            )
+            # TODO: FSDP's `clip_grad_norm_()` is not a static method, so we
+            # must make the root module an FSDP instance
+            fsdp_model = FSDP(
+                fsdp_model, sharding_strategy=ShardingStrategy.FULL_SHARD, **fsdp_kwargs
+            )
+        else:
+            fsdp_kwargs.update(
+                {
+                    "sharding_strategy": sharding_strategy,
+                    "auto_wrap_policy": ModuleWrapPolicy(
+                        {
+                            TransformerEncoderLayer,
+                            TransformerDecoderLayer,
+                        }
+                    ),
+                }
+            )
+            fsdp_model = TransformerWithSharedParams.init(
+                self.process_group,
+                FSDPInitMode.RECURSIVE,
+                CUDAInitMode.CUDA_BEFORE,
+                deterministic=True,
+                fsdp_kwargs=fsdp_kwargs,
+            )
         LR = 1e-2
         ddp_optim = torch.optim.Adam(ddp_model.parameters(), lr=LR)
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=LR)
@@ -126,24 +158,35 @@ class TestClipGradNorm(FSDPTest):
         inp = ddp_model.module.get_input(device)
         for model in (ddp_model, fsdp_model):
             out = model(*inp)
-            loss = model.module.get_loss(inp, out)
+            if isinstance(model, (DDP, FSDP)):
+                loss = model.module.get_loss(inp, out)
+            else:
+                loss = model.get_loss(inp, out)
             loss.backward()
 
         # Multiply gradients by a large factor to ensure that gradients will
         # actually be clipped
         for param in itertools.chain(ddp_model.parameters(), fsdp_model.parameters()):
-            if param.grad is not None:  # gradients may be `None` for `use_orig_params=True`
+            if (
+                param.grad is not None
+            ):  # gradients may be `None` for `use_orig_params=True`
                 param.grad *= LARGE_FACTOR
-        orig_ddp_grads = [param.grad.detach().clone() for param in ddp_model.parameters()]
+        orig_ddp_grads = [
+            param.grad.detach().clone() for param in ddp_model.parameters()
+        ]
         orig_fsdp_grads = [
             param.grad.detach().clone() if param.grad is not None else None
             for param in fsdp_model.parameters()
         ]
 
         ddp_total_norm = torch.nn.utils.clip_grad_norm_(
-            ddp_model.parameters(), max_norm=max_norm, norm_type=norm_type,
+            ddp_model.parameters(),
+            max_norm=max_norm,
+            norm_type=norm_type,
         )
-        fsdp_total_norm = fsdp_model.clip_grad_norm_(max_norm=max_norm, norm_type=norm_type)
+        fsdp_total_norm = fsdp_model.clip_grad_norm_(
+            max_norm=max_norm, norm_type=norm_type
+        )
         self.assertEqual(ddp_total_norm, fsdp_total_norm)
 
         # Check that the gradients were modified by `clip_grad_norm_()`

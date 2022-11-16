@@ -50,6 +50,7 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
 
     if args.fsdp:
         model = apply_fsdp(
+            args,
             model,
             use_checkpointing=args.fsdp_checkpoint,
             use_wrap_policy=args.fsdp_wrap,
@@ -63,6 +64,8 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
     if args.dynamo:
         if args.verbose:
             dynamo.config.verbose = True
+        if args.dynamo_optimize_ddp:
+            dynamo.config.optimize_ddp = True
 
         def print_compile(gm, ex):
             print(
@@ -130,6 +133,11 @@ if __name__ == "__main__":
         "--world_size", type=int, default=2, help="Number of ranks/gpus for experiments"
     )
     parser.add_argument(
+        "--dynamo_optimize_ddp",
+        action="store_true",
+        help="Enable dynamo's ddp optimizer",
+    )
+    parser.add_argument(
         "--fsdp_checkpoint",
         action="store_true",
         help="whether to use gradient checkpointing via model-specific policy",
@@ -153,7 +161,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    model_name = "ToyModel" if args.toy_model else args.torchbench_model
+    model_name = args.torchbench_model
+    if args.toy_model:
+        model_name = "ToyModel"
     model, inputs = get_model(args)
 
     fn = partial(run_model, args, model, inputs)

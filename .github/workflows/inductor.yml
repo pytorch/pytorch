@@ -1,11 +1,12 @@
 name: inductor
 
 on:
+  schedule:
+    - cron: 45 1,5,9,13,17,21 * * *
   push:
-    branches:
-      - master
     tags:
       - ciflow/inductor/*
+      - ciflow/periodic/*
   workflow_dispatch:
 
 concurrency:
@@ -22,16 +23,11 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 10, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 2, num_shards: 10, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 3, num_shards: 10, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 4, num_shards: 10, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 5, num_shards: 10, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 6, num_shards: 10, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 7, num_shards: 10, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 8, num_shards: 10, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 9, num_shards: 10, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 10, num_shards: 10, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
         ]}
 
   linux-bionic-cuda11_6-py3_10-gcc7-inductor-test:
