@@ -187,37 +187,7 @@ Tensor& squeeze_dims__batching_rule(Tensor& self, IntArrayRef dims) {
 }
 
 Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return self.squeeze_(dim);
-  }
-  auto* batched = maybeGetBatchedImpl(self);
-  const auto bdim = batched->bdim();
-  auto logical_dim = self.dim();
-
-  // If logically a scalar tensor, then Tensor.squeeze_(dim) is a no-op
-  if (logical_dim == 0) {
-    return self;
-  }
-
-  dim = maybe_wrap_dim(dim, logical_dim);
-  if (dim >= bdim) {
-    dim = dim + 1;
-    batched->value().squeeze_(dim);
-    batched->refreshTensorMetadata();
-    return self;
-  }
-
-  // Tensor.squeeze_(0) is a no-op if dim 0 has a size other than 1
-  if (batched->value().size(dim) != 1) {
-    return self;
-  }
-
-  // dim < bdim, so we need to adjust bdim
-  batched->value().squeeze_(dim);
-  batched->unsafe_set_bdim(bdim - 1);
-  batched->refreshTensorMetadata();
-  return self;
+  return squeeze_dims__batching_rule(self, {dim});
 }
 
 Tensor& squeeze__batching_rule(Tensor& self) {
