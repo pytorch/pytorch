@@ -7,6 +7,7 @@ import torch
 import torch._dynamo
 import torch._inductor.utils
 from torch._dynamo.test_minifier_common import MinifierTestBase
+from torch.testing._internal.common_utils import IS_MACOS
 
 _HAS_TRITON = torch._inductor.utils.has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not _HAS_TRITON, "requires cuda")
@@ -205,4 +206,5 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    run_tests()
+    if not IS_MACOS:
+        run_tests()
