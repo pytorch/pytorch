@@ -333,6 +333,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.grid_sample": {f16},
+    "grid_sampler_2d": {f16},
     "nn.functional.gaussian_nll_loss": {f16, f32, f64},
     "nn.functional.one_hot": {i64},
     "nn.functional.rrelu": {f16, f32, f64},
