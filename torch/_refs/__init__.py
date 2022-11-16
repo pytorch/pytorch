@@ -744,10 +744,10 @@ def nan_to_num(
         nan = 0.0
 
     if posinf is None:
-        posinf = prims.maximum_value(a.dtype)
+        posinf = torch.finfo(a.dtype).max
 
     if neginf is None:
-        neginf = prims.minimum_value(a.dtype)
+        neginf = torch.finfo(a.dtype).min
 
     result = where(isnan(a), nan, a)
 
@@ -2856,6 +2856,12 @@ def _unsqueeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeT
     return x
 
 
+def _squeeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
+    for dim in reversed(sorted(dimensions)):
+        x = torch.squeeze(x, dim)
+    return x
+
+
 @register_decomposition(torch.ops.aten.native_group_norm.default)
 def native_group_norm(
     input: Tensor,
@@ -2904,8 +2910,8 @@ def native_group_norm(
     rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
 
     # remove broadcast dimensions from mean and rstd
-    mean = prims.squeeze(mean, reduction_dims)
-    rstd = prims.squeeze(rstd, reduction_dims)
+    mean = _squeeze_multiple(mean, reduction_dims)
+    rstd = _squeeze_multiple(rstd, reduction_dims)
     return (out, mean, rstd)
 
 
