@@ -858,6 +858,58 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     if (numel == 0) {
       return;
     }
+
+    // When the slice of source or result is noncontiguous,
+    // original index_add is slow as it uses add for the sliced tensor,
+    // which is serial on index and parallel on sliced tensor to avoid write conflict.
+    // Doing parallel on the sliced tensor is not optimal as the size of sliced tensor
+    // may be not big enough to parallel and also causes multiple parallelizations.
+    // scatter_add is used to speedup for this case as scatter_add parallels on
+    // the outer dimension of input and is serial on the inner dimension to
+    // avoid write conflict. scatter_add only need one parallel and the size of
+    // outer dimensions is bigger to do parallel.
+
+    // TODO: When https://github.com/pytorch/pytorch/pull/82703 lands,
+    // using scatter_add will also get obvious speedup for the case dim == 0.
+    if ((result.stride(dim) == 1 || source.stride(dim) == 1) &&
+        // Data type of index should be long and alpha should be 1 to use scatter_add.
+        alpha.equal(1.0) && index_contig.scalar_type() == ScalarType::Long &&
+        result.numel() > at::internal::GRAIN_SIZE &&
+        // scatter_add does not support ComplexHalf
+        source.scalar_type() != ScalarType::ComplexHalf &&
+        result.scalar_type() != ScalarType::ComplexHalf) {
+      std::vector<int64_t> ep_sizes(result.sizes().size());
+      std::vector<int64_t> ep_strides(source.sizes().size());
+      ep_sizes[dim] = numel;
+      ep_strides[dim] = 1;
+
+      // Check whether result and source are matched apart from the dimension dim.
+      // Note that the broadcast case:
+      // source.select(dim, i) is broadcast for result.select(dim, index_data[i])
+      // The broadcast case is not applicable for scatter_add
+      auto check_sizes = [&ep_sizes, &ep_strides](IntArrayRef a, IntArrayRef b, int64_t dim) -> bool {
+        if (a.size() != b.size())
+          return false;
+        int64_t ndim = a.size();
+        for (int64_t i = ndim - 1; i >= 0; --i) {
+          if (i != dim){
+            if (a[i] != b[i])
+              return false;
+            ep_sizes[i] = a[i];
+            ep_strides[i] = 0;
+          }
+        }
+        return true;
+      };
+
+      if (check_sizes(result.sizes(), source.sizes(), dim)) {
+        auto ep_index = index_contig.as_strided(ep_sizes, ep_strides);
+        result.scatter_add_(dim, ep_index, source);
+        return;
+      };
+
+    }
+
     auto selfSlice = result.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
     auto self_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
