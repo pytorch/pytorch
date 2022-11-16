@@ -762,7 +762,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   id=$((SHARD_NUMBER-1))
   test_inductor_timm_shard $id
 elif [[ "${TEST_CONFIG}" == *inductor_torchbench* && $NUM_TEST_SHARDS -gt 1 ]]; then
-  checkout_install_torchaudio
+  install_torchaudio
   install_torchtext
   install_torchvision
   install_filelock

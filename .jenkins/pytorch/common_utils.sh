@@ -107,17 +107,6 @@ function install_torchaudio() {
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
 }
 
-# TODO: figure out why pip install torchaudio does not work
-function checkout_install_torchaudio() {
-  local commit
-  commit=$(get_pinned_commit audio)
-  git clone https://github.com/pytorch/audio
-  pushd audio
-  git checkout "${commit}"
-  time python setup.py install
-  popd
-}
-
 function install_torchtext() {
   local commit
   commit=$(get_pinned_commit text)
@@ -128,26 +117,6 @@ function install_torchvision() {
   local commit
   commit=$(get_pinned_commit vision)
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
-}
-
-function checkout_install_torchvision() {
-  local commit
-  commit=$(get_pinned_commit vision)
-  git clone https://github.com/pytorch/vision
-  pushd vision
-  git checkout "${commit}"
-  time python setup.py install
-  popd
-}
-
-function install_torchaudio_nightly() {
-  NIGHTLY_VERSION="dev20221101"
-  pip_install --user --pre torchaudio==0.14.0.${NIGHTLY_VERSION} --extra-index-url https://download.pytorch.org/whl/nightly/cu117
-}
-
-function install_torchtext_nightly() {
-  NIGHTLY_VERSION="dev20221101"
-  pip_install --user --pre torchtext==0.14.0.${NIGHTLY_VERSION} --extra-index-url https://download.pytorch.org/whl/nightly/cu117
 }
 
 function clone_pytorch_xla() {
