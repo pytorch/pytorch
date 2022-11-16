@@ -5637,8 +5637,8 @@ class TestTorch(TestCase):
         # i.e., using scatter_add
         for dtype in all_types_and_complex_and(torch.half, torch.bfloat16):
             for device in get_all_device_types():
-                for size in [(20, 20), (5, 20, 20)]:
-                    index = torch.randint(0, 20, (20,), dtype=torch.long, device=device)
+                for size in [(512, 256), (5, 256, 256)]:
+                    index = torch.randint(0, 256, (256,), dtype=torch.long, device=device)
                     tensor = torch.zeros(size, dtype=dtype, device=device)
                     if dtype.is_floating_point or dtype.is_complex:
                         source = torch.rand(size, dtype=dtype, device=device)
@@ -5655,11 +5655,11 @@ class TestTorch(TestCase):
                         self.assertEqual(out.float(), ref_out.float())
 
             # Check bound
-            result = torch.ones(3, 3)
-            source = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=dtype)
-            index = torch.tensor([0, 2, 2, 1])
+            result = torch.zeros(512, 256, dtype=dtype)
+            source = torch.ones(512, 256, dtype=dtype)
+            index = torch.ones(257)
             self.assertRaises(RuntimeError, lambda: result.index_add_(-1, index, source))
-            index = torch.tensor([0, 2, 3])
+            index = torch.ones(256) * 257
             self.assertRaises(RuntimeError, lambda: result.index_add_(-1, index, source))
 
     # FIXME: move to shape ops test suite
