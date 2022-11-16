@@ -24,9 +24,10 @@ from torch.utils._pytree import tree_map
 
 
 aten = torch.ops.aten
+c10d = torch.ops.c10d
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
-
+_meta_c10d_lib_dont_use_me_use_register_meta = torch.library.Library("c10d", "IMPL", "Meta")
 
 def register_meta(op):
     def wrapper(fn):
@@ -2064,6 +2065,9 @@ def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has
     grad_bias = grad_gates.sum(0, keepdim=False) if has_bias else None
     return grad_gates, grad_cx, grad_bias
 
+@register_meta(c10d.allgather_.default)
+def allgather__meta(tensorlist, *args, **kwargs):
+    return tensorlist
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
@@ -2108,7 +2112,10 @@ def activate_meta():
         }:
             pass
         else:
-            _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
+            if op_overload.name().startswith('c10d'):
+                _meta_c10d_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
+            else:
+                _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
 
 activate_meta()

@@ -3,7 +3,6 @@ import functools
 import itertools
 import operator
 
-import torch.nn as nn
 import torch
 from torch.fx.node import map_aggregate
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
@@ -18,10 +17,6 @@ if fake_tensors_available:
     from torch._subclasses import FakeTensorMode  # noqa: F401
 
     from ..utils import deepcopy_to_fake_tensor
-
-
-class InputMutationError(RuntimeError):
-    pass
 
 
 class ShapeAliasingAndMutationProp(ShapeProp):
@@ -52,10 +47,6 @@ class ShapeAliasingAndMutationProp(ShapeProp):
 
         input_versions1 = [obj._version for obj in tensor_args]
         result = getattr(self, n.op)(n.target, args, kwargs)
-        # Manual fixes for known batch norm bug, see
-        # https://github.com/pytorch/pytorch/issues/88375
-        if n.op == "call_module" and isinstance(self.fetch_attr(n.target), (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-            raise InputMutationError()
         assert result is not NotImplemented
         input_versions2 = [obj._version for obj in tensor_args]
 
@@ -155,11 +146,8 @@ def has_mutation(gm, example_inputs, inputs_only=False):
         fake_wrapper = functools.partial(_wrap_to_fake_tensor, f_mode=fake_mode)
         example_inputs = tree_map(fake_wrapper, example_inputs)
         new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
-        try:
-            with fake_mode, enable_python_dispatcher():
-                ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
-        except InputMutationError:
-            return True
+        with fake_mode, enable_python_dispatcher():
+            ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     else:
         # Clone the inputs such that intermediate tensors (not leaf tensors) with
         # requires_grad to True are now converted to False to avoid Runtime Error
@@ -167,16 +155,18 @@ def has_mutation(gm, example_inputs, inputs_only=False):
         example_inputs = clone_inputs(example_inputs)
         new_gm = copy.deepcopy(gm)
         example_inputs = copy.deepcopy(example_inputs)
-        try:
-            ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
-        except InputMutationError:
-            return True
+        ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
 
+    inp_nodes = [n for n in new_gm.graph.nodes if n.op == 'placeholder']
     for node in new_gm.graph.nodes:
         if node.meta["is_mutation"] or node.meta["is_input_mutation"]:
             if inputs_only:
                 if node.meta["is_input_alias"]:
-                    return True
+                    # Get the list of inputs that alias with the current node.
+                    inps_that_alias_node = [n for n in inp_nodes if n.meta['alias_groups'] & node.meta['alias_groups']]
+                    if len(inps_that_alias_node) > 1:
+                        import pdb; pdb.set_trace()
+                        return True
             else:
                 return True
     return False
