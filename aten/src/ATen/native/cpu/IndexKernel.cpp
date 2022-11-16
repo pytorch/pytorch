@@ -539,7 +539,7 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
     // thus is_contiguous condition is not satisfied and non-vectorized code path is taken.
     auto output_strides = iter.strides(0);
     auto input_strides = iter.strides(1);
-    if (iter.ndim() > 1 && output_strides[0] < 0 && input_strides[0] == iter.element_size(1)) {
+    if (iter.ndim() > 0 && output_strides[0] < 0 && input_strides[0] == iter.element_size(1)) {
       auto iter_dtype = iter.dtype();
       if (iter_dtype == kByte) {
         return cpu_hflip_vec<uint8_t>(iter);
