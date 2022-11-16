@@ -427,7 +427,11 @@ def check_node_is_add_inplace(node):
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
-    if config.permute_fusion:
+    is_cpu = all(
+        example_input.device == torch.device("cpu") for example_input in example_inputs
+    )
+
+    if config.permute_fusion and not is_cpu:
         # For linear permute fusion, we need to check input info to identify
         # and perform proper permutation/transpose
         ShapeProp(gm).propagate(*example_inputs)
@@ -440,9 +444,6 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         return gm
     if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
         return gm
-    is_cpu = all(
-        example_input.device == torch.device("cpu") for example_input in example_inputs
-    )
     if not is_cpu:
         return gm
     gm = fuse_conv_bn(gm)
