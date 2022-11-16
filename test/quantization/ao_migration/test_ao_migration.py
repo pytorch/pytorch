@@ -19,7 +19,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             'convert',
             'get_observer_dict',
             'get_unique_devices_',
-            'is_activation_post_process',
+            '_is_activation_post_process',
             'prepare',
             'prepare_qat',
             'propagate_qconfig_',
