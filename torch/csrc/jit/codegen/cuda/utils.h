@@ -60,7 +60,8 @@ enum class DebugDumpOption {
   Cubin, //! Dump compiled CUBIN
   Ptx, //! Dump compiled PTX
   BankConflictInfo, //! Dump bank confliction info
-  SyncMap //! RAW dependency info
+  SyncMap, //! RAW dependency info
+  LowerVerbose // Print all passes' transform in GpuLower::lower
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);

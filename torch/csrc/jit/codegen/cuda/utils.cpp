@@ -21,6 +21,7 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::FusionIrPresched, false},
       {DebugDumpOption::KernelIr, false},
       {DebugDumpOption::ComputeAtMap, false},
+      {DebugDumpOption::LowerVerbose, false},
       {DebugDumpOption::CudaKernel, false},
       {DebugDumpOption::CudaFull, false},
       {DebugDumpOption::CudaToFile, false},
@@ -109,6 +110,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::BankConflictInfo] = true;
       } else if (token == "sync_map") {
         options_map[DebugDumpOption::SyncMap] = true;
+      } else if (token == "lower_verbose") {
+        options_map[DebugDumpOption::LowerVerbose] = true;
       } else {
         TORCH_CHECK(
             false,
