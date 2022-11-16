@@ -355,8 +355,7 @@ Tensor mkl_linear(
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(origin_weight_t.size(0));
   auto output = at::empty(output_size, self.options());
-  auto M = std::accumulate(
-      input_size.begin(), input_size.end() - 1, static_cast<int64_t>(0));
+  int64_t M = self.numel() / self.size(self.dim() - 1);
   if (M == prepack_batch_size && mkl_weight_t.is_mkldnn()) {
     auto self_ = self.is_contiguous() ? self : self.contiguous();
     auto K = origin_weight_t.size(1);
