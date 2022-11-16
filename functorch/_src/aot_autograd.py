@@ -591,11 +591,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     return compiled_function
 
-# NOTE: This is here temporarily until we unify dynamo and functorch configs
-# This value acts as a proxy for dynamo configs "dynamic_shapes" setting,
-# without violating hierarchy by having aot_autograd (lower) know about dynamo
-_enforce_shape_env_passed_in = False
-
 @dynamo_timed
 def create_aot_dispatcher_function(
     flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, fake_mode,
