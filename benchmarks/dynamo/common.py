@@ -1038,7 +1038,7 @@ class BenchmarkRunner:
             out_batch_size = batch_size - 1
         return max(0, int(out_batch_size))
 
-    def batch_size_finder(self, device, model_name, initial_batch_size=128):
+    def batch_size_finder(self, device, model_name, initial_batch_size=1024):
         batch_size = initial_batch_size
         while batch_size >= 1:
             torch.cuda.empty_cache()
