@@ -84,7 +84,6 @@ class TestClipGradNorm(FSDPTest):
                 ],
                 "use_orig_params": [False, True],
                 "offload_params": [False, True],
-                # "use_orig_params": [
             },
             self._test_ddp_parity,
         )

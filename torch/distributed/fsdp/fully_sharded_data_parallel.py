@@ -1134,7 +1134,7 @@ class FullyShardedDataParallel(nn.Module):
 
         Args:
             max_norm (float or int): max norm of the gradients
-            norm_type (float or int): type of the used p-norm. Can be ``inf'``
+            norm_type (float or int): type of the used p-norm. Can be ``'inf'``
                 for infinity norm.
 
         Returns:
