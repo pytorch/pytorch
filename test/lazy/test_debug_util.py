@@ -33,7 +33,7 @@ class DebugUtilTest(TestCase):
             os.environ["LTC_SAVE_TENSORS_FILE"] = graph_file.name
             self._run_linear()
             file = graph_file.read()
-            if re.search(partial_graph, file, re.DOTALL) == None:
+            if re.search(partial_graph, file, re.DOTALL) is None:
                 print(file)
                 self.assertTrue(False)
 
