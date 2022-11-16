@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 
-from torch.distributed._shard.checkpoint import (
+from torch.distributed.checkpoint import (
     FileSystemReader,
     FileSystemWriter,
     load_state_dict,

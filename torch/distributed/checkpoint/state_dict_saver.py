@@ -9,11 +9,10 @@ from .storage import (
     StorageWriter,
 )
 
-from .metadata import (
-    Metadata,
-    STATE_DICT_TYPE
-)
+from .metadata import Metadata, STATE_DICT_TYPE
 from .utils import _DistWrapper
+
+__all__ = ["save_state_dict"]
 
 
 def save_state_dict(
@@ -22,7 +21,7 @@ def save_state_dict(
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: SavePlanner = None
+    planner: SavePlanner = None,
 ) -> Metadata:
     """
     Save a distributed model in SPMD style.
@@ -92,7 +91,9 @@ def save_state_dict(
         nonlocal global_metatadata
 
         assert planner is not None
-        all_local_plans, global_metatadata = planner.create_global_plan(all_local_plans)
+        all_local_plans, global_metatadata = planner.create_global_plan(
+            all_local_plans
+        )
         all_local_plans = storage_writer.prepare_global_plan(all_local_plans)
         return all_local_plans
 

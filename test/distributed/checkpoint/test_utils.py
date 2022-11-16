@@ -17,8 +17,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     run_tests,
 )
-from torch.distributed._shard.checkpoint.utils import find_state_dict_object
-from torch.distributed._shard.checkpoint.metadata import MetadataIndex
+from torch.distributed.checkpoint.utils import find_state_dict_object
+from torch.distributed.checkpoint.metadata import MetadataIndex
 from torch.testing._internal.distributed.distributed_utils import (
     with_fake_comms
 )

@@ -3,7 +3,7 @@
 import sys
 
 import torch
-from torch.distributed._shard.checkpoint.planner import LoadItemType, WriteItemType
+from torch.distributed.checkpoint.planner import LoadItemType, WriteItemType
 
 from torch.distributed._shard.sharded_tensor import (
     Shard,
@@ -18,13 +18,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     run_tests,
 )
-from torch.distributed._shard.checkpoint.metadata import BytesStorageMetadata, MetadataIndex, TensorStorageMetadata
+from torch.distributed.checkpoint.metadata import BytesStorageMetadata, MetadataIndex, TensorStorageMetadata
 from torch.testing._internal.distributed.distributed_utils import (
     with_fake_comms,
     with_dist
 )
 
-from torch.distributed._shard.checkpoint.default_planner import (
+from torch.distributed.checkpoint.default_planner import (
     create_default_global_save_plan,
     create_default_local_save_plan,
     create_default_local_load_plan,

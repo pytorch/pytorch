@@ -10,13 +10,16 @@ from .default_planner import DefaultLoadPlanner
 
 from .utils import _DistWrapper
 
+__all__ = ["load_state_dict"]
+
+
 def load_state_dict(
     state_dict: Dict[str, Any],
     storage_reader: StorageReader,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: LoadPlanner = None
+    planner: LoadPlanner = None,
 ) -> None:
     """
     Load a distributed state_dict in SPMD style.
@@ -78,7 +81,6 @@ def load_state_dict(
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if planner is None:
         planner = DefaultLoadPlanner()
-
 
     def local_step():
         assert planner is not None
