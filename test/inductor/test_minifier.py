@@ -206,5 +206,6 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
+    # skip CI tests on mac since CPU inductor does not seem to work due to C++ compile errors
     if not IS_MACOS:
         run_tests()
