@@ -71,6 +71,11 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
       bool allow_tensor_metadata_change) const override;
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override;
 
+  // This is pretty unsafe
+  void _set_value(const Tensor& value) {
+    value_ = value;
+  }
+
  private:
   const char* tensorimpl_type_name() const override;
   Tensor value_;

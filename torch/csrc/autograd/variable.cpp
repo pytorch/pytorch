@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
+#include <ATen/functorch/TensorWrapper.h>
 
 #include <ATen/core/VariableHooksInterface.h>
 
@@ -478,6 +479,14 @@ void VariableHooks::set_data(
   const Tensor& self = *self_ref;
   at::OptionalTensorRef new_data_ref(new_data_base);
   const Tensor& new_data = *new_data_ref;
+
+  // Store a dummy tensor in the meantime to avoid saving the entire original tensor
+  if (self.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::FuncTorchGradWrapper)) {
+    // If t is a TensorWrapper, setting t.data replaces the tensor it wraps
+    at::functorch::TensorWrapper* impl = reinterpret_cast<at::functorch::TensorWrapper*>(self.unsafeGetTensorImpl());
+    impl->_set_value(new_data);
+    return;
+  }
 
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
   // from `new_data` to `var`. It requires that `new_data` and `var` have
