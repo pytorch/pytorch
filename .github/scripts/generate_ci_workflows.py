@@ -195,8 +195,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         package_type="manywheel",
         build_configs=list(filter(
             lambda x:
-            x["gpu_arch_version"] == "11.6" and
-            x["python_version"] == "3.7" and
+            (x["gpu_arch_version"], x["python_version"]) == ("11.6", "3.7") and
             "pypi-cudnn" not in x["build_name"],
             bin_bld_matrix[OperatingSystem.LINUX][PackageType.WHEEL]
         )),
@@ -208,9 +207,8 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         abi_version=CXX11_ABI,
         build_configs=list(filter(
             lambda x:
-            x["devtoolset"] == CXX11_ABI and
-            x["gpu_arch_type"] == "cpu" and
-            x["libtorch_variant"] == "shared-with-deps",
+            (x["devtoolset"], x["gpu_arch_type"], x["libtorch_variant"]) ==
+            (CXX11_ABI, "cpu", "shared-with-deps"),
             bin_bld_matrix[OperatingSystem.LINUX][PackageType.LIBTORCH]
         )),
         branches="master",
@@ -221,9 +219,8 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         abi_version=PRE_CXX11_ABI,
         build_configs=list(filter(
             lambda x:
-            x["devtoolset"] == PRE_CXX11_ABI and
-            x["gpu_arch_type"] == "cpu" and
-            x["libtorch_variant"] == "shared-with-deps",
+            (x["devtoolset"], x["gpu_arch_type"], x["libtorch_variant"]) ==
+            (PRE_CXX11_ABI, "cpu", "shared-with-deps"),
             bin_bld_matrix[OperatingSystem.LINUX][PackageType.LIBTORCH]
         )),
         branches="master",
@@ -286,9 +283,8 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
         abi_version=RELEASE,
         build_configs=list(filter(
             lambda x:
-            x["libtorch_config"] == RELEASE and
-            x["gpu_arch_type"] == "cpu" and
-            x["libtorch_variant"] == "shared-with-deps",
+            (x["libtorch_config"], x["gpu_arch_type"], x["libtorch_variant"]) ==
+            (RELEASE, "cpu", "shared-with-deps"),
             bin_bld_matrix[OperatingSystem.WINDOWS][PackageType.LIBTORCH]
         )),
         branches="master",
@@ -299,9 +295,8 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
         abi_version=DEBUG,
         build_configs=list(filter(
             lambda x:
-            x["libtorch_config"] == DEBUG and
-            x["gpu_arch_type"] == "cpu" and
-            x["libtorch_variant"] == "shared-with-deps",
+            (x["libtorch_config"], x["gpu_arch_type"], x["libtorch_variant"]) ==
+            (DEBUG, "cpu", "shared-with-deps"),
             bin_bld_matrix[OperatingSystem.WINDOWS][PackageType.LIBTORCH]
         )),
         branches="master",
