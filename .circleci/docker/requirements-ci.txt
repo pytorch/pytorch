@@ -159,8 +159,13 @@ pytest-shard
 #Pinned versions:
 #test that import:
 
+pytest-repeat==0.9.1
+#Description: plugin for rerunning tests a fixed number of times in pytest
+#Pinned versions: 0.9.1
+#test that import:
+
 pytest-rerunfailures
-#Description: plugin for rerunning tests in pytest
+#Description: plugin for rerunning failure tests in pytest
 #Pinned versions:
 #test that import:
 
