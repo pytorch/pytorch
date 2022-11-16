@@ -520,7 +520,6 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # such as conv+add+relu for vision model.
     gm = fuse_unary(gm)
     gm = packed_module(gm)
-
     return gm
 
 
