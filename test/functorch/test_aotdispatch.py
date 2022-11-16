@@ -236,12 +236,7 @@ def _outs_and_grads(fn, graph_inps, inps):
     outs = fn(*graph_inps)
     for out in pytree.tree_flatten(outs)[0]:
         if isinstance(out, torch.Tensor) and out.requires_grad:
-            tmp = out.sum()
-            from torchviz import make_dot
-            # tmp2 = make_dot(tmp, params={i: x for (i, x) in enumerate(inps)})
-            #tmp2.render(format='png')
-            tmp.backward(retain_graph=True)
-            # out.sum().backward(retain_graph=True)
+            out.sum().backward(retain_graph=True)
     grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
     for inp in pytree.tree_flatten(inps)[0]:
         inp.grad = None
@@ -252,7 +247,14 @@ class TestAOTAutograd(AOTTestCase):
     # test_mutation will:
     # - Ensure that inputs are non-leaves, so our graphs can mutate them
     # - try to mutate outputs of the graph (to ensure that autograd meta is set properly on outputs)
-    def verify_aot_autograd(self, f, inp: Union[Callable, List[Any]], *, test_mutation: bool = False, return_fw_graph: bool = False):
+    def verify_aot_autograd(
+        self,
+        f,
+        inp: Union[Callable, List[Any]],
+        *,
+        test_mutation: bool = False,
+        return_fw_graph: bool = False,
+    ):
         # Some tests pass in a callable for inp, to generate the inputs
         # (useful if we want to generate complicated aliasing inputs)
         if isinstance(inp, Callable):
@@ -264,17 +266,25 @@ class TestAOTAutograd(AOTTestCase):
             inp, graph_inps = inp_callable()
         else:
             inp_copy = []
-            for x in inp:
-                x_copy = x.clone().detach().requires_grad_(x.requires_grad)
-                if x.requires_grad and not x.is_leaf:
-                    x_copy = x_copy.clone()
-                inp_copy.append(x_copy)
+            # Our input clones need to mimic when inputs are duplicates of one another
+            dupes_map = {}
+            for i, x in enumerate(inp):
+                if x in dupes_map:
+                    x_dupe_idx = dupes_map[x]
+                    inp_copy.append(inp_copy[x_dupe_idx])
+                else:
+                    dupes_map[x] = i
+                    x_copy = x.clone().detach().requires_grad_(x.requires_grad)
+                    if x.requires_grad and not x.is_leaf:
+                        x_copy = x_copy.clone()
+                    inp_copy.append(x_copy)
 
             if test_mutation:
                 # For graphs where we mutate inputs, need our test to make sure inputs aren't leaves
                 graph_inps = [x.add(1) for x in inp]
                 graph_inps_copy = [x.add(1) for x in inp_copy]
             else:
+                graph_inps = inp
                 graph_inps_copy = inp_copy
 
         # Create a copy of inputs, so we can test input mutation correctness.
@@ -588,19 +598,63 @@ def forward(self, primals_1):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     return [add]""")
 
+    def test_input_metadata_mutation_aliases(self):
+        def f(a, b):
+            # a and b alias, and we do a metadata mutation on a
+            # Since we're not mutating data, then b isn't affected at all.
+            # We expect aot autograd to not bother with constructing a synthetic base.
+            a.t_()
+            return a + b
+
+        def inp_callable():
+            base = torch.ones(2, 2, requires_grad=True)
+            x = base.add(1)
+            return [base], [x.view(-1), x.view(-1)]
+
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        # Expectation: fwd() takes in 2 args, and we don't construct a synthetic base.
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1, primals_2):
+    view = torch.ops.aten.view.default(primals_1, [4]);  primals_1 = None
+    t = torch.ops.aten.t.default(view);  view = None
+    add = torch.ops.aten.add.Tensor(t, primals_2);  t = primals_2 = None
+    return [add]""")
+
+    def test_input_mutation_aliases_and_none_require_gradients(self):
+        def f(a, b, c):
+            # a and b alias, but neither require gradients (so they don't have a _base)
+            # aot autograd should construct the synthetic base from `torch.Tensor(a.storage())`
+            a.mul_(2)
+            return b + 1, c + 1
+
+        def inp_callable():
+            base = torch.ones(2, 2)
+            c_arg = torch.ones(2, 2, requires_grad=True)
+            x = base.add(1)
+            return [base, c_arg], [x.view(-1), x.view(-1), c_arg]
+
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1, primals_2):
+    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+    as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
+    mul = torch.ops.aten.mul.Tensor(as_strided, 2);  as_strided = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    add = torch.ops.aten.add.Tensor(as_strided_2, 1);  as_strided_2 = None
+    add_1 = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
+    return [mul, add, add_1]""")
+
     def test_input_mutation_aliases_bases_out_of_order(self):
         # This tests our calling convention: if b and d are aliased, then the outer calling convention
         # that we send to the compiled forward becomes:
         # (b_d_base, a, c)
         # Importantly, even though a and c alias in our test, neither inputs are mutated,
         # So we don't need to do the base construction / deconstruction
-        def f(b, d):
+        def f(a, b, c, d):
             b.add_(1)
-            return b
-        # def f(a, b, c, d):
-            # b.add_(1)
-            # d.t_()
-            # return a + c + d, b.view(-1)
+            d.t_()
+            return a + c + d, b.view(-1)
 
         def inp_callable():
             base1 = torch.ones(2, 2, requires_grad=True)
@@ -608,19 +662,24 @@ def forward(self, primals_1):
             x1 = base1.add(1)
             x2 = base2.add(1)
             # a and c alias, b and d alias
-            return [base2], [x2.view(-1), x2.view(-1)]
-            # return [base1, base2], [x1.view(-1), x2.view(-1), x1.view(-1), x2.view(-1)]
+            return [base1, base2], [x1.view(-1), x2.view(-1), x1.view(-1), x2.view(-1)]
 
         fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
         # 3 graph inputs: (b_d_base, a, c)
-        # 3 returns: (b_updated, d_updated, out)
+        # 2 returns: (b_updated, a+c+d)
         # (there are 2 original fw outs, but one is a view of b so it's not part of the graph)
+        # (there are also 2 input mutations, but one is a metadata-only mutation so the compiled forward doesn't return it)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-    as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0);  clone = None
+def forward(self, primals_1, primals_2, primals_3):
+    clone = torch.ops.aten.clone.default(primals_2);  primals_2 = None
+    as_strided = torch.ops.aten.as_strided.default(primals_1, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    return [add]""")
+    add_1 = torch.ops.aten.add.Tensor(clone, primals_3);  clone = primals_3 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(primals_1, add, [4], [1], 0);  primals_1 = None
+    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    t_1 = torch.ops.aten.t.default(as_strided_4);  as_strided_4 = None
+    add_2 = torch.ops.aten.add.Tensor(add_1, t_1);  add_1 = t_1 = None
+    return [add, add_2]""")
 
     def test_no_grad_input_output(self):
         def f(a, b):
@@ -631,9 +690,23 @@ def forward(self, primals_1):
             inps = [i() for i in inps]
             self.verify_aot_autograd(f, inps)
 
-    def test_some_outputs_dont_require_grad(self):
+    def test_some_output_requires_grad_input_doesnt(self):
+        def f(a, b):
+            a_view = a.view(-1)
+            a_view.requires_grad_(True)
+            return a_view
+        inp = [torch.randn(3, 3), torch.randn(3, 3, requires_grad=True)]
+        self.verify_aot_autograd(f, inp)
+
+    def test_some_outputs_dont_require_grad_view(self):
         def f(a, b):
             return a.detach(), b
+        inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3, requires_grad=True)]
+        self.verify_aot_autograd(f, inp)
+
+    def test_some_outputs_dont_require_grad_non_view(self):
+        def f(a, b):
+            return a.add(1).detach(), b
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3, requires_grad=True)]
         self.verify_aot_autograd(f, inp)
 
@@ -684,8 +757,12 @@ def forward(self, primals_1):
             for k in x:
                 new_d[k] = x[k] * 2
             return new_d
-        inp = [{'a': torch.randn(3, requires_grad=True), 'b': torch.randn(3, requires_grad=True)}]
-        self.verify_aot_autograd(f, inp)
+
+        def inp_callable():
+            inps = [{'a': torch.randn(3, requires_grad=True), 'b': torch.randn(3, requires_grad=True)}]
+            return inps, inps
+
+        self.verify_aot_autograd(f, inp_callable)
 
     def test_module(self):
         mod = nn.Sequential(nn.Linear(32, 32), nn.ReLU())

@@ -282,6 +282,13 @@ def min_cut_rematerialization_partition(
 
     joint_module.graph.eliminate_dead_code()
     joint_module.recompile()
+
+    # networkx blows up on graphs with no outputs.
+    # Since there's nothing to partition anyway, and the default partitioner can "handle"
+    # this case, send our graph over to the default partitioner.
+    if num_fwd_outputs == 0:
+        return default_partition(joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs)
+
     fx_g = joint_module.graph
 
     #  add the CSE pass
@@ -444,7 +451,8 @@ def min_cut_rematerialization_partition(
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(lambda n: is_sym_node(n), saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
-    fw_module, bw_module = _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
+    fw_module, bw_module = _extract_fwd_bwd_modules(
+        joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
         fw_module_nodes = set([node.name for node in fw_module.graph.nodes if node.op == 'call_function'])
