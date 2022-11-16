@@ -4068,6 +4068,48 @@ class CommonTemplate:
             rtol=0.5,
         )
 
+    def test_conv_backward(self):
+        def fn(grad_out, inp, weight):
+            out1 = aten.convolution_backward(
+                grad_out,
+                inp,
+                weight,
+                [C],
+                [1, 1],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, True],
+            )
+            out2 = aten.convolution_backward(
+                grad_out,
+                inp,
+                weight,
+                [C],
+                [1, 1],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, False, False],
+            )
+            return (out1, out2)
+
+        B = 3
+        C = 4
+        H = 5
+        self.common(
+            fn,
+            [
+                torch.randn(B, C, H - 2, H - 2),
+                torch.randn(B, C, H, H),
+                torch.randn(C, C, 3, 3),
+            ],
+        )
+
     @unittest.skip(
         """
         FIXME: In the case of having equally max/min elements, our implementation returns
