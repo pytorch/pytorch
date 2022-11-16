@@ -1082,7 +1082,7 @@ def meta_diag(self, dim=0):
 
 @register_meta(aten.diagonal_scatter.default)
 def diagonal_scatter(self, src, offset=0, dim1=0, dim2=1):
-    return self.clone()
+    return clone_preserve_strides(self)
 
 
 @register_meta(aten._embedding_bag_forward_only.default)
@@ -1597,15 +1597,24 @@ def meta_select(self, dim, index):
 
     return self.as_strided(new_size, new_stride, new_storage_offset)
 
+# From TensorShape.cpp
+# This should be landed along with https://github.com/pytorch/pytorch/pull/88198
+def clone_preserve_strides(self):
+    # Should we check for internal mem overlap here? That might produce a lot of guards.
+    # if torch._debug_has_internal_overlap(self) == 1:
+        # return self.clone()
+    storage_numel = self.storage().size()
+    clone_full_size = self.as_strided((storage_numel,), (1,), 0)
+    return clone_full_size.as_strided(self.size(), self.stride(), self.storage_offset())
 
 @register_meta(aten.select_scatter.default)
 def meta_select_scatter(self, src, dim, index):
-    return torch.empty_like(self)
+    return clone_preserve_strides(self)
 
 
 @register_meta(aten.slice_scatter.default)
 def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
-    return torch.empty_like(self)
+    return clone_preserve_strides(self)
 
 
 @register_meta(aten._to_copy.default)
