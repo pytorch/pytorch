@@ -18,6 +18,7 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
+    _get_module_fsdp_state,
     _has_fsdp_params,
     _module_handles,
     clean_tensor_name,
@@ -636,8 +637,9 @@ def _post_state_dict_hook(
     FSDP module is executed. ``fsdp_state._state_dict_type`` is used to decide
     what postprocessing will be done.
     """
-    # TODO: get the composable state from module
-    fsdp_state: _FSDPState = module
+    state = _get_module_fsdp_state(module)
+    assert state is not None, "state_dict_hook get a module without _FSDPState"
+    fsdp_state = cast(_FSDPState, state)
     _post_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_state_dict_hook,
@@ -662,8 +664,9 @@ def _pre_load_state_dict_hook(
     is called. ``fsdp_state._state_dict_type`` is used to decide what preprocessing
     will be done.
     """
-    # TODO: get the composable state from module
-    fsdp_state: _FSDPState = module
+    state = _get_module_fsdp_state(module)
+    assert state is not None, "state_dict_hook get a module without _FSDPState"
+    fsdp_state = cast(_FSDPState, state)
     _pre_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_load_state_dict_hook,
@@ -681,8 +684,9 @@ def _pre_load_state_dict_hook(
 @no_type_check
 @torch.no_grad()
 def _post_load_state_dict_hook(module: nn.Module, *args: Any) -> None:
-    # TODO: get the composable state from module
-    fsdp_state: _FSDPState = module
+    state = _get_module_fsdp_state(module)
+    assert state is not None, "state_dict_hook get a module without _FSDPState"
+    fsdp_state = cast(_FSDPState, state)
     _post_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_load_state_dict_hook,

@@ -4,6 +4,8 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import contract
+from torch.distributed._composable_state import _insert_module_state
+from torch.distributed.fsdp._common_utils import _FSDPState
 from torch.distributed.fsdp._init_utils import (
     _init_buffer_state,
     _init_core_state,
@@ -45,6 +47,8 @@ def fully_shard(
     # Enforce the new auto wrap policy
     if policy is not None and not isinstance(policy, _FSDPPolicy):
         raise ValueError(f"Expects an `_FSDPPolicy` but got {policy}")
+    # This is a hack to make _FSDPState to be compatible with the existing contract.
+    fully_shard.set_state(module, _FSDPState())
     state = fully_shard.state(module)
     state = _init_ignored_module_states(state, module, ignored_modules)
     state = _init_process_group_state(state, process_group)
@@ -77,4 +81,6 @@ def fully_shard(
     modules = list(module.modules())
     _register_pre_forward_hooks(state, modules)
     _register_post_forward_hooks(state, modules)
+    for submodule in state._module_to_handles.keys():
+        _insert_module_state(submodule, state)
     return module

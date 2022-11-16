@@ -1,7 +1,8 @@
 import torch.nn as nn
 
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, cast, Dict, List, Optional
+from torch.distributed._composable_state import _get_module_state, _State
 
 
 # use state_slot as key for module.__dict__ to avoid coliding with other
@@ -14,8 +15,10 @@ class _StateKey:
         return True if isinstance(other, str) else id(self) < id(other)
 
 
+"""
 class _State:
     pass
+"""
 
 
 STATE_KEY = _StateKey()
@@ -140,6 +143,11 @@ def contract(func):
     def get_state(module: nn.Module) -> Optional[_State]:
         return module.__dict__.get(STATE_KEY).get(func)  # type: ignore[call-overload]
 
+    def set_state(module: nn.Module, state: _State) -> None:
+        # This is a hack to make the _FSDPState compatible with the existing contract.
+        module.__dict__[STATE_KEY][func] = state
+
     wrapper.state = get_state  # type: ignore[attr-defined]
+    wrapper.set_state = set_state
 
     return wrapper
