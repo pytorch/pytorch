@@ -21,7 +21,6 @@ namespace delegate {
 std::shared_ptr<torch::jit::Graph> XNNGraph::optimizeAndTraceGraph(
     std::shared_ptr<torch::jit::Graph> graph,
     std::vector<c10::IValue>& example_inputs) {
-  graph = tensorexpr::removeUnusedSelfArgument(graph);
   OptimizeFrozenGraph(graph, true);
   RemoveListMutation(graph);
   RemoveTensorMutation(graph);
