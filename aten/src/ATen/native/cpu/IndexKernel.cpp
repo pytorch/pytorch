@@ -487,12 +487,12 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
       int64_t i = 0;
 
       // data[0] unaligned pre-pass
-      uint8_t offset = (j * n + (n - i - Vec::size())) % 32;
+      int64_t offset = (j * n + (n - i - Vec::size())) % 32;
+      offset = (offset >= n) ? n : offset;
       for (; i < offset; i++) {
         scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride0);
         *out_ptr = *(scalar_t *)(data[1] + i * strides[1]);
       }
-
       for (; i <= n - 3 * Vec::size(); i += 3 * Vec::size()) {
         auto out1 = Vec::loadu(data[1] + i * strides[1]);
         auto out2 = Vec::loadu(data[1] + (i + Vec::size()) * strides[1]);
