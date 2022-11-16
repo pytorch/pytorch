@@ -66,14 +66,14 @@ class BinaryBuildWorkflow:
     package_type: str
 
     # Optional fields
-    build_environment: str = ''
-    abi_version: str = ''
+    build_environment: str = ""
+    abi_version: str = ""
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
-    is_scheduled: str = ''
+    is_scheduled: str = ""
     branches: str = CHANNEL
     # Mainly for macos
     cross_compile_arm64: bool = False
-    xcode_version: str = ''
+    xcode_version: str = ""
 
     def __post_init__(self) -> None:
         if self.abi_version:
@@ -111,7 +111,7 @@ def import_module(fname: Path) -> ModuleType:
     import importlib.util
     spec = importlib.util.spec_from_file_location(fname.stem, fname)
     if spec is None:
-        raise ImportError(f"Could not load spec for module '{fname.stem}' at: {fname}. \
+        raise ImportError(f"Could not load spec for module {fname.stem} at: {fname}. \
         Please run the regenerate.sh from .github folder before running generate_ci_workflows")
     module = importlib.util.module_from_spec(spec)
     try:
@@ -166,7 +166,7 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         package_type=PackageType.LIBTORCH.value,
         abi_version=CXX11_ABI,
         build_configs=list(filter(
-            lambda x: x['devtoolset'] == CXX11_ABI,
+            lambda x: x["devtoolset"] == CXX11_ABI,
             bin_bld_matrix[OperatingSystem.LINUX][PackageType.LIBTORCH]
         )),
         ciflow_config=CIFlowConfig(
@@ -179,7 +179,7 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         package_type=PackageType.LIBTORCH.value,
         abi_version=PRE_CXX11_ABI,
         build_configs=list(filter(
-            lambda x: x['devtoolset'] == PRE_CXX11_ABI,
+            lambda x: x["devtoolset"] == PRE_CXX11_ABI,
             bin_bld_matrix[OperatingSystem.LINUX][PackageType.LIBTORCH]
         )),
         ciflow_config=CIFlowConfig(
@@ -195,9 +195,9 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         package_type="manywheel",
         build_configs=list(filter(
             lambda x:
-            x['gpu_arch_version'] == "11.6" and
-            x['python_version'] == "3.7" and
-            "pypi-cudnn" not in x['build_name'],
+            x["gpu_arch_version"] == "11.6" and
+            x["python_version"] == "3.7" and
+            "pypi-cudnn" not in x["build_name"],
             bin_bld_matrix[OperatingSystem.LINUX][PackageType.WHEEL]
         )),
         branches="master",
@@ -208,9 +208,9 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         abi_version=CXX11_ABI,
         build_configs=list(filter(
             lambda x:
-            x['devtoolset'] == CXX11_ABI and
-            x['gpu_arch_type'] == "cpu" and
-            x['libtorch_variant'] == "shared-with-deps",
+            x["devtoolset"] == CXX11_ABI and
+            x["gpu_arch_type"] == "cpu" and
+            x["libtorch_variant"] == "shared-with-deps",
             bin_bld_matrix[OperatingSystem.LINUX][PackageType.LIBTORCH]
         )),
         branches="master",
@@ -221,9 +221,9 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         abi_version=PRE_CXX11_ABI,
         build_configs=list(filter(
             lambda x:
-            x['devtoolset'] == PRE_CXX11_ABI and
-            x['gpu_arch_type'] == "cpu" and
-            x['libtorch_variant'] == "shared-with-deps",
+            x["devtoolset"] == PRE_CXX11_ABI and
+            x["gpu_arch_type"] == "cpu" and
+            x["libtorch_variant"] == "shared-with-deps",
             bin_bld_matrix[OperatingSystem.LINUX][PackageType.LIBTORCH]
         )),
         branches="master",
@@ -255,7 +255,7 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         abi_version=RELEASE,
         build_configs=list(filter(
             lambda x:
-            x['libtorch_config'] == RELEASE,
+            x["libtorch_config"] == RELEASE,
             bin_bld_matrix[OperatingSystem.WINDOWS][PackageType.LIBTORCH]
         )),
         ciflow_config=CIFlowConfig(
@@ -269,7 +269,7 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         abi_version=DEBUG,
         build_configs=list(filter(
             lambda x:
-            x['libtorch_config'] == DEBUG,
+            x["libtorch_config"] == DEBUG,
             bin_bld_matrix[OperatingSystem.WINDOWS][PackageType.LIBTORCH]
         )),
         ciflow_config=CIFlowConfig(
@@ -286,9 +286,9 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
         abi_version=RELEASE,
         build_configs=list(filter(
             lambda x:
-            x['libtorch_config'] == RELEASE and
-            x['gpu_arch_type'] == "cpu" and
-            x['libtorch_variant'] == "shared-with-deps",
+            x["libtorch_config"] == RELEASE and
+            x["gpu_arch_type"] == "cpu" and
+            x["libtorch_variant"] == "shared-with-deps",
             bin_bld_matrix[OperatingSystem.WINDOWS][PackageType.LIBTORCH]
         )),
         branches="master",
@@ -299,9 +299,9 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
         abi_version=DEBUG,
         build_configs=list(filter(
             lambda x:
-            x['libtorch_config'] == DEBUG and
-            x['gpu_arch_type'] == "cpu" and
-            x['libtorch_variant'] == "shared-with-deps",
+            x["libtorch_config"] == DEBUG and
+            x["gpu_arch_type"] == "cpu" and
+            x["libtorch_variant"] == "shared-with-deps",
             bin_bld_matrix[OperatingSystem.WINDOWS][PackageType.LIBTORCH]
         )),
         branches="master",
@@ -333,7 +333,7 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         abi_version=CXX11_ABI,
         build_configs=list(filter(
             lambda x:
-            x['devtoolset'] == CXX11_ABI,
+            x["devtoolset"] == CXX11_ABI,
             bin_bld_matrix[OperatingSystem.MACOS][PackageType.LIBTORCH]
         )),
         ciflow_config=CIFlowConfig(
@@ -347,7 +347,7 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         abi_version=PRE_CXX11_ABI,
         build_configs=list(filter(
             lambda x:
-            x['devtoolset'] == PRE_CXX11_ABI,
+            x["devtoolset"] == PRE_CXX11_ABI,
             bin_bld_matrix[OperatingSystem.MACOS][PackageType.LIBTORCH]
         )),
         ciflow_config=CIFlowConfig(
