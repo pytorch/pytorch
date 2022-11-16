@@ -857,7 +857,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
     if (sizes_strides_policy.has_value()) {
       TORCH_CHECK(
           false,
-          "Setting sizes_strides_policy isn't suppored for this overload")
+          "Setting sizes_strides_policy isn't supported for this overload")
     }
   }
 
