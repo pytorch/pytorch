@@ -118,6 +118,8 @@ def set_meta(proxy, val):
     elif isinstance(val, torch.Tensor):
         if not val.is_sparse:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+            proxy.node.meta['val'] = fake_tensor_mode.from_tensor(val)
     return proxy
 
 def thunkify(f, *args, **kwargs):

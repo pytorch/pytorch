@@ -1042,7 +1042,8 @@ def make_fallback(kernel, layout_constraint=None):
         )
 
     add_needs_realized_inputs(kernel)
-    add_layout_constraint(kernel, layout_constraint)
+    if layout_constraint is not None:
+        add_layout_constraint(kernel, layout_constraint)
     return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
 
 

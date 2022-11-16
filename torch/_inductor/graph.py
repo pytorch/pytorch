@@ -319,7 +319,7 @@ class GraphLowering(torch.fx.Interpreter):
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
                     if user.target in needs_realized_inputs:
-                        result.realize()
+                        result.realize_hint()
                         # This inclusion is somewhat controversial (from
                         # discussion between Horace, Natalia, and Elias).
                         # Currently, it's not very clear why this is helpful.
