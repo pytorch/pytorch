@@ -308,8 +308,8 @@ def register_module_full_backward_hook(
         and it is only intended for debugging/profiling purposes.
 
     The hook will be called every time the gradients with respect to a module
-    are computed. Note that the hook will not execute if the gradients with
-    respect to module outputs are not computed. The hook should have the following
+    are computed, i.e. the hook will execute if and only if the gradients with
+    respect to module outputs are computed. The hook should have the following
     signature::
 
         hook(module, grad_input, grad_output) -> Tensor or None
@@ -1200,8 +1200,8 @@ class Module:
         r"""Registers a backward hook on the module.
 
         The hook will be called every time the gradients with respect to a module
-        are computed. Note that the hook will not execute if the gradients with
-        respect to module outputs are not computed. The hook should have the following
+        are computed, i.e. the hook will execute if and only if the gradients with
+        respect to module outputs are computed. The hook should have the following
         signature::
 
             hook(module, grad_input, grad_output) -> tuple(Tensor) or None
