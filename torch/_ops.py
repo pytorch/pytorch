@@ -365,7 +365,6 @@ class OpOverload(PyOperatorABC):
             return handler
 
         final_key = resolve_key(self, key)
-        # print(self, key, final_key)
         r = self.py_kernels.get(final_key, final_key)
         self._dispatch_cache[key] = r
         return r
