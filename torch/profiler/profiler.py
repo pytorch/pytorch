@@ -16,10 +16,19 @@ from torch._C._profiler import (
     _ExperimentalConfig,
     _remove_execution_graph_observer,
 )
-from torch.autograd import ProfilerActivity, kineto_available
+from torch.autograd import kineto_available, ProfilerActivity
+from torch.profiler import _memory_profiler
 
-__all__ = ['supported_activities', 'ProfilerAction', 'schedule', 'tensorboard_trace_handler', 'profile',
-           'ExecutionGraphObserver']
+
+__all__ = [
+    "supported_activities",
+    "ProfilerAction",
+    "schedule",
+    "tensorboard_trace_handler",
+    "profile",
+    "ExecutionGraphObserver",
+]
+
 
 def supported_activities():
     """
@@ -207,6 +216,15 @@ class _KinetoProfile(object):
             "rank": dist.get_rank(),
             "world_size": dist.get_world_size()
         }
+
+    def _memory_profile(self) -> _memory_profiler.MemoryProfile:
+        required = ("record_shapes", "profile_memory", "with_stack")
+        missing = [f"{i}=True" for i in required if not getattr(self, i)]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} required for memory profiling.")
+
+        assert self.profiler is not None and self.profiler.kineto_results is not None
+        return _memory_profiler.MemoryProfile(self.profiler.kineto_results)
 
 
 class ProfilerAction(Enum):
