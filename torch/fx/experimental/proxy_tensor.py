@@ -421,7 +421,9 @@ def wrap_key(f, tensors, tracer):
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
-        track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
+        assert isinstance(_get_current_dispatch_mode(), ProxyTorchDispatchMode)
+        with _pop_mode_temporarily():
+            track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
         out = f(*tensors)
         out = pytree.tree_map_only(

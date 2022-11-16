@@ -847,8 +847,7 @@ def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
     mul = sym_size * 2;  sym_size = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
-    detach = torch.ops.aten.detach.default(empty);  empty = None
-    return detach""")
+    return empty""")
 
 
     def test_neg_shape(self):
@@ -862,8 +861,7 @@ def forward(self, a_1):
     neg = -sym_size;  sym_size = None
     add = neg + 10;  neg = None
     empty = torch.ops.aten.empty.memory_format([add], device = device(type='cpu'), pin_memory = False);  add = None
-    detach = torch.ops.aten.detach.default(empty);  empty = None
-    return detach""")
+    return empty""")
 
     def test_sqrt_size(self):
         def f(a):
