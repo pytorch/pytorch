@@ -213,8 +213,9 @@ during backwards.  Note: the goal is to break the graph during backwards, and th
 break the forward graphs and then call AotAutograd and compilation on each section.  This allows DDP's allreduce hooks
 to fire in-between sections of backwards, and schedule communications to overlap with compute.
 
-See [TODO link to code docs] for more details about DDPOptimizer, and [TODO link to blog post] for a more in-depth
-explanation and experimental results.
+See [this blog post](https://dev-discuss.pytorch.org/t/torchdynamo-update-9-making-ddp-work-with-torchdynamo/860/1) for
+a more in-depth explanation and experimental results, or read the docs and code at
+[torch/_dynamo/optimizations/distributed.py](https://github.com/pytorch/pytorch/blob/4908a12542798a3e8641faae6b74f068fdfc6778/torch/_dynamo/optimizations/distributed.py#L56)
 
 To Debug DDPOptimizer, set `torch._dynamo.config.log_level` to DEBUG (for full graph dumps) or INFO
 (for basic info about bucket boundaries).  To disable DDPOptimizer, set `torch._dynamo.config.optimize_ddp=False`.
