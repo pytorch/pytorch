@@ -633,17 +633,15 @@ def neg(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::sqrt")
 @_beartype.beartype
 def sqrt(g: jit_utils.GraphContext, self):
-    # TODO(justinchuby): Add a helper function in jit_utils and use it to check types
-    if symbolic_helper._is_in_type_group(
-        self,
-        {
-            _type_utils.JitScalarType.UINT8,
-            _type_utils.JitScalarType.INT8,
-            _type_utils.JitScalarType.INT16,
-            _type_utils.JitScalarType.INT,
-            _type_utils.JitScalarType.INT64,
-        },
-    ):
+    if _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.UNDEFINED
+    ) in {
+        _type_utils.JitScalarType.UINT8,
+        _type_utils.JitScalarType.INT8,
+        _type_utils.JitScalarType.INT16,
+        _type_utils.JitScalarType.INT,
+        _type_utils.JitScalarType.INT64,
+    }:
         # torch converts all int inputs to sqrt to float
         self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
