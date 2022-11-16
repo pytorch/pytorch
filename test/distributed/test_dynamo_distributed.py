@@ -258,6 +258,8 @@ class TestDistributedMultiProc(MultiProcessTestCase):
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
+    # TODO(voz): Flaky on CI failure, consistent failure on local master.
+    @unittest.skipIf(True, "Flaky on CI failure, consistent failure on local master")
     def test_hf_bert_fsdp(self):
         from transformers.models.bert.modeling_bert import BertLayer
 

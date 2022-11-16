@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/onednn/graph_helper.h>
 #include <torch/csrc/jit/codegen/onednn/layout_propagation.h>
+#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
@@ -9,6 +10,14 @@ namespace onednn {
 void LayoutPropagation(Node* n) {
   if (!LlgaGraphHelper::isLlgaSubgraph(n))
     return;
+
+  // initial attr::output_layouts if undefined
+  if (!n->hasAttribute(attr::output_layouts)) {
+    const auto num_output = n->outputs().size();
+    GRAPH_DEBUG("Initial output_layouts of size ", num_output);
+    std::vector<int64_t> layouts(num_output, STRIDED_LAYOUT);
+    n->is_(attr::output_layouts, layouts);
+  }
 
   for (auto input : n->inputs()) {
     auto prev = input->node();
