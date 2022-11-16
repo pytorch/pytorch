@@ -421,7 +421,7 @@ class CSEVariable:
         return hash(self.name)
 
     def __eq__(self, other) -> bool:
-        return type(other)==type(self) and other.name==self.name
+        return type(other) == type(self) and other.name == self.name
 
     def update_on_args(self, args, kwargs):
         pass
