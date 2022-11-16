@@ -1,14 +1,11 @@
+from .base_structured_sparsifier import BaseStructuredSparsifier
 from .parametrization import (
-    ActivationReconstruction,
+    FakeStructuredSparsity,
     BiasHook,
-    PruningParametrization,
-    ZeroesParametrization,
 )
 
 __all__ = [
-    "ActivationReconstruction",
-    "BasePruner",
+    "FakeStructuredSparsity",
+    "BaseStructuredSparsifier",
     "BiasHook",
-    "PruningParametrization",
-    "ZeroesParametrization",
 ]

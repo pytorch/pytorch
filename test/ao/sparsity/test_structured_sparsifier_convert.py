@@ -7,7 +7,7 @@ import random
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.ao.pruning import BaseStructuredSparsifier, FakeStructuredSparsity
+from torch.ao.pruning._experimental.pruner import BaseStructuredSparsifier, FakeStructuredSparsity
 from torch.nn.utils import parametrize
 from torch.testing._internal.common_utils import TestCase
 
