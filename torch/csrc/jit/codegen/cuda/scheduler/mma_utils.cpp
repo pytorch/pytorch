@@ -208,7 +208,7 @@ std::vector<IterDomain*> getMmaDomains(MmaOp* mma, MmaDimension dimension) {
   TORCH_CHECK(
       a_domain.size() == b_domain.size() &&
           a_domain.size() == accumulator_domain.size(),
-      "Inconsisitent dimensions in mma op",
+      "Inconsistent dimensions in mma op",
       a_domain.size(),
       " ",
       b_domain.size(),
