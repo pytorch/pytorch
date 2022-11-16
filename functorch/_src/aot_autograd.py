@@ -809,7 +809,7 @@ def aot_function(
                             return x
                         if isinstance(x, torch._subclasses.fake_tensor.FakeTensor):
                             return x
-                        if idx < params_len and config.static_weight_shapes:
+                        if idx < num_params_buffers and config.static_weight_shapes:
                             return fake_mode.from_tensor(x, static_shapes=True)
                         return fake_mode.from_tensor(x, static_shapes=False)
 
@@ -817,7 +817,7 @@ def aot_function(
                 else:
                     return flat_args
 
-            fake_flat_tensor_args = process_inputs(params_flat)
+            fake_flat_tensor_args = process_inputs(flat_args)
 
             compiled_fn = create_aot_dispatcher_function(
                 flat_fn,

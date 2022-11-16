@@ -13,7 +13,11 @@ from torch import Tensor
 from torch._decomp import register_decomposition
 from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
-from torch.fx.experimental.symbolic_shapes import guard_int, sym_float, sym_int
+from torch.fx.experimental.symbolic_shapes import (
+    guard_int,
+    sym_float,
+    sym_int,
+)
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -425,26 +429,6 @@ def _nll_loss_backward(
         grad_output = torch.where(target != ignore_index, grad_output, 0)
 
     return grad_input * grad_output
-
-
-@register_decomposition(aten.addcmul_)
-def addcmul_(input: Tensor, tensor1, tensor2, value=None, out=None):
-    prod = torch.mul(tensor1, tensor2)
-    if value is not None:
-        # TODO(voz): Make add nicer
-        # argument 'alpha' must be Number, not NoneType
-        return torch.add(input, prod, alpha=value)
-    return torch.add(input, prod)
-
-
-@register_decomposition(aten.addcdiv_)
-def addcdiv_(input: Tensor, tensor1, tensor2, value=None, out=None):
-    res = torch.div(tensor1, tensor2)
-    if value is not None:
-        # TODO(voz): Make add nicer
-        # argument 'alpha' must be Number, not NoneType
-        return torch.add(input, res, alpha=value)
-    return torch.add(input, res)
 
 
 @register_decomposition(aten.glu_backward)
