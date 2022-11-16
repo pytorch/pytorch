@@ -24,16 +24,17 @@ out_dims_t = Union[int, Tuple[int, ...]]
 
 
 def doesnt_support_saved_tensors_hooks(f):
-    message = (
-        "functorch transforms don't yet support saved tensor hooks. "
-        "Please open an issue with your use case."
-    )
+    return f
+    # message = (
+    #     "functorch transforms don't yet support saved tensor hooks. "
+    #     "Please open an issue with your use case."
+    # )
 
-    @functools.wraps(f)
-    def fn(*args, **kwargs):
-        with torch.autograd.graph.disable_saved_tensors_hooks(message):
-            return f(*args, **kwargs)
-    return fn
+    # @functools.wraps(f)
+    # def fn(*args, **kwargs):
+    #     with torch.autograd.graph.disable_saved_tensors_hooks(message):
+    #         return f(*args, **kwargs)
+    # return fn
 
 
 # Checks that all args-to-be-batched have the same batch dim size

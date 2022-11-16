@@ -14,6 +14,40 @@ __all__ = [
     "allow_mutation_on_saved_tensors",
 ]
 
+
+def _get_tid(t) -> Tuple[int, int]:
+    # Returns a unique identifier for a particular version of a tensor. This is
+    # currently used in saved_tensor_hook context managers such as save_on_cpu()
+    # and allow_mutation_on_saved_tensors().
+    #
+    # We claim that id() and t._version are necessary and sufficient to uniquely
+    # identify a version of the tensor:
+    # - id corresponds to TensorImpl because we have pyobject persistence.
+    #   On the other hand, Keeping track of storage via something like data_ptr
+    #   is not sufficient because there can be different views to the same storage.
+    # - we don't need t.data_ptr() because the only way it can change from
+    #   underneath a TensorImpl is 1) if someone uses .data (we're okay with
+    #   silently wrong are produced if .data is used) OR 2) if version
+    #   counter also changes, e.g. when we perform an in-place view
+    #   We choose to omit this from the identifier as to support tensors that
+    #   don't have storage, e.g. sparse tensors. It may be better to have
+    #   special handling for sparse tensors, but that would also need to consider
+    #   additional things like coalescing.
+    #
+    #   TODO(soulitzer): check sparse correctness, make sure that if contents of sparse
+    #   tensor changes, that is also reflected here.
+    return (id(t), t._version)
+
+def _get_sid(t) -> Tuple[int, int]:
+    # Returns a tuple that uniquely identifies a tensor's storage
+    #
+    # NB: two tensors that share the same storage may have different
+    #     sid if their storage offset is different
+    return (t.data_ptr(), t._version)
+
+class _Handle():
+    pass
+
 class saved_tensors_hooks():
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
 
@@ -84,6 +118,18 @@ class saved_tensors_hooks():
     def __exit__(self, *args: Any):
         torch._C._autograd._pop_saved_tensors_default_hooks()
 
+# This would not be necessary if:
+# 1) we can rely on tensor subclass authors to provide a helper for testing if two
+#    tensors are the same
+# 2) extra layers of wrapping automatically die if we use them at a lower interpreter level
+#    not sure all tensor subclasses have this concept though
+def _functorch_unwrap_to_level(tensor: torch.Tensor, target_level: int) -> torch.Tensor:
+    assert target_level != 0, "level 0 is not supported, you should pass -1 instead"
+    current_level = torch._C._functorch.maybe_get_level(tensor)
+    for _ in range(max(current_level, 0), max(target_level, 0), -1):
+        tensor = torch._C._functorch.get_unwrapped(tensor)
+    assert torch._C._functorch.maybe_get_level(tensor) == target_level
+    return tensor
 
 class save_on_cpu(saved_tensors_hooks):
     """Context-manager under which tensors saved by the forward pass will be
@@ -127,24 +173,87 @@ class save_on_cpu(saved_tensors_hooks):
 
     """
     def __init__(self, pin_memory=False):
-        def pack_to_cpu(tensor):
-            if not pin_memory:
-                return (tensor.device, tensor.cpu())
+        # We use weak references here to makes sure that the only owning reference
+        # to any tensors that are offloaded have lifetimes that are linked to that
+        # of the graph
+        self.inner_copies: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+        self.tid_to_weakhandle: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
-            packed = torch.empty(
-                tensor.size(),
-                dtype=tensor.dtype,
-                layout=tensor.layout,
-                pin_memory=(torch.cuda.is_available() and not tensor.is_sparse))
-            packed.copy_(tensor)
-            return (tensor.device, packed)
+        def pack_to_cpu(tensor):
+            # NB: Always unwrap the outer layer, which is guaranteed to be a TensorWrapper
+            #     or a vanilla tensor. Unwrapping if the level is -1 is a no-op (I think).
+            level1 = torch._C._functorch.maybe_get_level(tensor)
+            inner = torch._C._functorch._unwrap_for_grad(tensor, level1)
+            # NB: level after unwrapping isn't always level - 1, so query again
+            level = torch._C._functorch.maybe_get_level(inner)
+
+            tid = _get_tid(_functorch_unwrap_to_level(inner, -1))
+
+            device = inner.device
+            handle = None
+
+            if tid in self.tid_to_weakhandle:
+                handle = self.tid_to_weakhandle[tid]
+                saved_level = torch._C._functorch.maybe_get_level(self.inner_copies[handle])
+
+                if level <= saved_level:
+                    # Unsolved problem with this approach:
+                    #
+                    # Unnecessary copies are made because we need to save the outermost tensor
+                    # but as we unwind the stack, we do not know whether the current level of
+                    # unwrapping is the outermost (there could be a vmap layer in the middle that
+                    # changes what is saved)
+                    return (device, handle, level)
+
+            if not pin_memory:
+                inner_copy = inner.cpu()
+            else:
+                inner_copy = torch.empty(
+                    inner.size(),
+                    dtype=inner.dtype,
+                    layout=inner.layout,
+                    pin_memory=(torch.cuda.is_available() and not inner.is_sparse))
+                inner_copy.copy_(inner)
+
+            handle = _Handle() if handle is None else handle
+            self.inner_copies[handle] = inner_copy
+            self.tid_to_weakhandle[tid] = handle
+
+            return (device, handle, level)
 
         def unpack_from_cpu(packed):
-            device, tensor = packed
-            return tensor.to(device, non_blocking=pin_memory)
+            device, handle, level = packed
+            ret = _functorch_unwrap_to_level(self.inner_copies[handle], level)
+            assert torch._C._functorch.maybe_get_level(ret) == level
+            ret = ret.to(device, non_blocking=pin_memory)
+            # Ideally we would be completely working with unwrapped tensors during backward,
+            # but for a grad transform the wrapping level is the same as that of forward.
+            # I think that should not be the case. (Can we fix this?)
+            #
+            # If saved tensor logic properly detached, we shouldn't have to unwrap and rewrap
+            # here at all. The rewrapping here is implicit due to lifting.
+
+            assert torch._C._functorch.maybe_get_level(ret) > level or level == -1, "lifting should happen"
+
+            # Maybe there is a more straightforward way to check the current interpreter level
+            # but we are doing .to anyway, so hopefully that should properly lift/kill wrappers.
+            return ret
 
         super().__init__(pack_to_cpu, unpack_from_cpu)
 
+    def __enter__(self):
+        torch._C._autograd._push_saved_tensors_default_hooks(self.pack_hook, self.unpack_hook)
+        return self
+
+    def __exit__(self, *args: Any):
+        # We cannot clear here because that would be bc-breaking: people sometimes run
+        # forward using save_on_cpu, but exit the ctx before running backward.
+        # Note that this behavior is inconsistent with that of allow_mutation_on_saved ctx
+        # which requires that backward also be run inside the ctx.
+        #
+        # self.inner_copies.clear()
+        # self.tid_to_weakhandle.clear()
+        torch._C._autograd._pop_saved_tensors_default_hooks()
 
 @contextlib.contextmanager
 def disable_saved_tensors_hooks(error_message):
@@ -288,15 +397,6 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
 # 3. during backward
 #    - if the clone exists, the tensor must've been modified in-place
 _allow_mutation_on_saved_tensors_enabled = False
-
-def _get_tid(t) -> Tuple[int, int, int]:
-    return (id(t), t.data_ptr(), t._version)
-
-def _get_sid(t) -> Tuple[int, int]:
-    return (t.data_ptr(), t._version)
-
-class _Handle():
-    pass
 
 class _swap_with_cloned(saved_tensors_hooks):
     def __init__(self, ctx):

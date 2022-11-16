@@ -23,6 +23,7 @@ import math
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch._subclasses.fake_tensor import FakeTensorMode
+import functools
 from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
 
@@ -3479,6 +3480,45 @@ def forward(self, x_1):
     """)
 
 
+class TestSavedTensorHooks(TestCase):
+    def test_save_on_cpu(self):
+        a = torch.ones(4, 2)
+
+        def fn(x):
+            return x.sin().exp().sin().sum()
+
+        def sum(fn):
+            @functools.wraps(fn)
+            def wrapped(x):
+                return fn(x).sum()
+            return wrapped
+
+        reference = grad(fn)(a)
+        with torch.autograd.graph.save_on_cpu():
+            actual = grad(fn)(a)
+        self.assertEqual(reference, actual)
+
+        reference = grad(sum(grad(fn)))(a)
+        with torch.autograd.graph.save_on_cpu():
+            actual = grad(sum(grad(fn)))(a)
+        self.assertEqual(reference, actual)
+
+        reference = grad(sum(vmap(grad(fn))))(a)
+        with torch.autograd.graph.save_on_cpu():
+            actual = grad(sum(vmap(grad(fn))))(a)
+        self.assertEqual(reference, actual)
+
+        a = torch.tensor(1., requires_grad=True)
+        grad1 = grad(sum(fn))(a)
+        with torch.autograd.graph.save_on_cpu():
+            grad2 = grad(sum(fn))(a)
+        self.assertEqual(reference, actual)
+        grad1.backward()
+        reference = a.grad.clone()
+        a.grad = None
+        grad2.backward()
+        self.assertEqual(reference, a.grad)
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(
@@ -3528,6 +3568,9 @@ instantiate_device_type_tests(
 )
 instantiate_parametrized_tests(
     TestMakeFunctional,
+)
+instantiate_parametrized_tests(
+    TestSavedTensorHooks,
 )
 
 if __name__ == '__main__':
