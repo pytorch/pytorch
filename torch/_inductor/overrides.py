@@ -499,7 +499,11 @@ def fuse_unary(gm: torch.fx.GraphModule):
                 eval_mode = all(not n.training for n in [computation_node, unary_node])
                 if not eval_mode:
                     continue
-
+                # TODO: support padding str input("valid", "same").
+                if type(computation_node) in [nn.Conv2d] and isinstance(
+                    computation_node.padding, str
+                ):
+                    continue
                 # only fuse for linear when the dtype is bf16
                 if type(computation_node) in [nn.Linear] and not is_bfloat16_module(
                     computation_node
@@ -570,6 +574,11 @@ def fuse_binary(gm: torch.fx.GraphModule):
                         if len(node.args[index_node].users) > 1:
                             continue
                         computation_node = modules[node.args[index_node].target]
+                        # TODO: support padding str input("valid", "same").
+                        if type(computation_node) in [nn.Conv2d] and isinstance(
+                            computation_node.padding, str
+                        ):
+                            continue
                         # only fuse for linear when the dtype is bf16
                         if type(computation_node) in [
                             nn.Linear
@@ -615,6 +624,11 @@ def fuse_binary_inplace(gm: torch.fx.GraphModule):
                     if node.args[1].args[0] == node.args[0]:
                         continue
                     computation_node = modules[node.args[1].target]
+                    # TODO: support padding str input("valid", "same").
+                    if type(computation_node) in [nn.Conv2d] and isinstance(
+                        computation_node.padding, str
+                    ):
+                        continue
                     replace_and_fuse_for_binary(
                         computation_node,
                         node,

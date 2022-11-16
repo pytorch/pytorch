@@ -2716,6 +2716,9 @@ class ConvDataset(Dataset):
 
 
 @unittest.skipIf(IS_WINDOWS, "Needs fork")
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "This test hangs when running with ASAN, see https://github.com/pytorch/pytorch/issues/75492")
 class TestConvAfterFork(TestCase):
     # Tests crash reported in https://github.com/pytorch/pytorch/issues/53565
     def test_conv_after_fork(self):

@@ -134,8 +134,7 @@ def _maybe_resize_out(out: TensorLikeType, shape):
     if out.shape == shape:
         return out
     else:
-        # We warn if out has elements but an incorrect number of them
-        if out.numel() not in (0, reduce(operator.mul, shape, 1)):
+        if out.numel() != 0:
             msg = (
                 f"An output with one or more elements was resized since it had shape {str(out.shape)} "
                 "which does not match the required output shape {str(shape)}. "
