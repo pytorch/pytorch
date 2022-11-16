@@ -2323,10 +2323,12 @@ def _arange_meta(
         step != 0,
         lambda: "step must be nonzero",
     )
-    utils.check(
-        math.isfinite(start) and math.isfinite(end),
-        lambda: f"unsupported range: {start} -> {end}",
-    )
+    # SymInts can't represent inf
+    if not isinstance(start, torch.SymInt) and not isinstance(end, torch.SymInt):
+        utils.check(
+            math.isfinite(start) and math.isfinite(end),
+            lambda: f"unsupported range: {start} -> {end}",
+        )
     utils.check(
         (step > 0 and end >= start) or (step < 0 and end <= start),
         lambda: "upper bound and lower bound inconsistent with step sign",

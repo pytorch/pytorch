@@ -1122,6 +1122,8 @@ fake_tensor_failures = {
     xfail('multinomial'),
     xfail('cholesky'),
     xfail('cholesky_inverse'),
+    # cannot do these as they rely on tensor data
+    xfail('repeat_interleave'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
 }
