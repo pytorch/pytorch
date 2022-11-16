@@ -4,7 +4,7 @@ from torch import nn
 from torch.nn.utils import parametrize
 
 from torch.ao.pruning import BaseSparsifier
-from .utils import FakeStructuredSparsity, BiasHook
+from .parametrization import FakeStructuredSparsity, BiasHook
 
 __all__ = ["BaseStructuredSparsifier"]
 
