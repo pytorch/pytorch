@@ -621,13 +621,12 @@ class AOTConfig:
     num_params_buffers: int
 
 
-
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
-
     if config.debug_graphs:
         print("====== Forward (only) graph ======")
         fw_module.print_readable()
+
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
@@ -1132,8 +1131,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
 
 @dynamo_timed
-def create_aot_dispatcher_function(
-    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, fake_mode,
+def _create_aot_dispatcher_function(
+    flat_fn, fake_flat_tensor_args: List[Tensor], aot_config: AOTConfig, fake_mode,
 ):
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
@@ -1179,7 +1178,7 @@ def create_aot_dispatcher_function(
             any(
                 [
                     x.requires_grad
-                    for x in flat_args
+                    for x in fake_flat_tensor_args
                     if isinstance(x, Tensor)
                 ]
             )
@@ -1189,10 +1188,10 @@ def create_aot_dispatcher_function(
         # TODO: Do this properly
         if needs_autograd:
             return make_boxed_func(
-                aot_dispatch_autograd(flat_fn, flat_args, aot_config)
+                aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config)
             )
         else:
-            return aot_dispatch_base(flat_fn, flat_args, aot_config)
+            return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config)
 
 
 # Inspired by autodidax (thanks!)
@@ -1339,10 +1338,10 @@ def aot_function(
             shape_env = ShapeEnv() if config.use_dynamic_shapes else None
             fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
 
-            # create_aot_dispatcher_function assumes fake inputs
+            # _create_aot_dispatcher_function assumes fake inputs
             # aot_function is the "public" entrypoint, so we need to process here
             # For internal entrypoint with already populated fake tensors, see aot_function_simplified
-            
+
             def process_inputs(flat_args):
                 if config.use_fake_tensor:
                     def convert(idx, x):
@@ -1360,7 +1359,7 @@ def aot_function(
 
             fake_flat_tensor_args = process_inputs(flat_args)
 
-            compiled_fn = create_aot_dispatcher_function(
+            compiled_fn = _create_aot_dispatcher_function(
                 flat_fn,
                 fake_flat_tensor_args,
                 aot_config,
@@ -1449,6 +1448,7 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
         fake_mode = top_kwargs["fake_mode"]
 
     # TODO(voz): Pull up to dynamo
+    # See [Real vs Fake Parms] below
     def fakify_params_and_buffers(flat_args):
         if config.use_fake_tensor:
             def convert(x):
@@ -1493,7 +1493,7 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
         decompositions: Optional[Dict] = None,
         hasher_type=None,
         static_argnums=None,
-        fake_mode = None
+        fake_mode=None
     ) -> Callable:
         assert static_argnums is None
         if bw_compiler is None:
@@ -1507,7 +1507,7 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
         )
 
         def compile(fn, *args):
-            return create_aot_dispatcher_function(
+            return _create_aot_dispatcher_function(
                 fn,
                 args,
                 aot_config,
@@ -1523,6 +1523,22 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
         return new_func
 
     compiled_f = aot_function_simplified(functional_call, *top_args, **top_kwargs)
+
+    # [Real vs Fake Params]
+    #
+    # We have a few options of what we need to do here, but a few rules for why this is the way it is:
+    #     - The "runtime" fwd must use real params, as these get invoked alongside real args
+    #     - _create_aot_dispatcher_function must be called with fake params and fake args
+    #
+    # So, we have a few ways of handling it
+    # 1) Dynamo passes only real params in, we fakify at the aot level (this current state)
+    # 2) Dynamo passes only fake params in, but we rewrite the def forward(*args): to def forward(*parms, *args):
+    #    (Not bad, but very annoying w/r/t changing dynamo's calling convention and contracts. Also, not having to close
+    #    over params is nice, and better w/r/t lifecycles and mutations)
+    # 3) Dynamo passes both real and fake tensor in (Not a bad future, but really a stopgap to 2)
+    #
+    # (2) is the correct long term direction, and we are at (1) for now, (3) can be done to make things a little more streamlined
+    # w/r/t where fake tensor conversion happens.
 
     if top_kwargs:
 

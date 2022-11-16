@@ -172,7 +172,14 @@ def align_inputs(model, inputs, static_input_idxs=()):
         i
         for i in range(len(inputs))
         # TODO: static inputs should not be passed in as fake tensor
-        if (i not in static_input_idxs or isinstance(inputs[i], FakeTensor) or (isinstance(inputs[i], torch.Tensor) and inputs[i].data_ptr() % ALIGNMENT) != 0)
+        if (
+            i not in static_input_idxs
+            or isinstance(inputs[i], FakeTensor)
+            or (
+                isinstance(inputs[i], torch.Tensor) and inputs[i].data_ptr() % ALIGNMENT
+            )
+            != 0
+        )
         and inputs[i].device.type == "cuda"
     ]
 
@@ -371,7 +378,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
 
     with overrides.patch_functions():
 
-        # TODO: can add logging before/after the call to create_aot_dispatcher_function
+        # TODO: can add logging before/after the call to _create_aot_dispatcher_function
         # in functorch/_src/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch
         return aot_autograd(
