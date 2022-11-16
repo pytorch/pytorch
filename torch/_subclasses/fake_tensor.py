@@ -861,11 +861,7 @@ class FakeTensorMode(TorchDispatchMode):
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
         # TODO - we should be use the prim aten impl
-        if (
-            "prims::" in func._schema.name
-            and len(flat_arg_fake_tensors) != 0
-            and hasattr(func, "prim_meta_impl")
-        ):
+        if "prims::" in func._schema.name and hasattr(func, "prim_meta_impl"):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
 
