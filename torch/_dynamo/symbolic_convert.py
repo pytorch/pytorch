@@ -53,9 +53,10 @@ from .utils import (
     fake_tensors_available,
     graph_break_dup_warning_checker,
     istype,
+    proxy_args_kwargs,
 )
 from .variables.base import MutableLocal, typestr, VariableTracker
-from .variables.builder import VariableBuilder
+from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.dicts import ConstDictVariable
@@ -81,7 +82,7 @@ from .variables.misc import (
     WithExitFunctionVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import TensorVariable
+from .variables.tensor import DynamicShapeVariable, TensorVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
 
@@ -121,16 +122,118 @@ def stack_op(fn: typing.Callable):
     return impl
 
 
+def _detect_and_normalize_assert_statement(
+    self: "InstructionTranslatorBase", truth_fn: typing.Callable, push: bool
+):
+    # Detect if this jump instruction is assert and normalize the assert
+    # by pushing dummy error message when nothing is given.
+    #
+    # Python 3.9 assertion is in following format:
+    # 18 POP_JUMP_IF_TRUE       28
+    # 20 LOAD_ASSERTION_ERROR
+    # 22 LOAD_CONST               3 ('Assert message') -> optional instruction
+    # 24 CALL_FUNCTION            1                    -> optional instruction
+    # 26 RAISE_VARARGS
+    #
+    # Python 3.8 assertion is in following format:
+    # 18 POP_JUMP_IF_TRUE       28
+    # 20 LOAD_GLOBAL              0 (Assertion type)
+    # 22 LOAD_CONST               3 ('Assert message') -> optional instruction
+    # 24 CALL_FUNCTION            1                    -> optional instruction
+    # 26 RAISE_VARARGS            1
+
+    if (truth_fn is not operator.truth) or push:
+        return False
+
+    current_instruction_pointer = self.instruction_pointer
+    inst = self.instructions[current_instruction_pointer]
+    # Detect LOAD_ASSERTION_ERROR or LOAD_GLOBAL 0
+    if sys.version_info < (3, 9):
+        if inst.opname != "LOAD_GLOBAL" or inst.argval != "AssertionError":
+            return False
+    else:
+        if inst.opname != "LOAD_ASSERTION_ERROR":
+            return False
+
+    current_instruction_pointer += 1
+
+    if current_instruction_pointer >= len(self.instructions):
+        return False
+
+    inst = self.instructions[current_instruction_pointer]
+    has_error_msg = False
+    # DETECT RAISE_VARARGS or LOAD CONST
+    if inst.opname == "LOAD_CONST":
+        if not isinstance(inst.argval, str):
+            return False
+        self.LOAD_CONST(inst)
+        has_error_msg = True
+
+        # if it is LOAD_CONSTANT, it must be followed by CALL_FUNCTION
+        current_instruction_pointer += 1
+        if current_instruction_pointer >= len(self.instructions):
+            return False
+        inst = self.instructions[current_instruction_pointer]
+        if inst.opname != "CALL_FUNCTION":
+            return False
+
+        # CALL_FUNCTION should be followed by RAISE_VARARGS
+        current_instruction_pointer += 1
+        if current_instruction_pointer >= len(self.instructions):
+            return False
+        inst = self.instructions[current_instruction_pointer]
+
+    if inst.opname != "RAISE_VARARGS":
+        return False
+
+    if not has_error_msg:
+        # Push dummy value instead of error message
+        self.push(ConstantVariable("assertion error"))
+
+    return True
+
+
 def generic_jump(truth_fn: typing.Callable, push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         self.output.guards.update(value.guards)
+        if (
+            config.rewrite_assert_with_torch_assert
+            and _detect_and_normalize_assert_statement(self, truth_fn, push)
+        ):
+            error_msg: VariableTracker = self.pop()
+            self.output.guards.update(error_msg.guards)
+            # Skip over things like `assert True`
+            if value.is_python_constant() and bool(value.as_python_constant()):
+                self.jump(inst)
+                return
+
+            # Manually insert torch._assert instead of python assert and jump over
+            # assert related instructions as we don't need them anymore.
+            self.output.create_proxy(
+                "call_function",
+                torch._assert,
+                *proxy_args_kwargs((value, error_msg), {}),
+                current_tx=self,
+            )
+            self.jump(inst)
+            return
+
         if value.is_python_constant():
             if truth_fn(value.as_python_constant()):
                 push and self.push(value)
                 self.jump(inst)
-        elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
+        elif (
+            isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
+        ):
             # compile a partial subgraph prefix then jump into user code
+            if self.has_backedge():
+                msg = (
+                    "Skipping frame because there is a graph break in a for/while loop"
+                )
+                log.debug(msg)
+                raise exc.SkipFrame(msg)
+
             self.push(value)
             self.output.compile_subgraph(
                 self,
@@ -155,6 +258,11 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 push and self.push(value)
                 self.jump(inst)
+        elif isinstance(value, DynamicShapeVariable):
+            eval_result = value.evaluate_expr(self.output)
+            if truth_fn(eval_result):
+                push and self.push(value)
+                self.jump(inst)
         else:
             unimplemented(f"generic_jump {typestr(value)}")
 
@@ -172,10 +280,15 @@ def break_graph_if_unsupported(*, push):
             reason = None
             try:
                 return inner_fn(self, inst)
-            except Unsupported as exc:
+            except Unsupported as excp:
+                if self.has_backedge():
+                    msg = "Skipping frame because there is a graph break in a for/while loop"
+                    log.debug(msg)
+                    raise exc.SkipFrame(msg)
+
                 if not self.should_compile_partial_graph():
                     raise
-                user_stack = [self.frame_summary()] + list(reversed(exc.real_stack))
+                user_stack = [self.frame_summary()] + list(reversed(excp.real_stack))
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
@@ -186,12 +299,12 @@ def break_graph_if_unsupported(*, push):
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
                     log.warning(
-                        f"Graph break: {exc} from user code at {user_stack_formatted}"
+                        f"Graph break: {excp} from user code at {user_stack_formatted}"
                     )
 
-                exc.remove_from_stats()
-                exc.add_to_stats("graph_break")
-                reason = GraphCompileReason(exc.msg, user_stack)
+                excp.remove_from_stats()
+                excp.add_to_stats("graph_break")
+                reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
             self.output.compile_subgraph(self, reason=reason)
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
@@ -230,6 +343,19 @@ def break_graph_if_unsupported(*, push):
 
 
 class InstructionTranslatorBase(object):
+    def has_backedge(self):
+        cur_offset = self.current_instruction.offset
+        for inst in self.instructions[self.instruction_pointer :]:
+            if inst.opname in (
+                "JUMP_ABSOLUTE",
+                "POP_JUMP_IF_TRUE",
+                "POP_JUMP_IF_FALSE",
+            ):
+                jump_offset = inst.argval
+                if jump_offset < cur_offset:
+                    return True
+        return False
+
     def cell_and_freevars(self):
         if not hasattr(self, "_cell_and_freevars"):
             self._cell_and_freevars = tuple(
@@ -700,6 +826,7 @@ class InstructionTranslatorBase(object):
                 left,
                 (
                     TensorVariable,
+                    DynamicShapeVariable,
                     NNModuleVariable,
                     BaseListVariable,
                     UserDefinedVariable,
@@ -718,16 +845,6 @@ class InstructionTranslatorBase(object):
                 )
             )
         elif (
-            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
-        ) and op in supported_tensors:
-            self.push(
-                TensorVariable.create(
-                    self,
-                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
-                    **options,
-                )
-            )
-        elif (
             left.is_python_constant()
             and right.is_python_constant()
             and op in supported_any
@@ -738,6 +855,28 @@ class InstructionTranslatorBase(object):
                     supported_any[op](
                         left.as_python_constant(), right.as_python_constant()
                     ),
+                    **options,
+                )
+            )
+        elif (
+            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
+        ) and op in supported_tensors:
+            self.push(
+                wrap_fx_proxy(
+                    self,
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    **options,
+                )
+            )
+        elif (
+            isinstance(left, DynamicShapeVariable)
+            or isinstance(right, DynamicShapeVariable)
+        ) and op in supported_tensors:
+            self.push(
+                DynamicShapeVariable.create(
+                    self,
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    dyn_shape=None,
                     **options,
                 )
             )
@@ -1029,12 +1168,12 @@ class InstructionTranslatorBase(object):
         elif isinstance(seq, TensorVariable):
             proxy = seq.as_proxy()
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable.create(self, proxy[i], **options))
+                self.push(wrap_fx_proxy(self, proxy[i], **options))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             for i in reversed(range(inst.argval)):
-                self.push(TensorVariable.create(self, proxy[i], **options))
+                self.push(wrap_fx_proxy(self, proxy[i], **options))
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
 
@@ -1109,7 +1248,8 @@ class InstructionTranslatorBase(object):
             fmt_spec = ConstantVariable("")
 
         value = self.pop()
-
+        if isinstance(value, DynamicShapeVariable):
+            value = ConstantVariable(str(value.dyn_shape))
         if (flags & 0x03) == 0x01:
             value = BuiltinVariable(str).call_function(self, [value], {})
         elif (flags & 0x03) == 0x02:
