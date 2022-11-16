@@ -10,6 +10,7 @@
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <ATen/NestedTensorImpl.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
 
 #include <functional>
 #include <unordered_set>
@@ -26,8 +27,6 @@ struct sdp_params {
   bool need_attn_weights;
   bool is_causal;
 };
-
-enum class SDPBackend { flash_attention, efficient_attention, math, error };
 
 template <typename dtype_vector>
 inline bool check_tensor_dtype(
