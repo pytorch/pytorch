@@ -4924,6 +4924,87 @@ if HAS_CUDA:
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
 
+    class CudaGraphTests(TestCase):
+        def tearDown(self):
+            torch._inductor.compile_fx.tape_manager_container.tape_manager = None
+
+        def get_tape_manager(self):
+            return torch._inductor.compile_fx.tape_manager_container.tape_manager
+
+        def get_tape_lengths(self):
+            return [len(tape.recorded_tape) for tape in self.get_tape_manager().tapes]
+
+        def test_dont_overwrite_output_recording(self):
+            @torch._dynamo.optimize()
+            def foo(x):
+                return x * x * 10
+
+            out1 = foo(torch.ones([4, 4], device="cuda"))
+            out2 = foo(torch.zeros([4, 4], device="cuda"))
+
+            self.assertFalse(same(out1, out2))
+
+        def test_dont_overwrite_output_execution(self):
+            def foo(x):
+                return x * x * 10
+
+            foo_opt = torch._dynamo.optimize()(foo)
+            # recording
+            out1_data_ptr = foo_opt(torch.ones([4, 4], device="cuda")).data_ptr()
+            # execution
+            out2 = foo_opt(torch.ones([4, 4], device="cuda"))
+
+            self.assertEqual(foo(torch.ones([4, 4], device="cuda")), out2)
+            self.assertEqual(out2.data_ptr(), out1_data_ptr)
+
+            # second execution doesnt overwrite first
+            out3 = foo(torch.zeros([4, 4], device="cuda"))
+
+            self.assertFalse(same(out2, out3))
+
+        def test_forward_backward(self):
+            @torch._dynamo.optimize()
+            def foo(x):
+                y = x * 2
+                return torch.sin(y) * torch.nn.functional.dropout(x, p=0.4)
+
+            inp = torch.rand([4, 4], requires_grad=True, device="cuda")
+            out = foo(inp)
+            out.sum().backward()
+
+            self.assertEqual(self.get_tape_lengths(), [2])
+            tape = self.get_tape_manager().tapes[0]
+
+            # the three saved tensors should die in the backward
+            self.assertEqual(
+                tape.expected_dead_indices_after_graph[1], [(0, 1), (0, 2), (0, 3)]
+            )
+            # we kept alive the output
+            self.assertEqual(tape.expected_dead_indices_before_graph[1], [])
+
+        def test_separate_recordings(self):
+            @torch._dynamo.optimize()
+            def foo(x, y):
+                return x.cos() @ y
+
+            inps = [
+                torch.rand([20, 20], device="cuda", requires_grad=True)
+                for _ in range(2)
+            ]
+
+            foo(*inps).sum().backward()
+            foo(*inps).sum().backward()
+
+            inps2 = [
+                torch.rand([40, 40], device="cuda", requires_grad=True)
+                for _ in range(2)
+            ]
+
+            foo(*inps2).sum().backward()
+            foo(*inps2).sum().backward()
+
+            assert self.get_tape_lengths() == [2, 2]
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
