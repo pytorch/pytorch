@@ -8,6 +8,7 @@ from ._infra import (
     Rule,
     RuleCollection,
     Stack,
+    StackFrame,
 )
 from .engine import DiagnosticEngine
 
@@ -22,4 +23,5 @@ __all__ = [
     "Rule",
     "RuleCollection",
     "Stack",
+    "StackFrame",
 ]
