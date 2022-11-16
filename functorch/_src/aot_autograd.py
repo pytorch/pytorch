@@ -598,7 +598,7 @@ _enforce_shape_env_passed_in = False
 
 @dynamo_timed
 def create_aot_dispatcher_function(
-    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, shape_env: Optional[ShapeEnv] = None
+    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, fake_mode,
 ):
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
@@ -640,34 +640,15 @@ def create_aot_dispatcher_function(
         # coordinate flags
         config.use_fake_tensor = False
 
-    shape_env = _produce_or_verify_shape_env(shape_env)
-
-    fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
 
     with torch.autograd.set_multithreading_enabled(False), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
-
-        def process_inputs(flat_args):
-            if config.use_fake_tensor:
-                def convert(idx, x):
-                    if not isinstance(x, torch.Tensor):
-                        return x
-                    if idx < aot_config.num_params_buffers and config.static_weight_shapes:
-                        return fake_mode.from_tensor(x, static_shapes=True)
-                    return fake_mode.from_tensor(x, static_shapes=False)
-
-                return [convert(idx, x) for idx, x in enumerate(flat_args)]
-            else:
-                return flat_args
-
-        fake_flat_tensor_args = process_inputs(flat_args)
-
         needs_autograd = (
             any(
                 [
                     x.requires_grad
-                    for x in fake_flat_tensor_args
+                    for x in flat_args
                     if isinstance(x, Tensor)
                 ]
             )
@@ -677,10 +658,10 @@ def create_aot_dispatcher_function(
         # TODO: Do this properly
         if needs_autograd:
             return make_boxed_func(
-                aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config)
+                aot_dispatch_autograd(flat_fn, flat_args, aot_config)
             )
         else:
-            return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config)
+            return aot_dispatch_base(flat_fn, flat_args, aot_config)
 
 
 # Inspired by autodidax (thanks!)
@@ -737,7 +718,6 @@ def aot_function(
     num_params_buffers: int = 0,
     hasher_type=None,  # deprecated
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
-    shape_env: Optional[ShapeEnv] = None,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -843,9 +823,28 @@ def aot_function(
                 out_spec.set(spec)
                 return flat_out
 
+            shape_env = _produce_or_verify_shape_env(None)
+            fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
+            def process_inputs(flat_args):
+                if config.use_fake_tensor:
+                    def convert(idx, x):
+                        if not isinstance(x, torch.Tensor):
+                            return x
+                        if isinstance(x, torch._subclasses.fake_tensor.FakeTensor):
+                            return x
+                        if idx < params_len and config.static_weight_shapes:
+                            return fake_mode.from_tensor(x, static_shapes=True)
+                        return fake_mode.from_tensor(x, static_shapes=False)
+
+                    return [convert(idx, x) for idx, x in enumerate(flat_args)]
+                else:
+                    return flat_args
+
+            fake_flat_tensor_args = process_inputs(params_flat)
+
             compiled_fn = create_aot_dispatcher_function(
                 flat_fn,
-                flat_args,
+                fake_flat_tensor_args,
                 aot_config,
                 shape_env,
             )
@@ -925,6 +924,22 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
     params_flat = tuple(params_flat)
     params_len = len(params_flat)
 
+    shape_env = _produce_or_verify_shape_env(top_kwargs["shape_env"])
+    fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
+    # TODO(voz): Pull up to dynamo
+    def fakify_params_and_buffers(flat_args):
+        if config.use_fake_tensor:
+            def convert(x):
+                if not isinstance(x, torch.Tensor):
+                    return x
+                return fake_mode.from_tensor(x, static_shapes=True)
+
+            return [convert(x) for x in flat_args]
+        else:
+            return flat_args
+
+    fake_flat_tensor_args = fakify_params_and_buffers(params_flat)
+
     def functional_call(*args, **kwargs):
         with stateless._reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
@@ -946,6 +961,7 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
                 "have tuple outputs or use aot_module instead."
             )
         return out
+        
 
     def aot_function_simplified(
         fn: Callable,
@@ -973,14 +989,13 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
                 fn,
                 args,
                 aot_config,
-                shape_env,
+                fake_mode,
             )
 
-        compiled_fn = compile(fn, *params_flat, *inputs)
+        compiled_fn = compile(fn, *fake_flat_tensor_args, *inputs)
 
         @wraps(fn)
         def new_func(*args):
-            # compiled_fn = compile(fn, *args)
             return compiled_fn(args)
         return new_func
 

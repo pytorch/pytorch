@@ -108,6 +108,7 @@ class GraphArg:
     source: Source
     example: Any
     is_unspecialized: bool
+    fake_tensor = None
 
     def __post_init__(self):
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
@@ -118,6 +119,9 @@ class GraphArg:
 
     def get_examples(self):
         return [self.example]
+
+    def get_fake_examples(self):
+        return [self.fake_tensor]
 
     def __len__(self):
         return 1
@@ -539,9 +543,11 @@ class VariableBuilder:
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
+            graph_arg = None
             if not is_constant_source(self.get_source()):
+                graph_arg = GraphArg(self.get_source(), value, False)
                 self.tx.output.graphargs.append(
-                    GraphArg(self.get_source(), value, False)
+                    graph_arg
                 )
             # Disable __torch_function__ to prevent cloning of `value` to hit
             # us
@@ -562,6 +568,7 @@ class VariableBuilder:
                     guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
                     should_specialize=self.tensor_should_specialize(),
                 )
+            graph_arg.fake_tensor = tensor_variable.proxy.node.meta['example_value']
             if torch.overrides.has_torch_function_unary(value):
                 subclass_torch_function__func = value.__torch_function__.__func__
                 subclass_type = type(value)
@@ -571,6 +578,7 @@ class VariableBuilder:
                     subclass_torch_function__func,
                     subclass_type,
                 )
+            # TODO(voz): Do not land this lol
             return tensor_variable
 
     def wrap_unspecialized_primitive(self, value):
