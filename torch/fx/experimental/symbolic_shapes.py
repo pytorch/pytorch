@@ -261,9 +261,6 @@ reflectable_magic_methods = {
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
-def _nyi():
-    raise NotImplementedError()
-
 magic_methods = {
     **reflectable_magic_methods,
     'eq': lambda a, b: sympy.Eq(a, b),
