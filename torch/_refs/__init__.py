@@ -4182,8 +4182,9 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
         )
     assert isinstance(weight, Tensor)  # mypy
     # We implement it this way for numerical stability. We assume (in the stability optimisation)
-    # that 0 <= weight <= 1. We take the abs to deal with comples numbers
-    # We want to do operations near zero, which is where floating points are most precise
+    # that 0 <= weight <= 1. We take the abs to deal with complex numbers
+    # We want to perform operations near zero, which is where floating points are most precise
+    # thus, we perform the following optimisation:
     # If weight.abs() >= 0.5:
     #    return (1 - weight) * (start - end) + end
     mask = weight.abs() >= 0.5
@@ -4205,22 +4206,22 @@ def linspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    if dtype is None:
-        dtype = torch.get_default_dtype()
-
-    # NB: NumPy actually doesn't do this cast, but for this ref, I'd rather have this
-    #     cast than not, because it allows us to always go into the precise path
-    #     if dtype is integral and not worry about whether start/end are float
-    if prims.utils.is_integer_dtype(dtype):
-        if isinstance(start, FloatLike):
-            start = sym_int(start)
-        if isinstance(end, FloatLike):
-            end = sym_int(end)
-
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
-        raise NotImplementedError
-    assert not isinstance(start, complex) and not isinstance(end, complex)  # for mypy
+        default_complex_dtype = utils.corresponding_complex_dtype(
+            torch.get_default_dtype()
+        )
+        if dtype is None:
+            dtype = default_complex_dtype
+        else:
+            check(
+                utils.is_complex_dtype(dtype),
+                lambda: f"linspace(): inferred dtype {default_complex_dtype} can't be safely cast to passed dtype {dtype}",
+            )
+    else:
+        dtype = dtype or torch.get_default_dtype()
+    assert isinstance(dtype, torch.dtype)
 
+    # steps does not participate in the computation of the dtype
     check(
         isinstance(steps, IntLike),
         lambda: "steps must be int, not float",
@@ -4236,41 +4237,27 @@ def linspace(
         "requires_grad": requires_grad,
     }
     if steps == 0:
-        ret = torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
-    elif steps == 1:
-        ret = torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
-    elif start == end:
-        ret = torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
-    else:
-        if prims.utils.is_integer_dtype(dtype):
-            # We need to cast to int, so to avoid off-by-one issues
-            # do the entire computation with ints when we can
-            assert isinstance(start, IntLike) and isinstance(end, IntLike)
-            step_size_x_denom = end - start
-            eps = 1 if end > start else -1
-            denom = steps - 1
-            ret = prims.to_dtype(
-                torch.arange(
-                    start * denom,
-                    end * denom + eps,
-                    step_size_x_denom,
-                    dtype=torch.int64,
-                    **factory_kwargs,  # type: ignore[arg-type]
-                )
-                / denom,
-                dtype,
-            )
-        else:
-            step_size = (end - start) / (steps - 1)
-            eps = step_size / 2
-            ret = prims.to_dtype(
-                torch.arange(  # type: ignore[call-overload]
-                    start, end + eps, step_size, dtype=torch.float64, **factory_kwargs
-                ),
-                dtype,
-            )
+        return torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
+    if steps == 1:
+        return torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
+    if start == end:
+        return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
 
-    return ret
+    # arange returns values in the interval [start, end) so we add an an eps to make it [start, end]
+    # The eps is small enough as to always add just the element end
+    step_size = 1 / (steps - 1)
+    eps = step_size / 2
+    # arange returns a tensor of size divup(end - start, step) and thus, for the arguemnts below
+    # ceil(div(1 + step_size/2,  1/(steps - 1)) = steps - 1  + ceil(1 / 2) = steps
+    # torch.arange is an scan algorithm, so we need a high-precision dtype
+    rg = torch.arange(
+        0, 1 + eps, step_size, dtype=torch.float64, **factory_kwargs  # type: ignore[arg-type]
+    )
+    double_dtype = torch.complex128 if utils.is_complex_dtype(dtype) else torch.float64
+    rg = _maybe_convert_to_dtype(rg, double_dtype)  # type: ignore[assignment]
+    cast = partial(torch.full, (1,), dtype=double_dtype, **factory_kwargs)
+    out = torch.lerp(cast(start), cast(end), rg)
+    return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
 
 @register_decomposition(torch.ops.aten.logspace)

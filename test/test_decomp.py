@@ -201,8 +201,17 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         (torch.complex64, torch.ops.aten.mv.default): (5e-5, 5e-5),
         (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 5e-4),
         (torch.float64, torch.ops.aten.upsample_bicubic2d.default) : (1e-5, 5e-4),
+        # The decomposition is TOO correct. It computes everything in int64, so sometimes
+        # there's an off-by-one error. See
+        # https://github.com/pytorch/pytorch/issues/81996
+        # https://github.com/pytorch/pytorch/issues/82230
+        (torch.int8, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.uint8, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int16, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int32, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int64, torch.ops.aten.linspace.default) : (0, 1),
     }
-    if (test_dtype, op) in tol_table:
+    if (decomp.dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
     else:
         rtol, atol = _getDefaultRtolAndAtol(orig.dtype, decomp.dtype)
