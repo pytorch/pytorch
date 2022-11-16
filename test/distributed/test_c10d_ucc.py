@@ -201,9 +201,9 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
 class ProcessGroupUCCTest(MultiProcessTestCase):
     def _create_process_group_ucc(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupUCC(store, self.rank, self.world_size)
+        return c10d.ProcessGroupUCC(store, self.rank, self.world_size)
         # dist.barrier(group=pg)
-        return pg
+        # return pg
 
     def setUp(self):
         super(ProcessGroupUCCTest, self).setUp()
