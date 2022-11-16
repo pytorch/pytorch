@@ -84,6 +84,7 @@ class TestClipGradNorm(FSDPTest):
                 ],
                 "use_orig_params": [False, True],
                 "offload_params": [False, True],
+                # "use_orig_params": [
             },
             self._test_ddp_parity,
         )
@@ -208,6 +209,34 @@ class TestClipGradNorm(FSDPTest):
             ):
                 self.assertEqual(n1, n2)
                 self.assertEqual(p1, p2)
+
+        if offload_params:
+            # TODO: Gradient computation on CPU and GPU differ slightly causing
+            # drift unrelated to `clip_grad_norm_()`.
+            # https://github.com/pytorch/pytorch/issues/89133
+            return
+
+        # Run a few more iterations
+        # TODO: We cannot run too many iterations, or else there is drift:
+        # https://github.com/pytorch/pytorch/issues/89136
+        for _ in range(3):
+            ddp_optim.zero_grad(set_to_none=True)
+            fsdp_optim.zero_grad(set_to_none=True)
+            inp = ddp_model.module.get_input(device)
+            for model in (ddp_model, fsdp_model):
+                out = model(*inp)
+                out.sum().backward()
+            ddp_total_norm = torch.nn.utils.clip_grad_norm_(
+                ddp_model.parameters(),
+                max_norm=max_norm,
+                norm_type=norm_type,
+            )
+            fsdp_total_norm = fsdp_model.clip_grad_norm_(
+                max_norm=max_norm, norm_type=norm_type
+            )
+            self.assertEqual(ddp_total_norm, fsdp_total_norm)
+            ddp_optim.step()
+            fsdp_optim.step()
 
 
 instantiate_parametrized_tests(TestClipGradNorm)
