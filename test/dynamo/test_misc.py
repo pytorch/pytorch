@@ -422,7 +422,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return (a + a.numel() + torch.numel(a), a + a.nelement())
 
         return torch._dynamo.testing.standard_test(
-            self, fn=fn, nargs=1, expected_ops=3, expected_ops_dynamic=4
+            self, fn=fn, nargs=1, expected_ops=3, expected_ops_dynamic=6
         )
 
     def test_pair(self):
