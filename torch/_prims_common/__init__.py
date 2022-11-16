@@ -544,11 +544,12 @@ def is_same_shape(a: Sequence, b: Sequence) -> bool:
 
 
 def is_cpu_scalar_tensor(a: Any) -> bool:
-    return isinstance(a, TensorLike) and a.ndim == 0 and a.device.type == "cpu"
+    from torch._subclasses.fake_tensor import FakeTensor
 
-
-def is_cpu_or_meta_scalar_tensor(a: Any) -> bool:
-    return isinstance(a, TensorLike) and a.ndim == 0 and (a.device.type == "meta" or a.device.type == "cpu")
+    # FakeTensor might report its device as "meta" when it's actually faking a
+    # CPU tensor
+    device = a.fake_device.type if isinstance(a, FakeTensor) else a.device.type
+    return isinstance(a, TensorLike) and a.ndim == 0 and device == "cpu"
 
 
 def check_same_device(*args, allow_cpu_scalar_tensors):
@@ -616,7 +617,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
         if isinstance(arg, Number):
             continue
         elif isinstance(arg, TensorLike):
-            if allow_cpu_scalar_tensors and is_cpu_or_meta_scalar_tensor(arg):
+            if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
                 continue
 
             if shape is None:
@@ -644,7 +645,7 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
         if isinstance(arg, Number):
             continue
         elif isinstance(arg, TensorLike):
-            if allow_cpu_scalar_tensors and is_cpu_or_meta_scalar_tensor(arg):
+            if allow_cpu_scalar_tensors and is_cpu_scalar_tensor(arg):
                 scalar_shape = arg.shape
                 continue
 
