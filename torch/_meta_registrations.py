@@ -1513,12 +1513,49 @@ def full(size, fill_value, *args, **kwargs):
         aten.randn_like.default,
         aten.rand_like.default,
         aten.full_like.default,
-        aten.zeros_like.default,
         aten.ones_like.default,
     ]
 )
 def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
+
+
+# zeros_like is special cased to work for sparse
+@register_meta(aten.zeros_like.default)
+def zeros_like(
+    self, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None
+):
+    if layout == torch.sparse_coo:
+        check(
+            memory_format is None,
+            lambda: "memory format option is only supported by strided tensors",
+        )
+
+        res = torch.empty(
+            0,
+            dtype=self.dtype if dtype is None else dtype,
+            layout=layout,
+            device=self.device if device is None else device,
+            pin_memory=pin_memory,
+        )
+
+        if self.is_sparse:
+            res.sparse_resize_and_clear_(
+                self.size(), self.sparse_dim(), self.dense_dim()
+            )
+        else:
+            res.sparse_resize_and_clear_(self.size(), self.dim(), 0)
+
+        res._coalesced_(True)
+        return res
+    return aten.empty_like.default(
+        self,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
+    )
 
 
 # hacky: Please remove after math.ceil works with arange
@@ -1893,11 +1930,6 @@ def activate_meta():
             # have CompositeImplicitAutograd kernels.
             # Instead, we should be letting those decompositions run, and writing meta kernels
             # only for the base operators.
-            pass
-        elif op_overload.is_view:
-            # Attempting to register a python meta kernel for a view operator.
-            # We shouldn't do this, because the output will report as not having aliased storages.
-            # All view ops have meta kernels in C++ today, so we should use those instead.
             pass
         elif op_overload.name() in {
             "aten::empty_strided",  # causing infinite recursion, test_meta.py
