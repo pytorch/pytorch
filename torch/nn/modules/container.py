@@ -234,9 +234,6 @@ class Sequential(Module):
         return self
 
 
-T = TypeVar('T', bound=Module)
-
-
 class ModuleList(Module, Sequence[T]):
     r"""Holds submodules in a list.
 
@@ -318,7 +315,7 @@ class ModuleList(Module, Sequence[T]):
         return self.extend(modules)
 
     def __add__(self, other: Iterable[T]) -> 'ModuleList'[T]:
-        combined = ModuleList()
+        combined: ModuleList[T] = ModuleList()
         for i, module in enumerate(chain(self, other)):
             combined.add_module(str(i), module)
         return combined
