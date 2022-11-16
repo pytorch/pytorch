@@ -2643,6 +2643,23 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.empty(2, 3, 3, dtype=torch.double).uniform_(0, 1)
         self.run_test(Bernoulli(), x)
 
+    def test_bernoulli_p(self):
+        class Bernoulli_float(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.bernoulli(x, 0.2).size(0))
+
+        class Bernoulli_tensor(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.rand_like(x).bernoulli_(x).size(0))
+
+        x = torch.rand(3, 3)
+        self.run_test(Bernoulli_float(), x)
+        self.run_test(Bernoulli_tensor(), x)
+
+        x = torch.rand(2, 3, 3, dtype=torch.double)
+        self.run_test(Bernoulli_float(), x)
+        self.run_test(Bernoulli_tensor(), x)
+
     @unittest.skip("Bug in ORT, skip test until rel-1.11.")
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_reshape_allowzero(self):
