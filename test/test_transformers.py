@@ -1130,7 +1130,7 @@ class TestTransformers(NNTestCase):
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             assert torch._fused_sdp_choice(q, k, v) == SDPBackend.MATH
 
-        if TEST_CUDA:
+        if TEST_CUDA and not TEST_WITH_ROCM and not IS_WINDOWS:
             batch_size, seq_len, num_heads, head_dim = 32, 64, 16, 64
             shape = (batch_size, seq_len, num_heads, head_dim)
             device = "cuda"
