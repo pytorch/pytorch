@@ -8,7 +8,7 @@ from .module import Module
 from ..parameter import Parameter
 from torch._jit_internal import _copy_to_script_wrapper
 
-from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, overload, Tuple, TypeVar, Union
+from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, overload, Sequence, Tuple, TypeVar, Union
 
 __all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList', 'ParameterDict']
 
@@ -234,7 +234,10 @@ class Sequential(Module):
         return self
 
 
-class ModuleList(Module):
+T = TypeVar('T', bound=Module)
+
+
+class ModuleList(Module, Sequence[T]):
     r"""Holds submodules in a list.
 
     :class:`~torch.nn.ModuleList` can be indexed like a regular Python list, but
@@ -258,9 +261,9 @@ class ModuleList(Module):
                 return x
     """
 
-    _modules: Dict[str, Module]  # type: ignore[assignment]
+    _modules: Dict[str, T]  # type: ignore[assignment]
 
-    def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
+    def __init__(self, modules: Optional[Iterable[T]] = None) -> None:
         super(ModuleList, self).__init__()
         if modules is not None:
             self += modules
@@ -274,14 +277,22 @@ class ModuleList(Module):
             idx += len(self)
         return str(idx)
 
+    @overload
+    def __getitem__(self, idx: int) -> T:
+        ...
+
+    @overload
+    def __getitem__(self, idx: slice) -> 'ModuleList[T]':
+        ...
+
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: Union[int, slice]) -> Union[Module, 'ModuleList']:
+    def __getitem__(self, idx: Union[int, slice]) -> Union[T, 'ModuleList'[T]]:
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
         else:
             return self._modules[self._get_abs_string_index(idx)]
 
-    def __setitem__(self, idx: int, module: Module) -> None:
+    def __setitem__(self, idx: int, module: T) -> None:
         idx = self._get_abs_string_index(idx)
         return setattr(self, str(idx), module)
 
@@ -300,13 +311,13 @@ class ModuleList(Module):
         return len(self._modules)
 
     @_copy_to_script_wrapper
-    def __iter__(self) -> Iterator[Module]:
+    def __iter__(self) -> Iterator[T]:
         return iter(self._modules.values())
 
-    def __iadd__(self, modules: Iterable[Module]) -> 'ModuleList':
+    def __iadd__(self, modules: Iterable[T]) -> 'ModuleList':
         return self.extend(modules)
 
-    def __add__(self, other: Iterable[Module]) -> 'ModuleList':
+    def __add__(self, other: Iterable[T]) -> 'ModuleList':
         combined = ModuleList()
         for i, module in enumerate(chain(self, other)):
             combined.add_module(str(i), module)
@@ -318,7 +329,7 @@ class ModuleList(Module):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
-    def insert(self, index: int, module: Module) -> None:
+    def insert(self, index: int, module: T) -> None:
         r"""Insert a given module before a given index in the list.
 
         Args:
@@ -329,7 +340,7 @@ class ModuleList(Module):
             self._modules[str(i)] = self._modules[str(i - 1)]
         self._modules[str(index)] = module
 
-    def append(self, module: Module) -> 'ModuleList':
+    def append(self, module: T) -> 'ModuleList':
         r"""Appends a given module to the end of the list.
 
         Args:
@@ -338,12 +349,12 @@ class ModuleList(Module):
         self.add_module(str(len(self)), module)
         return self
 
-    def pop(self, key: Union[int, slice]) -> Module:
+    def pop(self, key: Union[int, slice]) -> T:
         v = self[key]
         del self[key]
         return v
 
-    def extend(self, modules: Iterable[Module]) -> 'ModuleList':
+    def extend(self, modules: Iterable[T]) -> 'ModuleList':
         r"""Appends modules from a Python iterable to the end of the list.
 
         Args:
