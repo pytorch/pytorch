@@ -6,13 +6,10 @@ from torch.fx.graph import (
 from .utils import (
     all_node_args_have_no_tensors,
 )
-from torch.ao.quantization.utils import (
-    Pattern,
-    NodePattern,
-)
+from torch.ao.quantization.utils import NodePattern
 
 from abc import ABC
-from typing import Any, Callable, Dict, Optional
+from typing import Callable, Dict
 
 __all__ = [
     "QuantizeHandler",
@@ -97,19 +94,6 @@ class QuantizeHandler(ABC):
         observer_0 - avgpool2d - observer_0 (same observer instance as input)
         """
         return False
-
-    def get_activation_ctr(
-        self,
-        qconfig: Any,
-        pattern: Pattern,
-        is_training: bool,
-    ) -> Optional[Callable]:
-        """
-        Returns the constructor for the activation observer which should be
-        used for the pattern matched to this handler. Some handlers override
-        this to a different value than what is specified in the qconfig.
-        """
-        return qconfig.activation
 
     def is_custom_module(self):
         return self.is_custom_module_
