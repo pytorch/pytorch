@@ -238,7 +238,7 @@ void FusionExecutor::compileFusion(
 #ifndef USE_ROCM
   device_smem_limit_ = properties->sharedMemPerBlockOptin;
 #else
-  // don't know if rocm supports opt-in shared memroy reconfiguration
+  // don't know if rocm supports opt-in shared memory reconfiguration
   device_smem_limit_ = properties->sharedMemPerBlock;
 #endif
   warp_size_ = properties->warpSize;
