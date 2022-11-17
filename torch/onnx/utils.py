@@ -9,12 +9,10 @@ import contextlib
 import copy
 import inspect
 import io
-import os
 import re
 import textwrap
 import typing
 import warnings
-import zipfile
 from typing import (
     Any,
     Callable,
@@ -38,15 +36,19 @@ import torch.serialization
 from torch import _C
 from torch.onnx import (  # noqa: F401
     _constants,
-    _deprecation,
     _exporter_states,
-    _patch_torch,
     errors,
     symbolic_caffe2,
     symbolic_helper,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, diagnostics, jit_utils, registration
+from torch.onnx._internal import (
+    _beartype,
+    diagnostics,
+    jit_utils,
+    onnx_proto_utils,
+    registration,
+)
 
 __all__ = [
     "is_in_onnx_export",
@@ -1597,49 +1599,14 @@ def _export(
                     model_file_location,
                     node_attr_to_name,
                 )
+            # insert function_proto into model_proto.
+            proto = onnx_proto_utils._add_onnxscript_fn(
+                proto,
+                custom_opsets,
+            )
             if verbose:
                 torch.onnx.log("Exported graph: ", graph)
-            if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
-                assert len(export_map) == 0
-                with torch.serialization._open_file_like(f, "wb") as opened_file:
-                    opened_file.write(proto)
-            elif export_type in [
-                _exporter_states.ExportTypes.ZIP_ARCHIVE,
-                _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
-            ]:
-                compression = (
-                    zipfile.ZIP_DEFLATED
-                    if export_type
-                    == _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE
-                    else zipfile.ZIP_STORED
-                )
-                with zipfile.ZipFile(f, "w", compression=compression) as z:
-                    z.writestr(_constants.ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
-                    for k, v in export_map.items():
-                        z.writestr(k, v)
-            elif export_type == _exporter_states.ExportTypes.DIRECTORY:
-                if os.path.exists(f):
-                    assert os.path.isdir(f)
-                else:
-                    os.makedirs(f)
-
-                model_proto_file = os.path.join(
-                    f, _constants.ONNX_ARCHIVE_MODEL_PROTO_NAME
-                )
-                with torch.serialization._open_file_like(
-                    model_proto_file, "wb"
-                ) as opened_file:
-                    opened_file.write(proto)
-
-                for k, v in export_map.items():
-                    weight_proto_file = os.path.join(f, k)
-                    with torch.serialization._open_file_like(
-                        weight_proto_file, "wb"
-                    ) as opened_file:
-                        opened_file.write(v)
-            else:
-                raise RuntimeError("Unknown export type")
-
+            onnx_proto_utils._export_file(proto, f, export_type, export_map)
             # The ONNX checker only works for ONNX graph. So if the operator_export_type is not ONNX,
             # we can skip this check.
             # If large model format export is enabled, proto will only contain data location instead of
@@ -1752,10 +1719,21 @@ def _should_aten_fallback(
     )
     is_caffe2_build = _C_onnx._CAFFE2_ATEN_FALLBACK
 
-    return name.startswith("aten::") and (
-        ((is_onnx_aten_export or is_aten_fallback_export) and not is_caffe2_build)
-        or (not is_exportable_aten_op and is_aten_fallback_export)
-    )
+    if not name.startswith("aten::"):
+        return False
+
+    if is_caffe2_build:
+        if (
+            is_onnx_aten_export or is_aten_fallback_export
+        ) and not is_exportable_aten_op:
+            return True
+    else:
+        if is_onnx_aten_export or (
+            is_aten_fallback_export and not is_exportable_aten_op
+        ):
+            return True
+
+    return False
 
 
 @_beartype.beartype
@@ -1948,7 +1926,9 @@ def _verify_custom_op_name(symbolic_name: str):
 
 @_beartype.beartype
 def register_custom_op_symbolic(
-    symbolic_name: str, symbolic_fn: Callable, opset_version: int
+    symbolic_name: str,
+    symbolic_fn: Callable,
+    opset_version: int,
 ):
     """Registers a symbolic function for a custom operator.
 
