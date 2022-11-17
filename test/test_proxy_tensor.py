@@ -1308,10 +1308,6 @@ symbolic_tensor_failures = {
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('roll', ''),  # Tensors of type TensorImpl do not have numel
-    xfail('round', ''),  # aten.round.default - couldn't find symbolic meta function/decomposition
-    xfail('round', 'decimals_0'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
-    xfail('round', 'decimals_3'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
-    xfail('round', 'decimals_neg_3'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
     xfail('searchsorted', ''),  # Could not run 'aten::searchsorted.Tensor' with arguments from the 'Meta' backend. ...
     xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
@@ -1441,6 +1437,10 @@ inplace_symbolic_tensor_failures = {
     xfail('uniform', ''),  # aten.uniform_.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('xlogy', ''),  # aten.xlogy_.Tensor - couldn't find symbolic meta function/decomposition
+    xfail('round', ''),  # aten.round_.default - couldn't find symbolic meta function/decomposition
+    xfail('round', 'decimals_0'),  # aten.round_.decimals - couldn't find symbolic meta function/decomposition
+    xfail('round', 'decimals_3'),  # aten.round_.decimals - couldn't find symbolic meta function/decomposition
+    xfail('round', 'decimals_neg_3')  # aten.round_.decimals - couldn't find symbolic meta function/decomposition
 }
 
 # Copies inputs to inplace operations to avoid inplace modifications
