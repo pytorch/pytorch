@@ -147,13 +147,17 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
 #else
   if (k.size() > 0) {
 #endif
-    TORCH_WARN("Overriding a previously registered kernel for the same operator and the same dispatch key\n",
-               "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
-               "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
-               "  dispatch key: ", toString(dispatch_key), "\n",
-               "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : (sym_cpp_signature_.has_value() ? sym_cpp_signature_->debug : "no debug info")), "\n",
-               "       new kernel: ", debug
-    );
+    // Suppress the warning for Meta key as we are overriding C++ meta functions with python meta functions
+    // for some ops
+    if (dispatch_key != DispatchKey::Meta) {
+      TORCH_WARN("Overriding a previously registered kernel for the same operator and the same dispatch key\n",
+            "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
+            "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
+            "  dispatch key: ", toString(dispatch_key), "\n",
+            "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : (sym_cpp_signature_.has_value() ? sym_cpp_signature_->debug : "no debug info")), "\n",
+            "       new kernel: ", debug
+      );
+    }
   }
 
 #ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
