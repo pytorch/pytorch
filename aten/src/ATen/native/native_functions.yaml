@@ -4020,17 +4020,20 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: rad2deg
+    SparseCPU, SparseCUDA: rad2deg_sparse
     SparseCsrCPU, SparseCsrCUDA: rad2deg_sparse_csr
 
 - func: rad2deg_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: rad2deg_
+    SparseCPU, SparseCUDA: rad2deg_sparse_
     SparseCsrCPU, SparseCsrCUDA: rad2deg_sparse_csr_
 
 - func: rad2deg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: rad2deg_out
+    SparseCPU, SparseCUDA: rad2deg_sparse_out
     SparseCsrCPU, SparseCsrCUDA: rad2deg_sparse_csr_out
 
 - func: deg2rad(Tensor self) -> Tensor
@@ -13238,6 +13241,11 @@
   python_module: nn
   variants: function
   autogen: _scaled_dot_product_attention.out
+
+- func: _fused_sdp_choice(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> int
+  dispatch:
+    CPU, NestedTensorCPU, Meta: _fused_sdp_choice_cpp
+    CUDA, NestedTensorCUDA: _fused_sdp_choice_cuda
 
 # Register the math kernel for cpu
 - func: _scaled_dot_product_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> (Tensor, Tensor)

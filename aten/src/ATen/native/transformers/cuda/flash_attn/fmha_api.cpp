@@ -187,7 +187,7 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     bool loop = max_seqlen_k > blocksize_c;
 
     // Otherwise the kernel will be launched from cuda:0 device
-    at::cuda::CUDAGuard device_guard{q.get_device()};
+    at::cuda::CUDAGuard device_guard{q.device()};
 
     auto opts = q.options();
 
