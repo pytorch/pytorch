@@ -41,6 +41,12 @@ void clearCublasWorkspaces() {
 
 size_t parseChosenWorkspaceSize() {
   const char * val = getenv("CUBLAS_WORKSPACE_CONFIG");
+  /* :4096:2:16:8 default, 32MiB for Hopper */
+  int device;
+  cudaDeviceProp* properties = at::cuda::getDeviceProperties(cudaGetDevice(&device));
+  const bool sm90 = properties->major == 9 && properties->minor == 0;
+  const size_t default_size = sm90 ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
+
   if (val) {
     size_t total_size = 0;
     const std::string config(val);
@@ -48,8 +54,8 @@ size_t parseChosenWorkspaceSize() {
     std::sregex_iterator next(config.begin(), config.end(), exp);
     std::sregex_iterator end;
     if (next == end) {
-      TORCH_WARN("Could not parse CUBLAS_WORKSPACE_CONFIG, using default workspace size of :4096:8:16:8.");
-      return 4096 * 1024 * 8 + 16 * 1024 * 8;
+      TORCH_WARN("Could not parse CUBLAS_WORKSPACE_CONFIG, using default workspace size:", default_size);
+      return default_size;
     }
     while (next != end) {
       std::smatch match = *next;
@@ -60,8 +66,8 @@ size_t parseChosenWorkspaceSize() {
       next++;
     }
     return total_size;
-  } else /* :4096:8:16:8 */ {
-    return 4096 * 1024 * 8 + 16 * 1024 * 8;
+  } else {
+    return default_size;
   }
 }
 
