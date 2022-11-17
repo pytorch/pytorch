@@ -130,7 +130,7 @@ def has_mutation(gm, example_inputs, fake_mode, inputs_only=False):
         # on those shapes though, so just suppress_guards here.
         with fake_mode.shape_env.suppress_guards():
             new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
-            with enable_python_dispatcher():
+            with fake_mode, enable_python_dispatcher():
                 ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     else:
         # Clone the inputs such that intermediate tensors (not leaf tensors) with
