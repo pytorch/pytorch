@@ -304,6 +304,11 @@ def requires_nccl():
         "c10d was not compiled with the NCCL backend",
     )
 
+def requires_ucc():
+    return sandcastle_skip_if(
+        not c10d.is_ucc_available(),
+        "c10d was not compiled with the UCC backend",
+    )
 
 def requires_mpi():
     return sandcastle_skip_if(
@@ -328,7 +333,7 @@ def skip_if_rocm(func):
 def skip_if_win32():
     return sandcastle_skip_if(
         sys.platform == "win32",
-        "This unit test case is not supportted on Windows platform",
+        "This unit test case is not supported on Windows platform",
     )
 
 
