@@ -594,7 +594,7 @@ all of the unconvertible ops in one go you can::
 The set is approximated because some ops may be removed during the conversion
 process and don't need to be converted. Some other ops may have partial support
 that will fail conversion with particular inputs, but this should give you a
-general idea of what ops are not supported. Please feel free to open Github Issues
+general idea of what ops are not supported. Please feel free to open GitHub Issues
 for op support requests.
 
 Frequently Asked Questions
