@@ -119,7 +119,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "Background_Matting",
     "fastNLP_Bert",
     "hf_BigBird",
-    "hf_T5_base", # fp64_OOM
+    "hf_T5_base",  # fp64_OOM
     "mobilenet_v2",
     "mobilenet_v2_quantized_qat",
     "resnet50_quantized_qat",
