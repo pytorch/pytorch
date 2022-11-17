@@ -107,6 +107,9 @@ class ContextWrappingVariable(VariableTracker):
         super(ContextWrappingVariable, self).__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
+        self.recursively_contains = (
+            set()
+        )  # Workaround so that we don't call apply() on this variable
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
@@ -294,7 +297,7 @@ class GradModeVariable(ContextWrappingVariable):
 
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
-    def create(tx, target_values, kwargs):
+    def create(target_values, kwargs):
         values = target_values
         # device_type : str,
         # dtype : Optional[_dtype] = None,
@@ -322,10 +325,10 @@ class AutocastModeVariable(ContextWrappingVariable):
         else:
             values.append(variables.ConstantVariable(None))
 
-        var = AutocastModeVariable(tx, target_values, initial_values=None, **kwargs)
+        var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
 
-    def __init__(self, tx, target_values, initial_values=None, **kwargs):
+    def __init__(self, target_values, initial_values=None, **kwargs):
         super(AutocastModeVariable, self).__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )

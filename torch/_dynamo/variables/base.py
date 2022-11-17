@@ -21,19 +21,15 @@ class MutableLocal:
         return self is other
 
 
-def aggregate_mutable_locals(itr):
-    recursively_contains = set()
-
-    for var in itr:
-        if isinstance(var, VariableTracker):
-            if var.mutable_local:
-                recursively_contains.add(var.mutable_local)
-            recursively_contains.update(var.recursively_contains)
-
-    return recursively_contains
+# metaclass to call post_init
+class HasPostInit(type):
+    def __call__(cls, *args, **kwargs):
+        obj = type.__call__(cls, *args, **kwargs)
+        obj.__post_init__(*args, **kwargs)
+        return obj
 
 
-class VariableTracker:
+class VariableTracker(object, metaclass=HasPostInit):
     """
     Base class for tracked locals and stack values
 
@@ -86,7 +82,7 @@ class VariableTracker:
         fn: Callable[["VariableTracker"], "VariableTracker"],
         value,
         cache=None,
-        skip_fn=None,  # Whether we should skip applying to this var
+        skip_fn=lambda _: False,  # Whether we should skip applying to this var
     ):
         """
         Walk this object and call fn on all the VariableTracker
@@ -100,7 +96,7 @@ class VariableTracker:
             return cache[idx][0]
 
         if isinstance(value, VariableTracker):
-            if skip_fn is None or not skip_fn(value):
+            if not skip_fn(value):
                 updated_dict = dict(value.__dict__)
                 for key in updated_dict.keys():
                     if key not in value._nonvar_fields:
@@ -275,8 +271,23 @@ class VariableTracker:
         self.source = source
         self.mutable_local = mutable_local
         self.recursively_contains = (
-            recursively_contains or set()
-        )  # provides hint to replace_all when replacing vars
+            recursively_contains  # provides hint to replace_all when replacing vars
+        )
+
+    def __post_init__(self, *args, **kwargs):
+        if self.recursively_contains is None:
+            self.recursively_contains = set()
+
+            def aggregate_mutables(var):
+                self.recursively_contains.update(var.recursively_contains)
+                if var.mutable_local is not None:
+                    self.recursively_contains.add(var.mutable_local)
+
+                return var
+
+            VariableTracker.apply(
+                aggregate_mutables, self, skip_fn=lambda var: var is not self
+            )
 
 
 def typestr(*objs):

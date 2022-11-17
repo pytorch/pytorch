@@ -10,17 +10,13 @@ from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
-from .base import aggregate_mutable_locals, MutableLocal, VariableTracker
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
 
 
 class ConstDictVariable(VariableTracker):
     def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
-
-        if recursively_contains is None:
-            recursively_contains = aggregate_mutable_locals(items.values())
-
         super(ConstDictVariable, self).__init__(
             recursively_contains=recursively_contains, **kwargs
         )

@@ -8,7 +8,7 @@ from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
 from ..utils import namedtuple_fields, proxy_args_kwargs
-from .base import aggregate_mutable_locals, MutableLocal, VariableTracker
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -26,9 +26,6 @@ class BaseListVariable(VariableTracker):
     def __init__(
         self, items: List[VariableTracker], recursively_contains=None, **kwargs
     ):
-        if recursively_contains is None:
-            recursively_contains = aggregate_mutable_locals(items)
-
         super(BaseListVariable, self).__init__(
             recursively_contains=recursively_contains, **kwargs
         )
@@ -466,9 +463,6 @@ class SliceVariable(BaseListVariable):
 
 class ListIteratorVariable(VariableTracker):
     def __init__(self, items, index: int = 0, recursively_contains=None, **kwargs):
-        if recursively_contains is None:
-            recursively_contains = aggregate_mutable_locals(items)
-
         super(ListIteratorVariable, self).__init__(
             recursively_contains=recursively_contains, **kwargs
         )

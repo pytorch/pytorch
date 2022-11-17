@@ -82,7 +82,7 @@ class SideEffects(object):
             keepalive=list(self.keepalive),
         )
 
-    def apply(self, fn, cache=None, skip_fn=None):
+    def apply(self, fn, cache=None, skip_fn=lambda _: False):
         if cache is None:
             cache = dict()
 

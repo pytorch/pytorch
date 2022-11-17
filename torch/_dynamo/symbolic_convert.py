@@ -311,7 +311,9 @@ class InstructionTranslatorBase(object):
 
         cache = dict()
         self.output.side_effects.apply(repl, cache, skip_fn=skip)
-        self.stack = [VariableTracker.apply(repl, x, cache, skip) for x in self.stack]
+        self.stack = [
+            VariableTracker.apply(repl, x, cache, skip_fn=skip) for x in self.stack
+        ]
         for k, x in self.symbolic_locals.items():
             self.symbolic_locals[k] = VariableTracker.apply(
                 repl, x, cache, skip_fn=skip
