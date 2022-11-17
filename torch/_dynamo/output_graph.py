@@ -114,6 +114,12 @@ class OutputGraph(fx.Tracer):
         # all current placeholder node names
         self.name_to_input = collections.OrderedDict()
 
+        # Enables creating unique node names by tracking
+        # all current placeholder node names
+        self.name_to_input = collections.OrderedDict()
+        # Used to avoid iterating over the linked list of graph nodes (slow)
+        self.nodes = set()
+
     @property
     def output(self):
         return self
@@ -124,7 +130,7 @@ class OutputGraph(fx.Tracer):
 
     def copy_graphstate(self):
         """Create a checkpoint of the current state by copying everything"""
-        graph_nodes = set(self.graph.nodes)
+        graph_nodes = set(self.nodes)
         return (
             graph_nodes,
             list(self.graphargs),
@@ -143,7 +149,7 @@ class OutputGraph(fx.Tracer):
             self.side_effects,
         ) = state
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
-        for node in reversed(list(self.graph.nodes)):
+        for node in reversed(list(self.nodes)):
             if node not in graph_nodes:
                 # Erasing node alone does not remove the meta information
                 # So, remove the help tensor explicitly
@@ -567,3 +573,12 @@ class OutputGraph(fx.Tracer):
         rv.node.stack_trace = nn_module_stack_str + " | ".join(msgs)
 
         return rv
+
+    def create_node(self, *args, **kwargs):
+        node = super().create_node(*args, **kwargs)
+        self.nodes.add(node)
+        return node
+
+    def erase_node(self, node):
+        super().erase_node(node)
+        self.nodes.remove(node)
