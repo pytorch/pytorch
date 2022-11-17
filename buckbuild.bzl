@@ -51,6 +51,7 @@ load(
     "aten_ufunc_generated_cpu_sources",
     "aten_ufunc_generated_cuda_sources",
 )
+load("//:patch_select.bzl", "select")
 
 def read_bool(section, field, default, required = True):
     # @lint-ignore BUCKRESTRICTEDSYNTAX

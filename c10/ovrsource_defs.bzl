@@ -1,5 +1,6 @@
 load("//arvr/tools/build_defs:genrule_utils.bzl", "gen_cmake_header")
 load("//arvr/tools/build_defs:oxx.bzl", "oxx_static_library")
+load("//:patch_select.bzl", "select")
 
 cpu_supported_platforms = [
     "ovr_config//os:android",

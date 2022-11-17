@@ -1,6 +1,8 @@
 # @lint-ignore-every FBCODEBZLADDLOADS
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 
+load("//:patch_select.bzl", "select")
+
 # shared by internal and OSS BUCK
 def define_tools_targets(
         python_binary,

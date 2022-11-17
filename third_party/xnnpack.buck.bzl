@@ -36,6 +36,7 @@ load(
     "PROD_SSSE3_MICROKERNEL_SRCS",
     "PROD_XOP_MICROKERNEL_SRCS",
 )
+load("//:patch_select.bzl", "select")
 
 # This defines XNNPACK targets for both fbsource BUCK and OSS BUCK
 # Note that the file path is relative to the BUCK file that called from, not to this bzl file.
