@@ -1108,7 +1108,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     min_values_per_thread *= config.input_vec_size;
     max_values_per_thread *= config.input_vec_size;
   }
-  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / num_threads;
+  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / config.num_threads;
   const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   const int target_grid_size = num_mp * blocks_per_sm;
   int grid = config.grid().x;
