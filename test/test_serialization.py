@@ -585,6 +585,15 @@ class SerializationMixin(object):
         with self.assertRaises(TypeError):
             # Tries to serialize str into tensor with wrong callable write property
             torch.save('foo', x)
+        s_data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        s = torch.CharStorage(s_data)
+        with self.assertRaises(AttributeError):
+            # Tries to serialize list into CharStorage
+            torch.save(s_data, s)
+        x = torch.randint(10, (3, 3), dtype=torch.float).cpu().numpy()
+        with self.assertRaises(AttributeError):
+            # Tries to serialize ndarray into ndarray
+            torch.save(x, x)
 
 
     def test_serialization_storage_slice(self):
@@ -895,6 +904,28 @@ class TestSerialization(TestCase, SerializationMixin):
             state = torch.load(f, weights_only=weights_only)
 
         self.assertEqual(state['weight'].size(), big_model.weight.size())
+
+    def test_serialization_python_attr(self):
+        def _test_save_load_attr(t):
+            t.foo = 'foo'
+            t.pi = 3.14
+
+            with BytesIOContext() as f:
+                torch.save(t, f)
+                f.seek(0)
+                loaded_t = torch.load(f)
+
+            self.assertEqual(t, loaded_t)
+            self.assertEqual(t.foo, loaded_t.foo)
+            self.assertEqual(t.pi, loaded_t.pi)
+
+        t = torch.zeros(3, 3)
+        _test_save_load_attr(t)
+        # This should start failing once Parameter
+        # supports saving Python Attribute.
+        err_msg = "'Parameter' object has no attribute"
+        with self.assertRaisesRegex(AttributeError, err_msg):
+            _test_save_load_attr(torch.nn.Parameter(t))
 
     def test_weights_only_assert(self):
         class HelloWorld:

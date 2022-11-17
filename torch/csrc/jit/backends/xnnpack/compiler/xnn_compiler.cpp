@@ -11,9 +11,10 @@ namespace jit {
 namespace xnnpack {
 namespace delegate {
 
-XNNExecutor XNNCompiler::compileModel(std::string ser_model) {
-  const char* buffer_pointer = ser_model.data();
-
+void XNNCompiler::compileModel(
+    const void* buffer_pointer,
+    size_t num_bytes,
+    XNNExecutor* executor) {
   auto output_min = -std::numeric_limits<float>::infinity();
   auto output_max = std::numeric_limits<float>::infinity();
 
@@ -46,16 +47,16 @@ XNNExecutor XNNCompiler::compileModel(std::string ser_model) {
   // a new mapping from the old ids to the newly created ones
   std::unordered_map<uint32_t, uint32_t> remapped_ids;
 
-  for (auto value : *flatbuffer_graph->values()) {
-    switch (value->value_type()) {
-      case fb_xnnpack::ValueUnion::XNNTensorValue: {
-        auto tensor_value = value->value_as_XNNTensorValue();
+  for (auto value : *flatbuffer_graph->xvalues()) {
+    switch (value->xvalue_type()) {
+      case fb_xnnpack::XValueUnion::XNNTensorValue: {
+        auto tensor_value = value->xvalue_as_XNNTensorValue();
 
         const void* data_ptr = nullptr;
         auto buffer_idx = tensor_value->constant_buffer_idx();
         if (buffer_idx != 0) {
           // TODO: @maxren implement data handling
-          TORCH_CHECK(false, "Cosntant data handling not yet implemented")
+          TORCH_CHECK(false, "Constant data handling not yet implemented")
         }
         std::vector<size_t> dims_data;
         for (auto dim : *tensor_value->dims()) {
@@ -85,10 +86,10 @@ XNNExecutor XNNCompiler::compileModel(std::string ser_model) {
     }
   }
 
-  for (auto node : *flatbuffer_graph->nodes()) {
-    switch (node->node_type()) {
-      case fb_xnnpack::NodeUnion::XNNAdd: {
-        auto graph_node = node->node_as_XNNAdd();
+  for (auto node : *flatbuffer_graph->xnodes()) {
+    switch (node->xnode_type()) {
+      case fb_xnnpack::XNodeUnion::XNNAdd: {
+        auto graph_node = node->xnode_as_XNNAdd();
         status = xnn_define_add2(
             subgraph_ptr,
             output_min,
@@ -109,17 +110,17 @@ XNNExecutor XNNCompiler::compileModel(std::string ser_model) {
   status = xnn_create_runtime_v2(subgraph_ptr, nullptr, 0, &runtime_ptr);
   TORCH_CHECK(xnn_status_success == status);
 
-  XNNExecutor executor(runtime_ptr);
+  executor->runtime_ =
+      std::unique_ptr<xnn_runtime, decltype(&xnn_delete_runtime)>(
+          runtime_ptr, xnn_delete_runtime);
 
   for (auto old_id : *flatbuffer_graph->input_ids()) {
-    executor.input_ids_.push_back(remapped_ids.at(old_id));
+    executor->input_ids_.emplace_back(remapped_ids.at(old_id));
   }
 
   for (auto old_id : *flatbuffer_graph->output_ids()) {
-    executor.output_ids_.push_back(remapped_ids.at(old_id));
+    executor->output_ids_.emplace_back(remapped_ids.at(old_id));
   }
-
-  return executor;
 };
 
 } // namespace delegate
