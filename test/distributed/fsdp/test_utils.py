@@ -192,32 +192,24 @@ class TestGetSubmoduleToStates(TestCase):
         self.assertEqual(submodules[0], model)
         root_states = submodule_to_states[submodules[0]]
         self.assertEqual(root_states.params, [model.lin.weight])
-        self.assertEqual(root_states.param_names, ["lin.weight"])
         self.assertEqual(root_states.buffers, [])
-        self.assertEqual(root_states.buffer_names, [])
         # # - `seq2`
         self.assertEqual(submodules[1], model.seq2)
         seq2_states = submodule_to_states[submodules[1]]
         self.assertEqual(seq2_states.params, [model.seq2[1].weight])
-        self.assertEqual(seq2_states.param_names, ["1.weight"])
         self.assertEqual(seq2_states.buffers, [model.seq2[1].seq2_1_buffer])
-        self.assertEqual(seq2_states.buffer_names, ["1.seq2_1_buffer"])
         # - `seq2[0]`
         self.assertEqual(submodules[2], model.seq2[0])
         seq2_0_states = submodule_to_states[submodules[2]]
         self.assertEqual(seq2_0_states.params, [])  # shared parameter
-        self.assertEqual(seq2_0_states.param_names, [])
         self.assertEqual(seq2_0_states.buffers, [])
-        self.assertEqual(seq2_0_states.buffer_names, [])
         # - `seq1`
         self.assertEqual(submodules[3], model.seq1)
         seq1_states = submodule_to_states[submodules[3]]
         self.assertEqual(
             seq1_states.params, [model.seq1[0].weight, model.seq1[1].weight]
         )
-        self.assertEqual(seq1_states.param_names, ["0.weight", "1.weight"])
         self.assertEqual(seq1_states.buffers, [model.seq1.seq1_buffer])
-        self.assertEqual(seq1_states.buffer_names, ["seq1_buffer"])
 
 
 instantiate_parametrized_tests(TestUtils)
