@@ -124,9 +124,14 @@ def has_mutation(gm, example_inputs, fake_mode, inputs_only=False):
     # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
     if fake_tensors_available and config.fake_tensor_propagation:
         assert fake_mode, "Fake mode must be passed in"
-        new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
-        with fake_mode, enable_python_dispatcher():
-            ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
+        # Our analysis pass should use dynamic shape tensor inputs
+        # when dynamic shapes are enabled.
+        # We don't actually care about the guards that are created
+        # on those shapes though, so just suppress_guards here.
+        with fake_mode.shape_env.suppress_guards():
+            new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
+            with enable_python_dispatcher():
+                ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     else:
         # Clone the inputs such that intermediate tensors (not leaf tensors) with
         # requires_grad to True are now converted to False to avoid Runtime Error
