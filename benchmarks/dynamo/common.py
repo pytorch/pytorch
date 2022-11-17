@@ -144,6 +144,8 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "MT5ForConditionalGeneration",  # OOM
     "PegasusForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # fp64_OOM
+    "DebertaV2ForMaskedLM",  # OOM
+    "DebertaV2ForQuestionAnswering",  # OOM
     # OOM
     "BigBird",
     "TrOCRForCausalLM",
