@@ -1,6 +1,8 @@
 # Only used for PyTorch open source BUCK build
 # @lint-ignore-every BUCKRESTRICTEDSYNTAX
 
+load("@prelude//:rules.bzl", "cxx_library")
+
 load(
     ":buck_helpers.bzl",
     "filter_attributes",

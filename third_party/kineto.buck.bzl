@@ -1,4 +1,5 @@
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
+load("@prelude//:rules.bzl", "cxx_library", "genrule")
 
 # kineto code should be updated to not have to
 # suppress these warnings.

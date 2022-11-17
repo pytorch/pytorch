@@ -1,3 +1,5 @@
+load("@prelude//:rules.bzl", "cxx_library", "genrule")
+
 GLOG_CONFIG_HEADERS = [
     "vlog_is_on.h",
     "stl_logging.h",

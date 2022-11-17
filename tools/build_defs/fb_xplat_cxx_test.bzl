@@ -1,6 +1,7 @@
 # Only used for PyTorch open source BUCK build
 # @lint-ignore-every BUCKRESTRICTEDSYNTAX
 load(":buck_helpers.bzl", "filter_attributes")
+load("@prelude//:rules.bzl", "cxx_test")
 
 def fb_xplat_cxx_test(
         name,

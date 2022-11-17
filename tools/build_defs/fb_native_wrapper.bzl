@@ -1,3 +1,5 @@
+load("@prelude//:rules.bzl", "genrule", "filegroup")
+
 # Only used for PyTorch open source BUCK build
 # @lint-ignore-every BUCKRESTRICTEDSYNTAX
 def _genrule(default_outs = ["."], **kwargs):
