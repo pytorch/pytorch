@@ -114,6 +114,12 @@ class _ContainerTemplate(ABC):
     def reset(self) -> None:
         ...
 
+    @abstractmethod
+    def get_length_by_instance(self, instance_id: int):
+        r"""
+        Raise TypeError if it's not supposed to be implemented to support `list(datapipe)`
+        """
+
 
 class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
     r"""
@@ -178,6 +184,9 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         return self.end_ptr is not None and\
             all(self.end_ptr == ptr or self.end_ptr - 1 == ptr for ptr in self.child_pointers)
 
+    def get_length_by_instance(self, instance_id: int) -> int:
+        return len(self.main_datapipe)
+
     def reset(self) -> None:
         self._datapipe_iterator = iter(self.main_datapipe)
         self.buffer = deque()
@@ -214,7 +223,8 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self.end_ptr = None
 
     def __del__(self):
-        self.buffer.clear()
+        if self.buffer:
+            self.buffer.clear()
 
 
 class _ChildDataPipe(IterDataPipe):
@@ -259,7 +269,7 @@ class _ChildDataPipe(IterDataPipe):
         return self.main_datapipe.get_next_element_by_instance(self.instance_id)
 
     def __len__(self):
-        return len(self.main_datapipe)
+        return self.main_datapipe.get_length_by_instance(self.instance_id)
 
     # This method is called by `hook_iterator` in `_typing.py`.
     def _set_main_datapipe_valid_iterator_id(self) -> int:
@@ -410,6 +420,9 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
     def is_every_instance_exhausted(self) -> bool:
         return self.main_datapipe_exhausted and all(not child_buffer for child_buffer in self.child_buffers)
 
+    def get_length_by_instance(self, instance_id: int) -> int:
+        raise TypeError
+
     def reset(self) -> None:
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
@@ -446,8 +459,9 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self.main_datapipe_exhausted = False
 
     def __del__(self):
-        for dq in self.child_buffers:
-            dq.clear()
+        if self.child_buffers:
+            for dq in self.child_buffers:
+                dq.clear()
 
 
 @functional_datapipe('mux')
