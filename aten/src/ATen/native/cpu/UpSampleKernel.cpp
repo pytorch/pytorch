@@ -474,9 +474,9 @@ void cpu_upsample_linear_channels_last(
   using opmath_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<scalar_t>;
   auto loop2d = [&](int64_t begin, int64_t end) {
-    const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
+    const auto height_scale = area_pixel_compute_scale<opmath_t>(
         input_height, output_height, align_corners, scales[0]);
-    const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
+    const auto width_scale = area_pixel_compute_scale<opmath_t>(
         input_width, output_width, align_corners, scales[1]);
 
     auto input_indexr = [=](int64_t n, int64_t h, int64_t w) {
@@ -486,7 +486,7 @@ void cpu_upsample_linear_channels_last(
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ih0, ih1, iw0, iw1;
-    scalar_t h0lambda, h1lambda, w0lambda, w1lambda;
+    opmath_t h0lambda, h1lambda, w0lambda, w1lambda;
     for (const auto n : c10::irange(begin, end)) {
       for (const auto oh : c10::irange(output_height)) {
         compute_source_index_and_lambda(
@@ -521,11 +521,11 @@ void cpu_upsample_linear_channels_last(
   };
 
   auto loop3d = [&](int64_t begin, int64_t end) {
-    const scalar_t depth_scale = area_pixel_compute_scale<scalar_t>(
+    const auto depth_scale = area_pixel_compute_scale<opmath_t>(
         input_depth, output_depth, align_corners, scales[0]);
-    const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
+    const auto height_scale = area_pixel_compute_scale<opmath_t>(
         input_height, output_height, align_corners, scales[1]);
-    const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
+    const auto width_scale = area_pixel_compute_scale<opmath_t>(
         input_width, output_width, align_corners, scales[2]);
 
     auto input_indexr = [=](int64_t n, int64_t d, int64_t h, int64_t w) {
@@ -536,7 +536,7 @@ void cpu_upsample_linear_channels_last(
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t id0, id1, ih0, ih1, iw0, iw1;
-    scalar_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
+    opmath_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
     for (const auto n : c10::irange(begin, end)) {
       for (const auto od : c10::irange(output_depth)) {
         compute_source_index_and_lambda(
