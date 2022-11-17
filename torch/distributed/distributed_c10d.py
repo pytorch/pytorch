@@ -237,17 +237,6 @@ _backend: str = Backend.UNDEFINED
 dist_backend = Backend
 
 
-# NOTE(crcrpar): [ReduceOp static class attributes to support `isinstance`]
-#   A ReduceOp instance of `PREMUL_SUM` is supposed to be created via `_make_nccl_premul_sum`
-#   while the other `op`s (meaning RedOpType members) can be directly passed to c10d reduce collectives.
-#   I changed `ReduceOp` to struct from enum class and introduced RedOpType enum class for PREMUL_SUM,
-#   which broke an implicit contract of ReduceOp being enum-like with which users apply isinstance to
-#   `op`, for example, `isinstance(ReduceOp.SUM, ReduceOp)`: https://github.com/pytorch/pytorch/issues/87191
-DENY_LIST = ("PREMUL_SUM", )
-for _red_op_name, _red_op_value in ReduceOp.RedOpType.__members__.items():
-    setattr(ReduceOp, _red_op_name, _red_op_value if _red_op_name in DENY_LIST else ReduceOp(_red_op_value))
-
-
 class _reduce_op(object):
     r"""
     Deprecated enum-like class for reduction operations: ``SUM``, ``PRODUCT``,
@@ -1179,12 +1168,19 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
 
     Args:
         tensor (Tensor): Tensor to send.
-        dst (int): Destination rank.
+        dst (int): Destination rank. Destination rank should not be the same
+        as the rank of the current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
 
     """
+    if get_rank() == dst:
+        raise ValueError(
+            "Invalid destination rank: destination rank should not be the same as "
+            "the rank of the current process."
+        )
+
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("send")

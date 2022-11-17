@@ -4,6 +4,7 @@ import collections
 import copy
 import csv
 import functools
+import importlib
 import io
 import logging
 import os
@@ -143,6 +144,8 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "MT5ForConditionalGeneration",  # OOM
     "PegasusForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # fp64_OOM
+    "DebertaV2ForMaskedLM",  # OOM
+    "DebertaV2ForQuestionAnswering",  # OOM
     # OOM
     "BigBird",
     "TrOCRForCausalLM",
@@ -162,6 +165,42 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "twins_pcpvt_base",  # time out
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
+
+
+def model_specified_by_path(path_and_class_str):
+    return ":" in path_and_class_str
+
+
+def load_model_from_path(path_and_class_str):
+    configs = {}
+    for kvstr in path_and_class_str.split(","):
+        k, v = kvstr.split(":")
+        configs[k] = v
+
+    for name in ["path", "class"]:
+        if name not in configs:
+            raise RuntimeError(
+                "Invalid --only arguments. Check help message for the correct format"
+            )
+
+    path = configs["path"]
+    class_name = configs["class"]
+
+    if path[:1] != "/":
+        raise RuntimeError(
+            "Use absolute path since dynamo may change the current working directory which makes using relative path tricky"
+        )
+
+    spec = importlib.util.spec_from_file_location("module_name", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    model_class = getattr(module, class_name)
+    assert issubclass(model_class, torch.nn.Module)
+    model = model_class()
+    assert hasattr(model, "get_example_inputs")
+    inputs = model.get_example_inputs()
+    return model, inputs
 
 
 def output_csv(filename, headers, row):
@@ -1001,7 +1040,7 @@ class BenchmarkRunner:
             out_batch_size = batch_size - 1
         return max(0, int(out_batch_size))
 
-    def batch_size_finder(self, device, model_name, initial_batch_size=128):
+    def batch_size_finder(self, device, model_name, initial_batch_size=1024):
         batch_size = initial_batch_size
         while batch_size >= 1:
             torch.cuda.empty_cache()
@@ -1393,7 +1432,31 @@ def parse_args(args=None):
     parser.add_argument(
         "--fast", "-f", action="store_true", help="skip slow benchmarks"
     )
-    parser.add_argument("--only", help="Run just one model")
+    parser.add_argument(
+        "--only",
+        help="""Run just one model from torchbench. Or
+        specify the path and class name of the model in format like:
+        --only=path:<MODEL_FILE_PATH>,class:<CLASS_NAME>
+
+        Due to the fact that dynamo changes current working directory,
+        the path should be an absolute path.
+
+        The class should have a method get_example_inputs to return the inputs
+        for the model. An example looks like
+        ```
+        class LinearModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+            def get_example_inputs(self):
+                return (torch.randn(2, 10),)
+        ```
+    """,
+    )
     parser.add_argument(
         "--training",
         action="store_true",
@@ -1885,19 +1948,25 @@ def run(runner, args, original_dir=None):
                 batch_size = read_batch_size_from_file(
                     args, args.batch_size_file, model_name
                 )
-            try:
-                device, name, model, example_inputs, batch_size = runner.load_model(
-                    device,
-                    model_name,
-                    batch_size=batch_size,
-                )
-            except NotImplementedError as e:
-                print(e)
-                import traceback
+            if model_specified_by_path(args.only):
+                model, example_inputs = load_model_from_path(args.only)
+                name = model.__class__.__name__
+                model = model.to(device=device)
+                example_inputs = tree_map(lambda x: x.to(device=device), example_inputs)
+            else:
+                try:
+                    device, name, model, example_inputs, batch_size = runner.load_model(
+                        device,
+                        model_name,
+                        batch_size=batch_size,
+                    )
+                except NotImplementedError as e:
+                    print(e)
+                    import traceback
 
-                print(traceback.format_exc())
-                logging.warn(f"{args.only} failed to load")
-                continue  # bad benchmark implementation
+                    print(traceback.format_exc())
+                    logging.warn(f"{args.only} failed to load")
+                    continue  # bad benchmark implementation
 
             current_name = name
             current_device = device
