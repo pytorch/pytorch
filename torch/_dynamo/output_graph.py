@@ -160,6 +160,8 @@ class OutputGraph(fx.Tracer):
                     del node.meta["example_value"]
                 self.remove_node(node)
                 self.real_value_cache.pop(node, None)
+            else:
+                break
 
     def count_calls(self):
         return count_calls(self.graph)
