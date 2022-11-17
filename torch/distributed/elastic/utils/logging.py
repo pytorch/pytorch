@@ -53,6 +53,7 @@ def _derive_module_name(depth: int = 1) -> Optional[str]:
             frame = frame.f_back
             i += 1
 
+        assert frame is not None
         module = inspect.getmodule(frame)
         if module:
             module_name = module.__name__
