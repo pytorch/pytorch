@@ -86,14 +86,18 @@ class OutputGraph(fx.Tracer):
     ):
         super(OutputGraph, self).__init__()
 
-        # Mutable state checkpointed by copy_graphstate()
         self.graph = torch.fx.Graph()
+        # Mutable state checkpointed by copy_graphstate()
         self.graphargs = []
         self.guards = set()
         self.nn_modules = dict()
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions = []
+        # used to track nodes that are added between calls of copy_graphstate
+        # and restore_graphstate
+        self.timestamp = 0
+
         # Node => computed real value (see utils.get_real_value)
         self.real_value_cache = {}
 
@@ -114,11 +118,9 @@ class OutputGraph(fx.Tracer):
         # all current placeholder node names
         self.name_to_input = collections.OrderedDict()
 
-        # Enables creating unique node names by tracking
-        # all current placeholder node names
-        self.name_to_input = collections.OrderedDict()
         # Used to avoid iterating over the linked list of graph nodes (slow)
-        self.nodes = set()
+        # the keys contain the nodes, all values are None
+        self.nodes = collections.OrderedDict()
 
     @property
     def output(self):
@@ -130,34 +132,34 @@ class OutputGraph(fx.Tracer):
 
     def copy_graphstate(self):
         """Create a checkpoint of the current state by copying everything"""
-        graph_nodes = set(self.nodes)
-        return (
-            graph_nodes,
+        state = (
             list(self.graphargs),
             set(self.guards),
             dict(self.nn_modules),
             self.side_effects.clone(),
+            self.timestamp,
         )
+        self.timestamp += 1
+        return state
 
     def restore_graphstate(self, state):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
-            graph_nodes,
             self.graphargs,
             self.guards,
             self.nn_modules,
             self.side_effects,
+            self.timestamp,
         ) = state
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
-        for node in reversed(list(self.nodes)):
-            if node not in graph_nodes:
+        for node in reversed(list(self.nodes.keys())):
+            if node.timestamp > self.timestamp:
                 # Erasing node alone does not remove the meta information
                 # So, remove the help tensor explicitly
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
-                self.graph.erase_node(node)
+                self.remove_node(node)
                 self.real_value_cache.pop(node, None)
-                self.name_to_input.pop(node.name, None)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -482,9 +484,9 @@ class OutputGraph(fx.Tracer):
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
                 if node.op == "get_attr":
-                    self.graph.erase_node(node)
+                    self.remove_node(node)
                 elif node.op == "call_function" and node.target is operator.getitem:
-                    self.graph.erase_node(node)
+                    self.remove_node(node)
 
         expanded_graphargs = []
         for arg in self.graphargs:
@@ -499,9 +501,8 @@ class OutputGraph(fx.Tracer):
             if arg.uses == 0:
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
-                self.graph.erase_node(node)
+                self.remove_node(node)
                 self.real_value_cache.pop(node, None)
-                self.name_to_input.pop(node.name, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
 
@@ -576,9 +577,11 @@ class OutputGraph(fx.Tracer):
 
     def create_node(self, *args, **kwargs):
         node = super().create_node(*args, **kwargs)
-        self.nodes.add(node)
+        node.timestamp = self.timestamp
+        self.nodes[node] = None
         return node
 
-    def erase_node(self, node):
-        super().erase_node(node)
-        self.nodes.remove(node)
+    def remove_node(self, node):
+        self.graph.erase_node(node)
+        self.nodes.pop(node, None)
+        self.name_to_input.pop(node.name, None)
