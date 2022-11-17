@@ -156,7 +156,7 @@ class FakeTensorConverter(object):
         # const_tensor.add_(torch.rand([1]))
         # all aliases of it must become no longer const
         assert isinstance(fake_tensor, FakeTensor) and fake_tensor.constant is not None
-        weak_st = StorageWeakRef(fake_tensor.constant.storage())
+        weak_st = StorageWeakRef(fake_tensor.constant._typed_storage())
 
         # we need a map from a weak storage to all of its corresponding
         # constant tensors. python doesn't have the weak value equivalent
@@ -168,7 +168,7 @@ class FakeTensorConverter(object):
     def invalidate_constant_aliases(self, tensor):
         assert not isinstance(tensor, FakeTensor)
 
-        weak_st = StorageWeakRef(tensor.storage())
+        weak_st = StorageWeakRef(tensor._typed_storage())
         if weak_st not in self.constant_storage_mapping:
             return
 
@@ -861,11 +861,7 @@ class FakeTensorMode(TorchDispatchMode):
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
         # TODO - we should be use the prim aten impl
-        if (
-            "prims::" in func._schema.name
-            and len(flat_arg_fake_tensors) != 0
-            and hasattr(func, "prim_meta_impl")
-        ):
+        if "prims::" in func._schema.name and hasattr(func, "prim_meta_impl"):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
 
@@ -968,9 +964,13 @@ class FakeTensorMode(TorchDispatchMode):
             aten.empty_strided.default,
             aten.as_strided_scatter.default,
             aten.as_strided.default,
+            aten.as_strided_.default,
             aten.zeros.default,
             aten.detach.default,
+            aten.view_as_real.default,
+            aten.view_as_complex.default,
             aten.set_.source_Storage_storage_offset,
+            aten._sparse_coo_tensor_with_dims_and_tensors.default,
         ]
 
     @property
@@ -1042,7 +1042,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
     for e in tree_flatten((args, kwargs))[0]:
         if isinstance(e, torch.Tensor):
             if not e.is_sparse:
-                storages.add(e.storage()._cdata)
+                storages.add(e._typed_storage()._cdata)
 
     # TODO: also check metadata change on inputs
     # proper aliasing/metadata relationship between outputs and inputs will
@@ -1052,7 +1052,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
         if id(e) not in inp_impls and (
             isinstance(e, torch.Tensor)
             and not e.is_sparse
-            and e.storage()._cdata in storages
+            and e._typed_storage()._cdata in storages
         ):
             raise orig_not_implemented_exception
 
@@ -1079,7 +1079,9 @@ class FakeCopyMode(TorchFunctionMode):
 
         # clone will get called in Parameter deepcopy
         if func == torch._C._TensorBase.clone:
-            return func(self.fake_mode.from_tensor(args[0]), **kwargs)
+            return func(
+                self.fake_mode.from_tensor(args[0], static_shapes=True), **kwargs
+            )
         elif func == torch.Tensor.__deepcopy__:
             assert len(args) == 2 and len(kwargs) == 0
             tensor, memo = args
@@ -1087,7 +1089,7 @@ class FakeCopyMode(TorchFunctionMode):
             if id(tensor) in memo:
                 return memo[id(tensor)]
 
-            out = self.fake_mode.from_tensor(tensor)
+            out = self.fake_mode.from_tensor(tensor, static_shapes=True)
             memo[id(tensor)] = out
             return out
         else:

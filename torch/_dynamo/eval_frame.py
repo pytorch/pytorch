@@ -2,7 +2,6 @@ import contextlib
 import copy
 import functools
 import inspect
-import itertools
 import logging
 import os
 import sys
@@ -150,20 +149,17 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            any_arg_is_proxy = any(
-                map(
-                    lambda arg: isinstance(arg, torch.fx.Proxy),
-                    itertools.chain(args, kwargs.values()),
-                )
-            )
-            if any_arg_is_proxy:
+            if (
+                not isinstance(self, DisableContext)
+                and torch.fx._symbolic_trace.is_fx_tracing()
+            ):
                 if config.error_on_nested_fx_trace:
                     raise RuntimeError(
                         "Detected that you are using FX to symbolically trace "
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
                 else:
-                    return fn
+                    return fn(*args, **kwargs)
 
             on_enter()
             prior = set_eval_frame(callback)
@@ -355,6 +351,7 @@ def optimize(
         def toy_example(a, b):
             ...
     """
+    torch._C._log_api_usage_once("torch._dynamo.optimize")
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
     if sys.platform == "win32":
@@ -455,6 +452,7 @@ def explain(f, *args, **kwargs):
 def export(
     f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
 ):
+    torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
         assert (
             aten_graph
@@ -558,7 +556,10 @@ def export(
             )
 
         def placeholder(self, target, args, kwargs):
-            return next(self.old_args_gen)
+            arg = next(self.old_args_gen)
+            if "val" in self.current_node.meta:
+                arg.node.meta["val"] = self.current_node.meta["val"]
+            return arg
 
         def output(self, target, args, kwargs):
             dynamo_result_flat = args[0]
@@ -567,6 +568,10 @@ def export(
             new_result = pytree.tree_unflatten(new_result_flat, out_spec_traced)
 
             return super().output(target, (new_result,), {})
+
+        def run_node(self, n):
+            self.current_node = n
+            return super().run_node(n)
 
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace

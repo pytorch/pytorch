@@ -91,7 +91,7 @@ class TestXNNPackBackend(unittest.TestCase):
             add_module,
             {
                 "forward": {
-                    "inputs" : [sample_inputs[0], sample_inputs[1]],
+                    "inputs" : [sample_inputs[0].clone(), sample_inputs[1].clone()],
                     "outputs": [sample_output]
                 }
             }
