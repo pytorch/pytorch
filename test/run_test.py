@@ -779,7 +779,6 @@ def run_test_ops(test_module, test_directory, options):
             f"--shard-id={i}",
             f"--num-shards={NUM_PROCS}",
             "-k=not _linalg_cholesky_",
-
         ])
 
         return_code = pool.apply_async(
