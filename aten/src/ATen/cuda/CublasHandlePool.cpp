@@ -54,7 +54,7 @@ size_t parseChosenWorkspaceSize() {
     std::sregex_iterator next(config.begin(), config.end(), exp);
     std::sregex_iterator end;
     if (next == end) {
-      TORCH_WARN("Could not parse CUBLAS_WORKSPACE_CONFIG, using default workspace size:", default_size);
+      TORCH_WARN("Could not parse CUBLAS_WORKSPACE_CONFIG, using default workspace size of ", default_size, " bytes.");
       return default_size;
     }
     while (next != end) {
