@@ -277,7 +277,7 @@ def istype(obj, allowed_types):
 
 
 def is_typing(value):
-    if sys.version_info < (3, 8):
+    if sys.version_info < (3, 9):
         return isinstance(value, typing._GenericAlias)
     else:
         return isinstance(value, typing._SpecialGenericAlias)
