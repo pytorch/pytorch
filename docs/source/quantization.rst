@@ -354,7 +354,7 @@ QAT API Example::
   # attach a global qconfig, which contains information about what kind
   # of observers to attach. Use 'fbgemm' for server inference and
   # 'qnnpack' for mobile inference. Other quantization configurations such
-  # as selecting symmetric or assymetric quantization and MinMax or L2Norm
+  # as selecting symmetric or asymmetric quantization and MinMax or L2Norm
   # calibration techniques can be specified here.
   model_fp32.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
 

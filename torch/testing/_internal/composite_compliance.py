@@ -311,7 +311,7 @@ def generate_subclass_choices_args_kwargs(args, kwargs, CCT, cct_mode):
 
 def raise_composite_compliance_error(err, additional_info=''):
     raise RuntimeError(
-        "Composite compilance check failed with "
+        "Composite compliance check failed with "
         "the above error.\n"
         f"{additional_info}"
         "If you are adding an OpInfo of an "

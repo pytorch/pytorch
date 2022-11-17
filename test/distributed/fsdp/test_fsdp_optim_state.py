@@ -6,9 +6,10 @@ from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 import torch
+import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    _CHECKPOINT_PREFIX,
+    _CHECKPOINT_WRAPPED_MODULE,
     apply_activation_checkpointing,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -31,7 +32,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
 )
 
-STATE_DICT_TYPE = [StateDictType.FULL_STATE_DICT, StateDictType.SHARDED_STATE_DICT]
+STATE_DICT_TYPES = [StateDictType.FULL_STATE_DICT, StateDictType.SHARDED_STATE_DICT]
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -490,7 +491,7 @@ class TestFSDPOptimState(FSDPTest):
                         self.assertFalse(value.is_cuda)
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("state_dict_type", STATE_DICT_TYPE)
+    @parametrize("state_dict_type", STATE_DICT_TYPES)
     @parametrize("use_multiple_param_groups", [False, True])
     @parametrize("rank0_only", [False, True])
     @parametrize("use_diff_optim_inputs", [False, True])
@@ -502,7 +503,7 @@ class TestFSDPOptimState(FSDPTest):
         use_diff_optim_inputs: bool,
     ) -> None:
         """
-        Tests :meth:`full_optim_state_dict` and `sharded_optim_state_dict`
+        Tests :meth:`full_optim_state_dict` and meth:`sharded_optim_state_dict`
         by comparing the returned dict for an FSDP-wrapped model with that of
         an equivalent non-wrapped model.
 
@@ -610,7 +611,7 @@ class TestFSDPOptimState(FSDPTest):
         self.assertEqual(optim_state_dict["state"].keys(), state_dict.keys())
         # Check that checkpointing prefix was indeed stripped.
         for key in optim_state_dict["state"]:
-            self.assertNotIn(_CHECKPOINT_PREFIX, key)
+            self.assertNotIn(_CHECKPOINT_WRAPPED_MODULE, key)
 
     @skip_if_lt_x_gpu(2)
     def test_full_optim_state_dict_nested_invalid(self):
@@ -956,7 +957,7 @@ class TestFSDPOptimState(FSDPTest):
             self._step_model(model2, optim2, num_iters=NUM_ITERS)
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("state_dict_type", STATE_DICT_TYPE)
+    @parametrize("state_dict_type", STATE_DICT_TYPES)
     @parametrize("add_to_fsdp_module", [False, True])
     def test_shard_full_optim_state_dict_unmanaged_params(
         self,
@@ -1086,7 +1087,7 @@ class TestFSDPOptimState(FSDPTest):
             optim.load_state_dict(flattened_osd)
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("state_dict_type", STATE_DICT_TYPE)
+    @parametrize("state_dict_type", STATE_DICT_TYPES)
     @parametrize("use_multiple_param_groups", [False, True])
     def test_rekey_optim_state_dict_to_ids(
         self,
@@ -1381,6 +1382,61 @@ class TestFSDPOptimState(FSDPTest):
                     nonwrapped_model,
                     optim_input=nonwrapped_optim_input,
                 )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("state_dict_type", STATE_DICT_TYPES)
+    def test_save_load_without_0th_param_state(self, state_dict_type: StateDictType):
+        """
+        Tests saving and loading an optim state dict for Adam optimizer (i.e.
+        any optimizer with a "step" key in its state) when the first parameter
+        does not have optimizer state (e.g. unused or frozen).
+        """
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin1 = nn.Linear(5, 5)
+                self.lin2 = nn.Linear(5, 5)
+                self.relu = nn.ReLU()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # Do not use `lin1`, which is the parameter passed to the
+                # optimizer and the one checked for "step" state to see if it
+                # is tensor or float
+                return self.relu(self.lin2(x))
+
+        model = Model().cuda()
+        model.lin1 = FSDP(model.lin1)
+        model.lin2 = FSDP(model.lin2)
+        fsdp_model = FSDP(model)
+        optim = torch.optim.Adam(
+            fsdp_model.parameters(), lr=1e-2
+        )  # or any optimizer with "step"
+
+        # Run an iteration to construct optimizer state
+        device = torch.device("cuda")
+        inp = torch.randn((2, 5), device=device)
+        loss = fsdp_model(inp).sum()
+        loss.backward()
+        optim.step()
+
+        # Check that save and load does not error
+        if state_dict_type == StateDictType.FULL_STATE_DICT:
+            fsdp_osd = FSDP.full_optim_state_dict(fsdp_model, optim, rank0_only=False)
+            flattened_osd = FSDP.shard_full_optim_state_dict(fsdp_osd, fsdp_model)
+        elif state_dict_type == StateDictType.SHARDED_STATE_DICT:
+            fsdp_osd = FSDP.sharded_optim_state_dict(fsdp_model, optim)
+            flattened_osd = FSDP.flatten_sharded_optim_state_dict(fsdp_osd, fsdp_model)
+        optim.load_state_dict(flattened_osd)
+        # `__setstate__()` will check the 0th parameter to see if "step" is
+        # represented as a tensor or float, so it is imperative that its state
+        # is non-empty.
+
+        # Run an iteration as a sanity check
+        inp = torch.randn((2, 5), device=device)
+        loss = fsdp_model(inp).sum()
+        loss.backward()
+        optim.step()
 
 
 instantiate_parametrized_tests(TestFSDPOptimState)

@@ -98,6 +98,9 @@ def get_strip_error_messages():
         return True  # always strip in OSS CI to expose potential issues
     return read_bool("pt", "strip_error_messages", not _is_build_mode_dev())
 
+def get_disable_warn():
+    return read_bool("pt", "disable_warn", False)
+
 def get_enable_eager_symbolication():
     return read_bool("pt", "enable_eager_symbolication", default = False, required = False)
 
@@ -200,6 +203,8 @@ _COMMON_PREPROCESSOR_FLAGS = [
     ["-DC10_MOBILE_TRIM_DISPATCH_KEYS"] if get_enable_mobile_dispatch_keys_trimming() else []
 ) + (
     ["-DSTRIP_ERROR_MESSAGES"] if get_strip_error_messages() else []
+) + (
+    ["-DDISABLE_WARN"] if get_disable_warn() else []
 )
 
 def get_aten_preprocessor_flags():
@@ -1711,7 +1716,7 @@ def define_buck_targets(
             "torch/csrc/jit/serialization/mobile_bytecode.fbs",
         ],
         outs = {
-            "mobile_bytecode_generated.h": ["mobile_bytecode_generated.h"],
+            "mobile_bytecode_generated_fbsource.h": ["mobile_bytecode_generated.h"],
         },
         cmd = "$(exe {})".format(third_party("flatc")) +
               " --cpp --gen-mutable --scoped-enums -o ${OUT} ${SRCS}",
@@ -1727,13 +1732,16 @@ def define_buck_targets(
         name = "mobile_bytecode",
         header_namespace = "",
         exported_headers = {
-            "torch/csrc/jit/serialization/mobile_bytecode_generated.h": ":mobile_bytecode_header[mobile_bytecode_generated.h]",
+            ("torch/csrc/jit/serialization/mobile_bytecode_generated.h" if IS_OSS else "torch/csrc/jit/serialization/mobile_bytecode_generated_fbsource.h"): ":mobile_bytecode_header[mobile_bytecode_generated_fbsource.h]",
         },
         # Avoid leaking implementation details by only exposing this header to
         # the internals of the loader/serializer layer.
         visibility = [
             "{}:flatbuffer_loader".format(ROOT),
             "{}:flatbuffer_serializer_mobile".format(ROOT),
+        ],
+        exported_deps = [
+            third_party("flatbuffers-api"),
         ],
     )
 
@@ -1755,7 +1763,6 @@ def define_buck_targets(
             ":mobile_bytecode",
             ":torch_mobile_module",
             C10,
-            third_party("flatbuffers-api"),
         ],
         exported_deps = [
             ":torch_mobile_train",
@@ -1793,7 +1800,6 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":mobile_bytecode",
-            third_party("flatbuffers-api"),
         ],
         exported_deps = [
             ":torch_mobile_deserialize",
