@@ -41,7 +41,7 @@ class _ReplicateState:
         for child in module.children():
             self._recursive_collect_params(child)
 
-    def init_helper(self, **kwargs) -> None:
+    def init_helper(self) -> None:
         if self.has_initialized:
             return
 
@@ -49,12 +49,14 @@ class _ReplicateState:
         for module in self.modules:
             self._recursive_collect_params(module)
 
-        self._ddp = _ddp.DistributedDataParallel(self._param_list, **kwargs)
+        self._ddp = _ddp.DistributedDataParallel(
+            self._param_list, **self.kwargs
+        )
 
     def forward_pre_hook(
         self, module: nn.Module, input: Tuple[torch.Tensor]
     ) -> None:
-        self.init_helper(**self.kwargs)
+        self.init_helper()
         self._ddp.pre_forward()
 
     def forward_post_hook(
