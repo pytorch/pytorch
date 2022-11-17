@@ -353,6 +353,33 @@ std::string CreateMetricReport() {
   return ss.str();
 }
 
+std::string CreateMetricReport(const std::vector<std::string>& counter_names,
+                               const std::vector<std::string>& metric_names) {
+  MetricsArena* arena = MetricsArena::Get();
+  std::stringstream ss;
+  for (const std::string& metric_name : metric_names) {
+    MetricData* data = arena->GetMetric(metric_name);
+    if (data && data->TotalSamples() > 0) {
+      EmitMetricInfo(metric_name, data, &ss);
+    }
+  }
+  for (const std::string& counter_name : counter_names) {
+    CounterData* data = arena->GetCounter(counter_name);
+    if (data && data->Value() > 0) {
+      EmitCounterInfo(counter_name, data, &ss);
+    }
+  }
+  static std::string fall_back_counter_prefix = "aten::";
+  arena->ForEachCounter([&ss](const std::string& name, CounterData* data) {
+    if (name.rfind(fall_back_counter_prefix, 0) == 0 && data->Value() > 0) {
+      // it might emit duplicated counter if user also specified exact aten
+      // counter in the `counter_names` but it should be very rare.
+      EmitCounterInfo(name, data, &ss);
+    }
+  });
+  return ss.str();
+}
+
 std::vector<std::string> GetMetricNames() {
   return MetricsArena::Get()->GetMetricNames();
 }
