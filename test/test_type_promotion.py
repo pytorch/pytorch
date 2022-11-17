@@ -473,7 +473,7 @@ class TestTypePromotion(TestCase):
             elif isinstance(x, complex):
                 return torch.complex64
             else:
-                raise AssertionError(f"Unkonwn type {x}")
+                raise AssertionError(f"Unknown type {x}")
 
         # tensor against tensor
         a_tensor = torch.tensor((0, 1), device=device, dtype=dtypes[0])

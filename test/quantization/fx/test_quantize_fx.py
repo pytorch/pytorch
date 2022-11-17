@@ -491,7 +491,7 @@ class TestFuseFx(QuantizationTestCase):
 
         self.checkGraphModuleNodes(m, expected_node=ns.call_module(torch.nn.intrinsic.modules.fused.LinearReLU))
 
-    @unittest.skip("Temprorarily skipping the test case, will enable after the simple"
+    @unittest.skip("Temporarily skipping the test case, will enable after the simple"
                    "pattern format is supported")
     def test_fuse_addtional_fuser_method(self):
         class MyConvReLU(torch.nn.Module):
