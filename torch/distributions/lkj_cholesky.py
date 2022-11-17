@@ -21,7 +21,7 @@ class LKJCholesky(Distribution):
     LKJ distribution for lower Cholesky factor of correlation matrices.
     The distribution is controlled by ``concentration`` parameter :math:`\eta`
     to make the probability of the correlation matrix :math:`M` generated from
-    a Cholesky factor propotional to :math:`\det(M)^{\eta - 1}`. Because of that,
+    a Cholesky factor proportional to :math:`\det(M)^{\eta - 1}`. Because of that,
     when ``concentration == 1``, we have a uniform distribution over Cholesky
     factors of correlation matrices. Note that this distribution samples the
     Cholesky factor of correlation matrices and not the correlation matrices
