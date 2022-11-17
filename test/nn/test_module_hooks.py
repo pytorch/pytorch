@@ -693,6 +693,9 @@ class TestModuleGlobalHooks(TestCase):
 
 
 class TestModuleHookNN(NNTestCase):
+    _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
+
     def _test_hooks(self, backward_register_fn):
         module = nn.Sigmoid()
         input = torch.ones(5, 5, requires_grad=True)
