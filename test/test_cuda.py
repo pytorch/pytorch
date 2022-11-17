@@ -615,7 +615,7 @@ class TestCuda(TestCase):
                 torch.matmul(inp, inp)
             finish = torch.torch.cuda.memory_stats()['active_bytes.all.allocated']
             return finish - start
-        
+
         # check default
         os.environ['CUBLAS_WORKSPACE_CONFIG'] = ''
         self.assertTrue(abs(check_workspace_size(a) - default_workspace_size) < 524288)
