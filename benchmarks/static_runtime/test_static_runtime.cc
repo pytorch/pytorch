@@ -2560,8 +2560,8 @@ TEST(StaticRuntime, Tensor_Split) {
   std::vector<IValue> args2{at::randn({8}), torch::tensor(3), 0};
 
   const auto tensor_split_str3 = R"JIT(
-    def forward(self, a: Tensor, indicies: List[int], dim: int):
-        return torch.tensor_split(a, indicies, dim)
+    def forward(self, a: Tensor, indices: List[int], dim: int):
+        return torch.tensor_split(a, indices, dim)
   )JIT";
   std::vector<IValue> args3{at::randn({8}), c10::List<int64_t>({1, 6}), 0};
 
@@ -3194,9 +3194,14 @@ TEST(StaticRuntime, ReplaceWithMaybeCopy) {
   smodule.runtime().check_for_memory_leak();
 
   EXPECT_TRUE(expected.equal(actual));
-  EXPECT_FALSE(hasProcessedNodeWithName(smodule, "aten::to"));
+
+  // Make a fresh graph to ensure the pass works in isolation
+  auto new_graph = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(to, new_graph.get());
+  ReplaceWithMaybeCopy(new_graph);
+  EXPECT_FALSE(hasNodeWithKind(new_graph, "aten::to"));
   EXPECT_TRUE(
-      hasProcessedNodeWithName(smodule, "static_runtime::to_maybe_copy_out"));
+      hasNodeWithKind(new_graph, "static_runtime::to_maybe_copy_out"));
 }
 
 TEST(StaticRuntime, Int) {
@@ -3674,41 +3679,6 @@ TEST(StaticRuntime, ClampNaNToNum) {
   // Non-NNC path
   testStaticRuntime(src1, {a.to(at::kDouble)}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
   testStaticRuntime(src1, {a.to(at::kDouble)}, {b.to(at::kDouble)}, /*use_allclose=*/true, /*use_equalnan=*/true);
-}
-
-TEST(StaticRuntime, PrepackWeights) {
-  const std::string src = R"IR(
-    graph(%input: Tensor, %weight: Tensor, %bias: Tensor?, %scale: Tensor, %zero_point: Tensor):
-        %none: NoneType = prim::Constant()
-        %result: Tensor = fb::quantized_linear_unpacked_weight_v2(%input, %weight, %bias, %scale, %zero_point)
-        %dequantized: Tensor = aten::dequantize(%result)
-        return (%dequantized)
-  )IR";
-
-  auto graph = getGraphFromIR(src);
-  PrepackWeights(graph);
-  ASSERT_TRUE(graphHasOp(graph, "quantized::linear"));
-  ASSERT_TRUE(graphHasOp(graph, "quantized::linear_prepack"));
-  ASSERT_FALSE(graphHasOp(graph, "fb::quantized_linear_unpacked_weight_v2"));
-
-  auto scale = at::tensor({2}, at::kFloat);
-  auto zero_point = at::tensor({3}, at::kLong);
-
-  auto weight =
-      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQInt8);
-  auto input =
-      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQUInt8);
-  auto args1 = std::vector<IValue>{input, weight, c10::nullopt, scale, zero_point};
-
-  auto weight_2 =
-      at::quantize_per_tensor(torch::randn({8, 3}), 2, 3, torch::kQInt8);
-  auto input_2 =
-      at::quantize_per_tensor(torch::randn({9, 3}), 2, 3, torch::kQUInt8);
-  auto bias_2 = torch::randn({3}, torch::kFloat);
-  auto args2 = std::vector<IValue>{input, weight, bias_2, scale, zero_point};
-
-  testStaticRuntime(src, args1);
-  testStaticRuntime(src, args2);
 }
 
 TEST(StaticRuntime, IfReturningTuple) {

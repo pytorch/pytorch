@@ -5,7 +5,7 @@ load("@fbsource//tools/build_defs:default_platform_defs.bzl", "compose_platform_
 load("@fbsource//tools/build_defs:dict_defs.bzl", "dict_defs")
 load("@fbsource//tools/build_defs:expect.bzl", "expect")
 load("@fbsource//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_library")
-load("@fbsource//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
+load("@fbsource//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode", "is_fbcode_mode_mac")
 load("@fbsource//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "CXX", "IOS", "MACOSX", "WINDOWS")
 load("@fbsource//tools/build_defs/apple:build_mode_defs.bzl", "is_production_build")
 load("@fbsource//tools/build_defs/apple:config_utils_defs.bzl", "STATIC_LIBRARY_IOS_CONFIG", "STATIC_LIBRARY_MAC_CONFIG", "fbobjc_configs")
@@ -166,6 +166,7 @@ def get_c2_fbandroid_xplat_compiler_flags():
         # T95767731 -- remove this once all builds are on at least llvm-13
         "-Wno-unknown-warning-option",
         "-Wno-unused-but-set-variable",
+        "-DHAVE_MMAP",
     ]
 
     if get_c2_strip_glog():
@@ -351,7 +352,10 @@ def get_c2_aten_cpu_fbobjc_macosx_deps():
             "fbsource//xplat/caffe2:cpukernel_avx2",
         ]
     else:
-        return []
+        return select({
+            "DEFAULT": [],
+            "ovr_config//os:macos-x86_64": ["fbsource//xplat/deeplearning/fbgemm:fbgemm"],
+        }) if is_arvr_mode() else []
 
 def get_c2_aten_cpu_fbobjc_macosx_platform_deps():
     if is_focus_enabled():
@@ -377,10 +381,19 @@ def get_c2_aten_cpu_fbobjc_macosx_platform_deps():
             },
         ])
 
+def using_protobuf_v3():
+    # Consider migrating this to `read_config("protobuf", "use_v3")`
+    # The `is_fbcode_mode_mac()` clause was added rather than changing to `read_config` to minimize changes in behavior
+    return is_arvr_mode() or is_fbcode_mode_mac()
+
+def get_c2_protobuf_dep():
+    return "fbsource//third-party/protobuf:libprotobuf" if using_protobuf_v3() else "fbsource//xplat/third-party/protobuf:fb-protobuf-lite"
+
 def c2_cxx_library(**kwargs):
     args = get_c2_default_cxx_args()
     args.update(kwargs)
     args.setdefault("platforms", (ANDROID, APPLE, CXX, WINDOWS))
+
     fb_xplat_cxx_library(
         labels = [
             "supermodule:android/default/caffe2",
@@ -403,7 +416,7 @@ def c2_protobuf_rule(protos):
             protocmd = ("cp $SRCDIR/{} $SRCDIR/{} && chmod +w $SRCDIR/{} && echo \"option optimize_for = LITE_RUNTIME;\" >> $SRCDIR/{} && ".format(p, proto, proto, proto) +
                         "cp $SRCDIR/caffe2/proto/caffe2.proto $SRCDIR/caffe2.proto && chmod +w $SRCDIR/caffe2.proto && echo \"option optimize_for = LITE_RUNTIME;\" >> $SRCDIR/caffe2.proto && " +
                         "sed -i -e 's/caffe2\\/proto\\/caffe2.proto/caffe2.proto/g' $SRCDIR/{} && ".format(proto) +
-                        ("$(exe fbsource//third-party/protobuf:protoc-host) " if is_arvr_mode() else "$(exe fbsource//xplat/third-party/protobuf:protoc) --osx $(location fbsource//xplat/third-party/protobuf:protoc.Darwin) --linux $(location fbsource//xplat/third-party/protobuf:protoc.Linux) ") +
+                        ("$(exe fbsource//third-party/protobuf:protoc-host) " if using_protobuf_v3() else "$(exe fbsource//xplat/third-party/protobuf:protoc) --osx $(location fbsource//xplat/third-party/protobuf:protoc.Darwin) --linux $(location fbsource//xplat/third-party/protobuf:protoc.Linux) ") +
                         "-I $SRCDIR --cpp_out=$OUT $SRCDIR/{}".format(proto))
         buck_genrule(
             name = proto,
@@ -450,7 +463,7 @@ def c2_full_protobuf_rule(protos):
             protocmd = ("cp $SRCDIR/{} $SRCDIR/{} && ".format(p, proto) +
                         "cp $SRCDIR/caffe2/proto/caffe2.proto $SRCDIR/caffe2.proto && " +
                         "sed -i -e 's/caffe2\\/proto\\/caffe2.proto/caffe2.proto/g' $SRCDIR/{} && ".format(proto) +
-                        ("$(exe fbsource//third-party/protobuf:protoc-host) " if is_arvr_mode() else "$(exe fbsource//xplat/third-party/protobuf:protoc) --osx $(location fbsource//xplat/third-party/protobuf:protoc.Darwin) --linux $(location fbsource//xplat/third-party/protobuf:protoc.Linux) ") +
+                        ("$(exe fbsource//third-party/protobuf:protoc-host) " if using_protobuf_v3() else "$(exe fbsource//xplat/third-party/protobuf:protoc) --osx $(location fbsource//xplat/third-party/protobuf:protoc.Darwin) --linux $(location fbsource//xplat/third-party/protobuf:protoc.Linux) ") +
                         "-I $SRCDIR --cpp_out=$OUT $SRCDIR/{}".format(proto))
         buck_genrule(
             name = prefix + proto,
@@ -484,7 +497,7 @@ def libcaffe2_cxx_library(name, use_hptt, **kwargs):
         name = name,
         exported_deps = [
             "fbsource//xplat/caffe2/c10:c10",
-            "fbsource//third-party/protobuf:libprotobuf" if is_arvr_mode() else "fbsource//xplat/third-party/protobuf:fb-protobuf-lite",
+            get_c2_protobuf_dep(),
             ":caffe2_protobuf_headers",
             ":pthreadpool",
             ":common_core",

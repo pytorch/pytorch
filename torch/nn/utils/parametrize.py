@@ -73,7 +73,7 @@ class ParametrizationList(ModuleList):
     It is the type of ``module.parametrizations[tensor_name]`` when ``module[tensor_name]``
     has been parametrized with :func:`register_parametrization`.
 
-    If the first registered parmetrization has a ``right_inverse`` that returns one tensor or
+    If the first registered parametrization has a ``right_inverse`` that returns one tensor or
     does not have a ``right_inverse`` (in which case we assume that ``right_inverse`` is the identity),
     it will hold the tensor under the name ``original``.
     If it has a ``right_inverse`` that returns more than one tensor, these will be registered as

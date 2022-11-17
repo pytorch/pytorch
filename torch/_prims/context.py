@@ -68,7 +68,8 @@ def torch_to_refs_map():
 
     # Support conversions
     for s in torch._refs._conversions.__all__:
-        r[getattr(torch.Tensor, s)] = torch._refs._conversions.__dict__.get(s)
+        tensor_attr = getattr(torch.Tensor, s, None) or getattr(torch, s)
+        r[tensor_attr] = torch._refs._conversions.__dict__.get(s)
 
     return r
 
@@ -254,10 +255,6 @@ def _is_func_unsupported_nvfuser(
 class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
     def __init__(self, *, skip_ops=()):
         aten_ops_to_skip = (
-            "aten.transpose.int",
-            "aten.t.default",
-            "aten.unsqueeze.default",
-            "aten.permute.default",
             "aten._log_softmax.default",
             "aten._log_softmax_backward_data.default",
             "aten.expand.default",
@@ -401,6 +398,12 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             shape = torch._prims_common.extract_shape_from_varargs(
                 shape, validate=False
             )  # type: ignore[assignment]
+            if len(kwargs) > 0:
+                warn("view has ignored kwargs!")
+            return torch.ops.nvprims.view(a, shape)
+
+        if orig_func == torch.ops.aten._reshape_alias.default:
+            a, shape, stride = args
             if len(kwargs) > 0:
                 warn("view has ignored kwargs!")
             return torch.ops.nvprims.view(a, shape)
