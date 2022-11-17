@@ -20,17 +20,17 @@ from torch.futures import Future
 
 from torch.distributed._shard import sharded_tensor
 
-from torch.distributed._shard.checkpoint.default_planner import (
+from torch.distributed.checkpoint.default_planner import (
     _create_default_local_metadata,
 )
 
-from torch.distributed._shard.checkpoint.metadata import (
+from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     Metadata,
     TensorStorageMetadata,
 )
 
-from torch.distributed._shard.checkpoint.planner import (
+from torch.distributed.checkpoint.planner import (
     SavePlan,
     SavePlanner,
     LoadPlan,
