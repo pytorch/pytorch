@@ -19,7 +19,8 @@ class _ReplicateState:
             replicate.state(module)._distributed_state = self
             replicate.state(module)._params_collected = False
             module.register_forward_pre_hook(self.forward_pre_hook)
-            module.register_forward_hook(self.forward_post_hook)
+            # TODO(@yhcharles): fix type error
+            module.register_forward_hook(self.forward_post_hook)  # type: ignore[arg-type]
 
     def _recursive_collect_params(self, module: nn.Module) -> None:
         # TODO: skip if managed by other APIs
