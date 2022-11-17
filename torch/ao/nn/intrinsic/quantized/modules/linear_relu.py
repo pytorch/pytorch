@@ -82,29 +82,29 @@ class LinearLeakyReLU(nnq.Linear):
         act_scale, act_zp = activation_post_process.calculate_qparams()  # type: ignore[union-attr,operator]
         assert dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-        qlinear = cls(mod.in_features,
-                      mod.out_features,
-                      leaky_relu.negative_slope,
-                      dtype=dtype)
-        qlinear.set_weight_bias(qweight, mod.bias)
-        qlinear.scale = float(act_scale)
-        qlinear.zero_point = int(act_zp)
-        return qlinear
+        qlinear_leaky_relu = cls(
+            mod.in_features,
+            mod.out_features,
+            leaky_relu.negative_slope,
+            dtype=dtype)
+        qlinear_leaky_relu.set_weight_bias(qweight, mod.bias)
+        qlinear_leaky_relu.scale = float(act_scale)
+        qlinear_leaky_relu.zero_point = int(act_zp)
+        return qlinear_leaky_relu
 
     @classmethod
     def from_reference(cls, ref_mod, output_scale, output_zero_point):
         linear = ref_mod[0]
         leaky_relu = ref_mod[1]
-        qlinear = cls(
+        qlinear_leaky_relu = cls(
             linear.in_features,
             linear.out_features,
             leaky_relu.negative_slope)
         qweight = linear.get_quantized_weight()
-        qlinear.set_weight_bias(qweight, linear.bias)
-
-        qlinear.scale = float(output_scale)
-        qlinear.zero_point = int(output_zero_point)
-        return qlinear
+        qlinear_leaky_relu.set_weight_bias(qweight, linear.bias)
+        qlinear_leaky_relu.scale = float(output_scale)
+        qlinear_leaky_relu.zero_point = int(output_zero_point)
+        return qlinear_leaky_relu
 
 class LinearTanh(nnq.Linear):
     r"""
@@ -148,22 +148,23 @@ class LinearTanh(nnq.Linear):
         act_scale, act_zp = activation_post_process.calculate_qparams()  # type: ignore[union-attr,operator]
         assert dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-        qlinear = cls(mod.in_features,
-                      mod.out_features,
-                      dtype=dtype)
-        qlinear.set_weight_bias(qweight, mod.bias)
-        qlinear.scale = float(act_scale)
-        qlinear.zero_point = int(act_zp)
-        return qlinear
+        qlinear_tanh = cls(
+            mod.in_features,
+            mod.out_features,
+            dtype=dtype)
+        qlinear_tanh.set_weight_bias(qweight, mod.bias)
+        qlinear_tanh.scale = float(act_scale)
+        qlinear_tanh.zero_point = int(act_zp)
+        return qlinear_tanh
 
     @classmethod
     def from_reference(cls, ref_mod, output_scale, output_zero_point):
         linear = ref_mod[0]
-        qlinear = cls(
+        qlinear_tanh = cls(
             linear.in_features,
             linear.out_features)
         qweight = linear.get_quantized_weight()
-        qlinear.set_weight_bias(qweight, linear.bias)
-        qlinear.scale = float(output_scale)
-        qlinear.zero_point = int(output_zero_point)
-        return qlinear
+        qlinear_tanh.set_weight_bias(qweight, linear.bias)
+        qlinear_tanh.scale = float(output_scale)
+        qlinear_tanh.zero_point = int(output_zero_point)
+        return qlinear_tanh
