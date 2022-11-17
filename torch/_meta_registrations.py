@@ -1176,7 +1176,6 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
         aten.sin_.default,
         aten.sinh_.default,
         aten.tan_.default,
-        aten.atanh.default,
         aten.ceil_.default,
         aten.cos_.default,
         aten.cosh_.default,
@@ -1198,12 +1197,14 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
         aten.floor_.default,
         aten.sgn_.default,
         aten.atan_.default,
+        aten.sqrt_.default,
     ]
 )
 def meta_unary_inplace(self, **kwargs):
     meta_tensor = _elementwise_meta(
         self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
     )
+    # TODO: check memory overlap
     # sanity check
     assert meta_tensor.stride() == self.stride()
     assert meta_tensor.dtype == self.dtype

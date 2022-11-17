@@ -13,6 +13,7 @@ from torch.testing._internal.common_methods_invocations import op_db, wrapper_se
 from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
 from torch._decomp import decomposition_table
+from torch.fx.experimental.symbolic_shapes import sym_float
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule, has_proxy
@@ -719,7 +720,6 @@ def xfail_inherited_tests(tests):
 
 @skipIfNoSympy
 @xfail_inherited_tests([
-    "test_mode_tracing_factory_function",
     "test_make_fx_overloads",
     "test_trace_subclasses",
 ])
@@ -961,8 +961,27 @@ def forward(self, a_1):
         # happened afterwards
         self.assertTrue(meta_inp.meta['val'].shape[0].get_pyobj().expr == 3)
 
+    def test_elementwise_meta_with_sym_numbers(self):
+        def f(x, offset, as_sym_float=False):
+            x0 = x.size()[0]
+            if as_sym_float:
+                x0 = sym_float(x0)
+            return torch.add(x0, offset)
 
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.rand(2, 3), 2.0, False)
+        meta_add = _get_node(fx_g, lambda x: x.target == aten.add.Tensor)
+        self.assertEqual(meta_add.meta['val'].shape, ())
+        self.assertEqual(meta_add.meta['val'].dtype, torch.float32)
 
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.rand(2, 3), 2, False)
+        meta_add = _get_node(fx_g, lambda x: x.target == aten.add.Tensor)
+        self.assertEqual(meta_add.meta['val'].shape, ())
+        self.assertEqual(meta_add.meta['val'].dtype, torch.int64)
+
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.rand(2, 3), 2, True)
+        meta_add = _get_node(fx_g, lambda x: x.target == aten.add.Tensor)
+        self.assertEqual(meta_add.meta['val'].shape, ())
+        self.assertEqual(meta_add.meta['val'].dtype, torch.float32)
 
     def test_return_symint(self):
         def f(x):
@@ -1105,6 +1124,7 @@ fake_tensor_failures = {
     xfail('cholesky_inverse'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
+    xfail('nn.functional.cosine_similarity')
 }
 
 symbolic_tensor_failures = {
@@ -1380,7 +1400,6 @@ inplace_symbolic_tensor_failures = {
     xfail('remainder', ''),  # aten.remainder_.Tensor - couldn't find symbolic meta function/decomposition
     xfail('sigmoid', ''),  # aten.sigmoid_.default - couldn't find symbolic meta function/decomposition
     xfail('sign', ''),  # aten.sign_.default - couldn't find symbolic meta function/decomposition
-    xfail('sqrt', ''),  # aten.sqrt_.default - couldn't find symbolic meta function/decomposition
     xfail('square', ''),  # aten.pow_.Scalar - couldn't find symbolic meta function/decomposition
     xfail('squeeze', ''),  # aten.squeeze_.default - couldn't find symbolic meta function/decomposition
     xfail('t', ''),  # aten.t_.default - couldn't find symbolic meta function/decomposition
