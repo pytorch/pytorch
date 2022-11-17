@@ -420,7 +420,9 @@ def sample_inputs_softmax_backward_data(op_info, device, dtype, requires_grad, *
         input_dtypes += [torch.float16]
 
     for (shape, dim), input_dtype in product(cases, input_dtypes):
-        yield SampleInput(make_arg(shape), make_arg(shape), dim, input_dtype)
+        input = make_arg(shape)
+        output = torch.nn.functional.softmax(input, dim=dim, dtype=input_dtype)
+        yield SampleInput(make_arg(shape), output, dim, input_dtype)
 
 def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
@@ -10596,6 +10598,9 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-4, rtol=2e-3),
+                                            torch.bfloat16: tol(atol=1e-3, rtol=0.016)}),
+                         'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
         ),
     ),
     # `softmin` supports different dtypes based on whether `dtype` argument,
