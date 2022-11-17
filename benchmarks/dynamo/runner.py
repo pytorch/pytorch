@@ -864,6 +864,8 @@ class SummaryStatDiffer:
         for _, row in df_merge.iterrows():
             if row["Compiler"] in self.args.flag_compilers:
                 for suite in self.args.suites:
+                    if suite + "_prev" not in row or suite + "_cur" not in row:
+                        continue
                     data["compiler"].append(row["Compiler"])
                     data["suite"].append(suite)
                     data["prev_value"].append(row[suite + "_prev"])
