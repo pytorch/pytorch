@@ -1,12 +1,11 @@
 from collections import OrderedDict, defaultdict, abc as container_abcs
-from re import A
 import torch
 from copy import deepcopy
 from itertools import chain
 import warnings
 import functools
 
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict
 
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
