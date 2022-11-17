@@ -39,8 +39,6 @@ def process_report(
     Return a list of disabled tests that should be re-enabled and those that are still
     flaky (failed or skipped)
     """
-    root = ET.parse(report)
-
     # All rerun tests from a report are grouped here:
     #
     # * Success test should be re-enable if it's green after rerunning in all platforms
@@ -51,6 +49,12 @@ def process_report(
     #
     # We want to keep track of how many times the test fails (num_red) or passes (num_green)
     all_tests: Dict[str, Dict[str, int]] = {}
+
+    try:
+        root = ET.parse(report)
+    except ET.ParseError as e:
+        print(f"Fail to parse {report}: {e}")
+        return all_tests
 
     if not is_rerun_disabled_tests(root):
         return all_tests

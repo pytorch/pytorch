@@ -35,9 +35,13 @@ def parse_xml_report(
     job_id = get_job_id(report)
     print(f"Found job id: {job_id}")
 
-    root = ET.parse(report)
+    test_cases: List[Dict[str, Any]] = []
+    try:
+        root = ET.parse(report)
+    except ET.ParseError as e:
+        print(f"Fail to parse {report}: {e}")
+        return test_cases
 
-    test_cases = []
     for test_case in root.iter(tag):
         case = process_xml_element(test_case)
         case["workflow_id"] = workflow_id
@@ -121,8 +125,12 @@ def get_pytest_parallel_times() -> Dict[Any, Any]:
     pytest_parallel_times = {}
     for report in Path(".").glob("**/python-pytest/**/*.xml"):
         invoking_file = report.parent.name
-        root = ET.parse(report)
-        assert len(list(root.iter("testsuite"))) == 1
+        try:
+            root = ET.parse(report)
+        except ET.ParseError as e:
+            root = None
+            print(f"Fail to parse {report}: {e}")
+        assert type(root) is ET.ElementTree and len(list(root.iter("testsuite"))) == 1
         for test_suite in root.iter("testsuite"):
             pytest_parallel_times[
                 (invoking_file, get_job_id(report))
