@@ -823,7 +823,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
       blocksize[1] = std::max<int64_t>(1, self.values().size(n_batch + 2));
     });
 
-    DimVector output_shape = DimVector(self.sizes().slice(1, self.dim()-1));
+    DimVector output_shape = DimVector(self.sizes().slice(1, self.dim() - 1));
     if (dim == 1) {
       output_shape[0] = self.size(0);
     }
@@ -872,18 +872,14 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
             step = 1;
           } else if (select_nnz > 1) {
             // general solution, must scan the dim_indices content
-            int64_t step_candidate = accessor[1] - accessor[0];
-            for (int i=2; i<select_nnz; i++) {
-              if (accessor[i] - accessor[i-1] != step_candidate) {
-                step_candidate = 0;  // no solution
-                break;
-              }
-            }
-            if (step_candidate != 0) {
+            Tensor possible_steps = dim_indices_cpu.slice(0, 1).sub(dim_indices_cpu.slice(0, 0, -1));
+            index_t min_step = possible_steps.min().item<index_t>();
+            index_t max_step = possible_steps.max().item<index_t>();
+            if (min_step == max_step) {
               // found a general solution:
+              step = max_step;
               start = accessor[0];
-              end = start + select_nnz * step_candidate;
-              step = step_candidate;
+              end = start + select_nnz * step;
             }
           }
         });
@@ -906,9 +902,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
         [&]() {},
         [&]() {
           Tensor subblock_indices = at::arange(0, blocksize[1], indices_options);
-          indices = indices.mul(blocksize[1])
-            .repeat_interleave(blocksize[1])
-            .add(subblock_indices.repeat(select_nnz));
+          indices = indices.mul(blocksize[1]).unsqueeze(1).add(subblock_indices.unsqueeze(0)).flatten(0, 1);
           values = values.select(1, index % blocksize[0]).flatten(0, 1);
           // flatten(0, 1) can be a view or a copy operation. If view
           // is required, it will be checked below via is_alias_of,

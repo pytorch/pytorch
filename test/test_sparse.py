@@ -3708,7 +3708,7 @@ class TestSparse(TestSparseBase):
             check(self, s, d)
             check_empty(shape, nnz, sub_shape, coalesced)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy is not availible")
+    @unittest.skipIf(not TEST_NUMPY, "NumPy is not available")
     @onlyCPU
     @dtypes(*all_types_and_complex_and(torch.bool))
     def test_sparse_spdiags(self, device, dtype):
