@@ -708,6 +708,7 @@ def view(x, sizes_or_dtype):
 
         if old_dtype == new_dtype:
             return x
+
         if (
             DTYPE_TO_BYTES[new_dtype] != DTYPE_TO_BYTES[old_dtype]
             or DTYPE_TO_BYTES[new_dtype] == 2
