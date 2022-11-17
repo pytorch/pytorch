@@ -366,10 +366,8 @@ if TEST_WITH_TSAN:
     TIMEOUT_DEFAULT = 500
 else:
     TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '300'))
-TIMEOUT_OVERRIDE = {
-    "test_ddp_uneven_inputs": 400,
-    "test_file_system_checkpoint": 1200
-}
+TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+
 
 # https://github.com/pytorch/pytorch/issues/75665
 if TEST_WITH_ROCM:
