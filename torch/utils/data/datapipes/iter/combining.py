@@ -1,5 +1,6 @@
 import warnings
 
+from abc import ABC, abstractmethod
 from collections import deque
 from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVar, Deque
 
@@ -96,7 +97,25 @@ class ForkerIterDataPipe(IterDataPipe):
         return [_ChildDataPipe(container, i) for i in range(num_instances)]
 
 
-class _ForkerIterDataPipe(IterDataPipe):
+class _ContainerTemplate(ABC):
+    r"""
+    Abstract class for container ``DataPipes``. The followings are three required
+    methods.
+    """
+    @abstractmethod
+    def get_next_element_by_instance(self, instance_id: int):
+        ...
+
+    @abstractmethod
+    def is_every_instance_exhausted(self) -> bool:
+        ...
+
+    @abstractmethod
+    def reset(self) -> None:
+        ...
+
+
+class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
     r"""
     Container to hold instance-specific information on behalf of ForkerIterDataPipe. It tracks
     the state of its child DataPipes, maintains the buffer, and yields the next value
@@ -229,10 +248,8 @@ class _ChildDataPipe(IterDataPipe):
     _is_child_datapipe: bool = True
 
     def __init__(self, main_datapipe: IterDataPipe, instance_id: int):
-        required_attrs = ["get_next_element_by_instance", "is_every_instance_exhausted", "reset"]
-        required_ops = [getattr(main_datapipe, attr) for attr in required_attrs]
-        if any(not callable(op) for op in required_ops):
-            raise NotImplementedError(f"Main Datapipe must have methods {required_attrs} implemented.")
+        assert isinstance(main_datapipe, _ContainerTemplate)
+
         self.main_datapipe: IterDataPipe = main_datapipe
         self.instance_id = instance_id
 
@@ -324,7 +341,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         return [_ChildDataPipe(container, i) for i in range(num_instances)]
 
 
-class _DemultiplexerIterDataPipe(IterDataPipe):
+class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
     r"""
     Container to hold instance-specific information on behalf of DemultiplexerIterDataPipe. It tracks
     the state of its child DataPipes, maintains the buffer, classifies and yields the next correct value
