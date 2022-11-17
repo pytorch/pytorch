@@ -461,13 +461,10 @@ class GuardBuilder:
         # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
         self.tensor_check_ids[tensor_name] = id(value)
         if value._base is not None:
-            base_id = self.id_ref(value._base)
-            base_name = f"{tensor_name}._base"
-            # code = f"___check_obj_id({base_name}, {base_id})"
-            # self._produce_guard_code(None, [code])
-            self.tensor_check_names.append(base_name)
-            self.tensor_check_examples.append(value._base)
-            self.tensor_check_ids[base_name] = base_id
+            assert id(value._base) in self.guarded_code.output_graph.tensor_id_to_sym_shape_ref
+            refs = self.guarded_code.output_graph.tensor_id_to_sym_shape_ref[id(value._base)]
+            for ref in refs:
+                self.guarded_code.output_graph.base_symbols.update({ref.expr: f"{tensor_name}._base"})
 
         # Note: Guard code produced for tensor_match is a little different.
         # We accumulate tensor names, then do a single install of `___check_tensors`.
@@ -558,13 +555,14 @@ class DynamoGuardPrinter(StrPrinter):
         return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()"
 
     def __init__(
-        self, expr_to_tensor_ref, id_to_name_map, shape_env, intermediary_symbols
+        self, expr_to_tensor_ref, id_to_name_map, shape_env, intermediary_symbols, base_symbols
     ):
         super().__init__()
         self.expr_to_tensor_ref = expr_to_tensor_ref
         self.id_to_name_map = id_to_name_map
         self.shape_env = shape_env
         self.intermediary_symbols = intermediary_symbols
+        self.base_symbols = base_symbols
 
     def _print_Symbol(self, expr) -> str:
         assert isinstance(expr, sympy.Symbol)
@@ -578,6 +576,8 @@ class DynamoGuardPrinter(StrPrinter):
         if not expr_found:
             if config.dynamic_shapes_ignore_assert:
                 return f"{self.shape_env.var_to_val[expr]}"
+        assert expr not in self.base_symbols, f"Illegal attempt to install base guard {self.base_symbols[expr]} for {expr}"
+
         assert expr_found, breakpoint()
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
@@ -679,6 +679,7 @@ class CheckFunctionManager:
             id_to_name_map,
             self.output_graph.shape_env,
             self.output_graph.intermediary_symbols,
+            self.output_graph.base_symbols
         )
 
         # tensor_check_names is the primary tensor association mechanism in dynamo.
@@ -840,8 +841,8 @@ def guard_fail_hook(
     """
     called whenever a guard fails.
     """
-    if not last:
-        return
+    # if not last:
+    #     return
     scope = {rename_implicit(k): v for k, v in f_locals.items()}
     scope.update(guard_fn.closure_vars)
     reasons = []
@@ -855,6 +856,7 @@ def guard_fail_hook(
         elif isinstance(fail_reason, bool) and not fail_reason:
             reasons.append(part)
             break
+    print("GUARD FAILURE", reasons)
     guard_failures[orig_code_map[code]].append(reasons)
 
 
