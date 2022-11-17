@@ -1,5 +1,6 @@
 # Owner(s): ["module: fft"]
 
+from curses import window
 import torch
 import unittest
 import math
@@ -1092,6 +1093,32 @@ class TestFFT(TestCase):
             expected = _stft_reference(args[0], args[2], window)
             actual = torch.stft(*args, window=window, center=False)
             self.assertEqual(actual, expected)
+
+    @onlyNativeDeviceTypes
+    @skipCPUIfNoFFT
+    @dtypes(torch.double, torch.cdouble)
+    def test_stft_named_windows(self, device, dtype):
+
+        windows = {
+            "bartlett": torch.bartlett_window,
+            "blackman": torch.blackman_window,
+            "hamming": torch.hamming_window,
+            "hann": torch.hann_window,
+            "kaiser": torch.kaiser_window
+        }
+        n_fft = 1024
+
+        x = torch.randn(4000, device=device, dtype=dtype)
+        for window_name, window_func in windows.items():
+
+            # tensor window interface
+            x_ref_stft = torch.stft(x, n_fft, window=window_func(n_fft),
+                                    return_complex=True)
+
+            # string window interface
+            x_stft = torch.stft(x, n_fft, window=window_name,
+                                return_complex=True)
+            self.assertEqual(x_ref_stft, x_stft)
 
     @onlyNativeDeviceTypes
     @skipCPUIfNoFFT

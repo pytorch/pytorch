@@ -1,3 +1,5 @@
+import warnings
+
 from typing import (
     List, Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
@@ -505,7 +507,7 @@ def _meshgrid(*tensors, indexing: Optional[str]):
 
 
 def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
-         win_length: Optional[int] = None, window: Optional[Tensor] = None,
+         win_length: Optional[int] = None, window: Optional[Union[str, Tensor]] = None,
          center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
          onesided: Optional[bool] = None,
          return_complex: Optional[bool] = None) -> Tensor:
@@ -548,7 +550,9 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     * If :attr:`win_length` is ``None`` (default), it is treated as equal to
       :attr:`n_fft`.
 
-    * :attr:`window` can be a 1-D tensor of size :attr:`win_length`, e.g., from
+    * If :attr:`window` is a string, a window of appropriate size will be generated.
+      Currently supported windows are ``bartlett``, ``blackman``, ``hamming``, ``hann``, and ``kaiser``.
+      Alternatively, :attr:`window` can be a 1-D tensor of size :attr:`win_length`, e.g., from
       :meth:`torch.hann_window`. If :attr:`window` is ``None`` (default), it is
       treated as if having :math:`1` everywhere in the window. If
       :math:`\text{win\_length} < \text{n\_fft}`, :attr:`window` will be padded on
@@ -596,7 +600,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             frames. Default: ``None`` (treated as equal to ``floor(n_fft / 4)``)
         win_length (int, optional): the size of window frame and STFT filter.
             Default: ``None``  (treated as equal to :attr:`n_fft`)
-        window (Tensor, optional): the optional window function.
+        window (Tensor, str, optional): the optional window function.
             Default: ``None`` (treated as window of all :math:`1` s)
         center (bool, optional): whether to pad :attr:`input` on both sides so
             that the :math:`t`-th frame is centered at time :math:`t \times \text{hop\_length}`.
@@ -621,10 +625,39 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
                Note that calling :func:`torch.view_as_real` on the output will
                recover the deprecated output format.
 
+            .. deprecated:: 1.15.0
+               ``window=None`` is being deprecated,
+               as the default is being transitioned to ``hann``
+
     Returns:
         Tensor: A tensor containing the STFT result with shape described above
 
     """
+
+    if window is None:
+        warnings.warn(
+            "'window' was not specified, so a rectangular window will be applied."
+            "in version 1.15.0, not specifying a window will raise an error."
+            "Consider using an alternative available window, such as 'hann'.",
+            DeprecationWarning
+        )
+
+    elif isinstance(window, str):
+        windows = {
+            "bartlett": torch.bartlett_window,
+            "blackman": torch.blackman_window,
+            "hamming": torch.hamming_window,
+            "hann": torch.hann_window,
+            "kaiser": torch.kaiser_window
+        }
+        if window not in windows.keys():
+            raise ValueError(
+                f"{window} is not a valid window name."
+                f"Available windows are {windows.keys()}")
+        else:
+            win_length = n_fft if win_length is None else win_length
+            window = windows[window](win_length, device=input.device)
+
     if has_torch_function_unary(input):
         return handle_torch_function(
             stft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
