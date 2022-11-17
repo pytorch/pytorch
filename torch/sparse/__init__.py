@@ -150,6 +150,46 @@ Examples::
 """)
 
 
+spmm_reduce = _add_docstr(_sparse.spmm_reduce, r"""
+sparse.spmm_reduce(input, weight, reduce, row_indices=None, ccol_indices=None, csr2csc=None) -> Tensor
+
+Reduce rows from dense matrices :attr:`weight` at the locations specified by the sparsity pattern of :attr:`input`.
+The matrix :attr:`input` is not added to the final result.
+
+For each element in :attr:`input` at index [i, j], pick the rows from :attr:`weight` specified by j,
+and reduce to :attr:`output` at row i.
+
+.. note::
+    :attr:`input` must be a sparse CSR tensor. :attr:`weight` must be dense tensors.
+    This function is implemented only for tensors on CPU device.
+
+Args:
+    input (Tensor): a sparse CSR matrix of shape `(m, n)`.
+    weight (Tensor): a dense matrix of shape `(m, k)` to be reduced.
+    reduce (str): the reduction operation to apply for non-unique indices
+        (:obj:`"sum"`, :obj:`"mean"`, :obj:`"max"`, :obj:`"min"`).
+    row_indices (Tensor, optional): row indices for each element in :attr:`input`, 1-D tensor of size `nse`.
+    ccol_indices (Tensor, optional): compressed col indices for each element in :attr:`input`, 1-D tensor of size `n + 1`.
+    csr2csc (Tensor, optional): permute pattern to convert :attr:`input` from CSR to CSC.
+
+Examples::
+
+    >>> crow_indices = torch.tensor([0, 1, 3, 4])
+    >>> col_indices = torch.tensor([2, 0, 1, 3])
+    >>> values = torch.tensor([1, 2, 3, 4])
+    >>> csr = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=torch.float)
+    >>> csr
+    tensor(crow_indices=tensor([0, 1, 3, 4]),
+       col_indices=tensor([2, 0, 1, 3]),
+       values=tensor([1., 2., 3., 4.]), size=(3, 4), nnz=4,
+       layout=torch.sparse_csr)
+    >>> weight = torch.ones(4, 3)
+    >>> torch.sparse.spmm_reduce(csr, weight, "sum")
+    tensor([[1., 1., 1.],
+        [5., 5., 5.],
+        [4., 4., 4.]])
+""")
+
 def sum(input: Tensor, dim: DimOrDims = None,
         dtype: Optional[DType] = None) -> Tensor:
     r"""

@@ -3638,11 +3638,6 @@
     SparseCUDA: sparse_mask_helper_cuda
   autogen: _sparse_mask_helper.out
 
-- func: spmm_sum(Tensor rowptr, Tensor col, Tensor? optional_value, Tensor mat) -> Tensor
-  variants: function
-  dispatch:
-    CPU: spmm_sum_cpu
-
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
@@ -6097,6 +6092,19 @@
   dispatch:
     SparseCsrCUDA: sparse_sampled_addmm_sparse_csr_cuda
     SparseCsrCPU: sparse_sampled_addmm_sparse_csr_cpu
+
+- func: spmm_reduce(Tensor input, Tensor weight, str reduce, Tensor? row_indices=None, Tensor? ccol_indices=None, Tensor? csr2csc=None) -> Tensor
+  python_module: sparse
+
+- func: _spmm_reduce(Tensor input, Tensor weight, str reduce, Tensor? row_indices=None, Tensor? ccol_indices=None, Tensor? csr2csc=None) -> (Tensor, Tensor)
+  python_module: sparse
+  dispatch:
+    SparseCsrCPU: _spmm_reduce_sparse_csr_cpu
+
+- func: _spmm_reduce_backward(Tensor input, Tensor grad_out, Tensor weight, str reduce, Tensor arg_out, Tensor row_indices, Tensor ccol_indices, Tensor csr2csc, bool[2] output_mask) -> (Tensor, Tensor)
+  python_module: sparse
+  dispatch:
+    SparseCsrCPU: _spmm_reduce_backward_sparse_csr_cpu
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   structured: True
