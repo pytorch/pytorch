@@ -158,6 +158,7 @@ from torch.testing._internal.common_quantization import (
     LinearReluLinearModel,
     LinearReluModel,
     LinearBnLeakyReluModel,
+    LinearTanhModel,
     QuantizationTestCase,
     skipIfNoFBGEMM,
     skip_if_no_torchvision,
@@ -406,6 +407,46 @@ class TestFuseFx(QuantizationTestCase):
                 m,
                 expected_node_list=expected_nodes,
                 expected_node_occurrence=expected_occurrence)
+
+    @skipIfNoONEDNN
+    def test_fuse_linear_tanh_for_onednn_backend(self):
+        # linear - tanh is fused for onednn backend only
+        from torch.ao.quantization.backend_config import get_onednn_backend_config
+        expected_nodes = [
+            ns.call_module(nni.LinearTanh),
+        ]
+        expected_occurrence = {
+            ns.call_module(nn.Linear): 0,
+            ns.call_module(nn.Tanh): 0,
+        }
+
+        # test eval mode
+        m = LinearTanhModel().eval()
+        # fuse_fx is a top level api and only supports eval mode
+        m = fuse_fx(m,
+                    backend_config=get_onednn_backend_config())
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_list=expected_nodes,
+            expected_node_occurrence=expected_occurrence)
+
+    def test_linear_tanh_not_fused_by_default(self):
+        # Make sure linear - tanh is not fused by default
+        # test eval mode
+        m = LinearTanhModel().eval()
+        # fuse_fx is a top level api and only supports eval mode
+        m = fuse_fx(m)
+        expected_nodes = [
+            ns.call_module(nn.Linear),
+            ns.call_module(nn.Tanh),
+        ]
+        expected_occurrence = {
+            ns.call_module(nni.LinearTanh): 0,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_list=expected_nodes,
+            expected_node_occurrence=expected_occurrence)
 
     def test_fuse_convtranspose_bn_eval(self):
 

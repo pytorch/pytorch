@@ -254,6 +254,7 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
 STATIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
     nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU),
     nni.LinearLeakyReLU: (nnqr.Linear, nniq.LinearLeakyReLU),
+    nni.LinearTanh: (nnqr.Linear, nniq.LinearTanh),
     nni.ConvReLU1d: (nnqr.Conv1d, nniq.ConvReLU1d),
     nni.ConvReLU2d: (nnqr.Conv2d, nniq.ConvReLU2d),
     nni.ConvReLU3d: (nnqr.Conv3d, nniq.ConvReLU3d),
