@@ -1732,11 +1732,11 @@ def generate_elementwise_binary_extremal_value_tensors(
     lhs = make_tensor(
         (128, 128), device=device, dtype=dtype, requires_grad=requires_grad
     )
-    lhs.flatten()[::3] = nan
+    lhs.view(-1)[::3] = nan
     rhs = make_tensor(
         (128, 128), device=device, dtype=dtype, requires_grad=requires_grad
     )
-    rhs.flatten()[::3] = nan
+    rhs.view(-1)[::3] = nan
 
     yield SampleInput(lhs, args=(rhs,))
 
