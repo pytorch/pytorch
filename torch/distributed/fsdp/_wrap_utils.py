@@ -25,10 +25,6 @@ class SubmoduleState(NamedTuple):
 
     params: List[nn.Parameter]
     buffers: List[torch.Tensor]
-    # Parameter and buffer names are prefixed starting from the submodule,
-    # which is not necessarily the root module
-    param_names: List[str]
-    buffer_names: List[str]
 
 
 def _auto_wrap(
@@ -132,27 +128,21 @@ def _get_submodule_to_states(
         queue: Deque[Tuple[nn.Module, str]] = collections.deque()
         queue.append((submodule, ""))
         params: List[nn.Parameter] = []
-        param_names: List[str] = []
         buffers: List[torch.Tensor] = []
-        buffer_names: List[str] = []
         while len(queue) > 0:
             module, prefix = queue.popleft()
-            for param_name, param in module.named_parameters(recurse=False):
+            for param in module.parameters(recurse=False):
                 if param not in visited_params:
                     params.append(param)
                     visited_params.add(param)
-                    param_names.append(prefix + param_name)
-            for buffer_name, buffer in module.named_buffers(recurse=False):
+            for buffer in module.buffers(recurse=False):
                 if buffer not in visited_buffers:
                     buffers.append(buffer)
                     visited_buffers.add(buffer)
-                    buffer_names.append(prefix + buffer_name)
             for child_module_name, child_module in module.named_children():
                 if child_module not in wrapped_modules_set:
                     queue.append((child_module, prefix + child_module_name + "."))
-        submodule_to_states[submodule] = SubmoduleState(
-            params, buffers, param_names, buffer_names
-        )
+        submodule_to_states[submodule] = SubmoduleState(params, buffers)
     return submodule_to_states
 
 
