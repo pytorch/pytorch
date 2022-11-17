@@ -43,9 +43,19 @@ inline int64_t maybe_wrap_dim(
 inline void maybe_wrap_dims_n(
     int64_t* dims,
     int64_t ndims,
-    int64_t dim_post_expr) {
+    int64_t dim_post_expr,
+    bool wrap_scalars = true) {
   if (dim_post_expr <= 0) {
-    dim_post_expr = 1; // this will make range [-1, 0]
+    if (wrap_scalars) {
+      dim_post_expr = 1; // this will make range [-1, 0]
+    } else {
+      TORCH_CHECK_INDEX(
+          ndims == 0,
+          "Dimension specified as ",
+          dims[0],
+          " but tensor has no dimensions");
+      return;
+    }
   }
   int64_t min = -dim_post_expr;
   int64_t max = dim_post_expr - 1;
@@ -70,8 +80,12 @@ inline void maybe_wrap_dims_n(
 // Wrap each dim in a contiguous container, taking dim_post_expr as the true
 // number of dimensions E.g. could also be std::array or c10::SmallVector
 template <typename Container>
-inline void maybe_wrap_dims(Container& dims, int64_t dim_post_expr) {
-  return maybe_wrap_dims_n(dims.data(), dims.size(), dim_post_expr);
+inline void maybe_wrap_dims(
+    Container& dims,
+    int64_t dim_post_expr,
+    bool wrap_scalars = true) {
+  return maybe_wrap_dims_n(
+      dims.data(), dims.size(), dim_post_expr, wrap_scalars);
 }
 
 // previously, size [0] tensors were the only possible empty tensors; thus, it

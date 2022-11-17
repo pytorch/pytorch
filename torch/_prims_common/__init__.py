@@ -504,20 +504,20 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 # Takes a dimension or sequence of dimensions and "wraps" them,
 # mapping negative offsets to positive ones
 @overload
-def canonicalize_dims(rank: int, indices: Sequence[int]) -> Tuple[int, ...]:
+def canonicalize_dims(rank: int, indices: Sequence[int], wrap_scalar: bool = True) -> Tuple[int, ...]:
     pass
 
 
 @overload
-def canonicalize_dims(rank: int, indices: int) -> int:
+def canonicalize_dims(rank: int, indices: int, wrap_scalar: bool = True) -> int:
     pass
 
 
-def canonicalize_dims(rank, indices):
+def canonicalize_dims(rank, indices, wrap_scalar=True):
     if isinstance(indices, Dim):
-        return canonicalize_dim(rank, indices)
+        return canonicalize_dim(rank, indices, wrap_scalar)
 
-    return tuple(canonicalize_dim(rank, x) for x in indices)
+    return tuple(canonicalize_dim(rank, x, wrap_scalar) for x in indices)
 
 
 def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
