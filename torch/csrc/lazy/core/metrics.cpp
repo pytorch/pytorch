@@ -172,7 +172,9 @@ std::vector<std::string> MetricsArena::GetCounterNames() {
   std::vector<std::string> names;
   std::lock_guard<std::mutex> lock(lock_);
   for (auto& name_data : counters_) {
-    names.push_back(name_data.first);
+    if (name_data.second->Value() > 0) {
+      names.push_back(name_data.first);
+    }
   }
   return names;
 }
