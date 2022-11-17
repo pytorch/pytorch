@@ -538,6 +538,12 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::BFloat16);
+  cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
+  if (!at::globalContext().allowBF16ReductionCuBLAS()) {
+    cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
+  }
+  // Disallow fp16 reductions that could lead to unexpected overflow issues.
+  TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
   TORCH_CUDABLAS_CHECK(cublasGemmEx(
       handle,
       opa,
@@ -558,6 +564,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       ldc,
       CUDA_R_32F,
       CUBLAS_GEMM_DFALT_TENSOR_OP));
+  TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 }
 #endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 

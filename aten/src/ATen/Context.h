@@ -239,6 +239,8 @@ class TORCH_API Context {
   void setFloat32MatmulPrecision(Float32MatmulPrecision p);
   bool allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(bool);
+  bool allowBF16ReductionCuBLAS() const;
+  void setAllowBF16ReductionCuBLAS(bool);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines();
@@ -286,6 +288,7 @@ class TORCH_API Context {
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
+  bool allow_bf16_reduction_cublas = false;
   bool enabled_mkldnn = true;
   at::LinalgBackend linalg_preferred_backend = at::LinalgBackend::Default;
 #ifdef C10_MOBILE
