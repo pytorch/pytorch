@@ -10596,6 +10596,9 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=0.05, rtol=0.003),
+                                            torch.bfloat16: tol(atol=0.7, rtol=0.05)}),
+                         'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
         ),
     ),
     # `softmin` supports different dtypes based on whether `dtype` argument,
