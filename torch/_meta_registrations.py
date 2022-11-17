@@ -6,6 +6,7 @@ import torch._prims_common as utils
 from torch import Tensor
 from torch._decomp import _add_op_to_registry, global_decomposition_table, meta_table
 from torch._ops import OpOverload
+from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
     check,
     corresponding_complex_dtype,
@@ -1166,6 +1167,13 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     return self
 
 
+@register_meta([aten.round.default, aten.round.decimals])
+def meta_round(self, **kwargs):
+    return _elementwise_meta(
+        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
 @register_meta(aten.zero.default)
 def meta_zero(self):
     return self.new_empty(self.shape)
@@ -1474,6 +1482,25 @@ def meta_max_pool2d_with_indices(
     )
 
 
+@register_meta(aten.grid_sampler_2d_backward.default)
+def grid_sampler_2d_backward_meta(
+    grad_output,
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    output_mask,
+):
+    input_requires_grad = output_mask[0]
+    if input_requires_grad:
+        grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
+    else:
+        grad_input = None
+    grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
+    return (grad_input, grad_grid)
+
+
 @register_meta([aten.full.default])
 def full(size, fill_value, *args, **kwargs):
     return torch.empty(size, *args, **kwargs)
@@ -1486,12 +1513,49 @@ def full(size, fill_value, *args, **kwargs):
         aten.randn_like.default,
         aten.rand_like.default,
         aten.full_like.default,
-        aten.zeros_like.default,
         aten.ones_like.default,
     ]
 )
 def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
+
+
+# zeros_like is special cased to work for sparse
+@register_meta(aten.zeros_like.default)
+def zeros_like(
+    self, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None
+):
+    if layout == torch.sparse_coo:
+        check(
+            memory_format is None,
+            lambda: "memory format option is only supported by strided tensors",
+        )
+
+        res = torch.empty(
+            0,
+            dtype=self.dtype if dtype is None else dtype,
+            layout=layout,
+            device=self.device if device is None else device,
+            pin_memory=pin_memory,
+        )
+
+        if self.is_sparse:
+            res.sparse_resize_and_clear_(
+                self.size(), self.sparse_dim(), self.dense_dim()
+            )
+        else:
+            res.sparse_resize_and_clear_(self.size(), self.dim(), 0)
+
+        res._coalesced_(True)
+        return res
+    return aten.empty_like.default(
+        self,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
+    )
 
 
 # hacky: Please remove after math.ceil works with arange

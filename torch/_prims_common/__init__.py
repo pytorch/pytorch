@@ -291,6 +291,9 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     its dimensions that is contiguous.
     """
 
+    if a.is_sparse:
+        return False
+
     # Short-circuits if the tensor is already contiguous or channels-last contiguous
     if is_contiguous(a) or is_channels_last_contiguous(a):
         return True
