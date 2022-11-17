@@ -535,6 +535,19 @@ torch.cuda.synchronize()
             else:
                 unpool(output, indices)
 
+    def test_MaxUnpool_invalid_parameter(self, device):
+        maxunpool_module = {1: torch.nn.MaxUnpool1d, 2 : torch.nn.MaxUnpool2d, 3 : torch.nn.MaxUnpool3d}
+        for dim in [1, 2, 3]:
+            for kernel_size, stride, padding, msg in zip([-1, 1, 1], [1, -1, 1], [0, 0, -1],
+                                                         ['kernel size should be greater than zero',
+                                                          'stride should be greater than zero',
+                                                          'pad must be non-negative']):
+                unpool = maxunpool_module[dim](kernel_size=kernel_size, stride=stride, padding=padding)
+                output = torch.rand([1] * dim + [2, 2], dtype=torch.float32, device=device)
+                indices = torch.zeros([1] * dim + [2, 2], dtype=torch.int64, device=device)
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    unpool(output, indices)
+
     @onlyNativeDeviceTypes
     def test_AdaptiveMaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
