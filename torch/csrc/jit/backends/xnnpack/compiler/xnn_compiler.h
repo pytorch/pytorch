@@ -3,7 +3,6 @@
 #include <caffe2/torch/csrc/jit/backends/xnnpack/executor/xnn_executor.h>
 #include <xnnpack.h>
 #include <memory>
-#include <string>
 #include <vector>
 
 namespace torch {
