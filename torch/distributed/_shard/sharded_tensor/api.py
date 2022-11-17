@@ -630,7 +630,13 @@ class ShardedTensor(ShardedTensorBase):
         return st_cuda
 
     def to(self, *args, **kwargs) -> ShardedTensor:
-        current_device = self._local_shards[0].tensor.device
+        current_device: torch.device
+        if self._local_shards:
+            current_device = self._local_shards[0].tensor.device
+        elif self._process_group._get_backend_name() == "gloo":
+            current_device = torch.device("cpu")
+        else:
+            current_device = torch.device(torch.cuda.current_device())
         current_dtype = self.dtype
         device_to = current_device
         dtype_to = current_dtype
