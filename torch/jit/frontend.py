@@ -324,7 +324,7 @@ def build_class_def(ctx, py_def, methods, properties, self_name, assigns):
 
 def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=None):
     body = py_def.body
-    r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
+    r = ctx.make_range(py_def.lineno,
                        py_def.col_offset,
                        py_def.col_offset + len("def"))
 

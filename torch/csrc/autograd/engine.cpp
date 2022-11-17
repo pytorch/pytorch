@@ -271,10 +271,7 @@ void Engine::stop() {
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
   auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
-  if (!wait_duration_str) {
-    wait_duration_str = "10.0";
-  }
-  auto wait_duration = std::atof(wait_duration_str);
+  auto wait_duration = wait_duration_str ? std::atof(wait_duration_str) : 10.0;
   bool noBackward = true;
   for (auto& queue : device_ready_queues_) {
     noBackward = noBackward && queue->empty();
@@ -396,6 +393,66 @@ bool get_current_graph_task_keep_graph() {
 
 void add_node_to_current_graph_task_exec_info(Node* fn) {
   current_graph_task->exec_info_[fn].needed_ = true;
+}
+
+// NB: The engine itself does not use the outputs of this function.
+std::vector<Node*> get_current_graph_task_execution_order() {
+  std::shared_ptr<GraphTask> task = current_graph_task;
+  if (!task) {
+    return {};
+  }
+
+  // We could potentially check if there is only a single device here
+  // but explicitly require this context doens't seem bad either
+  TORCH_CHECK(
+      !c10::AutogradState::get_tls_state().get_multithreading_enabled(),
+      "get_current_graph_task_execution_order expects the current backward to be "
+      "executed with multithreading disabled, e.g. by running:\n\n"
+      ">>> with torch.autograd.set_multithreading_enabled(False):\n"
+      "...     torch.autograd.grad(...)\n");
+
+  const bool check_exec_info = !task->exec_info_.empty();
+  std::vector<Node*> out{};
+  std::unordered_set<Node*> seen{};
+
+  auto compare_seq_nr = [](Node* n1, Node* n2) {
+    return n1->sequence_nr() < n2->sequence_nr();
+  };
+  std::priority_queue<Node*, std::vector<Node*>, decltype(compare_seq_nr)> heap(
+      compare_seq_nr);
+
+  for (Node* ptr : task->graph_roots_) {
+    heap.push(ptr);
+  }
+
+  // Implementation notes:
+  // - Don't need to count dependencies because we have sequence_nr
+  // - Don't need to check topological_nr because we have exec_info
+  while (!heap.empty()) {
+    Node* fn = heap.top();
+    heap.pop();
+
+    const bool was_inserted = seen.insert(fn).second;
+    if (!was_inserted) {
+      continue;
+    }
+
+    out.push_back(fn);
+    for (const auto& edge : fn->next_edges()) {
+      Node* next_ptr = edge.function.get();
+      if (!next_ptr) {
+        continue;
+      }
+      if (check_exec_info) {
+        auto it = task->exec_info_.find(next_ptr);
+        if (it == task->exec_info_.end() || !it->second.should_execute()) {
+          continue;
+        }
+      }
+      heap.push(next_ptr);
+    }
+  }
+  return out;
 }
 
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
@@ -1050,7 +1107,7 @@ auto Engine::compute_dependencies(
 }
 
 auto Engine::execute(
-    const edge_list& roots,
+    const edge_list& root_edges,
     const variable_list& inputs,
     bool keep_graph,
     bool create_graph,
@@ -1058,9 +1115,9 @@ auto Engine::execute(
     const edge_list& outputs) -> variable_list {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(
-      roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
-        return msg;
-      });
+      root_edges,
+      const_cast<variable_list&>(inputs),
+      [](const std::string& msg) { return msg; });
   if (accumulate_grad && create_graph) {
     TORCH_WARN_ONCE(
         "Using backward() with create_graph=True will create a reference cycle "
@@ -1083,17 +1140,25 @@ auto Engine::execute(
   init_local_ready_queue();
   bool not_reentrant_backward_call = worker_device == NO_DEVICE;
 
+  // Store root nodes so we can traverse through the graph later
+  // e.g., for get_current_graph_task_execution_order
+  c10::SmallVector<Node*, 4> temp_roots{root_edges.size()};
+  for (const auto i : c10::irange(root_edges.size())) {
+    temp_roots[i] = root_edges[i].function.get();
+  }
+
   auto graph_task = std::make_shared<GraphTask>(
       /* keep_graph */ keep_graph,
       /* create_graph */ create_graph,
       /* depth */ not_reentrant_backward_call ? 0 : total_depth + 1,
-      /* cpu_ready_queue */ local_ready_queue);
+      /* cpu_ready_queue */ local_ready_queue,
+      /* graph_roots */ std::move(temp_roots));
 
   // If we receive a single root, skip creating extra root node
-  bool skip_dummy_node = roots.size() == 1;
+  bool skip_dummy_node = root_edges.size() == 1;
   auto graph_root = skip_dummy_node
-      ? roots.at(0).function
-      : std::make_shared<GraphRoot>(roots, inputs);
+      ? root_edges.at(0).function
+      : std::make_shared<GraphRoot>(root_edges, inputs);
 
   auto min_topo_nr = compute_min_topological_nr(outputs);
   // Now compute the dependencies for all executable functions
@@ -1106,14 +1171,17 @@ auto Engine::execute(
 
   // Queue the root
   if (skip_dummy_node) {
-    InputBuffer input_buffer(roots.at(0).function->num_inputs());
+    InputBuffer input_buffer(root_edges.at(0).function->num_inputs());
     auto input = inputs.at(0);
 
     const auto input_stream = InputMetadata(input).stream();
     const auto opt_next_stream =
-        roots.at(0).function->stream(c10::DeviceType::CUDA);
+        root_edges.at(0).function->stream(c10::DeviceType::CUDA);
     input_buffer.add(
-        roots.at(0).input_nr, std::move(input), input_stream, opt_next_stream);
+        root_edges.at(0).input_nr,
+        std::move(input),
+        input_stream,
+        opt_next_stream);
 
     execute_with_graph_task(graph_task, graph_root, std::move(input_buffer));
   } else {

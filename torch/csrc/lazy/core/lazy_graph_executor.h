@@ -158,7 +158,7 @@ class TORCH_API LazyGraphExecutor {
   };
 
   struct PostOrderData {
-    std::vector<Node*> post_order;
+    std::vector<const Node*> post_order;
     Util::EmissionMap emission_map;
     std::vector<BackendDataPtr> parameters_data;
     std::vector<size_t> parameter_sequence;
@@ -222,11 +222,6 @@ class TORCH_API LazyGraphExecutor {
       PostOrderData* po_data);
 
   ComputationCache::TypePtr LookupCachedCompile(const hash_t& hash);
-
-  void BuildInputOutputAliases(
-      const std::vector<LazyTensorPtr>& tensors,
-      c10::ArrayRef<size_t> indices,
-      LoweringContext* lowering_ctx);
 
   std::shared_ptr<Async> SyncTensorsGraphInternal(
       std::vector<LazyTensorPtr>* tensors,
