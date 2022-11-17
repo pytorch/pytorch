@@ -30,10 +30,6 @@ struct TorchScriptIrBuilder : IrBuilder {
       const bool& is_scalar_expand) const override {
     return ReuseOrMakeNode<Expand>(input0, size, is_scalar_expand);
   }
-  NodePtr MakeView(const Value& input0, const std::vector<int64_t>& output_size)
-      const override {
-    return ReuseOrMakeNode<View>(input0, output_size);
-  }
   NodePtr MakeCast(
       const Value& input0,
       const at::ScalarType& dtype,
