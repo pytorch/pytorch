@@ -9168,7 +9168,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @skipScriptTest(
-        skip_before_opset_version=11, reason="dynamic split support addded in 11"
+        skip_before_opset_version=11, reason="dynamic split support added in 11"
     )
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):
