@@ -142,15 +142,29 @@ def _unshard(
         event = state._free_event_queue.dequeue_if_needed()
         if event:
             event.synchronize()
+    # Compute a mask indicating if each handle is already unsharded from a
+    # different active module and skip unsharding those handles
+    already_unsharded_mask: List[bool] = []
+    for handle in handles:
+        active_forward_modules = state._handle_to_active_forward_modules.get(
+            handle, None
+        )
+        already_unsharded_mask.append(
+            active_forward_modules is not None and len(active_forward_modules) > 0
+        )
     any_ran_pre_unshard = False
     with torch.cuda.stream(pre_unshard_stream):
-        for handle in handles:
+        for handle, already_unsharded in zip(handles, already_unsharded_mask):
+            if already_unsharded:
+                continue
             ran_pre_unshard = handle.pre_unshard()
             any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
     if any_ran_pre_unshard:
         unshard_stream.wait_stream(pre_unshard_stream)
     with torch.cuda.stream(unshard_stream):
-        for handle in handles:
+        for handle, already_unsharded in zip(handles, already_unsharded_mask):
+            if already_unsharded:
+                continue
             handle.unshard()
             handle.post_unshard()
 
@@ -248,9 +262,10 @@ def _pre_forward_unshard(
     """Unshards parameters in the pre-forward."""
     if not handles:
         return
-    for handle in handles:
-        state._handle_to_active_forward_modules[handle].add(module)
     _unshard(state, handles, state._streams["unshard"], state._streams["pre_unshard"])
+    if _is_composable(state):
+        for handle in handles:
+            state._handle_to_active_forward_modules[handle].add(module)
     handles_key = tuple(handles)
     state._needs_pre_forward_unshard[handles_key] = False
     torch.cuda.current_stream().wait_stream(state._streams["unshard"])
