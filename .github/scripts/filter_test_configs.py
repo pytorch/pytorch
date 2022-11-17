@@ -24,6 +24,7 @@ VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}" for label in {
     "functorch",
     "inductor",
     "inductor_distributed",
+    "inductor_huggingface",
     "inductor_timm",
     "inductor_torchbench",
     "jit_legacy",

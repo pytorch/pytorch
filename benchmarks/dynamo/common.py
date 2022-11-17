@@ -113,11 +113,13 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "detectron2",
     "mobilenet_v3_large",
     "moco",
+    "tacotron2",
     "vision_maskrcnn",  # from functionalization
     # OOM
     "Background_Matting",
     "fastNLP_Bert",
     "hf_BigBird",
+    "hf_T5_base", # fp64_OOM
     "mobilenet_v2",
     "mobilenet_v2_quantized_qat",
     "resnet50_quantized_qat",
