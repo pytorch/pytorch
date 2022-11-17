@@ -333,9 +333,7 @@ def convolution_backward(
 ):
     if not output_mask[2] or grad_output.device.type != "cuda":
         return NotImplemented
-    grad_bias = aten.sum(
-        grad_output, [0] + list(range(2, grad_output.dim()))
-    )
+    grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
     grad_inp, grad_weight, _ = aten.convolution_backward(
         grad_output,
         input,
