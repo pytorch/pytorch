@@ -235,7 +235,7 @@ class SymInt:
         raise AssertionError("type stub not overridden")
 
     def __repr__(self):
-        return self.node.str()
+        return str(self.node)
 
     # For BC; direct access of node is OK too
     def get_pyobj(self):
