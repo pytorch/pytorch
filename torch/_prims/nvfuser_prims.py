@@ -454,6 +454,7 @@ def register_full():
         p.impl_nvfuser = _nvfuser_impls["full"]
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
+
 # functorch.compile.min_cut_rematerialization_partition accepts a list of
 # operators that can be recomputed in the backward pass. This list is used to
 # determine which operators can be recomputed. If an operator is not in this
