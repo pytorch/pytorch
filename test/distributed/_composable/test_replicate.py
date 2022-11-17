@@ -52,9 +52,6 @@ class ReplicateTest(MultiProcessTestCase):
         input = torch.randn(global_batch_size, 2)
         target = torch.randn(global_batch_size, 4)
 
-        # model = Net()
-        # replicate_model = mark_root_module(replicate(deepcopy(model)))
-
         def step_model(model, input, target):
             model.train()
             output = model(input)
