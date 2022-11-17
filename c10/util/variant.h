@@ -878,8 +878,8 @@ using std::is_trivially_move_constructible;
 #else
 template <typename T>
 struct is_trivially_copy_constructible
-    : bool_constant<std::is_copy_constructible<T>::value&& __has_trivial_copy(
-          T)> {};
+    : bool_constant<
+          std::is_copy_constructible<T>::value&& __is_trivially_copyable(T)> {};
 
 template <typename T>
 struct is_trivially_move_constructible : bool_constant<__is_trivial(T)> {};

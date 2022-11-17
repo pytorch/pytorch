@@ -431,11 +431,11 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
 #endif
 
 // Portable determination of whether type T is trivially copyable.
-// Warning: __has_trivial_copy for GCC may not always detect the non-POD
+// Warning: __is_trivially_copyable for GCC may not always detect the non-POD
 // correctly. For example, T = std::unique_ptr may evaluate to true and be
 // treated as POD. This can cause unexpected behavior.
 #if defined(__GNUG__) && __GNUC__ < 5
-#define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
+#define C10_IS_TRIVIALLY_COPYABLE(T) __is_trivially_copyable(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
 #endif
