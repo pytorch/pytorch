@@ -244,7 +244,7 @@ void reduction_out_mps
                                                                      numLower:0
                                                                      numUpper:0
                                                                          name:nil];
-            castOutputTensor = [mpsGraph reductionSumWithTensor:bandPartWithTensor 
+            castOutputTensor = [mpsGraph reductionSumWithTensor:bandPartWithTensor
                                                            axes:@[@0, @1]
                                                            name:nil];
           }
