@@ -60,7 +60,7 @@ class MixtureSameFamily(Distribution):
 
         if not isinstance(self._mixture_distribution, Categorical):
             raise ValueError(" The Mixture distribution needs to be an "
-                             " instance of torch.distribtutions.Categorical")
+                             " instance of torch.distributions.Categorical")
 
         if not isinstance(self._component_distribution, Distribution):
             raise ValueError("The Component distribution need to be an "

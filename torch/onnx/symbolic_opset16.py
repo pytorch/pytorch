@@ -15,7 +15,7 @@ Updated operators:
     PRelu
     RoiAlign
     Scan
-    ScatterElemenets
+    ScatterElements
     ScatterND
     Where
     GreaterOrEqual

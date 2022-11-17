@@ -28,8 +28,8 @@ class Partition:
             f" nodes: {self.node_names},\n"
             f" inputs: {self.inputs},\n"
             f" outputs: {self.outputs},\n"
-            f" partitions depenent on: {self.partitions_dependent_on},\n"
-            f" parition dependents: {self.partition_dependents}"
+            f" partitions dependent on: {self.partitions_dependent_on},\n"
+            f" partition dependents: {self.partition_dependents}"
         )
 
 

@@ -242,7 +242,7 @@ class ParametrizationList(ModuleList):
                 if len(value) != self.ntensors:
                     raise ValueError(
                         "'right_inverse' must return a sequence of tensors of length "
-                        f"{self.ntensors}. Got a sequence of lenght {len(value)}."
+                        f"{self.ntensors}. Got a sequence of length {len(value)}."
                     )
                 for i, tensor in enumerate(value):
                     original_i = getattr(self, f"original{i}")

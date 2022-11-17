@@ -696,7 +696,7 @@ class Partitioner:
             return find_combination, partitions
 
         def reset_partition_in_sparse_nn(partition, new_partition=True):
-            """If crossing the boudary between non-embedding nodes and
+            """If crossing the boundary between non-embedding nodes and
             embedding nodes, create a new partition
             """
             if in_embedding_region:

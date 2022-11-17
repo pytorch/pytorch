@@ -35,7 +35,7 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
                  freeze_bn=False,
                  qconfig=None):
         nn.modules.linear.Linear.__init__(self, in_features, out_features, bias)
-        assert qconfig, 'qconfig must be provded for QAT module'
+        assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.freeze_bn = freeze_bn if self.training else True
         self.bn = nn.BatchNorm1d(out_features, eps, momentum, True, True)
