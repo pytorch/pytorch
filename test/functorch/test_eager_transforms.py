@@ -148,7 +148,9 @@ def _get_weights_and_functional_call(net, mechanism):
         return make_functional(net)
     else:
         # this makes it so the function from make_functional and this call have the same signature
-        net_func = lambda weights, data: functional_call(net, weights, (data,))
+        def net_func(weights, data):
+            return functional_call(net, weights, (data,))
+
         weights = {k: v for k, v in net.named_parameters()}
         return net_func, weights
 
@@ -157,7 +159,9 @@ def _get_weights_and_functional_call_with_buffers(net, mechanism):
         return make_functional_with_buffers(net)
     else:
         # this makes it so the function from make_functional and this call have the same signature
-        net_func = lambda weights, buffers, data: functional_call(net, {**weights, **buffers}, (data,))
+        def net_func(weights, data):
+            return functional_call(net, weights, (data,))
+
         weights = {k: v for k, v in net.named_parameters()}
         buffers = {k: v for k, v in net.named_buffers()}
         return net_func, weights, buffers
@@ -2779,7 +2783,7 @@ class TestExamplesCorrectness(TestCase):
             return mse_loss(v_f, y2)
 
         task = sample_tasks(num_tasks, K)
-        list_params = params if mechanism == "make_functional" else [k for k in params.values()]
+        list_params = params if mechanism == "make_functional" else list(params.values())
 
         # Compute with vmap+grad
         inner_losses = vmap(partial(get_loss_for_task, True))(task[0], task[1], task[2], task[3])
@@ -2866,7 +2870,7 @@ class TestExamplesCorrectness(TestCase):
         # compute with vmap + grad
         compute_loss = partial(loss_for_task, net, n_inner_iter, True)
         qry_losses, _ = vmap(compute_loss)(x_spt, y_spt, x_qry, y_qry)
-        list_params = params if mechanism == "make_functional" else [k for k in params.values()]
+        list_params = params if mechanism == "make_functional" else list(params.values())
         result_grads = torch.autograd.grad(qry_losses.sum(), list_params)
 
         # compute without vmap + grad
@@ -3032,13 +3036,13 @@ class TestExamplesCorrectness(TestCase):
                 grad_weights, loss = grad_and_value(compute_loss)(weights, batch, targets)
             else:
                 loss = compute_loss(weights, batch, targets)
-                list_weights = weights if mechanism == "make_functional" else [i for i in weights.values()]
+                list_weights = weights if mechanism == "make_functional" else list(weights.values())
                 grad_weights = torch.autograd.grad(loss, list_weights)
-                grad_weights = grad_weights if mechanism == "make_functional" else {k: g for k, g in zip(weights.keys(), grad_weights)}
+                grad_weights = grad_weights if mechanism == "make_functional" else dict(zip(weights.keys(), grad_weights))
 
             new_weights = self._update_params(weights, grad_weights, lr, mechanism)
             if mechanism != "make_functional":
-                new_weights = [k for k in new_weights.values()]
+                new_weights = list(new_weights.values())
             # NB: return looks weird because torch.vmap must return Tensors
             return (loss, *new_weights)
 
@@ -3115,7 +3119,7 @@ class TestExamplesCorrectness(TestCase):
             grad_weights, loss = grad_and_value(compute_loss)(weights, batch, targets)
             new_weights = self._update_params(weights, grad_weights, lr, mechanism)
             if mechanism != "make_functional":
-                new_weights = [k for k in new_weights.values()]
+                new_weights = list(new_weights.values())
             # NB: return looks weird because torch.vmap must return Tensors
             return (loss, *new_weights)
 
@@ -3164,7 +3168,7 @@ class TestExamplesCorrectness(TestCase):
 
         result_grads = vmap(grad(compute_loss), in_dims=(None, 0, 0))(weights, images, targets)
 
-        list_weights = weights if mechanism == "make_functional" else [i for i in weights.values()]
+        list_weights = weights if mechanism == "make_functional" else list(weights.values())
         expected_grads = [
             torch.autograd.grad(compute_loss(weights, images[i], targets[i]), list_weights)
             for i in range(batch_size)
