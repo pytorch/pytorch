@@ -109,7 +109,8 @@ class ContextWrappingVariable(VariableTracker):
         self.initial_values = initial_values
         self.recursively_contains = (
             set()
-        )  # Workaround so that we don't call apply() on this variable
+        )  # This var doesn't contain any child vars and doesn't support clone() properly,
+        # so don't populate this automatically
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
