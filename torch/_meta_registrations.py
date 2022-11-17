@@ -1513,12 +1513,49 @@ def full(size, fill_value, *args, **kwargs):
         aten.randn_like.default,
         aten.rand_like.default,
         aten.full_like.default,
-        aten.zeros_like.default,
         aten.ones_like.default,
     ]
 )
 def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
+
+
+# zeros_like is special cased to work for sparse
+@register_meta(aten.zeros_like.default)
+def zeros_like(
+    self, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None
+):
+    if layout == torch.sparse_coo:
+        check(
+            memory_format is None,
+            lambda: "memory format option is only supported by strided tensors",
+        )
+
+        res = torch.empty(
+            0,
+            dtype=self.dtype if dtype is None else dtype,
+            layout=layout,
+            device=self.device if device is None else device,
+            pin_memory=pin_memory,
+        )
+
+        if self.is_sparse:
+            res.sparse_resize_and_clear_(
+                self.size(), self.sparse_dim(), self.dense_dim()
+            )
+        else:
+            res.sparse_resize_and_clear_(self.size(), self.dim(), 0)
+
+        res._coalesced_(True)
+        return res
+    return aten.empty_like.default(
+        self,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
+    )
 
 
 # hacky: Please remove after math.ceil works with arange
@@ -1770,20 +1807,32 @@ def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
     scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
     return self
 
+
 def multiply_integers(vs):
     r = 1
     for v in vs:
         r *= v
     return r
 
+
 def upsample_2d_common_check(input_size, output_size):
-    check(len(output_size) == 2, lambda: f"It is expected output_size equals to 2, but got size {len(output_size)}")
-    check(len(input_size) == 4, lambda: f"It is expected input_size equals to 4, but got size {len(input_size)}")
+    check(
+        len(output_size) == 2,
+        lambda: f"It is expected output_size equals to 2, but got size {len(output_size)}",
+    )
+    check(
+        len(input_size) == 4,
+        lambda: f"It is expected input_size equals to 4, but got size {len(input_size)}",
+    )
 
     output_height, output_width = output_size
     nbatch, channels, input_height, input_width = input_size
 
-    check(input_height > 0 and input_width > 0 and output_height > 0 and output_width > 0, f"Input and output sizes should be greater than 0, but got input (H: {input_height}, W: {input_width}), output (H: {output_height}), W: {output_width})")
+    check(
+        input_height > 0 and input_width > 0 and output_height > 0 and output_width > 0,
+        lambda: f"Input and output sizes should be greater than 0, but got input \
+            (H: {input_height}, W: {input_width}), output (H: {output_height}), W: {output_width})",
+    )
 
     return (nbatch, channels, output_height, output_width)
 
@@ -1791,9 +1840,47 @@ def upsample_2d_common_check(input_size, output_size):
 @register_meta(aten.upsample_nearest2d.default)
 def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
     full_output_size = upsample_2d_common_check(input.size(), output_size)
-    check(input.numel() != 0 or multiply_integers(input.size()[1:]),
-        lambda: "Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}")
-    return input.new_empty(full_output_size).to(memory_format=utils.suggest_memory_format(input))
+    check(
+        input.numel() != 0 or multiply_integers(input.size()[1:]),
+        lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
+    )
+    return input.new_empty(full_output_size).to(
+        memory_format=utils.suggest_memory_format(input)
+    )
+
+
+def upsample_1d_common_check(input_size, output_size):
+    check(
+        len(output_size) == 1,
+        lambda: f"It is expected output_size equals to 1, but got size {len(output_size)}",
+    )
+    check(
+        len(input_size) == 3,
+        lambda: f"It is expected input_size equals to 2, but got size {len(input_size)}",
+    )
+
+    output_width = output_size[0]
+    nbatch, channels, input_width = input_size
+
+    check(
+        input_width > 0 and output_width > 0,
+        lambda: f"Input and output sizes should be greater than 0, but got input\
+          (W: {input_width}), W: {output_width})",
+    )
+
+    return (nbatch, channels, output_width)
+
+
+@register_meta(aten.upsample_nearest1d.default)
+def upsample_nearest1d(input, output_size, scales=None):
+    full_output_size = upsample_1d_common_check(input.size(), output_size)
+    check(
+        input.shape[1] != 0 and input.shape[2] != 0 and input.dim() == 3,
+        lambda: f"Non-empty 3D data tensor expected but got a tensor with sizes {input.size()}",
+    )
+    return input.new_empty(full_output_size).to(
+        memory_format=utils.suggest_memory_format(input)
+    )
 
 
 @register_meta([aten.sort.default, aten.sort.stable])
