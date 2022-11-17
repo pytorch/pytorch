@@ -317,6 +317,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"SparseHIP", c10::DispatchKey::SparseHIP},
       {"SparseXPU", c10::DispatchKey::SparseXPU},
       {"SparseVE", c10::DispatchKey::SparseVE},
+      {"SparseMeta", c10::DispatchKey::SparseMeta},
 
       {"AutogradCPU", c10::DispatchKey::AutogradCPU},
       {"AutogradCUDA", c10::DispatchKey::AutogradCUDA},
