@@ -2643,6 +2643,23 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.empty(2, 3, 3, dtype=torch.double).uniform_(0, 1)
         self.run_test(Bernoulli(), x)
 
+    def test_bernoulli_p(self):
+        class Bernoulli_float(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.bernoulli(x, 0.2).size(0))
+
+        class Bernoulli_tensor(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.rand_like(x).bernoulli_(x).size(0))
+
+        x = torch.rand(3, 3)
+        self.run_test(Bernoulli_float(), x)
+        self.run_test(Bernoulli_tensor(), x)
+
+        x = torch.rand(2, 3, 3, dtype=torch.double)
+        self.run_test(Bernoulli_float(), x)
+        self.run_test(Bernoulli_tensor(), x)
+
     @unittest.skip("Bug in ORT, skip test until rel-1.11.")
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_reshape_allowzero(self):
@@ -8728,6 +8745,28 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.full_like(x, True)
         self.run_test(MinimumModel(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_maximum_dtypes(self):
+        class MaximumModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.maximum(x, y)
+
+        x = torch.randn((5, 5), dtype=torch.float16)
+        y = torch.randn((5, 5), dtype=torch.float)
+        self.run_test(MaximumModel(), (x, y))
+
+        x = torch.randn((5, 5), dtype=torch.float16)
+        y = torch.randint(10, (5, 5), dtype=torch.int16)
+        self.run_test(MaximumModel(), (x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int16)
+        y = torch.randint(10, (5, 5), dtype=torch.int32)
+        self.run_test(MaximumModel(), (x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int)
+        y = torch.full_like(x, True)
+        self.run_test(MaximumModel(), (x, y))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_any(self):
         class M(torch.nn.Module):
@@ -9129,7 +9168,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @skipScriptTest(
-        skip_before_opset_version=11, reason="dynamic split support addded in 11"
+        skip_before_opset_version=11, reason="dynamic split support added in 11"
     )
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):

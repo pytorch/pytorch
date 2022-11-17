@@ -10,8 +10,19 @@ from torch.ao.quantization.backend_config import (
     BackendConfig,
     DTypeWithConstraints,
 )
-from torch.ao.quantization.fake_quantize import FakeQuantizeBase
-from torch.ao.quantization.observer import ObserverBase
+from torch.ao.quantization.fake_quantize import (
+    FakeQuantizeBase,
+    FixedQParamsFakeQuantize,
+)
+from torch.ao.quantization.observer import (
+    FixedQParamsObserver,
+    ObserverBase,
+)
+from torch.ao.quantization.qconfig import (
+    float16_static_qconfig,
+    float16_dynamic_qconfig,
+    qconfig_equals,
+)
 from torch.ao.quantization.stubs import DeQuantStub
 from torch.ao.quantization.utils import (
     activation_is_statically_quantized,
@@ -19,7 +30,7 @@ from torch.ao.quantization.utils import (
     is_per_channel,
     to_underlying_dtype,
 )
-from torch.ao.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.observer import _is_activation_post_process
 
 from torch.fx import GraphModule, map_arg
 
@@ -183,7 +194,7 @@ def get_quantize_node_info(
     if hasattr(activation_post_process, "compute_dtype"):
         compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
-    if dtype in [torch.quint8, torch.qint8] and \
+    if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
             not hasattr(activation_post_process, 'compute_dtype'):
         node_type = "call_function"
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
@@ -436,7 +447,7 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
         result = False
     elif node.op == 'call_module':
         assert isinstance(node.target, str)
-        if is_activation_post_process(modules[node.target]):
+        if _is_activation_post_process(modules[node.target]):
             result = all_node_args_have_no_tensors(node.args[0], modules, cache)  # type: ignore[arg-type]
     elif node.op == 'call_module':
         result = False
@@ -951,10 +962,13 @@ def _qconfig_satisfies_dtype_config_constraints(
 
         1. QConfig specified a quantization range that falls within the backend's, if any
         2. QConfig specified a min scale value that is >= the backend's, if any
+        3. QConfig specified a FixedQParamsObserver or FixedQParamsFakeQuantize that has
+           scale and zero point that match the backend's, if any
 
     If `is_activation` is True, we check `qconfig.activation`, else we check `qconfig.weight`.
     If `qconfig` or `dtype_with_constraints.dtype` is None, or the dtypes do not match, return True.
     """
+    # TODO: log warnings only when the user enabled a debug flag
     def _activation_post_process_satisfies_dtype_config_constraints(
             activation_post_process: Union[ObserverBase, FakeQuantizeBase],
             dtype_with_constraints: DTypeWithConstraints,
@@ -968,6 +982,8 @@ def _qconfig_satisfies_dtype_config_constraints(
         backend_quant_min = dtype_with_constraints.quant_min_lower_bound
         backend_quant_max = dtype_with_constraints.quant_max_upper_bound
         backend_scale_min = dtype_with_constraints.scale_min_lower_bound
+        backend_scale_exact_match = dtype_with_constraints.scale_exact_match
+        backend_zero_point_exact_match = dtype_with_constraints.zero_point_exact_match
         # check quantization ranges
         if backend_quant_min is not None and backend_quant_max is not None:
             if app_quant_min is None or app_quant_max is None:
@@ -990,6 +1006,30 @@ def _qconfig_satisfies_dtype_config_constraints(
                               "the backend's min scale value (%s), ignoring %s") %
                               (debug_string, app_scale_min, backend_scale_min, qconfig))
                 return False
+        # check fixed scale and zero point
+        if backend_scale_exact_match is not None and backend_zero_point_exact_match is not None:
+            # For tests only, accept the following qconfigs for now
+            # TODO: handle fp16 qconfigs properly
+            for accepted_qconfig in [float16_static_qconfig, float16_dynamic_qconfig]:
+                if qconfig_equals(qconfig, accepted_qconfig):
+                    return True
+            suggestion_str = (
+                "Please use torch.ao.quantization.get_default_qconfig_mapping or "
+                "torch.ao.quantization.get_default_qat_qconfig_mapping. Example:\n"
+                "    qconfig_mapping = get_default_qconfig_mapping(\"fbgemm\")\n"
+                "    model = prepare_fx(model, qconfig_mapping, example_inputs)"
+            )
+            if not isinstance(activation_post_process, FixedQParamsObserver) and \
+                    not isinstance(activation_post_process, FixedQParamsFakeQuantize):
+                warnings.warn(("QConfig must specify a FixedQParamsObserver or a FixedQParamsFakeQuantize "
+                              "for fixed qparams ops, ignoring %s.\n%s") % (qconfig, suggestion_str))
+                return False
+            if observer.scale != backend_scale_exact_match or observer.zero_point != backend_zero_point_exact_match:
+                warnings.warn(("QConfig fixed scale (%s) and zero point (%s) do not match the backend's "
+                              "(%s and %s), ignoring %s.\n%s") %
+                              (observer.scale, observer.zero_point, backend_scale_exact_match,
+                              backend_zero_point_exact_match, qconfig, suggestion_str))
+                return False
         return True
 
     if qconfig is None or dtype_with_constraints.dtype is None:
@@ -1000,7 +1040,7 @@ def _qconfig_satisfies_dtype_config_constraints(
     satisfies_constraints = True
     if activation_post_process_ctr is not None:
         activation_post_process = activation_post_process_ctr()
-        assert is_activation_post_process(activation_post_process)
+        assert _is_activation_post_process(activation_post_process)
         # If dtypes don't match, don't check the activation_post_process and return True early
         if activation_post_process.dtype != dtype_with_constraints.dtype:
             return True
