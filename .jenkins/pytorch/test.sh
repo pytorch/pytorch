@@ -294,7 +294,7 @@ test_inductor_torchbench_shard() {
   fi
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  PYTHONPATH='${PYTHONPATH}:$(pwd)/torchbench/' \
+  PYTHONPATH="${PYTHONPATH}:$(pwd)/torchbench/" \
     python benchmarks/dynamo/torchbench.py --ci --training --accuracy \
     --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_torchbench_"$1".csv
