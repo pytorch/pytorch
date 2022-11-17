@@ -1,14 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from abc import abstractmethod
 import torch
-from dataclasses import dataclass
 from abc import ABC
 from typing import Union, Optional
-from torch.distributed._tensor import (
-    DTensor,
-    Shard,
-    Replicate,
-    DeviceMesh,
-)
+from torch.distributed._tensor import DTensor, Shard, Replicate, DeviceMesh
 from torch.distributed._tensor.parallel.utils import (
     _Prepare_Input_Func_Type,
     _Prepare_Output_Func_Type,
@@ -17,15 +12,54 @@ from torch.distributed._tensor.parallel.utils import (
 )
 
 
-@dataclass
 class ParallelStyle(ABC):
     """
     The parallel style user wants the module or submodule to be parallelized.
     Users can extend this class to build their own parallel style with customized input/output preparations.
     """
 
-    _prepare_input: Optional[_Prepare_Input_Func_Type]
-    _prepare_output: Optional[_Prepare_Output_Func_Type]
+    _prepare_input: _Prepare_Input_Func_Type
+    _prepare_output: _Prepare_Output_Func_Type
+
+    @abstractmethod
+    def __init__(self, _prepare_input, _prepare_output) -> None:
+        self._prepare_input = _prepare_input
+        self._prepare_output = _prepare_output
+
+
+class PairwiseParallel(ParallelStyle):
+    """
+    PairwiseParallel concatenate colwise and rowwise styles as a fixed
+    pair like what Megatron-LM(https://arxiv.org/abs/1909.08053) is doing.
+    We assume both input and output needs to a replicate DTensor.
+
+    .. warning::
+        PairwiseParallel only supports ``nn.Multihead Attention``,
+        ``nn.Transformer`` or even-number-layer MLP for now.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(make_input_replicate_1d, make_output_tensor)
+
+
+class RowwiseParallel(ParallelStyle):
+    """
+    Partitioning the row of a module.
+    We assume the input to be a sharded :class:``DTensor`` and output to be a replicated :class:``DTensor``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(make_input_shard_1d, make_output_replicate_1d)
+
+
+class ColwiseParallel(ParallelStyle):
+    """
+    Partitioning the column of a tensor or module.
+    We assume the input to be a replicated :class:``DTensor`` and output to be a sharded :class:``DTensor``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(make_input_replicate_1d, None)
 
 
 @_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
@@ -35,7 +69,7 @@ def make_input_shard_1d(
     dim: int = 0,
 ) -> DTensor:
     """
-    Shard input tensor on `dim` over an 1-D device mesh. This function will be used in ParallelStyle.
+    Shard input tensor on ``dim`` over an 1-D device mesh. This function will be used in ParallelStyle.
 
     Args:
         input (Union[Tensor, DTensor]):
