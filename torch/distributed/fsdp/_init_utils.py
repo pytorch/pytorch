@@ -152,10 +152,6 @@ def _init_core_state(
         backward_prefetch_limit,
         forward_prefetch_limit,
     )
-    _module_to_handles: Dict[
-        nn.Module, List[FlatParamHandle]
-    ] = collections.defaultdict(list)
-    state._module_to_handles = _module_to_handles
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handles`
     _handles: List[FlatParamHandle] = []
@@ -175,10 +171,18 @@ def _init_runtime_state(
     state._pre_forward_handles = _pre_forward_handles
     _post_forward_handles: List[RemovableHandle] = []
     state._post_forward_handles = _post_forward_handles
+    # Mapping from `FlatParamHandle` to the modules that consume the handle's
+    # `FlatParameter`
     _module_to_handles: Dict[
         nn.Module, List[FlatParamHandle]
     ] = collections.defaultdict(list)
     state._module_to_handles = _module_to_handles
+    # Mapping from `FlatParamHandle` to the active modules running forward that
+    # consume the handle's `FlatParameter`
+    _handle_to_active_forward_modules: Dict[
+        FlatParamHandle, Set[nn.Module]
+    ] = collections.defaultdict(set)
+    state._handle_to_active_forward_modules = _handle_to_active_forward_modules
     state._sync_gradients = True
     state._communication_hook = _get_default_comm_hook(state.sharding_strategy)
     state._communication_hook_state = _get_default_comm_hook_state(state.process_group)
@@ -260,7 +264,9 @@ def _init_param_handle_from_module(
         _sync_module_params_and_buffers(
             root_module, managed_params, state.process_group
         )
-    _init_param_handle_from_params(state, managed_params, root_module)
+    # TODO: No support for explicit LCA computation yet for wrapper FSDP
+    lca_modules = []
+    _init_param_handle_from_params(state, managed_params, root_module, lca_modules)
     return state
 
 
@@ -277,7 +283,7 @@ def _init_param_handles_from_module(
     Initializes all ``FlatParamHandle`` s from a module ``root_module``. This
     is the non-module-wrapper code path.
     """
-    submodule_to_states = _get_submodule_to_states(
+    submodule_to_states, shared_param_to_lca_module = _get_submodule_to_states(
         root_module,
         policy,
         state._ignored_modules,
@@ -286,9 +292,9 @@ def _init_param_handles_from_module(
     _check_single_device_module(root_module, state._ignored_params)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
     # Initialize and shard `FlatParamHandle`s one by one following bottom-up
-    # order (hence the `reversed`) to avoid increasing peak GPU memory usage
+    # order to avoid increasing peak GPU memory usage
     materialized_module = False
-    for submodule, (params, buffers) in reversed(submodule_to_states.items()):
+    for submodule, (params, buffers) in submodule_to_states.items():
         # Materialize the module if needed
         is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
             submodule, state._ignored_params
@@ -329,7 +335,12 @@ def _init_param_handles_from_module(
             _sync_module_states(params, buffers, state.process_group)
         # Pass `root_module` to have internal FQN metadata prefix starting from
         # it instead of `submodule`
-        _init_param_handle_from_params(state, params, root_module)
+        lca_modules = {
+            shared_param_to_lca_module[param]
+            for param in params
+            if param in shared_param_to_lca_module
+        }
+        _init_param_handle_from_params(state, params, root_module, lca_modules)
     # Reverse to preserve top-down order like `_fsdp_handles()`
     state._handles.reverse()
     return state
@@ -340,6 +351,7 @@ def _init_param_handle_from_params(
     state: _FSDPState,
     params: List[nn.Parameter],
     root_module: nn.Module,
+    lca_modules: List[nn.Module],
 ):
     if len(params) == 0:
         return
@@ -357,12 +369,17 @@ def _init_param_handle_from_params(
         handle_config,
         state.process_group,
         state._use_orig_params,
+        lca_modules,
     )
     # TODO: Can simplify call `shard()` in the `FlatParamHandle` ctor
     handle.shard()
     assert handle not in state._handles
     state.params.append(handle.flat_param)
     state._handles.append(handle)
+    # NOTE: By including all of `_modules` in the dict values, for shared
+    # parameters assigned to an LCA module not among the owning modules, the
+    # LCA module performs the actual unshard, and the owning modules' unshards
+    # are no-ops. The reshard waits for all consuming modules to run.
     for module in handle.flat_param._modules:
         state._module_to_handles[module].append(handle)
     cpu_device = torch.device("cpu")

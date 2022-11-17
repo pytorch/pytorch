@@ -266,7 +266,7 @@ class _ExecOrderData:
                 ),
                 2,
             ):
-                if i1 != i2:
+                if not torch.equal(i1, i2):
                     r1_param_names = self._get_names_from_handle_indices(i1)
                     r2_param_names = self._get_names_from_handle_indices(i2)
                     raise RuntimeError(
@@ -332,7 +332,7 @@ class _ExecOrderData:
 
     def _get_names_from_handle_indices(
         self,
-        handle_indices: Tuple[int, ...],
+        handle_indices: torch.Tensor,
     ) -> List[List[str]]:
         """
         Returns a list of prefixed parameter names for each handle in
@@ -340,7 +340,8 @@ class _ExecOrderData:
         parameter names are omitted from the returned list.
         """
         prefixed_param_names: List[List[str]] = []
-        for index in handle_indices:
+        for index_tensor in handle_indices:
+            index = index_tensor.item()
             if index is None or index < 0 or index >= len(self.all_handles):
                 continue
             handle = self.all_handles[index]

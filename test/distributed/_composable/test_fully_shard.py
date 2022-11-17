@@ -76,9 +76,8 @@ class TestFSDPInitialization(FSDPTest):
         return 2
 
     @skip_if_lt_x_gpu(2)
-    def test_auto_wrap_policy(self):
-        """Tests passing an ``auto_wrap_policy``."""
-
+    def test_module_wrap_policy(self):
+        """Tests passing ``ModuleWrapPolicy`` as an ``auto_wrap_policy``."""
         local_model = Model(device=torch.device("cuda"))
         fsdp_wrapped_model = FSDP(
             copy.deepcopy(local_model),
@@ -125,6 +124,76 @@ class TestFSDPInitialization(FSDPTest):
         for submodule in composable_module.modules():
             composable_module_classes.add(type(submodule))
         self.assertEqual(local_module_classes, composable_module_classes)
+
+    @skip_if_lt_x_gpu(2)
+    def test_sibling_shared_params(self):
+        """
+        Tests that shared parameters across siblings are correctly assigned to
+        their lowest common ancestor module.
+        """
+        # TODO: We cannot use `TransformerWithSharedParams` here due to its
+        # external parameter usage.
+        d_vocab = 23
+        d_model = 16
+
+        class ModelWithSharedParams(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.embed_tokens = nn.Embedding(d_vocab, d_model)
+                self.lin = nn.Linear(d_model, d_model)
+                self.seq = nn.Sequential(
+                    nn.Linear(d_model, d_model), nn.Linear(d_model, d_model)
+                )
+                self.output_proj = nn.Linear(d_model, d_vocab)
+                self.relu = nn.ReLU()
+                # Share a parameter across siblings, where the LCA module is
+                # this `ModelWithSharedParams` instance
+                self.output_proj.weight = self.embed_tokens.weight
+
+            def forward(self, x: torch.Tensor):
+                z = self.embed_tokens(x)
+                z = self.relu(self.lin(z))
+                z = self.relu(self.seq(z))
+                return self.output_proj(z)
+
+        composable_module = nn.Sequential(
+            ModelWithSharedParams(),
+            nn.Linear(d_vocab, d_vocab),
+        )
+        module_classes = {nn.Linear, nn.Embedding}
+        fully_shard(
+            composable_module,
+            self.process_group,
+            policy=ModuleWrapPolicy(module_classes),
+            device_id=torch.cuda.current_device(),
+        )
+
+        # Check that the shared embedding/output project weight are flattened
+        # together, meaning that only one name should appear in the FQNs
+        has_output_proj_weight = False
+        has_embed_tokens_weight = False
+        for handle in fully_shard.state(composable_module)._handles:
+            has_output_proj_weight |= any(
+                "output_proj.weight" in fqn for fqn in handle.flat_param._fqns
+            )
+            has_embed_tokens_weight |= any(
+                "embed_tokens.weight" in fqn for fqn in handle.flat_param._fqns
+            )
+        self.assertEqual(has_output_proj_weight + has_embed_tokens_weight, 1)
+
+        # Check that we can running a few training iterations without erroring
+        optim = torch.optim.Adam(composable_module.parameters(), lr=1e-2)
+        for i in range(4):
+            optim.zero_grad(set_to_none=(i % 2 == 0))
+            inp = torch.arange(12, device=torch.device("cuda")).view(6, 2)
+            # TODO (awgu): Remove this after resolving the root pre-forward
+            # hook registration, currently blocked by kwarg support
+            args, kwargs = _root_pre_forward(
+                fully_shard.state(composable_module), composable_module, inp
+            )
+            out = composable_module(*args, **kwargs)
+            out.sum().backward()
+            optim.step()
 
     @skip_if_lt_x_gpu(2)
     def test_device_id(self):

@@ -243,10 +243,13 @@ def _pre_forward(
 def _pre_forward_unshard(
     state: _FSDPState,
     handles: List[FlatParamHandle],
+    module: nn.Module,
 ) -> None:
     """Unshards parameters in the pre-forward."""
     if not handles:
         return
+    for handle in handles:
+        state._handle_to_active_forward_modules[handle].add(module)
     _unshard(state, handles, state._streams["unshard"], state._streams["pre_unshard"])
     handles_key = tuple(handles)
     state._needs_pre_forward_unshard[handles_key] = False
@@ -298,19 +301,39 @@ def _post_forward(
 def _post_forward_reshard(
     state: _FSDPState,
     handles: List[FlatParamHandle],
+    module: nn.Module,
 ) -> None:
     """Reshards parameters in the post-forward."""
     if not handles:
         return
+    if _is_composable(state):
+        handles_to_reshard = []
+        # Only reshard if all consuming modules have ran their forward
+        # NOTE: `_handle_to_active_forward_modules` logically follows a stack
+        # discipline, where we push in `_pre_forward_unshard()` and pop here.
+        for handle in handles:
+            p_assert(
+                module in state._handle_to_active_forward_modules[handle],
+                "Missing module in mapping; check the implementation",
+            )
+            state._handle_to_active_forward_modules[handle].discard(module)
+            all_handle_modules_ran_forward = (
+                len(state._handle_to_active_forward_modules[handle]) == 0
+            )
+            if all_handle_modules_ran_forward:
+                handles_to_reshard.append(handle)
+    else:
+        # TODO: Unify with the composable code path in a follow-up.
+        handles_to_reshard = handles
     # Do not free the root's parameters in the post-forward for `FULL_SHARD`
     # with the intention that they are immediately used for backward
     # computation (though this may not be true)
     free_unsharded_flat_params = [
         not state._is_root
         and handle._config.sharding_strategy == HandleShardingStrategy.FULL_SHARD
-        for handle in handles
+        for handle in handles_to_reshard
     ]
-    _reshard(state, handles, free_unsharded_flat_params)
+    _reshard(state, handles_to_reshard, free_unsharded_flat_params)
 
 
 @no_type_check
@@ -335,6 +358,7 @@ def _root_pre_forward(
     p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
     if not state._is_root:
         return args, kwargs
+    state._handle_to_active_forward_modules.clear()
     if state.forward_prefetch:
         handles_keys = []
         if _is_composable(state):
@@ -889,6 +913,7 @@ def _register_pre_forward_hooks(
                 _pre_forward_unshard,
                 state,
                 module_param_handles,
+                module,
             )
             hook = functools.partial(
                 _pre_forward, state, module_param_handles, unshard_fn
@@ -917,6 +942,7 @@ def _register_post_forward_hooks(
                 _post_forward_reshard,
                 state,
                 module_param_handles,
+                module,
             )
             hook = functools.partial(
                 _post_forward,

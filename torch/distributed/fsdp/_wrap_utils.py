@@ -5,6 +5,7 @@ from typing import Any, Deque, Dict, List, NamedTuple, Set, Tuple
 
 import torch
 import torch.nn as nn
+from torch.distributed.fsdp._shared_param_utils import get_shared_param_info_to_lca
 from torch.distributed.fsdp._utils import (
     _contains_batchnorm,
     _override_batchnorm_mixed_precision,
@@ -17,9 +18,9 @@ from torch.distributed.fsdp.wrap import (
 )
 
 
-class SubmoduleState(NamedTuple):
+class SubmoduleStates(NamedTuple):
     """
-    Submodule state for ``_get_submodule_to_states()``, representing a logical
+    Submodule states for ``_get_submodule_to_states()``, representing a logical
     grouping (e.g. parameters to be flattened together).
     """
 
@@ -77,22 +78,22 @@ def _get_submodule_to_states(
     auto_wrap_policy: _FSDPPolicy,
     ignored_modules: Set[nn.Module],
     ignored_params: Set[nn.Parameter],
-) -> Dict[nn.Module, SubmoduleState]:
+) -> Tuple[Dict[nn.Module, SubmoduleStates], Dict[nn.Parameter, nn.Module]]:
     """
-    Returns a mapping from submodule to its parameters, buffers, parameter
-    names, and buffer names, where each entry logically represents a grouping
+    Returns two data structures: (1) is a mapping from submodule to its
+    parameters and buffers, where each entry logically represents a grouping
     according to the given auto wrap policy and ignored modules/parameters.
-    However, this method does not actually perform any module wrapping.
+    However, this method does not actually perform any module wrapping. (2) is
+    a mapping from shared parameter to its lowest common ancestor (LCA) module.
 
-    The mapped-to values are the states from the subtree rooted at the
+    For (1), the mapped-to values are the states from the subtree rooted at the
     corresponding submodule key, excluding child submodules in the mapping and
-    ignored state. Sibling submodules cannot be grouped together. The parameter
-    and buffer names are prefixed starting from the submodule.
+    ignored state.
 
-    Each non-ignored parameter and buffer appears exactly once in the returned
-    ``dict``, and the ``dict`` is ordered by increasing tree depth. A mapped-to
-    parameter list may be empty if the submodule has no parameters or if its
-    parameters were assigned to a parent submodule instead.
+    Each non-ignored parameter and buffer appears exactly once in (1), and (1)
+    is ordered by decreasing tree depth. A mapped-to parameter list may be
+    empty if the submodule has no parameters or if its parameters were assigned
+    to a parent submodule instead.
     """
     # Record the modules to wrap without actually wrapping
     wrapped_modules: List[nn.Module] = []  # these are only logically wrapped
@@ -110,17 +111,25 @@ def _get_submodule_to_states(
         wrapped_modules.append(root_module)
 
     submodule_to_states = collections.OrderedDict()
-    visited_params = set()
-    for ignored_param in ignored_params:
-        visited_params.add(ignored_param)
+    visited_params = set(ignored_params)  # shallow copy
     visited_buffers = set()
+    visited_modules = set(ignored_modules)  # shallow copy
+
+    shared_param_info_to_lca = get_shared_param_info_to_lca(root_module, ignored_params)
+    shared_params: Set[nn.Parameter] = set()
+    lca_module_to_shared_params = collections.defaultdict(list)
+    shared_param_to_lca_module = {}
+    for shared_param_info, lca_module in shared_param_info_to_lca.items():
+        shared_param = shared_param_info.param
+        shared_params.add(shared_param)
+        lca_module_to_shared_params[lca_module].append(shared_param)
+        shared_param_to_lca_module[shared_param] = lca_module
+    visited_params.update(shared_params)  # finished handling shared parameters
+
     # Constructing `wrapped_modules` with `_recursive_wrap()` follows a
-    # post-order traversal. We record state in `submodule_to_states` using a
-    # reverse post-ordering since that is a topological sort. This assigns
-    # parent-child shared parameters to the parent submodule.
-    # TODO: To handle sibling shared parameters, we need to pre-compute the
-    # shared parameters and assign them to the LCA submodule manually.
-    wrapped_modules.reverse()
+    # post-order traversal (~bottom up). We iterate following this order so
+    # that each shared parameter is assigned to the lowest module in
+    # `wrapped_modules` that is a parent of the shared parameter's LCA module.
     wrapped_modules_set = set(wrapped_modules)
     for submodule in wrapped_modules:
         # Perform a BFS from `submodule` and record all unvisited state that is
@@ -131,6 +140,7 @@ def _get_submodule_to_states(
         buffers: List[torch.Tensor] = []
         while len(queue) > 0:
             module, prefix = queue.popleft()
+            visited_modules.add(module)
             for param in module.parameters(recurse=False):
                 if param not in visited_params:
                     params.append(param)
@@ -140,10 +150,18 @@ def _get_submodule_to_states(
                     buffers.append(buffer)
                     visited_buffers.add(buffer)
             for child_module_name, child_module in module.named_children():
-                if child_module not in wrapped_modules_set:
+                if (
+                    child_module not in wrapped_modules_set
+                    and child_module not in ignored_modules
+                ):
                     queue.append((child_module, prefix + child_module_name + "."))
-        submodule_to_states[submodule] = SubmoduleState(params, buffers)
-    return submodule_to_states
+            # Assign a shared parameter to this module if the walk visits its
+            # LCA module, and remove the entry to be sure to not also assign to
+            # another module.
+            params.extend(lca_module_to_shared_params.get(module, []))
+            lca_module_to_shared_params.pop(module, None)
+        submodule_to_states[submodule] = SubmoduleStates(params, buffers)
+    return submodule_to_states, shared_param_to_lca_module
 
 
 def _record_module_wrapper_cls(
