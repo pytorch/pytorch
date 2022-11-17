@@ -25,8 +25,6 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
 
         from onnxscript.onnx_opset import opset15 as op
 
-        # custom domain is needed for custom Op domain name should be
-        # aligned to the one in symbolic_fn
         # TODO(titaiwang): make an official domain for onnxscript usage
         custom_opset = onnxscript.values.Opset(domain="onnx-script", version=1)
 
