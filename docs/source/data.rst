@@ -441,9 +441,6 @@ Example::
 .. autoclass:: torch.utils.data.distributed.DistributedSampler
 
 
-.. This module is experimental and should be private, adding it here for now
-.. py:module:: torch.utils.data.communication
-
 .. These modules are documented as part of torch/data listing them here for
 .. now until we have a clearer fix
 .. py:module:: torch.utils.data.datapipes

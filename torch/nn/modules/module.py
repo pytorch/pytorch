@@ -307,8 +307,10 @@ def register_module_full_backward_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
-    The hook will be called every time the gradients with respect to module
-    inputs are computed. The hook should have the following signature::
+    The hook will be called every time the gradients with respect to a module
+    are computed, i.e. the hook will execute if and only if the gradients with
+    respect to module outputs are computed. The hook should have the following
+    signature::
 
         hook(module, grad_input, grad_output) -> Tensor or None
 
@@ -1197,8 +1199,10 @@ class Module:
     ) -> RemovableHandle:
         r"""Registers a backward hook on the module.
 
-        The hook will be called every time the gradients with respect to module
-        inputs are computed. The hook should have the following signature::
+        The hook will be called every time the gradients with respect to a module
+        are computed, i.e. the hook will execute if and only if the gradients with
+        respect to module outputs are computed. The hook should have the following
+        signature::
 
             hook(module, grad_input, grad_output) -> tuple(Tensor) or None
 
@@ -1958,7 +1962,12 @@ class Module:
         for name, param in self.named_parameters(recurse=recurse):
             yield param
 
-    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Parameter]]:
+    def named_parameters(
+            self,
+            prefix: str = '',
+            recurse: bool = True,
+            remove_duplicate: bool = True
+    ) -> Iterator[Tuple[str, Parameter]]:
         r"""Returns an iterator over module parameters, yielding both the
         name of the parameter as well as the parameter itself.
 
@@ -1967,6 +1976,8 @@ class Module:
             recurse (bool): if True, then yields parameters of this module
                 and all submodules. Otherwise, yields only parameters that
                 are direct members of this module.
+            remove_duplicate (bool, optional): whether to remove the duplicated
+                parameters in the result. Defaults to True.
 
         Yields:
             (str, Parameter): Tuple containing the name and parameter
@@ -1981,7 +1992,7 @@ class Module:
         """
         gen = self._named_members(
             lambda module: module._parameters.items(),
-            prefix=prefix, recurse=recurse)
+            prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
         for elem in gen:
             yield elem
 
