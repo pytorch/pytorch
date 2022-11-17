@@ -571,7 +571,7 @@ Tensor permute_backwards(const Tensor& grad, IntArrayRef fwd_dims) {
 Tensor rad2deg_backward(const Tensor& grad) {
   constexpr double M_180_PI =
       57.295779513082320876798154814105170332405472466564;
-  return at::mul(grad, at::native::wrapped_scalar_tensor(Scalar(M_180_PI)));
+  return at::mul(grad, Scalar(M_180_PI));
 }
 
 Tensor deg2rad_backward(const Tensor& grad) {
