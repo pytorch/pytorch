@@ -3372,10 +3372,8 @@ def _prepare_convolution_fusion_create(
             groups,
         )
         output_size = output.size()
-        stride_order = [0] + list(reversed(range(1, 2 + 1)))
-        if len(stride_order) < len(output_size):
-            # add batch dim if it exists
-            req_stride_order = [len(stride_order)] + stride_order
+        req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
+        req_stride_order = [len(req_stride_order)] + req_stride_order
         ouput_stride = make_channels_last_strides_for(output_size)
 
     x = cls.require_stride_order(x, req_stride_order)
