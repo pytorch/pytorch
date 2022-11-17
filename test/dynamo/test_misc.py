@@ -495,6 +495,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
+    def test_namedtuple3(self):
+        def fn(x, packed):
+            if isinstance(packed, mytuple):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand([2, 3])
+        packed = mytuple(1, 2, 3)
+        ref = fn(x, packed)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, packed)
+        self.assertTrue(same(ref, res))
+
     def test_range_input(self):
         def fn(a, rng):
             x = a
@@ -1388,7 +1402,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
     def test_torch_profiler(self):
-        # wrap torch.profiler.* as ProfilerContextWrapperVariable and do nothing
+        # wrap torch.profiler.* as NullContextVariable and do nothing
         def fn(x):
             y = x**2
             with torch.profiler.profile():
@@ -1408,7 +1422,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
 
     def test_autograd_profiler(self):
-        # wrap torch.autograd.profiler.* as ProfilerContextWrapperVariable and do nothing
+        # wrap torch.autograd.profiler.* as NullContextVariable and do nothing
         def fn(x):
             y = x**2
             with torch.autograd.profiler.profile():
