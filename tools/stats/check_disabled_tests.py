@@ -2,7 +2,6 @@ import argparse
 import json
 import os
 import xml.etree.ElementTree as ET
-from collections import defaultdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, Generator, Tuple
@@ -200,12 +199,10 @@ def save_results(
     }
 
     records = {}
-    # Log the results
-    print(f"The following {len(should_be_enabled_tests)} tests should be re-enabled:")
-
-    for test_id, stats in should_be_enabled_tests.items():
+    for test_id, stats in all_tests.items():
+        num_green = stats.get("num_green", 0)
+        num_red = stats.get("num_red", 0)
         disabled_test_name, name, classname, filename = get_disabled_test_name(test_id)
-        print(f"  {disabled_test_name} from {filename}")
 
         key, record = prepare_record(
             workflow_id=workflow_id,
@@ -213,14 +210,19 @@ def save_results(
             name=name,
             classname=classname,
             filename=filename,
-            flaky=False,
-            num_green=stats.get("num_green", 0),
+            flaky=test_id in still_flaky_tests,
+            num_green=num_green,
+            num_red=num_red,
         )
         records[key] = record
 
     # Log the results
-    print(f"The following {len(still_flaky_tests)} are still flaky:")
+    print(f"The following {len(should_be_enabled_tests)} tests should be re-enabled:")
+    for test_id, stats in should_be_enabled_tests.items():
+        disabled_test_name, name, classname, filename = get_disabled_test_name(test_id)
+        print(f"  {disabled_test_name} from {filename}")
 
+    print(f"The following {len(still_flaky_tests)} are still flaky:")
     for test_id, stats in still_flaky_tests.items():
         num_green = stats.get("num_green", 0)
         num_red = stats.get("num_red", 0)
@@ -229,18 +231,6 @@ def save_results(
         print(
             f"  {disabled_test_name} from {filename}, failing {num_red}/{num_red + num_green}"
         )
-
-        key, record = prepare_record(
-            workflow_id=workflow_id,
-            workflow_run_attempt=workflow_run_attempt,
-            name=name,
-            classname=classname,
-            filename=filename,
-            flaky=True,
-            num_green=num_green,
-            num_red=num_red,
-        )
-        records[key] = record
 
     upload_to_s3(
         workflow_id,
