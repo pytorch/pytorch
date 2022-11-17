@@ -8,6 +8,7 @@
 #include <system_error>
 
 #include <ATen/detail/FunctionTraits.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <pybind11/pybind11.h>
@@ -75,6 +76,8 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   _CATCH_GENERIC_ERROR(LinAlgError, THPException_LinAlgError, retstmnt) \
   _CATCH_GENERIC_ERROR(                                                 \
       OutOfMemoryError, THPException_OutOfMemoryError, retstmnt)        \
+  _CATCH_GENERIC_ERROR(                                                 \
+      DistBackendError, THPException_DistBackendError, retstmnt)        \
   _CATCH_GENERIC_ERROR(Error, PyExc_RuntimeError, retstmnt)             \
   catch (torch::PyTorchError & e) {                                     \
     auto msg = torch::processErrorMsg(e.what());                        \
@@ -146,7 +149,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError;
+    *THPException_OutOfMemoryError, *THPException_DistBackendError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
@@ -373,17 +376,17 @@ struct PyWarningHandler {
 
 namespace detail {
 template <typename Func, size_t i>
-using Arg = typename function_traits<Func>::template arg<i>::type;
+using Arg = typename invoke_traits<Func>::template arg<i>::type;
 
 template <typename Func, size_t... Is>
 auto wrap_pybind_function_impl_(Func&& f, std::index_sequence<Is...>) {
-  using traits = function_traits<Func>;
+  using result_type = typename invoke_traits<Func>::result_type;
   namespace py = pybind11;
 
   // f=f is needed to handle function references on older compilers
-  return [f = f](Arg<Func, Is>... args) -> typename traits::result_type {
+  return [f = std::forward<Func>(f)](Arg<Func, Is>... args) -> result_type {
     HANDLE_TH_ERRORS
-    return f(std::forward<Arg<Func, Is>>(args)...);
+    return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
     END_HANDLE_TH_ERRORS_PYBIND
   };
 }
@@ -393,7 +396,7 @@ auto wrap_pybind_function_impl_(Func&& f, std::index_sequence<Is...>) {
 // Returns a function object suitable for registering with pybind11.
 template <typename Func>
 auto wrap_pybind_function(Func&& f) {
-  using traits = function_traits<Func>;
+  using traits = invoke_traits<Func>;
   return torch::detail::wrap_pybind_function_impl_(
       std::forward<Func>(f), std::make_index_sequence<traits::arity>{});
 }

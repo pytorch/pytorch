@@ -4,6 +4,7 @@ import collections
 import copy
 import csv
 import functools
+import importlib
 import io
 import logging
 import os
@@ -22,7 +23,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
-from microbenchmarks.operator_inp_utils import OperatorInputsMode
+from functorch._src.aot_autograd import set_model_name
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.optimizations import backends
 from torch._dynamo.optimizations.log_args import conv_args_analysis
@@ -36,11 +37,9 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map
 
 try:
-    from functorch._src.aot_autograd import set_model_name
+    from .microbenchmarks.operator_inp_utils import OperatorInputsMode
 except ImportError:
-
-    def set_model_name(name):
-        pass
+    from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
 
 log = logging.getLogger(__name__)
@@ -158,11 +157,48 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "hrnet_w18",  # accuracy
     "lcnet_0500",  # accuracy
     "levit_128",  # levit_128
+    "poolformer_m36",
     "rexnet_100",  # accuracy
     "swin_base_patch4_window7_224",
     "twins_pcpvt_base",  # time out
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
+
+
+def model_specified_by_path(path_and_class_str):
+    return ":" in path_and_class_str
+
+
+def load_model_from_path(path_and_class_str):
+    configs = {}
+    for kvstr in path_and_class_str.split(","):
+        k, v = kvstr.split(":")
+        configs[k] = v
+
+    for name in ["path", "class"]:
+        if name not in configs:
+            raise RuntimeError(
+                "Invalid --only arguments. Check help message for the correct format"
+            )
+
+    path = configs["path"]
+    class_name = configs["class"]
+
+    if path[:1] != "/":
+        raise RuntimeError(
+            "Use absolute path since dynamo may change the current working directory which makes using relative path tricky"
+        )
+
+    spec = importlib.util.spec_from_file_location("module_name", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    model_class = getattr(module, class_name)
+    assert issubclass(model_class, torch.nn.Module)
+    model = model_class()
+    assert hasattr(model, "get_example_inputs")
+    inputs = model.get_example_inputs()
+    return model, inputs
 
 
 def output_csv(filename, headers, row):
@@ -413,8 +449,14 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             timings,
         )
 
-    headers = ("dev", "name", "batch_size", "speedup")
-    row = [current_device, current_name, current_batch_size, float(speedup)]
+    headers = ("dev", "name", "batch_size", "speedup", "abs_latency")
+    row = [
+        current_device,
+        current_name,
+        current_batch_size,
+        float(speedup),
+        median[1] * 1000,
+    ]
     if "compilation_latency" in kwargs:
         headers = headers + ("compilation_latency", "compression_ratio")
         row.append(kwargs["compilation_latency"])
@@ -1069,7 +1111,7 @@ class BenchmarkRunner:
         def deepcopy_and_maybe_ddp(model):
             model = copy.deepcopy(model)
             if self.args.ddp:
-                model = DDP(model)
+                model = DDP(model, find_unused_parameters=True)
             return model
 
         # Collect the fp64 reference outputs to be used later for accuracy checking.
@@ -1308,8 +1350,7 @@ def help(fn):
     return fn.__doc__
 
 
-def parse_args():
-
+def parse_args(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--filter", "-k", action="append", help="filter benchmarks with regexp"
@@ -1330,7 +1371,10 @@ def parse_args():
         default=0,
         help="ID of the benchmark suite partition to be run. Used to divide CI tasks",
     )
-    parser.add_argument("--devices", "-d", action="append", help="cpu or cuda")
+    parser.add_argument(
+        "--devices", "--device", "-d", action="append", help="cpu or cuda"
+    )
+    parser.add_argument("--device-index", help="CUDA device index")
     parser.add_argument(
         "--repeat", "-n", type=int, default=30, help="number of timing runs"
     )
@@ -1386,7 +1430,31 @@ def parse_args():
     parser.add_argument(
         "--fast", "-f", action="store_true", help="skip slow benchmarks"
     )
-    parser.add_argument("--only", help="Run just one model")
+    parser.add_argument(
+        "--only",
+        help="""Run just one model from torchbench. Or
+        specify the path and class name of the model in format like:
+        --only=path:<MODEL_FILE_PATH>,class:<CLASS_NAME>
+
+        Due to the fact that dynamo changes current working directory,
+        the path should be an absolute path.
+
+        The class should have a method get_example_inputs to return the inputs
+        for the model. An example looks like
+        ```
+        class LinearModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+            def get_example_inputs(self):
+                return (torch.randn(2, 10),)
+        ```
+    """,
+    )
     parser.add_argument(
         "--training",
         action="store_true",
@@ -1567,8 +1635,7 @@ def parse_args():
     mode_group.add_argument(
         "--performance", action="store_true", help="Measures performance speedup"
     )
-    args = parser.parse_args()
-    return args
+    return parser.parse_args(args)
 
 
 def main(runner, original_dir=None):
@@ -1617,7 +1684,11 @@ def run(runner, args, original_dir=None):
         else:
             # TODO(whc) after enabling DDPOptimizer by default this could be removed or assert
             torch._dynamo.config.optimize_ddp = True
-
+        if args.only == "dlrm":
+            log.error(
+                "DLRM+DDP is unsupported as it requires sharding the embedding layer separately from DDP"
+            )
+            return sys.exit(-1)
     if args.accuracy:
         # Use small batch size. We use >1 batch size to ensure we test
         # batch_norm type of operators that work on batch dims.
@@ -1636,10 +1707,13 @@ def run(runner, args, original_dir=None):
 
         # Some models e.g. yolov3 assert batch size on n_gpus
         if "CUDA_VISIBLE_DEVICES" not in os.environ:
-            os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+            args.device_index = "0"
 
         # Stricter check to disable fallbacks
         args.suppress_errors = False
+
+    if args.device_index is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.device_index
 
     elif args.performance:
         # Ensure that we test on real scenarios
@@ -1872,19 +1946,25 @@ def run(runner, args, original_dir=None):
                 batch_size = read_batch_size_from_file(
                     args, args.batch_size_file, model_name
                 )
-            try:
-                device, name, model, example_inputs, batch_size = runner.load_model(
-                    device,
-                    model_name,
-                    batch_size=batch_size,
-                )
-            except NotImplementedError as e:
-                print(e)
-                import traceback
+            if model_specified_by_path(args.only):
+                model, example_inputs = load_model_from_path(args.only)
+                name = model.__class__.__name__
+                model = model.to(device=device)
+                example_inputs = tree_map(lambda x: x.to(device=device), example_inputs)
+            else:
+                try:
+                    device, name, model, example_inputs, batch_size = runner.load_model(
+                        device,
+                        model_name,
+                        batch_size=batch_size,
+                    )
+                except NotImplementedError as e:
+                    print(e)
+                    import traceback
 
-                print(traceback.format_exc())
-                logging.warn(f"{args.only} failed to load")
-                continue  # bad benchmark implementation
+                    print(traceback.format_exc())
+                    logging.warn(f"{args.only} failed to load")
+                    continue  # bad benchmark implementation
 
             current_name = name
             current_device = device
