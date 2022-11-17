@@ -1421,7 +1421,15 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     return AOTModule()
 
 
-def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn.Module:
+def aot_module_simplified(mod: nn.Module, inputs,
+        fw_compiler: Callable,
+        bw_compiler: Optional[Callable] = None,
+        partition_fn: Callable = default_partition,
+        decompositions: Optional[Dict] = None,
+        hasher_type=None,
+        static_argnums=None,
+        fake_mode=None,
+        **top_kwargs) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
     like TorchDynamo, the input functions/modules to AOT are static and have
@@ -1441,11 +1449,6 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = tuple(params_flat)
     params_len = len(params_flat)
-
-
-    fake_mode = None
-    if "fake_mode" in top_kwargs and config.use_fake_tensor:
-        fake_mode = top_kwargs["fake_mode"]
 
     # TODO(voz): Pull up to dynamo
     # See [Real vs Fake Parms] below
@@ -1485,45 +1488,23 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
             )
         return out
 
+    assert static_argnums is None
+    if bw_compiler is None:
+        bw_compiler = fw_compiler
+    aot_config = AOTConfig(
+        fw_compiler=fw_compiler,
+        bw_compiler=bw_compiler,
+        partition_fn=partition_fn,
+        decompositions=decompositions,
+        num_params_buffers=params_len,
+    )
 
-    def aot_function_simplified(
-        fn: Callable,
-        fw_compiler: Callable,
-        bw_compiler: Optional[Callable] = None,
-        partition_fn: Callable = default_partition,
-        decompositions: Optional[Dict] = None,
-        hasher_type=None,
-        static_argnums=None,
-        fake_mode=None
-    ) -> Callable:
-        assert static_argnums is None
-        if bw_compiler is None:
-            bw_compiler = fw_compiler
-        aot_config = AOTConfig(
-            fw_compiler=fw_compiler,
-            bw_compiler=bw_compiler,
-            partition_fn=partition_fn,
-            decompositions=decompositions,
-            num_params_buffers=params_len,
-        )
+    joined_args = fake_flat_tensor_args + inputs
+    aot_dispatcher_function = _create_aot_dispatcher_function(functional_call, joined_args, aot_config, fake_mode)
 
-        def compile(fn, *args):
-            return _create_aot_dispatcher_function(
-                fn,
-                args,
-                aot_config,
-                fake_mode,
-            )
-
-        compiled_fn = compile(fn, *fake_flat_tensor_args, *inputs)
-
-        @wraps(fn)
-        def new_func(*args):
-            return compiled_fn(args)
-
-        return new_func
-
-    compiled_f = aot_function_simplified(functional_call, *top_args, **top_kwargs)
+    @wraps(functional_call)
+    def compiled_function(*args):
+        return aot_dispatcher_function(args)
 
     # [Real vs Fake Params]
     #
@@ -1544,7 +1525,7 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
     if top_kwargs:
 
         def forward(*args, **kwargs):
-            return compiled_f(
+            return compiled_function(
                 *params_flat,
                 *args,
                 **kwargs,
@@ -1553,7 +1534,7 @@ def aot_module_simplified(mod: nn.Module, inputs, *top_args, **top_kwargs) -> nn
     else:
 
         def forward(*args):
-            return compiled_f(
+            return compiled_function(
                 *params_flat,
                 *args,
             )
