@@ -392,7 +392,9 @@ def fused_conv_binary_inplace_eval(
     )
 
 
-def fused_binary_unary_eval(conv_binary: nn.Module, unary: nn.Module, input_size: list):
+def fused_conv_binary_unary_eval(
+    conv_binary: nn.Module, unary: nn.Module, input_size: list
+):
     assert not (conv_binary.training), "Fusion only for eval!"
     # reuse origin conv module, and just update its' unary attr.
     conv_binary._update_unary_params(unary)
@@ -1019,8 +1021,8 @@ replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: ra
 computation_op_unary_op_fusion_map = {
     nn.Conv2d: fused_conv_unary_eval,
     nn.Linear: fused_linear_unary_eval,
-    ConvBinary2d: fused_binary_unary_eval,
-    ConvBinaryInplace2d: fused_binary_unary_eval,
+    ConvBinary2d: fused_conv_binary_unary_eval,
+    ConvBinaryInplace2d: fused_conv_binary_unary_eval,
 }
 
 
