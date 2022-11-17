@@ -341,6 +341,12 @@ void Expr::setPredicate(kir::Predicate* predicate) {
   predicate_ = predicate;
 }
 
+Expr* Expr::withPredicate(kir::Predicate* predicate) {
+  auto result = shallowCopy();
+  result->setPredicate(predicate);
+  return result;
+}
+
 kir::Predicate* Expr::writePredicate() const {
   TORCH_INTERNAL_ASSERT(
       container()->isA<kir::Kernel>(), "Function invalid for fusion.");
@@ -351,6 +357,19 @@ void Expr::setWritePredicate(kir::Predicate* write_predicate) {
   TORCH_INTERNAL_ASSERT(
       container()->isA<kir::Kernel>(), "Function invalid for fusion.");
   write_predicate_ = write_predicate;
+}
+
+Expr* Expr::withWritePredicate(kir::Predicate* predicate) {
+  auto result = shallowCopy();
+  result->setWritePredicate(predicate);
+  return result;
+}
+
+void Expr::copyPredicatesFrom(const Expr* expr) {
+  if (container()->isA<kir::Kernel>()) {
+    predicate_ = expr->predicate_;
+    write_predicate_ = expr->write_predicate_;
+  }
 }
 
 } // namespace cuda
