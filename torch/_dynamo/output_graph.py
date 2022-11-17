@@ -583,6 +583,8 @@ class OutputGraph(fx.Tracer):
         self.nodes[node] = None
         return node
 
+    # Note: we did not override erase_node since
+    # we call self.graph.erase_node elsewhere
     def remove_node(self, node):
         self.graph.erase_node(node)
         self.nodes.pop(node, None)
