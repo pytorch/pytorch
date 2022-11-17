@@ -9,21 +9,27 @@ from typing import Dict
 import torch
 import torch.distributed as dist
 from torch.distributed._shard import sharded_tensor
-from torch.distributed._shard.sharded_tensor import ShardedTensor, state_dict_hook
+from torch.distributed._shard.sharded_tensor import (
+    ShardedTensor,
+    state_dict_hook,
+)
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
     EnumerableShardingSpec,
     ShardingSpec,
     ShardMetadata,
 )
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_nccl,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common import (
-    MyShardedModel1
+    MyShardedModel1,
 )
 
 
@@ -52,6 +58,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 _THREAD_COUNTS = {1, 2}
 
+
 def assert_state_dict_equal(
     self: TestCase,
     state_dict_1: Dict[str, torch.Tensor],
@@ -78,7 +85,8 @@ def assert_state_dict_equal(
                 )
         elif isinstance(value_1, torch.Tensor):
             self.assertTrue(
-                torch.equal(value_1, value_2), f"Key {key}'s tensor does not match"
+                torch.equal(value_1, value_2),
+                f"Key {key}'s tensor does not match",
             )
 
     return True
@@ -105,42 +113,67 @@ class MyShardedModel3(torch.nn.Module):
 
 
 class TestDistributedStateDictSaveLoad(TestCase):
-
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_read_write_only_tensor(self, thread_count) -> None:
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
 
             fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
-            save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer, no_dist=True)
+            save_state_dict(
+                state_dict=state_dict_to_save,
+                storage_writer=fs_writer,
+                no_dist=True,
+            )
 
             state_dict_to_load_to = MyTestModule().state_dict()
 
             with self.assertRaises(AssertionError):
-                assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+                assert_state_dict_equal(
+                    self, state_dict_to_load_to, state_dict_to_save
+                )
 
             # Load from file without any resharding
             fs_reader = FileSystemReader(path=path)
-            load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader, no_dist=True)
+            load_state_dict(
+                state_dict=state_dict_to_load_to,
+                storage_reader=fs_reader,
+                no_dist=True,
+            )
 
-            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+            assert_state_dict_equal(
+                self, state_dict_to_load_to, state_dict_to_save
+            )
 
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
 
-            fs_writer = FileSystemWriter(path=path, single_file_per_rank=True, thread_count=thread_count)
-            save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer, no_dist=True)
+            fs_writer = FileSystemWriter(
+                path=path, single_file_per_rank=True, thread_count=thread_count
+            )
+            save_state_dict(
+                state_dict=state_dict_to_save,
+                storage_writer=fs_writer,
+                no_dist=True,
+            )
 
             state_dict_to_load_to = MyTestModule().state_dict()
 
             with self.assertRaises(AssertionError):
-                assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+                assert_state_dict_equal(
+                    self, state_dict_to_load_to, state_dict_to_save
+                )
 
             # Load from file without any resharding
             fs_reader = FileSystemReader(path=path)
-            load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader, no_dist=True)
+            load_state_dict(
+                state_dict=state_dict_to_load_to,
+                storage_reader=fs_reader,
+                no_dist=True,
+            )
 
-            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+            assert_state_dict_equal(
+                self, state_dict_to_load_to, state_dict_to_save
+            )
 
 
 class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
@@ -188,11 +221,15 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
         dist.barrier()
 
         with self.assertRaises(AssertionError):
-            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+            assert_state_dict_equal(
+                self, state_dict_to_load_to, state_dict_to_save
+            )
 
         # Test load.
         fs_reader = FileSystemReader(path=path)
-        load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
+        load_state_dict(
+            state_dict=state_dict_to_load_to, storage_reader=fs_reader
+        )
 
         assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
         dist.barrier()
@@ -209,7 +246,11 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         return paths[0]
 
     def load_tensor(self, tensor: ShardedTensor) -> torch.Tensor:
-        res = torch.zeros(tensor.shape, device="cuda:0") if dist.get_rank() == 0 else None
+        res = (
+            torch.zeros(tensor.shape, device="cuda:0")
+            if dist.get_rank() == 0
+            else None
+        )
         tensor.gather(out=res)
         return res
 
@@ -303,8 +344,12 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 model_to_save._register_state_dict_hook(state_dict_hook)
                 state_dict_to_save = model_to_save.state_dict()
 
-                fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
-                save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
+                fs_writer = FileSystemWriter(
+                    path=path, thread_count=thread_count
+                )
+                save_state_dict(
+                    state_dict=state_dict_to_save, storage_writer=fs_writer
+                )
 
                 dist.barrier()
 
@@ -325,7 +370,8 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
                 if dist.get_rank() == 0:
                     self.assertTrue(
-                        torch.allclose(store_tensor, load_tensor), msg=f"{s0} vs {s1}"
+                        torch.allclose(store_tensor, load_tensor),
+                        msg=f"{s0} vs {s1}",
                     )
 
     @with_comms(init_rpc=False)
@@ -371,7 +417,9 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
         fs_reader = FileSystemReader(path=path)
 
-        load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
+        load_state_dict(
+            state_dict=state_dict_to_load_to, storage_reader=fs_reader
+        )
 
         # We can't use torch.allclose since each ST has a different sharding spec
         store_tensor = self.load_tensor(model_to_save.sharded_tensor)
@@ -380,7 +428,6 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         if dist.get_rank() == 0:
             self.assertTrue(torch.allclose(store_tensor, load_tensor))
 
-
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
@@ -388,31 +435,26 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
     def test_save_load_bytes(self, thread_count) -> None:
         path = self.get_file_path()
 
-        state_dict_to_save = {
-            'bytes0': [1],
-            'bytes1': 'string'
-        }
+        state_dict_to_save = {"bytes0": [1], "bytes1": "string"}
 
         fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
-        state_dict_to_load = {
-            'bytes0': [2],
-            'bytes1': 'other'
-        }
+        state_dict_to_load = {"bytes0": [2], "bytes1": "other"}
 
         fs_reader = FileSystemReader(path=path)
         load_state_dict(state_dict=state_dict_to_load, storage_reader=fs_reader)
 
-        self.assertEqual([1], state_dict_to_load['bytes0'])
-        self.assertEqual('string', state_dict_to_load['bytes1'])
-
+        self.assertEqual([1], state_dict_to_load["bytes0"])
+        self.assertEqual("string", state_dict_to_load["bytes1"])
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     @parametrize("thread_count", _THREAD_COUNTS)
-    def test_switch_between_sharded_tensor_to_tensor(self, thread_count) -> None:
+    def test_switch_between_sharded_tensor_to_tensor(
+        self, thread_count
+    ) -> None:
         path = self.get_file_path()
         tensor_size = 32
 
@@ -466,34 +508,39 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         for save_spec in specs:
             for load_spec in specs:
                 save_dict = {
-                    'sharded': sharded_tensor.rand(save_spec, tensor_size),
-                    'replicated': torch.rand(tensor_size, device=self.rank)
+                    "sharded": sharded_tensor.rand(save_spec, tensor_size),
+                    "replicated": torch.rand(tensor_size, device=self.rank),
                 }
 
-                fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+                fs_writer = FileSystemWriter(
+                    path=path, thread_count=thread_count
+                )
                 save_state_dict(state_dict=save_dict, storage_writer=fs_writer)
 
                 # Freaky Friday the tensors
                 load_dict = {
-                    'sharded': torch.zeros(tensor_size, device=self.rank),
-                    'replicated': sharded_tensor.zeros(load_spec, tensor_size)
+                    "sharded": torch.zeros(tensor_size, device=self.rank),
+                    "replicated": sharded_tensor.zeros(load_spec, tensor_size),
                 }
 
                 fs_reader = FileSystemReader(path=path)
                 load_state_dict(state_dict=load_dict, storage_reader=fs_reader)
 
-                save_dict_sharded = self.load_tensor(save_dict['sharded'])
-                load_dict_replicated = self.load_tensor(load_dict['replicated'])
+                save_dict_sharded = self.load_tensor(save_dict["sharded"])
+                load_dict_replicated = self.load_tensor(load_dict["replicated"])
 
                 if dist.get_rank() == 0:
                     self.assertTrue(
-                        torch.allclose(save_dict_sharded, load_dict['sharded']),
-                        f"save-spec {save_spec} load-spec {load_spec}"
+                        torch.allclose(save_dict_sharded, load_dict["sharded"]),
+                        f"save-spec {save_spec} load-spec {load_spec}",
                     )
                     self.assertTrue(
-                        torch.allclose(save_dict['replicated'], load_dict_replicated),
-                        f"save-spec {save_spec} load-spec {load_spec}"
+                        torch.allclose(
+                            save_dict["replicated"], load_dict_replicated
+                        ),
+                        f"save-spec {save_spec} load-spec {load_spec}",
                     )
+
 
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoad)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
