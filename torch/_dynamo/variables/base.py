@@ -21,6 +21,18 @@ class MutableLocal:
         return self is other
 
 
+def aggregate_mutable_locals(itr):
+    recursively_contains = set()
+
+    for var in itr:
+        if isinstance(var, VariableTracker):
+            if var.mutable_local:
+                recursively_contains.add(var.mutable_local)
+            recursively_contains.update(var.recursively_contains)
+
+    return recursively_contains
+
+
 class VariableTracker:
     """
     Base class for tracked locals and stack values
@@ -70,7 +82,11 @@ class VariableTracker:
 
     @classmethod
     def apply(
-        cls, fn: Callable[["VariableTracker"], "VariableTracker"], value, cache=None
+        cls,
+        fn: Callable[["VariableTracker"], "VariableTracker"],
+        value,
+        cache=None,
+        skip_fn=None,  # Whether we should skip applying to this var
     ):
         """
         Walk this object and call fn on all the VariableTracker
@@ -84,21 +100,29 @@ class VariableTracker:
             return cache[idx][0]
 
         if isinstance(value, VariableTracker):
-            updated_dict = dict(value.__dict__)
-            for key in updated_dict.keys():
-                if key not in value._nonvar_fields:
-                    updated_dict[key] = cls.apply(fn, updated_dict[key], cache)
-            result = fn(value.clone(**updated_dict))
+            if skip_fn is None or not skip_fn(value):
+                updated_dict = dict(value.__dict__)
+                for key in updated_dict.keys():
+                    if key not in value._nonvar_fields:
+                        updated_dict[key] = cls.apply(
+                            fn, updated_dict[key], cache, skip_fn
+                        )
+                result = fn(value.clone(**updated_dict))
+            else:
+                result = fn(value)
+
         elif istype(value, list):
-            result = [cls.apply(fn, v, cache) for v in value]
+            result = [cls.apply(fn, v, cache, skip_fn) for v in value]
         elif istype(value, tuple):
-            result = tuple(cls.apply(fn, v, cache) for v in value)
+            result = tuple(cls.apply(fn, v, cache, skip_fn) for v in value)
         elif istype(value, collections.OrderedDict):
             result = collections.OrderedDict(
-                cls.apply(fn, v, cache) for v in value.items()
+                cls.apply(fn, v, cache, skip_fn) for v in value.items()
             )
         elif istype(value, dict):
-            result = {k: cls.apply(fn, v, cache) for k, v in list(value.items())}
+            result = {
+                k: cls.apply(fn, v, cache, skip_fn) for k, v in list(value.items())
+            }
         else:
             result = value
 
@@ -244,11 +268,15 @@ class VariableTracker:
         guards: Optional[Set] = None,
         source: Source = None,
         mutable_local: MutableLocal = None,
+        recursively_contains: Optional[Set] = None,
     ):
         super(VariableTracker, self).__init__()
         self.guards = guards or set()
         self.source = source
         self.mutable_local = mutable_local
+        self.recursively_contains = (
+            recursively_contains or set()
+        )  # provides hint to replace_all when replacing vars
 
 
 def typestr(*objs):

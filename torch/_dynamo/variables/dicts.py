@@ -10,14 +10,20 @@ from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
-from .base import MutableLocal, VariableTracker
+from .base import aggregate_mutable_locals, MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
 
 
 class ConstDictVariable(VariableTracker):
-    def __init__(self, items, user_cls, **kwargs):
-        super(ConstDictVariable, self).__init__(**kwargs)
+    def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
+
+        if recursively_contains is None:
+            recursively_contains = aggregate_mutable_locals(items.values())
+
+        super(ConstDictVariable, self).__init__(
+            recursively_contains=recursively_contains, **kwargs
+        )
         self.items = items
         self.user_cls = user_cls
 
@@ -112,7 +118,14 @@ class ConstDictVariable(VariableTracker):
                 tx.store_dict_key(global_key_name(k), k)
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
-            return tx.replace_all(self, self.modifed(newval, **options))
+            new_rec_contains = self.recursively_contains.union(
+                args[1].recursively_contains
+            )
+            new_rec_contains.add(args[1].mutable_local)
+            return tx.replace_all(
+                self,
+                self.modifed(newval, recursively_contains=new_rec_contains, **options),
+            )
         elif (
             name in ("pop", "get")
             and args
