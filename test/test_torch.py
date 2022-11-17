@@ -1478,46 +1478,6 @@ else:
                 'put_',
                 torch.device(device).type == 'cuda')
 
-    @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
-    @onlyNativeDeviceTypes
-    def test_nondeterministic_alert_scatter(self, device):
-        a = torch.randn(10, device=device)
-        indices = torch.tensor([0, 0], device=device)
-        values = torch.tensor([0., 1.], device=device)
-        result = torch.empty_like(a)
-
-        error_msg = 'scatter with src tensor and reduce=None'
-
-        error_cases = [
-            lambda: torch.Tensor.scatter(a, 0, indices, values),
-            lambda: torch.Tensor.scatter_(a, 0, indices, values),
-            lambda: torch.scatter(a, 0, indices, values),
-            lambda: torch.scatter(a, 0, indices, values, out=result),
-        ]
-
-        no_error_cases = [
-            lambda: torch.Tensor.scatter(a, 0, indices, 0),
-            lambda: torch.Tensor.scatter_(a, 0, indices, 0),
-            lambda: torch.scatter(a, 0, indices, 0),
-            lambda: torch.scatter(a, 0, indices, 0, out=result),
-
-            lambda: torch.Tensor.scatter(a, 0, indices, values, reduce='add'),
-            lambda: torch.Tensor.scatter_(a, 0, indices, values, reduce='add'),
-            lambda: torch.scatter(a, 0, indices, values, reduce='add'),
-            lambda: torch.scatter(a, 0, indices, values, out=result, reduce='add'),
-        ]
-
-        for error_case in error_cases:
-            self.check_nondeterministic_alert(
-                error_case,
-                error_msg)
-
-        for no_error_case in no_error_cases:
-            self.check_nondeterministic_alert(
-                no_error_case,
-                error_msg,
-                False)
-
     @skipIfMps
     def test_nondeterministic_alert_histc(self, device):
         a = torch.tensor([], device=device)
