@@ -37,6 +37,7 @@ from functorch._src.make_functional import (
 )
 from functorch._src.eager_transforms import enable_fwd_grad, _slice_argnums
 from functorch.experimental import functionalize
+from torch.utils.checkpoint import checkpoint
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -3506,16 +3507,55 @@ class TestSavedTensorHooks(TestCase):
             actual = grad(sum(vmap(grad(fn))))(a)
         self.assertEqual(reference, actual)
 
-        a = torch.tensor(1., requires_grad=True)
-        grad1 = grad(sum(fn))(a)
+        a = torch.rand(4, 2, requires_grad=True)
+        grad1 = grad(sum(vmap(grad(fn))))(a)
         with torch.autograd.graph.save_on_cpu():
-            grad2 = grad(sum(fn))(a)
+            grad2 = grad(sum(vmap(grad(fn))))(a)
         self.assertEqual(reference, actual)
-        grad1.backward()
+        grad1.sum().backward()
         reference = a.grad.clone()
         a.grad = None
-        grad2.backward()
+        grad2.sum().backward()
         self.assertEqual(reference, a.grad)
+
+    def test_nonreentrant_checkpoint(self):
+        a = torch.rand(4, 2, requires_grad=True)
+
+        def fn(x):
+            return x.sin().exp().sin().sum()
+
+        def sum(fn):
+            def wrapped(x):
+                return fn(x).sum()
+            return wrapped
+
+        def apply_checkpoint(fn):
+            def wrapped(*args, **kwargs):
+                return checkpoint(fn, *args, use_reentrant=False, **kwargs)
+            return wrapped
+
+        reference = grad(fn)(a)
+        actual = grad(apply_checkpoint((fn)))(a)
+        self.assertEqual(reference, actual)
+
+        reference = grad(sum(grad(fn)))(a)
+        actual = grad(sum(grad(apply_checkpoint((fn)))))(a)
+        self.assertEqual(reference, actual)
+
+        reference = grad(sum(vmap(grad(fn))))(a)
+        actual = grad(sum(vmap(grad(apply_checkpoint(fn)))))(a)
+        self.assertEqual(reference, actual)
+
+        # TODO: not supported yet
+        # a = torch.rand(4, 2, requires_grad=True)
+        # grad1 = grad(sum(vmap(grad(fn))))(a)
+        # grad2 = grad(sum(vmap(grad(apply_checkpoint(fn)))))(a)
+        # self.assertEqual(reference, actual)
+        # grad1.sum().backward()
+        # reference = a.grad.clone()
+        # a.grad = None
+        # grad2.sum().backward()
+        # self.assertEqual(reference, a.grad)
 
 
 only_for = ("cpu", "cuda")

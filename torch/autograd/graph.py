@@ -20,23 +20,14 @@ def _get_tid(t) -> Tuple[int, int]:
     # currently used in saved_tensor_hook context managers such as save_on_cpu()
     # and allow_mutation_on_saved_tensors().
     #
-    # We claim that id() and t._version are necessary and sufficient to uniquely
-    # identify a version of the tensor:
-    # - id corresponds to TensorImpl because we have pyobject persistence.
-    #   On the other hand, Keeping track of storage via something like data_ptr
-    #   is not sufficient because there can be different views to the same storage.
-    # - we don't need t.data_ptr() because the only way it can change from
-    #   underneath a TensorImpl is 1) if someone uses .data (we're okay with
-    #   silently wrong are produced if .data is used) OR 2) if version
-    #   counter also changes, e.g. when we perform an in-place view
-    #   We choose to omit this from the identifier as to support tensors that
-    #   don't have storage, e.g. sparse tensors. It may be better to have
-    #   special handling for sparse tensors, but that would also need to consider
-    #   additional things like coalescing.
+    # id() and t._version are not sufficient because sometimes id() get reused
+    # so we also compare t.data_ptr() and the first value in the tensor.
+    # techincally this does not guarantee correctness either, but makes it
+    # somewhat safer at least.
     #
-    #   TODO(soulitzer): check sparse correctness, make sure that if contents of sparse
-    #   tensor changes, that is also reflected here.
-    return (id(t), t._version)
+    # TODO: support tensors that don't have storage
+    item = t.item() if t.ndim == 0 else t[(0,) * t.ndim].item()
+    return (id(t), t.data_ptr(), t._version, item)
 
 def _get_sid(t) -> Tuple[int, int]:
     # Returns a tuple that uniquely identifies a tensor's storage

@@ -2,6 +2,7 @@ import torch
 import warnings
 import weakref
 from typing import Any, Iterable, List, Tuple
+from torch.autograd.graph import _get_tid, _functorch_unwrap_to_level
 
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
@@ -367,35 +368,57 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
     # Custom class to be able to take weak references
     class Holder():
         pass
+
     # The Holder object for each of the saved object is saved directly on the
     # SavedVariable and is cleared when reset_data() is called on it. We MUST make
     # sure that this is the only object having an owning reference to ensure that
     # the Tensor stored in storage is deleted as soon as the corresponding SavedVariable
     # data is cleared.
+    # For deduping during packing/unpacking
+    tid_to_weakhandle: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+    tid_set_unpack = set()
+
     storage: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
     weak_holder_list = []
 
     def pack(x):
-        # TODO(varal7): Instead of returning abstract object, we can return things metadata (such as
-        # size, device, ...) to catch certain cases of undeterministic behavior of the forward
-        res = Holder()
-        weak_holder_list.append(weakref.ref(res))
-        return res
+        unwrapped, rewrap_fn = _functorch_unwrap_to_level(x, -1)
+        tid = _get_tid(unwrapped)
+        if tid not in tid_to_weakhandle:
+            handle = Holder()
+            weak_holder_list.append(weakref.ref(handle))
+            tid_to_weakhandle[tid] = handle
+        else:
+            handle = tid_to_weakhandle[tid]
 
+        return handle, tid, rewrap_fn
 
-    def unpack(x):
+    def unpack(saved):
+        handle, _unused_tid, rewrap_fns = saved
         unpack_counter = 0
+
         if len(storage) == 0:
-            def inner_pack(inner):
+            def inner_pack(tensor):
                 nonlocal unpack_counter
+
+                # If we've already recomputed this value, we are done
+                unwrapped_tid = _get_tid(_functorch_unwrap_to_level(tensor, -1)[0])
+                if unwrapped_tid in tid_set_unpack:
+                    return
                 unpack_counter += 1
+                tid_set_unpack.add(unwrapped_tid)
+
                 # If the holder went out of scope, the SavedVariable is dead and so
                 # the value will never be read from the storage. Skip filling it.
                 if weak_holder_list[unpack_counter - 1]() is None:
                     return
-                # Use detach here to ensure we don't keep the temporary autograd
+
+                # Unwrap the outer layer to ensure we don't keep the temporary autograd
                 # graph created during the second forward
-                storage[weak_holder_list[unpack_counter - 1]()] = inner.detach()
+                level = torch._C._functorch.maybe_get_level(tensor)
+                inner = torch._C._functorch._unwrap_for_grad(tensor, level)
+
+                storage[weak_holder_list[unpack_counter - 1]()] = inner
                 return
 
             def inner_unpack(packed):
@@ -419,14 +442,19 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
                      torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
                     _unused = function(*args, **kwargs)
 
-        if x not in storage:
+        if handle not in storage:
             raise RuntimeError(
                 "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
                 " recomputation being triggered in between, this is not currently supported. Please"
                 " open an issue with details on your use case so that we can prioritize adding this."
             )
 
-        return storage[x]
+        # Wrap all the way to the inner-most tensor, and rewrap using the
+        # rewrap function saved from forward
+        ret = _functorch_unwrap_to_level(storage[handle], -1)[0]
+        for fn in reversed(rewrap_fns):
+            ret = fn(ret)
+        return ret
 
     with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
         output = function(*args, **kwargs)
