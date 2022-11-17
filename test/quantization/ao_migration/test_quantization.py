@@ -22,7 +22,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             'convert',
             'get_observer_dict',
             'get_unique_devices_',
-            'is_activation_post_process',
+            '_is_activation_post_process',
             'prepare',
             'prepare_qat',
             'propagate_qconfig_',
@@ -118,7 +118,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
     def test_function_import_quant_type(self):
         function_list = [
             'QuantType',
-            'quant_type_to_str',
+            '_get_quant_type_to_str',
         ]
         self._test_function_import('quant_type', function_list)
 
