@@ -25,30 +25,36 @@ def is_rerun_disabled_tests(root: ET.ElementTree) -> bool:
     Check if the test report is coming from rerun_disabled_tests workflow
     """
     skipped = root.find(".//*skipped")
-    return skipped is not None and TARGET_WORKFLOW in skipped.attrib.get("message", "")
+    # Need to check against None here, if not skipped doesn't work as expected
+    if skipped is None:
+        return False
+
+    message = skipped.attrib.get("message", "")
+    return TARGET_WORKFLOW in message or "num_red" in message
 
 
 def process_report(
     report: Path,
-) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, Dict[str, int]]]:
+) -> Dict[str, Dict[str, int]]:
     """
     Return a list of disabled tests that should be re-enabled and those that are still
-    failing and flaky (skipped)
+    flaky (failed or skipped)
     """
     root = ET.parse(report)
 
-    # A test should be re-enable if it's green after rerunning in all platforms where it
-    # is currently disabled
-    success_tests: Dict[str, int] = defaultdict(int)
-    # Also keep track of failures because pytest-flakefinder is used to run the same test
-    # multiple times, some could fails
-    failure_tests: Dict[str, int] = defaultdict(int)
-    # Skipped tests are flaky tests (unittest), so we want to keep num_red and num_green
-    # here for additional stats
-    skipped_tests: Dict[str, Dict[str, int]] = {}
+    # All rerun tests from a report are grouped here:
+    #
+    # * Success test should be re-enable if it's green after rerunning in all platforms
+    #   where it is currently disabled
+    # * Failures from pytest because pytest-flakefinder is used to run the same test
+    #   multiple times, some could fails
+    # * Skipped tests from unittest
+    #
+    # We want to keep track of how many times the test fails (num_red) or passes (num_green)
+    all_tests: Dict[str, Dict[str, int]] = {}
 
     if not is_rerun_disabled_tests(root):
-        return success_tests, failure_tests, skipped_tests
+        return all_tests
 
     for test_case in root.iter(TESTCASE_TAG):
         parsed_test_case = process_xml_element(test_case)
@@ -75,6 +81,12 @@ def process_report(
         failure = parsed_test_case.get("failure", None)
 
         disabled_test_id = SEPARATOR.join([name, classname, filename])
+        if disabled_test_id not in all_tests:
+            all_tests[disabled_test_id] = {
+                "num_green": 0,
+                "num_red": 0,
+            }
+
         # Under --rerun-disabled-tests mode, if a test is not skipped or failed, it's
         # counted as a success. Otherwise, it's still flaky or failing
         if skipped:
@@ -83,16 +95,15 @@ def process_report(
             except json.JSONDecodeError:
                 stats = {}
 
-            skipped_tests[disabled_test_id] = {
-                "num_green": stats.get("num_green", 0),
-                "num_red": stats.get("num_red", 0),
-            }
+            all_tests[disabled_test_id]["num_green"] += stats.get("num_green", 0)
+            all_tests[disabled_test_id]["num_red"] += stats.get("num_red", 0)
         elif failure:
-            failure_tests[disabled_test_id] += 1
+            # As a failure, increase the failure count
+            all_tests[disabled_test_id]["num_red"] += 1
         else:
-            success_tests[disabled_test_id] += 1
+            all_tests[disabled_test_id]["num_green"] += 1
 
-    return success_tests, failure_tests, skipped_tests
+    return all_tests
 
 
 def get_test_reports(
@@ -169,24 +180,30 @@ def prepare_record(
 def save_results(
     workflow_id: int,
     workflow_run_attempt: int,
-    success_tests: Dict[str, int],
-    failure_tests: Dict[str, int],
-    skipped_tests: Dict[str, Dict[str, int]],
+    all_tests: Dict[str, Dict[str, int]],
 ) -> None:
     """
     Save the result to S3, so it can go to Rockset
     """
     should_be_enabled_tests = {
-        name
-        for name in success_tests.keys()
-        if name not in failure_tests and name not in skipped_tests
+        name: stats
+        for name, stats in all_tests.items()
+        if "num_green" in stats
+        and stats["num_green"]
+        and "num_red" in stats
+        and stats["num_red"] == 0
     }
-    records = {}
+    still_flaky_tests = {
+        name: stats
+        for name, stats in all_tests.items()
+        if name not in should_be_enabled_tests
+    }
 
+    records = {}
     # Log the results
     print(f"The following {len(should_be_enabled_tests)} tests should be re-enabled:")
 
-    for test_id in should_be_enabled_tests:
+    for test_id, stats in should_be_enabled_tests.items():
         disabled_test_name, name, classname, filename = get_disabled_test_name(test_id)
         print(f"  {disabled_test_name} from {filename}")
 
@@ -197,25 +214,14 @@ def save_results(
             classname=classname,
             filename=filename,
             flaky=False,
+            num_green=stats.get("num_green", 0),
         )
         records[key] = record
 
     # Log the results
-    print(f"The following {len(failure_tests) + len(skipped_tests)} are still flaky:")
+    print(f"The following {len(still_flaky_tests)} are still flaky:")
 
-    # Consolidate failure and skipped tests
-    for test_id, count in failure_tests.items():
-        # Also see if there is any success
-        num_green = success_tests.get(test_id, 0)
-        num_red = count
-
-        if test_id not in skipped_tests:
-            skipped_tests[test_id] = defaultdict(int)
-
-        skipped_tests[test_id]["num_green"] += num_green
-        skipped_tests[test_id]["num_red"] += num_red
-
-    for test_id, stats in skipped_tests.items():
+    for test_id, stats in still_flaky_tests.items():
         num_green = stats.get("num_green", 0)
         num_red = stats.get("num_red", 0)
 
@@ -248,42 +254,24 @@ def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
     """
     Find the list of all disabled tests that should be re-enabled
     """
-    # A test should be re-enable if it's green after rerunning in all platforms where it
-    # is currently disabled
-    success_tests: Dict[str, int] = defaultdict(int)
-    # Also keep track of failures because pytest-flakefinder is used to run the same test
-    # multiple times, some could fails
-    failure_tests: Dict[str, int] = defaultdict(int)
-    # Skipped tests are flaky tests (unittest), so we want to keep num_red and num_green
-    # here for additional stats
-    skipped_tests: Dict[str, Dict[str, int]] = {}
+    # Aggregated across all jobs
+    all_tests: Dict[str, Dict[str, int]] = {}
 
     for report in get_test_reports(
         args.repo, args.workflow_run_id, args.workflow_run_attempt
     ):
-        success, failure, skipped = process_report(report)
-
-        # A test should be re-enable if it's green after rerunning in all platforms where it
-        # is currently disabled. So they all need to be aggregated here
-        for name, count in success.items():
-            success_tests[name] += count
-
-        for name, count in failure.items():
-            failure_tests[name] += count
-
-        for name, stats in skipped.items():
-            if name not in failure_tests:
-                skipped_tests[name] = stats.copy()
+        tests = process_report(report)
+        for name, stats in tests.items():
+            if name not in all_tests:
+                all_tests[name] = stats.copy()
             else:
-                skipped_tests[name]["num_green"] += stats["num_green"]
-                skipped_tests[name]["num_red"] += stats["num_red"]
+                all_tests[name]["num_green"] += stats.get("num_green", 0)
+                all_tests[name]["num_red"] += stats.get("num_red", 0)
 
     save_results(
         workflow_run_id,
         workflow_run_attempt,
-        success_tests,
-        failure_tests,
-        skipped_tests,
+        all_tests,
     )
 
 
