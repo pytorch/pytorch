@@ -1101,6 +1101,15 @@ class BenchmarkRunner:
             )
             return "PASS" if accuracy_status in ("pass", "pass_due_to_skip") else "FAIL"
 
+        def run_and_log_peak_memory(run_fn, run_type):
+            if current_device == "cuda":
+                torch.cuda.reset_peak_memory_stats()
+                torch.cuda.empty_cache()
+            result = run_fn()
+            if current_device == "cuda":
+                print(f"Peak memory for {run_type} run: {get_peak_memory()} GB")
+            return result
+
         tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
             self.args.training, current_device, name
         )
@@ -1117,11 +1126,14 @@ class BenchmarkRunner:
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
         try:
-            fp64_outputs = self.run_n_iterations(
-                *cast_to_fp64(
-                    deepcopy_and_maybe_ddp(model),
-                    clone_inputs(example_inputs),
-                )
+            fp64_outputs = run_and_log_peak_memory(
+                lambda: self.run_n_iterations(
+                    *cast_to_fp64(
+                        deepcopy_and_maybe_ddp(model),
+                        clone_inputs(example_inputs),
+                    )
+                ),
+                "eager fp64",
             )
         except Exception:
             log.warning(f"fp64 golden ref were not generated for {name}")
@@ -1136,15 +1148,22 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             # Get results of native pytorch
             reset_rng_state()
-            correct_result = self.run_n_iterations(
-                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
+            correct_result = run_and_log_peak_memory(
+                lambda: self.run_n_iterations(
+                    deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
+                ),
+                "eager baseline",
             )
 
             # Rerun native pytorch
             reset_rng_state()
-            correct_rerun_result = self.run_n_iterations(
-                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
+            correct_rerun_result = run_and_log_peak_memory(
+                lambda: self.run_n_iterations(
+                    deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
+                ),
+                "eager rerun",
             )
+
             if not same(
                 correct_result,
                 correct_rerun_result,
@@ -1161,8 +1180,11 @@ class BenchmarkRunner:
             try:
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
 
-                new_result = optimized_model_iter_fn(
-                    deepcopy_and_maybe_ddp(model), example_inputs
+                new_result = run_and_log_peak_memory(
+                    lambda: optimized_model_iter_fn(
+                        deepcopy_and_maybe_ddp(model), example_inputs
+                    ),
+                    "optimized",
                 )
             except Exception as e:
                 accuracy_status = "fail_to_run"
