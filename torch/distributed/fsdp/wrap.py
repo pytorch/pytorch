@@ -6,7 +6,18 @@
 import contextlib
 import functools
 from abc import ABC, abstractmethod
-from typing import Any, Callable, cast, Dict, Generator, Optional, Set, Tuple, Type, no_type_check
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Generator,
+    no_type_check,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+)
 
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
