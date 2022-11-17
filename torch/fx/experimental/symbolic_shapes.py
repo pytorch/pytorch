@@ -434,6 +434,7 @@ def _lru_cache(fn, maxsize=None):
 
 class ShapeEnv(object):
     def __init__(self):
+        print("NEW SHAPE ENV")
         self.guards = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
@@ -472,7 +473,9 @@ class ShapeEnv(object):
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
+        print("SIZE FOR TENSOR")
         size = [self.create_symbol(i) for i in ex.size()]
+        print("STRIDE FOR TENSOR")
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):

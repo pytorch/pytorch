@@ -460,6 +460,14 @@ class GuardBuilder:
 
         # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
         self.tensor_check_ids[tensor_name] = id(value)
+        if value._base is not None:
+            base_id = self.id_ref(value._base)
+            base_name = f"{tensor_name}._base"
+            # code = f"___check_obj_id({base_name}, {base_id})"
+            # self._produce_guard_code(None, [code])
+            self.tensor_check_names.append(base_name)
+            self.tensor_check_examples.append(value._base)
+            self.tensor_check_ids[base_name] = base_id
 
         # Note: Guard code produced for tensor_match is a little different.
         # We accumulate tensor names, then do a single install of `___check_tensors`.
@@ -536,6 +544,7 @@ class TensorReference(object):
     # Note - this is untyped because of TypeError: '_SpecialForm' object does not support item assignment
     # But it is a Optional[Union["sympy.Expr", int]]
     expr: Optional[object] = None  # Populated after association
+    
 
     def __hash__(self):
         return hash((self.ref_id, self.kind, self.idx))
@@ -569,7 +578,7 @@ class DynamoGuardPrinter(StrPrinter):
         if not expr_found:
             if config.dynamic_shapes_ignore_assert:
                 return f"{self.shape_env.var_to_val[expr]}"
-        assert expr_found, f"Failed to find {expr}"
+        assert expr_found, breakpoint()
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
@@ -673,9 +682,9 @@ class CheckFunctionManager:
         )
 
         # tensor_check_names is the primary tensor association mechanism in dynamo.
+        # tensor_check_ids is the names from tensor_check_names + their ._bases as keys
         # All other guards installations are driven off of it, so these ones will too.
-        for name in tensor_check_names:
-            tensor_id = tensor_check_ids[name]
+        for name, tensor_id in tensor_check_ids.items():
             id_to_name_map[tensor_id] = name
 
             if tensor_id in self.output_graph.tensor_id_to_sym_shape_ref:
