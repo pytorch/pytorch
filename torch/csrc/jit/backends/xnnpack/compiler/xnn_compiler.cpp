@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/backends/xnnpack/serialization/schema_generated.h>
 
 #include <ATen/Utils.h>
-#include <unordered_set>
 
 namespace torch {
 namespace jit {
@@ -24,17 +23,8 @@ XNNExecutor XNNCompiler::compileModel(std::string ser_model) {
 
   // create xnnpack subgraph
   xnn_subgraph_t subgraph_ptr = nullptr;
-
-  // TODO: @maxren serialize extern_ids in flatbuffer schema
-  std::unordered_set<uint32_t> extern_ids;
-  for (auto input_id : *flatbuffer_graph->input_ids()) {
-    extern_ids.insert(input_id);
-  }
-  for (auto output_id : *flatbuffer_graph->output_ids()) {
-    extern_ids.insert(output_id);
-  }
   status = xnn_create_subgraph(
-      /*external_value_ids=*/extern_ids.size(),
+      /*external_value_ids=*/flatbuffer_graph->num_externs(),
       /*flags=*/0,
       &subgraph_ptr);
   TORCH_CHECK(xnn_status_success == status, "Failed to create xnn subgraph");

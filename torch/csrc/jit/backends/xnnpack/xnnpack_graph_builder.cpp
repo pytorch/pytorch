@@ -130,16 +130,20 @@ void XNNGraph::checkOpsToDelegate(std::shared_ptr<torch::jit::Graph>& graph) {
 std::string XNNGraph::serializedXNNGraph() {
   std::vector<uint32_t> input_ids;
   std::vector<uint32_t> output_ids;
+  std::unordered_set<uint32_t> num_externs;
 
   for (auto val : _inputs) {
     input_ids.push_back(_val_to_ids[val]);
+    num_externs.emplace(_val_to_ids[val]);
   }
 
   for (auto val : _outputs) {
     output_ids.push_back(_val_to_ids[val]);
+    num_externs.emplace(_val_to_ids[val]);
   }
 
-  return _serializer.finishAndSerialize(input_ids, output_ids);
+  return _serializer.finishAndSerialize(
+      input_ids, output_ids, num_externs.size());
 }
 
 std::vector<std::vector<long>> XNNGraph::getGraphOutputShapes() {
