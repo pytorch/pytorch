@@ -2,6 +2,7 @@
 
 import copy
 import os
+import pickle
 import sys
 import tempfile
 import threading
@@ -1427,6 +1428,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         dist.send(input_tensor, (self.rank + 1) % self.world_size)
         self.assertEqual(input_tensor, torch.zeros(2, 2) + 1)
 
+        with self.assertRaises(ValueError):
+            dist.send(input_tensor, dist.get_rank())
+
         # test recv
         input_tensor = torch.zeros(2, 2)
         dist.recv(input_tensor, (self.rank + 1) % self.world_size)
@@ -1502,6 +1506,21 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         for collective, *args in collectives_and_args:
             with self.subTest(collective=collective, args=args):
                 self._call_collective_with_varying_tensors(backend, collective, *args)
+
+    def _test_allreduce_coalesced(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        # TODO: this will be updated in the future to not be backend specific
+        device = "cuda" if backend == "nccl" else "cpu"
+        tensors = [torch.ones(10, 10, device=torch.device(device))]
+        dist.all_reduce_coalesced(tensors, dist.ReduceOp.SUM)
+        for tensor in tensors:
+            self.assertEqual(tensor, torch.ones(10, 10) * self.world_size)
 
 class CompilerTest(MultiProcessTestCase):
     def setUp(self):
@@ -1639,14 +1658,43 @@ class CompilerTest(MultiProcessTestCase):
 
 class ReduceOpTest(TestCase):
 
+    # Ref: https://github.com/pytorch/pytorch/issues/87191
     def test_op_isinstance_of_reduceop(self):
         for reduce_op in (
             c10d.ReduceOp.SUM, c10d.ReduceOp.AVG, c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX,
             c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
         ):
             self.assertTrue(isinstance(reduce_op, c10d.ReduceOp))
-        for scale in ([torch.tensor(1.0)], 2.0):
+        for scale in (torch.tensor(1.0), 2.0):
             self.assertTrue(isinstance(dist._make_nccl_premul_sum(scale), c10d.ReduceOp))
+
+    # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
+    def test_reduceop_copyable(self):
+        for reduce_op in (
+            c10d.ReduceOp.SUM, c10d.ReduceOp.AVG, c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX,
+            c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
+        ):
+            self.assertEqual(copy.copy(reduce_op), reduce_op)
+            self.assertEqual(copy.deepcopy(reduce_op), reduce_op)
+            self.assertEqual(copy.copy(c10d.ReduceOp(reduce_op)), reduce_op)
+            self.assertEqual(copy.deepcopy(c10d.ReduceOp(reduce_op)), reduce_op)
+
+        for scale in (torch.tensor(1.0), 2.0):
+            reduce_op = dist._make_nccl_premul_sum(scale)
+            self.assertEqual(copy.copy(reduce_op), reduce_op)
+            self.assertEqual(copy.deepcopy(reduce_op), reduce_op)
+
+    def test_reduceop_pickle(self):
+        for reduce_op in (
+            c10d.ReduceOp.SUM, c10d.ReduceOp.AVG, c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX,
+            c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
+        ):
+            pickle.loads(pickle.dumps(reduce_op))
+            orig = c10d.ReduceOp(reduce_op)
+            self.assertEqual(pickle.loads(pickle.dumps(orig)), orig)
+        for scale in (torch.tensor(1.0), 2.0):
+            reduce_op = dist._make_nccl_premul_sum(scale)
+            self.assertEqual(pickle.loads(pickle.dumps(reduce_op)), reduce_op)
 
 
 if __name__ == "__main__":
