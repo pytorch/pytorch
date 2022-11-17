@@ -129,16 +129,25 @@ def _unwrap(tensor):
     if _is_grad_wrapper(tensor):
         unwrapped = torch._C._functorch._unwrap_for_grad(tensor, current_level)
         assert tensor is not unwrapped
+        inner_level = torch._C._functorch.maybe_get_level(unwrapped)
+
+        # Clone and replace the inner tensor of the TensorWrapper with an empty tensor
+        # This is so that we can capture the autograd metadata without capturing the
+        # data as well.
+        # TODO: figure out a way to do this without actually cloning the data.
+        with torch.autograd.enable_grad():
+            # Why do we need to reenable grad?
+            captured_wrapper = tensor.clone()
+        new_inner = torch.empty_like(unwrapped)
+        # Undo lifting
+        new_inner = _functorch_unwrap_to_level_no_rewrap(new_inner, inner_level)
+        captured_wrapper = _functorch_unwrap_to_level_no_rewrap(captured_wrapper, current_level)
+        captured_wrapper.data = new_inner
 
         def rewrap_fn(new_value):
-            # This prematurely lifts to the current interpreter level unfortunately,
-            # we prefer to rewrap ourselves so we can actually restore the original autograd
-            # so we have to manually unwrap again after the clone :(
-            level = torch._C._functorch.maybe_get_level(tensor)
-            cloned_wrapped = tensor.clone()
-            cloned_wrapped, _ = _functorch_unwrap_to_level(cloned_wrapped, level)
-            cloned_wrapped.data = new_value
-            return cloned_wrapped
+            nonlocal captured_wrapper
+            captured_wrapper.data = new_value
+            return captured_wrapper
     else:
         bdim = torch._C._functorch.maybe_get_bdim(tensor)
         unwrapped = torch._C._functorch.get_unwrapped(tensor)
@@ -147,6 +156,14 @@ def _unwrap(tensor):
             return torch._C._functorch._add_batch_dim(new_value, bdim, current_level)
 
     return unwrapped, rewrap_fn
+
+def _functorch_unwrap_to_level_no_rewrap(tensor: torch.Tensor, target_level: int) -> torch.Tensor:
+    current_level = torch._C._functorch.maybe_get_level(tensor)
+    while current_level > target_level:
+        tensor = torch._C._functorch._unwrap_for_grad(tensor, current_level)
+        current_level = torch._C._functorch.maybe_get_level(tensor)
+    assert current_level == target_level, (current_level, target_level)
+    return tensor
 
 # It might be better to do more things in cpp:
 # https://github.com/pytorch/pytorch/pull/88976
