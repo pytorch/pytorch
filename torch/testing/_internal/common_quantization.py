@@ -1388,6 +1388,24 @@ class LinearReluAddModel(torch.nn.Module):
     def get_example_inputs(self) -> Tuple[Any, ...]:
         return (torch.rand(1, 5),)
 
+class LinearBnLeakyReluModel(torch.nn.Module):
+    def __init__(self, with_bn=True):
+        super().__init__()
+        self.linear = nn.Linear(5, 5)
+        self.bn1d = nn.BatchNorm1d(5)
+        self.leaky_relu = nn.LeakyReLU(0.01)
+        self.with_bn = with_bn
+
+    def forward(self, x):
+        x = self.linear(x)
+        if self.with_bn:
+            x = self.bn1d(x)
+        x = self.leaky_relu(x)
+        return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
 # TODO: self.fc should be self.conv
 class ConvReluModel(torch.nn.Module):
     def __init__(self):

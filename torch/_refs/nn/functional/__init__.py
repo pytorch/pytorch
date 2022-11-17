@@ -1,3 +1,4 @@
+import math
 from typing import Callable, Optional, Union
 
 import torch
@@ -27,6 +28,7 @@ from torch._refs import (
 from torch._subclasses.fake_tensor import FakeTensor
 
 __all__ = [
+    "alpha_dropout",
     "celu",
     "dropout",
     "elu",
@@ -58,6 +60,65 @@ __all__ = [
 ]
 
 Tensor = torch.Tensor
+
+
+def _dropout_helper(
+    self: TensorLikeType,
+    val: float,
+) -> TensorLikeType:
+    """
+    Helper function for all dropout-type operators. During training,
+    some of the elements of the input tensor are randomly masked.
+
+    Returns the masked tensor of the boolean values.
+
+    """
+
+    return (
+        refs.uniform(
+            self.shape, low=0.0, high=1.0, dtype=torch.float32, device=self.device
+        )
+        < val
+    )
+
+
+@register_decomposition(torch.ops.aten.alpha_dropout)
+def alpha_dropout(
+    self: TensorLikeType, p: float = 0.5, training: bool = False, inplace: bool = False
+) -> TensorLikeType:
+
+    if inplace:
+        raise NotImplementedError
+
+    if not training:
+        return self
+
+    utils.check(
+        p <= 1 and p >= 0,
+        lambda: f"dropout probability has to be between 0 and 1, but got, {p}",
+    )
+
+    if p == 1:
+        return torch.zeros_like(self)
+
+    if p == 0:
+        return self
+
+    dropout_mask = _dropout_helper(self, 1 - p)
+
+    # From paper: Self-Normalizing Neural Networks (https://arxiv.org/pdf/1706.02515.pdf)
+    # alpha = - SELU.alpha * SELU.scale, here
+    # SELU.alpha = 1.6732632423543772848170429916717 and
+    # SELU.scale = 1.0507009873554804934193349852946
+    alpha = -1.7580993408473766
+
+    a = 1.0 / math.sqrt((alpha * alpha * p + 1) * (1 - p))
+    b = torch.logical_not(dropout_mask)
+    b = b * (alpha * a) + alpha * a * p
+    dropout_mask = a * dropout_mask
+
+    return self * dropout_mask + b
+
 
 # celu is implemented specially because it has an alpha argument
 # celu is very similar to elu
@@ -93,7 +154,6 @@ def celu(
     return torch.where(a > 0, a, rhs)
 
 
-# TODO: should we allow the user to set a different dtype for the mask generation?
 @register_decomposition(torch.ops.aten.dropout)
 def dropout(
     a: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
@@ -105,22 +165,21 @@ def dropout(
     if not training:
         return a
 
-    assert p <= 1
-    assert p >= 0
+    utils.check(
+        p <= 1 and p >= 0,
+        lambda: f"dropout probability has to be between 0 and 1, but got, {p}",
+    )
 
     if p == 1:
-        return refs.zeros_like(a)
+        return torch.zeros_like(a)
 
     if p == 0:
         return a
 
-    p1m = 1 - p
-    scale = 1 / p1m
-    mask = refs.lt(
-        refs.uniform(a.shape, low=0.0, high=1.0, dtype=torch.float32, device=a.device),
-        p1m,
-    )
-    return refs.mul(refs.mul(a, mask), scale)
+    scale = 1 / (1 - p)
+    dropout_mask = _dropout_helper(a, 1 - p)
+
+    return a * dropout_mask * scale
 
 
 # elu is implemented specially because it has an alpha argument
@@ -169,6 +228,46 @@ def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
         raise NotImplementedError
 
     return torch.where(torch.le(a, 0), 0, a)
+
+
+def group_norm(
+    input: Tensor,
+    num_groups: int,
+    weight: Optional[Tensor] = None,
+    bias: Optional[Tensor] = None,
+    eps: float = 1e-5,
+) -> Tensor:
+    """
+    Reference implementation of :func:`torch.nn.functional.group_norm`.
+    """
+    utils.check(
+        input.ndim >= 2,
+        lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
+    )
+
+    batch_size = input.shape[0]
+    num_channels = input.shape[1]
+    utils.check(
+        num_channels % num_groups == 0,
+        lambda: "Expected number of channels in input to be divisible by num_groups, "
+        + f"but got input of shape {input.shape} and num_groups = {num_groups}",
+    )
+
+    # input shape is (N, C, *), so we flatten all inner dimensions except (N, C)
+    flattened_inner_size = 1
+    for dim_length in input.shape[2:]:
+        flattened_inner_size *= dim_length
+
+    return torch.native_group_norm(
+        input,
+        weight,
+        bias,
+        batch_size,
+        num_channels,
+        flattened_inner_size,
+        num_groups,
+        eps,
+    )[0]
 
 
 def layer_norm(
