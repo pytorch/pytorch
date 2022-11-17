@@ -161,6 +161,10 @@ is crucial especially for newer GPUs where the bottleneck is memory
 bandwidth (how quickly you can send data to a GPU) instead of compute
 (how quickly your GPU can crunch floating point operations)
 
+Another major optimization that inductor makes available is automatic support for CUDA graphs.
+CUDA graphs help eliminate the overhead from launching individual kernels from a python program
+which is especially relevant for newer GPUs.
+
 dynamo supports many different backends but inductor specifically works
 by generating `Triton <https://github.com/openai/triton>`__ kernels and
 we can inspect them by running ``TORCHINDUCTOR_TRACE=1 python trig.py``
