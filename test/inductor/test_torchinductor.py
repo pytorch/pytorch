@@ -10,6 +10,7 @@ import sys
 import typing
 import unittest
 import weakref
+from typing import Any, Callable
 from unittest.mock import patch
 
 import torch
@@ -18,6 +19,7 @@ import torch._dynamo
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
@@ -39,6 +41,14 @@ try:
     from torch._inductor import codecache, config, metrics
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
+    from torch._inductor.overrides import (
+        linear_permute_fusion,
+        linear_transpose,
+        permute_linear_fusion,
+        permute_matmul_fusion,
+        transpose_linear,
+        transpose_matmul,
+    )
     from torch._inductor.sizevars import SizeVarAllocator
     from torch._inductor.utils import has_torchvision_roi_align, timed
 
@@ -110,6 +120,29 @@ def requires_decomp(fn):
         return maybe_test
 
     return wrap_test
+
+
+PassFunc = Callable[[torch.fx.GraphModule, Any], torch.fx.GraphModule]
+
+
+def chain_passes(*passes: PassFunc) -> PassFunc:
+    def parent_pass(module: torch.fx.GraphModule, input: Any) -> torch.fx.GraphModule:
+        for pass_ in passes:
+            if isinstance(module, torch.fx.GraphModule):
+                ShapeProp(module).propagate(*input)
+            module = pass_(module)
+        return module
+
+    return parent_pass
+
+
+def count_call_function(module: torch.fx.GraphModule, target_op: Any) -> int:
+    return sum(
+        [
+            1 if (n.op == "call_function" and n.target == target_op) else 0
+            for n in module.graph.nodes
+        ]
+    )
 
 
 class TestCase(TorchTestCase):
@@ -1584,6 +1617,82 @@ class CommonTemplate:
         x = torch.tensor(123)
         y = torch.tensor(0)
         self.assertEqual(fn(x, y), x + x)
+
+    @unittest.skipIf(HAS_CPU, "Support GPU so far")
+    def test_linear_permute_fusion(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self, k: int, n: int):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(n, k))
+                self.bias = torch.nn.Parameter(torch.randn(n))
+
+            def forward(self, input: torch.Tensor):
+                a0 = torch.nn.functional.linear(input, self.weight, self.bias)
+                b0 = a0.permute(0, 2, 1)
+                return b0
+
+        m, k, n = 16, 8, 4
+        trace_func = chain_passes(torch.fx.symbolic_trace, linear_permute_fusion)
+        module = TestModule(k, n).eval()
+        input = torch.randn(6, m, k)
+        traced = trace_func(module, [input])
+        num_linear = count_call_function(traced, torch.nn.functional.linear)
+        num_linear_transpose = count_call_function(traced, linear_transpose)
+        self.assertEqual(num_linear, 0)
+        self.assertEqual(num_linear_transpose, 1)
+
+        self.assertTrue(torch.allclose(module(input), traced(input)))
+
+    @unittest.skipIf(HAS_CPU, "Support GPU so far")
+    def test_permute_linear_fusion(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self, k: int, n: int):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(n, k))
+                self.bias = torch.nn.Parameter(torch.randn(n))
+
+            def forward(self, input: torch.Tensor):
+                input1 = input.permute(0, 2, 1)
+                output = torch.nn.functional.linear(input1, self.weight, self.bias)
+                return output
+
+        m, k, n = 16, 8, 4
+
+        trace_func = chain_passes(torch.fx.symbolic_trace, permute_linear_fusion)
+        module = TestModule(k, n).eval()
+        input = torch.randn(6, k, m)
+        traced = trace_func(module, [input])
+        num_linear = count_call_function(traced, torch.nn.functional.linear)
+        num_transpose_linear = count_call_function(traced, transpose_linear)
+        self.assertEqual(num_linear, 0)
+        self.assertEqual(num_transpose_linear, 1)
+
+        self.assertTrue(torch.allclose(module(input), traced(input)))
+
+    @unittest.skipIf(HAS_CPU, "Support GPU so far")
+    def test_permute_bmm_fusion(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self, batch: int, k: int, n: int):
+                super().__init__()
+                self.other = torch.randn(batch, k, n)
+
+            def forward(self, input: torch.Tensor):
+                input1 = input.permute(0, 2, 1)
+                output = torch.bmm(input1, self.other)
+                return output
+
+        batch, m, k, n = 6, 16, 8, 4
+
+        trace_func = chain_passes(torch.fx.symbolic_trace, permute_matmul_fusion)
+        module = TestModule(batch, k, n).eval()
+        input = torch.randn(batch, k, m)
+        traced = trace_func(module, [input])
+        num_bmm = count_call_function(traced, torch.bmm)
+        num_transpose_matmul = count_call_function(traced, transpose_matmul)
+        self.assertEqual(num_bmm, 0)
+        self.assertEqual(num_transpose_matmul, 1)
+
+        self.assertTrue(torch.allclose(module(input), traced(input)))
 
     def test_slice1(self):
         def fn(a):
@@ -3189,7 +3298,7 @@ class CommonTemplate:
             ),
         )
 
-    @unittest.skipIf(not has_torchvision_roi_align(), "requirs torchvision")
+    @unittest.skipIf(not has_torchvision_roi_align(), "requires torchvision")
     def test_roi_align(self):
         def fn(a, b):
             return torch.ops.torchvision.roi_align(a, b, 0.25, 7, 7, 2, False)
@@ -4069,11 +4178,15 @@ class CommonTemplate:
         )
 
     def test_conv_backward(self):
+
         def fn(grad_out, inp, weight):
+            def shrink_rank(x, rank):
+                res = x
+                while res.dim() > rank:
+                    res = torch.select(res, -1, 0)
+                return res
             out1 = aten.convolution_backward(
-                grad_out,
-                inp,
-                weight,
+                *[shrink_rank(x, 4) for x in [grad_out, inp, weight]],
                 [C],
                 [1, 1],
                 [0, 0],
@@ -4084,9 +4197,7 @@ class CommonTemplate:
                 [True, True, True],
             )
             out2 = aten.convolution_backward(
-                grad_out,
-                inp,
-                weight,
+                *[shrink_rank(x, 4) for x in [grad_out, inp, weight]],
                 [C],
                 [1, 1],
                 [0, 0],
@@ -4096,7 +4207,29 @@ class CommonTemplate:
                 1,
                 [True, False, False],
             )
-            return (out1, out2)
+            out3 = aten.convolution_backward(
+                *[shrink_rank(x, 3) for x in [grad_out, inp, weight]],
+                [C],
+                [1],
+                [0],
+                [1],
+                False,
+                [0],
+                1,
+                [True, False, True],
+            )
+            out4 = aten.convolution_backward(
+                *[shrink_rank(x, 5) for x in [grad_out, inp, weight]],
+                [C],
+                [1, 1, 1],
+                [0, 0, 0],
+                [1, 1, 1],
+                False,
+                [0, 0, 0],
+                1,
+                [True, True, True],
+            )
+            return (out1, out2, out3, out4)
 
         B = 3
         C = 4
@@ -4104,9 +4237,9 @@ class CommonTemplate:
         self.common(
             fn,
             [
-                torch.randn(B, C, H - 2, H - 2),
-                torch.randn(B, C, H, H),
-                torch.randn(C, C, 3, 3),
+                torch.randn(B, C, H - 2, H - 2, H - 2),
+                torch.randn(B, C, H, H, H),
+                torch.randn(C, C, 3, 3, 3),
             ],
         )
 
@@ -4945,6 +5078,20 @@ if HAS_CUDA:
             ]
             result = forward(*args)
             assert same(result, torch.sort(args[0], descending=True, dim=1)[0])
+
+        @requires_cuda()
+        def test_scalar_triton_index(self):
+            # The indirect indexing via a scalar like below used to lead to
+            # bad triton code that made triton segfault when compiling.
+            # See https://github.com/pytorch/torchdynamo/issues/1515
+            def fn(a):
+                zero = torch.zeros((16,), device=a.device, dtype=torch.int64)
+                return (a[zero],)
+
+            a = torch.randn((8,), dtype=torch.float32, device="cuda")
+
+            fn_optimized = torch._dynamo.optimize("inductor")(fn)
+            assert same(fn(a), fn_optimized(a))
 
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_ops.autotune import CachingAutotuner
