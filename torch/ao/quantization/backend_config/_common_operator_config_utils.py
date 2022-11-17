@@ -1,3 +1,4 @@
+import copy
 import operator
 import torch
 import torch.nn.functional as F
@@ -7,23 +8,22 @@ import torch.ao.nn.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
 from collections import namedtuple
-from typing import List
+from typing import Callable, Dict, List, Union
 from .backend_config import (
     BackendPatternConfig,
     DTypeConfig,
+    DTypeWithConstraints,
     ObservationType,
 )
-from ..fake_quantize import FixedQParamsFakeQuantize
 from ..fuser_method_mappings import (
-    reverse_sequential_wrapper2,
-    reverse2,
-    reverse3,
+    _reverse_sequential_wrapper2,
+    _reverse2,
+    _reverse3,
     fuse_conv_bn,
     fuse_conv_bn_relu,
     fuse_linear_bn,
     fuse_convtranspose_bn,
 )
-from ..qconfig_mapping import _FIXED_QPARAMS_OP_TO_OBSERVER
 
 # TODO: rename to be more explict, e.g. qat_conv_relu
 _ConvMetadata = namedtuple(
@@ -47,6 +47,38 @@ _Conv3dMetadata = _ConvMetadata(
     nni.ConvReLU3d, nni.ConvBn3d, nni.ConvBnReLU3d,
     nnqat.Conv3d, nniqat.ConvReLU3d, nniqat.ConvBn3d, nniqat.ConvBnReLU3d,
     F.conv3d)
+
+# Add constraints for fixed qparams ops like sigmoid and tanh to ensure values
+# fall within the proper ranges, e.g. [0, 1] for sigmoid, [-1, 1] for tanh
+_FIXED_QPARAM_OP_0TO1_CONSTRAINTS = DTypeWithConstraints(
+    dtype=torch.quint8,
+    quant_min_lower_bound=0,
+    quant_max_upper_bound=255,
+    scale_exact_match=1.0 / 256.0,
+    zero_point_exact_match=0,
+)
+_FIXED_QPARAM_OP_NEG1TO1_CONSTRAINTS = DTypeWithConstraints(
+    dtype=torch.quint8,
+    quant_min_lower_bound=0,
+    quant_max_upper_bound=255,
+    scale_exact_match=2.0 / 256.0,
+    zero_point_exact_match=128,
+)
+_FIXED_QPARAMS_OP_TO_CONSTRAINTS: Dict[Union[Callable, str], DTypeWithConstraints] = {
+    torch.nn.Hardsigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    torch.nn.functional.hardsigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    "hardsigmoid": _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    "hardsigmoid_": _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    torch.nn.Sigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    torch.sigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    "sigmoid": _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    "sigmoid_": _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    torch.nn.Softmax: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
+    torch.nn.Tanh: _FIXED_QPARAM_OP_NEG1TO1_CONSTRAINTS,
+    torch.tanh: _FIXED_QPARAM_OP_NEG1TO1_CONSTRAINTS,
+    "tanh": _FIXED_QPARAM_OP_NEG1TO1_CONSTRAINTS,
+    "tanh_": _FIXED_QPARAM_OP_NEG1TO1_CONSTRAINTS,
+}
 
 def _get_binary_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
     binary_op_configs: List[BackendPatternConfig] = []
@@ -115,13 +147,13 @@ def _get_linear_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPattern
     linear_configs.append(
         BackendPatternConfig((torch.nn.ReLU, torch.nn.Linear))
             .set_dtype_configs(dtype_configs)  # noqa: E131
-            .set_fuser_method(reverse_sequential_wrapper2(nni.LinearReLU))
+            .set_fuser_method(_reverse_sequential_wrapper2(nni.LinearReLU))
             .set_fused_module(nni.LinearReLU))
     # linear relu, linear module + functional relu
     linear_configs.append(
         BackendPatternConfig((torch.nn.functional.relu, torch.nn.Linear))
             .set_dtype_configs(dtype_configs)  # noqa: E131
-            .set_fuser_method(reverse_sequential_wrapper2(nni.LinearReLU))
+            .set_fuser_method(_reverse_sequential_wrapper2(nni.LinearReLU))
             .set_fused_module(nni.LinearReLU))
 
     # 2.2 linear module + relu, fused module configs
@@ -158,7 +190,7 @@ def _get_linear_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPattern
     linear_configs.append(
         BackendPatternConfig((nn.BatchNorm1d, nn.Linear))
             .set_dtype_configs(dtype_configs)  # noqa: E131
-            .set_fuser_method(reverse2(fuse_linear_bn))
+            .set_fuser_method(_reverse2(fuse_linear_bn))
             .set_fused_module(nni.LinearBn1d))
 
     # 3.2 linear bn fused
@@ -218,13 +250,13 @@ def _get_conv_configs(dtype_configs):
         conv_configs.append(
             BackendPatternConfig((torch.nn.ReLU, convs.root))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(reverse_sequential_wrapper2(convs.fused_conv_relu))
+                .set_fuser_method(_reverse_sequential_wrapper2(convs.fused_conv_relu))
                 .set_fused_module(convs.fused_conv_relu))
         # conv relu fusion, conv module + functional relu
         conv_configs.append(
             BackendPatternConfig((F.relu, convs.root))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(reverse_sequential_wrapper2(convs.fused_conv_relu))
+                .set_fuser_method(_reverse_sequential_wrapper2(convs.fused_conv_relu))
                 .set_fused_module(convs.fused_conv_relu))
         # 2.2 conv module + relu fused module configs
         # conv relu, fused module
@@ -273,20 +305,20 @@ def _get_conv_configs(dtype_configs):
         conv_configs.append(
             BackendPatternConfig((convs.bn, convs.root))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(reverse2(fuse_conv_bn))
+                .set_fuser_method(_reverse2(fuse_conv_bn))
                 .set_fused_module(convs.fused_conv_bn))
         # conv + bn + relu module fusion
         conv_configs.append(
             BackendPatternConfig((nn.ReLU, (convs.bn, convs.root)))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(reverse3(fuse_conv_bn_relu))
+                .set_fuser_method(_reverse3(fuse_conv_bn_relu))
                 .set_fused_module(convs.fused_conv_bn_relu))
         # conv + bn + relu functional fusion
         conv_configs.append(
             BackendPatternConfig((F.relu, (convs.bn, convs.root)))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
                 .set_root_module(convs.root)
-                .set_fuser_method(reverse3(fuse_conv_bn_relu))
+                .set_fuser_method(_reverse3(fuse_conv_bn_relu))
                 .set_fused_module(convs.fused_conv_bn_relu))
         # TODO: we can add fusion for torch.relu as well
 
@@ -330,7 +362,7 @@ def _get_conv_configs(dtype_configs):
         conv_configs.append(
             BackendPatternConfig((convs.bn, convs.transpose))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(reverse2(fuse_convtranspose_bn))
+                .set_fuser_method(_reverse2(fuse_convtranspose_bn))
                 .set_root_module(convs.transpose)
                 .set_reference_quantized_module(convs.transpose_reference))
 
@@ -393,21 +425,45 @@ def _get_default_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPat
     )
     return configs
 
+def _add_fixed_qparams_to_dtype_configs(
+    dtype_configs: List[DTypeConfig],
+    constraints: DTypeWithConstraints,
+) -> List[DTypeConfig]:
+    """
+    Return a copy of the list of DTypeConfigs where activations are subject to the specified
+    constraints required for fixed qparams ops.
+
+    If the data type doesn't match the one in the constraints, simply leave the corresponding
+    DTypeConfig unchanged.
+
+    If `scale_min_lower_bound` or `scale_max_upper_bound` is specified in the activations,
+    throw an exception since these settings are incompatible with fixed qparams ops.
+    """
+    new_dtype_configs = []
+    for dtype_config in dtype_configs:
+        dc = copy.deepcopy(dtype_config)
+        for orig_constraints in [dc.input_dtype_with_constraints, dc.output_dtype_with_constraints]:
+            if orig_constraints.dtype != constraints.dtype:
+                continue
+            if orig_constraints.scale_min_lower_bound is not None:
+                raise ValueError("scale_min_lower_bound is invalid for fixed qparams ops: %s" % dtype_config)
+            if orig_constraints.scale_max_upper_bound is not None:
+                raise ValueError("scale_max_upper_bound is invalid for fixed qparams ops: %s" % dtype_config)
+            orig_constraints.quant_min_lower_bound = constraints.quant_min_lower_bound
+            orig_constraints.quant_max_upper_bound = constraints.quant_max_upper_bound
+            orig_constraints.scale_exact_match = constraints.scale_exact_match
+            orig_constraints.zero_point_exact_match = constraints.zero_point_exact_match
+        new_dtype_configs.append(dc)
+    return new_dtype_configs
+
 def _get_fixed_qparams_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
     fixed_qparams_op_configs = []
-    for fixed_qparam_op, output_observer in _FIXED_QPARAMS_OP_TO_OBSERVER.items():
+    for fixed_qparam_op, constraints in _FIXED_QPARAMS_OP_TO_CONSTRAINTS.items():
+        new_dtype_configs = _add_fixed_qparams_to_dtype_configs(dtype_configs, constraints)
         fixed_qparams_op_configs.append(
-            # TODO: The _overwrite_output keys are temporary, since we don't want to put observer
-            # in the configs we expect that it's provided by user
-            # What we want to put here is the requirement on observers, in this case dtype,
-            # quant_min, quant_max etc., but we need to first move all configs to
-            # backend_config_dict to do that, we'll remove these keys after we fully migrated
-            # everything to use backend_config_dict
             BackendPatternConfig(fixed_qparam_op)
                 .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
-                .set_dtype_configs(dtype_configs)
-                ._set_overwrite_output_fake_quantize(FixedQParamsFakeQuantize.with_args(observer=output_observer))
-                ._set_overwrite_output_observer(output_observer))
+                .set_dtype_configs(new_dtype_configs))
     return fixed_qparams_op_configs
 
 def _get_share_qparams_op_configs(dtype_configs):
@@ -497,13 +553,13 @@ def _get_bn_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConf
         bn_configs.append(
             BackendPatternConfig((torch.nn.ReLU, bn))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(reverse_sequential_wrapper2(fused_bn))
+                .set_fuser_method(_reverse_sequential_wrapper2(fused_bn))
                 .set_fused_module(fused_bn))
         # bn module + F.relu fusion config
         bn_configs.append(
             BackendPatternConfig((torch.nn.functional.relu, bn))
                 .set_dtype_configs(dtype_configs)  # noqa: E131
-                .set_fuser_method(reverse_sequential_wrapper2(bn_to_fused_bn[bn]))
+                .set_fuser_method(_reverse_sequential_wrapper2(bn_to_fused_bn[bn]))
                 .set_fused_module(fused_bn))
         bn_configs.append(
             BackendPatternConfig(bn)
