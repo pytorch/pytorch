@@ -1,7 +1,7 @@
 import copy
-import math
 import itertools
 import logging
+import math
 import operator
 import random
 import weakref
@@ -328,7 +328,7 @@ class PackedLinear(nn.Linear):
         self.__dict__ = copy.deepcopy(linear.__dict__)
         self.batch_size = int(math.prod(input_size) / input_size[-1])
         self.packed_weight = torch.nn.Parameter(
-            torch._C._nn.reorder_linear_weight(
+            torch.ops.mkl._mkl_reorder_linear_weight(
                 self.weight.to_mkldnn(), self.batch_size
             ),
             requires_grad=self.weight.requires_grad,
@@ -421,7 +421,9 @@ def fused_conv_binary_inplace_eval(
     )
 
 
-def fused_binary_unary_eval(conv_binary: nn.Module, unary: nn.Module, input_size: list):
+def fused_conv_binary_unary_eval(
+    conv_binary: nn.Module, unary: nn.Module, input_size: list
+):
     assert not (conv_binary.training), "Fusion only for eval!"
     # reuse origin conv module, and just update its' unary attr.
     conv_binary._update_unary_params(unary)
@@ -1074,8 +1076,8 @@ replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: ra
 computation_op_unary_op_fusion_map = {
     nn.Conv2d: fused_conv_unary_eval,
     nn.Linear: fused_linear_unary_eval,
-    ConvBinary2d: fused_binary_unary_eval,
-    ConvBinaryInplace2d: fused_binary_unary_eval,
+    ConvBinary2d: fused_conv_binary_unary_eval,
+    ConvBinaryInplace2d: fused_conv_binary_unary_eval,
 }
 
 

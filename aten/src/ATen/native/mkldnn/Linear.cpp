@@ -338,7 +338,7 @@ TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
 
 #endif // AT_MKLDNN_ENABLED
 
-#if AT_MKL_ENABLED()
+#if AT_MKL_ENABLED() && AT_MKLDNN_ENABLED()
 #include <mkl.h>
 
 namespace at {
@@ -403,11 +403,6 @@ Tensor mkl_linear(
   return output;
 }
 
-TORCH_LIBRARY(mkl, m) {
-  m.def(TORCH_SELECTIVE_SCHEMA(
-      "mkl::_mkl_linear(Tensor X, Tensor MKL_W, Tensor ORI_W, Tensor? B, int batch_size) -> Tensor"));
-}
-
 TORCH_LIBRARY_IMPL(mkl, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("mkl::_mkl_linear"), TORCH_FN(mkl_linear));
 }
@@ -419,4 +414,4 @@ TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
 } // namespace native
 } // namespace at
 
-#endif // AT_MKL_ENABLED
+#endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED

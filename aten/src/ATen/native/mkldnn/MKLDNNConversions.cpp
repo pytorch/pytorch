@@ -199,18 +199,17 @@ Tensor mkldnn_reorder_conv3d_weight(
 
 #endif // AT_MKLDNN_ENABLED()
 
-#if AT_MKL_ENABLED()
+#if AT_MKL_ENABLED() && AT_MKLDNN_ENABLED()
 #include <mkl.h>
 
-Tensor reorder_linear_weight(
+Tensor mkl_reorder_linear_weight(
     const Tensor& weight,
-    const c10::optional<int64_t> batch_size) {
-  // TODO: bf16 prepack using MKLDNN
+    const int64_t batch_size) {
   TORCH_CHECK(
       weight.scalar_type() == ScalarType::Float,
       "reorder_linear_weight: weight's dtype should be float");
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-  auto M = batch_size.has_value() ? batch_size.value() : 128;
+  auto M = batch_size;
   auto N = weight.size(0);
   auto K = weight.size(1);
   int64_t pack_size =
@@ -237,11 +236,11 @@ Tensor reorder_linear_weight(
   return packed_weight;
 }
 
-#else
-Tensor reorder_linear_weight(
-    const Tensor& weight,
-    const c10::optional<int64_t> batch_size) {
-  TORCH_CHECK(false, "reorder_linear_weight: MKL build is disabled");
+TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkl::_mkl_reorder_linear_weight"),
+      TORCH_FN(mkl_reorder_linear_weight));
 }
-#endif // AT_MKL_ENABLED()
+
+#endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED
 }}
