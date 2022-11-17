@@ -8,8 +8,6 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/BatchRulesHelper.h>
 
-#include <utility>
-
 // This file contains batching rules for random operations. These are different
 // from our regular batching rules: regular batching rules get registered to the
 // FuncTorchBatched key, but batching rules for random operations get
@@ -101,11 +99,11 @@ Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, c
     "If this is necessary for your usage, please file an issue with functorch.");
   if (randomness == RandomnessType::Same && self_bdim) {
     auto intermediate = empty(self.sizes(), self.options());
-    intermediate.bernoulli_(other_, std::move(gen));
+    intermediate.bernoulli_(other_, gen);
     self.copy_(intermediate); // batching should make this just work out...
     return self;
   } else {
-    self_.bernoulli_(other_, std::move(gen));
+    self_.bernoulli_(other_, gen);
     return self;
   }
 }
