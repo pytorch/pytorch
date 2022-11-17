@@ -1619,7 +1619,6 @@ class CommonTemplate:
         y = torch.tensor(0)
         self.assertEqual(fn(x, y), x + x)
 
-    @unittest.skipIf(HAS_CPU, "Support GPU so far")
     def test_linear_permute_fusion(self):
         class TestModule(torch.nn.Module):
             def __init__(self, k: int, n: int):
@@ -1644,7 +1643,6 @@ class CommonTemplate:
 
         self.assertTrue(torch.allclose(module(input), traced(input)))
 
-    @unittest.skipIf(HAS_CPU, "Support GPU so far")
     def test_permute_linear_fusion(self):
         class TestModule(torch.nn.Module):
             def __init__(self, k: int, n: int):
@@ -1670,7 +1668,6 @@ class CommonTemplate:
 
         self.assertTrue(torch.allclose(module(input), traced(input)))
 
-    @unittest.skipIf(HAS_CPU, "Support GPU so far")
     def test_permute_bmm_fusion(self):
         class TestModule(torch.nn.Module):
             def __init__(self, batch: int, k: int, n: int):
