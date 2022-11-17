@@ -1011,7 +1011,6 @@ symbolic_aot_autograd_failures = {
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('deg2rad', ''),  # aten.deg2rad.default - couldn't find symbolic meta function/decomposition
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('dist', ''),  # aten.dist.default - couldn't find symbolic meta function/decomposition
