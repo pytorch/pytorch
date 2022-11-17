@@ -284,8 +284,9 @@ def min_cut_rematerialization_partition(
     fx_g = joint_module.graph
 
     #  add the CSE pass
-    cse_graph = fx_graph_cse(fx_g)
-    joint_module.graph = cse_graph
+    if config.cse:
+        cse_graph = fx_graph_cse(fx_g)
+        joint_module.graph = cse_graph
     full_bw_graph = joint_module.graph
 
     name_to_node = {}
@@ -374,7 +375,7 @@ def min_cut_rematerialization_partition(
             # Arbitrary hack that sometimes seems to help things. The above
             # modification appears to have made this heuristic a lot less critical
             # for performance.
-            if compiler == "inductor" and node.dist_from_bw > 5:
+            if compiler == "inductor" and node.dist_from_bw > config.max_dist_from_bw:
                 return True
             # If the output of an op is 4x smaller (arbitrary choice),
             # then we don't allow recomputation.
