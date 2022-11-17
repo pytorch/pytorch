@@ -461,6 +461,16 @@ class GuardBuilder:
         # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
         self.tensor_check_ids[tensor_name] = id(value)
         if value._base is not None:
+            if torch.equal(value, value._base):
+                # wtf? None access error without
+                return
+            base_id = self.id_ref(value._base)
+            base_name = f"{tensor_name}._base"
+
+            self.tensor_check_names.append(base_name)
+            self.tensor_check_examples.append(value._base)
+            self.tensor_check_ids[base_name] = base_id
+
             assert id(value._base) in self.guarded_code.output_graph.tensor_id_to_sym_shape_ref
             refs = self.guarded_code.output_graph.tensor_id_to_sym_shape_ref[id(value._base)]
             for ref in refs:
@@ -572,11 +582,12 @@ class DynamoGuardPrinter(StrPrinter):
             return "1"
         expr_found = expr in (self.expr_to_tensor_ref) or (
             expr in self.intermediary_symbols
-        )
+        ) or expr in (self.base_symbols)
         if not expr_found:
             if config.dynamic_shapes_ignore_assert:
                 return f"{self.shape_env.var_to_val[expr]}"
-        assert expr not in self.base_symbols, f"Illegal attempt to install base guard {self.base_symbols[expr]} for {expr}"
+        # assert expr not in self.base_symbols, breakpoint()
+        # f"Illegal attempt to install base guard {self.base_symbols[expr]} for {expr}"
 
         assert expr_found, breakpoint()
         refs = self.expr_to_tensor_ref[expr]
