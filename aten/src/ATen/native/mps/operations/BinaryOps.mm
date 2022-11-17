@@ -334,6 +334,7 @@ TORCH_IMPL_FUNC(sub_out_mps) (const Tensor& self, const Tensor& other, const Sca
 }
 
 TORCH_IMPL_FUNC(fmod_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output) {
+  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "int64 is not supported for fmod");
   mps::fmod_template(self, other, output, "fmod");
 }
 

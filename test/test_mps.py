@@ -3288,11 +3288,18 @@ class TestNLLLoss(TestCase):
                 mps_x = cpu_x.detach().clone().to('mps')
                 mps_y = cpu_y.detach().clone().to('mps')
 
-                result_fmod_cpu = torch.fmod(cpu_x, cpu_y)
-                result_fmod_mps = torch.fmod(mps_x, mps_y)
-                self.assertEqual(result_fmod_mps, result_fmod_cpu)
+                # int64 currently not supported for fmod
+                if dtype == torch.int64:
+                    error_regex = "int64 is not supported for fmod"
+                    with self.assertRaisesRegex(RuntimeError, error_regex):
+                        result_fmod_mps = torch.fmod(mps_x, mps_y)
+                else:
+                    result_fmod_cpu = torch.fmod(cpu_x, cpu_y)
+                    result_fmod_mps = torch.fmod(mps_x, mps_y)
+                    self.assertEqual(result_fmod_mps, result_fmod_cpu)
 
         helper((2, 8, 4, 5))
+
 
     def test_rounding(self):
         def helper(shape):
