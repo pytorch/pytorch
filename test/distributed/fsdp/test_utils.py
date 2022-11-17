@@ -169,7 +169,6 @@ class TestGetSubmoduleToStates(TestCase):
         NOTE: This test is hard coded against ``Model``.
         """
         model = self.Model(TestGetSubmoduleToStates.SharedParameterMode.PARENT_CHILD)
-        print(model)
 
         # Compute the mapping from submodule to states and the mapping from
         # shared parameter to LCA module according to a logical module wrap
@@ -229,7 +228,6 @@ class TestGetSubmoduleToStates(TestCase):
         NOTE: This test is hard coded against ``Model``.
         """
         model = self.Model(TestGetSubmoduleToStates.SharedParameterMode.SIBLING)
-        print(model)
 
         # Compute the mapping from submodule to states and the mapping from
         # shared parameter to LCA module according to a logical module wrap
