@@ -1876,7 +1876,8 @@ static std::unordered_set<std::string> nodeTypeReliableForTracer = {
 
 void UpdateReliable(
     torch::jit::Value* output,
-    const std::pair<bool, bool>& inferred_type_reliable) {
+    const std::pair<bool, bool>& inferred_type_reliable,
+    bool no_type_warning) {
   auto inferred =
       ConstantValueMap::GetUseInferredType(output->debugName()).value_or(false);
   auto isTypeReliableForTracer =
@@ -1884,7 +1885,7 @@ void UpdateReliable(
           output->node()->kind().toDisplayString()) !=
       nodeTypeReliableForTracer.end();
   if (!inferred && !isTypeReliableForTracer &&
-      !output->node()->kind().is_onnx()) {
+      !output->node()->kind().is_onnx() and no_type_warning) {
     // TODO(84661): This warning comes before setType in symbolic_fn.
     // tracked in #84661
     TORCH_WARN(
@@ -1896,7 +1897,7 @@ void UpdateReliable(
     diagnostics::Diagnose(
         diagnostics::Rule::kNodeMissingOnnxShapeInference,
         diagnostics::Level::kWarning,
-        {output->node()->kind().toDisplayString()});
+        {{"op_name", output->node()->kind().toDisplayString()}});
   }
   auto reliable = false;
   if (inferred) {
@@ -1954,7 +1955,7 @@ void ONNXShapeTypeInference(
   size_t all_has_value = 0;
   for (auto node_output : n->outputs()) {
     if (auto output_type = node_output->type()->cast<TensorType>()) {
-      if (output_type->sizes().concrete_sizes().has_value()) {
+      if (output_type->dim()) {
         all_has_value += 1;
       }
     }
@@ -2233,7 +2234,7 @@ size_t ONNXAssignOutputShape(
           auto& new_var = THPVariable_Unpack(list_elem);
           TORCH_CHECK(
               var.scalar_type() == new_var.scalar_type(),
-              "Unsupported sequence with mixed elment types in model outputs. "
+              "Unsupported sequence with mixed element types in model outputs. "
               "ONNX supports only sequences of elements of the same data type.");
         }
         auto elem_type = graph->outputs()

@@ -330,8 +330,11 @@ void NodeToONNX(
           // should be reliable.
           MergeInferredTypeAndSetMap(
               outputs[i], old->type(), outputs[i]->type());
+          // non ONNX node with no type given will throw out the warnings here.
           UpdateReliable(
-              outputs[i], AreInputsReliableOrStatic(outputs[i]->node()));
+              outputs[i],
+              AreInputsReliableOrStatic(outputs[i]->node()),
+              /*no_type_warning=*/true);
           // For the node type that does not have ComputeConstant logic, it may
           // have reliable shape but its shape is not in ConstantValueMap. So we
           // need to update ConstantValueMap.

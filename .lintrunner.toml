@@ -372,6 +372,7 @@ include_patterns = [
 exclude_patterns = [
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
+    'aten/src/ATen/native/vulkan/glsl/**',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
 command = [

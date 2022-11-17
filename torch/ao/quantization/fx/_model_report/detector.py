@@ -10,7 +10,7 @@ from torch.ao.quantization.fx._model_report.model_report_observer import ModelRe
 from torch.ao.quantization.qconfig import (
     QConfig,
     default_qconfig,
-    assert_valid_qconfig,
+    _assert_valid_qconfig,
 )
 from torch.ao.quantization.observer import (
     ObserverBase,
@@ -23,7 +23,7 @@ from torch.ao.quantization.fx._equalize import (
     default_equalization_qconfig,
     EqualizationQConfig,
 )
-from torch.ao.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.observer import _is_activation_post_process
 
 # Names for observer insert keys
 DETECTOR_TARGET_NODE_KEY = "target_node"
@@ -84,7 +84,7 @@ class DetectorQConfigInfo():
             weight = default_per_channel_weight_observer if rec[1] else default_weight_observer
             test_config = QConfig(activation, weight)
             try:
-                assert_valid_qconfig(test_config, module)
+                _assert_valid_qconfig(test_config, module)
                 module_qconfig = test_config
                 break
             except AssertionError:
@@ -1273,7 +1273,7 @@ class OutlierDetector(DetectorBase):
         # case for insertion of module
         # check if the module has any children and isn't observer
         num_children = len(list(module.children()))
-        return num_children == 0 and not is_activation_post_process(module)
+        return num_children == 0 and not _is_activation_post_process(module)
 
     def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
         r""" Returns the DetectorQConfigInfo for each module_fqn relavent
