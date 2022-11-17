@@ -629,7 +629,7 @@ void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Sca
     cpu_kernel_vec(
         iter,
         [=](BFloat16 grad_val, BFloat16 self_val) -> BFloat16 {
-          return (float(self_val) <= min_val || float(self_val) >= max_val) ? float(0) : float(grad_val);
+          return (float(self_val) <= min_val || float(self_val) >= max_val) ? BFloat16(0) : grad_val;
         },
         [=](Vectorized<BFloat16> grad_val, Vectorized<BFloat16> self_val) -> Vectorized<BFloat16> {
           Vectorized<float> grad_val0, grad_val1, self_val0, self_val1;
@@ -1055,11 +1055,11 @@ void glu_backward_kernel(TensorIterator& iter) {
 
 void silu_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == kBFloat16) {
-      const Vectorized<float> kOneVec(float(1));
+      const Vectorized<float> kOneVec(1.0f);
       cpu_kernel_vec(
           iter,
           [](BFloat16 x) -> BFloat16 {
-            return float(x) / (float(1) + std::exp(-float(x)));
+            return float(x) / (1.0f + std::exp(-float(x)));
           },
           [kOneVec](Vectorized<BFloat16> x_vec) -> Vectorized<BFloat16> {
             Vectorized<float> x_vec0, x_vec1;
@@ -1086,13 +1086,13 @@ void silu_kernel(TensorIteratorBase& iter) {
 
 void silu_backward_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == kBFloat16) {
-    const Vectorized<float> kOneVec(float(1));
+    const Vectorized<float> kOneVec(1.0f);
     cpu_kernel_vec(
         iter,
         [](BFloat16 dy, BFloat16 x) -> BFloat16 {
           const float sigmoid =
-              float(1) / (float(1) + std::exp(-float(x)));
-          return dy * sigmoid * (float(1) + x * (float(1) - sigmoid));
+              1.0f / (1.0f + std::exp(-float(x)));
+          return dy * sigmoid * (1.0f + x * (1.0f - sigmoid));
         },
         [kOneVec](Vectorized<BFloat16> dy_vec, Vectorized<BFloat16> x_vec) -> Vectorized<BFloat16> {
           Vectorized<float> x_vec0, x_vec1, dy_vec0, dy_vec1;
@@ -1159,14 +1159,14 @@ void mish_kernel(TensorIteratorBase& iter) {
 void mish_backward_kernel(TensorIterator& iter) {
   if (iter.dtype() == kBFloat16) {
     using Vec = Vectorized<float>;
-    const Vec kOneVec(float(1));
+    const Vec kOneVec(1.0f);
     cpu_kernel_vec(
         iter,
         [](BFloat16 dy, BFloat16 x) -> BFloat16 {
           const float sigmoid =
-              float(1) / (float(1) + std::exp(-float(x)));
+              1.0f / (1.0f + std::exp(-float(x)));
           const float tanh_softplus = std::tanh(std::log1p(std::exp(float(x))));
-          return dy * (tanh_softplus + x * sigmoid * (float(1) - tanh_softplus * tanh_softplus));
+          return dy * (tanh_softplus + x * sigmoid * (1.0f - tanh_softplus * tanh_softplus));
         },
         [kOneVec](Vectorized<BFloat16> dy_vec, Vectorized<BFloat16> x_vec) -> Vectorized<BFloat16> {
           Vectorized<float> x_vec0, x_vec1, dy_vec0, dy_vec1;
