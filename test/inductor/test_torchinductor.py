@@ -4685,8 +4685,8 @@ if HAS_CPU:
                 x = torch.masked_fill(value, mask, -33.0)
                 return torch.softmax(x, -1)
 
-            value = torch.randn((2, 9))
-            mask = torch.randint(0, 1, size=(2, 9), dtype=torch.uint8)
+            value = torch.randn((2, 17))
+            mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8)
             with patch.object(config.cpp, "simdlen", None):
                 torch._dynamo.reset()
                 metrics.reset()
