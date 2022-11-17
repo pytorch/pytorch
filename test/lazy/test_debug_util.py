@@ -4,14 +4,16 @@ import os
 import re
 import tempfile
 import torch.nn as nn
+import unittest
 
 import torch._lazy
 import torch._lazy.ts_backend
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 torch._lazy.ts_backend.init()
 
 
+@unittest.skipIf(IS_WINDOWS, "To be fixed")
 class DebugUtilTest(TestCase):
     def _run_linear(self):
         device = "lazy"
