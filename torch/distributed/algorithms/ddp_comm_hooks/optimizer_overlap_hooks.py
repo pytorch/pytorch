@@ -32,6 +32,34 @@ class _OptimizerHookState(object):
             )
 
 
+def _apply_optim_in_backward_hook(
+    hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
+) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
+    r"""
+    If torch.distributed.optim._apply_optimizer_in_backward is used to overlap
+    optimizer with backward pass, DDP will run the below hook to run optimizer
+    step for parametrs after gradient communication has taken place.
+    """
+    def apply_optim_in_backward_hook(
+        hook_state: Any, bucket: dist.GradBucket,
+    ) -> torch.futures.Future[torch.Tensor]:
+        # Run original hook
+        fut = hook(hook_state, bucket)
+        def optimizer_step(fut):
+            model_params = bucket.parameters()
+            for p in model_params:
+                if hasattr(p, '_in_backward_optimizers'):
+                    for optim in p._in_backward_optimizers:
+                        # TODO - DDP is set to zero_grad in reducer, simply
+                        # setting to None here won't work.
+                        optim.step()
+
+            return bucket.buffer()
+
+        return fut.then(optimizer_step)
+
+    return apply_optim_in_backward_hook
+
 def _hook_then_optimizer(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
     optimizer_state: _OptimizerHookState,

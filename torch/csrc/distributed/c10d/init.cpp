@@ -403,6 +403,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
             return reducer.get_grad_buckets(/* return_zero_tensors */ true);
           },
           py::call_guard<py::gil_scoped_release>())
+      .def("_set_grads_to_none", [](::c10d::Reducer& reducer) {
+          reducer.set_grads_to_none(true);
+      }, py::call_guard<py::gil_scoped_release>())
       .def(
           "_push_all_rebuilt_params",
           &::c10d::Reducer::push_rebuilt_params_for_all_indices,

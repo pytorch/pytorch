@@ -692,6 +692,39 @@ class DistributedDataParallel(Module, Joinable):
         if static_graph:
             self._set_static_graph()
 
+        # Check if user has used apply_optim_in_backward to overlap optimizer
+        # step + DDP backward. Currnent constraints:
+        # 1. Only allreduce is supported at the moment, no custom communication.
+        # 2. The reducer by default sets all grads for parameters DDP manages to
+        # None after they have been applied by the optimizer. There is no support
+        # for setting only some parameter grads to None, this must be done manually
+        # by user (and DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE=0 needs to be set.)
+        from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import allreduce_hook
+        from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import _apply_optim_in_backward_hook
+        if any(
+            hasattr(p, '_in_backward_optimizers') for p in self.module.parameters()
+        ):
+            # Remove hooks that apply_optim_in_backward had registered because
+            # DDP customizes how optimizer is overlapped with backward due to
+            # the allreduce.
+            for p in self.module.parameters():
+                for handle in p._optimizer_hook_handles:
+                    handle.remove()
+
+            self.register_comm_hook(
+                None, # wrapped hook state
+                _apply_optim_in_backward_hook(allreduce_hook),
+            )
+            if os.getenv("DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE", "1") != "0":
+                warnings.warn(
+                    "DDP + apply_optim_in_backward will currently set all "
+                    "parameter gradients to None. If this is not the desired "
+                    "behavior, please set env variable "
+                    "DDP_OVERLAPPED_OPTIM_SET_GRADS_TO_NONE=0, and manually set"
+                    "gradients to None/zero as desired."
+                )
+                self.reducer._set_grads_to_none()
+
     def _build_replicated_tensor_module(self):
         if self._use_replicated_tensor_module:
             # Create a module with ReplicatedTensor without copying tensors. Avoid
