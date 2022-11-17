@@ -14640,6 +14640,9 @@ class TestNNDeviceType(NNTestCase):
             test_bfloat16(torch.nn.Softshrink(), device, shape, prec=1e-2)
             test_bfloat16(torch.nn.Hardswish(), device, shape, prec=2e-2)
             test_bfloat16(torch.nn.Softplus(), device, shape, prec=1e-2)
+            test_bfloat16(torch.nn.SiLU(), device, shape, prec=1e-2)
+            test_bfloat16(torch.nn.Hardtanh(), device, shape, prec=1e-2)
+            test_bfloat16(torch.nn.Mish(), device, shape, prec=1e-2)
 
     @onlyCUDA
     def test_activations_bfloat16(self, device):
