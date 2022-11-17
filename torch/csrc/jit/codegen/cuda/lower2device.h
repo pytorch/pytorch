@@ -185,6 +185,8 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   //  warp size.
   void collectPaddedParallelDims();
 
+  bool resolveComputeWith(Fusion* fusion);
+
  private:
   // Lowered Kernel IR
   std::unique_ptr<kir::Kernel> kernel_;

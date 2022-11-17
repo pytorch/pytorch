@@ -11,12 +11,18 @@ namespace fuser {
 namespace cuda {
 
 MaxPosCalculator::MaxPosCalculator(
-    const std::unordered_set<IterDomain*>& uninlinable_ids)
+    const std::unordered_set<IterDomain*>& uninlinable_ids,
+    bool compute_at_only)
     : uninlinable_ids_(uninlinable_ids) {
-  buildUnmappableDims();
+  buildUnmappableDims(compute_at_only);
 }
 
-void MaxPosCalculator::buildUnmappableDims() {
+void MaxPosCalculator::buildUnmappableDims(bool compute_at_only) {
+  // When used for computeAt only, i.e., without inlining storeAt
+  // positions, the restriction below does not apply
+  if (compute_at_only) {
+    return;
+  }
   ComputeAtRootDomainMap root_map;
   root_map.build();
   auto all_tvs = ir_utils::allTvs(FusionGuard::getCurFusion());

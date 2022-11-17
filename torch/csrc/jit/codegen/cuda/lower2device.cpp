@@ -254,6 +254,8 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // information.
   compute_at_map_ = std::make_shared<ComputeAtMap>(fusion_);
 
+  resolveComputeWith(fusion_);
+
   if (isDebugDumpEnabled(DebugDumpOption::ComputeAtMap)) {
     std::cout << compute_at_map_->toString() << std::endl;
   }
@@ -456,6 +458,29 @@ void GpuLower::propagateExprInfo(const Expr* old_expr, const Expr* new_expr) {
           new_expr->as<kir::Allocate>(), std::move(alloc_info));
     }
   }
+}
+
+bool GpuLower::resolveComputeWith(Fusion* fusion) {
+  std::vector<Expr*> exprs_sorted;
+
+  bool updated = false;
+  for (auto val : fusion->usedMathVals()) {
+    auto tv = dynamic_cast<TensorView*>(val);
+    if (tv == nullptr) {
+      continue;
+    }
+    if (tv->hasComputeWith()) {
+      if (exprs_sorted.empty()) {
+        exprs_sorted = reorderExprsForComputeAt();
+      }
+      if (tv->resolveComputeWith(exprs_sorted)) {
+        updated = true;
+        compute_at_map_->updateComputeWith(tv);
+      }
+    }
+  }
+
+  return updated;
 }
 
 } // namespace cuda

@@ -57,6 +57,13 @@ void validateReductionGrouping(
   const auto num_root_dims = ref_domain.size();
   const auto num_dims = ref_tv->nDims();
   const auto ref_ca_pos = ref_tv->getComputeAtPosition();
+  const auto ref_cw_pos = ref_tv->getComputeWithPosition();
+  // Don't know which consumer would be computed with at this
+  // point. Just make sure all the grouped reduction outputs have the
+  // same set of consumers. This is not necessarily a required
+  // condition and could be made more flexible
+  const auto uses_of_ref =
+      ref_tv->hasComputeWith() ? ref_tv->uses() : std::vector<Expr*>();
   for (const auto i : c10::irange(inputs.size())) {
     auto output_tv = outputs.at(i)->as<TensorView>();
     const auto& output_domain = output_tv->getRootDomain();
@@ -135,6 +142,26 @@ void validateReductionGrouping(
         ref_tv->toString(),
         ". Mismatched tensor: ",
         output_tv->toString());
+
+    // Must have the same computeWith position
+    TORCH_INTERNAL_ASSERT(
+        output_tv->getComputeWithPosition() == ref_cw_pos,
+        "Invalid grouped reduction due to mismatched computeWith position. ",
+        "Reference tensor: ",
+        ref_tv->toString(),
+        ". Mismatched tensor: ",
+        output_tv->toString());
+
+    if (ref_tv->hasComputeWith()) {
+      // Must have the same computeWith consumers
+      TORCH_INTERNAL_ASSERT(
+          output_tv->uses() == uses_of_ref,
+          "Invalid grouped reduction due to mismatched consumers. ",
+          "Reference tensor: ",
+          ref_tv->toString(),
+          ". Mismatched tensor: ",
+          output_tv->toString());
+    }
   }
 
   // Must not have any data dependency from outputs to inputs

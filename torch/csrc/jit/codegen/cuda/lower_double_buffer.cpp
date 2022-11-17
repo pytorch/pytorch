@@ -79,12 +79,17 @@ void validateDoubleBufferedTensor(const TensorView* tv) {
       "Invalid tensor to double-buffer. Only tensor defined by UnaryOp::Set with TensorView is supported: ",
       def->toString());
 
+  TORCH_INTERNAL_ASSERT(
+      !tv->hasComputeWith(),
+      "computeWith is not supported with double buffering: ",
+      tv->toString());
+
   // Require the producer tensor to have been computed entirely for
   // the double-buffering loop. Otherwise, the producer itself would
   // also need to be double-bufferred.
   auto producer = def->input(0)->as<TensorView>();
   TORCH_INTERNAL_ASSERT(
-      producer->getComputeAtPosition() <= double_buffer_pos,
+      producer->getComputePosition(tv) <= double_buffer_pos,
       "Invalid tensor to double-buffer. The computeAt position of the producer tensor must be moved left: ",
       producer->toString());
 

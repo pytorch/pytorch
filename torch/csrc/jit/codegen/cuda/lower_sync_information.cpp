@@ -242,15 +242,15 @@ bool useSameIndex(
     return false;
   }
 
-  // If the producer ID is left of the CA position, the indexing is
-  // done with the corresponding consumer ID
-  auto producer_id_pos = std::distance(
-      producer_tv->domain()->domain().begin(),
-      std::find(
-          producer_tv->domain()->domain().begin(),
-          producer_tv->domain()->domain().end(),
-          producer_id));
-  if (producer_id_pos < producer_tv->getComputeAtPosition()) {
+  // If the producer ID is mapped with any of the consumer IDs, the
+  // indexing is done with the corresponding consumer ID
+  if (std::any_of(
+          consumer_tv->domain()->domain().begin(),
+          consumer_tv->domain()->domain().end(),
+          [&](IterDomain* consumer_leaf_id) {
+            return ca_map.areMapped(
+                consumer_leaf_id, producer_id, IdMappingMode::LOOP);
+          })) {
     return true;
   }
 

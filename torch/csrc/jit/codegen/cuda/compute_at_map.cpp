@@ -19,9 +19,13 @@ namespace {
 // computeAtPosition.
 // If outside computeAt axis, we don't want to directly map consumer/producer in
 // the loop mapping as they are not sharing the same loop.
-bool idIsAComputeAtLeafDomain(IterDomain* id, TensorView* tv) {
-  auto begin = tv->domain()->domain().begin();
-  auto end = tv->domain()->domain().begin() + tv->getComputeAtPosition();
+bool idIsAComputeAtLeafDomain(
+    IterDomain* id,
+    TensorView* producer_tv,
+    TensorView* consumer_tv) {
+  auto begin = producer_tv->domain()->domain().begin();
+  auto end = producer_tv->domain()->domain().begin() +
+      producer_tv->getComputePosition(consumer_tv);
   return std::find(begin, end, id) != end;
 }
 
@@ -475,7 +479,7 @@ void IterDomainGraph::build(Fusion* fusion) {
               if (p_ids.count(id1) && c_ids.count(id2)) {
                 consumers_.at(id1).pushBack(id2);
                 producers_.at(id2).pushBack(id1);
-                if (idIsAComputeAtLeafDomain(id1, p_tv) &&
+                if (idIsAComputeAtLeafDomain(id1, p_tv, c_tv) &&
                     idIsALeafDomain(id2, c_tv)) {
                   loop_nodes_.mapEntries(id1, id2);
                 }
@@ -483,7 +487,7 @@ void IterDomainGraph::build(Fusion* fusion) {
               if (c_ids.count(id1) && p_ids.count(id2)) {
                 producers_.at(id1).pushBack(id2);
                 consumers_.at(id2).pushBack(id1);
-                if (idIsAComputeAtLeafDomain(id2, p_tv) &&
+                if (idIsAComputeAtLeafDomain(id2, p_tv, c_tv) &&
                     idIsALeafDomain(id1, c_tv)) {
                   loop_nodes_.mapEntries(id1, id2);
                 }
@@ -1562,6 +1566,60 @@ ComputeAtMap::getAllDisjointSetConsumers(
   }
 
   return visited;
+}
+
+void IterDomainGraph::updateComputeWith(TensorView* compute_with_tv) {
+  TORCH_INTERNAL_ASSERT(
+      compute_with_tv->hasResolvedComputeWith(),
+      "Invalid tensor: ",
+      compute_with_tv->toString());
+
+  // Can use any consumer this tensor is computed with
+  auto consumer_tv = compute_with_tv->getComputeWithConsumers().at(0);
+
+  for (auto pos = compute_with_tv->getComputeAtPosition();
+       pos < compute_with_tv->getComputeWithPosition();
+       ++pos) {
+    auto id = compute_with_tv->axis(pos);
+
+    // Find the matching consumer ID using the permissive map
+    auto it = std::find_if(
+        consumer_tv->domain()->domain().begin(),
+        consumer_tv->domain()->domain().end(),
+        [&](auto consumer_id) {
+          return permissiveNodes().disjointSetMap().at(id)->has(consumer_id);
+        });
+    TORCH_INTERNAL_ASSERT(
+        it != consumer_tv->domain()->domain().end(),
+        "No consumer leaf ID of tensor ",
+        consumer_tv->toString(),
+        " permissively mapped with: ",
+        id->toString());
+
+    IterDomain* consumer_id = *it;
+
+    loop_nodes_.mapEntries(id, consumer_id);
+  }
+}
+
+void ComputeAtMap::updateComputeWith(TensorView* compute_with_tv) {
+  TORCH_INTERNAL_ASSERT(
+      compute_with_tv->hasResolvedComputeWith(),
+      "Invalid tensor: ",
+      compute_with_tv->toString());
+
+  id_graph_.updateComputeWith(compute_with_tv);
+
+  // Update the LOOP concrete IDs
+  for (const auto& disjoint_set_shared_ptr :
+       id_graph_.loopNodes().disjointSets()) {
+    TORCH_INTERNAL_ASSERT(
+        disjoint_set_shared_ptr->vector().size(),
+        "Cannot compute concrete id of empty set.");
+    auto first_id = disjoint_set_shared_ptr->vector().front();
+    auto concrete_id = computeConcreteId(first_id, IdMappingMode::LOOP);
+    concrete_id_cache_[disjoint_set_shared_ptr] = concrete_id;
+  }
 }
 
 } // namespace cuda

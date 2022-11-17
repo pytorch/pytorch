@@ -296,6 +296,10 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return max_producer_pos_;
   }
 
+  unsigned int getMaybeMaxProducerPosition() const {
+    return maybe_max_producer_pos_;
+  }
+
   //! This is used when we disconnect a tensorview from a reduction
   //!  operation and connect it to a non-reduction operator. We need
   //!  to remove the reduction ids on the tv in this case.
@@ -473,6 +477,58 @@ class TORCH_CUDA_CU_API TensorView : public Val {
       bool best_effort = false,
       MaxPosCalculator* calc = nullptr);
 
+  //! Inline the computation of this tensor into a consumer at the given
+  //! position. The consumer to compute with is determined when the
+  //! fusion is lowered. Specifically, it is the first consumer tensor
+  //! in the topologically ordered dependency graph. Before the
+  //! lowering, its compute-with consumer is considered unresolved,
+  //! which is then resolved by resolveComputeWith below.
+  //!
+  //! The position is relative to its own domain. It is an
+  //! error if the position is smaller than the compute-at position. If this
+  //! tensor is already inlined in a higher position with the same
+  //! consumer, then this call is a no-op. The actual position is
+  //! computed in the same way as inlineAt, except that computeWith
+  //! does not have the constraint of the persistent data-dependency pattern.
+  void computeWith(int pos, bool best_effort = false);
+
+  //! Set the actual consumer tensors that this tensor is
+  //! computed with. Requires a topologically sorted list expressions,
+  //! which can be obtained reorderExprsForComputeAt. Return true if
+  //! resolution is actually done. This should only be done in the
+  //! Kernel container.
+  bool resolveComputeWith(const std::vector<Expr*>& sorted_exprs);
+
+  bool hasComputeWith() const {
+    return getComputeWithPosition() > getComputeAtPosition();
+  }
+
+  bool hasResolvedComputeWith() const {
+    return !compute_with_consumers_.empty();
+  }
+
+  //! Query if this tensor is computed with a given consumer.
+  bool isComputedWith(const TensorView* consumer) const;
+
+  //! Return the tensors with which this tensor is computed. It is an
+  //! error to use this function without first resolving computeWith.
+  const std::vector<TensorView*>& getComputeWithConsumers() const;
+
+  unsigned int getComputeWithPosition() const {
+    return compute_with_pos_;
+  }
+
+  unsigned int getMaxComputePosition() const {
+    return std::max(getComputeWithPosition(), getComputeAtPosition());
+  }
+
+  //! Returns the position that this tensor is produced at for a given
+  //! consumer. If this tensor is computed with the given consumer,
+  //! which also means its computeWith needs to have been resolved, the
+  //! computeWith position is returned. Otherwise, the default computeAt
+  //! position is retured.
+  unsigned int getComputePosition(const TensorView* consumer) const;
+
   // Update the max producer position of the current tensor. This is required
   // when we modify producer-consumer relationship of a scheduled tensor, for
   // example, grouping multiple reductions.
@@ -497,6 +553,8 @@ class TORCH_CUDA_CU_API TensorView : public Val {
       TensorView* tv,
       const std::vector<int>& axes);
 
+  void clearComputeWith();
+
  private:
   TensorDomain* domain_ = nullptr;
   unsigned int compute_at_pos_ = 0;
@@ -510,18 +568,34 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   //! Indicates the circular buffering stage depth if applicable.
   unsigned int circular_buffer_stage_ = 0;
 
-  // special handling for CPU based zero-dim tensors (i.e. CPU Tensors that only
-  // have one value). This is only used if on an input value, otherwise ignored.
-  // This is important as special handling because these "scalars" should be
-  // type promoted as a tensor, but we want to avoid explicit copying of the
-  // data, so we want to pass the data value as a standard kernel argument
-  // value.
+  // special handling for CPU based zero-dim tensors (i.e. CPU Tensors that
+  // only have one value). This is only used if on an input value, otherwise
+  // ignored. This is important as special handling because these "scalars"
+  // should be type promoted as a tensor, but we want to avoid explicit
+  // copying of the data, so we want to pass the data value as a standard
+  // kernel argument value.
   bool cpu_scalar_ = false;
 
   //! Indicates if this tensor view has swizzle operator on its tensor domain.
   //!  This is the temporary flag for indicating that the new swizzle
   //!  implementation is used and will be removed in follow ups.
   bool has_swizzle_op_ = false;
+
+  //! Direct consumer tensors that this tensor is computed with
+  std::vector<TensorView*> compute_with_consumers_;
+
+  //! Position where this tensor is computed with the compute-with
+  //! consumer tensors. It should be always be equal or greater than
+  //! the computeAt position
+  unsigned int compute_with_pos_ = 0;
+
+  //! Maximum position where producers may be computed at, including
+  //! unresolved computeWith. This is equal to max_producer_pos_ when
+  //! no producer has unresolved computeWith. It is only used before
+  //! resolving computeWith so that no IterDomain should never be
+  //! transformed when there may actually be a producer tensor that
+  //! may be computed at.
+  unsigned int maybe_max_producer_pos_ = 0;
 };
 
 //! A simple TensorView builder

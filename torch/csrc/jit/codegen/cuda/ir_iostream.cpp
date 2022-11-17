@@ -150,7 +150,8 @@ void IrPrinter::handle(const TensorDomain* td) {
 }
 
 void IrPrinter::handle(const TensorView* tv) {
-  os_ << "T" << varName(tv);
+  static const std::string prefix = "T";
+  os_ << prefix << varName(tv);
   switch (tv->getMemoryType()) {
     case MemoryType::Global:
       os_ << "_g";
@@ -171,9 +172,30 @@ void IrPrinter::handle(const TensorView* tv) {
     os_ << tv->getComputeAtPosition();
     os_ << " )";
   }
+  if (tv->hasComputeWith()) {
+    os_ << " compute_with( ";
+    bool first = true;
+    if (tv->hasResolvedComputeWith()) {
+      for (auto consumer : tv->getComputeWithConsumers()) {
+        if (!first) {
+          os_ << ", ";
+        }
+        os_ << prefix << varName(consumer);
+        first = false;
+      }
+      os_ << ", ";
+    }
+    os_ << tv->getComputeWithPosition();
+    os_ << " )";
+  }
   if (tv->getMaxProducerPosition() > 0) {
     os_ << " produce_pos( ";
     os_ << tv->getMaxProducerPosition();
+    os_ << ")";
+  }
+  if (tv->getMaybeMaxProducerPosition() > tv->getMaxProducerPosition()) {
+    os_ << " maybe_produce_pos( ";
+    os_ << tv->getMaybeMaxProducerPosition();
     os_ << ")";
   }
 }

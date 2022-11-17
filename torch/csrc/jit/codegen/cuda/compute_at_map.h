@@ -112,6 +112,9 @@ class TORCH_CUDA_CU_API IterDomainGraph {
     return self_mapping_info_.has_value();
   }
 
+  // Update the LOOP nodes with resolved computeWith
+  void updateComputeWith(TensorView* compute_with_tv);
+
  private:
   void build(Fusion* fusion);
 
@@ -254,6 +257,9 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   const std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>& disjointSetOf(
       IterDomain* id,
       IdMappingMode mode) const;
+
+  // Update the LOOP map with resolved computeWith
+  void updateComputeWith(TensorView* compute_with_tv);
 
  private:
   // Traverses through definitions of exact maps (unique_exact_definitions_) to

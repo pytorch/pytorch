@@ -541,7 +541,7 @@ void validateAndCollectVectorizeInfo(Fusion* fusion) {
         // on it to make sure their compute at position isn't to the right of
         // the vectorize dim.
         TORCH_INTERNAL_ASSERT(
-            i >= tv->getComputeAtPosition(),
+            i >= tv->getMaxComputePosition(),
             "IterDomains to the left of the compute at point cannot be vectorized: ",
             tv,
             "\n");
@@ -550,8 +550,8 @@ void validateAndCollectVectorizeInfo(Fusion* fusion) {
 
       if (concrete_id->getParallelType() == ParallelType::MisalignedVectorize) {
         TORCH_INTERNAL_ASSERT(
-            !tv->hasComputeAt() ||
-                tv->getComputeAtPosition() == tv->nDims() - 1,
+            tv->getMaxComputePosition() == 0 ||
+                tv->getMaxComputePosition() == tv->nDims() - 1,
             "Only allow misaligned vectorization in the -2 computeAt position.");
         TORCH_INTERNAL_ASSERT(
             tv->getMemoryType() == MemoryType::Local ||
@@ -1111,11 +1111,11 @@ void validateSwizzle(Fusion* fusion) {
       auto inlined_swizzles = ir_utils::getAllSwizzlesBetween(
           tv->getMaybeRFactorDomain(),
           {tv->domain()->domain().begin(),
-           tv->domain()->domain().begin() + tv->getComputeAtPosition()});
+           tv->domain()->domain().begin() + tv->getMaxComputePosition()});
 
       auto not_inlined_swizzles = ir_utils::getAllSwizzlesBetween(
           tv->getMaybeRFactorDomain(),
-          {tv->domain()->domain().begin() + tv->getComputeAtPosition(),
+          {tv->domain()->domain().begin() + tv->getMaxComputePosition(),
            tv->domain()->domain().end()});
 
       // Check inlined swizzles: only loop swizzles can be inlined currently
@@ -1184,7 +1184,7 @@ void validateAndConvertIterDomainGrouping(Fusion* fusion) {
 
       // The CA position must be left of any grouped ID
       TORCH_CHECK(
-          tv->getComputeAtPosition() <= id_idx,
+          tv->getMaxComputePosition() <= id_idx,
           "Invalid use of ParallelType::Group.",
           " ComputeAt position must be left of grouped IDs: ",
           tv->toString());

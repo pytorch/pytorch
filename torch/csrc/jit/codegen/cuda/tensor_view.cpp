@@ -213,7 +213,9 @@ TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
       is_circular_buffered_(src->is_circular_buffered_),
       circular_buffer_stage_(src->circular_buffer_stage_),
       cpu_scalar_(src->cpu_scalar_),
-      has_swizzle_op_(src->has_swizzle_op_) {}
+      has_swizzle_op_(src->has_swizzle_op_),
+      compute_with_consumers_(ir_cloner->clone(src->compute_with_consumers_)),
+      compute_with_pos_(src->compute_with_pos_) {}
 
 bool TensorView::hasReduction() const {
   return domain()->hasReduction();
@@ -330,24 +332,34 @@ void TensorView::inlineAt(
     return;
   }
 
-  if (pos > compute_at_pos_) {
-    compute_at_pos_ = pos;
-    for (auto consumer : ir_utils::consumerTvsOf(this)) {
-      consumer->updateMaxProducerPosition();
-    }
+  if (pos <= compute_at_pos_) {
+    return;
+  }
+
+  compute_at_pos_ = pos;
+
+  // If the new computeAt position is further inlined than the
+  // computeWith position, reset the computeWith setting
+  if (compute_at_pos_ >= compute_with_pos_) {
+    clearComputeWith();
+  }
+
+  for (auto consumer : ir_utils::consumerTvsOf(this)) {
+    consumer->updateMaxProducerPosition();
   }
 }
 
 namespace {
 
-// Try to find the aligned position on consumer's domain corresponding to the
-//  compute at position of producer domain. No checking on actual
+// Try to find the aligned position on consumer's domain corresponding to a
+//  position of producer domain. No checking on actual
 //  producer-consumer relationship.
 unsigned int getConsumerPosAlignedToProducerCA(
     TensorView* consumer,
-    TensorView* producer) {
+    TensorView* producer,
+    unsigned int producer_pos) {
   // Locate consumer's position that aligns with
-  //  the producer's new compute at axis. We need broadcast axes forwarded so we
+  //  the producer's position. We need broadcast axes forwarded so we
   //  need to replay PasC as CasP will not forward braodcast dims. For example
   //  if we have:
   // T2[ iS22{( 3 * 1 )} ] ca_pos( 1 ) = broadcast( T1[ iS1{3} ] ca_pos( 1 )
@@ -368,7 +380,7 @@ unsigned int getConsumerPosAlignedToProducerCA(
     auto p_dom = producer->domain()->domain();
     if (std::any_of(
             p_dom.begin(),
-            p_dom.begin() + producer->getComputeAtPosition(),
+            p_dom.begin() + producer_pos,
             [&consumer_id, &disjoint_sets](IterDomain* p_id) {
               return disjoint_sets.permissiveAreMapped(consumer_id, p_id);
             })) {
@@ -383,12 +395,27 @@ unsigned int getConsumerPosAlignedToProducerCA(
 } // namespace
 
 void TensorView::updateMaxProducerPosition() {
-  TORCH_INTERNAL_ASSERT(
-      !container()->isA<kir::Kernel>(),
-      "Function invalid for kernel container.");
   for (auto producer : ir_utils::producerTvsOf(this)) {
     max_producer_pos_ = std::max(
-        max_producer_pos_, getConsumerPosAlignedToProducerCA(this, producer));
+        max_producer_pos_,
+        getConsumerPosAlignedToProducerCA(
+            this, producer, producer->getComputePosition(this)));
+  }
+
+  maybe_max_producer_pos_ = max_producer_pos_;
+
+  // When a producer may be computed with this tensor, i.e., it isn't
+  // yet resolved, reflect that in maybe_max_producer_pos_. If all
+  // producers are already resolved, i.e., after the initial
+  // resolveComputeWith in lowering, this should be just equal to
+  // max_producer_pos_.
+  for (auto producer : ir_utils::producerTvsOf(this)) {
+    if (producer->hasComputeWith() && !producer->hasResolvedComputeWith()) {
+      maybe_max_producer_pos_ = std::max(
+          maybe_max_producer_pos_,
+          getConsumerPosAlignedToProducerCA(
+              this, producer, producer->getComputeWithPosition()));
+    }
   }
 }
 
@@ -405,8 +432,9 @@ TensorView* TensorView::computeAt(
   // We support negative axes, so increment it by consumer->nDims() + 1 and make
   // sure the result is within consumer->nDims() + 1. being at consumer->nDims()
   // means producer will be computed inline with consumer, hence the +1.
-  if (position < 0)
+  if (position < 0) {
     position += int(consumer->nDims()) + 1;
+  }
 
   TORCH_CHECK(
       (position >= 0 && (unsigned int)position < consumer->nDims() + 1) ||
@@ -423,6 +451,180 @@ TensorView* TensorView::computeAt(
   return this;
 }
 
+void TensorView::computeWith(int pos, bool best_effort) {
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
+
+  if (isFusionInput()) {
+    return;
+  }
+
+  TORCH_CHECK(
+      !ir_utils::consumerTvsOf(this).empty(),
+      "There must be at least one consumer of this tensor to use computeWith: ",
+      toString());
+
+  if (pos < 0) {
+    pos += int(nDims()) + 1;
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      pos >= 0 && pos <= nDims(),
+      "Invalid inline position for ",
+      toString(),
+      ": ",
+      pos);
+
+  const auto max_inline_pos =
+      MaxPosCalculator({}, true).getMaxPosAll(this, best_effort);
+
+  if (best_effort) {
+    pos = std::min<int>(max_inline_pos, pos);
+  }
+
+  // hoist inner most broadcast
+  while (pos > 0 && axis(pos - 1)->isBroadcast()) {
+    pos--;
+  }
+
+  TORCH_CHECK(
+      pos <= max_inline_pos,
+      "Invalid computeWith position for T",
+      name(),
+      ": ",
+      pos,
+      ". Maximum allowed value:",
+      max_inline_pos);
+
+  // The position must be right of the computeAt position
+  TORCH_CHECK(
+      pos >= getComputeAtPosition(),
+      "Position must be right of the computeAt position. Position: ",
+      pos,
+      ", computeAt position: ",
+      getComputeAtPosition());
+
+  // If it's already set to be computed with the consumer and the
+  // position is higher, nothing to change
+  if (getComputeWithPosition() >= pos) {
+    return;
+  }
+
+  // Update the siblings together
+  auto siblings = ir_utils::filterByType<TensorView>(definition()->outputs());
+
+  for (auto sibling : siblings) {
+    sibling->clearComputeWith();
+  }
+
+  // If the given position is the same as the computeAt position, this
+  // is a no-op
+  if (pos == getComputeAtPosition()) {
+    return;
+  }
+
+  for (auto sibling : siblings) {
+    sibling->compute_with_pos_ = (unsigned int)pos;
+  }
+
+  for (auto consumer : ir_utils::consumerTvsOf(this)) {
+    consumer->updateMaxProducerPosition();
+  }
+}
+
+bool TensorView::isComputedWith(const TensorView* consumer) const {
+  if (!hasComputeWith()) {
+    return false;
+  }
+
+  // Quering is an error if the compute-with consumer is still unresolved
+  TORCH_INTERNAL_ASSERT(
+      hasResolvedComputeWith(), "Not resolved yet: ", toString());
+
+  return std::find(
+             getComputeWithConsumers().begin(),
+             getComputeWithConsumers().end(),
+             consumer) != getComputeWithConsumers().end();
+}
+
+const std::vector<TensorView*>& TensorView::getComputeWithConsumers() const {
+  TORCH_INTERNAL_ASSERT(
+      !hasComputeWith() || hasResolvedComputeWith(),
+      "computeWith not yet resolved: ",
+      toString());
+  return compute_with_consumers_;
+}
+
+unsigned int TensorView::getComputePosition(const TensorView* consumer) const {
+  if (hasResolvedComputeWith() && isComputedWith(consumer)) {
+    return getComputeWithPosition();
+  } else {
+    return getComputeAtPosition();
+  }
+}
+
+bool TensorView::resolveComputeWith(const std::vector<Expr*>& sorted_exprs) {
+  TORCH_INTERNAL_ASSERT(
+      container()->isA<kir::Kernel>(), "Function invalid for fusion.");
+
+  auto siblings = ir_utils::filterByType<TensorView>(definition()->outputs());
+
+  for (auto sibling : siblings) {
+    TORCH_INTERNAL_ASSERT(
+        sibling->hasComputeWith(),
+        "Invlaid attempt to resolve computeWith: ",
+        sibling->toString());
+  }
+
+  // It may have been already resolved through its siblings
+  if (hasResolvedComputeWith()) {
+    return false;
+  }
+
+  std::unordered_set<Expr*> use_set;
+  for (auto sibling : siblings) {
+    use_set.insert(sibling->uses().begin(), sibling->uses().end());
+  }
+
+  for (auto expr : sorted_exprs) {
+    if (!use_set.count(expr)) {
+      continue;
+    }
+
+    // First use found. Set it as the computeWith target tensor
+    std::vector<TensorView*> use_out_tvs{
+        ir_utils::filterByType<TensorView>(expr->outputs()).begin(),
+        ir_utils::filterByType<TensorView>(expr->outputs()).end()};
+
+    for (auto sibling : siblings) {
+      sibling->compute_with_consumers_ = use_out_tvs;
+    }
+
+    for (auto consumer_tv : compute_with_consumers_) {
+      consumer_tv->updateMaxProducerPosition();
+    }
+
+    return true;
+  }
+
+  // No expr found
+  TORCH_INTERNAL_ASSERT(
+      false, "No use expr found in the sorted expr list: ", toString());
+}
+
+void TensorView::clearComputeWith() {
+  //! This should be only used while in a Fusion container.
+  TORCH_INTERNAL_ASSERT(
+      !container()->isA<kir::Kernel>(),
+      "Function invalid for kernel container.");
+
+  compute_with_pos_ = getComputeAtPosition();
+
+  // compute_with_consumers_ should still be empty
+  TORCH_INTERNAL_ASSERT(compute_with_consumers_.empty());
+}
+
 TensorView* TensorView::split(
     int axis_,
     Val* factor,
@@ -430,7 +632,11 @@ TensorView* TensorView::split(
     bool trim_out_of_bounds) {
   // Only check things associated with axis, factor will be validated in
   // IterDomain
-  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim TensorView");
+  TORCH_INTERNAL_ASSERT(
+      nDims() > 0,
+      "Tried to do split on a 0-dim TensorView. ",
+      "Tensor: ",
+      toString());
 
   if (axis_ < 0)
     axis_ += domain()->nDims();
@@ -438,26 +644,34 @@ TensorView* TensorView::split(
   TORCH_INTERNAL_ASSERT(
       axis_ >= 0,
       "Split axis is less than 0 even after adjusting for nDims: ",
-      axis_);
+      axis_,
+      ". Tensor: ",
+      toString());
 
   TORCH_CHECK(
-      axis_ >= (int)getComputeAtPosition(),
+      axis_ >= (int)getMaxComputePosition(),
       "Cannot split axis within compute at position. Axis = ",
       axis_,
-      " computeAtPosition = ",
-      getComputeAtPosition());
+      " computePosition = ",
+      getMaxComputePosition(),
+      ". Tensor: ",
+      toString());
 
   TORCH_CHECK(
-      axis_ >= (int)getMaxProducerPosition(),
+      axis_ >= (int)getMaybeMaxProducerPosition(),
       "Cannot split axis within max producer position. Axis = ",
       axis_,
       " maxProducerPosition = ",
-      getMaxProducerPosition());
+      getMaybeMaxProducerPosition(),
+      ". Tensor: ",
+      toString());
 
   TORCH_CHECK(
       axis(axis_)->getParallelType() == ParallelType::Serial,
       "Splitting an axis of non-Serial parallel type is not supported at this time."
-      " Parallelization strategy must be set after calling split.");
+      " Parallelization strategy must be set after calling split.",
+      ". Tensor: ",
+      toString());
 
   domain()->split(axis_, factor, inner_split, trim_out_of_bounds);
   return this;
@@ -483,25 +697,25 @@ TensorView* TensorView::merge(int axis_o, int axis_i) {
     axis_i += domain()->nDims();
 
   TORCH_CHECK(
-      axis_o >= (int)getComputeAtPosition() &&
-          axis_i >= (int)getComputeAtPosition(),
+      axis_o >= (int)getMaxComputePosition() &&
+          axis_i >= (int)getMaxComputePosition(),
       false,
       "Cannot merge axes within compute at position. Either axis ",
       axis_o,
       " or ",
       axis_i,
-      " are within computeAtPosition = ",
-      getComputeAtPosition());
+      " are within computePosition = ",
+      getMaxComputePosition());
 
   TORCH_CHECK(
-      axis_o >= (int)getMaxProducerPosition() &&
-          axis_i >= (int)getMaxProducerPosition(),
+      axis_o >= (int)getMaybeMaxProducerPosition() &&
+          axis_i >= (int)getMaybeMaxProducerPosition(),
       "Cannot merge axes within max producer position. Either axis ",
       axis_o,
       " or ",
       axis_i,
       " are within maxProducerPosition = ",
-      getMaxProducerPosition());
+      getMaybeMaxProducerPosition());
 
   TORCH_CHECK(
       axis(axis_o)->getParallelType() == ParallelType::Serial ||
@@ -537,24 +751,24 @@ TensorView* TensorView::reorder(const std::unordered_map<int, int>& old2new_) {
         "Found \"new\" position that's less than 0 even though already adjusted by nDims: ",
         new_pos);
     TORCH_CHECK(
-        old_pos >= (int)getComputeAtPosition() &&
-            new_pos >= (int)getComputeAtPosition(),
+        old_pos >= (int)getMaxComputePosition() &&
+            new_pos >= (int)getMaxComputePosition(),
         "Cannot reorder axes within compute at position. Either axis ",
         old_pos,
         " or ",
         new_pos,
-        " are within computeAtPosition = ",
-        getComputeAtPosition());
+        " are within computePosition = ",
+        getMaxComputePosition());
 
     TORCH_CHECK(
-        old_pos >= (int)getMaxProducerPosition() &&
-            new_pos >= (int)getMaxProducerPosition(),
+        old_pos >= (int)getMaybeMaxProducerPosition() &&
+            new_pos >= (int)getMaybeMaxProducerPosition(),
         "Cannot reorder axes within max producer position. Either axis ",
         old_pos,
         " or ",
         new_pos,
         " are within maxProducerPosition = ",
-        getMaxProducerPosition());
+        getMaybeMaxProducerPosition());
   }
 
   domain()->reorder(old2new_);
@@ -580,19 +794,18 @@ TensorView* TensorView::swizzle(
       "Data swizzle on global memory is not supported.");
 
   TORCH_CHECK(
-      x >= (int)getComputeAtPosition(),
-      false,
+      x >= (int)getMaxComputePosition(),
       "Cannot swizzle axes within compute at position. Axis ",
       x,
-      " is within computeAtPosition = ",
-      getComputeAtPosition());
+      " is within computePosition = ",
+      getMaxComputePosition());
 
   TORCH_CHECK(
-      y >= (int)getMaxProducerPosition(),
+      y >= (int)getMaybeMaxProducerPosition(),
       "Cannot swizzle axes within max producer position. Axis ",
       y,
       " is within maxProducerPosition = ",
-      getMaxProducerPosition());
+      getMaybeMaxProducerPosition());
 
   // Disable unsupported use cases at the current step.
   //  Currently do not support reducing or broadcasting

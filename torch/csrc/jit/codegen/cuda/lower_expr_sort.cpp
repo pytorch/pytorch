@@ -143,6 +143,10 @@ class ExprGroup {
     return payload_;
   }
 
+  const std::unique_ptr<ExprSortPayload>& payload() const {
+    return payload_;
+  }
+
   const auto& producerEdges() const {
     return producer_edges_;
   }
@@ -182,6 +186,8 @@ class ExprGroup {
   const auto& exprs() const {
     return exprs_;
   }
+
+  std::string toString() const;
 
  private:
   static void addEdge(
@@ -333,30 +339,30 @@ class ExprSegmentationSorter {
 };
 
 // // Debug printing, disabled due to clang-tidy see above for declarations.
-// std::ostream& operator<<(std::ostream& os, ExprGroup* group) {
-//   os << "Group Start{\n  ca, pa ("
-//      << group->payload()->ca_domains_.size() << ", "
-//      << group->payload()->pa_domains_.size() << ")";
-//   os << " ca_ids {";
-//   for (size_t i = 0; i < group->payload()->ca_domains_.size(); i++) {
-//     os << group->payload()->ca_domains_[i];
-//     if (i + 1 != group->payload()->ca_domains_.size())
-//       os << ", ";
-//   }
-//   os << "} pa_ids {";
-//   for (size_t i = 0; i < group->payload()->pa_domains_.size(); i++) {
-//     os << group->payload()->pa_domains_[i];
-//     if (i + 1 != group->payload()->pa_domains_.size())
-//       os << ", ";
-//   }
-//   os << "}";
-//   os << "\nExprs {\n";
-//   for(auto expr : group->exprs()){
-//     os << expr;
-//   }
-//    os << "}Group End\n";
-//   return os;
-// }
+std::string ExprGroup::toString() const {
+  std::stringstream os;
+  os << "Group Start{\n  ca, pa (" << payload()->ca_domains.size() << ", "
+     << payload()->pa_domains.size() << ")";
+  os << " ca_ids {";
+  for (size_t i = 0; i < payload()->ca_domains.size(); i++) {
+    os << payload()->ca_domains[i];
+    if (i + 1 != payload()->ca_domains.size())
+      os << ", ";
+  }
+  os << "} pa_ids {";
+  for (size_t i = 0; i < payload()->pa_domains.size(); i++) {
+    os << payload()->pa_domains[i];
+    if (i + 1 != payload()->pa_domains.size())
+      os << ", ";
+  }
+  os << "}";
+  os << "\nExprs {\n";
+  for (auto expr : exprs()) {
+    os << expr;
+  }
+  os << "}Group End\n";
+  return os.str();
+}
 
 std::vector<ExprGroup*> ExprGroup::getNeighbors() {
   std::vector<ExprGroup*> neighbors;
@@ -549,7 +555,10 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup(
     // Grab all id's that are shared with other tensors.
     // If not connected to consumers, doesn't mater what compute at is set to
     if (!terminating_expr) {
-      for (const auto tv_i : c10::irange(out_tv->getComputeAtPosition())) {
+      for (const auto tv_i : c10::irange(
+               out_tv->hasResolvedComputeWith()
+                   ? out_tv->getComputeWithPosition()
+                   : out_tv->getComputeAtPosition())) {
         auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
             out_tv->axis(tv_i), IdMappingMode::LOOP);
         group->payload()->ca_domains.push_back(concrete_id);
@@ -567,39 +576,39 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup(
 // Debug function that prints the current state of the sorter.
 //
 // Uncomment if needed.
-// std::string ExprSegmentationSorter::toString(int verbosity) const {
-//   std::stringstream ss;
-//   ss << "{\n";
-//   for (auto& group : groups_) {
-//     ss << "  " << group.get() << "\n";
+std::string ExprSegmentationSorter::toString(int verbosity) const {
+  std::stringstream ss;
+  ss << "{\n";
+  for (auto& group : groups_) {
+    ss << "  " << group.get()->toString() << "\n";
 
-//     if (verbosity > 1) {
-//       if (group->producerEdges().size() > 0) {
-//         ss << "Produced by groups with edges: { \n";
-//         for (auto producer_edge : group->producerEdges()) {
-//           ss << producer_edge->producer_val_ << " -> "
-//              << producer_edge->consumer_val_ << "\n";
-//         }
-//         ss << "    }"
-//            << "\n";
-//       }
-//     }
+    if (verbosity > 1) {
+      if (group->producerEdges().size() > 0) {
+        ss << "Produced by groups with edges: { \n";
+        for (auto producer_edge : group->producerEdges()) {
+          ss << producer_edge->producer_val->toString() << " -> "
+             << producer_edge->consumer_val->toString() << "\n";
+        }
+        ss << "    }"
+           << "\n";
+      }
+    }
 
-//     if (verbosity > 1) {
-//       if (group->consumerEdges().size() > 0) {
-//         ss << "Consumed by groups with edges: { \n";
-//         for (auto consumer_edge : group->consumerEdges()) {
-//           ss << consumer_edge->producer_val_ << " -> "
-//              << consumer_edge->consumer_val_ << "\n";
-//         }
-//         ss << "    }"
-//            << "\n";
-//       }
-//     }
-//   }
-//   ss << "}\n";
-//   return ss.str();
-// }
+    if (verbosity > 1) {
+      if (group->consumerEdges().size() > 0) {
+        ss << "Consumed by groups with edges: { \n";
+        for (auto consumer_edge : group->consumerEdges()) {
+          ss << consumer_edge->producer_val->toString() << " -> "
+             << consumer_edge->consumer_val->toString() << "\n";
+        }
+        ss << "    }"
+           << "\n";
+      }
+    }
+  }
+  ss << "}\n";
+  return ss.str();
+}
 
 namespace {
 
@@ -679,6 +688,8 @@ std::vector<IterDomain*> getLocalDomainOrdering(
       continue;
     }
 
+    auto tv_output = ir_utils::getTvOutput(expr);
+
     auto tv_inputs = ir_utils::filterByType<TensorView>(expr->inputs());
     for (auto tv_input : tv_inputs) {
       std::vector<IterDomain*> domain;
@@ -687,7 +698,7 @@ std::vector<IterDomain*> getLocalDomainOrdering(
           tv_input->domain()->domain().begin(),
           tv_input->domain()->domain().begin() +
               std::max(
-                  tv_input->getComputeAtPosition(),
+                  tv_input->getComputePosition(tv_output),
                   tv_input->getMaxProducerPosition()),
           std::back_inserter(domain),
           [&ca_map](IterDomain* id) {
@@ -794,12 +805,17 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
   // to grab the producer val as that's the one we generate.
   std::unordered_set<IterDomain*> ca_ids;
   for (auto consumer_group_edge : joined_groups->consumerEdges()) {
-    auto producer_of_consumer_edge = consumer_group_edge->producer_val;
-    if (producer_of_consumer_edge->isA<TensorView>()) {
-      auto tv = producer_of_consumer_edge->as<TensorView>();
-      for (const auto tv_i : c10::irange(tv->getComputeAtPosition())) {
+    auto producer_of_consumer_edge =
+        dynamic_cast<TensorView*>(consumer_group_edge->producer_val);
+    if (producer_of_consumer_edge != nullptr) {
+      auto consumer_of_consumer_edge =
+          dynamic_cast<TensorView*>(consumer_group_edge->consumer_val);
+      TORCH_INTERNAL_ASSERT(consumer_of_consumer_edge != nullptr);
+      for (const auto tv_i :
+           c10::irange(producer_of_consumer_edge->getComputePosition(
+               consumer_of_consumer_edge))) {
         ca_ids.emplace(GpuLower::current()->caMap()->getConcreteMappedID(
-            tv->axis(tv_i), IdMappingMode::LOOP));
+            producer_of_consumer_edge->axis(tv_i), IdMappingMode::LOOP));
       }
     }
   }
@@ -883,7 +899,7 @@ bool canReducePA(ExprGroup* group) {
     // If any compute at positions of producers directly map to the last produce
     // at position it can't be lowered.
     for (int producer_pos_i =
-             static_cast<int>(producer_tv->getComputeAtPosition());
+             static_cast<int>(producer_tv->getComputePosition(consumer_tv));
          producer_pos_i > 0;
          producer_pos_i--) {
       if (GpuLower::current()->caMap()->areMapped(
@@ -932,7 +948,8 @@ bool ExprSegmentationSorter::interIterUpdate() {
         !fallback_mode_enabled_,
         "Couldn't succcessfully sort out the fusion expressions. ",
         "There are remaining connections of the heirarchical segmentation which should have been ",
-        "flattened to a single ordered group, or disjoint ordered groups.");
+        "flattened to a single ordered group, or disjoint ordered groups.\n",
+        toString());
     // We didn't finish, but we haven't tried the fallback, try again with that.
     fallback_mode_enabled_ = true;
   }
@@ -980,8 +997,10 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
 
   for (auto tv : ir_utils::allTvs(fusion_)) {
     std::unordered_set<IterDomain*> dependencies;
-    for (size_t tv_id_i =
-             std::max(tv->getMaxProducerPosition(), tv->getComputeAtPosition());
+    for (size_t tv_id_i = std::max(
+             tv->getMaxProducerPosition(),
+             tv->hasResolvedComputeWith() ? tv->getComputeWithPosition()
+                                          : tv->getComputeAtPosition());
          tv_id_i > 0;
          tv_id_i--) {
       auto tv_id = tv->axis((int)(tv_id_i - 1));
@@ -1069,7 +1088,7 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
       }
     }
 
-    std::cerr << "Depdencies: " << std::endl;
+    std::cerr << "Dependencies: " << std::endl;
     for (const auto& dep_entry : concrete_id_dependencies_) {
       std::cerr << "  Deps of " << dep_entry.first->toString() << std::endl
                 << "   ";
@@ -1181,10 +1200,11 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
         consumer_val);
 
     auto producer_tv = producer_val->as<TensorView>();
+    auto consumer_tv = consumer_val->as<TensorView>();
 
-    auto compute_at_pos = producer_tv->getComputeAtPosition();
+    auto compute_at_pos = producer_tv->getComputePosition(consumer_tv);
     auto compute_at_dim = compute_at_pos > 0
-        ? producer_tv->axis((int)producer_tv->getComputeAtPosition() - 1)
+        ? producer_tv->axis((int)compute_at_pos - 1)
         : nullptr;
 
     if (compute_at_dim == nullptr) {

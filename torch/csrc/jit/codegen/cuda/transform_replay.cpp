@@ -879,8 +879,8 @@ namespace {
 bool validateDomain(TensorView* tv, TensorDomain* new_td) {
   auto first_mismatch =
       BestEffortReplay::findFirstMismatchedID(tv->domain(), new_td);
-  return first_mismatch >= (int)tv->getMaxProducerPosition() &&
-      first_mismatch >= (int)tv->getComputeAtPosition();
+  return first_mismatch >= (int)tv->getMaybeMaxProducerPosition() &&
+      first_mismatch >= (int)tv->getMaxComputePosition();
 }
 
 } // namespace
