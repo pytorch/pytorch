@@ -32,7 +32,6 @@ from torch.distributed.fsdp._common_utils import (
     _get_param_to_fqns,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
-    HandleTrainingState,
     TrainingState,
 )
 from torch.distributed.fsdp._init_utils import (
@@ -53,9 +52,7 @@ from torch.distributed.fsdp._runtime_utils import (
     _post_forward_reshard,
     _pre_forward,
     _pre_forward_unshard,
-    _reshard,
     _root_pre_forward,
-    _should_free_in_backward,
     _wait_for_computation_stream,
 )
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
