@@ -54,7 +54,10 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 _THREAD_COUNTS = {1, 2}
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> [PT-D][Checkpointing]Add MultiThreaded FileSystemWriter for distributed checkpointing and Update tests
 def assert_state_dict_equal(
     self: TestCase,
     state_dict_1: Dict[str, torch.Tensor],
@@ -109,17 +112,25 @@ class MyShardedModel3(torch.nn.Module):
 
 
 class TestDistributedStateDictSaveLoad(TestCase):
+<<<<<<< HEAD
+=======
+
+>>>>>>> [PT-D][Checkpointing]Add MultiThreaded FileSystemWriter for distributed checkpointing and Update tests
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_read_write_only_tensor(self, thread_count) -> None:
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
 
             fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+<<<<<<< HEAD
             save_state_dict(
                 state_dict=state_dict_to_save,
                 storage_writer=fs_writer,
                 no_dist=True,
             )
+=======
+            save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer, no_dist=True)
+>>>>>>> [PT-D][Checkpointing]Add MultiThreaded FileSystemWriter for distributed checkpointing and Update tests
 
             state_dict_to_load_to = MyTestModule().state_dict()
 
@@ -305,12 +316,17 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 model_to_save._register_state_dict_hook(state_dict_hook)
                 state_dict_to_save = model_to_save.state_dict()
 
+<<<<<<< HEAD
                 fs_writer = FileSystemWriter(
                     path=path, thread_count=thread_count
                 )
                 save_state_dict(
                     state_dict=state_dict_to_save, storage_writer=fs_writer
                 )
+=======
+                fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+                save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
+>>>>>>> [PT-D][Checkpointing]Add MultiThreaded FileSystemWriter for distributed checkpointing and Update tests
 
                 dist.barrier()
 
@@ -407,9 +423,13 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False, backend="gloo")
     @parametrize("thread_count", _THREAD_COUNTS)
+<<<<<<< HEAD
     def test_switch_between_sharded_tensor_to_tensor(
         self, thread_count
     ) -> None:
+=======
+    def test_switch_between_sharded_tensor_to_tensor(self, thread_count) -> None:
+>>>>>>> [PT-D][Checkpointing]Add MultiThreaded FileSystemWriter for distributed checkpointing and Update tests
         path = self.get_file_path()
         tensor_size = 32
 
@@ -469,9 +489,13 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     ),
                 }
 
+<<<<<<< HEAD
                 fs_writer = FileSystemWriter(
                     path=path, thread_count=thread_count
                 )
+=======
+                fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+>>>>>>> [PT-D][Checkpointing]Add MultiThreaded FileSystemWriter for distributed checkpointing and Update tests
                 save_state_dict(state_dict=save_dict, storage_writer=fs_writer)
 
                 # Freaky Friday the tensors
