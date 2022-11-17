@@ -1,3 +1,4 @@
+import abc
 import enum
 import functools
 import inspect
@@ -25,6 +26,8 @@ def wrap_bound_arg(val, options):
         return variables.ConstantVariable(val, **options)
     elif isinstance(val, enum.Enum):
         return variables.EnumVariable(val, **options)
+    elif isinstance(val, (type, abc.ABCMeta)):
+        return variables.UserDefinedClassVariable(val, **options)
     else:
         assert isinstance(val, VariableTracker), typestr(val)
         return val
@@ -84,7 +87,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         assert isinstance(
             fn, types.FunctionType
         ), f"expected FunctionType found {typestr(fn)} {fn}"
-        # unpack @torchdynamo.optimize()(fn) wrapped function
+        # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
         # unpack torch.jit.script_if_tracing
         if inspect.getattr_static(fn, "__script_if_tracing_wrapper", False):

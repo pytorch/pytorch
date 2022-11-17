@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/reference_tensor.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <unordered_map>
@@ -17,40 +16,40 @@
  * indices (based on input indices) that match the root dimension.
  *
  * For example with GLOBAL tensor:
- * TV[I, J]
- * TV[Io, Ii{4}, J] = TV.split(I, factor=4)
+ * TV[I, K]
+ * TV[Io, Ii{4}, K] = TV.split(I, factor=4)
  * ALLOC: NONE
  * INDEX: indexCompute {i, j, k} -> {i * 4 + j, k}
- * FLATTENED_INDEX: {i * 4 + j, k} -> {i * 4 + j * J + k}
+ * FLATTENED_INDEX: {i * 4 + j, k} -> {(i * 4 + j) * K + k}
  * PREDICATE: {i * 4 + j, k} -> i * 4 + j < I
  *
  *
  * For example with SHARED tensor:
  *
- * global_TV[I, J]
- * global_TV[Io, Ii{4}, J] = global_TV.split(I, factor=4)
+ * global_TV[I, K]
+ * global_TV[Io, Ii{4}, K] = global_TV.split(I, factor=4)
  * smem_TV.compute_at(global_TV, 1)
  * global_TV.parallelize(1, threadIDx.x)
  *
- * ALLOC: alloc(smem_TV, 4 x J)
+ * ALLOC: alloc(smem_TV, 4 x K)
  * INDEX: indexCompute(smem_TV, {threadIdx.x, k}) -> {threadIdx.x, k}
- * FLATTENED_INDEX: {threadIdx.x * 4 + j, k} -> {threadIdx.x * 4 + j * J + k}
+ * FLATTENED_INDEX: {threadIdx.x * 4 + j, k} -> {(threadIdx.x * 4 + j) * K + k}
  * PREDICATE: {threadIdx.x * 4 + j, k} -> threadIdx.x * 4 + j < I // Same as if
  * global
  *
  *
  * For example with LOCAL tensor:
- * global_TV[I, J, K]
- * global_TV[Io, Ii{4}, J] = global_TV.split(I, factor=4)
- * reg_TV.compute_at(global_TV, 1)
+ * global_TV[I, K, L]
+ * global_TV[Io, Ii{4}, K, L] = global_TV.split(I, factor=4)
+ * reg_TV.compute_at(global_TV, 2)
  * global_TV.parallelize(1, threadIDx.x)
  * global_TV{i, j, k, l} -> { i * 4 + j, k, l }
- * global_TV{ i * 4 + j, k, l } -> { i * 4 + j * J * K  +  k * K  +  l}
+ * global_TV{ i * 4 + j, k, l } -> { (i * 4 + j) * K * L  +  k * L  +  l}
  *
- * ALLOC: alloc(reg_TV, J x K)
+ * ALLOC: alloc(reg_TV, K x L)
  * INDEX: {k, l} -> {k, l}
- * FLATTENED_INDEX: {k, l} -> {k * J + l}
- * PREDICATE: i * 4 + j < I && k < J && l < K ->  // Same as if global
+ * FLATTENED_INDEX: {k, l} -> {k * L + l}
+ * PREDICATE: i * 4 + j < I && k < K && l < L ->  // Same as if global
  *
  * These indices can then be flattened later based on strides.
  */
@@ -62,6 +61,7 @@ namespace cuda {
 
 class ContigIDs;
 class LoopIndexing;
+struct IndexFromIdGraph;
 
 class IndexCompute : public BackwardVisitor {
  protected:
@@ -134,9 +134,8 @@ class IndexCompute : public BackwardVisitor {
   // if there's an option
   std::unordered_set<IterDomain*> preferred_paths_;
 
-  // Map from IterDomains to halo-extended extents in corresponding
-  // reference tensor
-  std::unordered_map<IterDomain*, Val*> reference_halo_extent_map_;
+  // Map from IterDomains to halo-extended extents
+  std::unordered_map<IterDomain*, Val*> halo_extent_map_;
 
   // Temporary flag which tells IndexCompute to use concrete id's from the exact
   // map rather than the actual IDs used in the ID expressions.
@@ -188,7 +187,7 @@ class IndexCompute : public BackwardVisitor {
       std::unordered_set<IterDomain*> zero_domains,
       std::unordered_set<IterDomain*> _zero_merged_in,
       std::unordered_set<IterDomain*> preferred_paths = {},
-      std::unordered_map<IterDomain*, Val*> reference_halo_extent_map = {});
+      std::unordered_map<IterDomain*, Val*> halo_extent_map = {});
 
   IndexCompute(
       const TensorDomain* _td,
@@ -198,7 +197,7 @@ class IndexCompute : public BackwardVisitor {
       std::unordered_set<IterDomain*> _zero_merged_in,
       const ContigIDs& contig_finder,
       std::unordered_set<IterDomain*> preferred_paths = {},
-      std::unordered_map<IterDomain*, Val*> reference_halo_extent_map = {});
+      std::unordered_map<IterDomain*, Val*> halo_extent_map = {});
 
   // Entry point used for using concrete id based traversal. This traversal is
   // assumed to start at leaf IDs provided by initial_index_map.
@@ -213,9 +212,7 @@ class IndexCompute : public BackwardVisitor {
   IndexCompute updateIndexCompute(
       const TensorDomain* new_td,
       const std::unordered_map<IterDomain*, IterDomain*>& id_map,
-      const ContigIDs& contig_finder,
-      const std::unordered_map<IterDomain*, Val*>& reference_halo_extent_map =
-          {}) const;
+      const ContigIDs& contig_finder) const;
 
   // Interface to run index traversal through loop indexing analysis result to
   // be used with the entry point for concrete id based traversal.
@@ -331,6 +328,15 @@ class Index {
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
+  // get the strides of a tensor used for the index lowering
+  static std::vector<Val*> getStrides(const TensorView* tv);
+
+  // get the root indices of a tensor used for the index lowering
+  static std::vector<Val*> getRootIndices(
+      const TensorView* tv,
+      const std::vector<kir::ForLoop*>& loops,
+      const IndexFromIdGraph& index_from_id_graph);
+
  public:
   // Indexing functions
   // Consumer = Producer
@@ -363,19 +369,28 @@ class Index {
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
-  //! Returns a vector of strided indices mapped onto the (rfactor)
+  //! Returns the logical index linearized from a multi-dimension address into a
+  //! linear memory address a consumer tensor. The returned index is intended to
+  //! be used for the computation of some tensor factories, such as: arange and
+  //! rand (for Philox pseudo random sequences)
+  static std::vector<Val*> getLinearLogicalIndex(
+      TensorView* consumer_tv,
+      const std::vector<kir::ForLoop*>& loops);
+
+  //! Returns a vector of logical indices mapped onto the (rfactor)
   //! root domain of a consumer tensor. The returned index is intended
-  //! to be used to index into arange or Philox pseudo random sequences
-  static std::vector<Val*> getLinearIndex(
+  //! to be used for the computation of some tensor factories, such as:
+  //! eye
+  static std::vector<Val*> getPerDimLogicalIndex(
       TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops);
 
   //! Take a consumer tensorview and loop nest and generates predicates
   //! associated with the concrete roots of the loop nest. Returns a list of
-  //! predicates, and a list of concrete roots they're associated with. It is
-  //! assumed that no predicate is required if index[i] is an index directly
-  //! from a for loop. This will not catch all cases if we actually have static
-  //! size information for example:
+  //! predicates, and a list of concrete roots they're associated with. It
+  //! is assumed that no predicate is required if index[i] is an index
+  //! directly from a for loop. This will not catch all cases if we actually
+  //! have static size information for example:
   //!
   //! TV[I].split(4)
   //! would produce the code:
@@ -384,14 +399,14 @@ class Index {
   //!     if( i * 4 + j < TV.size(0))
   //!       TV[i * 4 + j]...
   //!
-  //! However if we had TV.size[0] = 16 at "compile time" then we wouldn't need
-  //! the predicate. This will be caught by canOmitPredicate in the predicate
-  //! lowering
+  //! However if we had TV.size[0] = 16 at "compile time" then we wouldn't
+  //! need the predicate. This will be caught by canOmitPredicate in the
+  //! predicate lowering
   //!
-  //! unswitch_or_vec_loop is the for loop to start the unswitch like predicate,
-  //! this is not a bool value as if we have an unswitch loop with a vectorized
-  //! loop inside, we only want to base the "unswitch" like predicate on the
-  //! vectorized loop.
+  //! unswitch_or_vec_loop is the for loop to start the unswitch like
+  //! predicate, this is not a bool value as if we have an unswitch loop
+  //! with a vectorized loop inside, we only want to base the "unswitch"
+  //! like predicate on the vectorized loop.
   static std::vector<RootPredicateInfo> getReferenceRootPredicates(
       TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops,

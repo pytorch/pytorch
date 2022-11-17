@@ -66,7 +66,6 @@ class _FunctionalAdam(object):
         Similar to step, but operates on a single parameter and optionally a
         gradient tensor.
         """
-        params = [param]
         params_with_grad = []
         grads = []
         exp_avgs = []

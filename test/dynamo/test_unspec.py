@@ -50,7 +50,6 @@ def make_unspec_cls(cls):
 UnspecReproTests = make_unspec_cls(test_repros.ReproTests)
 UnspecNNModuleTests = make_unspec_cls(test_modules.NNModuleTests)
 
-# RuntimeError: a leaf Variable that requires grad is being used in an in-place operation.
 unittest.expectedFailure(UnspecReproTests.test_batch_norm_act_unspec)
 
 
