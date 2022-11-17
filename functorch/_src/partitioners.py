@@ -361,7 +361,20 @@ def min_cut_rematerialization_partition(
                 return False
             if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
                 return False
-            if compiler == "inductor" and node.dist_from_bw > 3:
+
+            # If a node *must* be materialized in the backwards pass, then we
+            # should never recompute it. This is a pretty subtle point.  In
+            # general, the assumption we make is that recomputing a node in the
+            # backwards pass is "free". However, if a node must be materialized
+            # in the backwards pass, then recomputing it is never free.
+            for user in node.users:
+                if user in required_bw_nodes and not is_fusible(node, user):
+                    return True
+
+            # Arbitrary hack that sometimes seems to help things. The above
+            # modification appears to have made this heuristic a lot less critical
+            # for performance.
+            if compiler == "inductor" and node.dist_from_bw > 5:
                 return True
             # If the output of an op is 4x smaller (arbitrary choice),
             # then we don't allow recomputation.
