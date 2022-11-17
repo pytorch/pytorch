@@ -524,6 +524,39 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
   iter.cast_outputs();
 }
 
+template <typename scalar_t>
+void cpu_vflip_memcpy(at::TensorIterator& iter) {
+
+  auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
+
+    static constexpr int ntensors = 3;
+    std::array<char*, ntensors> data_arr;
+    std::copy_n(base, ntensors, data_arr.data());
+    const int64_t *outer_strides = &strides[ntensors];
+
+    for (const auto j C10_UNUSED : c10::irange(size1)) {
+
+      char** C10_RESTRICT data_ = data_arr.data();
+      int64_t n = size0;
+
+      char* C10_RESTRICT data[ntensors];
+      for (const auto arg : c10::irange(ntensors)) {
+        data[arg] = data_[arg];
+      }
+
+      memcpy(data[0], data[1], n * strides[0]);
+
+      // advance:
+      for (const auto arg : c10::irange(data_arr.size())) {
+        data_arr[arg] += outer_strides[arg];
+      }
+    }
+  };
+
+  int64_t grain_size = at::internal::GRAIN_SIZE;
+  iter.for_each(loop2d, grain_size);
+  iter.cast_outputs();
+}
 
 void flip_kernel(TensorIterator& iter, const bool quantized) {
   if (quantized) {
@@ -534,7 +567,7 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
         });
     });
   } else {
-    // Special case: horizontal flip with vectorization and input is contiguous
+    // Special cases: horizontal flip with vectorization and input is contiguous
     // Context: horizontal flip leads to strides[0] < 0 and
     // thus is_contiguous condition is not satisfied and non-vectorized code path is taken.
     auto output_strides = iter.strides(0);
@@ -551,6 +584,21 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
         return cpu_hflip_vec<int64_t>(iter);
       } else if (iter_dtype == kDouble) {
         return cpu_hflip_vec<double>(iter);
+      }
+      // other dtypes are handled below with cpu_kernel_vec
+    } else if (iter.ndim() > 1 && output_strides[1] < 0 && input_strides[0] == iter.element_size(1) \
+               && output_strides[0] == iter.element_size(0)) {
+      auto iter_dtype = iter.dtype();
+      if (iter_dtype == kByte) {
+        return cpu_vflip_memcpy<uint8_t>(iter);
+      } else if (iter_dtype == kFloat) {
+        return cpu_vflip_memcpy<float>(iter);
+      } else if (iter_dtype == kInt) {
+        return cpu_vflip_memcpy<int32_t>(iter);
+      } else if (iter_dtype == kLong) {
+        return cpu_vflip_memcpy<int64_t>(iter);
+      } else if (iter_dtype == kDouble) {
+        return cpu_vflip_memcpy<double>(iter);
       }
       // other dtypes are handled below with cpu_kernel_vec
     }
