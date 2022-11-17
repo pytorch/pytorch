@@ -168,8 +168,8 @@ class TestFSDPInitialization(FSDPTest):
             device_id=torch.cuda.current_device(),
         )
 
-        # Check that the shared embedding/output project weight are flattened
-        # together, meaning that only one name should appear in the FQNs
+        # Check that the shared embedding/output projection weight is flattened
+        # once, meaning that only one name should appear in the FQNs
         has_output_proj_weight = False
         has_embed_tokens_weight = False
         for handle in fully_shard.state(composable_module)._handles:
