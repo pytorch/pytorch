@@ -20,19 +20,16 @@ from torch.utils.data import (
     ChainDataset,
     ConcatDataset,
     DataLoader,
-    DataLoader2,
     Dataset,
     IterableDataset,
     IterDataPipe,
     Subset,
     TensorDataset,
-    communication,
     _utils
 )
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch.utils.data.datapipes.iter import IterableWrapper
-from torch.utils.data.datapipes.map import SequenceWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
@@ -2222,114 +2219,6 @@ except RuntimeError as e:
                 r"excessive worker creation might get DataLoader running slow or even freeze"):
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
-# Define a global function for testing purposes since local functions cannot be pickled
-def identity(x):
-    return x
-
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)")
-class TestDataLoader2(TestCase):
-    @skipIfNoDill
-    def test_basics(self):
-        # TODO(VitalyFedyunin): This test will start breaking if we remove guaranteed order
-        # of traversing workers
-        dp = IterableWrapper(list(range(1000))).sharding_filter()
-        dl = DataLoader(dp, batch_size=3, collate_fn=identity, num_workers=2)
-        dl2 = DataLoader2(dp, batch_size=3, collate_fn=identity, num_workers=2)
-        dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=identity, num_workers=2, parallelism_mode='thread')
-        self.assertEqual(list(dl), list(dl2))
-        self.assertEqual(list(dl), list(dl2_threading))
-
-    class Sorter(IterDataPipe):
-        def __init__(self, datapipe):
-            self.datapipe = datapipe
-
-        def __iter__(self):
-            return iter(sorted(self.datapipe))
-
-    def test_shuffle(self):
-        items = list(range(1000))
-        dp = IterableWrapper(items).sharding_filter().shuffle()
-
-        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False)
-        self.assertEqual(items, list(dl))
-
-        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
-        self.assertNotEqual(items, list(dl))
-        self.assertEqual(items, sorted(list(dl)))
-
-        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
-        self.assertNotEqual(items, list(dl))
-        self.assertEqual(items, sorted(list(dl)))
-
-        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
-        self.assertEqual(list(dl), items)
-
-        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
-        self.assertEqual(list(dl), items)
-
-
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)")
-class TestDataLoader2_EventLoop(TestCase):
-    @skipIfNoDill
-    def test_basic_threading(self):
-        def clean_me(process, req_queue, res_queue):
-            req_queue.put(communication.messages.TerminateRequest())
-            _ = res_queue.get()
-            process.join()
-
-        it = list(range(100))
-        numbers_dp = IterableWrapper(it)
-        (process, req_queue, res_queue, _thread_local_datapipe) = communication.eventloop.SpawnThreadForDataPipeline(numbers_dp)
-
-        process.start()
-        local_datapipe = communication.iter.QueueWrapper(
-            communication.protocol.IterDataPipeQueueProtocolClient(req_queue, res_queue))
-
-        actual = list(local_datapipe)
-        clean_me(process, req_queue, res_queue)
-
-        self.assertEqual(list(range(100)), actual)
-
-    @skipIfNoDill
-    def test_basic_mapdatapipe_threading(self):
-        def clean_me(process, req_queue, res_queue):
-            req_queue.put(communication.messages.TerminateRequest())
-            _ = res_queue.get()
-            process.join()
-
-        input_len = 100
-        it = list(range(input_len))
-        numbers_dp = SequenceWrapper(it)
-        (process, req_queue, res_queue, _thread_local_datapipe) = communication.eventloop.SpawnThreadForDataPipeline(
-            numbers_dp)
-
-        process.start()
-
-        # Functional Test: Ensure that you can retrieve every element from the Queue and DataPipe
-        local_datapipe = communication.map.QueueWrapperForMap(
-            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
-        actual = list(local_datapipe)
-        self.assertEqual([(x, x) for x in range(100)], actual)
-
-        # Functional Test: raise Error when input
-        local_datapipe = communication.map.QueueWrapperForMap(
-            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
-        with self.assertRaisesRegex(IndexError, "out of bound"):
-            local_datapipe[1000]
-
-        # __len__ Test: Ensure that the correct length is returned
-        local_datapipe = communication.map.QueueWrapperForMap(
-            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
-        self.assertEqual(input_len, len(local_datapipe))
-
-        clean_me(process, req_queue, res_queue)
-
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
     r"""
@@ -2827,6 +2716,9 @@ class ConvDataset(Dataset):
 
 
 @unittest.skipIf(IS_WINDOWS, "Needs fork")
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "This test hangs when running with ASAN, see https://github.com/pytorch/pytorch/issues/75492")
 class TestConvAfterFork(TestCase):
     # Tests crash reported in https://github.com/pytorch/pytorch/issues/53565
     def test_conv_after_fork(self):
