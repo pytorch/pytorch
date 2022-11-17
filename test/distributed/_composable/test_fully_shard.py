@@ -11,9 +11,14 @@ from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
 from torch.distributed.fsdp._runtime_utils import _root_pre_forward
-from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.distributed.fsdp.wrap import _ExecOrderBasePolicy, ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import (
+    CUDAInitMode,
+    FSDPInitMode,
+    FSDPTest,
+    TransformerWithSharedParams,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
@@ -131,40 +136,17 @@ class TestFSDPInitialization(FSDPTest):
         Tests that shared parameters across siblings are correctly assigned to
         their lowest common ancestor module.
         """
-        # TODO: We cannot use `TransformerWithSharedParams` here due to its
-        # external parameter usage.
-        d_vocab = 23
-        d_model = 16
-
-        class ModelWithSharedParams(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.embed_tokens = nn.Embedding(d_vocab, d_model)
-                self.lin = nn.Linear(d_model, d_model)
-                self.seq = nn.Sequential(
-                    nn.Linear(d_model, d_model), nn.Linear(d_model, d_model)
-                )
-                self.output_proj = nn.Linear(d_model, d_vocab)
-                self.relu = nn.ReLU()
-                # Share a parameter across siblings, where the LCA module is
-                # this `ModelWithSharedParams` instance
-                self.output_proj.weight = self.embed_tokens.weight
-
-            def forward(self, x: torch.Tensor):
-                z = self.embed_tokens(x)
-                z = self.relu(self.lin(z))
-                z = self.relu(self.seq(z))
-                return self.output_proj(z)
-
-        composable_module = nn.Sequential(
-            ModelWithSharedParams(),
-            nn.Linear(d_vocab, d_vocab),
+        composable_module = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            {},
+            deterministic=True,
         )
-        module_classes = {nn.Linear, nn.Embedding}
         fully_shard(
             composable_module,
             self.process_group,
-            policy=ModuleWrapPolicy(module_classes),
+            policy=_ExecOrderBasePolicy(),
             device_id=torch.cuda.current_device(),
         )
 
@@ -185,14 +167,15 @@ class TestFSDPInitialization(FSDPTest):
         optim = torch.optim.Adam(composable_module.parameters(), lr=1e-2)
         for i in range(4):
             optim.zero_grad(set_to_none=(i % 2 == 0))
-            inp = torch.arange(12, device=torch.device("cuda")).view(6, 2)
+            inp = composable_module.get_input(torch.device("cuda"))
             # TODO (awgu): Remove this after resolving the root pre-forward
             # hook registration, currently blocked by kwarg support
             args, kwargs = _root_pre_forward(
-                fully_shard.state(composable_module), composable_module, inp
+                fully_shard.state(composable_module), composable_module, *inp
             )
             out = composable_module(*args, **kwargs)
-            out.sum().backward()
+            loss = composable_module.get_loss(inp, out)
+            composable_module.run_backward(loss)
             optim.step()
 
     @skip_if_lt_x_gpu(2)
