@@ -546,7 +546,6 @@ def get_fqn_to_example_inputs(
         torch.nn.Module.__call__ = orig_module_call
     return fqn_to_example_inputs
 
-
 def _get_lstm_with_individually_observed_parts(
     float_lstm: torch.nn.LSTM,
     # Use Callable instead of _PartialWrapper here to avoid circular dependencies
