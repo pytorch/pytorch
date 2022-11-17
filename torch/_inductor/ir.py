@@ -998,11 +998,11 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=No
                 x.data.decide_layout()
         return x, x.data.layout
     if isinstance(x, ReinterpretView):
+        # making the base of x contiguous or stride_ordered will not necessarily make
+        # the ReinterpretedView either, so dont pass along those arguments
         buffer, _ = as_storage_and_layout(
             x.data,
             freeze=freeze,
-            want_contiguous=want_contiguous,
-            stride_order=stride_order,
         )
         return buffer, x.layout
     raise NotImplementedError
@@ -1401,6 +1401,10 @@ class ReinterpretView(BaseView):
     """Pretend our storage has a different layout"""
 
     layout: "Layout"
+
+    def __post_init__(self):
+        if isinstance(self.data, BaseView):
+            self.data = self.data.unwrap_view()
 
     def __str__(self):
         return self.str_helper(
@@ -2474,6 +2478,9 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_stride_order(cls, x, order):
+        if x.get_numel() == 0:  # Layout doesn't matter
+            return x
+
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
             if isinstance(
