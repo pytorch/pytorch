@@ -2459,6 +2459,87 @@ TEST_F(NVFuserTest, FusionCrossIterationGroupedGridAllreduceWelfordShmoo_CUDA) {
   }
 }
 
+TEST_F(NVFuserTest, FusionGeluBwdReduction_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> tensor_shape{4, 128};
+
+  // input
+  TensorView* tv0_grad = makeSymbolicTensor(tensor_shape.size());
+  fusion.addInput(tv0_grad);
+  TensorView* tv1_xvar = makeSymbolicTensor(tensor_shape.size());
+  fusion.addInput(tv1_xvar);
+
+  // inter
+  const float k_079 = 0.79788456;
+  const float k_004 = 0.044715;
+  const float k_010 = 0.1070322243;
+  auto t8 = mul(tv1_xvar, IrBuilder::create<Double>(k_079));
+  auto t9 = mul(tv1_xvar, IrBuilder::create<Double>(k_004));
+  auto t10 = mul(t9, tv1_xvar);
+  auto t11 = add(t10, IrBuilder::create<Int>(1));
+  auto t12 = mul(t8, t11);
+  auto t13 = unaryOp(UnaryOpType::Tanh, t12);
+  auto t14 = mul(tv1_xvar, IrBuilder::create<Double>(0.5));
+  auto t15 = mul(t13, t13);
+  auto t16 = unaryOp(UnaryOpType::Neg, t15);
+  auto t17 = add(t16, IrBuilder::create<Int>(1));
+  auto t18 = mul(tv1_xvar, IrBuilder::create<Double>(k_010));
+  auto t19 = mul(t18, tv1_xvar);
+  auto t20 = add(t19, IrBuilder::create<Double>(k_079));
+  auto t21 = mul(t17, t20);
+  auto t22 = mul(t14, t21);
+  auto t23 = add(t13, IrBuilder::create<Int>(1));
+  auto t24 = mul(t23, IrBuilder::create<Double>(0.5));
+  auto t25 = add(t22, t24);
+  auto t26 = mul(t25, tv0_grad);
+  auto t27 = sum(t26, {0});
+
+  // output
+  fusion.addOutput(t26);
+  fusion.addOutput(t27);
+
+  fusion.printMath();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(1);
+
+  // reference values
+  at::Tensor at_grad = at::randn(tensor_shape, options);
+  at::Tensor at_xvar = at::randn(tensor_shape, options);
+  auto at_x = at_xvar.to(c10::ScalarType::Float);
+
+  // auto at_tanh_out = (k_079 * at_x * (1 + k_004 * at_x * at_x)).tanh();
+  // auto at_ff = 0.5 * at_x *
+  //        ((1 - at_tanh_out * at_tanh_out) * (k_079 + k_010 * at_x * at_x)) +
+  //    0.5 * (1 + at_tanh_out);
+  // auto at_output_pointwise = at_ff * at_grad;
+
+  auto at_output_pointwise = at::gelu_backward(at_grad, at_x, "tanh");
+  auto at_output_reduction = at_output_pointwise.sum({0});
+
+  // fusion values
+  std::vector<int64_t> reduction_axes{0};
+  auto reduction_params = getReductionHeuristics(&fusion, {at_grad, at_xvar});
+  TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
+  scheduleReduction(&fusion, *reduction_params);
+  fusion.printKernel();
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {at_grad, at_xvar}, reduction_params->lparams);
+  auto cg_outputs = fe.runFusion({at_grad, at_xvar}, reduction_params->lparams);
+
+  testValidate(
+      &fusion,
+      cg_outputs,
+      {at_grad, at_xvar},
+      {at_output_pointwise, at_output_reduction},
+      __LINE__,
+      __FILE__,
+      "",
+      reduction_params->lparams);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
