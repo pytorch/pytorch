@@ -106,11 +106,6 @@ unittest.expectedFailure(
     DynamicShapesUnspecTests.test_unspec_float_precision_dynamic_shapes
 )
 
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_reformer_sorting_dynamic_shapes
-    # Unable to cast Python instance to C++ type
-)
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

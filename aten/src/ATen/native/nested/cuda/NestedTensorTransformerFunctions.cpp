@@ -152,8 +152,8 @@ Tensor NestedTensor_to_padded_tensor_cuda(
     if (t_dim == 3 && nt_input->opt_size(2) && (*nt_input->opt_size(2) > 0) &&
         !(output_size.has_value())) {
       Tensor nt_sizes = nt_input->get_nested_size_tensor();
-      Tensor sizes_dim1 = at::native::narrow(nt_sizes, 1, 0, 1);
-      Tensor sizes_dim2 = at::native::narrow(nt_sizes, 1, 1, 1);
+      Tensor sizes_dim1 = at::native::narrow_symint(nt_sizes, 1, 0, 1);
+      Tensor sizes_dim2 = at::native::narrow_symint(nt_sizes, 1, 1, 1);
       Tensor result = at::detail::make_tensor<NestedTensorImpl>(
           nt_input->get_buffer(), sizes_dim1 * sizes_dim2[0]);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.dim() == 2);

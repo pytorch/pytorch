@@ -70,4 +70,12 @@ std::ostream& operator<<(std::ostream& os, const SymFloat& s) {
   return os;
 }
 
+double SymFloat::guard_float(const char* file, int64_t line) const {
+  if (!is_symbolic()) {
+    return data_;
+  }
+  SymNode a = toSymNodeImpl();
+  return a->guard_float(file, line);
+}
+
 } // namespace c10
