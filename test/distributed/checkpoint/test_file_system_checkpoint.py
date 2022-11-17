@@ -115,12 +115,10 @@ class MyShardedModel3(torch.nn.Module):
 class TestDistributedStateDictSaveLoad(TestCase):
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_read_write_only_tensor(self, thread_count) -> None:
-        # def test_read_write_only_tensor(self) -> None:
         with tempfile.TemporaryDirectory() as path:
             state_dict_to_save = MyTestModule().state_dict()
 
             fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
-            # fs_writer = FileSystemWriter(path=path)
             save_state_dict(
                 state_dict=state_dict_to_save,
                 storage_writer=fs_writer,
@@ -152,10 +150,6 @@ class TestDistributedStateDictSaveLoad(TestCase):
             fs_writer = FileSystemWriter(
                 path=path, single_file_per_rank=True, thread_count=thread_count
             )
-            # fs_writer = FileSystemWriter(
-            #     path=path,
-            #     single_file_per_rank=True,
-            # )
             save_state_dict(
                 state_dict=state_dict_to_save,
                 storage_writer=fs_writer,
@@ -192,7 +186,6 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @parametrize("thread_count", _THREAD_COUNTS)
     def test_read_write_shard_tensor(self, thread_count) -> None:
-        # def test_read_write_shard_tensor(self) -> None:
         paths = [tempfile.mkdtemp()]
         dist.broadcast_object_list(paths)
 
@@ -214,7 +207,6 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
         state_dict_to_save = model_to_save.state_dict()
 
         fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
-        # fs_writer = FileSystemWriter(path=path)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
         dist.barrier()
@@ -439,9 +431,8 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
-    # @parametrize("thread_count", _THREAD_COUNTS)
-    # def test_save_load_bytes(self, thread_count) -> None:
-    def test_save_load_bytes(self) -> None:
+    @parametrize("thread_count", _THREAD_COUNTS)
+    def test_save_load_bytes(self, thread_count) -> None:
         path = self.get_file_path()
 
         state_dict_to_save = {"bytes0": [1], "bytes1": "string"}
