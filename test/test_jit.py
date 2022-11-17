@@ -3954,7 +3954,7 @@ def foo(x):
     def test_calls_in_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "Type annotation should not contain calls"):
             def spooky(a):
-                # type: print("Hello") -> Tensor
+                # type: print("Hello") -> Tensor # noqa: F723
                 return a + 2
             print(torch.__file__)
             torch.jit.annotations.get_signature(spooky, None, 1, True)
