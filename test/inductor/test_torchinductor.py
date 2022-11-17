@@ -4178,13 +4178,13 @@ class CommonTemplate:
         )
 
     def test_conv_backward(self):
-
         def fn(grad_out, inp, weight):
             def shrink_rank(x, rank):
                 res = x
                 while res.dim() > rank:
                     res = torch.select(res, -1, 0)
                 return res
+
             out1 = aten.convolution_backward(
                 *[shrink_rank(x, 4) for x in [grad_out, inp, weight]],
                 [C],
@@ -4216,7 +4216,7 @@ class CommonTemplate:
                 False,
                 [0],
                 1,
-                [True, False, True],
+                [True, True, True],
             )
             out4 = aten.convolution_backward(
                 *[shrink_rank(x, 5) for x in [grad_out, inp, weight]],
