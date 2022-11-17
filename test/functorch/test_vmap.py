@@ -3219,6 +3219,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.rrelu'),  # randomness
         xfail('nn.functional.dropout2d', ''),  # randomness
         xfail('nn.functional.dropout3d', ''),  # randomness
+        xfail('nn.functional.alpha_dropout', ''),  # randomness
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         xfail('as_strided'),  # Our test runner can't handle this; manual test exists
         skip('new_empty_strided'),  # empty tensor data is garbage so it's hard to make comparisons with it
@@ -3229,13 +3230,16 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linspace', ''),  # test runner can't handle factory functions
         xfail('arange', ''),  # test runner can't handle factory functions
         xfail('logspace', ''),  # test runner can't handle factory functions
+        xfail('scalar_tensor'),  # test runner can't handle factory functions
         xfail('empty', ''),  # test runner can't handle factory functions
         xfail('ones', ''),  # test runner can't handle factory functions
         xfail('zeros', ''),  # test runner can't handle factory functions
+        xfail('full', ''),  # test runner can't handle factory functions
         xfail('eye', ''),  # non-tensor input
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
         xfail('cross'),  # The default value of dim in op is *very* weird. No wonder it doesn't work
+        skip('_softmax_backward_data'),
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
@@ -3377,6 +3381,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('bernoulli', ''),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
+        xfail('native_dropout_backward'),
         xfail('nn.functional.kl_div', ''),
         xfail('multinomial', ''),
         xfail('column_stack', ''),
@@ -3450,6 +3455,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('equal', ''),
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
+        skip('_softmax_backward_data'),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
