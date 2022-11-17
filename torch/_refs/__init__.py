@@ -122,7 +122,6 @@ __all__ = [
     "bitwise_right_shift",
     "bitwise_xor",
     "clamp_min",
-    # "complex",
     "copysign",
     "div",
     "eq",
@@ -238,6 +237,7 @@ __all__ = [
     "movedim",
     "narrow",
     "narrow_copy",
+    "native_group_norm",
     "native_layer_norm",
     "permute",
     "ravel",
@@ -321,7 +321,7 @@ def _broadcast_shapes(*_shapes):
     common_shape = [
         1,
     ] * reduce(max, (len(shape) for shape in shapes))
-    for shape in shapes:
+    for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
             if common_shape[idx] == 1:
                 if shape[idx] < 0:
@@ -332,9 +332,9 @@ def _broadcast_shapes(*_shapes):
             elif shape[idx] != 1:
                 if common_shape[idx] != shape[idx]:
                     raise RuntimeError(
-                        "Attempting to broadcast a dimension of length ",
-                        str(shape[idx]),
-                        "!",
+                        f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
+                        f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
+                        f"should be broadcastable to {common_shape}"
                     )
 
     return common_shape
@@ -412,6 +412,19 @@ def _make_elementwise_unary_reference(
         return _ref
 
     return inner
+
+
+def _make_alias(fn, name):
+    """
+    This function defines an alias of another function and sets its __name__argument
+    Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`.
+    """
+
+    def _fn(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    _fn.__name__ = name
+    return _fn
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
@@ -611,6 +624,10 @@ def isnan(a: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, a)
 
 
+# alias
+mvlgamma = _make_alias(torch.special.multigammaln, "mvlgamma")  # type: ignore[has-type]
+
+
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=None,  # CompositeImplicitAutograd
@@ -632,10 +649,6 @@ def i0(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def lgamma(a):
     return prims.lgamma(a)
-
-
-# alias
-mvlgamma = torch.special.multigammaln  # type: ignore[has-type]
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -710,10 +723,10 @@ def nan_to_num(
         nan = 0.0
 
     if posinf is None:
-        posinf = prims.maximum_value(a.dtype)
+        posinf = torch.finfo(a.dtype).max
 
     if neginf is None:
-        neginf = prims.minimum_value(a.dtype)
+        neginf = torch.finfo(a.dtype).min
 
     result = where(isnan(a), nan, a)
 
@@ -2736,19 +2749,39 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
 
 
 # CompositeImplicitAutograd - don't register decomp
-def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
+def narrow(
+    a: TensorLikeType, dim: int, start: Union[int, TensorLikeType], length: int
+) -> TensorLikeType:
+    # Supports Tensor overload that was added for XLA:
+    # https://github.com/pytorch/pytorch/issues/31558
+    if isinstance(start, TensorLike):
+        check(
+            start.dim() == 0 and utils.is_integer_dtype(start.dtype),
+            lambda: "start must be an 0-dim integral Tensor.",
+        )
+        start = start.item()  # type: ignore[assignment]
+    check(a.dim() > 0, lambda: "narrow() cannot be applied to a 0-dim tensor.")
+    check(length >= 0, lambda: "narrow(): length must be non-negative.")
     dim = utils.canonicalize_dim(a.ndim, dim)
+    dim_length = a.size(dim)
+    # Start being the end is usually invalid since it's out of bounds. So it's
+    # not allowed by canonicalize_dim. But for narrow it's valid as long as
+    # the length is 0, which is handled by the check below.
+    if start != dim_length:
+        # Negative start means indexing from the end of dim.
+        # Note: a dimension isn't being canonicalized here, this reuses
+        # canonicalize_dim because the semantics are similar.
+        start = utils.canonicalize_dim(dim_length, start)  # type: ignore[arg-type]
+    check(
+        start <= dim_length - length,  # type: ignore[arg-type]
+        lambda: f"start ({start}) + length ({length}) exceeds dimension size ({dim_length}).",
+    )
     return prims.slice_in_dim(a, start, start + length, axis=dim)
 
 
-@register_decomposition(torch.ops.aten.narrow_copy)
-@out_wrapper()
-def narrow_copy(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
-    # TODO: This must return a sparse tensor if the input is sparse, but refs
-    # have no sparse support.  See narrow_copy_sparse in core.
-    if a.is_sparse:
-        raise NotImplementedError("narrow_copy ref doesn't support sparse tensors")
-    return torch.clone(torch.narrow(a=a, dim=dim, start=start, length=length))  # type: ignore[call-overload]
+# TODO: This must return a sparse tensor if the input is sparse, but refs have
+# no sparse support. See narrow_copy_sparse in core.
+narrow_copy = _make_copy_from_view(narrow)
 
 
 def _normalize(
@@ -2768,6 +2801,7 @@ def _normalize(
         mean (Tensor): mean of the tensor along norm_dims.
         rstd (Tensor): 1/std of the tensor along norm_dims.
     """
+    norm_dims = utils.canonicalize_dims(a.ndim, norm_dims)
     computation_dtype = utils.get_computation_dtype(a.dtype)
     a_acc = _maybe_convert_to_dtype(a, computation_dtype)
     assert isinstance(a_acc, TensorLike)  # to avoid mypy error for var_mean
@@ -2777,6 +2811,72 @@ def _normalize(
     rstd = torch.rsqrt(biased_var + eps)
     out = (a - mean) * rstd
     return out, mean, rstd
+
+
+# add all specified dimensions
+def _unsqueeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
+    for dim in sorted(dimensions):
+        x = torch.unsqueeze(x, dim)
+    return x
+
+
+def _squeeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
+    for dim in reversed(sorted(dimensions)):
+        x = torch.squeeze(x, dim)
+    return x
+
+
+@register_decomposition(torch.ops.aten.native_group_norm.default)
+def native_group_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    batch_size: int,
+    num_channels: int,
+    flattened_inner_size: int,
+    num_groups: int,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    utils.check(
+        input.ndim >= 2,
+        lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
+    )
+    utils.check(
+        num_channels % num_groups == 0,
+        lambda: "Expected number of channels in input to be divisible by num_groups, "
+        + f"but got input of shape {input.shape} and num_groups = {num_groups}",
+    )
+
+    # num_channels / num_groups and flattened inner dimension are the reduction axes
+    reduction_dims = [2, 3]
+    input_reshaped = torch.reshape(
+        input,
+        [batch_size, num_groups, num_channels // num_groups, flattened_inner_size],
+    )
+    out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
+    out = out.view(input.shape)
+
+    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
+    unsqueeze_bias = None
+    if bias is not None:
+        unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
+    unsqueeze_weight = None
+    if weight is not None:
+        unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
+
+    if unsqueeze_weight is not None:
+        out = out * unsqueeze_weight
+    if unsqueeze_bias is not None:
+        out = out + unsqueeze_bias
+
+    out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
+    mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
+    rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
+
+    # remove broadcast dimensions from mean and rstd
+    mean = _squeeze_multiple(mean, reduction_dims)
+    rstd = _squeeze_multiple(rstd, reduction_dims)
+    return (out, mean, rstd)
 
 
 @register_decomposition(torch.ops.aten.native_layer_norm)
@@ -3572,6 +3672,7 @@ diagonal_copy = _make_copy_from_view(diagonal)
 
 
 @register_decomposition(torch.ops.aten.diag_embed)
+@out_wrapper()
 def diag_embed(
     t: TensorLikeType,
     offset: int = 0,
@@ -4081,8 +4182,9 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
         )
     assert isinstance(weight, Tensor)  # mypy
     # We implement it this way for numerical stability. We assume (in the stability optimisation)
-    # that 0 <= weight <= 1. We take the abs to deal with comples numbers
-    # We want to do operations near zero, which is where floating points are most precise
+    # that 0 <= weight <= 1. We take the abs to deal with complex numbers
+    # We want to perform operations near zero, which is where floating points are most precise
+    # thus, we perform the following optimisation:
     # If weight.abs() >= 0.5:
     #    return (1 - weight) * (start - end) + end
     mask = weight.abs() >= 0.5
@@ -4104,22 +4206,22 @@ def linspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    if dtype is None:
-        dtype = torch.get_default_dtype()
-
-    # NB: NumPy actually doesn't do this cast, but for this ref, I'd rather have this
-    #     cast than not, because it allows us to always go into the precise path
-    #     if dtype is integral and not worry about whether start/end are float
-    if prims.utils.is_integer_dtype(dtype):
-        if isinstance(start, FloatLike):
-            start = sym_int(start)
-        if isinstance(end, FloatLike):
-            end = sym_int(end)
-
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
-        raise NotImplementedError
-    assert not isinstance(start, complex) and not isinstance(end, complex)  # for mypy
+        default_complex_dtype = utils.corresponding_complex_dtype(
+            torch.get_default_dtype()
+        )
+        if dtype is None:
+            dtype = default_complex_dtype
+        else:
+            check(
+                utils.is_complex_dtype(dtype),
+                lambda: f"linspace(): inferred dtype {default_complex_dtype} can't be safely cast to passed dtype {dtype}",
+            )
+    else:
+        dtype = dtype or torch.get_default_dtype()
+    assert isinstance(dtype, torch.dtype)
 
+    # steps does not participate in the computation of the dtype
     check(
         isinstance(steps, IntLike),
         lambda: "steps must be int, not float",
@@ -4135,41 +4237,27 @@ def linspace(
         "requires_grad": requires_grad,
     }
     if steps == 0:
-        ret = torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
-    elif steps == 1:
-        ret = torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
-    elif start == end:
-        ret = torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
-    else:
-        if prims.utils.is_integer_dtype(dtype):
-            # We need to cast to int, so to avoid off-by-one issues
-            # do the entire computation with ints when we can
-            assert isinstance(start, IntLike) and isinstance(end, IntLike)
-            step_size_x_denom = end - start
-            eps = 1 if end > start else -1
-            denom = steps - 1
-            ret = prims.to_dtype(
-                torch.arange(
-                    start * denom,
-                    end * denom + eps,
-                    step_size_x_denom,
-                    dtype=torch.int64,
-                    **factory_kwargs,  # type: ignore[arg-type]
-                )
-                / denom,
-                dtype,
-            )
-        else:
-            step_size = (end - start) / (steps - 1)
-            eps = step_size / 2
-            ret = prims.to_dtype(
-                torch.arange(  # type: ignore[call-overload]
-                    start, end + eps, step_size, dtype=torch.float64, **factory_kwargs
-                ),
-                dtype,
-            )
+        return torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
+    if steps == 1:
+        return torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
+    if start == end:
+        return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
 
-    return ret
+    # arange returns values in the interval [start, end) so we add an an eps to make it [start, end]
+    # The eps is small enough as to always add just the element end
+    step_size = 1 / (steps - 1)
+    eps = step_size / 2
+    # arange returns a tensor of size divup(end - start, step) and thus, for the arguemnts below
+    # ceil(div(1 + step_size/2,  1/(steps - 1)) = steps - 1  + ceil(1 / 2) = steps
+    # torch.arange is an scan algorithm, so we need a high-precision dtype
+    rg = torch.arange(
+        0, 1 + eps, step_size, dtype=torch.float64, **factory_kwargs  # type: ignore[arg-type]
+    )
+    double_dtype = torch.complex128 if utils.is_complex_dtype(dtype) else torch.float64
+    rg = _maybe_convert_to_dtype(rg, double_dtype)  # type: ignore[assignment]
+    cast = partial(torch.full, (1,), dtype=double_dtype, **factory_kwargs)
+    out = torch.lerp(cast(start), cast(end), rg)
+    return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
 
 @register_decomposition(torch.ops.aten.logspace)
@@ -4419,6 +4507,7 @@ def eye(
     # result.requires_grad_(requires_grad)
 
 
+@register_decomposition(torch.ops.aten.full)
 @out_wrapper()
 def full(
     shape: ShapeType,
@@ -4430,6 +4519,12 @@ def full(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
+    utils.check_layout(layout)
+    utils.check_pin_memory(pin_memory)
+
+    dtype = dtype if dtype is not None else utils.type_to_dtype(type(fill_value))
+    device = device if device is not None else torch.device("cpu")
+
     e = empty(
         shape,
         dtype=dtype,
@@ -4438,7 +4533,7 @@ def full(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return fill(e, fill_value)
+    return torch.fill(e, fill_value)  # type: ignore[arg-type]
 
 
 def full_like(
