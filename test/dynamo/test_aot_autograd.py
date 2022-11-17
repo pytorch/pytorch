@@ -9,8 +9,8 @@ from torch._dynamo.optimizations.training import is_aot_autograd_safe_to_run
 from torch._dynamo.testing import CompileCounter, rand_strided
 
 
-def compiler_safe_fn(gm, example_inputs, is_safe):
-    is_safe[0] = is_aot_autograd_safe_to_run(gm, example_inputs)
+def compiler_safe_fn(gm, example_inputs, is_safe, fake_mode):
+    is_safe[0] = is_aot_autograd_safe_to_run(gm, example_inputs, fake_mode)
     return gm.forward
 
 

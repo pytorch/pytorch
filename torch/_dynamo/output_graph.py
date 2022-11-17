@@ -6,6 +6,7 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
+from inspect import signature
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch.nn
@@ -352,6 +353,7 @@ class OutputGraph(fx.Tracer):
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
+            and False
         ):
 
             # optimization to generate better code in a common case
@@ -427,6 +429,7 @@ class OutputGraph(fx.Tracer):
         name = unique_id("__compiled_fn")
 
         compiled_fn = self.call_user_compiler(gm)
+
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
@@ -458,7 +461,12 @@ class OutputGraph(fx.Tracer):
                 else ""
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            compiled_fn = self.compiler_fn(gm, self.example_inputs())
+            if "fake_mode" in signature(self.compiler_fn).parameters.keys():
+                compiled_fn = self.compiler_fn(
+                    gm, self.example_inputs(), fake_mode=self.fake_mode
+                )
+            else:
+                compiled_fn = self.compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
@@ -469,7 +477,16 @@ class OutputGraph(fx.Tracer):
     def example_inputs(self):
         result = []
         for arg in self.graphargs:
-            result.extend(arg.get_examples())
+            if config.fake_tensor_propagation:
+                example = arg.get_fake_examples()
+                if example:
+                    result.extend(example)
+                else:
+                    # Fallback, in case fake_tensor was not set
+                    # Particularly for graph args that are not tensors
+                    result.extend(arg.get_examples())
+            else:
+                result.extend(arg.get_examples())
         return result
 
     def remove_unused_graphargs(self):
