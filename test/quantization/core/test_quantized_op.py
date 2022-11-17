@@ -3666,20 +3666,36 @@ class TestQuantizedLinear(TestCase):
             np.testing.assert_array_almost_equal(
                 Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=decimal_val)
 
-    """Tests the correctness of the quantized linear and linear_relu op."""
+    """Tests the correctness of the quantized linear op."""
     @override_qengines
     def test_qlinear(self):
         batch_size_list = [1, 4]
         input_channels_list = [16, 32]
         output_channels_list = [4, 8]
         use_bias_list = [True, False]
-        post_op_list = ['none', 'relu']
         use_multi_dim_input_list = [True, False]
         use_channelwise_list = [True, False]
+        post_op = 'none'
         cases = itertools.product(batch_size_list, input_channels_list, output_channels_list,
-                                  use_bias_list, post_op_list, use_multi_dim_input_list,
-                                  use_channelwise_list)
-        for batch_size, input_channels, output_channels, use_bias, post_op,\
+                                  use_bias_list, use_multi_dim_input_list, use_channelwise_list)
+        for batch_size, input_channels, output_channels, use_bias,\
+                use_multi_dim_input, use_channelwise in cases:
+            self._test_qlinear_impl(batch_size, input_channels, output_channels,
+                                    use_bias, post_op, use_multi_dim_input, use_channelwise)
+
+    """Tests the correctness of the quantized linear_relu op."""
+    @override_qengines
+    def test_qlinear_relu(self):
+        batch_size_list = [1, 4]
+        input_channels_list = [16, 32]
+        output_channels_list = [4, 8]
+        use_bias_list = [True, False]
+        use_multi_dim_input_list = [True, False]
+        use_channelwise_list = [True, False]
+        post_op = 'relu'
+        cases = itertools.product(batch_size_list, input_channels_list, output_channels_list,
+                                  use_bias_list, use_multi_dim_input_list, use_channelwise_list)
+        for batch_size, input_channels, output_channels, use_bias,\
                 use_multi_dim_input, use_channelwise in cases:
             self._test_qlinear_impl(batch_size, input_channels, output_channels,
                                     use_bias, post_op, use_multi_dim_input, use_channelwise)
