@@ -588,6 +588,8 @@ When exporting a custom operator, you can specify the custom domain version usin
 ``custom_opsets`` dictionary at export. If not specified, the custom opset version defaults to 1.
 
 NOTE: Be careful to align the opset version mentioned in the above example, and make sure they are consumed in exporter step.
+The example usage of how to write a onnx-script function is a beta version in terms of the active development on onnx-script.
+Please follow the latest `ONNX-script <https://github.com/microsoft/onnx-script>`_
 
 C++ Operators
 ~~~~~~~~~~~~~
