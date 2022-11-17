@@ -118,7 +118,7 @@ def _get_submodule_to_states(
     shared_param_info_to_lca = get_shared_param_info_to_lca(root_module, ignored_params)
     shared_params: Set[nn.Parameter] = set()
     lca_module_to_shared_params = collections.defaultdict(list)
-    shared_param_to_lca_module = {}
+    shared_param_to_lca_module: Dict[nn.Parameter, nn.Module] = {}
     for shared_param_info, lca_module in shared_param_info_to_lca.items():
         shared_param = shared_param_info.param
         shared_params.add(shared_param)
