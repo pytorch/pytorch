@@ -10,8 +10,6 @@
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#include <utility>
-
 namespace at {
 namespace native {
 
@@ -56,7 +54,7 @@ std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
   if (output_mask[0]) {
     auto grad_input_buffer = at::mm(reshaped_grad, weight).view({-1});
     auto grad_input_nt_size = nt_input->get_nested_size_tensor().clone();
-    grad_input = wrap_buffer(std::move(grad_input_buffer), std::move(grad_input_nt_size));
+    grad_input = wrap_buffer(grad_input_buffer, grad_input_nt_size);
   }
   if (output_mask[1]) {
     grad_weight =
@@ -151,7 +149,7 @@ Tensor _nested_sum_backward_cpu(
     }
   });
 
-  return wrap_buffer(self_grad_buffer, std::move(self_sizes));
+  return wrap_buffer(self_grad_buffer, self_sizes);
 
 }
 
