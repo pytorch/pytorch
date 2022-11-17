@@ -1,0 +1,39 @@
+[pt]
+  is_oss=1
+
+[buildfile]
+  name = BUCK.oss
+  includes = //tools/build_defs/select.bzl
+
+[repositories]
+  bazel_skylib = third_party/bazel-skylib/
+  self = .
+
+  ovr_config = prelude
+  prelude = prelude
+  toolchains = toolchains
+  buck = no
+  fbcode = no
+  fbcode_macros = no
+  fbsource = no
+
+[download]
+  in_build = true
+
+[cxx]
+  cxxflags = -std=c++17
+  should_remap_host_platform = true
+  cpp = /usr/bin/clang
+  cc = /usr/bin/clang
+  cxx = /usr/bin/clang++
+  cxxpp = /usr/bin/clang++
+  ld = /usr/bin/clang++
+
+[project]
+  default_flavors_mode=all
+
+[build]
+  execution_platforms = ovr_config//platforms:default
+
+[parser]
+  target_platform_detector_spec = target://...->ovr_config//platforms:default
