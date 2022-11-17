@@ -14,6 +14,7 @@ pygments==2.12.0
 pytest==7.2.0
 pytest-xdist==3.0.2
 pytest-rerunfailures==10.2
+pytest-flakefinder==1.1.0
 pytest-shard==0.1.2
 scipy==1.9.0
 sympy==1.11.1
