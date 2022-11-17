@@ -3951,6 +3951,14 @@ def foo(x):
                 return a + 2
             torch.jit.script(invalid4)
 
+    def test_calls_in_type_annotations(self):
+        with self.assertRaisesRegex(RuntimeError, "Type annotation should not contain calls"):
+            def spooky(a):
+                # type: print("Hello") -> Tensor # noqa: F723
+                return a + 2
+            print(torch.__file__)
+            torch.jit.annotations.get_signature(spooky, None, 1, True)
+
     def test_is_optional(self):
         ann = Union[List[int], List[float]]
         torch._jit_internal.is_optional(ann)
