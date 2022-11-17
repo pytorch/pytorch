@@ -217,6 +217,14 @@ class TestGenSchemaRegistration(unittest.TestCase):
             loc=torchgen.model.Location(__file__, 1),
             valid_tags=set(),
         )
+        (
+            self.fragment_custom_native_function,
+            _,
+        ) = torchgen.model.NativeFunction.from_yaml(
+            {"func": "quantized_decomposed::func() -> bool"},
+            loc=torchgen.model.Location(__file__, 1),
+            valid_tags=set(),
+        )
 
     def test_default_namespace_schema_registration_code_valid(self) -> None:
         native_functions = [DEFAULT_NATIVE_FUNCTION]
@@ -235,6 +243,23 @@ class TestGenSchemaRegistration(unittest.TestCase):
             registrations,
             """
 TORCH_LIBRARY(custom, m) {
+  m.def("func() -> bool", {});
+
+};""",
+        )
+
+    def test_fragment_custom_namespace_schema_registration_code_valid(self) -> None:
+        """Sometimes we want to extend an existing namespace, for example quantized
+        namespace, which is already defined in native/quantized/library.cpp
+        """
+        _, registrations = get_native_function_schema_registrations(
+            native_functions=[self.fragment_custom_native_function],
+            schema_selector=self.selector,
+        )
+        self.assertEqual(
+            registrations,
+            """
+TORCH_LIBRARY_FRAGMENT(quantized_decomposed, m) {
   m.def("func() -> bool", {});
 
 };""",

@@ -2,6 +2,7 @@
 
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef, skipIfRocm
 import torch
+import torch._dynamo
 import itertools
 import numpy as np
 from torch.testing._internal.jit_utils import RUN_CUDA
@@ -11,6 +12,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     DynamicOutputShapeException,
 )
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.testing import FileCheck
 from torch import nn
 import unittest
@@ -194,6 +196,12 @@ class FakeTensorTest(TestCase):
             y1 = torch.randperm(5, device="cpu")
             prims.utils.compare_tensor_meta(y, y1)
 
+    def test_print_in_fake_mode(self):
+        x = torch.zeros(2)
+        # does not fail
+        with FakeTensorMode():
+            out = str(x)
+        assert "FakeTensor" not in out
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cpu_fallback(self):
@@ -505,7 +513,7 @@ class FakeTensorConverterTest(TestCase):
         x = torch.rand(2, 2).to(device="meta")
         mode = FakeTensorMode()
         converter = mode.fake_tensor_converter
-        self.assertTrue(converter(mode, x, "cpu") is converter(mode, x, "cpu"))
+        self.assertTrue(converter.from_meta_and_device(mode, x, "cpu") is converter.from_meta_and_device(mode, x, "cpu"))
 
     def test_separate_tensor_storages_view(self):
         x = torch.rand(2, 2, 2)
@@ -554,10 +562,10 @@ class FakeTensorConverterTest(TestCase):
         converter = FakeTensorConverter()
         x_conv = converter(mode, x)
         self.assertEqual(len(converter.tensor_memo), 1)
-        self.assertEqual(len(converter.meta_converter.tensor_memo), 1)
+        x_conv2 = converter(mode, x)
+        assert x_conv2 is x_conv
         del x
         self.assertEqual(len(converter.tensor_memo), 0)
-        self.assertEqual(len(converter.meta_converter.tensor_memo), 0)
 
     def test_no_active_mode(self):
         with FakeTensorMode() as mode:
@@ -656,6 +664,63 @@ class FakeTensorOperatorInvariants(TestCase):
             if "_like" == schema.name[-5:]:
                 op = self.get_aten_op(schema)
                 self.assertIn(op, torch._subclasses.fake_tensor._like_tensor_constructors)
+
+class FakeTensorPropTest(TestCase):
+    def test_fake_tensor_prop_on_nn_module(self):
+        class ToyNnModuleWithParameters(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(4, 3)
+                self.layer2 = torch.nn.Linear(3, 2)
+
+            def forward(self, value):
+                value = self.layer1(value)
+                value = torch.relu(value)
+                value = self.layer2(value)
+                return value
+
+        model = ToyNnModuleWithParameters()
+        value = torch.randn(5, 4)
+        # Convert nn.Module to GraphModule so that FakeTensorProp runs.
+        graph_model = torch.fx.symbolic_trace(model, (value,))
+        # The following block runs FakeTensorProp on graph_module w/to the same FakeTensorMode
+        #
+        # TODO(wschin): there should be an API to run FakeTensorProp for GraphModule
+        # with parameters and buffers.
+        with FakeTensorMode() as fake_tensor_mode:
+
+            def to_fake_tensor(x):
+                if isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor):
+                    return fake_tensor_mode.from_tensor(x)
+                return x
+
+            fake_parameters_and_buffers = {
+                k: to_fake_tensor(v)
+                for k, v in itertools.chain(
+                    graph_model.named_parameters(), graph_model.named_buffers()
+                )
+            }
+            with torch.nn.utils.stateless._reparametrize_module(
+                graph_model, fake_parameters_and_buffers
+            ):
+                # This case uses the **same** fake tensor mode to
+                #  1. create fake parameters and fake buffers, and
+                #  2. run FakeTensorProp
+                # The result should be correct.
+                result = FakeTensorProp(graph_model, fake_tensor_mode).propagate(value)
+                self.assertTrue(isinstance(result, FakeTensor))
+                self.assertEqual(result.shape, (5, 2))
+                # This case uses the **different** fake tensor modes to
+                #  1. create fake parameters and fake buffers, and
+                #  2. run FakeTensorProp
+                # The following code should fail.
+                failed = False
+                try:
+                    FakeTensorProp(graph_model).propagate(value)
+                except AssertionError:
+                    # AssertionError: tensor's device must be `meta`, got cpu instead
+                    failed = True
+                self.assertTrue(failed)
 
 if __name__ == "__main__":
     run_tests()

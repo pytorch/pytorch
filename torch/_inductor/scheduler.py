@@ -16,7 +16,7 @@ import torch
 from . import config, dependencies, ir
 from .dependencies import MemoryDep, StarDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, dynamo_utils
+from .utils import cache_on_self, cmp, dynamo_utils, has_triton
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -922,9 +922,22 @@ class Scheduler:
         be scheduled before the fusion of node1 and node2.
         """
         node1_names = node1.get_names()
-        remaining_deps = {
-            dep.name for dep in node2.unmet_dependencies - node1.read_writes.writes
-        }
+        computed_deps = set()
+        for rd in node2.unmet_dependencies:
+            for cd in node1.read_writes.writes:
+                # StarDep doesn't match MemoryDep, different indices don't match
+                # However, broadcasting sometimes strips dimensions, and if that's the case
+                # we still can match unmet dep
+                if (
+                    rd.name == cd.name
+                    and type(rd) == type(cd)
+                    and rd.index == cd.index
+                    and len(rd.size) >= len(cd.size)
+                    and rd.size[: len(cd.size)] == cd.size
+                ):
+                    computed_deps.add(rd)
+
+        remaining_deps = {dep.name for dep in node2.unmet_dependencies - computed_deps}
         if remaining_deps & node1_names:
             # MemoryDeps didn't match and read different locations of the same buffer.
             # Examples here include:
@@ -1065,6 +1078,16 @@ class Scheduler:
 
             return CppScheduling(self)
         else:
+            if not has_triton():
+                device_props = torch.cuda.get_device_properties(device)
+                if device_props.major < 6:
+                    raise RuntimeError(
+                        f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 6.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
+                    )
+                else:
+                    raise RuntimeError(
+                        "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
+                    )
             from .codegen.triton import TritonScheduling
 
             return TritonScheduling(self)

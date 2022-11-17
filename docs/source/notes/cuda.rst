@@ -394,6 +394,12 @@ Available options:
   the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
   them, the values are 1024, 1280, 1536, and 1792. So, allocation size of 1200
   will be rounded to 1280 as the nearest ceiling of power-2 division.
+  Specify a single value to apply for all allocation sizes or specify an
+  array of key value pairs to set power-2 division individually for each
+  power of two interval. For example to set 1 division for all allocations
+  under 256MB, 2 division for allocations between 256MB and 512MB, 4 divisions
+  for allocations between 512MB and 1GB and 8 divisions for any larger allocations,
+  set the knob value to: [256:1,512:2,1024:4,>:8].
   ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
 * ``roundup_bypass_threshold_mb`` bypass rounding the requested allocation size,

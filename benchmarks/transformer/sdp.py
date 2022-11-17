@@ -7,6 +7,8 @@ import random
 
 import warnings
 warnings.filterwarnings("ignore")
+
+
 class CompositeMHA(torch.nn.Module):
     def __init__(self, num_heads, in_proj_weight, in_proj_bias, out_proj):
         super().__init__()
@@ -90,8 +92,8 @@ def benchmark_torch_function(iters, f, *args, **kwargs):
     return (start_event.elapsed_time(end_event) * 1.0e-3) / iters
 
 
-def run_timing(iters, batch_size, embed_dimension, num_heads, max_sequence_len, pad_percentage, writer):
-    with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True):
+def run_timing(iters, batch_size, embed_dimension, num_heads, max_sequence_len, pad_percentage, enable_math, enable_flash, writer):
+    with torch.backends.cuda.sdp_kernel(enable_math=enable_math, enable_flash=enable_flash):
         with torch.inference_mode():
             dropout_p = 0.0
             mask = None
@@ -122,6 +124,8 @@ def run_timing(iters, batch_size, embed_dimension, num_heads, max_sequence_len, 
             results["cp_time"] = cp_time
             results["speedup"] = pt_time / cp_time
             results["dtype"] = str(x.dtype)
+            results["enable_math"] = str(enable_math)
+            results["enable_flash"] = str(enable_flash)
             writer.writerow(results)
 
 
@@ -131,15 +135,22 @@ def main():
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    headers = ["max_sequence_len", "num_heads", "embed_dimension", "pt_time", "cp_time", "speedup", "dtype"]
+    headers = ["max_sequence_len", "num_heads", "embed_dimension", "pt_time",
+               "cp_time", "speedup", "dtype", "enable_math", "enable_flash"]
     writer = csv.DictWriter(sys.stdout, headers)
     writer.writeheader()
 
     batch_size = 64
     pad_percentage = 0.5
 
-    for num_heads, max_seq_len in itertools.product([2, 4, 8, 16, 32], [64, 128, 256]):
-        run_timing(iters, batch_size, 1024, num_heads, max_seq_len, pad_percentage, writer)
+    for (enable_math, enable_flash) in [(False, True), (True, False), (True, True)]:
+        for num_heads, max_seq_len in itertools.product([2, 4, 8, 16, 32], [64, 128, 256]):
+            run_timing(iters, batch_size, 1024, num_heads, max_seq_len,
+                       pad_percentage, enable_math, enable_flash, writer)
+            run_timing(iters, batch_size, 1024, num_heads, max_seq_len,
+                       pad_percentage, enable_math, enable_flash, writer)
+            run_timing(iters, batch_size, 1024, num_heads, max_seq_len,
+                       pad_percentage, enable_math, enable_flash, writer)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import inspect
+import logging
 from queue import Queue
 from functools import wraps
 from typing import Callable, Dict, List
@@ -8,31 +9,10 @@ from torch.fx.graph_module import GraphModule
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 
-__all__ = ['inplace_wrapper', 'pass_result_wrapper', 'this_before_that_pass_constraint', 'PassManager']
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)
 
-@compatibility(is_backward_compatible=False)
-def inplace_wrapper(fn: Callable) -> Callable:
-    """
-    Convenience wrapper for passes which modify an object inplace. This
-    wrapper makes them return a PassResult containing the modified object and
-    True for the "modified" flag.
-
-    Args:
-        fn (Callable[Module, Any])
-
-    Returns:
-        wrapped_fn (Callable[Module, PassResult])
-    """
-    if fn is None:
-        return None
-
-    @wraps(fn)
-    def wrapped_fn(gm):
-        return fn(gm) or PassResult(gm, True)
-
-    if wrapped_fn.__name__ == 'wrapped_fn':
-        wrapped_fn.__name__ = str(fn)
-    return wrapped_fn
+__all__ = ['pass_result_wrapper', 'this_before_that_pass_constraint', 'PassManager']
 
 @compatibility(is_backward_compatible=False)
 def pass_result_wrapper(fn: Callable) -> Callable:
@@ -52,8 +32,16 @@ def pass_result_wrapper(fn: Callable) -> Callable:
 
     @wraps(fn)
     def wrapped_fn(gm):
-        gm = fn(gm)
-        return PassResult(gm, True)
+        res = fn(gm)
+        if res is None:
+            return PassResult(gm, True)
+        if isinstance(res, PassResult):
+            return res
+        elif isinstance(res, nn.Module):
+            return PassResult(res, True)
+
+    if not inspect.isfunction(fn):
+        wrapped_fn.__name__ = type(fn).__name__
 
     return wrapped_fn
 
@@ -189,7 +177,6 @@ class PassManager:
         steps=None,
         run_checks_after_each_pass: bool = False,
         suppress_check_failures: bool = False,
-        debug: bool = False,
     ):
         if passes:
             self.passes = passes
@@ -200,7 +187,6 @@ class PassManager:
 
         self.run_checks_after_each_pass = run_checks_after_each_pass
         self.suppress_check_failures = suppress_check_failures
-        self.debug = debug
 
     def add_pass(self, _pass: Callable):
         """
@@ -279,25 +265,29 @@ class PassManager:
 
             # Run the set of passes on the graph module
             for i, fn in enumerate(self.passes):
-                if self.debug:
-                    print(f"Running pass \'{fn.__name__}\'")
+                logger.debug(f"Running pass \'{fn.__name__}\'")
 
                 try:
                     res = fn(module)
+
+                    if not isinstance(res, PassResult) and not hasattr(res, "graph_module"):
+                        raise TypeError(f"The result of the pass {fn.__name__} should be type PassResult. \
+                                          Please wrap it with pass_result_wrapper()")
+                    module = res.graph_module
+                    modified = modified or res.modified
+
+                    if isinstance(module, GraphModule):
+                        logger.debug(f"Graph after pass \'{fn.__name__}\':", module.graph)
+                        module.recompile()
+
+                    # Check graph invariants
+                    if self.run_checks_after_each_pass:
+                        self.check(module)
+
                 except Exception as e:
                     prev_pass_names = [p.__name__ for p in self.passes[:i]]
                     msg = f"An error occurred when running the \'{fn.__name__}\' pass after the following passes: {prev_pass_names}"
-                    raise type(e)(msg) from e
-
-                module = res.graph_module
-                modified = modified or res.modified
-
-                if isinstance(module, GraphModule):
-                    module.recompile()
-
-                # Check graph invariants
-                if self.run_checks_after_each_pass:
-                    self.check(module)
+                    raise Exception(msg) from e
 
             # If the graph no longer changes, then we can stop running these passes
             overall_modified = overall_modified or modified

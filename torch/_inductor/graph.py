@@ -1,6 +1,7 @@
 import logging
 import operator
 import os
+import re
 import time
 
 import sympy
@@ -18,10 +19,15 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, InputBuffer, TensorBox
-from .lowering import lowerings, make_fallback, needs_realized_inputs
+from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
+from .lowering import (
+    layout_constraints,
+    lowerings,
+    make_fallback,
+    needs_realized_inputs,
+)
 from .sizevars import SizeVarAllocator
-from .utils import dynamo_logging, dynamo_utils
+from .utils import dynamo_utils, gather_origins
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -40,11 +46,9 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
 
-        size = [
-            i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in size
-        ]
+        size = [i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in size]
         stride = [
-            i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in stride
+            i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in stride
         ]
         return size, stride
 
@@ -92,6 +96,9 @@ class GraphLowering(torch.fx.Interpreter):
             return self.name_to_buffer[buffer_name].get_dtype()
         if buffer_name in self.graph_inputs:
             return self.graph_inputs[buffer_name].get_dtype()
+        m = re.match(r"as_strided\(([a-zA-Z0-9_]+),", buffer_name)
+        if m:
+            return self.get_dtype(m.group(1))
         raise KeyError(f"could not find {buffer_name}")
 
     def random_seed_buffer(self, device: torch.device):
@@ -214,34 +221,35 @@ class GraphLowering(torch.fx.Interpreter):
         return tensor
 
     def call_function(self, target, args, kwargs):
-        if target is operator.getitem and isinstance(args[0], (list, tuple)):
-            return super().call_function(target, args, kwargs)
+        with ir.IRNode.current_origins(gather_origins(args, kwargs)):
+            if target is operator.getitem and isinstance(args[0], (list, tuple)):
+                return super().call_function(target, args, kwargs)
 
-        if target not in lowerings:
-            if config.implicit_fallbacks:
-                error = (
-                    MissingOperatorWithDecomp
-                    if get_decompositions([target])
-                    else MissingOperatorWithoutDecomp
-                )
-                log.warning(
-                    "Creating implicit fallback for:\n%s",
-                    error.operator_str(target, args, kwargs),
-                )
-                make_fallback(target)
-            elif get_decompositions([target]):
-                # There isn't a good way to dynamically patch this in
-                # since AOT Autograd already ran.  The error message tells
-                # the user how to fix it.
-                raise MissingOperatorWithDecomp(target, args, kwargs)
-            else:
-                raise MissingOperatorWithoutDecomp(target, args, kwargs)
+            if target not in lowerings:
+                if config.implicit_fallbacks:
+                    error = (
+                        MissingOperatorWithDecomp
+                        if get_decompositions([target])
+                        else MissingOperatorWithoutDecomp
+                    )
+                    log.warning(
+                        "Creating implicit fallback for:\n%s",
+                        error.operator_str(target, args, kwargs),
+                    )
+                    make_fallback(target)
+                elif get_decompositions([target]):
+                    # There isn't a good way to dynamically patch this in
+                    # since AOT Autograd already ran.  The error message tells
+                    # the user how to fix it.
+                    raise MissingOperatorWithDecomp(target, args, kwargs)
+                else:
+                    raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
-        try:
-            out = lowerings[target](*args, **kwargs)
-            return out
-        except Exception as e:
-            raise LoweringException(e, target, args, kwargs) from e
+            try:
+                out = lowerings[target](*args, **kwargs)
+                return out
+            except Exception as e:
+                raise LoweringException(e, target, args, kwargs) from e
 
     def get_attr(self, target, args, kwargs):
         # this is a constant
@@ -298,15 +306,36 @@ class GraphLowering(torch.fx.Interpreter):
 
     def run_node(self, n: torch.fx.Node):
         with ir.IRNode.current_origins({n}):
-            result = super().run_node(n)
+            if n.op == "call_function" and n.target in layout_constraints:
+                args, kwargs = self.fetch_args_kwargs_from_env(n)
+                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
+                result = self.call_function(n.target, args, kwargs)
+            else:
+                result = super().run_node(n)
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
-                    if user.target in needs_realized_inputs or user.op == "output":
+                    if user.target in needs_realized_inputs:
                         result.realize_hint()
+                        # This inclusion is somewhat controversial (from
+                        # discussion between Horace, Natalia, and Elias).
+                        # Currently, it's not very clear why this is helpful.
+                        # The general idea here is that even though a node may
+                        # have FlexibleLayout, we still often *treat* it as if
+                        # it was contiguous. This appears to sometime result in
+                        # suboptimal behavior.
+                        #
+                        # When we do a better job selecting layout, we should
+                        # revisit this.
+                        result = ir.ExternKernel.require_stride_order(
+                            result, ir.get_stride_order(n.meta["val"].stride())
+                        )
+                    if user.op == "output":
+                        if isinstance(result.data.data, (Pointwise, Reduction)):
+                            result.realize()
 
                 # TODO(jansel): introduce a store vs inline choice
                 result.mark_reuse(len(n.users))
@@ -339,7 +368,7 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        log.log(dynamo_logging.CODE, "Output code: %s", mod.__file__)
+        log.log(logging.CODE, "Output code: %s", mod.__file__)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
