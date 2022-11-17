@@ -176,13 +176,17 @@ cxx_library(
 )
 
 cxx_library(
+    header_namespace = "",
     name = "FP16",
-    raw_headers = glob([
-        "FP16/include/*.h",
-    ]),
     public_include_directories = [
         "FP16/include/",
     ],
+    exported_headers = {
+        "fp16.h": "FP16/include/fp16.h",
+        "fp16/fp16.h": "FP16/include/fp16/fp16.h",
+        "fp16/bitcasts.h": "FP16/include/fp16/bitcasts.h",
+        "fp16/psimd.h": "FP16/include/fp16/psimd.h",
+    },
     force_static = True,
     visibility = ["PUBLIC"],
 )

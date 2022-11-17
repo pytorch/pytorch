@@ -67,7 +67,7 @@ def define_glog():
             "-DHAVE_PREAD",
             "-DHAVE___ATTRIBUTE__",
         ],
-        deps = [":glog_config"],
+        exported_deps = [":glog_config"],
         soname = "libglog.$(ext)",
         visibility = ["PUBLIC"],
     )

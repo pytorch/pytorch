@@ -240,7 +240,7 @@ def define_qnnpack(third_party, labels = []):
         force_static = True,
         labels = labels,
         visibility = ["PUBLIC"],
-        deps = [
+        exported_deps = [
             third_party("pthreadpool_header"),
         ],
     )
@@ -327,10 +327,12 @@ def define_qnnpack(third_party, labels = []):
             ":ukernels_sse41",
             ":ukernels_ssse3",
             third_party("cpuinfo"),
+            third_party("pthreadpool"),
             third_party("FP16"),
             third_party("FXdiv"),
         ],
         exported_deps = [
+            third_party("clog"),
             third_party("cpuinfo"),
         ],
     )

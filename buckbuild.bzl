@@ -850,6 +850,7 @@ def define_buck_targets(
             ("aten/src", "ATen/native/mkl/*.h"),
             ("aten/src", "ATen/native/mkldnn/*.h"),
         ]),
+        exported_deps = ["//third_party:interface"], # xnnpack headers
         visibility = ["PUBLIC"],
         labels = labels,
     )
@@ -904,6 +905,9 @@ def define_buck_targets(
         deps = [
             ":generated-version-header",
         ],
+        exported_deps = [
+            ":generated-autograd-headers"
+        ]
     )
 
     fb_xplat_cxx_library(
@@ -1657,6 +1661,9 @@ def define_buck_targets(
             "-Wl,--no-as-needed",
         ],
         visibility = ["PUBLIC"],
+        deps = [
+            ":torch_headers",
+        ],
         exported_deps = [
             ":aten_cpu",
             ":torch_common",
@@ -1686,6 +1693,7 @@ def define_buck_targets(
         exported_deps = [
             ":aten_cpu",
             ":torch_common",
+            ":torch_headers",
         ],
     )
 

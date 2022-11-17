@@ -137,10 +137,12 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         windows_compiler_flags_override = WINDOWS_FLAGS,
         deps = [
             ":interface",
-            third_party("FP16"),
             third_party("FXdiv"),
             third_party("clog"),
         ],
+        exported_deps = [
+            third_party("FP16"),
+        ]
     )
 
     fb_xplat_cxx_library(
@@ -1780,6 +1782,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ":ukernels_scalar",
             third_party("cpuinfo"),
             third_party("pthreadpool"),
+            third_party("clog"),
         ] + select({
             "DEFAULT": [
                 ":arm_lib",
