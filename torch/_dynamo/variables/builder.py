@@ -108,6 +108,8 @@ class GraphArg:
     source: Source
     example: Any
     is_unspecialized: bool
+    # Must only be a fake tensor
+    fake_tensor = None
 
     def __post_init__(self):
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
@@ -118,6 +120,12 @@ class GraphArg:
 
     def get_examples(self):
         return [self.example]
+
+    def get_fake_examples(self):
+        assert config.fake_tensor_propagation
+        if self.fake_tensor is not None:
+            assert isinstance(self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
+        return [self.fake_tensor]
 
     def __len__(self):
         return 1
@@ -539,10 +547,10 @@ class VariableBuilder:
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
+            graph_arg = None
             if not is_constant_source(self.get_source()):
-                self.tx.output.graphargs.append(
-                    GraphArg(self.get_source(), value, False)
-                )
+                graph_arg = GraphArg(self.get_source(), value, False)
+                self.tx.output.graphargs.append(graph_arg)
             # Disable __torch_function__ to prevent cloning of `value` to hit
             # us
             with torch._C.DisableTorchFunction():
@@ -562,6 +570,10 @@ class VariableBuilder:
                     guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
                     should_specialize=self.tensor_should_specialize(),
                 )
+            if graph_arg and config.fake_tensor_propagation:
+                example = tensor_variable.proxy.node.meta["example_value"]
+                if isinstance(example, torch._subclasses.fake_tensor.FakeTensor):
+                    graph_arg.fake_tensor = example
             if torch.overrides.has_torch_function_unary(value):
                 subclass_torch_function__func = value.__torch_function__.__func__
                 subclass_type = type(value)

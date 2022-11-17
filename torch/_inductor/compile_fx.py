@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 import sys
+from contextlib import nullcontext
 from typing import List
 
 import functorch
@@ -172,7 +173,14 @@ def align_inputs(model, inputs, static_input_idxs=()):
         i
         for i in range(len(inputs))
         # TODO: static inputs should not be passed in as fake tensor
-        if (i not in static_input_idxs or isinstance(inputs[i], FakeTensor) or (isinstance(inputs[i], torch.Tensor) and inputs[i].data_ptr() % ALIGNMENT) != 0)
+        if (
+            i not in static_input_idxs
+            or isinstance(inputs[i], FakeTensor)
+            or (
+                isinstance(inputs[i], torch.Tensor) and inputs[i].data_ptr() % ALIGNMENT
+            )
+            != 0
+        )
         and inputs[i].device.type == "cuda"
     ]
 
@@ -327,10 +335,14 @@ def count_tangents(fx_g: torch.fx.GraphModule):
 _graph_counter = itertools.count(0)
 
 
-def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
+def compile_fx(
+    model_: torch.fx.GraphModule,
+    example_inputs_: List[torch.Tensor],
+    fake_mode=nullcontext,
+):
     """Main entrypoint to a compile given FX graph"""
 
-    if not is_aot_autograd_safe_to_run(model_, example_inputs_):
+    if not is_aot_autograd_safe_to_run(model_, example_inputs_, fake_mode):
         log.warning("Aot Autograd is not safe to run, so falling back to eager")
         return model_
 
@@ -371,7 +383,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
 
     with overrides.patch_functions():
 
-        # TODO: can add logging before/after the call to create_aot_dispatcher_function
+        # TODO: can add logging before/after the call to _create_aot_dispatcher_function
         # in functorch/_src/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch
         return aot_autograd(
@@ -383,4 +395,5 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
+            fake_mode=fake_mode,
         )

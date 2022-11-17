@@ -118,36 +118,20 @@ class ShapeAliasingAndMutationProp(ShapeProp):
             self.env.clear()
 
 
-def has_mutation(gm, example_inputs, inputs_only=False):
+def has_mutation(gm, example_inputs, fake_mode, inputs_only=False):
     """Check if the graph module has any form of mutation.  If inputs_only is
     true, we only check for mutation of inputs"""
     # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
-
     if fake_tensors_available and config.fake_tensor_propagation:
-
-        def _wrap_to_fake_tensor(t, *, f_mode):
-            if type(t) in (torch.Tensor, torch.nn.Parameter):
-                static_shapes_ = config.dynamic_shapes is False
-                return fake_mode.from_tensor(
-                    t, static_shapes=config.dynamic_shapes is not False
-                )
-            else:
-                return t
-
+        assert fake_mode, "Fake mode must be passed in"
         # Our analysis pass should use dynamic shape tensor inputs
         # when dynamic shapes are enabled.
         # We don't actually care about the guards that are created
-        # on those shapes though, so just create a fresh ShapeEnv here.
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv() if config.dynamic_shapes else None
-        )
-        fake_wrapper = functools.partial(_wrap_to_fake_tensor, f_mode=fake_mode)
-        example_inputs = tree_map(fake_wrapper, example_inputs)
-        new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
-        with fake_mode, enable_python_dispatcher():
-            ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
+        # on those shapes though, so just suppress_guards here.
+        with fake_mode.shape_env.suppress_guards():
+            new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
+            with fake_mode, enable_python_dispatcher():
+                ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     else:
         # Clone the inputs such that intermediate tensors (not leaf tensors) with
         # requires_grad to True are now converted to False to avoid Runtime Error

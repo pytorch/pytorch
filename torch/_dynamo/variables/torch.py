@@ -389,7 +389,7 @@ Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.
 To support this behavior, we need to allow const-propping tensors that store symint data.
 For now, dynamo will explicitly graph break when it encounters user code with this behavior.
 """
-                log.warning(msg)
+                # log.warning(msg)
                 raise unimplemented(msg)
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.

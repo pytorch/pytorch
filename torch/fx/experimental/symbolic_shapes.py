@@ -528,7 +528,7 @@ class ShapeEnv(object):
 
     def evaluate_guards_for_args(self, *args):
         new_env = ShapeEnv()
-        # NB: This must be kept in sync with create_aot_dispatcher_function
+        # NB: This must be kept in sync with _create_aot_dispatcher_function
         # and wrap_fake_symbolic
         meta_converter = MetaConverter()
         pytree.tree_map_only(torch.Tensor, partial(meta_converter, shape_env=new_env), args)
@@ -697,6 +697,7 @@ class ShapeEnv(object):
         # TODO: optimize this; avoid formatting traces until we need them
         # NB: drop two frames; evaluate_expr and the Sym* function that
         # actually called us
+        # breakpoint()
         if not self._suppress_guards_tls():
             stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
             if concrete_val is sympy.true:
