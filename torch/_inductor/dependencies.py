@@ -3,24 +3,25 @@ import dataclasses
 import itertools
 import logging
 import typing
-import torch
 from typing import Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
-import functools
 
 from . import config
 from .codegen.common import index_prevent_reordering
-from .utils import sympy_product, sympy_str, sympy_subs, sympy_symbol, VarRanges
+from .utils import (
+    get_dtype_size,
+    sympy_product,
+    sympy_str,
+    sympy_subs,
+    sympy_symbol,
+    VarRanges,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
 
 Dep = Union["MemoryDep", "StarDep"]
-
-@functools.lru_cache(8)
-def get_dtype_size(dtype):
-    return torch.empty((), dtype=dtype).element_size()
 
 
 class MemoryDep(typing.NamedTuple):
@@ -113,7 +114,9 @@ class StarDep(typing.NamedTuple):
         if hasattr(buf, "layout") and isinstance(buf.layout, MultiOutputLayout):
             # NB: Too annoying to acquire, should only be used for instrumentation
             return 1
-        return V.graph.sizevars.size_hint(sympy_product(buf.get_size())) * get_dtype_size(buf.get_dtype())
+        return V.graph.sizevars.size_hint(
+            sympy_product(buf.get_size())
+        ) * get_dtype_size(buf.get_dtype())
 
     def is_contiguous(self) -> bool:
         return False
