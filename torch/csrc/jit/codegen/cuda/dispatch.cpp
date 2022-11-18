@@ -48,6 +48,9 @@ void Val::dispatch(T handler, Val* val) {
         case DataType::Bool:
           ptr(handler)->handle(val->as<Bool>());
           return;
+        case DataType::Float:
+          ptr(handler)->handle(val->as<Float>());
+          return;
         case DataType::Double:
           ptr(handler)->handle(val->as<Double>());
           return;
@@ -271,6 +274,9 @@ void Val::constDispatch(T handler, const Val* val) {
       switch (*(val->getDataType())) {
         case DataType::Bool:
           ptr(handler)->handle(val->as<Bool>());
+          return;
+        case DataType::Float:
+          ptr(handler)->handle(val->as<Float>());
           return;
         case DataType::Double:
           ptr(handler)->handle(val->as<Double>());
@@ -506,6 +512,9 @@ void Val::mutatorDispatch(T mutator, Val* val) {
       switch (*(val->getDataType())) {
         case DataType::Bool:
           ptr(mutator)->mutate(val->as<Bool>());
+          return;
+        case DataType::Float:
+          ptr(mutator)->mutate(val->as<Float>());
           return;
         case DataType::Double:
           ptr(mutator)->mutate(val->as<Double>());
@@ -821,6 +830,9 @@ void OptInDispatch::unhandled(Statement* stmt) {
 void OptOutConstDispatch::handle(const Bool* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const Float* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const Double* stmt) {
   unhandled(stmt);
 }
@@ -978,6 +990,9 @@ void OptOutDispatch::unhandled(Statement*) {}
 
 // Vals
 void OptOutDispatch::handle(Bool* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(Float* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(Double* stmt) {

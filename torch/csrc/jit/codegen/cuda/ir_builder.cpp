@@ -3,6 +3,9 @@
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_container.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -45,6 +48,7 @@ IR_BUILDER_INSTANTIATE(IterDomain)
 IR_BUILDER_INSTANTIATE(TensorDomain)
 IR_BUILDER_INSTANTIATE(TensorView)
 IR_BUILDER_INSTANTIATE(Bool)
+IR_BUILDER_INSTANTIATE(Float)
 IR_BUILDER_INSTANTIATE(Double)
 IR_BUILDER_INSTANTIATE(Int)
 IR_BUILDER_INSTANTIATE(ComplexDouble)
@@ -80,6 +84,8 @@ Val* IrBuilder::newResult(DataType dtype) {
   switch (dtype) {
     case DataType::Bool:
       return IrBuilder::create<Bool>(c10::nullopt);
+    case DataType::Float:
+      return IrBuilder::create<Float>(c10::nullopt);
     case DataType::Double:
       return IrBuilder::create<Double>(c10::nullopt);
     case DataType::Int:

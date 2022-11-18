@@ -44,6 +44,17 @@ class IrNodeLabel : private OptInConstDispatch {
     }
   }
 
+  void handle(const Float* f) override {
+    if (f->isSymbolic()) {
+      label_ << "f" << f->name();
+    } else {
+      if (detail_level_ >= DetailLevel::Explicit) {
+        label_ << "f" << f->name() << "=";
+      }
+      label_ << *f->value();
+    }
+  }
+
   void handle(const Double* d) override {
     if (d->isSymbolic()) {
       label_ << "d" << d->name();
@@ -361,6 +372,10 @@ void IrGraphGenerator::handle(const IterDomain* id) {
 
 void IrGraphGenerator::handle(const Bool* b) {
   printValue(b, IrNodeLabel::gen(b, detail_level_));
+}
+
+void IrGraphGenerator::handle(const Float* f) {
+  printValue(f, IrNodeLabel::gen(f, detail_level_));
 }
 
 void IrGraphGenerator::handle(const Double* d) {

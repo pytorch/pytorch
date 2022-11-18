@@ -63,6 +63,7 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   void handle(const IterDomain*) override;
 
   void handle(const Bool*) override;
+  void handle(const Float*) override;
   void handle(const Double*) override;
   void handle(const Int*) override;
   void handle(const ComplexDouble*) override;

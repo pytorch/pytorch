@@ -4,6 +4,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder_passkey.h>
 #include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/mma_type.h>
 
@@ -21,7 +22,6 @@ class WelfordResult;
 class ViewTransform;
 
 class IrCloner;
-class IrBuilderPasskey;
 
 //! A Bool value
 //!
@@ -54,20 +54,27 @@ class TORCH_CUDA_CU_API Bool : public Val {
   const c10::optional<bool> maybe_value_;
 };
 
-//! A Float64 value. This value can be a symbolic value (defined after the
-//! kernel is compiled) or a constant value (inlined into the kernel
+//! A floating-point value. This value can be a symbolic value (defined after
+//! the kernel is compiled) or a constant value (inlined into the kernel
 //! definition).
-class TORCH_CUDA_CU_API Double : public Val {
+template <DataType DT>
+class TORCH_CUDA_CU_API FloatingPoint : public Val {
  public:
-  using ScalarType = double;
+  using ScalarType = typename DataTypeToNativeType<DT>::type;
 
-  Double(IrBuilderPasskey passkey);
+  FloatingPoint(IrBuilderPasskey passkey)
+      : Val(passkey, ValType::Scalar, DT), maybe_value_{c10::nullopt} {}
 
-  explicit Double(IrBuilderPasskey passkey, ScalarType value);
+  explicit FloatingPoint(IrBuilderPasskey passkey, ScalarType value)
+      : Val(passkey, ValType::Scalar, DT), maybe_value_{value} {}
 
-  explicit Double(IrBuilderPasskey passkey, c10::optional<ScalarType> value);
+  explicit FloatingPoint(
+      IrBuilderPasskey passkey,
+      c10::optional<ScalarType> value)
+      : Val(passkey, ValType::Scalar, DT), maybe_value_{value} {}
 
-  Double(const Double* src, IrCloner* ir_cloner);
+  FloatingPoint(const FloatingPoint* src, IrCloner* ir_cloner)
+      : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -79,11 +86,25 @@ class TORCH_CUDA_CU_API Double : public Val {
     return maybe_value_;
   }
 
-  bool sameAs(const Statement* other) const override;
+  bool sameAs(const Statement* other) const override {
+    if (this == other) {
+      return true;
+    }
+    if (!other->isA<FloatingPoint>()) {
+      return false;
+    }
+    const auto other_val = other->as<FloatingPoint>();
+    if (isConst() && other_val->isConst())
+      return *value() == *(other_val->value());
+    return false;
+  }
 
  private:
   const c10::optional<ScalarType> maybe_value_;
 };
+
+using Float = FloatingPoint<DataType::Float>;
+using Double = FloatingPoint<DataType::Double>;
 
 //! An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
 //! inlined literal in the kernel.

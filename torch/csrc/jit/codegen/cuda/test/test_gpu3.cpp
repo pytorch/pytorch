@@ -6870,6 +6870,77 @@ TEST_F(NVFuserTest, FusionIssue2163ReproInvalidAlias_CUDA) {
       fe.kernel(), {cg_output}, aten_inputs, {ref_y}, __LINE__, __FILE__, "");
 }
 
+// Testing scalar FP types
+TEST_F(NVFuserTest, FusionFloatingPointType_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const float float_val = 0.1f;
+  const double double_val = 0.2;
+
+  {
+    auto tv0 = makeConcreteTensor({2}, DataType::Float);
+    fusion.addInput(tv0);
+
+    auto f2 = IrBuilder::create<Float>(float_val);
+    auto d3 = IrBuilder::create<Double>(double_val);
+
+    // Adding two Floats produces a Float
+    auto f4 = add(f2, f2);
+    TORCH_CHECK(f4->isA<Float>(), "Invalid result: ", f4->toString());
+
+    // Adding a Double and a Float produces a Double
+    auto d5 = add(f2, d3);
+    TORCH_CHECK(d5->isA<Double>(), "Invalid result: ", d5->toString());
+
+    // Adding a Float and a Double produces a Double
+    auto d6 = add(d3, f2);
+    TORCH_CHECK(d6->isA<Double>(), "Invalid result: ", d6->toString());
+
+    // Adding two Doubles produce a Double
+    auto d7 = add(d5, d6);
+    TORCH_CHECK(d7->isA<Double>(), "Invalid result: ", d7->toString());
+
+    // Adding a Float to a Float tensor produces a Float tensor
+    auto tv1 = add(tv0, f4);
+    TORCH_CHECK(
+        tv1->getDataType() == DataType::Float,
+        tv1->toString(),
+        " has an invalid data type: ",
+        tv1->getDataType().value());
+
+    // Adding a Double to a Float tensor still produces a Float tensor
+    auto tv2 = add(tv1, d7);
+    TORCH_CHECK(
+        tv2->getDataType() == DataType::Float,
+        tv2->toString(),
+        " has an invalid data type: ",
+        tv2->getDataType().value());
+
+    fusion.addOutput(tv2);
+  }
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({2}, options);
+
+  std::vector<IValue> inputs({t0});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, inputs);
+  auto cg_outputs = fe.runFusion(inputs);
+
+  auto f2 = float_val;
+  auto d3 = double_val;
+  auto f4 = f2 + f2;
+  auto d5 = f2 + d3;
+  auto d6 = d3 + f2;
+  auto d7 = d5 + d6;
+  auto t1 = t0 + f4;
+  auto t2 = t1 + d7;
+
+  testValidate(&fusion, cg_outputs, inputs, {t2}, __LINE__, __FILE__);
+}
+
 // Test file size should be up to 10K LoC. Create a new file for more tests.
 
 } // namespace jit

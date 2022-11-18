@@ -103,6 +103,21 @@ DataType getTypeFromComplexType(DataType dtype);
 // Return if the datatype is supported on the current device
 TORCH_CUDA_CU_API bool isSupportedTypeByDevice(DataType dtype);
 
+template <DataType DT>
+struct DataTypeToNativeType;
+
+#define DEFINE_DATATYPE_TO_NATIVE_TYPE(data_type, native_type) \
+  template <>                                                  \
+  struct DataTypeToNativeType<data_type> {                     \
+    using type = native_type;                                  \
+  };
+
+// TODO: Add more type specializations
+DEFINE_DATATYPE_TO_NATIVE_TYPE(DataType::Float, float);
+DEFINE_DATATYPE_TO_NATIVE_TYPE(DataType::Double, double);
+
+#undef DEFINE_DATATYPE_TO_NATIVE_TYPE
+
 enum class UnaryOpType {
   Abs,
   Acos,

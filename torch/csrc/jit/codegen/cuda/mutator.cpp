@@ -47,6 +47,8 @@ void OptOutMutator::registerMutation(Val* val, Val* mutation) {
 
 void OptOutMutator::mutate(Bool* b) {}
 
+void OptOutMutator::mutate(Float* d) {}
+
 void OptOutMutator::mutate(Double* d) {}
 
 void OptOutMutator::mutate(Int* i) {}

@@ -198,6 +198,9 @@ void Fusion::addInput(Val* input) {
     TORCH_CHECK(
         !input->isConst(),
         "Immediate scalar value cannot be added as an input. It is not necessary to pass it as an input.");
+    TORCH_CHECK(
+        !input->isA<Float>(),
+        "Using Float as an input is not supported as there is no scalar float type in PyTorch.");
   }
 
   inputs_.push_back(input);

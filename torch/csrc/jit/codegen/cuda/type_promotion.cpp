@@ -54,7 +54,7 @@ at::native::ResultTypeState updateResultTypeState(
     const at::native::ResultTypeState& in_state) {
   at::native::ResultTypeState new_state = in_state;
   c10::ScalarType current = scalar;
-  if (c10::isFloatingType(scalar)) {
+  if (scalar == c10::ScalarType::Half || scalar == c10::ScalarType::BFloat16) {
     current = c10::typeMetaToScalarType(at::get_default_dtype());
   }
   new_state.wrappedResult =

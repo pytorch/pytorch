@@ -88,10 +88,11 @@ Val* newScalar(ValType vtype, DataType dtype) {
       switch (dtype) {
         case DataType::Bool:
           return IrBuilder::create<Bool>();
-        case DataType::Double:
         case DataType::Float:
         case DataType::Half:
         case DataType::BFloat16:
+          return IrBuilder::create<Float>();
+        case DataType::Double:
           return IrBuilder::create<Double>();
         case DataType::Int32:
         case DataType::Int:

@@ -44,6 +44,10 @@ class ScalarCheck : OptInConstDispatch {
     same_ = v1_->as<Bool>()->sameAs(v2_->as<Bool>());
   }
 
+  void handle(const Float* d) final {
+    same_ = v1_->as<Float>()->sameAs(v2_->as<Float>());
+  }
+
   void handle(const Double* d) final {
     same_ = v1_->as<Double>()->sameAs(v2_->as<Double>());
   }
@@ -96,32 +100,6 @@ bool Bool::sameAs(const Statement* other) const {
   if (isConst() && other_bool->isConst()) {
     return *value() == *(other_bool->value());
   }
-  return false;
-}
-
-Double::Double(IrBuilderPasskey passkey)
-    : Val(passkey, ValType::Scalar, DataType::Double),
-      maybe_value_{c10::nullopt} {}
-
-Double::Double(IrBuilderPasskey passkey, ScalarType value)
-    : Val(passkey, ValType::Scalar, DataType::Double), maybe_value_{value} {}
-
-Double::Double(IrBuilderPasskey passkey, c10::optional<ScalarType> value)
-    : Val(passkey, ValType::Scalar, DataType::Double), maybe_value_{value} {}
-
-Double::Double(const Double* src, IrCloner* ir_cloner)
-    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
-
-bool Double::sameAs(const Statement* other) const {
-  if (this == other) {
-    return true;
-  }
-  if (!other->isA<Double>()) {
-    return false;
-  }
-  const auto other_double = other->as<Double>();
-  if (isConst() && other_double->isConst())
-    return *value() == *(other_double->value());
   return false;
 }
 

@@ -21,29 +21,6 @@ namespace cuda {
 
 class IrBuilderPasskey;
 
-// Abstract nodes
-class Val;
-class Expr;
-
-// Values
-class Bool;
-class Double;
-class Int;
-class NamedScalar;
-
-class IterDomain;
-class TensorDomain;
-class TensorView;
-
-// Expressions
-class UnaryOp;
-class BinaryOp;
-class TernaryOp;
-class RNGOp;
-class ReductionOp;
-class WelfordOp;
-class BroadcastOp;
-
 namespace kir {
 class Kernel;
 

@@ -214,6 +214,24 @@ void IrPrinter::handle(const Bool* b) {
   }
 }
 
+void IrPrinter::handle(const Float* f) {
+  if (print_inline_ && f->definition() != nullptr) {
+    os_ << "( ";
+    handle(f->definition());
+    os_ << " )";
+    return;
+  }
+
+  if (f->isSymbolic()) {
+    os_ << "f" << varName(f);
+  } else {
+    os_ << "float("
+        << std::setprecision(
+               std::numeric_limits<Float::ScalarType>::max_digits10)
+        << *(f->value()) << ")";
+  }
+}
+
 void IrPrinter::handle(const Double* d) {
   if (print_inline_ && d->definition() != nullptr) {
     os_ << "( ";

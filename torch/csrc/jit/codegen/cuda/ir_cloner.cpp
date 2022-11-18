@@ -68,6 +68,10 @@ void IrCloner::handle(const Bool* b) {
   clone_ = IrBuilder::clone(b, this);
 }
 
+void IrCloner::handle(const Float* f) {
+  clone_ = IrBuilder::clone(f, this);
+}
+
 void IrCloner::handle(const Double* d) {
   clone_ = IrBuilder::clone(d, this);
 }

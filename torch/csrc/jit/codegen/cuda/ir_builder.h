@@ -1,8 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_container.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder_passkey.h>
 
 namespace torch {
 namespace jit {
@@ -14,20 +13,7 @@ class Kernel;
 }
 
 class IrCloner;
-
-// Passkey for builder to register properties with statements, and to call
-// functions in IrContainer
-class TORCH_CUDA_CU_API IrBuilderPasskey {
-  friend class IrBuilder;
-
- public:
-  // TODO: Collapse ir_container and Kernel once Kernel inherits from
-  // IrContainer
-  IrContainer* const ir_container_ = nullptr;
-
- private:
-  explicit IrBuilderPasskey(IrContainer* ir_container);
-};
+class IrContainer;
 
 //! IR builder interface
 class TORCH_CUDA_CU_API IrBuilder {

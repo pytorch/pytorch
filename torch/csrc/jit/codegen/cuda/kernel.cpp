@@ -15,9 +15,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-IrBuilderPasskey::IrBuilderPasskey(IrContainer* ir_container)
-    : ir_container_(ir_container) {}
-
 namespace kir {
 
 namespace {
