@@ -577,14 +577,14 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       auto iter_dtype = iter.dtype();
       if (iter_dtype == kByte) {
         return cpu_hflip_vec<uint8_t>(iter);
-      } else if (iter_dtype == kFloat) {
-        return cpu_hflip_vec<float>(iter);
-      } else if (iter_dtype == kInt) {
-        return cpu_hflip_vec<int32_t>(iter);
       } else if (iter_dtype == kShort) {
         return cpu_hflip_vec<int16_t>(iter);
+      } else if (iter_dtype == kInt) {
+        return cpu_hflip_vec<int32_t>(iter);
       } else if (iter_dtype == kLong) {
         return cpu_hflip_vec<int64_t>(iter);
+      } else if (iter_dtype == kFloat) {
+        return cpu_hflip_vec<float>(iter);
       } else if (iter_dtype == kDouble) {
         return cpu_hflip_vec<double>(iter);
       }
@@ -594,12 +594,14 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       auto iter_dtype = iter.dtype();
       if (iter_dtype == kByte) {
         return cpu_vflip_memcpy<uint8_t>(iter);
-      } else if (iter_dtype == kFloat) {
-        return cpu_vflip_memcpy<float>(iter);
+      } else if (iter_dtype == kShort) {
+        return cpu_hflip_vec<int16_t>(iter);
       } else if (iter_dtype == kInt) {
         return cpu_vflip_memcpy<int32_t>(iter);
       } else if (iter_dtype == kLong) {
         return cpu_vflip_memcpy<int64_t>(iter);
+      } else if (iter_dtype == kFloat) {
+        return cpu_vflip_memcpy<float>(iter);
       } else if (iter_dtype == kDouble) {
         return cpu_vflip_memcpy<double>(iter);
       }
