@@ -61,18 +61,18 @@ class ToyModel(nn.Module):
     def __init__(self):
         super(ToyModel, self).__init__()
         self.net = nn.Sequential(
-            *[nn.Linear(10, 10000), nn.ReLU()]
-            + [nn.Linear(10000, 10000), nn.ReLU()]
-            + [MyModule(10000, 10000)]
+            # *[nn.Linear(10, 10000), nn.ReLU()]
+            # + [nn.Linear(10000, 10000), nn.ReLU()]
+            *[MyModule(10, 10000)]
             + [MyModule(10000, 1000)]
-            + [MyModule(1000, 1000)]
-            + [MyModule(1000, 1000)]
-            + [MyModule(1000, 1000)]
-            + [MyModule(1000, 1000)]
-            + [MyModule(1000, 1000)]
-            + [MyModule(1000, 1000)]
-            + [MyModule(1000, 1000)]
-            + [nn.Linear(1000, 5)]
+            + [MyModule(1000, 5)]
+            # + [MyModule(1000, 1000)]
+            # + [MyModule(1000, 1000)]
+            # + [MyModule(1000, 1000)]
+            # + [MyModule(1000, 1000)]
+            # + [MyModule(1000, 1000)]
+            # + [MyModule(1000, 1000)]
+            # + [nn.Linear(1000, 5)]
         )
 
     def forward(self, x):

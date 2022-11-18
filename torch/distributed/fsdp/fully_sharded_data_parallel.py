@@ -695,6 +695,7 @@ class FullyShardedDataParallel(nn.Module):
                     "Expected `FlatParameter` to be on the compute device "
                     f"{self.compute_device} but got {handle.flat_param.device}",
                 )
+            print(f"FSDP.forward call self._fsdp_wrapped_module()\nself={self}")
             output = self._fsdp_wrapped_module(*args, **kwargs)
             return _post_forward(
                 self, self._handles, reshard_fn, unused, unused, output

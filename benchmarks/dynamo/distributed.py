@@ -23,8 +23,11 @@ def torchviz_model(args, model, inputs, rank):
 
     outputs = model(*inputs)
     loss = reduce_to_scalar_loss(outputs)
+    x = [whc_debug_views[k] for k in whc_debug_views]
+    tensors = (loss, *x)
     parameter_names = dict(model.named_parameters())
-    dot = make_dot(loss, params=parameter_names, show_attrs=True, show_saved=True)
+    parameter_names.update(whc_debug_views)
+    dot = make_dot(tensors, params=parameter_names, show_attrs=True, show_saved=True)
     if rank == 0:
         dot.render("torchviz.dot")
 
