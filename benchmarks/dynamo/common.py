@@ -110,27 +110,16 @@ CI_SKIP_INDUCTOR_TRAINING = [
     # *CI_SKIP_AOT_EAGER_TRAINING,
     # *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
-    "attention_is_all_you_need_pytorch",
-    "drq",
-    "hf_Albert",
-    "hf_Bart",
-    "hf_GPT2",
-    "hf_Reformer",
+    "detectron2",
     "mobilenet_v3_large",
     "moco",
-    "pytorch_struct",
-    "vgg16",
-    "speech_transformer",  # from functionalization
-    "vision_maskrcnn",  # from functionalization
-    "timm_efficientnet",  # from functionalization (only fails for inductor)
-    "hf_Bert",
-    "soft_actor_critic",
     "tacotron2",
-    "yolov3",
+    "vision_maskrcnn",  # from functionalization
     # OOM
     "Background_Matting",
     "fastNLP_Bert",
     "hf_BigBird",
+    "hf_T5_base",  # fp64_OOM
     "mobilenet_v2",
     "mobilenet_v2_quantized_qat",
     "resnet50_quantized_qat",
