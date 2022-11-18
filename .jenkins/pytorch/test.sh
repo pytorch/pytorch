@@ -199,12 +199,14 @@ test_python_shard() {
     exit 1
   fi
 
+  python tools/dynamo/verify_dynamo.py
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
 
   assert_git_not_dirty
 }
 
 test_python() {
+  python tools/dynamo/verify_dynamo.py
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose
   assert_git_not_dirty
 }
@@ -250,6 +252,7 @@ test_inductor_distributed() {
 }
 
 test_inductor() {
+  python tools/dynamo/verify_dynamo.py
   python test/run_test.py --include test_modules test_ops --verbose
   PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor --include inductor/test_torchinductor_opinfo --verbose
   # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
