@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import dataclasses
 import functools
 import itertools
 import logging
 import sys
 import threading
-
 import weakref
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -27,7 +28,7 @@ from .utils import (
 )
 from .virtualized import V
 
-WeakRef = Any
+WeakRef = weakref.ref
 
 log = logging.getLogger(__name__)
 ALIGNMENT = 16
@@ -255,6 +256,12 @@ class CUDAGraphTapeManger(object):
         self.debug_fail_counter = 0
 
     def increment_recording_tape(self) -> GraphID:
+        """
+        Creates a new GraphID and decides whether whether to associate it with an
+        existing cuda tape or create a new one. If there is a currently executing tape that
+        cannot be terminated, it is invalid to call this function and will throw an error.
+        `valid_begin_of_recording` should be called to check before calling this function.
+        """
         if self.in_execution:
             # checked prior to invocation
             assert self.executing_tape.valid_end_of_execution()
@@ -267,7 +274,7 @@ class CUDAGraphTapeManger(object):
             self.active_recording_idx = None
 
         if not self.in_recording:
-            self.tapes.append(CUDAGraphTape(self))
+            self.tapes.append(CUDAGraphTape())
             self.active_recording_idx = len(self.tapes) - 1
 
         graph_id = GraphID(next(self.counter))
@@ -278,8 +285,15 @@ class CUDAGraphTapeManger(object):
 
         return graph_id
 
-    # returns True if the execution tape is valid to increment
     def increment_execution_tape(self, id: GraphID) -> bool:
+        """
+        For the given GraphID, checks if it is valid to execute its cuda graph
+        and adjusts the executing cuda graph tape.
+
+        If there is a current recording that cannot be terminated, the GraphID is out of
+        order of its recording, their is a prior, unassociated executing tape that cannot
+        be terminated, or the memory preconditions of this graph are not met, will return False.
+        """
         if self.in_recording:
             if not self.recording_tape.valid_end_of_recording():
                 return False
@@ -300,24 +314,34 @@ class CUDAGraphTapeManger(object):
         return self.executing_tape.increment_execution_tape(id)
 
     def record_graph_outputs(self, outputs: List[Optional[torch.Tensor]]) -> None:
+        "Records the outputs of the currently recording cuda graph"
         self.recording_tape.record_graph_outputs(outputs)
 
     def add_executed_outputs(self, outputs: List[Optional[torch.Tensor]]):
+        "Records the outputs of the currently executing cuda graph"
         return self.executing_tape.add_executed_outputs(outputs)
 
     def valid_begin_of_recording(self):
+        "The tape can record another cuda graph"
         return not self.in_execution or self.executing_tape.valid_end_of_execution()
 
     def valid_end_of_execution(self) -> bool:
+        "The currently executing tape may be terminated"
         return self.executing_tape.valid_end_of_execution()
 
     def valid_end_of_recording(self) -> bool:
+        "The currently recording tape may be terminated"
         return self.recording_tape.valid_end_of_recording()
 
     def check_execution_liveness_after_graph(self) -> bool:
+        """
+        The graph in the currently executed tape, following execution, has the same memory pattern
+        as was recorded.
+        """
         return self.executing_tape.check_execution_liveness_after_graph()
 
     def is_cuda_graph_recorded_tensor(self, tensor) -> bool:
+        "Is the tensor an output of a previous graph in the currently recording tape"
         return self.recording_tape.is_cuda_graph_recorded_tensor(tensor)
 
     @property
@@ -338,6 +362,23 @@ class CUDAGraphTapeManger(object):
         assert self.in_recording
         return self.tapes[self.active_recording_idx]
 
+    def live_cuda_graph_managed_tensors(self) -> List[torch.Tensor]:
+        "Returns the tensors which alive and allocate to the cuda graph memory pool"
+        if not self.in_execution and not self.in_recording:
+            return []
+
+        if self.in_execution:
+            output_refs = self.executing_tape.executed_outputs_weakrefs
+        else:
+            output_refs = self.recording_tape.recorded_outputs_weakrefs
+
+        return [
+            t()
+            for sublist in output_refs
+            for t in sublist
+            if t is not None and t() is not None
+        ]
+
 
 class CUDAGraphTape(object):
     """
@@ -355,9 +396,7 @@ class CUDAGraphTape(object):
     memory invariants from before graph execution and after.
     """
 
-    def __init__(self, tape_manager):
-
-        self.tape_manager = tape_manager
+    def __init__(self):
         self.recorded_tape: List[GraphID] = []
         self.executed_tape: List[GraphID] = []
 
@@ -528,26 +567,32 @@ class TapeManagerContainer(object):
                 self.tape_manager = None
                 self.graph = None
 
-    def finalize_cuda_graphify(self, obj_ref):
-        assert obj_ref() is not None
-        obj = obj_ref()
+    def finalize_cuda_graphify(self, graph: torch.cuda.CUDAGraph, tape_manager):
         with self.lock:
             self.alive_cudagraphify_objs -= 1
             if self.alive_cudagraphify_objs != 0:
                 return
-            live_tensors = self.live_cuda_graph_managed_tensors()
-            self.graph = obj.graph
+            live_tensors = tape_manager.live_cuda_graph_managed_tensors()
             if not live_tensors:
                 self.tape_manager = None
                 return
 
+            self.graph = graph
             for t in live_tensors:
                 self.live_tensors_count += 1
                 weakref.finalize(t, self.finalize_tensor)
 
     def get_tape_manager(self, obj: Optional["CudaGraphify"] = None):
+        # if the live tensors count is set, then the memory pool is still
+        # being used even if the tape manager and CudaGraphTape objects are dead
         if self.live_tensors_count:
             return None
+
+        if self.tape_manager is None or self.tape_manager() is None:
+            tape_manager = CUDAGraphTapeManger()
+            self.tape_manager = weakref.ref(tape_manager)
+        else:
+            tape_manager = self.tape_manager()
 
         if isinstance(obj, CudaGraphify):
             with self.lock:
@@ -556,38 +601,11 @@ class TapeManagerContainer(object):
             # needs to be weak refs otherwise finalizer would keep obj alive
             obj_ref = weakref.ref(obj)
             finalize_fn = functools.partial(
-                self.finalize_cuda_graphify, obj_ref=obj_ref
+                self.finalize_cuda_graphify, graph=obj.graph, tape_manager=tape_manager
             )
             weakref.finalize(obj, finalize_fn)
 
-        if self.tape_manager is None:
-            self.tape_manager = CUDAGraphTapeManger()
-        return self.tape_manager
-
-    def live_cuda_graph_managed_tensors(self):
-        if not self.tape_manager:
-            return []
-
-        if self.tape_manager.in_execution:
-            if self.tape_manager.valid_end_of_execution():
-                return []
-
-            tape = self.tape_manager.executing_tape
-            output_refs = tape.executed_outputs_weakrefs
-        else:
-            assert self.tape_manager.in_recording
-            if self.tape_manager.valid_end_of_recording():
-                return []
-
-            tape = self.tape_manager.recording_tape
-            output_refs = tape.recorded_outputs_weakrefs
-
-        return [
-            t()
-            for sublist in output_refs
-            for t in sublist
-            if t is not None and t() is not None
-        ]
+        return tape_manager
 
 
 local = threading.local()
@@ -609,11 +627,14 @@ class CudaGraphify(object):
     def __init__(self, model, inputs, static_input_idxs=()):
 
         assert isinstance(inputs, (list, tuple))
-        self.tape_manager = get_container().get_tape_manager(self)
-        assert self.tape_manager is not None
-        self.graph_id = self.tape_manager.increment_recording_tape()
+        self.graph = torch.cuda.CUDAGraph()
         self.model = model
         static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
+
+        tape_manager = get_container().get_tape_manager(self)
+        tape_manager is not None
+        self.tape_manager = tape_manager
+        self.graph_id = self.tape_manager.increment_recording_tape()
 
         # tensors which are outputs of previous graphs in the tape - assume these stay stable
         self.cudagraph_managed_idxs = [
@@ -658,7 +679,6 @@ class CudaGraphify(object):
         ]
 
         self.warmup(model, stream, recording_inputs)
-        self.graph = torch.cuda.CUDAGraph()
 
         # on the first invocation, return the first recorded outputs, because their memory
         # is correctly accounted for in the CUDAGraphs caching allocator, so on subsequent cudagraph
