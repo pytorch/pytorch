@@ -479,9 +479,8 @@ class BuiltinVariable(VariableTracker):
                     return arg.evaluate_expr(tx.output)
                 return arg
 
-            args = [guard_if_dyn(arg) for arg in args]
-            value = self.fn(*args)
-            return variables.RangeVariable(value)
+            args = [variables.ConstantVariable(guard_if_dyn(arg)) for arg in args]
+            return variables.RangeVariable(args)
         # None no-ops this handler and lets the driving function proceed
         return None
 

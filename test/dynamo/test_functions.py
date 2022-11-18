@@ -218,6 +218,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.unsqueeze(a, 0)[:, 2:]
 
     @make_test
+    def test_range1(a):
+        return torch.tensor(range(a.size(0)))
+
+    @make_test
+    def test_range2(x, y):
+        r = x + y
+        for i in range(x.size(0) + 2):
+            r = r / y
+        return r
+
+    @make_test
     def test_unpack1(a):
         a, b = a[:5], a[5:]
         return a - b
