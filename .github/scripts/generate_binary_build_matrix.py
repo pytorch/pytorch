@@ -219,9 +219,9 @@ def generate_wheels_matrix(os: str,
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements":
-                        "nvidia-cuda-runtime-cu11;"
-                        "nvidia-cudnn-cu11==8.5.0.96;"
-                        "nvidia-cublas-cu11==11.10.3.66",
+                        "nvidia-cuda-runtime-cu11; platform_system == 'Linux' | "
+                        "nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' | "
+                        "nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux'",
                         "build_name":
                         f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-with-pypi-cudnn"
                         .replace(
