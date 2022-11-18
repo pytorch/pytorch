@@ -203,7 +203,7 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
-        elif name == "numel" and self.size is not None:
+        elif name in ("numel", "nelement") and self.size is not None:
             constant_result = ConstantVariable(product(self.size), **options)
         elif name in ("ndimension", "dim") and self.ndim is not None:
             constant_result = ConstantVariable(self.ndim, **options)

@@ -419,10 +419,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_numel(self):
         def fn(a):
-            return a + a.numel() + torch.numel(a)
+            return (a + a.numel() + torch.numel(a), a + a.nelement())
 
         return torch._dynamo.testing.standard_test(
-            self, fn=fn, nargs=1, expected_ops=2, expected_ops_dynamic=4
+            self, fn=fn, nargs=1, expected_ops=3, expected_ops_dynamic=6
         )
 
     def test_pair(self):
@@ -2961,6 +2961,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(4)
         ref = model(x)
         res = opt_model(x)
+        self.assertTrue(same(ref, res))
+
+    def test_torch_cuda_is_available(self):
+        def fn(x):
+            if torch.cuda.is_available():
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(4)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
 
