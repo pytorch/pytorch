@@ -24,18 +24,20 @@
 #endif
 
 template <typename index_t>
-kernel void compute_mps_kernel(at::mps:device int64_t* _repeat_ptr,
-    	at::mps:device int64_t* _cumsum_ptr,
-    	at::mps:device index_t* _result_ptr,
+kernel void compute_mps_kernel(at::mps::metal::device int64_t* _repeat_ptr,
+    	at::mps::metal::device int64_t* _cumsum_ptr,
+    	at::mps::metal::device index_t* _result_ptr,
+      at::mps::metal::device int64_t& _size,
       uint idx [[thread_position_in_grid]])
     {
 
-      using namespace mps;
+      using namespace at::mps;
 
+      int64_t block = 512;
     	int64_t stride = (threadGroupSize * block) / C10_WARP_SIZE;
     	int warp_id = idx / C10_WARP_SIZE;
     	int tid_in_warp = idx % C10_WARP_SIZE;
-    	for (int64_t i = warp_id; i < size; i += stride)
+    	for (int64_t i = warp_id; i < _size; i += stride)
     	{
     		int64_t end = _cumsum_ptr[i];
     		index_t repeat = _repeat_ptr[i];
@@ -81,9 +83,11 @@ dispatch_sync(mpsStream->queue(), ^(){
   id<MTLBuffer> _repeat_ptr = [device newBufferWithLength:size options:MTLResourceStorageModeShared];
   id<MTLBuffer> _cumsum_ptr = [device newBufferWithLength:size options:MTLResourceStorageModeShared];
   id<MTLBuffer> _result_ptr = [device newBufferWithLength:result_size options:MTLResourceStorageModeShared];
+  id<MTLBuffer> _size = [device newBufferWithLength:1 options:MTLResourceStorageModeShared];
 
   _repeat_ptr.contents = repeat_ptr;
   _cumsum_ptr.contents = cumsum_ptr;
+  _size.contents = size;
 
   [computeEncoder setComputePipelineState:_mAddFunctionPSO];
   [computeEncoder setBuffer:_repeat_ptr offset:0 atIndex:0];
