@@ -1,4 +1,5 @@
 import math
+from functools import wraps
 from typing import Callable, Optional, Union
 
 import torch
@@ -20,6 +21,7 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
+from torch._refs import _make_inplace
 
 from torch._subclasses.fake_tensor import FakeTensor
 
@@ -116,9 +118,31 @@ def alpha_dropout(
     return self * dropout_mask + b
 
 
+def inplace_wrapper(fn):
+    """
+    Given a nn.functional non-linearity, implements its `inplace: bool` argument
+    """
+
+    # nb. We use the name of the first argument used in the unary references
+    @wraps(fn)
+    def _fn(a, *args, inplace=False, **kwargs):
+        if inplace:
+            check(
+                "out" not in kwargs,
+                lambda: "Cannot set inplace=True and pass out= at the same time",
+            )
+            return fn(a, *args, inplace=False, out=a, **kwargs)
+        else:
+            return fn(a, *args, inplace=False, **kwargs)
+
+    return _fn
+
+
 # celu is implemented specially because it has an alpha argument
 # celu is very similar to elu
 @register_decomposition(torch.ops.aten.celu)
+@inplace_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -151,6 +175,8 @@ def celu(
 
 
 @register_decomposition(torch.ops.aten.dropout)
+@inplace_wrapper
+@out_wrapper()
 def dropout(
     a: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
 ) -> TensorLikeType:
@@ -178,14 +204,19 @@ def dropout(
     return a * dropout_mask * scale
 
 
-# elu is implemented specially because it has an alpha argument
-# This cannot be used as a decomposition because the aten op takes in 2 extra kwargs
+@register_decomposition(torch.ops.aten.elu)
+@inplace_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def elu(
-    a: TensorLikeType, alpha: Optional[NumberType] = None, inplace: bool = False
+    a: TensorLikeType,
+    alpha: NumberType = 1.0,
+    scale: NumberType = 1.0,
+    input_scale: NumberType = 1.0,
+    inplace: bool = False,
 ) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.elu
@@ -193,24 +224,27 @@ def elu(
     if inplace:
         raise NotImplementedError
 
-    rhs: TensorLikeType
-    if alpha is not None:
-        python_type = utils.dtype_to_type(a.dtype)
-        if not utils.is_weakly_lesser_type(type(alpha), python_type):
-            msg = (
-                "alpha argument of type {0} cannot be safely cast to type {1}!".format(
-                    type(alpha), python_type
-                )
-            )
-            raise ValueError(msg)
-        rhs = alpha * torch.expm1(a)
-    else:
-        rhs = torch.expm1(a)
+    # nb. This should be factored out into a can_cast aux function
+    python_type = utils.dtype_to_type(a.dtype)
+    check(
+        utils.is_weakly_lesser_type(type(input_scale), python_type),
+        lambda: f"input_scale argument of type {type(input_scale)} cannot be safely cast to type {python_type}!",
+    )
+    check(
+        utils.is_weakly_lesser_type(type(scale), python_type),
+        lambda: f"scale argument of type {type(scale)} cannot be safely cast to type {python_type}!",
+    )
+    check(
+        utils.is_weakly_lesser_type(type(alpha), python_type),
+        lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
+    )
 
-    return torch.where(a > 0, a, rhs)
+    return torch.where(a > 0, scale * a, (alpha * scale) * torch.expm1(a * input_scale))
 
 
 @register_decomposition(torch.ops.aten.relu)
+@inplace_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -280,6 +314,8 @@ def layer_norm(
 
 
 @register_decomposition(torch.ops.aten.leaky_relu)
+@inplace_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -302,6 +338,8 @@ def leaky_relu(
 
 
 @register_decomposition(torch.ops.aten.mish)
+@inplace_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -317,6 +355,8 @@ def mish(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 
 
 @register_decomposition(torch.ops.aten.selu)
+@inplace_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -369,6 +409,7 @@ def softmin(
 
 # softplus is implemented specially because it has beta and threshold arguments
 @register_decomposition(torch.ops.aten.softplus)
+@inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -661,11 +702,11 @@ def _nll_loss_nd(
 
 
 @register_decomposition(torch.ops.aten.nll_loss)
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("input",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-@out_wrapper()
 def nll_loss(
     input: TensorLikeType,
     target: TensorLikeType,
@@ -784,6 +825,8 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
 
 
 @register_decomposition(torch.ops.aten.threshold)
+@inplace_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -883,6 +926,8 @@ def _triplet_margin_with_distance_loss(
 
 
 @register_decomposition(torch.ops.aten.hardtanh)
+@inplace_wrapper
+@out_wrapper()
 @elementwise_unary_scalar_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a"),
@@ -1022,6 +1067,8 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
 
 
 @register_decomposition(torch.ops.aten.relu6)
+@inplace_wrapper
+@out_wrapper()
 def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.relu6
@@ -1036,11 +1083,11 @@ def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 
 
 @register_decomposition(torch.ops.aten.glu)
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-@out_wrapper()
 def glu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
     dim = utils.canonicalize_dims(a.ndim, dim)
     check(
@@ -1065,11 +1112,11 @@ def pairwise_distance(
 
 
 @register_decomposition(torch.ops.aten.pdist)
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-@out_wrapper()
 def pdist(a: TensorLikeType, p: float = 2) -> TensorLikeType:
     check(a.ndim == 2, lambda: f"pdist only supports 2D tensors, got: {a.ndim}D")
     check(p >= 0, lambda: "pdist only supports non-negative p values")
@@ -1083,3 +1130,11 @@ def pdist(a: TensorLikeType, p: float = 2) -> TensorLikeType:
         t = torch.linalg.vector_norm(a.unsqueeze(1) - a, ord=p, dim=2)
     i = torch.triu_indices(t.shape[0], t.shape[1], offset=1, device=a.device)
     return t.flatten().index_select(0, i[0] * t.shape[0] + i[1])
+
+
+# Needed as aten.{celu_,elu_...} exist (even if they don't have the in-place kwarg)
+celu_ = _make_inplace(celu)
+elu_ = _make_inplace(elu)
+mish_ = _make_inplace(mish)
+selu_ = _make_inplace(selu)
+threshold_ = _make_inplace(threshold)

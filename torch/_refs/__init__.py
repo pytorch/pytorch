@@ -122,6 +122,7 @@ __all__ = [
     "bitwise_right_shift",
     "bitwise_xor",
     "clamp_min",
+    "clamp_max",
     "copysign",
     "div",
     "eq",
@@ -419,6 +420,31 @@ def _make_alias(fn, name):
         return fn(*args, **kwargs)
 
     _fn.__name__ = name
+    return _fn
+
+
+def _make_inplace(fn):
+    """
+    Given a function with out variant (i.e. using `out_wrapper()), it returns its in-place variant
+    See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-do-in-place-operations-work-in-pytorch
+    """
+
+    # nb. We use the name of the first argument used in the unary references
+    @wraps(fn)
+    def _fn(a, *args, **kwargs):
+        return fn(a, *args, out=a, **kwargs)
+
+    inplace_name = f"{fn.__name__}_"
+    _fn.__name__ = inplace_name
+    _fn = register_decomposition(getattr(torch.ops.aten, inplace_name))(_fn)
+
+    # We access the __all__ attribute of the module where fn is defined
+    # There may be a cleaner way of doing this...
+    from inspect import getmodule
+
+    _all = getmodule(fn).__all__  # type: ignore[union-attr]
+    if inplace_name not in _all:
+        _all.append(inplace_name)
     return _fn
 
 
@@ -3419,7 +3445,6 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
     return x[idx]
 
 
-# Note: although squeeze is documented as having the out= kwarg it doesn't
 @register_decomposition(torch.ops.aten.squeeze)
 def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
     if dim is not None:
@@ -3843,6 +3868,7 @@ def cumsum(
     return sum(masked_a, dim=dim, keepdim=keepdim, dtype=dtype, out=out)
 
 
+# Note: although squeeze is documented as having the out= kwarg it doesn't
 @register_decomposition(torch.ops.aten.unsqueeze)
 def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     # Note that unsqueeze canonicalizes with rank + 1 because it allows
@@ -5011,6 +5037,92 @@ def bucketize(
             start = torch.where((~cond_mid) & cond_update, mid + 1, start)
 
     return start.to(dtype=out_dtype)
+
+
+# inplace
+abs_ = _make_inplace(abs)
+acos_ = _make_inplace(acos)
+acosh_ = _make_inplace(acosh)
+addcmul_ = _make_inplace(addcmul)
+addcdiv_ = _make_inplace(addcdiv)
+asin_ = _make_inplace(asin)
+asinh_ = _make_inplace(asinh)
+atan_ = _make_inplace(atan)
+atanh_ = _make_inplace(atanh)
+atan2_ = _make_inplace(atan2)
+ceil_ = _make_inplace(ceil)
+clamp_ = _make_inplace(clamp)
+clamp_min_ = _make_inplace(clamp_min)
+clamp_max_ = _make_inplace(clamp_max)
+conj_physical_ = _make_inplace(conj_physical)
+copysign_ = _make_inplace(copysign)
+cos_ = _make_inplace(cos)
+cosh_ = _make_inplace(cosh)
+cumsum_ = _make_inplace(cumsum)
+digamma_ = _make_inplace(digamma)
+div_ = _make_inplace(div)
+eq_ = _make_inplace(eq)
+erf_ = _make_inplace(erf)
+erfc_ = _make_inplace(erfc)
+erfinv_ = _make_inplace(erfinv)
+exp_ = _make_inplace(exp)
+exp2_ = _make_inplace(exp2)
+expm1_ = _make_inplace(expm1)
+float_power_ = _make_inplace(float_power)
+floor_ = _make_inplace(floor)
+floor_divide_ = _make_inplace(floor_divide)
+fmod_ = _make_inplace(fmod)
+frac_ = _make_inplace(frac)
+ge_ = _make_inplace(ge)
+gt_ = _make_inplace(gt)
+heaviside_ = _make_inplace(heaviside)
+hypot_ = _make_inplace(hypot)
+igamma_ = _make_inplace(igamma)
+igammac_ = _make_inplace(igammac)
+le_ = _make_inplace(le)
+lerp_ = _make_inplace(lerp)
+lgamma_ = _make_inplace(lgamma)
+log10_ = _make_inplace(log10)
+log1p_ = _make_inplace(log1p)
+log2_ = _make_inplace(log2)
+log_ = _make_inplace(log)
+logical_and_ = _make_inplace(logical_and)
+logical_or_ = _make_inplace(logical_or)
+logical_xor_ = _make_inplace(logical_xor)
+lt_ = _make_inplace(lt)
+mvlgamma_ = _make_inplace(mvlgamma)
+nan_to_num_ = _make_inplace(nan_to_num)
+ne_ = _make_inplace(ne)
+neg_ = _make_inplace(neg)
+nextafter_ = _make_inplace(nextafter)
+pow_ = _make_inplace(pow)
+reciprocal_ = _make_inplace(reciprocal)
+remainder_ = _make_inplace(remainder)
+rsqrt_ = _make_inplace(rsqrt)
+sgn_ = _make_inplace(sgn)
+sigmoid_ = _make_inplace(sigmoid)
+sign_ = _make_inplace(sign)
+sin_ = _make_inplace(sin)
+sinc_ = _make_inplace(sinc)
+sinh_ = _make_inplace(sinh)
+sqrt_ = _make_inplace(sqrt)
+square_ = _make_inplace(square)
+tan_ = _make_inplace(tan)
+tanh_ = _make_inplace(tanh)
+tril_ = _make_inplace(tril)
+triu_ = _make_inplace(triu)
+true_divide_ = _make_inplace(true_divide)
+trunc_ = _make_inplace(trunc)
+xlogy_ = _make_inplace(xlogy)
+
+# Views
+# We can't model these as above, as the pattern of doing `op(a, out=a)` does not work for a view function
+# given that it does not reshape the input (it just copies the result into it)
+
+# squeeze_ = _make_inplace(squeeze)
+# t_ = _make_inplace(t)
+# transpose_ = _make_inplace(transpose)
+# unsqueeze_ = _make_inplace(unsqueeze)
 
 
 import torch._refs._conversions
