@@ -288,7 +288,52 @@ class TestPrims(TestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
-    def test_nvfuser_rand_like_fusion(self, device):
+    @parametrize("mode", ["real", "fake", "symbolic"])
+    def test_nvprims_tracing_modes(self, device, mode):
+        from torch._prims.context import NvfuserPrimsMode, TorchRefsMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.executor import execute
+
+        a = make_tensor((3, 4), device=device, dtype=torch.float32)
+        b = make_tensor((3,), device=device, dtype=torch.float32)
+
+        # This function has add, broadcast, and sin. These nvprims just
+        # reference the same meta functions as the original prims
+        def func(a, b):
+            a = torch.ops.nvprims.view(a, list(reversed(a.shape)))
+            return (a + b).sin()
+
+        with NvfuserPrimsMode(), TorchRefsMode():
+            gm = make_fx(func, tracing_mode=mode)(a, b)
+
+        # symbolic mode introduces "aten.sym_size" node that is not supported
+        # "nvfuser" executor is a partitioned executor, so it should work
+        executor = "nvfuser" if mode == "symbolic" else "strictly_nvfuser"
+        out = execute(gm, a, b, executor=executor)
+        self.assertEqual(out, func(a, b))
+
+    # Verifying fix for
+    # https://github.com/pytorch/pytorch/issues/87236
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_nvprims_div_fake_cpu_scalar(self, device):
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        meta_scalar = torch.zeros((), device="meta")
+        meta_tensor = torch.zeros((3, 3), device="meta")
+
+        with torch._subclasses.fake_tensor.FakeTensorMode() as fake_mode:
+            fake_cpu_scalar = FakeTensor(fake_mode, meta_scalar, torch.device("cpu"))
+            fake_cuda_tensor = FakeTensor(fake_mode, meta_tensor, torch.device("cuda"))
+
+        # This fails if op is called under in_kernel_invocation_manager context
+        for op in [torch.ops.prims.div, torch.ops.nvprims.div]:
+            gm = make_fx(lambda a, b: op(a, b))(fake_cuda_tensor, fake_cpu_scalar)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @parametrize("mode", ["real", "fake", "symbolic"])
+    def test_nvfuser_rand_like_fusion(self, device, mode):
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.executor import execute
@@ -299,7 +344,7 @@ class TestPrims(TestCase):
             return torch.rand_like(a)
 
         with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(func)(a)
+            gm = make_fx(func, tracing_mode=mode)(a)
 
         out = execute(gm, a, executor="strictly_nvfuser")
         self.assertEqual(out.size(), a.size())
@@ -806,7 +851,8 @@ class TestPrims(TestCase):
     @dtypes(torch.float16, torch.float32)
     @parametrize("correction", [0, 1])
     @parametrize("keepdim", [True, False])
-    def test_var_mean(self, device, dtype, correction, keepdim):
+    @parametrize("mode", ["real", "fake", "symbolic"])
+    def test_nvprims_var_mean(self, device, dtype, correction, keepdim, mode):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
 
@@ -817,7 +863,7 @@ class TestPrims(TestCase):
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
         with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(_wrapper)(make_arg((5, 5)))
+            gm = make_fx(_wrapper, tracing_mode=mode)(make_arg((5, 5)))
 
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
         includes_nvprims_var_mean = any(
