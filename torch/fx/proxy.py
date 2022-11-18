@@ -55,16 +55,10 @@ class ScopeContextManager(object):
     the current module, and when we exit, we'll restore the previous scope information.
     """
 
-    def __init__(
-        self, scope: Scope, current_module: torch.nn.Module, current_module_path: str
-    ):
+    def __init__(self, prev_scope: Scope, current_scope: Scope):
         super().__init__()
-        self._prev_scope = Scope("", None)
-        self._prev_scope.module_type = scope.module_type
-        self._prev_scope.module_path = scope.module_path
-        self.scope = scope
-        self.scope.module_path = current_module_path
-        self.scope.module_type = type(current_module)
+        self._prev_scope = prev_scope
+        self.scope = current_scope
 
     def __enter__(self):
         return self.scope
