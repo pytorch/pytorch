@@ -232,7 +232,6 @@ class FlatParameter(nn.Parameter):
         shapes: List[torch.Size],
         prefixed_param_names: List[str],
         shared_param_infos: List[SharedParamInfo],
-        modules: Set[nn.Module],
         param_extensions: List[Any],
         params: Optional[List[nn.Parameter]],
         shared_params: Optional[List[nn.Parameter]],
@@ -263,7 +262,9 @@ class FlatParameter(nn.Parameter):
         self._fqns = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
         self._param_extensions = tuple(param_extensions)
-        self._modules = modules
+        self._modules = set(pi.module for pi in self._param_infos).union(
+            set(spi.module for spi in self._shared_param_infos)
+        )
         assert (params is None) == (shared_params is None)
         if params is not None:
             assert shared_params is not None and len(shared_params) == len(
@@ -315,12 +316,6 @@ class FlatParamHandle:
             :class:`FlatParameter`). If ``False``, then FSDP reconstructs the
             parameter every iteration and returns the :class:`FlatParameter` s
             from ``named_parameters()``.
-        lca_modules (List[nn.Module]): Least common ancestor (LCA) modules
-            that own some parameter in ``params``, the first of which in the
-            forward order is responsible for unsharding this handle. This is
-            used to compute ``FlatParameter._modules``. The LCA module may not
-            be any of the parameters' owning modules, and conversely, not all
-            submodules in ``module`` 's tree consume the ``FlatParameter``.
     """
 
     ##################
@@ -334,7 +329,6 @@ class FlatParamHandle:
         config: HandleConfig,
         process_group: dist.ProcessGroup,
         use_orig_params: bool,
-        lca_modules: List[nn.Module],
     ):
         super().__init__()
         self.device = device
@@ -345,7 +339,7 @@ class FlatParamHandle:
         self._use_orig_params = use_orig_params
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
-        self._init_flat_param(params, module, use_orig_params, lca_modules)
+        self._init_flat_param(params, module, use_orig_params)
         self._use_unsharded_views(as_params=False)
 
     def _init_flat_param(
@@ -353,7 +347,6 @@ class FlatParamHandle:
         params: Sequence[Optional[nn.Parameter]],
         module: nn.Module,
         use_orig_params: bool,
-        lca_modules: List[nn.Module],
     ) -> None:
         """
         Initializes the flattened parameter ``self.flat_param`` by flattening
@@ -443,17 +436,12 @@ class FlatParamHandle:
         self.flat_param = FlatParamHandle.flatten_params(
             params_to_flatten, requires_grad
         )
-        modules = set(pi.module for pi in param_infos).union(
-            set(spi.module for spi in shared_param_infos)
-        )
-        modules.update(lca_modules)
         self.flat_param._init_metadata(
             param_infos,
             numels,
             shapes,
             prefixed_param_names,
             shared_param_infos,
-            modules,
             param_extensions,
             params_to_flatten if use_orig_params else None,
             shared_params if use_orig_params else None,
@@ -1319,10 +1307,7 @@ class FlatParamHandle:
                         assert tensor is not None  # mypy
                         param_var = tensor
                 setattr(module, param_name, param_var)
-                if (
-                    self._use_orig_params
-                    and self._training_state == HandleTrainingState.FORWARD
-                ):
+                if self._use_orig_params and self._training_state == HandleTrainingState.FORWARD:
                     module._parameters[param_name] = param_var  # type: ignore[assignment]
         for i, (
             param_name,
@@ -1354,10 +1339,7 @@ class FlatParamHandle:
                 module.register_parameter(param_name, prim_param)
             else:
                 setattr(module, param_name, prim_param)
-                if (
-                    self._use_orig_params
-                    and self._training_state == HandleTrainingState.FORWARD
-                ):
+                if self._use_orig_params and self._training_state == HandleTrainingState.FORWARD:
                     module._parameters[param_name] = prim_param  # type: ignore[assignment]
 
     def _use_unsharded_grad_views(self) -> None:
