@@ -41,10 +41,11 @@ inline void _vec_log_softmax_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
-  int64_t BLOCK_SIZE = 1024 * 128;
+  static constexpr int64_t BLOCK_SIZE = 1024 * 128;
   int64_t CHUNK_SIZE = std::max(
       (int64_t)1, (int64_t)(BLOCK_SIZE / (sizeof(scalar_t) * dim_size)));
-  // usually, we'll use all the threads in the OpenMP thread pool
+
+  // usually, we'd use all the threads in the OpenMP thread pool 
   int64_t grain_size = (outer_size - 1) / (at::get_num_threads() - 1);
   // assign fewer threads if the number of computations is not large enough
   int64_t num_computations = 16 * outer_size * dim_size;
@@ -56,16 +57,18 @@ inline void _vec_log_softmax_lastdim(
     // only 1 thread will be used
     grain_size = outer_size;
   }
-  
+
   parallel_for(
       0,
       outer_size,
       grain_size,
       [&](int64_t begin, int64_t end) {
-        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-        scalar_t tmp_sum_scalar[CHUNK_SIZE];
-        // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-        scalar_t max_input_arr[CHUNK_SIZE];
+    // MSVC requires such a declaration of dynamic arrays
+    // Source: https://stackoverflow.com/a/33423538
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+    scalar_t* tmp_sum_scalar = new scalar_t[CHUNK_SIZE];
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+    scalar_t* max_input_arr = new scalar_t[CHUNK_SIZE];
         for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
           int64_t loop_end = CHUNK_SIZE;
           if (ii + CHUNK_SIZE > end)
