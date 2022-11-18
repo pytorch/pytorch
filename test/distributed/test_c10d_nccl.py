@@ -348,16 +348,14 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Premul Sum
         if torch.cuda.nccl.version() >= (2, 11, 1):
             for dtype in torch.half, torch.float, torch.double:
-                for factor in (3.0,
-                               (torch.tensor([5.0], device=local_device_id, dtype=dtype),)):
+                for factor in (3.0, torch.tensor([5.0], device=local_device_id, dtype=dtype)):
                     tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id).to(dtype=dtype)]
 
                     allreduce(tensors, c10d._make_nccl_premul_sum(factor))
 
-                    f = factor if isinstance(factor, float) else factor[0]
                     # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                     self.assertEqualIgnoreType(
-                        f * torch.tensor([float(self.world_size * (self.world_size + 1) / 2)], device=local_device_id),
+                        factor * torch.tensor([float(self.world_size * (self.world_size + 1) / 2)], device=local_device_id),
                         tensors[0],
                     )
 
@@ -435,9 +433,9 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
             # Premul sum
             if torch.cuda.nccl.version() >= (2, 11, 1):
-                for factor in (3.0, (torch.tensor([5.0], device=local_device_id),)):
-                    if isinstance(factor, tuple):
-                        factor_ref = factor[0].cpu().item()
+                for factor in (3.0, torch.tensor([5.0], device=local_device_id)):
+                    if isinstance(factor, torch.Tensor):
+                        factor_ref = factor.cpu().item()
                     else:
                         factor_ref = factor
                     float_tensors = [
@@ -933,9 +931,9 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         self.assertEqualIgnoreType(expected, output_tensor)
 
         if torch.cuda.nccl.version() >= (2, 11, 1):
-            for factor in (3.0, (torch.tensor([5.0], device=self.rank),),):
-                if isinstance(factor, tuple):
-                    factor_ref = factor[0].cpu().item()
+            for factor in (3.0, torch.tensor([5.0], device=self.rank)):
+                if isinstance(factor, torch.Tensor):
+                    factor_ref = factor.cpu().item()
                 else:
                     factor_ref = factor
                 output = [t.float() for t in output]
@@ -1033,8 +1031,10 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         self._create_process_group_nccl(store, self.opts())
 
         # Both rank 0 and 1 will use the same CUDA device resulting in ncclInvalidUsage
-        with self.assertRaises(dist.DistBackendError):
+        with self.assertRaises(dist.DistBackendError) as cm:
             dist.broadcast(torch.tensor([1, 2, 3]).cuda(), 0)
+
+        self.assertIsInstance(cm.exception, RuntimeError)
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase

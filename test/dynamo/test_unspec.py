@@ -50,6 +50,8 @@ def make_unspec_cls(cls):
 UnspecReproTests = make_unspec_cls(test_repros.ReproTests)
 UnspecNNModuleTests = make_unspec_cls(test_modules.NNModuleTests)
 
+unittest.expectedFailure(UnspecReproTests.test_batch_norm_act_unspec)
+
 
 @patch.object(torch._dynamo.config, "specialize_int_float", False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
