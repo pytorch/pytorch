@@ -356,8 +356,8 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   }
 
   // 2.5. For batched backend keys, use kernel from DispatchKey::FuncTorchBatched if available
-  if (isIncludedInAlias(dispatch_key, DispatchKey::FuncTorchBatched)) {
-    if (auto batched_registration = getKernelForDispatchKey(DispatchKey::FuncTorchBatched)) {
+  if (isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitBatched)) {
+    if (auto batched_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitBatched)) {
       return {*batched_registration, "batched kernel"};
     }
   }
