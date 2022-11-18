@@ -1952,15 +1952,23 @@ void ONNXShapeTypeInference(
 
   // Go through every output to check if they all have shape
   // If they all do, this should be reliable even if the Op is not from ONNX.
-  size_t all_has_value = 0;
+  size_t all_output_has_value = 0;
   for (auto node_output : n->outputs()) {
     if (auto output_type = node_output->type()->cast<TensorType>()) {
-      if (output_type->dim()) {
-        all_has_value += 1;
+      if (output_type->dim().has_value()) {
+        // Go through every symbolic_sizes and if one of them > 0, we say this is set by user.
+        // On the other hand, if all of them are *, we take this node does not have given type,
+        // since unreliable nodes have * shape anyway.
+        for (size_t i=0; i<output_type->dim().value(); i++) {
+          if (output_type->symbolic_sizes()[i].value() > 0) {
+            all_output_has_value += 1;
+            break;
+          }
+        }
       }
     }
   }
-  bool custom_setType = (all_has_value == n->outputs().size()) ? true : false;
+  bool custom_setType = (all_output_has_value == n->outputs().size()) ? true : false;
 
   if (IsValidONNXNode(n)) {
     // Create a Graph containing only the single node n.

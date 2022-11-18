@@ -369,13 +369,12 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
                 return torch.inverse(x) + x
 
         def linalg_inv_settype(g, self):
-            return g.op("com.microsoft::Inverse", self).setType(self.type())
+            return g.op("com.microsoft::Inverse", self).setType(self.type().with_dtype(torch.float).with_sizes([None, 3, 3]))
 
         torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_settype, 9)
         model = CustomInverse()
         x = torch.randn(2, 3, 3)
         f = io.BytesIO()
-        dynamic_axe = "batch"
         torch.onnx.export(
             model,
             (x,),
@@ -383,7 +382,7 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
             opset_version=self.opset_version,
             custom_opsets={"com.microsoft": 1},
             input_names=["x"],
-            dynamic_axes={"x": {0: dynamic_axe}},
+            dynamic_axes={"x": {0: "batch"}},
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
@@ -393,7 +392,6 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
         dims = model_value_info[0].type.tensor_type.shape.dim
         # The first axe should be dynamic as we defined when exporting
         self.assertTrue(dims[0].HasField("dim_param"))
-        self.assertEqual(dims[0].dim_param, dynamic_axe)
         for i in range(1, len(dims)):
             # If node output has shape info, it should have dim_value
             # Otherwise, it has dim_params with dynamic shape
