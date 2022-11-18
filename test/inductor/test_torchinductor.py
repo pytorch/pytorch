@@ -4238,6 +4238,7 @@ class CommonTemplate:
             while res.dim() > rank:
                 res = torch.select(res, -1, 0)
             return res.contiguous()
+
         rank4_inps = [shrink_rank(x, 4) for x in [grad_out, inp, weight]]
         rank3_inps = [shrink_rank(x, 4) for x in [grad_out, inp, weight]]
         rank5_inps = [shrink_rank(x, 5) for x in [grad_out, inp, weight]]
