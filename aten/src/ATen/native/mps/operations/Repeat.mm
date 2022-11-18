@@ -23,11 +23,13 @@
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #endif
 
+#include <metal_stdlib>
+
 template <typename index_t>
-kernel void compute_mps_kernel(at::mps::metal::device int64_t* _repeat_ptr,
-    	at::mps::metal::device int64_t* _cumsum_ptr,
-    	at::mps::metal::device index_t* _result_ptr,
-      at::mps::metal::device int64_t& _size,
+kernel void compute_mps_kernel(metal::device int64_t* _repeat_ptr,
+    	metal::device int64_t* _cumsum_ptr,
+    	metal::device index_t* _result_ptr,
+      metal::device int64_t& _size,
       uint idx [[thread_position_in_grid]])
     {
 
@@ -43,7 +45,7 @@ kernel void compute_mps_kernel(at::mps::metal::device int64_t* _repeat_ptr,
     		index_t repeat = _repeat_ptr[i];
     		for (int64_t j = start + tid_in_warp; j < end; j += C10_WARP_SIZE)
     		{
-    			result_ptr[j] = i;
+    			_repeat_ptr[j] = i;
     		}
     	}
     }
