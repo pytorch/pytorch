@@ -115,13 +115,13 @@ def has_proxy(obj):
 
 def set_meta(proxy, val):
     if isinstance(val, FakeTensor):
-        proxy.node.meta['val'] = val
+        proxy.node.meta['val'] = val.detach()
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     elif isinstance(val, py_sym_types):
         proxy.node.meta['val'] = val
     elif isinstance(val, list) or isinstance(val, tuple):
         if all(isinstance(x, FakeTensor) for x in val):
-            proxy.node.meta['val'] = val
+            proxy.node.meta['val'] = [x.detach() for x in val]
     elif isinstance(val, torch.Tensor):
         if not val.is_sparse:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
@@ -439,7 +439,9 @@ def wrap_key(f, tensors, tracer):
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
-        track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
+        assert isinstance(_get_current_dispatch_mode(), ProxyTorchDispatchMode)
+        with _pop_mode_temporarily():
+            track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
         out = f(*tensors)
         out = pytree.tree_map_only(
