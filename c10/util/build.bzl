@@ -68,5 +68,5 @@ def define_targets(rules):
             exclude = [
             ],
         ),
-        visibility = ["//c10:__pkg__"],
+        visibility = ["//c10:__pkg__", "//:__pkg__"],
     )
