@@ -38,6 +38,12 @@ TORCH_API c10::intrusive_ptr<Work> _allgather_base(
     at::Tensor& inputTensor,
     const AllgatherOptions& opts = {});
 
+TORCH_API c10::intrusive_ptr<Work> allgather_coalesced(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const std::vector<std::vector<at::Tensor>>& output_lists,
+    const at::TensorList& input_list,
+    const AllgatherOptions& opts = {});
+
 TORCH_API c10::intrusive_ptr<Work> reduce_scatter(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<at::Tensor>& output_tensors,
@@ -58,12 +64,12 @@ TORCH_API c10::intrusive_ptr<Work> reduce(
 TORCH_API c10::intrusive_ptr<Work> gather(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const std::vector<at::Tensor>& input_tensors,
+    const at::TensorList& input_tensors,
     const GatherOptions& opts = {});
 
 TORCH_API c10::intrusive_ptr<Work> scatter(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const std::vector<at::Tensor>& output_tensors,
+    const at::TensorList& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const ScatterOptions& opts = {});
 
@@ -76,6 +82,11 @@ TORCH_API c10::intrusive_ptr<Work> alltoall(
 TORCH_API c10::intrusive_ptr<Work> barrier(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const BarrierOptions& opts = {});
+
+TORCH_API void monitored_barrier(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const BarrierOptions& opts,
+    bool waitAllRanks);
 
 TORCH_API c10::intrusive_ptr<Work> send(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
