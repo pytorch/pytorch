@@ -101,20 +101,16 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
+function install_torchtext() {
+  local commit
+  commit=$(get_pinned_commit text)
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/text.git@${commit}"
+}
+
 function install_torchvision() {
   local commit
   commit=$(get_pinned_commit vision)
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
-}
-
-function checkout_install_torchvision() {
-  local commit
-  commit=$(get_pinned_commit vision)
-  git clone https://github.com/pytorch/vision
-  pushd vision
-  git checkout "${commit}"
-  time python setup.py install
-  popd
 }
 
 function clone_pytorch_xla() {
@@ -194,13 +190,10 @@ function install_timm() {
 }
 
 function checkout_install_torchbench() {
-  local commit
-  commit=$(get_pinned_commit torchbench)
   git clone https://github.com/pytorch/benchmark torchbench
   pushd torchbench
-  git checkout "${commit}"
+  git checkout no_torchaudio
   python install.py
-  pip_install gym==0.25.2  # workaround issue in 0.26.0
   popd
 }
 
