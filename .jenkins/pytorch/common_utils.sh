@@ -9,6 +9,10 @@ log() { printf '%s\n' "$*"; }
 error() { log "ERROR: $*" >&2; }
 fatal() { error "$@"; exit 1; }
 
+retry () {
+    "$@" || (sleep 10 && "$@") || (sleep 20 && "$@") || (sleep 40 && "$@")
+}
+
 # compositional trap taken from https://stackoverflow.com/a/7287873/23845
 # appends a command to a trap
 #
@@ -78,12 +82,12 @@ function get_exit_code() {
 function get_bazel() {
   if [[ $(uname) == "Darwin" ]]; then
     # download bazel version
-    curl https://github.com/bazelbuild/bazel/releases/download/4.2.1/bazel-4.2.1-darwin-x86_64  -Lo tools/bazel
+    retry curl https://github.com/bazelbuild/bazel/releases/download/4.2.1/bazel-4.2.1-darwin-x86_64  -Lo tools/bazel
     # verify content
     echo '74d93848f0c9d592e341e48341c53c87e3cb304a54a2a1ee9cff3df422f0b23c  tools/bazel' | shasum -a 256 -c >/dev/null
   else
     # download bazel version
-    curl https://ossci-linux.s3.amazonaws.com/bazel-4.2.1-linux-x86_64 -o tools/bazel
+    retry curl https://ossci-linux.s3.amazonaws.com/bazel-4.2.1-linux-x86_64 -o tools/bazel
     # verify content
     echo '1a4f3a3ce292307bceeb44f459883859c793436d564b95319aacb8af1f20557c  tools/bazel' | shasum -a 256 -c >/dev/null
   fi

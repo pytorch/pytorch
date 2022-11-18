@@ -29,7 +29,7 @@ if (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswher
 }
 
 echo "Downloading VS installer from S3."
-curl.exe --retry 3 -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
+curl.exe --retry 3 --retry-all-errors -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
 if ($LASTEXITCODE -ne 0) {
     echo "Download of the VS 2019 Version ${env:VS_VERSION} installer failed"
     exit 1
