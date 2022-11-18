@@ -27,7 +27,7 @@ from .lowering import (
     needs_realized_inputs,
 )
 from .sizevars import SizeVarAllocator
-from .utils import dynamo_utils, gather_origins
+from .utils import dynamo_utils, gather_origins, get_dtype_size, sympy_product
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -355,6 +355,47 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler = Scheduler(self.buffers)
         self.scheduler.codegen()
         return self.wrapper_code.generate()
+
+    def count_bytes(self):
+        from .scheduler import FusedSchedulerNode, NopKernelSchedulerNode, Scheduler
+
+        scheduler = Scheduler(self.buffers)
+
+        def get_read_write_buffers_sizes(node):
+            if isinstance(node, NopKernelSchedulerNode):
+                return 0
+            reads = set(dep.name for dep in node.read_writes.reads)
+            writes = set(dep.name for dep in node.read_writes.writes)
+
+            def is_materialized(buf):
+                buf_uses = set(
+                    [user.node for user in scheduler.name_to_node[buf].users]
+                )
+                return len(buf_uses - set(node.snodes)) > 0
+
+            if isinstance(node, FusedSchedulerNode):
+                writes = set([dep for dep in writes if is_materialized(dep)])
+            node_bytes = 0
+            for buf in reads | writes:
+                if buf in self.name_to_buffer:
+                    buf = self.name_to_buffer[buf]
+                elif buf in self.graph_inputs:
+                    buf = self.graph_inputs[buf]
+                else:
+                    continue
+
+                node_bytes += V.graph.sizevars.size_hint(
+                    sympy_product(buf.get_size())
+                ) * get_dtype_size(buf.get_dtype())
+            return node_bytes
+
+        total_bytes = 0
+        node_counts = []
+        for node in scheduler.nodes:
+            num_bytes = get_read_write_buffers_sizes(node)
+            node_counts.append((node, num_bytes // 4))
+            total_bytes += num_bytes
+        return total_bytes, node_counts
 
     @dynamo_utils.dynamo_timed
     def compile_to_module(self):
