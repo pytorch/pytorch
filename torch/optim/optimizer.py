@@ -5,7 +5,7 @@ from itertools import chain
 import warnings
 import functools
 
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
@@ -73,6 +73,8 @@ class Optimizer(object):
         self.defaults = defaults
         super().__setattr__('_optimizer_step_pre_hooks', OrderedDict())
         super().__setattr__('_optimizer_step_post_hooks', OrderedDict())
+
+        self._hook_for_profile()
 
         if isinstance(params, torch.Tensor):
             raise TypeError("params argument given to the optimizer should be "
@@ -157,6 +159,12 @@ class Optimizer(object):
         """
         pass
 
+    def _pre_hook(self, closure: Optional[Callable]):
+        pass
+
+    def _post_hook(self, closure: Optional[Callable]) -> None:
+        pass
+
     def _hook_for_profile(self):
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
 
@@ -167,8 +175,15 @@ class Optimizer(object):
                 obj, *_ = args
                 profile_name = "Optimizer.step#{}.step".format(obj.__class__.__name__)
                 with torch.autograd.profiler.record_function(profile_name):
+                    # call optimizer step pre hooks
+                    for hook in self._optimizer_step_pre_hooks.values():
+                        pre_hook_result = self._pre_hook(hook)
+
                     out = func(*args, **kwargs)
                     obj._optimizer_step_code()
+                    # call optimizer step post hooks
+                    for hook in self._optimizer_step_post_hooks.values():
+                        self._post_hook(hook)
                     return out
 
             return wrapper
@@ -191,9 +206,6 @@ class Optimizer(object):
         handle = hooks.RemovableHandle(self._optimizer_step_post_hooks)
         self._optimizer_step_post_hooks[handle.id] = hook
         return handle
-
-    def step_with_hook(self):
-        pass
 
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
