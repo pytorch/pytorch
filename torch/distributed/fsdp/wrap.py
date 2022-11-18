@@ -6,18 +6,7 @@
 import contextlib
 import functools
 from abc import ABC, abstractmethod
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Generator,
-    no_type_check,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-)
+from typing import Any, Callable, cast, Dict, Generator, Optional, Set, Tuple, Type
 
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
@@ -66,11 +55,11 @@ def _module_wrap_policy(
     module_classes: Set[Type[nn.Module]],
 ) -> bool:
     """
-    This policy wraps every module that is an instance of any type in
-    ``module_classes``. The root module given by ``module`` is always wrapped
-    regardless. Since the wrapping proceeds following a post-order traversal
-    (~bottom up), each wrap includes the parameters in its subtree excluding
-    any already assigned to a child wrap.
+    This auto wrap policy wraps every module that is an instance of any type in
+    ``module_classes`` as its own FSDP instance. The root module given by
+    ``module`` is always wrapped as an FSDP instance regardless. Since the
+    wrapping proceeds bottom up, each FSDP instance manages the parameters in
+    its subtree excluding any already managed by a child FSDP instance.
 
     Args:
         module (nn.Module): Current module being considered.
@@ -95,48 +84,10 @@ class ModuleWrapPolicy(_FSDPPolicy):
     """This is a wrapper around :func:`_module_wrap_policy`."""
 
     def __init__(self, module_classes: Set[Type[nn.Module]]):
-        super().__init__()
         self._policy: Callable = functools.partial(
             _module_wrap_policy,
             module_classes=module_classes,
         )
-
-    @property
-    def policy(self):
-        return self._policy
-
-
-@no_type_check
-def _exec_order_base_policy(
-    module: nn.Module,
-    recurse: bool,
-    nonwrapped_numel: int,
-):
-    """
-    This policy wraps every module, excluding those with type in
-    ``EXCLUDE_MODULE_CLASSES`` and forcing those with type in
-    ``FORCE_LEAF_MODULE_CLASSES`` to be wrapped without further recursing. This
-    is meant to be the first iteration base policy for ``ExecOrderPolicy``.
-    """
-    if recurse:
-        return not isinstance(module, _exec_order_base_policy.FORCE_LEAF_MODULE_CLASSES)
-    return not isinstance(module, _exec_order_base_policy.EXCLUDE_MODULE_CLASSES)
-
-
-_exec_order_base_policy.EXCLUDE_MODULE_CLASSES = (nn.ModuleList, nn.ModuleDict)
-# Force any modules with external parameters to be leafs
-_exec_order_base_policy.FORCE_LEAF_MODULE_CLASSES = (nn.MultiheadAttention,)
-
-
-class _ExecOrderBasePolicy(_FSDPPolicy):
-    """
-    This is a wrapper around :func:`_exec_order_base_policy` and is meant for
-    testing.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self._policy = _exec_order_base_policy
 
     @property
     def policy(self):
