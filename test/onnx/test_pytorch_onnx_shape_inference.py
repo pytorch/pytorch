@@ -369,7 +369,9 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
                 return torch.inverse(x) + x
 
         def linalg_inv_settype(g, self):
-            return g.op("com.microsoft::Inverse", self).setType(self.type().with_dtype(torch.float).with_sizes([None, 3, 3]))
+            return g.op("com.microsoft::Inverse", self).setType(
+                self.type().with_dtype(torch.float).with_sizes([None, 3, 3])
+            )
 
         torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv_settype, 9)
         model = CustomInverse()

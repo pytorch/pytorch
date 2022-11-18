@@ -1956,10 +1956,11 @@ void ONNXShapeTypeInference(
   for (auto node_output : n->outputs()) {
     if (auto output_type = node_output->type()->cast<TensorType>()) {
       if (output_type->dim().has_value()) {
-        // Go through every symbolic_sizes and if one of them > 0, we say this is set by user.
-        // On the other hand, if all of them are *, we take this node does not have given type,
-        // since unreliable nodes have * shape anyway.
-        for (size_t i=0; i<output_type->dim().value(); i++) {
+        // Go through every symbolic_sizes and if one of them > 0, we say this
+        // is set by user. On the other hand, if all of them are *, we take this
+        // node does not have given type, since unreliable nodes have * shape
+        // anyway.
+        for (size_t i = 0; i < output_type->dim().value(); i++) {
           if (output_type->symbolic_sizes()[i].value() > 0) {
             all_output_has_value += 1;
             break;
@@ -1968,7 +1969,8 @@ void ONNXShapeTypeInference(
       }
     }
   }
-  bool custom_setType = (all_output_has_value == n->outputs().size()) ? true : false;
+  bool custom_setType =
+      (all_output_has_value == n->outputs().size()) ? true : false;
 
   if (IsValidONNXNode(n)) {
     // Create a Graph containing only the single node n.
