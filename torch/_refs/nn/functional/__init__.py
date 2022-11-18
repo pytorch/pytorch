@@ -595,7 +595,7 @@ def _nll_loss_nd(
 ) -> TensorLikeType:
     utils.check(
         input.ndim > 0 and input.ndim <= 3,
-        lambda: f"Expected input dimension to be either [1, 2, 3] but recieved {input.ndim}.",
+        lambda: f"Expected input dimension to be either [1, 2, 3] but received {input.ndim}.",
     )
 
     utils.check(
