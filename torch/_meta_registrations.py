@@ -2082,9 +2082,11 @@ def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has
     grad_bias = grad_gates.sum(0, keepdim=False) if has_bias else None
     return grad_gates, grad_cx, grad_bias
 
-@register_meta(c10d.allgather_.default)
-def allgather__meta(tensorlist, *args, **kwargs):
-    return tensorlist
+# @register_meta(c10d.allgather_.default)
+# def allgather__meta(output_tensors, input_tensors, process_group, timeout):
+#     # should work but currently errors out (ScriptObject doesn't have allgather as an attribute)
+#     work = process_group.allgather(output_tensors, input_tensors, timeout)
+#     return (output_tensors, work)
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
