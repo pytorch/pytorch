@@ -881,29 +881,160 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
       indices = plain_indices.slice(0, start, end);
       values = self.values().slice(0, start, end);
     } else {
+      Tensor decompressed_indices = at::_convert_indices_from_csr_to_coo(compressed_indices, plain_indices)
+        .select(0, 0);
+
       Tensor dim_indices = at::where(plain_indices.eq(index / blocksize[dim]))[0];
-      // Assume that dim_indices is a sorted sequence of non-negative
+      // Notice that dim_indices is a sorted sequence of non-negative
       // distinct integers. Below we'll try to solve `dim_indices ==
       // arange(start, stop, step)`. If the solution exists then the
       // select will be a view operation also for the `dim !=
       // fast_dim` case.
-      indices = at::_convert_indices_from_csr_to_coo(compressed_indices, plain_indices)
-        .select(0, 0);
       int64_t start{}, end{}, step{};
       if (solve_arange(dim_indices, start, end, step)) {
-        indices = indices.slice(0, start, end, step);
+        indices = decompressed_indices.slice(0, start, end, step);
         values = self.values().slice(0, start, end, step);
         is_view = true;
       } else {
-        // select will be a copy operation due to index_select usage!
-        indices = indices.index_select(0, dim_indices);
+        // select will be a copy operation due to index_select!
+        indices = decompressed_indices.index_select(0, dim_indices);
         values = self.values().index_select(0, dim_indices);
       }
     }
 
-    AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "select",
-        [&]() {},
+    AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "select", [&]() {},
         [&]() {
+          /*
+            The formula for select indices and values below are best
+            explained by an example. Consider a BSR tensor with a
+            block size (2, 3) having four blocks (the other two blocks
+            contain all zeros and hence will not be specified):
+
+              [ 1  2  3] | [ 7  8  9]
+              [ 4  5  6] | [10 11 12]
+              ---------------------
+              [13 14 15] | [ 0  0  0]
+              [16 17 18] | [ 0  0  0]
+              -----------------------
+              [ 0  0  0] | [19 20 21]
+              [ 0  0  0] | [22 23 24]
+
+            that represents a 6 x 6 tensor:
+
+              [  1  2  3  7  8  9 ]
+              [  4  5  6 10 11 12 ]
+              [ 13 14 15  0  0  0 ]
+              [ 16 17 18  0  0  0 ]
+              [  0  0  0 19 20 21 ]
+              [  0  0  0 22 23 24 ]
+
+            The corresponding data for the BSR representation is:
+
+              crow_indices = [0 2 3 4]
+              col_indices =  [0 1 0 1]
+              values = [ [[1 2 3], [4 5 6]], [[7 8 9], [10 11 12]], [[13 14 15], [16 17 18]], [[19 20 21], [22 23 24]] ]
+              shape = (6, 6)
+
+            From crow_indices, we can find that
+
+              row_indices = [0 0 1 2]
+
+            In the following, we'll illustrate the details of
+            computing the result of torch.select_copy(input, dim,
+            index) where dim is 0 or 1, and index is in
+            range(shape[dim]).
+
+            Select a row of a BSR tensor
+            ----------------------------
+
+            We will consider first the dim=0 case that corresponds to
+            selecting a index-th row of the tensor. For instance, for
+            dim=0 and index=1, the expected result would represent a
+            1D tensor:
+
+              [  4  5  6 10 11 12 ]
+
+            that is a concatenated tensor of certain slices from the
+            first and the second block that is computed as follows:
+
+              values[dim_indices].select(1 + dim, index % blocksize[dim]).flatten(0, 1)
+              -> values[[0, 1]][:, 1 % 2].flatten(0, 1)
+              -> [ [[1 2 3], [4 5 6]], [[7 8 9], [10 11 12]] ][:, 1].flatten(0, 1)
+              -> [ [4 5 6], [10 11 12]].flatten(0, 1)
+              -> [ 4 5 6 10 11 12]
+
+            where dim_indices is found as
+
+              where(row_indices == index//blocksize[dim])
+              -> where([0 0 1 2] == 1//2)
+              -> [0 1]
+
+            The corresponding column indices are computed as
+
+              (col_indices[dim_indices].mul(blocksize[other_dim]).unsqueeze(1) + arange(blocksize[other_dim]).unsqueeze(0)).flatten(0, 1)
+
+            where other_dim is 1 if dim is 0, and 0 if dim is 1. Let's
+            expand the above expression with the data in the example:
+
+              -> (col_indices[[0, 1]].mul(3).unsqueeze(1) + arange(3).unsqueeze(0)).flatten(0, 1)
+              -> ([[0 1].mul(3).unsqueeze(1) + [[0 1 2]]).flatten(0, 1)
+              -> ([[[0], [3]] + [[0 1 2]]).flatten(0, 1)     <- here addition will use broadcasting rules!
+              -> ([[[0 1 2], [3 4 5]]).flatten(0, 1)
+              -> [0 1 2 3 4 5]
+
+            Finally, the select(dim=0, index=1) op on the given sparse
+            compressed tensors will return a COO tensor:
+
+              sparse_coo_tensor([0 1 2 3 4 5].unsqueeze(0), [4 5 6 10 11 12], (6,))
+
+            that represents the expected result: [ 4 5 6 10 11 12 ]
+
+            Select a column of a BSR tensor
+            -------------------------------
+
+            Next, we'll consider the dim=1 case that corresponds to
+            selecting the index-th column of the tensor. For instance,
+            for dim=1 and index=4, the expected result would represent
+            a 1D tensor:
+
+              [  8 11 0  0 20 23]
+
+            that is a concatenated tensor of certain slices from the
+            second and the last block:
+
+              values[dim_indices].select(1 + dim, index % blocksize[dim]).flatten(0, 1)
+              -> values[[1, 3]][:, :, 4 % 3 ].flatten(0, 1)
+              -> [ [[7 8 9], [10 11 12]], [[19 20 21], [22 23 24]] ][:, 1, 1].flatten(0, 1)
+              -> [ [8 11], [20 23]].flatten(0, 1)
+              -> [ 8 11 20 23 ]
+
+            The corresponding row indices are computed as
+
+              (row_indices[dim_indices].mul(blocksize[other_dim]).unsqueeze(1) + arange(blocksize[other_dim]).unsqueeze(0)).flatten(0, 1)
+
+            where dim_indices is
+
+              where(col_indices == index//blocksize[dim])
+              -> where([0 1 0 1] == 4//3)
+              -> [1 3]
+
+            and we have
+
+              (row_indices[dim_indices].mul(blocksize[other_dim]).unsqueeze(1) + arange(blocksize[other_dim]).unsqueeze(0)).flatten(0, 1)
+              -> (row_indices[[1 3]].mul(2).unsqueeze(1) + arange(2).unsqueeze(0)).flatten(0, 1)
+              -> ([0 4].unsqueeze(1) + [0 1].unsqueeze(0)).flatten(0, 1)
+              -> ([[0], [4]] + [[0 1]]).flatten(0, 1)     <- here addition will use broadcasting rules!
+              -> ([[0 1], [4 5]]).flatten(0, 1)
+              -> [ 0 1 4 5 ]
+
+            Finally, the select(dim=1, index=4) op on the given sparse
+            compressed tensors will return a COO tensor:
+
+              sparse_coo_tensor([0 1 4 5].unsqueeze(0), [8 11 20 23], (6,))
+
+            that represents the expected result: [ 8 11 0 0 20 23 ]
+
+           */
           Tensor subblock_indices = at::arange(0, blocksize[other_dim], indices_options);
           indices = indices.mul(blocksize[other_dim]).unsqueeze(1).add(subblock_indices.unsqueeze(0)).flatten(0, 1);
           values = values.select(dim + 1, index % blocksize[dim]).flatten(0, 1);
@@ -917,7 +1048,8 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
         });
 
     if (require_view) {
-      TORCH_CHECK(values.is_alias_of(self.values()), select_name, ": no view exists for the given input");
+      TORCH_CHECK(values.is_alias_of(self.values()), select_name,
+                  ": no view exists for the given input, consider using torch.select_copy.");
     }
 
     indices = indices.unsqueeze(0).to(kLong);
