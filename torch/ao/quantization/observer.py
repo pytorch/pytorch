@@ -1551,7 +1551,7 @@ Per-channel, symmetric weight observer with the 8-bit values restricted to [-127
 """
 
 default_dynamic_quant_observer = PlaceholderObserver.with_args(
-    dtype=torch.quint8, compute_dtype=torch.quint8
+    dtype=torch.quint8, compute_dtype=torch.quint8, quant_min=0, quant_max=255
 )
 """
 Default observer for dynamic quantization.

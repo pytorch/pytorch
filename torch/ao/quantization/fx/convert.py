@@ -58,6 +58,10 @@ from .utils import (
     graph_module_from_producer_nodes,
     node_arg_is_weight,
 )
+from torch.ao.quantization.utils import (
+    is_per_channel,
+    to_underlying_dtype,
+)
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
 )
@@ -146,13 +150,13 @@ def _replace_observer_with_quantize_dequantize_node(
             if is_decomposed:
                 quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
                 quant_max = activation_post_process.quant_max  # type: ignore[attr-defined]
-                dtype = to_underlying_dtype(dtype)
+                dtype_ = to_underlying_dtype(dtype)
                 qparams = {
                     "_scale_": scale,
                     "_zero_point_": zero_point,
                     "_quant_min": quant_min,
                     "_quant_max": quant_max,
-                    "_dtype_": dtype
+                    "_dtype_": dtype_
                 }
                 quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor
             else:
@@ -164,17 +168,12 @@ def _replace_observer_with_quantize_dequantize_node(
         node_type = "call_function"
         is_dynamic = True
         if is_decomposed:
-            # TODO: add quant_min/quant_max for PlaceholderObserver
-            # quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
-            # quant_max = activation_post_process.quant_max  # type: ignore[attr-defined]
             dtype = to_underlying_dtype(dtype)
-            if dtype == torch.uint8:
-                quant_min = 0
-                quant_max = 255
-            else:
-                quant_min = -128
-                quant_max = 127
-
+            assert dtype in [torch.uint8, torch.int8], \
+                "only uint8 and int8 are supported in reference flow for " \
+                "dynamic quantization right now"
+            quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
+            quant_max = activation_post_process.quant_max  # type: ignore[attr-defined]
             # note: scale and zero_point are missing for quantize_per_tensor op
             # we'll need to get this from choose_qparams op, which we'll add after
             # this stage
@@ -197,8 +196,14 @@ def _replace_observer_with_quantize_dequantize_node(
 
     # 2. insert choose_qparams op and update the params list for the is_decomposed and
     # is_dynamic case
-    if is_decomposed:
-        if is_dynamic:
+    # only needed for is_dynamic because the quantization parameters for static
+    # quantization is fixed, we don't need to compute it dynamically in the graph
+    # with choose_qparams
+    if is_dynamic:
+        # only supported for is_decomposed now, but we should probably align the
+        # non-decomposed path with this as well, but that should probably be done
+        # after we remove reduce_range flag
+        if is_decomposed:
             with graph.inserting_before(node):
                 input_node = node.args[0]
                 choose_qparams_op_inputs = [node.args[0]]
@@ -206,10 +211,25 @@ def _replace_observer_with_quantize_dequantize_node(
                     # we have quant_min, quant_max and dtype, all should be stored
                     # as literals
                     choose_qparams_op_inputs.append(value)
-                choose_qparams_node = graph.create_node("call_function", torch.ops.quantized_decomposed.choose_qparams.tensor, tuple(choose_qparams_op_inputs), {})
+                choose_qparams_node = graph.create_node(
+                    "call_function",
+                    torch.ops.quantized_decomposed.choose_qparams.tensor,
+                    tuple(choose_qparams_op_inputs),
+                    {}
+                )
                 # choose_qparms returns (scale, zero_point)
-                scale_node = graph.create_node("call_function", operator.getitem, (choose_qparams_node, 0), {})
-                zero_point_node = graph.create_node("call_function", operator.getitem, (choose_qparams_node, 1), {})
+                scale_node = graph.create_node(
+                    "call_function",
+                    operator.getitem,
+                    (choose_qparams_node, 0),
+                    {}
+                )
+                zero_point_node = graph.create_node(
+                    "call_function",
+                    operator.getitem,
+                    (choose_qparams_node, 1),
+                    {}
+                )
                 quant_min = qparams["_quant_min_"]
                 quant_max = qparams["_quant_max_"]
                 dtype = qparams["_dtype_"]
