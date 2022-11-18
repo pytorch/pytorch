@@ -1,6 +1,5 @@
 # Owner(s): ["module: fft"]
 
-from curses import window
 import torch
 import unittest
 import math
@@ -27,7 +26,6 @@ from typing import Optional, List
 
 if TEST_NUMPY:
     import numpy as np
-
 
 if TEST_LIBROSA:
     import librosa

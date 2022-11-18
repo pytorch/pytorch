@@ -637,8 +637,8 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     if window is None:
         warnings.warn(
             "'window' was not specified, so a rectangular window will be applied."
-            "in version 1.15.0, not specifying a window will raise an error."
-            "Consider using an alternative available window, such as 'hann'.",
+            " In version 1.15.0, not specifying a window will raise an error."
+            " Consider using an alternative available window, such as 'hann'.",
             DeprecationWarning
         )
 
@@ -653,7 +653,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         if window not in windows.keys():
             raise ValueError(
                 f"{window} is not a valid window name."
-                f"Available windows are {windows.keys()}")
+                f" Available windows are {windows.keys()}")
         else:
             win_length = n_fft if win_length is None else win_length
             window = windows[window](win_length, device=input.device)
