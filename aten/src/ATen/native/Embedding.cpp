@@ -35,8 +35,9 @@ namespace at { namespace native {
 
 Tensor embedding_symint(const Tensor & weight, const Tensor & indices,
                         c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
-  TORCH_CHECK(weight.dim() == 2,  "'weight' must be 2-D");
-  auto indices_arg = TensorArg(indices, "indices", 1);
+  auto weight_arg = TensorArg(weight, "weight", 1);
+  auto indices_arg = TensorArg(indices, "indices", 2);
+  checkDim("embedding", weight_arg, 2);
   checkScalarTypes("embedding", indices_arg, {kLong, kInt});
 
   // TODO: use tensor.index() after improving perf

@@ -1022,6 +1022,47 @@ def rsub_Scalar(self: Tensor, other: float, alpha: float = 1) -> Tensor:
     return torch.sub(other, self, alpha=alpha)
 
 
+def _check_dim(
+    op_name: str,
+    tensor: Tensor,
+    arg_name: str,
+    pos: int,  # 1-indexed
+    dim: int,
+):
+    utils.check(
+        tensor.dim() == dim,
+        lambda: (
+            f"Expected "
+            f"{dim}"
+            f"-dimensional tensor, but got "
+            f"{tensor.dim()}"
+            f"-dimensional tensor for "
+            f"argument #{pos} '{arg_name}' "
+            f"(while checking arguments for {op_name})"
+        ),
+    )
+
+
+def _check_scalar_types(
+    op_name: str,
+    tensor: Tensor,
+    arg_name: str,
+    pos: int,  # 1-indexed
+    types: Tuple[torch.dtype, ...],
+):
+    utils.check(
+        tensor.dtype in types,
+        lambda: (
+            f"Expected tensor for "
+            f"argument #{pos} '{arg_name}' "
+            f"to have one of the following scalar types: "
+            f"{', '.join(map(str, types))}; "
+            f"but got {tensor.dtype} instead "
+            f"(while checking arguments for {op_name})"
+        ),
+    )
+
+
 @register_decomposition(aten.embedding)
 def embedding(
     weight: Tensor,
@@ -1030,7 +1071,9 @@ def embedding(
     scale_grad_by_freq: bool = False,
     sparse: bool = False,
 ) -> Tensor:
-    assert weight.dim() == 2, "'weight' must be 2-D"
+    _check_dim("embedding", weight, "weight", 1, 2)
+    _check_scalar_types("embedding", indices, "indices", 2, (torch.long, torch.int))
+
     # Nb. scale_grad_by_freq is not used in the forward
     if indices.ndim <= 1:
         # We need this one as weight[indices] calls item() in these cases
@@ -1051,6 +1094,9 @@ def embedding_dense_backward(
     padding_idx: int,
     scale_grad_by_freq: bool,
 ):
+    # TODO: No way to call this directly, so no check needed here?
+    # _check_scalar_types("embedding_backward", indices, "indices", 2, (torch.long, torch.int))
+
     indices = _maybe_convert_to_dtype(indices, torch.long)  # type: ignore[assignment]
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
@@ -1074,9 +1120,10 @@ def embedding_renorm_(
     max_norm: float,
     norm_type: float,
 ) -> Tensor:
-    # TODO: Assert not ported over yet
-    #   checkDim("embedding_renorm_", self_arg, 2);
-    #   checkScalarTypes("embedding_renorm_", indices_arg, {kLong, kInt});
+    _check_dim("embedding_renorm_", self, "self", 1, 2)
+    _check_scalar_types(
+        "embedding_renorm_", indices, "indices", 2, (torch.long, torch.int)
+    )
 
     # TODO: index_put expects non-duplicate indices or the behavior is
     # undefined. But unique is not implemented yet and is data-dependent.

@@ -2230,16 +2230,44 @@ def error_inputs_diag(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(zero_d, args=(0,)), error_type=RuntimeError,
                      error_regex="1D or 2D")
 
-def error_inputs_embedding(op_info, device, **kwargs):
-    indices = torch.rand(2, 2, device=device).long()
-    weights = [
-        torch.tensor(1.0, device=device),
-        torch.tensor(1.0, device=device).reshape(1, 1, 1),
-    ]
 
-    for weight in weights:
-        yield ErrorInput(SampleInput(weight, args=(indices,)), error_type=RuntimeError,
-                         error_regex="'weight' must be 2-D")
+def error_inputs_embedding(op_info, device, **kwargs):
+    weight = torch.tensor(1.0, device=device)
+    indices = torch.rand(2, 2, device=device).long()
+
+    kwargs = (
+        dict(),
+        dict(max_norm=1.),  # tests embedding_renorm_
+    )
+
+    for k in kwargs:
+        is_embedding_renorm_ = bool(k.get("max_norm"))
+        arg1_name = "self" if is_embedding_renorm_ else "weight"
+        op_name = "embedding_renorm_" if is_embedding_renorm_ else "embedding"
+        # 0-dim weight
+        yield ErrorInput(SampleInput(weight, indices, **k),
+                         error_type=RuntimeError,
+                         error_regex=(rf"Expected 2-dimensional tensor, but got 0-dimensional tensor for "
+                                      rf"argument #1 '{arg1_name}' "
+                                      rf"\(while checking arguments for {op_name}\)"))
+        # 3-dim weight
+        yield ErrorInput(SampleInput(weight.reshape(1, 1, 1), indices, **k),
+                         error_type=RuntimeError,
+                         error_regex=(rf"Expected 2-dimensional tensor, but got 3-dimensional tensor for "
+                                      rf"argument #1 '{arg1_name}' "
+                                      rf"\(while checking arguments for {op_name}\)"))
+
+        # non-integral indices
+        is_cuda = torch.device(device).type == 'cuda'
+        if is_cuda and is_embedding_renorm_:
+            float_regex = "\"embedding_renorm_cuda_\" not implemented for 'Float'"
+        else:
+            float_type = 'torch.cuda.FloatTensor' if is_cuda else 'torch.FloatTensor'
+            float_regex = (rf"Expected tensor for argument #2 'indices' to have one of the following "
+                           rf"scalar types: Long, Int; but got {float_type} instead "
+                           rf"\(while checking arguments for {op_name}\)")
+        yield ErrorInput(SampleInput(weight.reshape(1, 1), indices.float(), **k),
+                         error_type=RuntimeError, error_regex=float_regex)
 
 
 def error_inputs_t(op_info, device, **kwargs):
