@@ -88,13 +88,13 @@ __all__ = [
 ]
 
 def _replace_observer_with_quantize_dequantize_node(
-    model: torch.nn.Module,
-    graph: Graph,
-    node: Node,
-    modules: Dict[str, torch.nn.Module],
-    node_name_to_scope: Dict[str, Tuple[str, type]],
-    node_name_to_qconfig: Dict[str, QConfigAny],
-    is_decomposed: bool) -> None:
+        model: torch.nn.Module,
+        graph: Graph,
+        node: Node,
+        modules: Dict[str, torch.nn.Module],
+        node_name_to_scope: Dict[str, Tuple[str, type]],
+        node_name_to_qconfig: Dict[str, QConfigAny],
+        is_decomposed: bool) -> None:
     """ Replace activation_post_process module call node with quantize and
     dequantize node
 
