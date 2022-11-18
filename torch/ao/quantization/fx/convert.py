@@ -125,6 +125,12 @@ def _replace_observer_with_quantize_dequantize_node(
         return
 
     # otherwise, we can convert the activation_post_process module call to quantize/dequantize node
+    # high level
+    # step 1: extract information for inserting q/dq node from activation_post_process
+    # e.g. quantize_op, quantization parameters (no graph change)
+    # step 2: (optional) insert choose_qparams, and update the extracted information if needed
+    # step 3: insert q/dq node
+
     # 1. extract the information from activation_post_process module for generating
     # the quantize and dequantize operator
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
@@ -136,6 +142,9 @@ def _replace_observer_with_quantize_dequantize_node(
     is_per_channel_ = False
     if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
             not hasattr(activation_post_process, 'compute_dtype'):
+        # TODO: probably should cleanup this condition check, it's hard
+        # to reason about this if and the following elif
+        # static quantization branch
         node_type = "call_function"
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
