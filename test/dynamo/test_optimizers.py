@@ -125,7 +125,7 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
         batch = {"x": input1, "y": input2}
         for _ in range(2):
             opt_training_iter_fn(batch, net, optimizer)
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
 
 
 if __name__ == "__main__":
