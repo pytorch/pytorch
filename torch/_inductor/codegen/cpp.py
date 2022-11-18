@@ -1,6 +1,7 @@
 import contextlib
 import dataclasses
 import functools
+import math
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List
@@ -268,6 +269,8 @@ class CppVecOverrides(OpOverrides):
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
             quote = f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        elif math.isnan(val):
+            return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::quiet_NaN()"
         elif val is True or val is False:
             quote = f"static_cast<{DTYPE_TO_CPP[dtype]}>({str(val).lower()})"
         else:
@@ -446,6 +449,8 @@ class CppOverrides(OpOverrides):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
         elif val == float("-inf"):
             return f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        elif math.isnan(val):
+            return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::quiet_NaN()"
         elif val is True or val is False:
             return ops.to_dtype(str(val).lower(), dtype)
         return ops.to_dtype(repr(val), dtype)

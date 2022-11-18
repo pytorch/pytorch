@@ -3259,6 +3259,17 @@ class CommonTemplate:
             ],
         )
 
+    def test_isinf2(self):
+        def fn(x):
+            y = torch.tensor(
+                [1, float("inf"), 2, float("-inf"), float("nan")], device=self.device
+            )
+            return x == y
+
+        self.common(
+            fn, (torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")]),)
+        )
+
     def test_any(self):
         def fn(x):
             return (
