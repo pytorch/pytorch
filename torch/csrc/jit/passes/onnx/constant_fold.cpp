@@ -263,16 +263,14 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     const Node* node,
     std::vector<at::Tensor>& inputTensorValues,
     int opset_version) {
+  // opset_version < 9 doesn't do constant folding during onnx export
+  // so we ignore them here in every node case.
   at::Tensor updated_val;
   if (node->kind() == onnx::Slice) {
     if (opset_version == ONNX_OPSET_9) {
       return runTorchSlice_opset9(node, inputTensorValues);
     } else if (opset_version >= ONNX_OPSET_10) {
       return runTorchSlice_opset10(node, inputTensorValues);
-    } else {
-      TORCH_WARN(
-          "Constant folding - unsupported opset version. Constant folding not applied.");
-      return c10::nullopt;
     }
   } else if (node->kind() == onnx::Concat) {
     if (!node->hasAttributeS("axis")) {
@@ -341,11 +339,6 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         updated_val = at::unsqueeze(updated_val, axis);
       }
       return c10::optional<at::Tensor>(updated_val);
-    } else {
-      TORCH_WARN(
-          "Constant folding - unsupported opset version. "
-          "Constant folding not applied.");
-      return c10::nullopt;
     }
   } else if (node->kind() == onnx::Squeeze) {
     assert(inputTensorValues.size() == 2 || inputTensorValues.size() == 1);
@@ -385,11 +378,6 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         }
       }
       return c10::optional<at::Tensor>(updated_val);
-    } else {
-      TORCH_WARN(
-          "Constant folding - unsupported opset version. "
-          "Constant folding not applied.");
-      return c10::nullopt;
     }
   } else if (node->kind() == onnx::Transpose) {
     assert(inputTensorValues.size() == 1);
@@ -612,12 +600,6 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
 // nodes can be lifted so we run them earlier, before the usual parameters are
 // known.
 void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
-  if (opset_version < ONNX_OPSET_9) {
-    TORCH_WARN(
-        "Constant folding supported for only opsets >= 9. "
-        "Constant folding not applied.");
-    return;
-  }
   TORCH_INTERNAL_ASSERT(b->param_node());
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
   // Only the root block is constant-folded. Folding nested blocks is
