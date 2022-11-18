@@ -4182,7 +4182,7 @@ class CommonTemplate:
             def shrink_rank(x, rank):
                 res = x
                 while res.dim() > rank:
-                    res = torch.select(res, -1, 0)
+                    res = torch.select(res, -1, 0).contiguous()
                 return res
 
             out1 = aten.convolution_backward(
