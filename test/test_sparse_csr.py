@@ -953,19 +953,6 @@ class TestSparseCSR(TestCase):
                                                        device=device)
         self.assertEqual(expected_sparse_selected12, sparse_selected12)
 
-        # Select from dense dimensions
-        sparse_hybrid = self.genSparseCompressedTensor(shape + (4, 2),
-                                                       nnz,
-                                                       device=device,
-                                                       layout=layout,
-                                                       dtype=dtype,
-                                                       index_dtype=index_dtype,
-                                                       blocksize=blocksize,
-                                                       dense_dims=2)
-        sparse_hybrid_dense_selected = sparse_hybrid.select(4, 1)
-        expected_sparse_hybrid_dense_selected = sparse_hybrid.values().select(-2, 1)
-        self.assertEqual(expected_sparse_hybrid_dense_selected, sparse_hybrid_dense_selected)
-
         # selecting rows/col with batch dims not allowed
         sparse_non_batched = sparse[0, 0]
         # select from sparse dimensions
