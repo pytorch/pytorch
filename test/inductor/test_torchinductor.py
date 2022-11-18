@@ -4101,6 +4101,78 @@ class CommonTemplate:
             rtol=0.5,
         )
 
+    def test_conv_backward(self):
+        def fn(rank4_inps, rank3_inps, rank5_inps):
+
+            out1 = aten.convolution_backward(
+                *rank4_inps,
+                [C],
+                [1, 1],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, True],
+            )
+            out2 = aten.convolution_backward(
+                *rank4_inps,
+                [C],
+                [1, 1],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, False, False],
+            )
+            out3 = aten.convolution_backward(
+                *rank3_inps,
+                [C],
+                [1],
+                [0],
+                [1],
+                False,
+                [0],
+                1,
+                [True, True, True],
+            )
+            out4 = aten.convolution_backward(
+                *rank5_inps,
+                [C],
+                [1, 1, 1],
+                [0, 0, 0],
+                [1, 1, 1],
+                False,
+                [0, 0, 0],
+                1,
+                [True, True, True],
+            )
+            return (out1, out2, out3, out4)
+
+        B = 3
+        C = 4
+        H = 5
+        grad_out = torch.randn(B, C, H - 2, H - 2, H - 2)
+        inp = torch.randn(B, C, H, H, H)
+        weight = torch.randn(C, C, 3, 3, 3)
+
+        def shrink_rank(x, rank):
+            res = x
+            while res.dim() > rank:
+                res = torch.select(res, -1, 0)
+            return res.contiguous()
+
+        rank4_inps = [shrink_rank(x, 4) for x in [grad_out, inp, weight]]
+        rank3_inps = [shrink_rank(x, 4) for x in [grad_out, inp, weight]]
+        rank5_inps = [shrink_rank(x, 5) for x in [grad_out, inp, weight]]
+
+        with torch.backends.cudnn.flags(allow_tf32=False):
+            self.common(
+                fn,
+                [rank4_inps, rank3_inps, rank5_inps],
+            )
+
     @unittest.skip(
         """
         FIXME: In the case of having equally max/min elements, our implementation returns
