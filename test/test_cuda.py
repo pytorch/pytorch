@@ -625,8 +625,10 @@ class TestCuda(TestCase):
         self.assertTrue(abs(check_workspace_size(a) - default_workspace_size) < 524288)
 
         # check valid config
-        os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':1024:8:512:4:128:8'
-        self.assertTrue(abs(check_workspace_size(a) - (8196 * 1024 + 2048 * 1024 + 1024 * 1024)) < 524288)
+        os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':128:8:64:16:32:32'
+        self.assertTrue(abs(check_workspace_size(a) - (3072 * 1024)) < 524288)
+
+        torch._C._cuda_clearCublasWorkspaces()
 
     def test_cublas_allow_tf32_get_set(self):
         skip_tf32_cublas = 'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE' in os.environ and\
