@@ -3492,6 +3492,7 @@
   dispatch:
     CPU: median_cpu
     CUDA: median_cuda
+    MPS: median_mps
   autogen: median.out
 
 - func: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
@@ -3503,6 +3504,7 @@
   dispatch:
     CPU: median_out_cpu
     CUDA: median_out_cuda
+    MPS: median_out_mps
 
 - func: median.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
