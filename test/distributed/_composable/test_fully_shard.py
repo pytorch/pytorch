@@ -11,14 +11,9 @@ from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
 from torch.distributed.fsdp._runtime_utils import _root_pre_forward
-from torch.distributed.fsdp.wrap import _ExecOrderBasePolicy, ModuleWrapPolicy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
-    FSDPInitMode,
-    FSDPTest,
-    TransformerWithSharedParams,
-)
+from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
@@ -81,8 +76,9 @@ class TestFSDPInitialization(FSDPTest):
         return 2
 
     @skip_if_lt_x_gpu(2)
-    def test_module_wrap_policy(self):
-        """Tests passing ``ModuleWrapPolicy`` as an ``auto_wrap_policy``."""
+    def test_auto_wrap_policy(self):
+        """Tests passing an ``auto_wrap_policy``."""
+
         local_model = Model(device=torch.device("cuda"))
         fsdp_wrapped_model = FSDP(
             copy.deepcopy(local_model),
@@ -129,54 +125,6 @@ class TestFSDPInitialization(FSDPTest):
         for submodule in composable_module.modules():
             composable_module_classes.add(type(submodule))
         self.assertEqual(local_module_classes, composable_module_classes)
-
-    @skip_if_lt_x_gpu(2)
-    def test_sibling_shared_params(self):
-        """
-        Tests that shared parameters across siblings are correctly assigned to
-        their lowest common ancestor module.
-        """
-        composable_module = TransformerWithSharedParams.init(
-            self.process_group,
-            FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
-            {},
-            deterministic=True,
-        )
-        fully_shard(
-            composable_module,
-            self.process_group,
-            policy=_ExecOrderBasePolicy(),
-            device_id=torch.cuda.current_device(),
-        )
-
-        # Check that the shared embedding/output projection weight is flattened
-        # once, meaning that only one name should appear in the FQNs
-        has_output_proj_weight = False
-        has_embed_tokens_weight = False
-        for handle in fully_shard.state(composable_module)._handles:
-            has_output_proj_weight |= any(
-                "output_proj.weight" in fqn for fqn in handle.flat_param._fqns
-            )
-            has_embed_tokens_weight |= any(
-                "embed_tokens.weight" in fqn for fqn in handle.flat_param._fqns
-            )
-        self.assertEqual(has_output_proj_weight + has_embed_tokens_weight, 1)
-
-        # Check that we can running a few training iterations without erroring
-        optim = torch.optim.Adam(composable_module.parameters(), lr=1e-2)
-        for i in range(4):
-            optim.zero_grad(set_to_none=(i % 2 == 0))
-            inp = composable_module.get_input(torch.device("cuda"))
-            # TODO (awgu): Remove this after resolving the root pre-forward
-            # hook registration, currently blocked by kwarg support
-            args, kwargs = _root_pre_forward(
-                fully_shard.state(composable_module), composable_module, *inp
-            )
-            out = composable_module(*args, **kwargs)
-            loss = composable_module.get_loss(inp, out)
-            composable_module.run_backward(loss)
-            optim.step()
 
     @skip_if_lt_x_gpu(2)
     def test_device_id(self):
