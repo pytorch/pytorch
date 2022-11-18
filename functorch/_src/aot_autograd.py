@@ -1302,7 +1302,7 @@ def aot_function(
         flat_args, _ = pytree.tree_flatten((args, kwargs))
 
         # Compile the function and save it in the cache
-        if True:
+        if cached_res is None:
             # Save the args_spec for flat_tensor_args to unflatten while tracing
             _, tensor_args_spec = pytree.tree_flatten((args, kwargs))
             out_spec = PytreeThunk()
