@@ -1683,7 +1683,7 @@ class TestFX(JitTestCase):
         class SubModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv_mod = torch.nn.Conv2d(64, 64, (3,3), padding=1, bias=False)
+                self.conv_mod = torch.nn.Conv2d(64, 64, (3, 3), padding=1, bias=False)
 
             def forward(self, x):
                 return self.conv_mod(x)
@@ -1700,14 +1700,13 @@ class TestFX(JitTestCase):
         gm = torch.fx.symbolic_trace(m)
 
         mod_stack = {}
-        expected_stack = [{'sub_mod': 'SubModule'}, {'sub_mod.conv_mod': 'Conv2d'}]
+        expected_stack = [{'sub_mod': str(type(m.sub_mod))},
+                          {'sub_mod.conv_mod': str(type(m.sub_mod.conv_mod))}]
         for node in gm.graph.nodes:
             mod_stack = node.meta.get('nn_module_stack', {})
             if mod_stack:
-                print(f"Node {node} module {mod_stack}")
                 break
         stack_list = [{item: mod_stack[item]} for item in mod_stack]
-        print(f"Stack list {stack_list}")
         self.assertEqual(stack_list, expected_stack)
 
     def test_interpreter(self):

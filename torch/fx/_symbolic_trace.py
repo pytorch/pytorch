@@ -436,7 +436,7 @@ class Tracer(TracerBase):
             value was returned from the ``Module`` invocation.
         """
         module_qualified_name = self.path_of_module(m)
-        with ScopeContextManager(self.scope, Scope(module_qualified_name, type(m).__name__)) as _scope:
+        with ScopeContextManager(self.scope, Scope(module_qualified_name, type(m))) as _scope:
             # module_stack is an ordered dict so writing then deleting the
             # entry is equivalent to push/pop on a list
             self.module_stack[_scope.module_path] = str(_scope.module_type)
