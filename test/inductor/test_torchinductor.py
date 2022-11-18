@@ -5015,17 +5015,12 @@ if HAS_CUDA:
 
             out = test_closure()
             torch._dynamo.reset()
-            assert (
-                torch._inductor.compile_fx.tape_manager_container.live_tensors_count
-                == 1
-            )
-            assert torch._inductor.compile_fx.tape_manager_container.graph is not None
+            container = torch._inductor.compile_fx.tape_manager_container
+            self.assertEqual(container.live_tensors_count, 1)
+            self.assertTrue(container.graph is not None)
             del out
-            assert (
-                torch._inductor.compile_fx.tape_manager_container.live_tensors_count
-                == 0
-            )
-            assert torch._inductor.compile_fx.tape_manager_container.graph is None
+            self.assertEqual(container.live_tensors_count, 0)
+            self.assertTrue(container.graph is None)
 
 
 if __name__ == "__main__":
