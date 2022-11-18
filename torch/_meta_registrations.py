@@ -1928,25 +1928,6 @@ def infer_dense_strides(tensor_sizes, tensor_strides):
     return out_strides
 
 
-@register_meta(aten.grid_sampler_2d_backward.default)
-def grid_sample_2d_backward_meta(
-    grad_output,
-    input,
-    grid,
-    interpolation_mode,
-    padding_mode,
-    align_corners,
-    output_mask,
-):
-    input_requires_grad = output_mask[0]
-    if input_requires_grad:
-        grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
-    else:
-        grad_input = None
-    grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
-    return (grad_input, grad_grid)
-
-
 @register_meta(aten.scatter_add_)
 def meta_scatter_add_(self, dim, index, src):
     scatter_meta_impl(self, dim, index, src, "add")
