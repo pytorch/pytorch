@@ -457,7 +457,6 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
     });
 }
 
-
 template <typename scalar_t>
 void cpu_hflip_vec(at::TensorIterator& iter) {
 
@@ -568,7 +567,7 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
         });
     });
   } else {
-    // Special cases: horizontal flip with vectorization and input is contiguous
+    // Special case: horizontal flip with vectorization and input is contiguous
     // Context: horizontal flip leads to strides[0] < 0 and
     // thus is_contiguous condition is not satisfied and non-vectorized code path is taken.
     auto output_strides = iter.strides(0);
