@@ -381,7 +381,7 @@ class GraphLowering(torch.fx.Interpreter):
                 if dep.name in buf_seen:
                     continue
                 buf_seen.add(dep.name)
-                node_numel += dep.numel_hint()
+                node_numel += dep.numbytes_hint()
             return node_numel
 
         total_numel = 0
