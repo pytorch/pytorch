@@ -10,7 +10,7 @@ error() { log "ERROR: $*" >&2; }
 fatal() { error "$@"; exit 1; }
 
 retry () {
-  $* || (sleep 10 && $*) || (sleep 20 && $*) || (sleep 40 && $*)
+    "$@" || (sleep 10 && "$@") || (sleep 20 && "$@") || (sleep 40 && "$@")
 }
 
 # compositional trap taken from https://stackoverflow.com/a/7287873/23845
