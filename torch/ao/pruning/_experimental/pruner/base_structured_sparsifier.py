@@ -21,58 +21,64 @@ from .convert_functions import (
     convert_conv2d_pool_flatten_linear,
 )
 
-__all__ = ["BaseStructuredSparsifier"]
+__all__ = ["BaseStructuredSparsifier", "get_default_structured_pruning_patterns"]
 
-SUPPORTED_STRUCTURED_PRUNING_MODULES = {  # added to config if None given
-    nn.Linear,
-    nn.Conv2d,
-}
+def _get_supported_structured_pruning_modules():
+    SUPPORTED_STRUCTURED_PRUNING_MODULES = {  # added to config if None given
+        nn.Linear,
+        nn.Conv2d,
+    }
+    return SUPPORTED_STRUCTURED_PRUNING_MODULES
 
-SUPPORTED_ACTIVATION_FUNCTIONS = {
-    F.relu,
-    F.rrelu,
-    F.hardtanh,
-    F.relu6,
-    F.sigmoid,
-    F.hardsigmoid,
-    F.tanh,
-    F.silu,
-    F.mish,
-    F.hardswish,
-    F.elu,
-    F.celu,
-    F.selu,
-    F.hardshrink,
-    F.leaky_relu,
-    F.logsigmoid,
-    F.softplus,
-    F.prelu,
-    F.softsign,
-    F.tanhshrink,
-}
+def _get_supported_activation_functions():
+    SUPPORTED_ACTIVATION_FUNCTIONS = {
+        F.relu,
+        F.rrelu,
+        F.hardtanh,
+        F.relu6,
+        F.sigmoid,
+        F.hardsigmoid,
+        F.tanh,
+        F.silu,
+        F.mish,
+        F.hardswish,
+        F.elu,
+        F.celu,
+        F.selu,
+        F.hardshrink,
+        F.leaky_relu,
+        F.logsigmoid,
+        F.softplus,
+        F.prelu,
+        F.softsign,
+        F.tanhshrink,
+    }
+    return SUPPORTED_ACTIVATION_FUNCTIONS
 
-SUPPORTED_ACTIVATION_MODULES = {
-    nn.ReLU,
-    nn.RReLU,
-    nn.Hardtanh,
-    nn.ReLU6,
-    nn.Sigmoid,
-    nn.Hardsigmoid,
-    nn.Tanh,
-    nn.SiLU,
-    nn.Mish,
-    nn.Hardswish,
-    nn.ELU,
-    nn.CELU,
-    nn.SELU,
-    nn.Hardshrink,
-    nn.LeakyReLU,
-    nn.LogSigmoid,
-    nn.Softplus,
-    nn.PReLU,
-    nn.Softsign,
-    nn.Tanhshrink,
-}
+def _get_supported_activation_modules():
+    SUPPORTED_ACTIVATION_MODULES = {
+        nn.ReLU,
+        nn.RReLU,
+        nn.Hardtanh,
+        nn.ReLU6,
+        nn.Sigmoid,
+        nn.Hardsigmoid,
+        nn.Tanh,
+        nn.SiLU,
+        nn.Mish,
+        nn.Hardswish,
+        nn.ELU,
+        nn.CELU,
+        nn.SELU,
+        nn.Hardshrink,
+        nn.LeakyReLU,
+        nn.LogSigmoid,
+        nn.Softplus,
+        nn.PReLU,
+        nn.Softsign,
+        nn.Tanhshrink,
+    }
+    return SUPPORTED_ACTIVATION_MODULES
 
 def get_default_structured_pruning_patterns():
     """
@@ -87,7 +93,7 @@ def get_default_structured_pruning_patterns():
         (nn.Conv2d, nn.Conv2d): convert_conv2d_conv2d,
     }
 
-    for activation in chain(SUPPORTED_ACTIVATION_MODULES, SUPPORTED_ACTIVATION_FUNCTIONS):
+    for activation in chain(_get_supported_activation_functions(), _get_supported_activation_modules()):
         patterns.update({
             # linear -> activation -> linear
             (nn.Linear, activation, nn.Linear): convert_linear_activation_linear,
@@ -111,8 +117,6 @@ def get_default_structured_pruning_patterns():
         })
     return patterns
 
-SUPPORTED_STRUCTURED_PRUNING_PATTERNS = get_default_structured_pruning_patterns()
-
 
 class BaseStructuredSparsifier(BaseSparsifier):
     r"""Base class for structured pruning.
@@ -127,17 +131,21 @@ class BaseStructuredSparsifier(BaseSparsifier):
             be updated.
     """
 
-    def __init__(self, defaults, patterns=SUPPORTED_STRUCTURED_PRUNING_PATTERNS):
+    def __init__(self, defaults, patterns=None):
         super().__init__(defaults)
+        if patterns is None:
+            patterns = get_default_structured_pruning_patterns()
         self.patterns = patterns
 
     def make_config_from_model(
         self,
         model: nn.Module,
-        SUPPORTED_MODULES: Set[Type] = SUPPORTED_STRUCTURED_PRUNING_MODULES,
+        SUPPORTED_MODULES: Set[Type] = None,
     ) -> None:
+        if SUPPORTED_MODULES is None:
+            SUPPORTED_MODULES = _get_supported_structured_pruning_modules()
         super().make_config_from_model(
-            model, SUPPORTED_MODULES=SUPPORTED_STRUCTURED_PRUNING_MODULES
+            model, SUPPORTED_MODULES=SUPPORTED_MODULES
         )
 
     def _prepare(self, *args, **kwargs) -> None:
@@ -164,6 +172,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                 module.register_parameter("_bias", nn.Parameter(module.bias.detach()))
                 module.bias = None
                 module.prune_bias = prune_bias
+
             self.bias_handles.append(
                 module.register_forward_hook(
                     BiasHook(module.parametrizations.weight[0], prune_bias)
@@ -194,10 +203,6 @@ class BaseStructuredSparsifier(BaseSparsifier):
                     if (
                         first_module is not None
                         and parametrize.is_parametrized(first_module)
-                        and isinstance(
-                            first_module.parametrizations["weight"][0],
-                            FakeStructuredSparsity,
-                        )
                     ):
                         convert_block = []
                         for node in matched:

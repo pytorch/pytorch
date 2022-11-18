@@ -6,8 +6,20 @@ import torch
 from torch import nn
 from torch.nn.utils import parametrize
 
+__all__ = [
+    "convert_linear",
+    "convert_linear_linear",
+    "convert_linear_activation_linear",
+    "convert_conv2d",
+    "convert_conv2d_conv2d",
+    "convert_conv2d_activation_conv2d",
+    "convert_conv2d_activation_pool_conv2d",
+    "convert_conv2d_pool_activation_conv2d",
+    "convert_conv2d_pool_flatten_linear",
+]
+
 # BIAS PROPOGATION
-def get_adjusted_next_layer_bias(next_layer, pruned_biases, mask):
+def _get_adjusted_next_layer_bias(next_layer, pruned_biases, mask):
     r"""Returns new adjusted bias for the second supported module"""
     if parametrize.is_parametrized(next_layer):
         # need to access original weight
@@ -51,7 +63,7 @@ def get_adjusted_next_layer_bias(next_layer, pruned_biases, mask):
     return adjusted_bias
 
 
-def prune_module_bias(module, mask):
+def _prune_module_bias(module, mask):
     r"""Applies mask to given modules bias"""
     # prune bias along with weights, discard pruned indices of bias
     original_bias = getattr(module, "_bias", module.bias)
@@ -63,7 +75,7 @@ def prune_module_bias(module, mask):
         delattr(module, "_bias")
 
 
-def propogate_module_bias(module, mask):
+def _propogate_module_bias(module, mask):
     r"""
     In the case that we need to propogate biases, this function will return the biases we need
     """
@@ -86,7 +98,7 @@ def propogate_module_bias(module, mask):
 
 
 # LINEAR CONVERSION FUNCTIONS
-def convert_linear_helper(linear):
+def _convert_linear_helper(linear):
     mask = linear.parametrizations.weight[0].mask
     with torch.no_grad():
         parametrize.remove_parametrizations(linear, "weight", leave_parametrized=True)
@@ -96,9 +108,9 @@ def convert_linear_helper(linear):
 
 
 def convert_linear(linear):
-    mask = convert_linear_helper(linear)
+    mask = _convert_linear_helper(linear)
     if getattr(linear, "prune_bias", False):
-        prune_module_bias(linear, mask)
+        _prune_module_bias(linear, mask)
 
 
 def convert_linear_linear(linear1, linear2):
@@ -106,15 +118,15 @@ def convert_linear_linear(linear1, linear2):
 
 
 def convert_linear_activation_linear(linear1, activation, linear2):
-    mask = convert_linear_helper(linear1)
+    mask = _convert_linear_helper(linear1)
     if getattr(linear1, "prune_bias", False):
-        prune_module_bias(linear1, mask)
+        _prune_module_bias(linear1, mask)
     else:
-        pruned_biases = propogate_module_bias(linear1, mask)
+        pruned_biases = _propogate_module_bias(linear1, mask)
         if pruned_biases is not None:
             if activation:
                 pruned_biases = activation(pruned_biases)
-            linear2.bias = get_adjusted_next_layer_bias(linear2, pruned_biases, mask)
+            linear2.bias = _get_adjusted_next_layer_bias(linear2, pruned_biases, mask)
 
     with torch.no_grad():
         if parametrize.is_parametrized(linear2):
@@ -128,7 +140,7 @@ def convert_linear_activation_linear(linear1, activation, linear2):
 
 
 # CONV2d CONVERSION FUNCTIONS
-def convert_conv2d_helper(conv2d):
+def _convert_conv2d_helper(conv2d):
     mask = conv2d.parametrizations.weight[0].mask
     with torch.no_grad():
         parametrize.remove_parametrizations(conv2d, "weight", leave_parametrized=True)
@@ -168,9 +180,9 @@ def convert_conv2d_padded(conv2d_1):
 
 
 def convert_conv2d(conv2d):
-    mask = convert_conv2d_helper(conv2d)
+    mask = _convert_conv2d_helper(conv2d)
     if getattr(conv2d, "prune_bias", False):
-        prune_module_bias(conv2d, mask)
+        _prune_module_bias(conv2d, mask)
 
 
 def convert_conv2d_conv2d(conv2d_1, conv2d_2):
@@ -190,15 +202,15 @@ def convert_conv2d_activation_conv2d(conv2d_1, activation, conv2d_2):
     ):
         convert_conv2d_padded(conv2d_1)
     else:
-        mask = convert_conv2d_helper(conv2d_1)
+        mask = _convert_conv2d_helper(conv2d_1)
         if prune_bias:
-            prune_module_bias(conv2d_1, mask)
+            _prune_module_bias(conv2d_1, mask)
         else:
-            pruned_biases = propogate_module_bias(conv2d_1, mask)
+            pruned_biases = _propogate_module_bias(conv2d_1, mask)
             if pruned_biases is not None:
                 if activation:
                     pruned_biases = activation(pruned_biases)
-                conv2d_2.bias = get_adjusted_next_layer_bias(
+                conv2d_2.bias = _get_adjusted_next_layer_bias(
                     conv2d_2, pruned_biases, mask
                 )
 
@@ -228,7 +240,7 @@ def convert_conv2d_activation_pool_conv2d(c1, activation, pool, c2):
 
 
 def convert_conv2d_pool_flatten_linear(conv2d, pool, flatten, linear):
-    mask = convert_conv2d_helper(conv2d)
+    mask = _convert_conv2d_helper(conv2d)
 
     # We map the pruned indices of the Conv2d output to the flattened indices of the Linear following the Flatten layer.
     # we determine the flattening scale (h * w), and readjust `first_pruned_indices`
@@ -250,13 +262,13 @@ def convert_conv2d_pool_flatten_linear(conv2d, pool, flatten, linear):
     ).flatten()
 
     if getattr(conv2d, "prune_bias", False):
-        prune_module_bias(conv2d, mask)
+        _prune_module_bias(conv2d, mask)
     else:
-        pruned_biases = propogate_module_bias(conv2d, mask)
+        pruned_biases = _propogate_module_bias(conv2d, mask)
         flattened_pruned_biases = torch.tensor(
             [[bias] * flatten_scale for bias in pruned_biases]
         ).flatten()
-        linear.bias = get_adjusted_next_layer_bias(
+        linear.bias = _get_adjusted_next_layer_bias(
             linear, flattened_pruned_biases, flattened_mask
         )
 

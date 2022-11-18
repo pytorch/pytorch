@@ -10,7 +10,7 @@ from torch.fx import Node
 from torch.nn.utils import parametrize
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-def match(modules: Dict[str, nn.ModuleDict], node: Node, current: Union[nn.Module, Any]) -> bool:
+def _match(modules: Dict[str, nn.ModuleDict], node: Node, current: Union[nn.Module, Any]) -> bool:
     r"""
     checks to see if a single node of a pattern matches
     """
@@ -42,11 +42,11 @@ def apply_match(
     """
     if isinstance(pattern, tuple):
         if len(pattern) == 1:
-            if match(modules, node, pattern[0]):
+            if _match(modules, node, pattern[0]):
                 return matched_node_pattern + [node]
 
         first, *rest = pattern
-        if match(modules, node, first):
+        if _match(modules, node, first):
             if rest is None:
                 return matched_node_pattern + [node]
 
@@ -54,6 +54,6 @@ def apply_match(
                 return apply_match(
                     modules, tuple(rest), user, matched_node_pattern + [node]
                 )
-    elif match(modules, node, pattern):
+    elif _match(modules, node, pattern):
         return [node]
     return None
