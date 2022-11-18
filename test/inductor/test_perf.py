@@ -1,4 +1,7 @@
 # Owner(s): ["module: inductor"]
+import contextlib
+from unittest.mock import patch
+
 import torch._dynamo
 import torch._inductor.config as config
 from torch._dynamo.optimizations.backends import register_backend
@@ -8,10 +11,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-import contextlib
-from unittest.mock import patch
-import unittest
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
 
@@ -41,8 +41,7 @@ def T(*size, dtype=torch.float32, device="cuda"):
 
 
 class TestCase(TorchTestCase):
-    def assertExpectedInt(self, actual, expected):
-        return self.assertExpectedInline(actual, str(expected), skip=1)
+    pass
 
 
 class NumBytesMetricTests(TestCase):
@@ -157,7 +156,7 @@ class NumBytesMetricTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """30""")
 
 
-class FusionTests(TorchTestCase):
+class FusionTests(TestCase):
     device = """cuda"""
 
     def test_horizontal_reduction_pointwise(self):
@@ -269,7 +268,7 @@ class FusionTests(TorchTestCase):
         self.assertExpectedInline(count_numel(f, *inp), """90""")
 
 
-class SchedulerFusionTests(TorchTestCase):
+class SchedulerFusionTests(TestCase):
     """
     Testing the fusion group creation heuristic.
     Disables inductor rematerialization for easier reasoning of tests.
@@ -368,5 +367,5 @@ class WouldBeNiceIfItWorked:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+    if HAS_CUDA and not TEST_WITH_ROCM:
         run_tests(needs="filelock")
