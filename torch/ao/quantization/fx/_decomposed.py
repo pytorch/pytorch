@@ -1,5 +1,5 @@
 import torch
-from torch.library import impl, Library
+from torch.library import Library, impl
 from torch.ao.quantization import MinMaxObserver
 
 # Note: decomposed means decomposed quantized tensor, using decomposed so that the
@@ -38,6 +38,16 @@ def quantize_per_tensor(input, scale, zero_point, quant_min, quant_max, dtype):
     inv_scale = 1.0 / scale
     return torch.clamp(torch.round(input * inv_scale) + zero_point, quant_min, quant_max).to(dtype)
 
+quantized_decomposed_lib.define(
+    "quantize_per_tensor.tensor("
+    "Tensor input, Tensor scale, Tensor zero_point, int quant_min, int quant_max, ScalarType dtype) -> Tensor")
+
+@impl(quantized_decomposed_lib, "quantize_per_tensor.tensor", "CompositeExplicitAutograd")
+def quantize_per_tensor_tensor(input, scale, zero_point, quant_min, quant_max, dtype):
+    assert zero_point.numel() == 1, f"Exepecting zero_point tensor to be one element, but received : {zero_point.numel()}"
+    assert scale.numel() == 1, f"Exepecting scale tensor to be one element, but received : {scale.numel()}"
+    return quantize_per_tensor(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)
+
 # Note: quant_min/quant_max/dtype are not used in the operator, but for now it's kept in
 # the signature as metadata for the input Tensor, this might be useful for pattern
 # matching in the future
@@ -56,13 +66,25 @@ def dequantize_per_tensor(input, scale, zero_point, quant_min, quant_max, dtype)
     else:
         raise ValueError(f"Unsupported dtype in dequantize_per_tensor: {dtype}")
 
-quantized_decomposed_lib.define(
-    "quantize_per_tensor_dynamic(Tensor input, int quant_min, int quant_max, ScalarType dtype) -> Tensor")
 
-@impl(quantized_decomposed_lib, "quantize_per_tensor_dynamic", "CompositeExplicitAutograd")
-def quantize_per_tensor_dynamic(input, quant_min, quant_max, dtype):
+quantized_decomposed_lib.define(
+    "dequantize_per_tensor.tensor("
+    "Tensor input, Tensor scale, Tensor zero_point, int quant_min, int quant_max, ScalarType dtype) -> Tensor")
+
+@impl(quantized_decomposed_lib, "dequantize_per_tensor.tensor", "CompositeExplicitAutograd")
+def dequantize_per_tensor_tensor(input, scale, zero_point, quant_min, quant_max, dtype):
+    assert zero_point.numel() == 1, f"Exepecting zero_point tensor to be one element, but received : {zero_point.numel()}"
+    assert scale.numel() == 1, f"Exepecting scale tensor to be one element, but received : {scale.numel()}"
+    return dequantize_per_tensor(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)
+
+
+quantized_decomposed_lib.define(
+    "choose_qparams.tensor(Tensor input, int quant_min, int quant_max, ScalarType dtype) -> (Tensor, Tensor)")
+
+@impl(quantized_decomposed_lib, "choose_qparams.tensor", "CompositeExplicitAutograd")
+def choose_qparams_tensor(input, quant_min, quant_max, dtype):
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
-    _quant_min_max_bounds_check(quant_min, quant_max, dtype)
+    assert quant_min < quant_max, f"Expecting quant_min to be smaller than quant_max but received min: {quant_min} max: {quant_max}"
 
     # Its weird to create an observer manually just to calculate qparams. I tried refactoring this functionality out of observer
     # into a util and then use that util directly, but I kept running into jit typing errors related to torch.qscheme not
@@ -71,4 +93,4 @@ def quantize_per_tensor_dynamic(input, quant_min, quant_max, dtype):
     observer = MinMaxObserver(quant_min=quant_min, quant_max=quant_max, dtype=tensor_dtype_to_observer_dtype[dtype])
     observer(input)
     scale, zero_point = observer.calculate_qparams()
-    return torch.ops.quantized_decomposed.quantize_per_tensor(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)
+    return (scale, zero_point)

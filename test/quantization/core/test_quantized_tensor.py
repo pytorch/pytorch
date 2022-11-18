@@ -14,7 +14,6 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import TestCase, DeterministicGuard
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_quantization import get_supported_device_types
-from torch.ao.quantization import MinMaxObserver
 
 hu.assert_deadline_disabled()
 
@@ -1499,7 +1498,7 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
         self.assertEqual(dequantized_X, dequantized_decomposed_X)
 
-    def test_decomposed_quantize_dynamic(self):
+    def test_decomposed_dynamic_quant_pattern(self):
         import torch.ao.quantization.fx._decomposed
         X = torch.randn(5, 10)
         dtype = torch.uint8
@@ -1510,14 +1509,13 @@ class TestQuantizedTensor(TestCase):
         quantized_X = torch.quantize_per_tensor(X, scale, zero_point, qdtype)
         dequantized_X = torch.dequantize(quantized_X)
 
-        quantized_decomposed_X = torch.ops.quantized_decomposed.quantize_per_tensor_dynamic(
+        # Now try decomposed pattern
+        (scale_decomposed, zero_point_decomposed) = torch.ops.quantized_decomposed.choose_qparams.tensor(
             X, quant_min, quant_max, dtype)
+        quantized_decomposed_X = torch.ops.quantized_decomposed.quantize_per_tensor.tensor(
+            X, scale_decomposed, zero_point_decomposed, quant_min, quant_max, dtype)
 
-        # observer logic is what quantize_per_tensor_dynamic does internally
-        observer = MinMaxObserver(quant_min=quant_min, quant_max=quant_max)
-        observer(X)
-        scale_decomposed, zero_point_decomposed = observer.calculate_qparams()
-        dequantized_decomposed_X = torch.ops.quantized_decomposed.dequantize_per_tensor(
+        dequantized_decomposed_X = torch.ops.quantized_decomposed.dequantize_per_tensor.tensor(
             quantized_decomposed_X, scale_decomposed, zero_point_decomposed, quant_min, quant_max, dtype
         )
         self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
