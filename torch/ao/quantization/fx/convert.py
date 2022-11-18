@@ -197,28 +197,29 @@ def _replace_observer_with_quantize_dequantize_node(
 
     # 2. insert choose_qparams op and update the params list for the is_decomposed and
     # is_dynamic case
-    if is_decomposed and is_dynamic:
-        with graph.inserting_before(node):
-            input_node = node.args[0]
-            choose_qparams_op_inputs = [node.args[0]]
-            for key, value in qparams.items():
-                # we have quant_min, quant_max and dtype, all should be stored
-                # as literals
-                choose_qparams_op_inputs.append(value)
-            choose_qparams_node = graph.create_node("call_function", torch.ops.quantized_decomposed.choose_qparams.tensor, tuple(choose_qparams_op_inputs), {})
-            # choose_qparms returns (scale, zero_point)
-            scale_node = graph.create_node("call_function", operator.getitem, (choose_qparams_node, 0), {})
-            zero_point_node = graph.create_node("call_function", operator.getitem, (choose_qparams_node, 1), {})
-            quant_min = qparams["_quant_min_"]
-            quant_max = qparams["_quant_max_"]
-            dtype = qparams["_dtype_"]
-            qparams = {
-                "_scale_": scale_node,
-                "_zero_point_": zero_point_node,
-                "_quant_min": quant_min,
-                "_quant_max": quant_max,
-                "_dtype_": dtype
-            }
+    if is_decomposed:
+        if is_dynamic:
+            with graph.inserting_before(node):
+                input_node = node.args[0]
+                choose_qparams_op_inputs = [node.args[0]]
+                for key, value in qparams.items():
+                    # we have quant_min, quant_max and dtype, all should be stored
+                    # as literals
+                    choose_qparams_op_inputs.append(value)
+                choose_qparams_node = graph.create_node("call_function", torch.ops.quantized_decomposed.choose_qparams.tensor, tuple(choose_qparams_op_inputs), {})
+                # choose_qparms returns (scale, zero_point)
+                scale_node = graph.create_node("call_function", operator.getitem, (choose_qparams_node, 0), {})
+                zero_point_node = graph.create_node("call_function", operator.getitem, (choose_qparams_node, 1), {})
+                quant_min = qparams["_quant_min_"]
+                quant_max = qparams["_quant_max_"]
+                dtype = qparams["_dtype_"]
+                qparams = {
+                    "_scale_": scale_node,
+                    "_zero_point_": zero_point_node,
+                    "_quant_min": quant_min,
+                    "_quant_max": quant_max,
+                    "_dtype_": dtype
+                }
 
     # 3. replace observer node with quant - dequant node
     with graph.inserting_before(node):
