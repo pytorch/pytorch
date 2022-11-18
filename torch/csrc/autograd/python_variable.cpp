@@ -305,10 +305,6 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
   // THPVariable_clear).
   // 2. We are decref-ing some other Python object. We don't do
   // PyObject resurrection on non-Tensors, so we just carry on as usual
-  if (is_tensor) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        !c10::impl::HermeticPyObjectTLS::get_state());
-  }
   if (is_tensor && Py_REFCNT(pyobj) > 1) {
     // It's still alive!  This can happen if a weak ref resurrected
     // the PyObject without flipping ownership.  At this point it is
@@ -861,7 +857,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
     if (sizes_strides_policy.has_value()) {
       TORCH_CHECK(
           false,
-          "Setting sizes_strides_policy isn't suppored for this overload")
+          "Setting sizes_strides_policy isn't supported for this overload")
     }
   }
 
@@ -2321,11 +2317,20 @@ void ConcretePyInterpreterVTable::python_dispatcher(
     torch::jit::Stack* stack) const {
   py::gil_scoped_acquire g;
   py::handle torch_api_function_overload = getTorchApiFunction(op);
+  // TODO: if necessary, can optimize to cache the cache lookup
+  // TODO: if necessary, can optimize OpOverload to have slots
+  auto cache = py::dict(torch_api_function_overload.attr("_dispatch_cache"));
+  if (cache.ptr() == nullptr) {
+    throw python_error();
+  }
 
   c10::DispatchKey k = ks.highestPriorityTypeId();
-  auto handler = torch_api_function_overload.attr(toString(k));
+  // TODO: allow this to be non-owning
+  auto handler = py::reinterpret_borrow<py::object>(
+      PyDict_GetItem(cache.ptr(), py::cast(k).ptr()));
   if (handler.ptr() == nullptr) {
-    throw python_error();
+    // Slow path
+    handler = torch_api_function_overload.attr("_get_dispatch")(k);
   }
   if (py::isinstance<c10::DispatchKey>(handler)) {
     // NB: not redispatch, as that will permanently remove the python

@@ -360,7 +360,7 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
 
     shape = tensors[0].shape
 
-    def _cmp(idx_a, idx_b):
+    def should_swap(idx_a, idx_b):
         for tensor in tensors:
             stride_a = tensor.stride()[idx_a]
             stride_b = tensor.stride()[idx_b]
@@ -378,24 +378,30 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
             if shape[idx_a] > shape[idx_b]:
                 return 1
 
-            # NOTE: this case is missing in the C++ impl
-            if shape[idx_a] < shape[idx_b]:
-                return -1
-
         # Note: this case is hit if all strides are zero,
         # or all strides are equal and all dimensions have the same length
         return 0
 
-    perm = tuple(range(ndim))
-    perm = tuple(sorted(perm, key=cmp_to_key(_cmp), reverse=True))
+    perm = list(reversed(range(ndim)))
+
+    # insertion sort with support for ambiguous comparisons
+    for i in range(1, ndim):
+        dim1 = i
+        for dim0 in reversed(range(i)):
+            comparison = should_swap(perm[dim0], perm[dim1])
+            if comparison > 0:
+                perm[dim0], perm[dim1] = perm[dim1], perm[dim0]
+                dim1 = dim0
+            elif comparison < 0:
+                break
 
     permuted_shape = [-1] * ndim
-    for idx, x in enumerate(perm):
+    for idx, x in enumerate(reversed(perm)):
         permuted_shape[idx] = shape[x]
 
     new_strides = make_contiguous_strides_for(permuted_shape)
     permuted_strides = [-1] * ndim
-    for idx, x in enumerate(perm):
+    for idx, x in enumerate(reversed(perm)):
         permuted_strides[x] = new_strides[idx]
 
     return tuple(permuted_strides)
@@ -831,10 +837,11 @@ def type_to_dtype(typ: type) -> torch.dtype:
 
     if typ is bool:
         return torch.bool
-    if typ is int:
+    if typ in [int, torch.SymInt]:
         return torch.long
-    if typ is float:
+    if typ in [float, torch.SymFloat]:
         return torch.get_default_dtype()
+    # TODO: sym_complex_float?
     if typ is complex:
         return corresponding_complex_dtype(torch.get_default_dtype())
 

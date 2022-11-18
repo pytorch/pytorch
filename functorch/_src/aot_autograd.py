@@ -18,7 +18,6 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
 
 from functorch import make_fx
-from functorch.experimental import functionalize
 from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
@@ -133,7 +132,99 @@ def setup_stacktrace_preservation_hooks(roots: List):
         node.register_hook(get_posthook(special_stack))
 
 
-def create_joint_forward_backward(fn):
+# This is a version of functionalization that is specifically designed
+# for the AOTAutograd use case.  It might be generally applicable though
+# (if so, move it out of this file), so I've tried to give it a name that
+# describes what it does.
+#
+# Given a function f, it produces a new function g that:
+#
+#   - Detaches all inputs before running f; the inner function
+#     does not directly participate in any pre-existing autograd.
+#     preserve_requires_grad is provided as a convenience to set the
+#     requires_grad on the new detached leaves in sync with the originals.
+#     (NB: In principle, you could backward through the pure operations
+#     produced by functionalization; this is not used for AOTAutograd
+#     and we have not tested it.)
+#
+#   - Functionalizes all operations on f, under the assumption that the passed
+#     in function f must be "observationally pure"; that is, it cannot perform any
+#     mutations (inplace data or view operations) on the passed in inputs, nor is
+#     it allowed to directly close over tensors that aren't passed via its
+#     arguments.  See
+#     https://docs.google.com/document/d/19UoIh_SVrMy_b2Sx5ZaeOJttm6P0Qmyss2rdBuyfoic/edit
+#     for discussion how how to implement the more complicated case.
+#
+# Unlike functorch's variant, this doesn't use the functorch level system,
+# instead it directly uses PyTorch's conventional dispatcher to hit the
+# functionalization key.  In particular, this means that FunctionalTensorWrapper
+# can have autograd data stored directly on it.
+#
+# In typical AOTAutograd usage, the dispatch key order will look like:
+#
+#   Autograd - Functionalization ~~~~> Proxy Mode - Fake Tensor
+#       outer tensor                        inner tensor
+#
+# TODO: Provide a faster version of this that assumes flat arguments
+# (so no pytree necessary)
+def detach_and_functionalize_pure(f, preserve_requires_grad=True):
+    @wraps(f)
+    def inner(*args, **kwargs):
+        def to_fun(t):
+            if isinstance(t, Tensor):
+                r = torch._to_functional_tensor(t)
+                # NB: r is a leaf; it has no grad_fn relating
+                # it to t.  If t has autograd metadata, that
+                # metadata was preserved *inside* the r wrapper
+                if preserve_requires_grad:
+                    r.requires_grad = t.requires_grad
+                return r
+            else:
+                return t
+
+        f_args, f_kwargs = pytree.tree_map(to_fun, (args, kwargs))
+
+        torch._enable_functionalization(reapply_views=True)
+        try:
+            outs = f(*f_args, **f_kwargs)
+        finally:
+            torch._disable_functionalization()
+
+        # Detect input mutation and error if found
+        flat_args, _ = pytree.tree_flatten((args, kwargs))
+        flat_f_args, _ = pytree.tree_flatten((f_args, f_kwargs))
+
+        # This is just for sanity checking, can be skipped
+        for arg, f_arg in zip(flat_args, flat_f_args):
+            if not isinstance(arg, Tensor):
+                continue
+            torch._sync(f_arg)
+            new_arg = torch._from_functional_tensor(f_arg)
+            # I want to do this assert, but it is annoying because
+            # we have operator tests that have mutating inputs.  So
+            # I do something unsound instead
+            # assert arg is new_arg, "input argument was mutated, this is not valid"
+            if arg is not new_arg:
+                assert arg.shape == new_arg.shape
+                arg.copy_(new_arg)
+
+        def from_fun(t):
+            if not isinstance(t, Tensor) or not torch._is_functional_tensor(t):
+                return t
+            torch._sync(t)
+            return torch._from_functional_tensor(t)
+
+        return pytree.tree_map(from_fun, outs)
+    return inner
+
+
+# This creates a joint forwards-backwards function given both
+# the primals (to run forwards) and tangents (to run backwards).
+#
+# It has a precondition which is that the passed in function
+# must be observationally pure; it is not permitted to mutate
+# the primals or tangents.
+def create_joint_forward_backward_pure(fn):
     def joint_forward_backward(
         primals: List[Any], tangents: List[Any]
     ) -> Tuple[List[Any], List[Any]]:
@@ -366,7 +457,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
-    joint_forward_backward = create_joint_forward_backward(lambda *args: flat_fn(*add_dupe_args(args)))
+    joint_forward_backward = create_joint_forward_backward_pure(lambda *args: flat_fn(*add_dupe_args(args)))
 
     out = flat_fn(*flat_args)
     # Collect info on which output tensors require gradients,
@@ -392,27 +483,13 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     if config.use_functionalize:
         with enable_python_dispatcher():
-            # Trace once without decompositions, into a graph of ATen ops.
-            # NB: tracing_mode is real, as it's assumed the calling context setup
-            # fake tensor mode / symbolic shapes if that is needed
-            fx_g = make_fx(joint_forward_backward)(*joint_inputs)
-
-            context = disable_autocast_manager if disable_amp else nullcontext
-
-            def fake_fn(primals, tangents):
-                with torch.fx.traceback.override_stack_trace():
-                    return torch.fx.Interpreter(fx_g).run(primals, tangents)
-
-            # Trace a second time, running functionalization, and THEN running decompositions.
-            # functionalization only acts on ATen today, and doesn't currently handle
-            # view and inplace ops that come from primtorch.
-            # Eventually, functionalization should support primtorch view/inplace ops,
-            # which will make it ok to run decompositions before functionalization.
-            with context():
-                fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
+            fx_g = make_fx(
+                detach_and_functionalize_pure(joint_forward_backward), aot_config.decompositions
+            )(*joint_inputs)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
+        warnings.warn("graph partitioning without functionalization is not sound, we may introduce errors")
         fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
     if config.debug_joint:
