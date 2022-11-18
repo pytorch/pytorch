@@ -217,8 +217,9 @@ class TORCH_API Counter {
 TORCH_API std::string CreateMetricReport();
 
 // Creates a report with the selected metrics statistics.
-TORCH_API std::string CreateMetricReport(const std::vector<std::string>& counter_names,
-                               const std::vector<std::string>& metric_names);
+TORCH_API std::string CreateMetricReport(
+    const std::vector<std::string>& counter_names,
+    const std::vector<std::string>& metric_names);
 
 // Returns the currently registered metric names. Note that the list can grow
 // since metrics are usually function intialized (they are static function

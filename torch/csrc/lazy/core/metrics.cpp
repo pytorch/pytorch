@@ -355,8 +355,9 @@ std::string CreateMetricReport() {
   return ss.str();
 }
 
-std::string CreateMetricReport(const std::vector<std::string>& counter_names,
-                               const std::vector<std::string>& metric_names) {
+std::string CreateMetricReport(
+    const std::vector<std::string>& counter_names,
+    const std::vector<std::string>& metric_names) {
   MetricsArena* arena = MetricsArena::Get();
   std::stringstream ss;
   for (const std::string& metric_name : metric_names) {
