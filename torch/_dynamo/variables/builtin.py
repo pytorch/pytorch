@@ -468,19 +468,11 @@ class BuiltinVariable(VariableTracker):
     call_min = _call_min_max
     call_max = _call_min_max
 
-    def call_range(self, tx, *args, **kwargs):
-        if self.unspec_python_args(*args, **kwargs) or self.constant_args(
-            *args, **kwargs
-        ):
-            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
-            return variables.RangeVariable(
-                value=range(
-                    *[x.value for x in args],
-                    **{k: v.value for k, v in kwargs.items()},
-                ),
-            )
-        elif self._dynamic_args(*args, **kwargs):
-            assert len(kwargs) == 0
+    def call_range(self, tx, *args):
+        if self.unspec_python_args(*args) or self.constant_args(*args):
+            args, _ = specialize_args_kwargs(tx, args, {})
+            return variables.RangeVariable(args)
+        elif self._dynamic_args(*args):
 
             def guard_if_dyn(arg):
                 if isinstance(arg, DynamicShapeVariable):
@@ -489,7 +481,7 @@ class BuiltinVariable(VariableTracker):
 
             args = [guard_if_dyn(arg) for arg in args]
             value = self.fn(*args)
-            return variables.RangeVariable(value=value)
+            return variables.RangeVariable(value)
         # None no-ops this handler and lets the driving function proceed
         return None
 
