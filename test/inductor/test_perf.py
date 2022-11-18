@@ -9,6 +9,9 @@ from torch.testing._internal.common_utils import (
     TestCase as TorchTestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+import contextlib
+from unittest.mock import patch
+import unittest
 
 aten = torch.ops.aten
 
@@ -272,9 +275,16 @@ class SchedulerFusionTests(TorchTestCase):
     Disables inductor rematerialization for easier reasoning of tests.
     """
 
-    def setUp(self):
-        super().setUp()
-        config.realize_bytes_threshold = 0
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()
+        cls._stack.enter_context(patch.object(config, "realize_bytes_threshold", 0))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._stack.close()
+        super().tearDownClass()
 
     def test_fusion_choice1(self):
         # Doesn't matter where we break fusion group here
@@ -328,20 +338,13 @@ class WouldBeNiceIfItWorked:
     # TODO: We aren't fusing outer dim softmaxes
     def test_softmax_outer(self):
         def f(a):
-            return torch.softmax(a, dim=1)
+            return torch.softmax(a, dim=0)
 
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """200""")
 
-    # TODO: We materialize the intermediate if we don't unroll the reduction
-    def test_neighbor(self):
-        def f(a, b):
-            return ((a - b) ** 2).sum(dim=-1).amax(dim=1)
-
-        inp = (T(10, 1, 8), T(1, 10, 8))
-        self.assertExpectedInline(count_numel(f, *inp), """170""")
-
-    # TODO: We end up with 1050 not 1000 due to greedy fusion.
+    # TODO: The greedy fusion strategy results in suboptimal grouping
+    @patch.object(config, "realize_bytes_threshold", 0)
     def test_fusion_choice4(self):
         def f(a, b, b2):
             c = a + b
@@ -352,6 +355,14 @@ class WouldBeNiceIfItWorked:
 
         inp = (T(10, 10), T(10, 10, dtype=torch.float16), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """1000""")
+
+    # TODO: We materialize the intermediate if we don't unroll the reduction
+    def test_neighbor(self):
+        def f(a, b):
+            return ((a - b) ** 2).sum(dim=-1).amax(dim=1)
+
+        inp = (T(10, 1, 8), T(1, 10, 8))
+        self.assertExpectedInline(count_numel(f, *inp), """170""")
 
 
 if __name__ == "__main__":
