@@ -104,7 +104,8 @@ def _permute_to_axis_zero(x, axis):
     return y, new_axis_list
 
 quantized_decomposed_lib.define(
-    "quantize_per_channel(Tensor input, Tensor scales, Tensor zero_points, int axis, int quant_min, int quant_max, ScalarType dtype) -> Tensor")
+    "quantize_per_channel(Tensor input, Tensor scales, Tensor zero_points, int axis, "
+    "int quant_min, int quant_max, ScalarType dtype) -> Tensor")
 
 @impl(quantized_decomposed_lib, "quantize_per_channel", "CompositeExplicitAutograd")
 def quantize_per_channel(input, scales, zero_points, axis, quant_min, quant_max, dtype):
