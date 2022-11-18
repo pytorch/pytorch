@@ -1,10 +1,11 @@
 import copy
 import itertools
 import logging
-import math
 import operator
 import random
 import weakref
+
+import numpy
 
 import torch
 import torch.nn as nn
@@ -326,7 +327,7 @@ class PackedLinear(nn.Linear):
 
     def _update_module_params(self, linear, input_size):
         self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.batch_size = int(math.prod(input_size) / input_size[-1])
+        self.batch_size = int(numpy.prod(input_size) / input_size[-1])
         self.packed_weight = torch.nn.Parameter(
             torch.ops.mkl._mkl_reorder_linear_weight(
                 self.weight.to_mkldnn(), self.batch_size
