@@ -4,8 +4,10 @@ import torch._inductor.config as config
 from torch._dynamo.optimizations.backends import register_backend
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
-from torch.testing._internal.common_utils import  TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    TEST_WITH_ROCM,
+    TestCase as TorchTestCase,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
@@ -27,14 +29,20 @@ def count_numel(f, *args):
     """
     metrics.reset()
     torch._dynamo.optimize("count_bytes_inductor")(f)(*args)
+    print(metrics.nodes_num_elem)
     return str(metrics.num_bytes_accessed // 4)
 
 
-def T(*size, device="cuda"):
-    return torch.randn(size, device=device)
+def T(*size, dtype=torch.float32, device="cuda"):
+    return torch.randn(size, dtype=dtype, device=device)
 
 
-class NumBytesMetricTests(TorchTestCase):
+class TestCase(TorchTestCase):
+    def assertExpectedInt(self, actual, expected):
+        return self.assertExpectedInline(actual, str(expected), skip=1)
+
+
+class NumBytesMetricTests(TestCase):
     """
     Primarily used for testing that the num_bytes_accessed metrics is correct.
     """
@@ -44,62 +52,63 @@ class NumBytesMetricTests(TorchTestCase):
             return x.cos()
 
         inp = (T(10),)
-        self.assertExpectedInline(count_numel(f, *inp), "20")
+        self.assertExpectedInline(count_numel(f, *inp), """20""")
 
         def f(x, y):
             return x + y
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), "30")
+        self.assertExpectedInline(count_numel(f, *inp), """30""")
 
         def f(x, y):
             return x + y
 
         inp = (T(10, 10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), "210")
+        self.assertExpectedInline(count_numel(f, *inp), """210""")
 
         def f(x):
             return x + x
 
         inp = (T(10),)
-        self.assertExpectedInline(count_numel(f, *inp), "20")
+        self.assertExpectedInline(count_numel(f, *inp), """20""")
 
         def f(x):
             return x + x.t()
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "200")
+        self.assertExpectedInline(count_numel(f, *inp), """200""")
 
         def f(a, b, c):
             return a.cos(), b.sin() + c.sin()
 
         inp = (T(10), T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), "50")
+        self.assertExpectedInline(count_numel(f, *inp), """50""")
 
     def test_reduction(self):
         def f(x):
             return x.sum(dim=1)
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "110")
+        self.assertExpectedInline(count_numel(f, *inp), """110""")
 
         def f(x):
             return x.sum(dim=0)
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "110")
+        self.assertExpectedInline(count_numel(f, *inp), """110""")
 
     def test_extern(self):
         def f(x):
             return torch.mm(x, x)
+
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "200")
+        self.assertExpectedInline(count_numel(f, *inp), """200""")
 
         def f(a, b):
             return torch.mm(a, b)
 
         inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), "300")
+        self.assertExpectedInline(count_numel(f, *inp), """300""")
 
         def f(x):
             x = x.cos()
@@ -108,7 +117,7 @@ class NumBytesMetricTests(TorchTestCase):
             return x
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "600")
+        self.assertExpectedInline(count_numel(f, *inp), """600""")
 
         def f(x):
             a = x.cos()
@@ -117,36 +126,36 @@ class NumBytesMetricTests(TorchTestCase):
             return x
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "600")
+        self.assertExpectedInline(count_numel(f, *inp), """600""")
 
     def test_cat(self):
         def f(a, b):
             return torch.cat([a.sin(), b.sin()])
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), "40")
+        self.assertExpectedInline(count_numel(f, *inp), """40""")
 
         def f(a, b):
             return torch.cat([a, b])
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), "40")
+        self.assertExpectedInline(count_numel(f, *inp), """40""")
 
         def f(a, b):
             return torch.cat([a.cos(), b])
 
         inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), "40")
+        self.assertExpectedInline(count_numel(f, *inp), """40""")
 
         def f(a):
             return torch.cat([a.cos(), a.sin()])
 
         inp = (T(10),)
-        self.assertExpectedInline(count_numel(f, *inp), "30")
+        self.assertExpectedInline(count_numel(f, *inp), """30""")
 
 
 class FusionTests(TorchTestCase):
-    device = "cuda"
+    device = """cuda"""
 
     def test_horizontal_reduction_pointwise(self):
         def f(a):
@@ -155,7 +164,7 @@ class FusionTests(TorchTestCase):
             return b, c
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "210")
+        self.assertExpectedInline(count_numel(f, *inp), """210""")
 
     def test_horizontal_reduction_reduction(self):
         def f(a):
@@ -164,7 +173,7 @@ class FusionTests(TorchTestCase):
             return b, c
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "120")
+        self.assertExpectedInline(count_numel(f, *inp), """120""")
 
     def test_horizontal_reduction_pointwise2(self):
         def f(a, b):
@@ -173,7 +182,7 @@ class FusionTests(TorchTestCase):
             return b + c
 
         inp = (T(10, 10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), "120")
+        self.assertExpectedInline(count_numel(f, *inp), """120""")
 
     def test_horizontal_reduction_outer_pointwise(self):
         def f(a, b):
@@ -182,7 +191,7 @@ class FusionTests(TorchTestCase):
             return b + c
 
         inp = (T(10, 10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), "120")
+        self.assertExpectedInline(count_numel(f, *inp), """120""")
 
     def test_horizontal_sum_pw_broadcast(self):
         def f(a, b):
@@ -191,7 +200,7 @@ class FusionTests(TorchTestCase):
             return a * b
 
         inp = (T(10, 10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), "210")
+        self.assertExpectedInline(count_numel(f, *inp), """210""")
 
     def test_vertical_sum_pw(self):
         def f(a):
@@ -200,7 +209,7 @@ class FusionTests(TorchTestCase):
             return a.cos()
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "110")
+        self.assertExpectedInline(count_numel(f, *inp), """110""")
 
     def test_norm_chain(self):
         def f(a):
@@ -213,14 +222,14 @@ class FusionTests(TorchTestCase):
             return a
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "200")
+        self.assertExpectedInline(count_numel(f, *inp), """200""")
 
     def test_softmax_inner(self):
         def f(a):
             return torch.softmax(a, dim=1)
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "200")
+        self.assertExpectedInline(count_numel(f, *inp), """200""")
 
     def test_layer_norm(self):
         # TODO: Suboptimal! We shouldn't need to save normalization stats.
@@ -231,7 +240,7 @@ class FusionTests(TorchTestCase):
 
         inp = (T(10, 10),)
         with torch.no_grad():
-            self.assertExpectedInline(count_numel(f, *inp), "220")
+            self.assertExpectedInline(count_numel(f, *inp), """220""")
 
     def test_double_softmax(self):
         def f(x):
@@ -240,20 +249,21 @@ class FusionTests(TorchTestCase):
             return x
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "200")
+        self.assertExpectedInline(count_numel(f, *inp), """200""")
 
     def test_softmax_backward(self):
         def f(grad_out, out):
             return aten._softmax_backward_data(grad_out, out, 1, torch.float32)
 
         inp = (T(10, 10), T(10, 10))
-        self.assertExpectedInline(count_numel(f, *inp), "300")
+        self.assertExpectedInline(count_numel(f, *inp), """300""")
 
-    def test_nn(self):
+    def test_neighbor(self):
         def f(a, b):
-            return ((a - b)**2).sum(dim=-1).amax(dim=1)
-        inp = (T(10, 10, 3), T(10, 10, 3))
-        self.assertExpectedInline(count_numel(f, *inp), "210")
+            return ((a - b) ** 2).sum(dim=-1).amax(dim=1)
+
+        inp = (T(10, 1, 4), T(1, 10, 4))
+        self.assertExpectedInline(count_numel(f, *inp), """90""")
 
 
 class SchedulerFusionTests(TorchTestCase):
@@ -275,7 +285,7 @@ class SchedulerFusionTests(TorchTestCase):
             return d + e
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "700")
+        self.assertExpectedInline(count_numel(f, *inp), """700""")
 
     def test_fusion_choice2(self):
         # We should materialize e (it's smaller!)
@@ -288,7 +298,7 @@ class SchedulerFusionTests(TorchTestCase):
             return f
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "620")
+        self.assertExpectedInline(count_numel(f, *inp), """620""")
 
     def test_fusion_choice3(self):
         # We should materialize e.
@@ -301,7 +311,7 @@ class SchedulerFusionTests(TorchTestCase):
             return f, e
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "800")
+        self.assertExpectedInline(count_numel(f, *inp), """800""")
 
 
 # Test cases where we don't do the right thing yet.
@@ -313,14 +323,36 @@ class WouldBeNiceIfItWorked:
             return b, c
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "210")
+        self.assertExpectedInline(count_numel(f, *inp), """210""")
 
+    # TODO: We aren't fusing outer dim softmaxes
     def test_softmax_outer(self):
         def f(a):
             return torch.softmax(a, dim=1)
 
         inp = (T(10, 10),)
-        self.assertExpectedInline(count_numel(f, *inp), "200")
+        self.assertExpectedInline(count_numel(f, *inp), """200""")
+
+    # TODO: We materialize the intermediate if we don't unroll the reduction
+    def test_neighbor(self):
+        def f(a, b):
+            return ((a - b) ** 2).sum(dim=-1).amax(dim=1)
+
+        inp = (T(10, 1, 8), T(1, 10, 8))
+        self.assertExpectedInline(count_numel(f, *inp), """170""")
+
+    # TODO: We end up with 1050 not 1000 due to greedy fusion.
+    def test_fusion_choice4(self):
+        def f(a, b, b2):
+            c = a + b
+            d = torch.mm(c, c)
+            e = c + b + b2
+            f = d + e + b2
+            return f, e
+
+        inp = (T(10, 10), T(10, 10, dtype=torch.float16), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """1000""")
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
