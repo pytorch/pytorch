@@ -147,4 +147,3 @@ def dequantize_per_channel(input, scales, zero_points, axis, quant_min, quant_ma
 
     out = res.permute(tuple(permute_axis_list))
     return out
->>>>>>> 662aa2a3327 ([quant] Add dequantize_per_channel in quantized_decomposed op library)
