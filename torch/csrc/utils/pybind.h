@@ -36,7 +36,7 @@ template <>
 struct TORCH_PYTHON_API type_caster<at::Tensor> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::Tensor, _("at::Tensor"));
+  PYBIND11_TYPE_CASTER(at::Tensor, _("torch.Tensor"));
 
   bool load(handle src, bool);
 
@@ -51,7 +51,7 @@ template <>
 struct type_caster<at::Storage> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::Storage, _("at::Storage"));
+  PYBIND11_TYPE_CASTER(at::Storage, _("torch.storage._StorageBase"));
 
   bool load(handle src, bool) {
     PyObject* obj = src.ptr();
@@ -74,7 +74,7 @@ template <>
 struct type_caster<at::Generator> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::Generator, _("at::Generator"));
+  PYBIND11_TYPE_CASTER(at::Generator, _("torch.Generator"));
 
   bool load(handle src, bool) {
     PyObject* obj = src.ptr();
@@ -97,7 +97,7 @@ template <>
 struct TORCH_PYTHON_API type_caster<at::IntArrayRef> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::IntArrayRef, _("at::IntArrayRef"));
+  PYBIND11_TYPE_CASTER(at::IntArrayRef, _("typing.Tuple[int, ...]"));
 
   bool load(handle src, bool);
   static handle cast(
@@ -129,7 +129,7 @@ template <>
 struct TORCH_PYTHON_API type_caster<at::MemoryFormat> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::MemoryFormat, _("at::MemoryFormat"));
+  PYBIND11_TYPE_CASTER(at::MemoryFormat, _("torch.memory_format"));
 
   bool load(handle src, bool) {
     PyObject* obj = src.ptr();
@@ -151,7 +151,7 @@ template <>
 struct type_caster<at::Device> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  PYBIND11_TYPE_CASTER(at::Device, _("at::Device"));
+  PYBIND11_TYPE_CASTER(at::Device, _("torch.device"));
 
   // PYBIND11_TYPE_CASTER defines a member field called value. Since at::Device
   // cannot be default-initialized, we provide this constructor to explicitly
@@ -206,7 +206,7 @@ struct type_caster<c10::DispatchKey>
 template <>
 struct type_caster<c10::SymInt> {
  public:
-  PYBIND11_TYPE_CASTER(c10::SymInt, _("SymInt"));
+  PYBIND11_TYPE_CASTER(c10::SymInt, _("torch._prims_common.IntLike"));
   bool load(py::handle src, bool);
 
   static py::handle cast(
@@ -218,7 +218,7 @@ struct type_caster<c10::SymInt> {
 template <>
 struct type_caster<c10::SymFloat> {
  public:
-  PYBIND11_TYPE_CASTER(c10::SymFloat, _("SymFloat"));
+  PYBIND11_TYPE_CASTER(c10::SymFloat, _("torch._prims_common.FloatLike"));
   bool load(py::handle src, bool);
 
   static py::handle cast(

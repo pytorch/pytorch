@@ -65,7 +65,6 @@ except (ImportError, AssertionError) as e:
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
-
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 torch._inductor.config.triton.autotune = False  # too slow
@@ -3324,7 +3323,7 @@ class CommonTemplate:
             ),
         )
 
-    @unittest.skipIf(not has_torchvision_roi_align(), "requirs torchvision")
+    @unittest.skipIf(not has_torchvision_roi_align(), "requires torchvision")
     def test_roi_align(self):
         def fn(a, b):
             return torch.ops.torchvision.roi_align(a, b, 0.25, 7, 7, 2, False)
@@ -5113,6 +5112,8 @@ if HAS_CUDA:
             return kernels
 
         def test_divisibile_by_16_covers_numel_args(self):
+            torch._dynamo.reset()
+
             def fn(a: torch.Tensor) -> torch.Tensor:
                 return torch.sum(a)
 
@@ -5132,6 +5133,7 @@ if HAS_CUDA:
                 kernels[1].meta["configs"][0].divisible_by_16
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
+            torch._dynamo.reset()
 
 
 if __name__ == "__main__":

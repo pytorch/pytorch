@@ -958,6 +958,8 @@ def packed_module(gm: torch.fx.GraphModule):
                 computation_node_input_meta = node.args[0].meta.get("tensor_meta")
                 if computation_node_input_meta.dtype != torch.float32:
                     continue
+                if type(cur_module) in [torch.nn.Linear] and not torch._C.has_mkl:
+                    continue
                 computation_node_input_size = computation_node_input_meta.shape
                 if type(cur_module) in [nn.Conv2d] and isinstance(
                     cur_module.padding, str
