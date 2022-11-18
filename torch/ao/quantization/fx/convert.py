@@ -110,21 +110,21 @@ def _replace_observer_with_quantize_dequantize_node(
     assert modules is not None
     assert isinstance(node.target, str)
     module_path, prefix = get_module_path_and_prefix(node, node_name_to_scope, node_name_to_qconfig)
-    observer_module = modules[node.target]
+    activation_post_process = modules[node.target]
     # Skip replacing observers to quant/dequant nodes if the qconfigs of all
     # consumers and producers of this observer are None
     skip_replacement = all([
         has_none_qconfig(n, node_name_to_qconfig) for n in
         list(node.args) + list(node.users.keys())])
-    if skip_replacement or not _is_conversion_supported(observer_module):
-        # didn't find correponding quantize op and info for the observer_module
+    if skip_replacement or not _is_conversion_supported(activation_post_process):
+        # didn't find correponding quantize op and info for the activation_post_process
         # so we just remove the observer
         with graph.inserting_before(node):
             node.replace_all_uses_with(node.args[0])
             graph.erase_node(node)
         return
 
-    # otherwise, we can convert the observer module call to quantize/dequantize node
+    # otherwise, we can convert the activation_post_process module call to quantize/dequantize node
     # 1. extract the information from activation_post_process module for generating
     # the quantize and dequantize operator
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
@@ -133,17 +133,35 @@ def _replace_observer_with_quantize_dequantize_node(
         compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
     is_dynamic = False
+    is_per_channel_ = False
     if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
             not hasattr(activation_post_process, 'compute_dtype'):
         node_type = "call_function"
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
+            is_per_channel_ = True
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
-            qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
             if is_decomposed:
-                raise NotImplementedError("decomposed quantize_per_channel op not implemented yet")
+                quantize_op = torch.ops.quantized_decomposed.quantize_per_channel
+                quant_min = activation_post_process.quant_min
+                quant_max = activation_post_process.quant_max
+                dtype_ = to_underlying_dtype(dtype)
+                qparams = {
+                    "_scale_": scale,
+                    "_zero_point_": zero_point,
+                    "_axis_": ch_axis,
+                    "_quant_min_": quant_min,
+                    "_quant_max_": quant_max,
+                    "_dtype_": dtype_
+                }
             else:
                 quantize_op = torch.quantize_per_channel
+                qparams = {
+                    "_scale_": scale,
+                    "_zero_point_": zero_point,
+                    "_axis_": ch_axis,
+                    "_dtype_": dtype
+                }
         else:
             scale = float(scale)
             zero_point = int(zero_point)
@@ -261,8 +279,11 @@ def _replace_observer_with_quantize_dequantize_node(
         if is_decomposed:
             # use the same qparams from quantize op
             dq_inputs = [quantized_node] + quantize_op_inputs[1:]
+            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_channel \
+                if is_per_channel_ \
+                else torch.ops.quantized_decomposed.dequantize_per_tensor
             dequantized_node = graph.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor,
+                dequantize_op,
                 tuple(dq_inputs),
                 {}
             )
