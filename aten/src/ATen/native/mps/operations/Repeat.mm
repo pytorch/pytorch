@@ -24,61 +24,28 @@
 #endif
 
 template <typename index_t>
-static void compute_mps_kernel(index_t *repeat_ptr,
-    	int64_t *cumsum_ptr,
-    	index_t *result_ptr,
-    	int64_t size,
-    	int64_t result_size)
+kernel void compute_mps_kernel(device int64_t* _repeat_ptr,
+    	device int64_t* _cumsum_ptr,
+    	device index_t* _result_ptr,
+      int64_t idx [[thread_position_in_grid]])
     {
-    	using namespace mps;
+    	using namespace at::mps;
 
-    	id<MTLBuffer> inputBuffer = getMTLBufferStorage(inputTensor);
-    	id<MTLBuffer> outputBuffer = getMTLBufferStorage(outputTensor);
-    	MPSStream *mpsStream = getCurrentMPSStream();
-    	id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-    	dispatch_sync(mpsStream->queue(), ^ ()
-    		{         
-        @autoreleasepool {
 
-    				NSError *error = nil;
-    				TORCH_CHECK(result_size == cumsum_ptr[size - 1], "allocated size does not match required size");
-    				int64_t idx = blockIdx.x *blockDim.x + threadIdx.x;
-    				int64_t stride = (blockDim.x *gridDim.x) / at::mps::C10_WARP_SIZE;
-    				int warp_id = idx / at::mps::C10_WARP_SIZE;
-    				int tid_in_warp = idx % at::mps::C10_WARP_SIZE;
-    				for (int64_t i = warp_id; i < size; i += stride)
-    				{
-    					int64_t end = cumsum_ptr[i];
-    					index_t repeat = repeat_ptr[i];
-    					TORCH_CHECK(repeat >= 0, "repeats can not be negative"; int64_t start = end - repeat);
-    						for (int64_t j = start + tid_in_warp; j < end; j += at::mps::C10_WARP_SIZE)
-    						{
-    							result_ptr[j] = i;
-    						}
-    					}
-
-    				int64_t block = 512;
-    				int64_t warps_per_block = block / at::mps::C10_WARP_SIZE();
-
-    				NSUInteger threadGroupSize = ((size + warps_per_block - 1) / warps_per_block, 2048);
-    				if (threadGroupSize > 2048)
-    				{
-    					threadGroupSize = 2048;
-    				}
-
-    				MTLSize grid = MTLSizeMake(threadGroupSize, 1, 1);
-
-    			[computeEncoder dispatchThreads: gridSize threadsPerThreadgroup: grid];
-
-    			[computeEncoder endEncoding];
-    				mpsStream->commit(true);
-
-        }        
-      });
-      
-    return true;
-  }
+    	int64_t stride = (threadGroupSize * block) / C10_WARP_SIZE;
+    	int warp_id = idx / C10_WARP_SIZE;
+    	int tid_in_warp = idx % C10_WARP_SIZE;
+    	for (int64_t i = warp_id; i < size; i += stride)
+    	{
+    		int64_t end = cumsum_ptr[i];
+    		index_t repeat = repeat_ptr[i];
+    		for (int64_t j = start + tid_in_warp; j < end; j += C10_WARP_SIZE)
+    		{
+    			result_ptr[j] = i;
+    		}
+    		}
+    }
 
 template <typename index_t>
 void compute_mps(index_t* repeat_ptr,
@@ -86,9 +53,58 @@ void compute_mps(index_t* repeat_ptr,
     index_t* result_ptr,
     int64_t size,
     int64_t result_size) {
+    
+    using namespace at::mps;
 
-  TORCH_CHECK(compute_mps_kernel(
-      repeat_ptr, cumsum_ptr, result_ptr, size, result_size), "Failed compute_mps");
+            int64_t block = 512;
+    			  int64_t warps_per_block = block / C10_WARP_SIZE;
+
+    			  NSUInteger threadGroupSize = ((size + warps_per_block - 1) / warps_per_block, 2048);
+    			  if (threadGroupSize > 2048)
+    			  {
+    				  threadGroupSize = 2048;
+    			  }
+
+  MPSStream *mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+
+dispatch_sync(mpsStream->queue(), ^(){
+
+  NSError* error = nil;
+
+
+  MTLSize gridSize = MTLSizeMake(threadGroupSize, 1, 1);
+  id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+  id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+  id<MTLFunction> addFunction = MPSDevice::getInstance()->metalIndexingFunction("compute_mps_kernel", nil);
+  id<MTLComputePipelineState> _mAddFunctionPSO = [device newComputePipelineStateWithFunction: addFunction error:&error];
+
+  id<MTLBuffer> _repeat_ptr = [device newBufferWithLength:size options:MTLResourceStorageModeShared];
+  id<MTLBuffer> _cumsum_ptr = [device newBufferWithLength:size options:MTLResourceStorageModeShared];
+  id<MTLBuffer> _result_ptr = [device newBufferWithLength:result_size options:MTLResourceStorageModeShared];
+
+  _repeat_ptr = repeat_ptr;
+  _cumsum_ptr = cumsum_ptr;
+
+  [computeEncoder setComputePipelineState:_mAddFunctionPSO];
+  [computeEncoder setBuffer:_repeat_ptr offset:0 atIndex:0];
+  [computeEncoder setBuffer:_cumsum_ptr offset:0 atIndex:0];
+  [computeEncoder setBuffer:_result_ptr offset:0 atIndex:0];
+
+  [computeEncoder dispatchThreads:gridSize
+          threadsPerThreadgroup:threadgroupSize];
+
+  [computeEncoder endEncoding];
+
+  mpsStream->commit(true);
+
+  - (void) outputResults
+  {
+    index_t* result = _result_ptr.contents;
+
+    result_ptr = result
+}
+})
 }
 
 
