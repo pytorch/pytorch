@@ -106,7 +106,7 @@ def replicate(network, devices, detach=False):
     buffer_copies_not_rg = _broadcast_coalesced_reshape(buffers_not_rg, devices, detach=True)
 
     modules = list(network.modules())
-    module_copies = [[] for device in devices]
+    module_copies = [[] for device in devices]  # type: ignore[var-annotated]
     module_indices = {}
 
     for i, module in enumerate(modules):

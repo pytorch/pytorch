@@ -43,7 +43,7 @@ def scatter(inputs, target_gpus, dim=0):
     try:
         res = scatter_map(inputs)
     finally:
-        scatter_map = None
+        scatter_map = None  # type: ignore[assignment]
     return res
 
 
@@ -85,5 +85,5 @@ def gather(outputs, target_device, dim=0):
     try:
         res = gather_map(outputs)
     finally:
-        gather_map = None
+        gather_map = None  # type: ignore[assignment]
     return res
