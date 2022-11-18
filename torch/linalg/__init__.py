@@ -1084,16 +1084,26 @@ Returns:
 
 Examples::
 
-    >>> A = torch.tensor([[[10, 2, 3], [3, 10, 5], [5, 6, 12]]], dtype=torch.float) # shape (1, 3, 3)
-    >>> B = torch.tensor([[[2, 5, 1], [3, 2, 1], [5, 1, 9]],
-                          [[4, 2, 9], [2, 0, 3], [2, 5, 3]]], dtype=torch.float) # shape (2, 3, 3)
+    >>> A = torch.randn(1,3,3)
+    >>> A
+    tensor([[[-1.0838,  0.0225,  0.2275],
+         [ 0.2438,  0.3844,  0.5499],
+         [ 0.1175, -0.9102,  2.0870]]])
+    >>> B = torch.randn(2,3,3)
+    >>> B
+    tensor([[[-0.6772,  0.7758,  0.5109],
+         [-1.4382,  1.3769,  1.1818],
+         [-0.3450,  0.0806,  0.3967]],
+        [[-1.3994, -0.1521, -0.1473],
+         [ 1.9194,  1.0458,  0.6705],
+         [-1.1802, -0.9796,  1.4086]]])
     >>> X = torch.linalg.lstsq(A, B).solution # A is broadcasted to shape (2, 3, 3)
     >>> torch.dist(X, torch.linalg.pinv(A) @ B)
-    tensor(2.0862e-07)
+    tensor(1.5152e-06)
 
     >>> S = torch.linalg.lstsq(A, B, driver='gelsd').singular_values
     >>> torch.dist(S, torch.linalg.svdvals(A))
-    tensor(5.7220e-06)
+    tensor(2.3842e-07)
 
     >>> A[:, 0].zero_()  # Decrease the rank of A
     >>> rank = torch.linalg.lstsq(A, B).rank

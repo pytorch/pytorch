@@ -148,6 +148,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   c10::SymInt sym_size_custom(int64_t d) const override;
   c10::SymIntArrayRef sym_strides_custom() const override;
   c10::SymInt sym_storage_offset_custom() const override;
+  c10::Device device_custom() const override;
 
  private:
   const char* tensorimpl_type_name() const override;

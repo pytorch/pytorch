@@ -1686,7 +1686,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
             extra_ldflags.append(f'/LIBPATH:{_join_cuda_home("lib", "x64")}')
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
-                extra_ldflags.append(os.path.join(CUDNN_HOME, "lib", "x64"))
+                extra_ldflags.append(f'/LIBPATH:{os.path.join(CUDNN_HOME, "lib", "x64")}')
         elif not IS_HIP_EXTENSION:
             extra_ldflags.append(f'-L{_join_cuda_home("lib64")}')
             extra_ldflags.append('-lcudart')
@@ -1730,10 +1730,11 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Turing', '7.5+PTX'),
         ('Ampere', '8.0;8.6+PTX'),
         ('Ada', '8.9+PTX'),
+        ('Hopper', '9.0+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.9']
+                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.9', '9.0']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
