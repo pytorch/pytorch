@@ -74,6 +74,12 @@ struct RegisterLibKinetoClient {
     }
 
     libkineto::api().registerClient(&client);
+
+    // For CUDA profiling, CuPTI callback is going to initialize it
+    // But for CPU profiling we need to do it explicitly
+    if (!libkineto::api().isProfilerInitialized()) {
+      libkineto::api().initProfilerIfRegistered();
+    }
   }
 } register_libkineto_client;
 
