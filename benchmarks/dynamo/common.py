@@ -110,7 +110,9 @@ CI_SKIP_INDUCTOR_TRAINING = [
     # *CI_SKIP_AOT_EAGER_TRAINING,
     # *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
+    "DALLE2_pytorch",
     "detectron2",
+    "functorch_dp_cifar10",
     "mobilenet_v3_large",
     "moco",
     "tacotron2",
