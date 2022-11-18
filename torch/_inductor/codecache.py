@@ -218,7 +218,7 @@ def cpp_compile_command(input, output, include_pytorch=False):
     if include_pytorch or valid_isa:
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
-        libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
+        libs = ["c10", "torch", "torch_cpu", "torch_python"]
         macros = _SupportedVecIsa.vec_macro(valid_isa)
         if macros:
             macros = f"-D{macros}"
@@ -229,19 +229,22 @@ def cpp_compile_command(input, output, include_pytorch=False):
         # This approach allows us to only pay for what we use.
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = []
-        libs = ["gomp"]
+        libs = []
         macros = ""
+    if config.cpp.threads != 1:
+        libs.append("gomp")
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
+    omp_flags = "-fopenmp" if config.cpp.threads != 1 else ""
 
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {input} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
+            {cpp_compiler()} {input} -shared -fPIC {config.cpp.cxx_flags}
             {ipaths} {lpaths} {libs} {macros}
-            -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
+            {config.cpp.cxx_opt_flags} {omp_flags}
             -D C10_USING_CUSTOM_GENERATED_MACROS
             -o{output}
         """,

@@ -101,6 +101,8 @@ class cpp:
         "g++",
         "g++.par",
     )
+    cxx_flags = "-std=c++14 -Wall -Wno-unused-variable"
+    cxx_opt_flags = "-march=native -O3 -ffast-math -fno-finite-math-only"
 
 
 # config specific to codegen/triton.py
