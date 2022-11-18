@@ -5278,28 +5278,28 @@ class TestQuantizeFx(QuantizationTestCase):
                 return self.linear(x)
 
         # to avoid reduce_range
-        torch.backends.quantized.engine = "qnnpack"
-        m = M().eval()
-        qconfig_mapping = get_default_qconfig_mapping("fbgemm") \
-            .set_object_type(torch.nn.Linear, default_dynamic_qconfig)
-        example_inputs = (torch.randn(1, 5),)
-        m = prepare_fx(m, qconfig_mapping, example_inputs)
-        m(*example_inputs)
-        m_ref = copy.deepcopy(m)
-        m_ref = convert_to_reference_fx(m_ref)
-        m = _convert_to_reference_decomposed_fx(m)
-        expected_occurrence = {
-            ns.call_function(torch.ops.quantized_decomposed.choose_qparams.tensor): 1,
-            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor): 1,
-            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor): 1,
-        }
-        self.checkGraphModuleNodes(
-            m,
-            expected_node_occurrence=expected_occurrence)
-        # make sure it runs
-        res_ref = m_ref(*example_inputs)
-        res = m(*example_inputs)
-        self.assertEqual(res, res_ref)
+        with override_quantized_engine("qnnpack"):
+            m = M().eval()
+            qconfig_mapping = get_default_qconfig_mapping("fbgemm") \
+                .set_object_type(torch.nn.Linear, default_dynamic_qconfig)
+            example_inputs = (torch.randn(1, 5),)
+            m = prepare_fx(m, qconfig_mapping, example_inputs)
+            m(*example_inputs)
+            m_ref = copy.deepcopy(m)
+            m_ref = convert_to_reference_fx(m_ref)
+            m = _convert_to_reference_decomposed_fx(m)
+            expected_occurrence = {
+                ns.call_function(torch.ops.quantized_decomposed.choose_qparams.tensor): 1,
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.tensor): 1,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor): 1,
+            }
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_occurrence=expected_occurrence)
+            # make sure it runs
+            res_ref = m_ref(*example_inputs)
+            res = m(*example_inputs)
+            self.assertEqual(res, res_ref)
 
     def test__convert_to_reference_decomposed_fx_per_channel_quant(self):
         class M(torch.nn.Module):
