@@ -77,6 +77,5 @@ def replicate(
         >>> module = nn.Linear(3, 3)
         >>> replicate(module)
     """
-    state = _ReplicateState()
-    state.mark_modules(module)
+    _ReplicateState().mark_modules(module)
     return module
