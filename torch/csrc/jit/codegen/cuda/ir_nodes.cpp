@@ -105,15 +105,32 @@ bool Bool::sameAs(const Statement* other) const {
   return false;
 }
 
-Int::Int(IrBuilderPasskey passkey)
-    : Val(passkey, ValType::Scalar, DataType::Int),
-      maybe_value_{c10::nullopt} {}
+Int::Int(IrBuilderPasskey passkey, DataType dtype)
+    : Val(passkey, ValType::Scalar, dtype), maybe_value_{c10::nullopt} {
+  TORCH_CHECK(
+      dtype == DataType::Int || dtype == DataType::Int32,
+      "Invalid data type: ",
+      dtype);
+}
 
-Int::Int(IrBuilderPasskey passkey, ScalarType value)
-    : Val(passkey, ValType::Scalar, DataType::Int), maybe_value_{value} {}
+Int::Int(IrBuilderPasskey passkey, ScalarType value, DataType dtype)
+    : Val(passkey, ValType::Scalar, dtype), maybe_value_{value} {
+  TORCH_CHECK(
+      dtype == DataType::Int || dtype == DataType::Int32,
+      "Invalid data type: ",
+      dtype);
+}
 
-Int::Int(IrBuilderPasskey passkey, c10::optional<ScalarType> value)
-    : Val(passkey, ValType::Scalar, DataType::Int), maybe_value_{value} {}
+Int::Int(
+    IrBuilderPasskey passkey,
+    c10::optional<ScalarType> value,
+    DataType dtype)
+    : Val(passkey, ValType::Scalar, DataType::Int), maybe_value_{value} {
+  TORCH_CHECK(
+      dtype == DataType::Int || dtype == DataType::Int32,
+      "Invalid data type: ",
+      dtype);
+}
 
 Int::Int(const Int* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}

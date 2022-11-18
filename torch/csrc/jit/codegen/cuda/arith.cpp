@@ -95,8 +95,9 @@ Val* newScalar(ValType vtype, DataType dtype) {
         case DataType::Double:
           return IrBuilder::create<Double>();
         case DataType::Int32:
+          return IrBuilder::create<Int>(DataType::Int32);
         case DataType::Int:
-          return IrBuilder::create<Int>();
+          return IrBuilder::create<Int>(DataType::Int);
         case DataType::ComplexFloat:
         case DataType::ComplexDouble:
           return IrBuilder::create<ComplexDouble>();

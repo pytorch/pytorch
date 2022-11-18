@@ -99,9 +99,12 @@ __device__ float normalf(unsigned int x, unsigned int y, int rng_component) {
   }
 }
 
-__device__ double normal(unsigned int x0, unsigned int x1,
-                         unsigned int y0, unsigned int y1,
-                         int rng_component) {
+__device__ double normal(
+    unsigned int x0,
+    unsigned int x1,
+    unsigned int y0,
+    unsigned int y1,
+    int rng_component) {
   double u = uniform(x0, x1);
   double v = uniform(y0, y1) * 6.2831853071795860;
 
@@ -115,16 +118,17 @@ __device__ double normal(unsigned int x0, unsigned int x1,
 __device__ double rng_normal_standard(
     const uint4& rng_result,
     int rng_component) {
-  return normal(rng_result.x, rng_result.y, rng_result.z, rng_result.w, rng_component);
+  return normal(
+      rng_result.x, rng_result.y, rng_result.z, rng_result.w, rng_component);
 }
 
 __device__ float rng_normal_standardf(
     const uint4& rng_result,
     int rng_component) {
   return normalf(
-    (&rng_result.x)[rng_component / 2 * 2],
-    (&rng_result.y)[rng_component / 2 * 2],
-    rng_component);
+      (&rng_result.x)[rng_component / 2 * 2],
+      (&rng_result.y)[rng_component / 2 * 2],
+      rng_component);
 }
 
 __device__ double rng_normal_general(

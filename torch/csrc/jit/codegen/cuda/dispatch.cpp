@@ -524,6 +524,7 @@ void Val::mutatorDispatch(T mutator, Val* val) {
           ptr(mutator)->mutate(val->as<Double>());
           return;
         case DataType::Int:
+        case DataType::Int32:
           ptr(mutator)->mutate(val->as<Int>());
           return;
         case DataType::ComplexDouble:

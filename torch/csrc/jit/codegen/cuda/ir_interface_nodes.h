@@ -116,11 +116,17 @@ class TORCH_CUDA_CU_API Int : public Val {
  public:
   using ScalarType = int64_t;
 
-  Int(IrBuilderPasskey passkey);
+  explicit Int(IrBuilderPasskey passkey, DataType dtype = DataType::Int);
 
-  explicit Int(IrBuilderPasskey passkey, ScalarType value);
+  explicit Int(
+      IrBuilderPasskey passkey,
+      ScalarType value,
+      DataType dtype = DataType::Int);
 
-  explicit Int(IrBuilderPasskey passkey, c10::optional<ScalarType> value);
+  explicit Int(
+      IrBuilderPasskey passkey,
+      c10::optional<ScalarType> value,
+      DataType dtype = DataType::Int);
 
   Int(const Int* src, IrCloner* ir_cloner);
 

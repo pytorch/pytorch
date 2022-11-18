@@ -6941,6 +6941,80 @@ TEST_F(NVFuserTest, FusionFloatingPointType_CUDA) {
   testValidate(&fusion, cg_outputs, inputs, {t2}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionIntegerType_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int64_t int64_val = 1;
+  const int int_val = 2;
+
+  {
+    auto tv0 = makeConcreteTensor({10}, DataType::Int32);
+    fusion.addInput(tv0);
+
+    auto i2 = IrBuilder::create<Int>(int64_val, DataType::Int);
+    auto i3 = IrBuilder::create<Int>(int_val, DataType::Int32);
+
+    // Adding two Ints produces an Int
+    auto i4 = add(i2, i2);
+    TORCH_CHECK(
+        i4->getDataType() == DataType::Int,
+        "Invalid result: ",
+        i4->toInlineString());
+
+    // Adding two Int32s produces an Int32
+    auto i5 = add(i3, i3);
+    TORCH_CHECK(
+        i5->getDataType() == DataType::Int32,
+        "Invalid result: ",
+        i5->toInlineString());
+
+    // Adding an Int and an Int32 produces an Int
+    auto i6 = add(i4, i5);
+    TORCH_CHECK(
+        i6->getDataType() == DataType::Int,
+        "Invalid result: ",
+        i6->toInlineString());
+
+    // Adding an Int32 to an Int32 tensor produces an Int32 tensor
+    auto tv1 = add(tv0, i4);
+    TORCH_CHECK(
+        tv1->getDataType() == DataType::Int32,
+        tv1->toString(),
+        " has an invalid data type: ",
+        tv1->getDataType().value());
+
+    // Adding an Int to an Int32 tensor still produces an Int32 tensor
+    auto tv2 = add(tv1, i6);
+    TORCH_CHECK(
+        tv2->getDataType() == DataType::Int32,
+        tv2->toString(),
+        " has an invalid data type: ",
+        tv2->getDataType().value());
+
+    fusion.addOutput(tv2);
+  }
+
+  auto options = at::TensorOptions().dtype(kInt).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randint(10, {10}, options);
+
+  std::vector<IValue> inputs({t0});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, inputs);
+  auto cg_outputs = fe.runFusion(inputs);
+
+  auto i2 = int64_val;
+  auto i3 = int_val;
+  auto i4 = i2 + i2;
+  auto i5 = i3 + i3;
+  auto i6 = i4 + i5;
+  auto t1 = t0 + i4;
+  auto t2 = t1 + i6;
+
+  TORCH_CHECK(cg_outputs.at(0).equal(t2));
+}
+
 // Test file size should be up to 10K LoC. Create a new file for more tests.
 
 } // namespace jit

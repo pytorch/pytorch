@@ -25,7 +25,7 @@ namespace jit {
 
 using namespace torch::jit::fuser::cuda;
 
-enum RNGTest_t{
+enum RNGTest_t {
   Uniform,
   Normal,
 };
@@ -86,7 +86,10 @@ __global__ void generate_random_numbers_kernel(
   }
 }
 
-at::Tensor generate_random_numbers(int64_t size, at::ScalarType dtype, RNGTest_t rng_test) {
+at::Tensor generate_random_numbers(
+    int64_t size,
+    at::ScalarType dtype,
+    RNGTest_t rng_test) {
   auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
   auto result = at::empty({size}, options);
 
