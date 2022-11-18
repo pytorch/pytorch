@@ -421,6 +421,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=4e-04, rtol=4e-04)}),
         tol1('nn.functional.batch_norm',
              {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+        tol1('pca_lowrank',
+             {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
     ))
     def test_jvp(self, device, dtype, op):
         # TODO: get rid of vjp_decomp when we add decomposition support to
