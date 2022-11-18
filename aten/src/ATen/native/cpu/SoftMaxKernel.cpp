@@ -45,7 +45,7 @@ inline void _vec_log_softmax_lastdim(
   int64_t CHUNK_SIZE = std::max(
       (int64_t)1, (int64_t)(BLOCK_SIZE / (sizeof(scalar_t) * dim_size)));
 
-  // usually, we'd use all the threads in the OpenMP thread pool 
+  // usually, we'd use all the threads in the OpenMP thread pool.
   int64_t grain_size = (outer_size - 1) / (at::get_num_threads() - 1);
   // assign fewer threads if the number of computations is not large enough
   int64_t num_computations = 16 * outer_size * dim_size;
