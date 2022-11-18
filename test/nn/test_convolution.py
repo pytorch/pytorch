@@ -1412,7 +1412,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             if mode == 'same':
                 actual = actual[:feat_dim]
 
-            self.assertEqual(actual, expected)
+            self.assertEqual(actual, expected, atol=2e-5, rtol=2e-5)
 
         # Global dtype for this test suite is torch.double
         # This leads to change in type-promotion
