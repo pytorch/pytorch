@@ -1287,6 +1287,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
 
+    def test_tensor_dot_data(self):
+        def fn(x, y):
+            signs = 2.0 * y.float() - 1.0
+            errors = 1.0 - x * signs
+            _, perm = torch.sort(errors, dim=0, descending=True)
+            return y[perm.data]
+
+        x = torch.rand(8)
+        y = torch.rand(8)
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
     def test_version_ci(self):
         # temporary test to check that the ci torch version is set correctly
         self.assertTrue(hasattr(torch, "_subclasses"))

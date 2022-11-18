@@ -145,6 +145,8 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
             result = self.call_method(tx, "dim", [], {})
+        elif name == "data":
+            result = self.call_method(tx, "detach", [], {})
         elif name == "T":
             args = [variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)]
             result = self.call_method(tx, "permute", args, {})
