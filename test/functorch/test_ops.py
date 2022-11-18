@@ -10,7 +10,7 @@ import itertools
 import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
-    IS_ARM64, parametrize, TEST_WITH_ASAN, noncontiguous_like
+    IS_ARM64, IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
 import torch
 from torch import Tensor
 import functools
@@ -411,6 +411,8 @@ class TestOperators(TestCase):
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
+        decorate('linalg.det', 'singular',
+                 decorator=unittest.skipIf(IS_MACOS and IS_X86, "Fails on x86 MacOS CI")),
     }))
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
@@ -420,6 +422,8 @@ class TestOperators(TestCase):
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=4e-04, rtol=4e-04)}),
         tol1('nn.functional.batch_norm',
+             {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+        tol1('nn.functional.conv2d',
              {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
         tol1('pca_lowrank',
              {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
