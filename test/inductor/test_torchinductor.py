@@ -4926,7 +4926,7 @@ if HAS_CUDA:
 
     class CudaGraphTests(TestCase):
         def tearDown(self):
-            torch._inductor.compile_fx.tape_manager_container.tape_manager = None
+            torch._dynamo.reset()
 
         def get_tape_manager(self):
             return torch._inductor.compile_fx.tape_manager_container.tape_manager
@@ -5004,6 +5004,28 @@ if HAS_CUDA:
             foo(*inps2).sum().backward()
 
             assert self.get_tape_lengths() == [2, 2]
+
+        def test_escaped_tensor(self):
+            def test_closure():
+                @torch._dynamo.optimize()
+                def foo(x):
+                    return x + 1 + 2
+
+                return foo(torch.rand([4], device="cuda"))
+
+            out = test_closure()
+            torch._dynamo.reset()
+            assert (
+                torch._inductor.compile_fx.tape_manager_container.live_tensors_count
+                == 1
+            )
+            assert torch._inductor.compile_fx.tape_manager_container.graph is not None
+            del out
+            assert (
+                torch._inductor.compile_fx.tape_manager_container.live_tensors_count
+                == 0
+            )
+            assert torch._inductor.compile_fx.tape_manager_container.graph is None
 
 
 if __name__ == "__main__":
