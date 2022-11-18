@@ -58,6 +58,10 @@ from .utils import (
     graph_module_from_producer_nodes,
     node_arg_is_weight,
 )
+from torch.ao.quantization.utils import (
+    is_per_channel,
+    to_underlying_dtype,
+)
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
 )
