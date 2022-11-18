@@ -353,34 +353,44 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.wrapper_code = WrapperCodeGen()
         self.scheduler = Scheduler(self.buffers)
-        from .utils import sympy_product
-        def get_read_write_buffers_sizes(node):
-            reads = set([dep.name for dep in node.read_writes.reads])
-            writes = set([dep.name for dep in node.read_writes.writes])
-            total_numel = 0
-            for name in set(reads + writes):
-                if name in self.scheduler.name_to_node:
-                    buf = self.scheduler.name_to_node[name].node
-                    if isinstance(buf.layout, ir.MultiOutputLayout):
-                        continue
-                    numel = V.graph.sizevars.size_hint(sympy_product(buf.get_size()))
-                    print(buf)
-                    print(name, numel)
-                    total_numel += numel
-                elif name in V.graph.graph_inputs:
-                    buf = V.graph.graph_inputs[name]
-                    numel = V.graph.sizevars.size_hint(sympy_product(buf.get_size()))
-                    print(name, numel)
-                    total_numel += numel
-            return total_numel
-        total_numel = 0
-        for node in self.scheduler.nodes:
-            numel = get_read_write_buffers_sizes(node)
-            # print(node, numel)
-            total_numel += numel
-        print(total_numel)
         self.scheduler.codegen()
         return self.wrapper_code.generate()
+
+    def count_bytes(self):
+        from .scheduler import FusedSchedulerNode, NopKernelSchedulerNode, Scheduler
+
+        scheduler = Scheduler(self.buffers)
+
+        def get_read_write_buffers_sizes(node):
+            if isinstance(node, NopKernelSchedulerNode):
+                return 0
+            reads = set(dep for dep in node.read_writes.reads)
+            writes = set(dep for dep in node.read_writes.writes)
+
+            def is_materialized(buf):
+                buf_uses = set(
+                    [user.node for user in scheduler.name_to_node[buf].users]
+                )
+                return len(buf_uses - set(node.snodes)) > 0
+
+            if isinstance(node, FusedSchedulerNode):
+                writes = set([dep for dep in writes if is_materialized(dep.name)])
+            node_numel = 0
+            buf_seen = set()
+            for dep in reads | writes:
+                if dep.name in buf_seen:
+                    continue
+                buf_seen.add(dep.name)
+                node_numel += dep.numel_hint()
+            return node_numel
+
+        total_numel = 0
+        node_counts = []
+        for node in scheduler.nodes:
+            numel = get_read_write_buffers_sizes(node)
+            node_counts.append((node, numel))
+            total_numel += numel
+        return total_numel, node_counts
 
     @dynamo_utils.dynamo_timed
     def compile_to_module(self):

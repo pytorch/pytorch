@@ -71,8 +71,15 @@ class MemoryDep(typing.NamedTuple):
 
     def numel_hint(self):
         vars = set(self.index.free_symbols)
+        size_vars_used = []
+        for var in vars:
+            if var.name.startswith(canonicalization_prefix()):
+                # Sometimes with indirect indexing we have very weird symbol names
+                assert " " not in var.name
+                size_vars_used.append(int(var.name[len(canonicalization_prefix()) :]))
+
         return V.graph.sizevars.size_hint(
-            sympy_product([s for s in self.size if s in vars])
+            sympy_product([self.size[i] for i in size_vars_used])
         )
 
     def is_contiguous(self) -> bool:
@@ -89,7 +96,16 @@ class StarDep(typing.NamedTuple):
         return self
 
     def numel_hint(self):
-        return 1
+        from .ir import MultiOutputLayout
+
+        if self.name in V.graph.name_to_buffer:
+            buf = V.graph.name_to_buffer[self.name]
+        else:
+            buf = V.graph.graph_inputs[self.name]
+        if hasattr(buf, "layout") and isinstance(buf.layout, MultiOutputLayout):
+            # NB: Too annoying to acquire, should only be used for instrumentation
+            return 1
+        return V.graph.sizevars.size_hint(sympy_product(buf.get_size()))
 
     def is_contiguous(self) -> bool:
         return False
