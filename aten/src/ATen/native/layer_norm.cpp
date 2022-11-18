@@ -19,6 +19,8 @@
 #include <ATen/ops/native_layer_norm_native.h>
 #include <ATen/ops/zeros_like_native.h>
 #endif
+#include <ATen/native/cpu/mixed_data_type.h>
+
 
 #include <array>
 #include <tuple>
@@ -78,6 +80,10 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
+  bool mixed_type = is_mixed_type(input, weight, bias);
+  if (mixed_type) {
+    check_mixed_data_type(input, weight, bias);
+  }
 
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto M = M_N.first;
@@ -93,8 +99,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
       c10::nullopt /* device */,
       c10::nullopt /* pin_memory */,
       at::MemoryFormat::Contiguous);
-  Tensor mean = at::empty({M}, X->options());
-  Tensor rstd = at::empty({M}, X->options());
+  const auto dtype = param_scalar_type(input, mixed_type);
+  Tensor mean = at::empty({M}, X->options().dtype(dtype));
+  Tensor rstd = at::empty({M}, X->options().dtype(dtype));
 
   layer_norm_with_mean_rstd_out(Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
@@ -185,7 +192,6 @@ Tensor layer_norm(
   const Tensor& weight = *weight_maybe_owned;
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
-
 
   return std::get<0>(at::native_layer_norm(input, normalized_shape, weight, bias, eps));
 }
