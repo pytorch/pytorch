@@ -101,8 +101,7 @@ struct ReduceConfig {
 
   template <typename T>
   void set_block_dimension(int64_t dim0, int64_t dim1) {
-    auto vec_size = vectorize_input ? input_vec_size : output_vec_size;
-    const int max_num_threads = mnt_wrapper<T>::MAX_NUM_THREADS / vec_size;
+    const int max_num_threads = mnt_wrapper<T>::MAX_NUM_THREADS / output_vec_size;
     int dim0_pow2 = dim0 < max_num_threads ? static_cast<int>(last_pow2(dim0)) : max_num_threads;
     int dim1_pow2 = dim1 < max_num_threads ? static_cast<int>(last_pow2(dim1)) : max_num_threads;
     block_width = std::min(dim0_pow2, int(at::cuda::warp_size()));
@@ -589,9 +588,6 @@ struct ReduceOp {
       for (index_t i = 0; i < vt0; i++) {
         const auto offset = calc(idx + i * stride) / output_vec_size;
         values[i] = memory::load_vector<output_vec_size>(data_, offset);
-      }
-      #pragma unroll
-      for (index_t i = 0; i < vt0; i++) {
         #pragma unroll
         for (index_t j = 0; j < output_vec_size; j++) {
           value_list[i][j] = ops.reduce(value_list[i][j], values[i].val[j], idx + i * stride);
@@ -1092,7 +1088,10 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     config.output_mult[0] = config.split_output(block_width);
   }
 
-  if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= 256) {
+  constexpr int min_values_per_thread = 16;
+  constexpr int max_values_per_thread = 256;
+
+  if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= max_values_per_thread) {
     // Divide the input across warps in a thread-block, if that leaves at least
     // 16 elements to be summed by each thread. This will require inter-warp
     // reduction using shared memory.
@@ -1102,12 +1101,6 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     config.output_mult[1] = config.split_output(block_height);
   }
 
-  int min_values_per_thread = 16;
-  int max_values_per_thread = 256;
-  if (config.vectorize_input) {
-    min_values_per_thread *= config.input_vec_size;
-    max_values_per_thread *= config.input_vec_size;
-  }
   const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / config.num_threads;
   const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   const int target_grid_size = num_mp * blocks_per_sm;
