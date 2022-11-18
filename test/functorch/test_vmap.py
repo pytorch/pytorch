@@ -3929,24 +3929,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         x = torch.randn(3)
         vmap(f)(x)
 
-        with self.assertRaisesRegex(RuntimeError, "your  tensor escaped from vmap"):
+        with self.assertRaisesRegex(RuntimeError, "your tensor escaped from vmap"):
             escaped.sin()
-
-    def test_vmap_escaped_error_boxed(self):
-        escaped = None
-
-        def f(x):
-            nonlocal escaped
-            escaped = x
-            return x ** 2
-
-        x = torch.randn(3)
-        vmap(f)(x)
 
         with self.assertRaisesRegex(RuntimeError, "your boxed tensor escaped from vmap"):
             escaped.sin_()
-
-
 
 class TestRandomness(TestCase):
     def _reset_random(self, generator, orig_state, use_generator, seed):

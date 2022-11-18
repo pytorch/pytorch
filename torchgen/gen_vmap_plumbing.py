@@ -135,7 +135,7 @@ def is_mutated_arg(argument: Argument) -> bool:
 def gen_check_escaped(check: str, what: str) -> str:
     return f"""TORCH_CHECK(
 {check},
-"oops your {what} tensor escaped from vmap ",
+"oops your{what} tensor escaped from vmap ",
 "See https://pytorch.org/functorch/stable/ux_limitations.html"
   );"""
 
@@ -169,7 +169,7 @@ def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> Optional[str]:
 
     unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all, cur_level_var)
     bdims_all_none_case = gen_case_where_all_bdims_are_none(sig, schema, cur_level_var)
-    check_escaped = gen_check_escaped("maybe_layer.has_value()", "(inplace)")
+    check_escaped = gen_check_escaped("maybe_layer.has_value()", " (inplace)")
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
@@ -192,7 +192,7 @@ def gen_vmap_plumbing_no_returns(native_function: NativeFunction) -> str:
 
     unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all, cur_level_var)
     bdims_all_none_case = gen_case_where_all_bdims_are_none(sig, schema, cur_level_var)
-    check_escaped = gen_check_escaped("maybe_layer.has_value()", "(non returned)")
+    check_escaped = gen_check_escaped("maybe_layer.has_value()", " (non returned)")
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
