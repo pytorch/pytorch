@@ -3,20 +3,28 @@ import traceback as tb
 
 WRAPPED_EXCEPTION = Tuple[BaseException, tb.StackSummary]
 
+__all__ = ["CheckpointException"]
+
+
 def _wrap_exception(exc: BaseException) -> WRAPPED_EXCEPTION:
     return (exc, tb.extract_tb(exc.__traceback__))
+
 
 def _is_wrapped_exception(obj: Any) -> bool:
     if not isinstance(obj, tuple):
         return False
     if len(obj) != 2:
         return False
-    return isinstance(obj[0], BaseException) and isinstance(obj[1], tb.StackSummary)
+    return isinstance(obj[0], BaseException) and isinstance(
+        obj[1], tb.StackSummary
+    )
+
 
 class CheckpointException(BaseException):
     """
     Exception raised if failure was detected as part of a checkpoint load or save.
     """
+
     def __init__(self, msg: str, failures: Dict[int, WRAPPED_EXCEPTION]):
         super().__init__(msg, failures)
         self._failures = failures
