@@ -59,6 +59,7 @@ def init_lists():
     # but run functionalized versions of the composite kernels in core.
     # This means that we don't expect the ops to show directly in the LTC metrics.
     FUNCTIONAL_DECOMPOSE_LIST = set([
+        'diag_embed',
         'block_diag',
         'new_empty_strided',
         'narrow_copy',

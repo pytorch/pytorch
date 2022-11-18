@@ -19,9 +19,10 @@ Motivation
   The PyTorch API of masked tensors is in the prototype stage and may or may not change in the future.
 
 MaskedTensor serves as an extension to :class:`torch.Tensor` that provides the user with the ability to:
-- use any masked semantics (e.g. variable length tensors, nan* operators, etc.)
-- differentiation between 0 and NaN gradients
-- various sparse applications (see tutorial below)
+
+* use any masked semantics (e.g. variable length tensors, nan* operators, etc.)
+* differentiate between 0 and NaN gradients
+* various sparse applications (see tutorial below)
 
 "Specified" and "unspecified" have a long history in PyTorch without formal semantics and certainly without
 consistency; indeed, MaskedTensor was born out of a build up of issues that the vanilla :class:`torch.Tensor`
@@ -55,10 +56,10 @@ There are already a number of existing tutorials that we've written to help user
 -  `Advanced semantics - discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations),
    differences with NumPy's MaskedArray, and reduction semantics`_
 
-.. _Overview - the place to start for new users, discusses how to use MaskedTensors and why they're useful: https://pytorch.org/tutorials/prototype/maskedtensor_overview.html/
-.. _Sparsity - MaskedTensor supports sparse COO and CSR data and mask Tensors: https://pytorch.org/tutorials/prototype/maskedtensor_sparsity.html/
-.. _Adagrad sparse semantics - a practical example of how MaskedTensor can simplify sparse semantics and implementations: https://pytorch.org/tutorials/prototype/maskedtensor_adagrad_semantics.html>
-.. _Advanced semantics - discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations), differences with NumPy's MaskedArray, and reduction semantics: https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html/
+.. _Overview - the place to start for new users, discusses how to use MaskedTensors and why they're useful: https://pytorch.org/tutorials/prototype/maskedtensor_overview.html
+.. _Sparsity - MaskedTensor supports sparse COO and CSR data and mask Tensors: https://pytorch.org/tutorials/prototype/maskedtensor_sparsity.html
+.. _Adagrad sparse semantics - a practical example of how MaskedTensor can simplify sparse semantics and implementations: https://pytorch.org/tutorials/prototype/maskedtensor_adagrad.html
+.. _Advanced semantics - discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations), differences with NumPy's MaskedArray, and reduction semantics: https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html
 
 Supported Operators
 +++++++++++++++++++
@@ -156,7 +157,7 @@ Binary Operators
 As you may have seen in the tutorial, :class:`MaskedTensor` also has binary operations implemented with the caveat
 that the masks in the two MaskedTensors must match or else an error will be raised. As noted in the error, if you
 need support for a particular operator or have proposed semantics for how they should behave instead, please open
-an issue on Github. For now, we have decided to go with the most conservative implementation to ensure that users
+an issue on GitHub. For now, we have decided to go with the most conservative implementation to ensure that users
 know exactly what is going on and are being intentional about their decisions with masked semantics.
 
 The available binary operators are:

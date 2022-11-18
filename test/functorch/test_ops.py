@@ -9,7 +9,8 @@
 import itertools
 import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64, parametrize, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
+    IS_ARM64, parametrize, TEST_WITH_ASAN
 import torch
 from torch import Tensor
 import functools
@@ -342,7 +343,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
-        skip('as_strided_scatter', ''),  # silent incorrectness; seems flaky
         xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
@@ -475,7 +475,6 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
-        skip('as_strided_scatter', ''),  # silent incorrectness; also might be flaky
         xfail('sparse.sampled_addmm', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
@@ -613,6 +612,7 @@ class TestOperators(TestCase):
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
         skip("nn.functional.dropout3d"),  # calls random op
+        skip("nn.functional.alpha_dropout"),  # calls random op
         skip("nn.functional.feature_alpha_dropout", "with_train"),  # calls random op
         skip("nn.functional.fractional_max_pool2d"),  # calls random op
         skip("nn.functional.fractional_max_pool3d"),  # calls random op
@@ -654,7 +654,6 @@ class TestOperators(TestCase):
         # view doesn't work on sparse
         xfail("to_sparse"),
         xfail("native_batch_norm"),
-        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -721,8 +720,8 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout'),  # randomness
         skip('nn.functional.dropout2d'),  # randomness
         skip('nn.functional.dropout3d', ''),  # randomness
+        skip('nn.functional.alpha_dropout'),  # randomness
         skip('nn.functional._scaled_dot_product_attention'),  # randomness
-        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
         xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
         xfail('masked_scatter'),  # dynamic
@@ -811,6 +810,7 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout2d', ''),
         skip('nn.functional.dropout3d', ''),
         skip('nn.functional._scaled_dot_product_attention'),  # randomness
+        skip('nn.functional.alpha_dropout'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),
         skip('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('nn.functional.fractional_max_pool2d'),  # Cannot access data pointer of Tensor that doesn't have storage
@@ -825,6 +825,7 @@ class TestOperators(TestCase):
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
         decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "Fails on M1")),
+        decorate('linalg.det', 'singular', decorator=unittest.skipIf(IS_MACOS, "Fails on x86 MacOS CI")),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('masked.mean'),  # silent incorrectness (nan difference)
 
@@ -853,7 +854,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail("native_batch_norm"),
         # ----------------------------------------------------------------------
-        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
@@ -1055,6 +1055,7 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
+        xfail("native_dropout_backward"),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1092,6 +1093,7 @@ class TestOperators(TestCase):
         skip('nn.functional.rrelu'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
+        skip('nn.functional.alpha_dropout'),  # randomness
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         skip('to_sparse', ''),  # non-dense output
         skip('ormqr', ''),  # takes too long
@@ -1124,7 +1126,6 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
-        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1203,6 +1204,7 @@ class TestOperators(TestCase):
         xfail('logcumsumexp', ''),  # NYI: forward-AD for logcumsumexp
         xfail('nn.functional.embedding_bag', ''),  # NYI: forward-AD for _embedding_bag
         xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
+        xfail('grid_sampler_2d', ''),  # NYI: forward AD for grid_sampler_2d
         xfail('nn.functional.hardsigmoid', ''),  # NYI: forward AD for hardsigmoid_backward
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
         xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
@@ -1217,10 +1219,11 @@ class TestOperators(TestCase):
         xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
-        skip('as_strided_scatter', ''),  # seems flaky
         xfail('segment_reduce', 'offsets'),  # NYI: forward-AD for segment_reduce
         xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
         xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
+        xfail('native_dropout_backward'),  # NYI
+
     }))
     @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
         tol1('masked.prod',
@@ -1335,11 +1338,13 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout'),  # calls random op
         skip('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('nn.functional.embedding_bag'),  # Forward AD not implemented and no decomposition
+        xfail('nn.functional.alpha_dropout'),  # calls randomn op
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # calls random op
         xfail('nn.functional.fractional_max_pool2d'),  # calls random op
         xfail('nn.functional.fractional_max_pool3d'),  # calls random op
         xfail('nn.functional.gaussian_nll_loss'),  # data depenedant flow
         xfail('nn.functional.grid_sample'),  # Forward AD not implemented and no decomposition
+        xfail('grid_sampler_2d'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.hardsigmoid'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.hinge_embedding_loss'),  # vmap: inplace into a regular tensor
         xfail('nn.functional.huber_loss'),  # Forward AD not implemented and no decomposition
@@ -1377,7 +1382,7 @@ class TestOperators(TestCase):
         # input while the running_mean or running_var, which will be updated in
         # place, were not batched.
         xfail("native_batch_norm"),
-        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
+        xfail('native_dropout_backward',)
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1617,7 +1622,6 @@ class TestOperators(TestCase):
         skip('linalg.multi_dot', '', device_type='cpu'),
         skip('sparse.sampled_addmm', ''),
         skip('native_layer_norm', '', device_type='cpu'),
-        xfail('as_strided_scatter', ''),
     })
     @opsToleranceOverride('TestOperators', 'test_vmap_autograd_grad', (
         tol1('linalg.householder_product',
