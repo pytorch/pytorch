@@ -147,6 +147,10 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
     std::vector<at::Tensor> result() override;
 
+    std::shared_ptr<std::vector<at::cuda::CUDAEvent>> endEvents();
+
+    void createFuture();
+
    protected:
     // The cached list of CUDA devices to operate on
     std::vector<at::Device> devices_;

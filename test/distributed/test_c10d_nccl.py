@@ -37,6 +37,7 @@ from torch.testing._internal.common_distributed import (
     requires_gloo,
     requires_nccl_version,
     skip_if_lt_x_gpu,
+    simple_sparse_reduce_tests,
     get_timeout,
     skip_if_rocm,
     with_dist_debug_levels,
@@ -1032,7 +1033,28 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         # Both rank 0 and 1 will use the same CUDA device resulting in ncclInvalidUsage
         with self.assertRaises(dist.DistBackendError):
+
             dist.broadcast(torch.tensor([1, 2, 3]).cuda(), 0)
+
+    def _test_sparse_allreduce_basics(self, fn):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+
+        tests = simple_sparse_reduce_tests(
+            self.rank, self.world_size, num_inputs=1
+        )
+        for (inputs, outputs) in tests:
+            tensors = [fn(input) for input in inputs]
+            fut = pg.allreduce(tensors).get_future()
+            fut.wait()
+            result = fut.value()
+            self.assertEqual(tensors, outputs)
+            self.assertEqual(result, outputs)
+
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_sparse_allreduce_basics_cuda(self):
+        self._test_sparse_allreduce_basics(lambda t: t.clone().cuda(self.rank))
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase

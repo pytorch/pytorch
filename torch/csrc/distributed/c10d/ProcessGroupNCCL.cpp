@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/SparseNCCLCollectives.hpp>
 #include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
 #include <sstream>
 
@@ -14,6 +15,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/CallOnce.h>
@@ -1470,6 +1472,15 @@ std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
   return *outputs_;
 }
 
+std::shared_ptr<std::vector<at::cuda::CUDAEvent>> ProcessGroupNCCL::WorkNCCL::endEvents() {
+  return ncclEndEvents_;
+}
+
+void ProcessGroupNCCL::WorkNCCL::createFuture() {
+  future_ = c10::make_intrusive<at::ivalue::Future>(
+      c10::ListType::create(c10::TensorType::get()), devices_);
+}
+
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
   return future_;
@@ -1623,8 +1634,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   {
     c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams);
-    work->future_ = c10::make_intrusive<at::ivalue::Future>(
-        c10::ListType::create(c10::TensorType::get()), devices);
+    work->createFuture();
 
     // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
     // future blocks the stream this callback runs on the corresponding
@@ -1761,8 +1771,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // send().
   {
     c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
-    work->future_ = c10::make_intrusive<at::ivalue::Future>(
-        c10::ListType::create(c10::TensorType::get()), devices);
+    work->createFuture();
     work->future_->markCompleted(at::IValue(*work->outputs_));
   }
 
@@ -1842,6 +1851,16 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
+  // Special handling for sparse tensors.
+  bool all_sparse = true;
+  for (const auto& tensor : tensors) {
+    all_sparse &= tensor.is_sparse();
+  }
+
+  if (all_sparse) {
+    return sparse_allreduce(this, tensors, opts, desyncDebug_);
+  }
+
   check_gpu_tensors_different_devices(tensors);
 
   // @lint-ignore CLANGTIDY
