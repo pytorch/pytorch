@@ -333,7 +333,7 @@ static void and_kernel_impl(TensorIterator& iter) {
     binary_kernel_reduce_vec(
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a && b) ? 1 : 0; },
-#if defined(CPU_CAPABILITY_ZVECTOR)
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_ZVECTOR)
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
           return a & b;
         },
@@ -380,7 +380,7 @@ static void or_kernel_impl(TensorIterator& iter) {
     binary_kernel_reduce_vec(
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a || b) ? 1 : 0; },
-#if defined(CPU_CAPABILITY_ZVECTOR)
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_ZVECTOR)
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
           return a | b;
         },
