@@ -145,9 +145,11 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
     grad_v = chunk.select(2, 2);
     gQKV_strideM_multiplier=3;
   } else {
-    grad_q = at::empty_like(query).contiguous();
-    grad_k = grad_kv_needs_init ? at::zeros_like(key).contiguous() : at::empty_like(key).contiguous();
-    grad_v = grad_kv_needs_init ? at::zeros_like(value).contiguous() : at::empty_like(value).contiguous();
+    grad_q = at::empty(query.sizes(), query.options());
+    grad_k = grad_kv_needs_init ? at::zeros(key.sizes(), key.options())
+                                : at::empty(key.sizes(), key.options());
+    grad_v = grad_kv_needs_init ? at::zeros(value.sizes(), value.options())
+                                : at::empty(value.sizes(), value.options());
   }
 
   auto launchKernel = [&](auto _k, int computeCapability) {
