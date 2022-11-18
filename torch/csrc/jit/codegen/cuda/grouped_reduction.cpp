@@ -38,7 +38,7 @@ bool hasMatchingTransformations(TensorView* ref, TensorView* other) {
 }
 
 // Validate grouping of reductions and return a new max producer position
-unsigned int validateReductionGrouping(
+void validateReductionGrouping(
     const std::vector<Val*>& inputs,
     const std::vector<Val*>& outputs) {
   TORCH_INTERNAL_ASSERT(inputs.size() == outputs.size());
@@ -57,7 +57,6 @@ unsigned int validateReductionGrouping(
   const auto num_root_dims = ref_domain.size();
   const auto num_dims = ref_tv->nDims();
   const auto ref_ca_pos = ref_tv->getComputeAtPosition();
-  auto max_producer_pos = ref_tv->getMaxProducerPosition();
   for (const auto i : c10::irange(inputs.size())) {
     auto output_tv = outputs.at(i)->as<TensorView>();
     const auto& output_domain = output_tv->getRootDomain();
@@ -136,9 +135,6 @@ unsigned int validateReductionGrouping(
         ref_tv->toString(),
         ". Mismatched tensor: ",
         output_tv->toString());
-
-    max_producer_pos =
-        std::max(max_producer_pos, output_tv->getMaxProducerPosition());
   }
 
   // Must not have any data dependency from outputs to inputs
@@ -152,8 +148,6 @@ unsigned int validateReductionGrouping(
     }
     TORCH_INTERNAL_ASSERT(all_dep_vals.empty(), ss.str());
   }
-
-  return max_producer_pos;
 }
 
 } // namespace
@@ -194,14 +188,14 @@ void groupReductions(const std::vector<TensorView*>& reduction_outputs) {
     inputs.at(i) = rop->in();
   }
 
-  auto max_producer_pos = validateReductionGrouping(inputs, outputs);
-
-  for (auto output : ir_utils::filterByType<TensorView>(outputs)) {
-    output->setMaxProducer(max_producer_pos);
-  }
+  validateReductionGrouping(inputs, outputs);
 
   IrBuilder::create<GroupedReductionOp>(
       container, op_types, init_vals, outputs, inputs);
+
+  for (auto output : ir_utils::filterByType<TensorView>(outputs)) {
+    output->updateMaxProducerPosition();
+  }
 }
 
 } // namespace cuda

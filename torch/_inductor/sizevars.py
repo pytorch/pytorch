@@ -461,6 +461,7 @@ class SizeVarAllocator(object):
         for name, value in graph_inputs.items():
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
+                shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
                     added.add(shape)
@@ -471,6 +472,7 @@ class SizeVarAllocator(object):
         for name, value in graph_inputs.items():
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
+                shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
                     code.writeline(f"{shape} = {strideof(name)}[{dim}]")

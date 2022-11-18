@@ -11,7 +11,6 @@ from functorch.compile import min_cut_rematerialization_partition
 
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.utils._mode_utils import no_dispatch
 
 from . import config, overrides
 from .debug import DebugContext
@@ -79,17 +78,13 @@ def complex_memory_overlap(t):
     return False
 
 
-def is_unspec_input(t):
-    return t.device.type == "cpu" and t.dim() == 0
-
-
 @functools.lru_cache(None)
 def _step_logger():
     return dynamo_logging.get_step_logger(log)
 
 
 @DebugContext.wrap
-@no_dispatch()
+@torch.utils._python_dispatch._disable_current_modes()
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -187,11 +182,7 @@ def align_inputs(model, inputs, static_input_idxs=()):
         for i in check_inputs:
             if new_inputs[i].data_ptr() % ALIGNMENT:
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
-        new_inputs_to_cuda = [
-            x.to("cuda") if is_unspec_input(x) else x for x in new_inputs
-        ]
-        new_inputs.clear()
-        return model(new_inputs_to_cuda)
+        return model(new_inputs)
 
     return run
 
@@ -247,9 +238,6 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
         return torch.as_strided(buffer, x.size(), x.stride())
 
     assert isinstance(inputs, (list, tuple))
-    # dynamo wraps unspec variable as 0 dim tensor on CPU, need to move to GPU explicitly
-    inputs = [x.to("cuda") if is_unspec_input(x) else x for x in inputs]
-
     static_inputs = [
         static_input(x) if idx not in static_input_idxs else x.detach()
         for idx, x in enumerate(inputs)
@@ -351,6 +339,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     with overrides.patch_functions():
         model_ = normalize_ir(model_, example_inputs_)
         model_ = overrides.replace_fx(model_)
+        model_ = overrides.fuse_fx(model_, example_inputs_)
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(config.triton.cudagraphs and not config.dynamic_shapes)
 

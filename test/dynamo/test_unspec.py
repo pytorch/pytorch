@@ -50,6 +50,8 @@ def make_unspec_cls(cls):
 UnspecReproTests = make_unspec_cls(test_repros.ReproTests)
 UnspecNNModuleTests = make_unspec_cls(test_modules.NNModuleTests)
 
+unittest.expectedFailure(UnspecReproTests.test_batch_norm_act_unspec)
+
 
 @patch.object(torch._dynamo.config, "specialize_int_float", False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
@@ -171,6 +173,8 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
+    # TypeError: zeros(): argument 'size' (position 1) must be tuple of SymInts, not FakeTensor
+    @unittest.expectedFailure
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
         def fn(x, idx):

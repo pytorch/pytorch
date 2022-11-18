@@ -799,6 +799,13 @@ inline Vectorized<T> operator~(const Vectorized<T>& a) {
   return a ^ ones;
 }
 
+template <class T> Vectorized<T> inline operator<<(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    c[i] = a[i] << b[i];
+  }
+  return c;
+}
 
 template <typename T>
 inline Vectorized<T>& operator += (Vectorized<T>& a, const Vectorized<T>& b) {
@@ -827,8 +834,19 @@ inline Vectorized<T>& operator *= (Vectorized<T>& a, const Vectorized<T>& b) {
 }
 
 template <typename T>
+inline Vectorized<T>& operator <<= (Vectorized<T>& a, const Vectorized<T>& b) {
+  a = a << b;
+  return a;
+}
+
+template <typename T>
 inline Vectorized<T> fmadd(const Vectorized<T>& a, const Vectorized<T>& b, const Vectorized<T>& c) {
   return a * b + c;
+}
+
+template <typename T>
+inline Vectorized<T> fmsub(const Vectorized<T>& a, const Vectorized<T>& b, const Vectorized<T>& c) {
+  return a * b - c;
 }
 
 template <int64_t scale = 1, typename T = void>
