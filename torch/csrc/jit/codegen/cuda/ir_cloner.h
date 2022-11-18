@@ -20,13 +20,14 @@ class IrContainer;
 //!   Fusion copy operations and the and limited scope of RecomputeTv below.
 //!   It is not intended for any other uses.
 //!
-class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
+class TORCH_CUDA_CU_API IrCloner {
   friend class Statement;
   friend class IrBuilder;
 
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit IrCloner(IrContainer* container);
+  virtual ~IrCloner() {}
 
   Statement* clone(const Statement* statement);
 
@@ -53,47 +54,7 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
 
  protected:
   void registerClone(const Statement* src, Statement* clone);
-
-  void handle(const Statement*) override;
-  void handle(const Val*) override;
-  void handle(const Expr*) override;
-
-  void handle(const TensorDomain*) override;
-  void handle(const TensorView*) override;
-  void handle(const IterDomain*) override;
-
-  void handle(const Bool*) override;
-  void handle(const Float*) override;
-  void handle(const Double*) override;
-  void handle(const Int*) override;
-  void handle(const ComplexDouble*) override;
-  void handle(const NamedScalar*) override;
-
-  void handle(const FullOp*) override;
-  void handle(const ARangeOp*) override;
-  void handle(const EyeOp*) override;
-  void handle(const UnaryOp*) override;
-  void handle(const BinaryOp*) override;
-  void handle(const TernaryOp*) override;
-  void handle(const SelectOp*) override;
-  void handle(const RNGOp*) override;
-  void handle(const BroadcastOp*) override;
-  void handle(const SqueezeOp*) override;
-  void handle(const ReductionOp*) override;
-  void handle(const GroupedReductionOp*) override;
-  void handle(const WelfordOp*) override;
-  void handle(const LoadStoreOp*) override;
-  void handle(const MmaOp*) override;
-  void handle(const TransposeOp*) override;
-  void handle(const ExpandOp*) override;
-  void handle(const ShiftOp*) override;
-  void handle(const GatherOp*) override;
-  void handle(const ViewAsScalar*) override;
-  void handle(const ViewOp*) override;
-
-  void handle(const Split*) override;
-  void handle(const Merge*) override;
-  void handle(const Swizzle2D*) override;
+  virtual Statement* handle(const Statement* s);
 
  protected:
   // We keep track of the original -> clone map so we don't
@@ -103,11 +64,6 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
  private:
   // The destination Fusion container
   IrContainer* ir_container_ = nullptr;
-
-  // The dispatch interface doesn't allow returning values from
-  // individual `handle()` methods, so they are storing the
-  // result here
-  Statement* clone_ = nullptr;
 
   // Builder to make all the new nodes
   IrBuilder builder_;
@@ -123,11 +79,43 @@ class RecomputeTv : private IrCloner {
 
  private:
   RecomputeTv(Fusion* fusion, std::vector<Expr*> exprs);
-
-  void handle(const TensorDomain*) final;
+  virtual Statement* handle(const Statement* s) override;
+  Statement* handle(const TensorDomain*);
 
   Fusion* fusion_;
 };
+
+//! Clone an IR node, forwarding the arguments to the IrCloner constructor.
+template <class T>
+T* IrBuilder::clone(const T* src, IrCloner* ir_cloner) {
+  TORCH_INTERNAL_ASSERT(
+      ir_cloner != nullptr,
+      "Cannot use create when a cloner object is set. Use clone.");
+
+  TORCH_INTERNAL_ASSERT(
+      ir_cloner->container() != nullptr,
+      "Cloner doesn't have a valid container to store cloned object.");
+
+  T* dest = new T(src, ir_cloner);
+  const Statement* src_stmt = dynamic_cast<const Statement*>(src);
+  Statement* dest_stmt = dynamic_cast<Statement*>(dest);
+
+  auto dest_container = ir_cloner->container();
+  auto src_container = src_stmt->container();
+
+  dest_container->registerStmt(IrBuilderPasskey(dest_container), dest_stmt);
+
+  if (src_container != dest_container) {
+    dest_stmt->setName(IrBuilderPasskey(dest_container), src_stmt->name());
+  }
+
+  ir_cloner->registerClone(src_stmt, dest_stmt);
+
+  return dest;
+}
+
+template <typename T>
+NVFUSER_DEFINE_CLONE(Attribute<T>)
 
 } // namespace cuda
 } // namespace fuser

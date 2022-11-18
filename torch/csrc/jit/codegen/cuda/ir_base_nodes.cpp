@@ -34,6 +34,8 @@ Statement::Statement(const Statement* src, IrCloner* ir_cloner) {
   ir_container_ = ir_cloner->container();
 }
 
+NVFUSER_DEFINE_CLONE(Statement)
+
 void Statement::setName(IrContainerPasskey, StmtNameType name) {
   name_ = name;
 }
@@ -97,6 +99,8 @@ Val::Val(IrBuilderPasskey passkey, ValType _vtype, DataType _dtype)
 //
 Val::Val(const Val* src, IrCloner* ir_cloner)
     : Statement(src, ir_cloner), vtype_(src->vtype_), dtype_(src->dtype_) {}
+
+NVFUSER_DEFINE_CLONE(Val)
 
 const std::vector<Expr*>& Val::uses() const {
   if (vtype_ == ValType::TensorView) {
@@ -319,7 +323,27 @@ Expr::Expr(IrBuilderPasskey passkey) : Statement(passkey) {}
 Expr::Expr(const Expr* src, IrCloner* ir_cloner)
     : Statement(src, ir_cloner),
       inputs_(ir_cloner->clone(src->inputs_)),
-      outputs_(ir_cloner->clone(src->outputs_)) {}
+      outputs_(ir_cloner->clone(src->outputs_)),
+      attributes_(ir_cloner->clone(src->attributes_)) {}
+
+Expr::Expr(
+    IrBuilderPasskey passkey,
+    std::vector<Val*> inputs,
+    std::vector<Val*> outputs,
+    std::vector<Statement*> attributes)
+    : Statement(passkey),
+      inputs_(std::move(inputs)),
+      outputs_(std::move(outputs)),
+      attributes_(std::move(attributes)) {}
+
+Expr* Expr::shallowCopy() const {
+  auto result = newObject(inputs(), outputs(), attributes());
+  if (container()->isA<kir::Kernel>()) {
+    result->predicate_ = predicate_;
+    result->write_predicate_ = write_predicate_;
+  }
+  return result;
+}
 
 bool Expr::sameAs(const Statement* other) const {
   if (this == other) {
@@ -333,11 +357,17 @@ bool Expr::sameAs(const Statement* other) const {
     return false;
   }
   if (inputs().size() != other_expr->inputs().size() ||
-      outputs().size() != other_expr->outputs().size()) {
+      outputs().size() != other_expr->outputs().size() ||
+      attributes().size() != other_expr->attributes().size()) {
     return false;
   }
   for (const auto i : c10::irange(inputs().size())) {
     if (!input(i)->sameAs(other_expr->input(i))) {
+      return false;
+    }
+  }
+  for (const auto i : c10::irange(attributes().size())) {
+    if (!attribute(i)->sameAs(other_expr->attribute(i))) {
       return false;
     }
   }
@@ -378,13 +408,6 @@ Expr* Expr::withWritePredicate(kir::Predicate* predicate) {
   auto result = shallowCopy();
   result->setWritePredicate(predicate);
   return result;
-}
-
-void Expr::copyPredicatesFrom(const Expr* expr) {
-  if (container()->isA<kir::Kernel>()) {
-    predicate_ = expr->predicate_;
-    write_predicate_ = expr->write_predicate_;
-  }
 }
 
 } // namespace cuda

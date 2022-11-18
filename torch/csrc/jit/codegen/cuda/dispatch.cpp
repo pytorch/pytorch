@@ -313,6 +313,10 @@ void Val::constDispatch(T handler, const Val* val) {
     case ValType::TensorIndex:
       ptr(handler)->handle(val->as<kir::TensorIndex>());
       return;
+    case ValType::Attribute:
+      // Attribute Val is just a wrapper for non-IR data, so there is nothing to
+      // handle
+      return;
     default:
       break;
   }

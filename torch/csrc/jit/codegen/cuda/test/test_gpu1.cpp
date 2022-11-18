@@ -758,6 +758,7 @@ TEST_F(NVFuserTest, FusionRegister_CUDA) {
 
 // dummy expr with 2 outputs only for toposort test.
 struct DummyExpr : public Expr {
+  using Expr::Expr;
   ~DummyExpr() = default;
   DummyExpr(
       IrBuilderPasskey passkey,
@@ -765,13 +766,13 @@ struct DummyExpr : public Expr {
       Val* _outrhs,
       Val* _lhs,
       Val* _rhs)
-      : Expr(passkey) // terribly safe :-D
-  {
+      : Expr(passkey) {
     addOutput(_outlhs);
     addOutput(_outrhs);
     addInput(_lhs);
     addInput(_rhs);
   }
+  NVFUSER_DECLARE_CLONE_AND_CREATE
   DummyExpr(const DummyExpr& other) = delete;
   DummyExpr& operator=(const DummyExpr& other) = delete;
   DummyExpr(DummyExpr&& other) = delete;
@@ -779,10 +780,9 @@ struct DummyExpr : public Expr {
   virtual const char* getOpString() const override {
     return "DummyExpr";
   }
-  Expr* shallowCopy() const override {
-    return nullptr;
-  }
 };
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(DummyExpr)
 
 TEST_F(NVFuserTest, FusionTopoSort_CUDA) {
   Fusion fusion;

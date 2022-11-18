@@ -856,9 +856,12 @@ void IndexLowering::handle(const GroupedWelfordOp* grouped_wop) {
   std::vector<WelfordTriplet> indexed_outputs(grouped_wop->numExprs());
   std::vector<WelfordTriplet> indexed_inputs(grouped_wop->numExprs());
 
+  auto output_vals = grouped_wop->outputVals();
+  auto input_vals = grouped_wop->inputVals();
+
   for (const auto i : c10::irange(grouped_wop->numExprs())) {
-    const auto& output = grouped_wop->outputVals().at(i);
-    const auto& input = grouped_wop->inputVals().at(i);
+    const auto& output = output_vals.at(i);
+    const auto& input = input_vals.at(i);
     WelfordTriplet indexed_output;
     WelfordTriplet indexed_input;
     for (const auto j : c10::irange(3)) {

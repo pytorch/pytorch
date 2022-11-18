@@ -32,33 +32,29 @@ bool areEqualScalars(Val* v1, Val* v2);
 
 class TORCH_CUDA_CU_API FullOp : public Expr {
  public:
+  using Expr::Expr;
+
   FullOp(IrBuilderPasskey, Val* out, Val* fill_value, DataType dtype);
 
-  FullOp(const FullOp* src, IrCloner* ir_cloner);
-
-  Expr* shallowCopy() const override;
-
-  bool sameAs(const Statement* other) const override;
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "FullOp";
   }
 
   DataType dtype() const {
-    return dtype_;
+    return attribute(0)->as<Attribute<DataType>>()->value;
   }
 
   Val* getFillValue() const {
-    return fill_value_;
+    return inputs().back();
   }
-
- private:
-  const DataType dtype_;
-  Val* fill_value_;
 };
 
 class TORCH_CUDA_CU_API SelectOp : public Expr {
  public:
+  using Expr::Expr;
+
   SelectOp(
       IrBuilderPasskey,
       Val* out,
@@ -66,30 +62,25 @@ class TORCH_CUDA_CU_API SelectOp : public Expr {
       IterDomain* select_id,
       Val* index);
 
-  SelectOp(const SelectOp* src, IrCloner* ir_cloner);
-
-  Expr* shallowCopy() const override;
-
-  bool sameAs(const Statement* other) const override;
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "SelectOp";
   }
 
-  std::unordered_map<IterDomain*, Val*> getIndexOverridingMap() const {
-    return {{select_id_, input(1)}};
-  }
-
   IterDomain* getSelectAxis() const {
-    return select_id_;
+    return attribute(0)->as<IterDomain>();
   }
 
- private:
-  IterDomain* select_id_;
+  std::unordered_map<IterDomain*, Val*> getIndexOverridingMap() const {
+    return {{getSelectAxis(), input(1)}};
+  }
 };
 
 class TORCH_CUDA_CU_API ARangeOp : public Expr {
  public:
+  using Expr::Expr;
+
   ARangeOp(
       IrBuilderPasskey,
       Val* out,
@@ -99,46 +90,31 @@ class TORCH_CUDA_CU_API ARangeOp : public Expr {
       DataType dtype,
       Val* linear_index = nullptr);
 
-  ARangeOp(const ARangeOp* src, IrCloner* ir_cloner);
-
-  Expr* shallowCopy() const override;
-
-  bool sameAs(const Statement* other) const override;
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "ARangeOp";
   }
 
   DataType dtype() const {
-    return dtype_;
+    return attribute(0)->as<Attribute<DataType>>()->value;
   }
 
   Val* start() const {
-    return start_;
+    return input(0);
   }
 
   Val* end() const {
-    return end_;
+    return input(1);
   }
 
   Val* step() const {
-    return step_;
+    return input(2);
   }
 
   Val* getLinearLogicalIndex() const {
-    return linear_index_;
+    return attributeVal(1);
   }
-
-  void setLinearIndex(Val* index) {
-    linear_index_ = index;
-  }
-
- private:
-  const DataType dtype_;
-  Val* start_;
-  Val* end_;
-  Val* step_;
-  Val* linear_index_ = nullptr;
 };
 
 // Tensor factory for generating identity matrices like
@@ -161,6 +137,8 @@ class TORCH_CUDA_CU_API ARangeOp : public Expr {
 //  [0, 0, 1, 0]]
 class TORCH_CUDA_CU_API EyeOp : public Expr {
  public:
+  using Expr::Expr;
+
   EyeOp(
       IrBuilderPasskey,
       Val* out,
@@ -168,40 +146,23 @@ class TORCH_CUDA_CU_API EyeOp : public Expr {
       Val* index1 = nullptr,
       Val* index2 = nullptr);
 
-  EyeOp(const EyeOp* src, IrCloner* ir_cloner);
-
-  Expr* shallowCopy() const override;
-
-  bool sameAs(const Statement* other) const override;
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "EyeOp";
   }
 
   DataType dtype() const {
-    return dtype_;
+    return attribute(0)->as<Attribute<DataType>>()->value;
   }
 
   Val* getIndex1() const {
-    return index1_;
-  }
-
-  void setIndex1(Val* index) {
-    index1_ = index;
+    return attributeVal(1);
   }
 
   Val* getIndex2() const {
-    return index2_;
+    return attributeVal(2);
   }
-
-  void setIndex2(Val* index) {
-    index2_ = index;
-  }
-
- private:
-  const DataType dtype_;
-  Val* index1_ = nullptr;
-  Val* index2_ = nullptr;
 };
 
 //! A specialization for Unary operations. Unary operations take in a single
@@ -212,38 +173,26 @@ class TORCH_CUDA_CU_API EyeOp : public Expr {
 //!   4) split/merge
 class TORCH_CUDA_CU_API UnaryOp : public Expr {
  public:
-  UnaryOp(
-      IrBuilderPasskey,
-      UnaryOpType type,
-      Val* out,
-      Val* in,
-      int rng_offset = -1);
+  using Expr::Expr;
 
-  UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
+  UnaryOp(IrBuilderPasskey, UnaryOpType type, Val* out, Val* in);
 
-  Expr* shallowCopy() const override;
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "UnaryOp";
   }
 
   Val* out() const {
-    return out_;
+    return output(0);
   }
   Val* in() const {
-    return in_;
+    return input(0);
   }
 
   UnaryOpType getUnaryOpType() const {
-    return unary_op_type_;
+    return attribute(0)->as<Attribute<UnaryOpType>>()->value;
   }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  const UnaryOpType unary_op_type_;
-  Val* const out_ = nullptr;
-  Val* const in_ = nullptr;
 };
 
 //! A specialization for Binary operations. Binary operations take in two inputs
@@ -252,43 +201,89 @@ class TORCH_CUDA_CU_API UnaryOp : public Expr {
 //!  2) LT (A < B)
 class TORCH_CUDA_CU_API BinaryOp : public Expr {
  public:
+  using Expr::Expr;
+
   BinaryOp(IrBuilderPasskey, BinaryOpType type, Val* out, Val* lhs, Val* rhs);
 
-  BinaryOp(const BinaryOp* src, IrCloner* ir_cloner);
-
-  Expr* shallowCopy() const override;
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "BinaryOp";
   }
 
   Val* out() const {
-    return out_;
+    return output(0);
   }
   Val* lhs() const {
-    return lhs_;
+    return input(0);
   }
   Val* rhs() const {
-    return rhs_;
+    return input(1);
   }
 
   BinaryOpType getBinaryOpType() const {
-    return binary_op_type_;
+    return attribute(0)->as<Attribute<BinaryOpType>>()->value;
+  }
+};
+
+class TORCH_CUDA_CU_API TernaryOp : public Expr {
+ public:
+  using Expr::Expr;
+
+  TernaryOp(
+      IrBuilderPasskey,
+      TernaryOpType type,
+      Val* out,
+      Val* in1,
+      Val* in2,
+      Val* in3);
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
+  virtual const char* getOpString() const override {
+    return "TernaryOp";
   }
 
-  bool sameAs(const Statement* other) const override;
+  Val* out() const {
+    return output(0);
+  }
 
- private:
-  const BinaryOpType binary_op_type_;
-  Val* const out_ = nullptr;
-  Val* const lhs_ = nullptr;
-  Val* const rhs_ = nullptr;
+  Val* in1() const {
+    return input(0);
+  }
+  Val* in2() const {
+    return input(1);
+  }
+  Val* in3() const {
+    return input(2);
+  }
+
+  TernaryOpType getTernaryOpType() const {
+    return attribute(0)->as<Attribute<TernaryOpType>>()->value;
+  }
 };
 
 //! A specialization for random number generator (RNG) operations. RNG
 //! operations take in no tensor input and produce a single output.
 class TORCH_CUDA_CU_API RNGOp : public Expr {
+  size_t getOutputDims() const;
+
  public:
+  struct Attributes {
+    RNGOpType rtype;
+    DataType dtype;
+    int rng_offset;
+
+    // TODO: Enable the following in C++20:
+    // bool operator==(const Attributes &other) const = default;
+    bool operator==(const Attributes& other) const {
+      return rtype == other.rtype && dtype == other.dtype &&
+          rng_offset == other.rng_offset;
+    }
+  };
+
+  using Expr::Expr;
+
   RNGOp(
       IrBuilderPasskey,
       RNGOpType type,
@@ -298,66 +293,51 @@ class TORCH_CUDA_CU_API RNGOp : public Expr {
       int rng_offset = 0,
       Val* philox_index = nullptr);
 
-  RNGOp(const RNGOp* src, IrCloner* ir_cloner);
-
-  Expr* shallowCopy() const override;
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "RNGOp";
   }
 
   RNGOpType getRNGOpType() const {
-    return rng_op_type_;
+    return attribute(0)->as<Attribute<Attributes>>()->value.rtype;
   }
 
   DataType dtype() const {
-    return dtype_;
+    return attribute(0)->as<Attribute<Attributes>>()->value.dtype;
   }
 
   int getRNGOffset() const {
-    return rng_offset_;
+    return attribute(0)->as<Attribute<Attributes>>()->value.rng_offset;
   }
 
   void setRNGOffset(int val) {
-    rng_offset_ = val;
+    attribute(0)->as<Attribute<Attributes>>()->value.rng_offset = val;
   }
 
-  const std::vector<Val*>& getParameters() const {
-    return parameters_;
+  std::vector<Val*> getParameters() const {
+    return {inputs().begin() + getOutputDims(), inputs().end()};
   }
 
-  const std::vector<Val*>& getShape() const {
-    return shape_;
+  std::vector<Val*> getShape() const {
+    return {inputs().begin(), inputs().begin() + getOutputDims()};
   }
 
   Val* getPhiloxIndex() const {
-    return philox_index_;
-  }
-
-  void setPhiloxIndex(Val* index) {
-    philox_index_ = index;
+    return attributeVal(1);
   }
 
   int getPhiloxMultiple() const {
-    return dtype_ == DataType::Double ? 2 : 4;
+    return dtype() == DataType::Double ? 2 : 4;
   }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  const RNGOpType rng_op_type_;
-  const DataType dtype_;
-  std::vector<Val*> parameters_;
-  std::vector<Val*> shape_;
-  int rng_offset_ = -1;
-  // The index used to feed philox's subsequence and component
-  Val* philox_index_ = nullptr;
 };
 
 //! Broadcast in to match out. is_broadcast_dims are relative to out. Where
 //! is_broadcast_dims.size() == out->nDims().
 class TORCH_CUDA_CU_API BroadcastOp : public Expr {
  public:
+  using Expr::Expr;
+
   //! \param out The output tensor
   //! \param in The input tensor
   //! \param is_broadcast_dims True when output dim is a new broadcast domain
@@ -367,34 +347,22 @@ class TORCH_CUDA_CU_API BroadcastOp : public Expr {
       Val* in,
       std::vector<bool> is_broadcast_dims);
 
-  BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "BroadcastOp";
   }
 
-  Expr* shallowCopy() const override;
-
   Val* out() const {
-    return out_;
+    return output(0);
   }
   Val* in() const {
-    return in_;
+    return input(0);
   }
 
   bool isBroadcastDim(size_t dim) const {
-    return is_broadcast_dims_.at(dim);
+    return getBroadcastDimFlags().at(dim);
   }
-
-  const std::vector<bool>& getBroadcastDimFlags() const {
-    return is_broadcast_dims_;
-  }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  Val* const out_ = nullptr;
-  Val* const in_ = nullptr;
 
   //! The same list passed to the broadcast arithmetic op. Each
   //! element corresponds to an IterDomain of the output tensor and is
@@ -402,7 +370,9 @@ class TORCH_CUDA_CU_API BroadcastOp : public Expr {
   //! that the output tensor may have other broadcast domains whose
   //! flags are false because the input tensor may already have
   //! broadcast domains.
-  const std::vector<bool> is_broadcast_dims_;
+  const std::vector<bool>& getBroadcastDimFlags() const {
+    return attribute(0)->as<Attribute<std::vector<bool>>>()->value;
+  }
 };
 
 //! Squeeze in to match out. is_squeeze_dims are relative to in. Where
@@ -410,6 +380,8 @@ class TORCH_CUDA_CU_API BroadcastOp : public Expr {
 //! broadcast.
 class TORCH_CUDA_CU_API SqueezeOp : public Expr {
  public:
+  using Expr::Expr;
+
   //! \param out The output tensor
   //! \param in The input tensor
   //! \param is_squeeze_dims True when input dim is a removed broadcast domain
@@ -419,34 +391,22 @@ class TORCH_CUDA_CU_API SqueezeOp : public Expr {
       Val* in,
       std::vector<bool> is_broadcast_dims);
 
-  SqueezeOp(const SqueezeOp* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "SqueezeOp";
   }
 
-  Expr* shallowCopy() const override;
-
   Val* out() const {
-    return out_;
+    return output(0);
   }
   Val* in() const {
-    return in_;
+    return input(0);
   }
 
   bool isSqueezeDim(size_t dim) const {
-    return is_squeeze_dims_.at(dim);
+    return getSqueezeDimFlags().at(dim);
   }
-
-  const std::vector<bool>& getSqueezeDimFlags() const {
-    return is_squeeze_dims_;
-  }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  Val* const out_ = nullptr;
-  Val* const in_ = nullptr;
 
   //! The same list passed to the squeeze arithmetic op. Each
   //! element corresponds to an IterDomain of the input tensor and is
@@ -454,7 +414,9 @@ class TORCH_CUDA_CU_API SqueezeOp : public Expr {
   //! output. Note that the output tensor may still contain broadcast domains
   //! because the input tensor may have broadcast domains that we don't want to
   //! remove (false flag).
-  const std::vector<bool> is_squeeze_dims_;
+  const std::vector<bool>& getSqueezeDimFlags() const {
+    return attribute(0)->as<Attribute<std::vector<bool>>>()->value;
+  }
 };
 
 //! Reduction operation. Out is first initialized to _init. Then
@@ -464,6 +426,8 @@ class TORCH_CUDA_CU_API SqueezeOp : public Expr {
 //! non-reduction/non-broadcast dimensions.
 class TORCH_CUDA_CU_API ReductionOp : public Expr {
  public:
+  using Expr::Expr;
+
   ReductionOp(
       IrBuilderPasskey,
       BinaryOpType reduction_op_type,
@@ -472,41 +436,29 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
       Val* in,
       bool is_allreduce = false);
 
-  ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "ReductionOp";
   }
 
-  Expr* shallowCopy() const override;
-
   Val* out() const {
-    return out_;
+    return output(0);
   }
   Val* in() const {
-    return in_;
+    return input(0);
   }
   Val* init() const {
-    return init_;
+    return attributeVal(0);
   }
 
   BinaryOpType getReductionOpType() const {
-    return reduction_op_type_;
+    return attribute(1)->as<Attribute<BinaryOpType>>()->value;
   }
 
   bool isAllreduce() const {
-    return is_allreduce_;
+    return attribute(2)->as<Attribute<bool>>()->value;
   }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  const BinaryOpType reduction_op_type_;
-  Val* const init_ = nullptr;
-  Val* const out_ = nullptr;
-  Val* const in_ = nullptr;
-  //! True if broadcast is fused
-  bool is_allreduce_ = false;
 };
 
 //! Grouped reduction operation for horizontal fusions. It works like
@@ -517,61 +469,57 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
 //! significant performance impact.
 class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
  public:
+  using Expr::Expr;
+
   GroupedReductionOp(
       IrBuilderPasskey,
-      std::vector<BinaryOpType> reduction_op_type,
+      std::vector<BinaryOpType> reduction_op_types,
       std::vector<Val*> init,
       std::vector<Val*> out,
       std::vector<Val*> in,
       bool is_allreduce = false);
 
-  GroupedReductionOp(const GroupedReductionOp* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "GroupedReductionOp";
   }
 
-  Expr* shallowCopy() const override;
-
   //! Number of expressions grouped horizontally. It does not reflect
   //! iteration grouping.
   size_t numExprs() const {
-    return reduction_op_types_.size();
+    return getReductionOpTypes().size();
   }
 
-  const std::vector<Val*>& initVals() const {
-    return init_vals_;
+  std::vector<Val*> initVals() const {
+    auto size = numExprs();
+    std::vector<Val*> result;
+    result.reserve(size);
+    for (auto i : c10::irange(2, 2 + size)) {
+      result.emplace_back(attribute(i)->as<Val>());
+    }
+    return result;
   }
 
   Val* initVal(size_t index) const {
-    return init_vals_.at(index);
+    return attributeVal(2 + index);
   }
 
   const std::vector<BinaryOpType>& getReductionOpTypes() const {
-    return reduction_op_types_;
+    return attribute(0)->as<Attribute<std::vector<BinaryOpType>>>()->value;
   }
 
   BinaryOpType getReductionOpType(size_t index) const {
-    return reduction_op_types_.at(index);
+    return getReductionOpTypes().at(index);
   }
 
   bool isAllreduce() const {
-    return is_allreduce_;
+    return attribute(1)->as<Attribute<bool>>()->value;
   }
 
   //! Return the index of the corresponding reduction expression for
   //! a given output val.
   int getExprIndexOfOutput(Val* output_val) const;
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  //! Reduction ops of grouped reductions
-  const std::vector<BinaryOpType> reduction_op_types_;
-  //! Initial values of grouped reductions
-  const std::vector<Val*> init_vals_;
-  //! True if using the fused reduction kernel
-  bool is_allreduce_ = false;
 };
 
 //! Average, variance and N (count) vals for Welford
@@ -697,6 +645,8 @@ class TORCH_CUDA_CU_API WelfordTriplet {
 //! Welford Scan operation.
 class TORCH_CUDA_CU_API WelfordOp : public Expr {
  public:
+  using Expr::Expr;
+
   WelfordOp(
       IrBuilderPasskey,
       const WelfordTriplet& output,
@@ -717,70 +667,66 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
       Val* init_N,
       bool is_fused = false);
 
-  WelfordOp(const WelfordOp* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "WelfordOp";
   }
 
-  Expr* shallowCopy() const override;
-
   Val* out() const {
-    return output().avg();
+    return outputTriplet().avg();
   }
 
   Val* in() const {
-    return input().avg();
+    return inputTriplet().avg();
   }
 
-  bool sameAs(const Statement* const other) const override;
-
-  const WelfordTriplet& output() const {
-    return output_;
+  WelfordTriplet outputTriplet() const {
+    return WelfordTriplet(outAvg(), outVar(), outN());
   }
 
   Val* outAvg() const {
-    return output().avg();
+    return output(0);
   }
 
   Val* outVar() const {
-    return output().var();
+    return output(1);
   }
 
   Val* outN() const {
-    return output().N();
+    return output(2);
   }
 
-  const WelfordTriplet& input() const {
-    return input_;
+  WelfordTriplet inputTriplet() const {
+    return WelfordTriplet(inAvg(), inVar(), inN());
   }
 
   Val* inAvg() const {
-    return input().avg();
+    return input(0);
   }
 
   Val* inVar() const {
-    return input().var();
+    return input(1);
   }
 
   Val* inN() const {
-    return input().N();
+    return input(2);
   }
 
-  const WelfordTriplet& init() const {
-    return init_;
+  WelfordTriplet initTriplet() const {
+    return WelfordTriplet(initAvg(), initVar(), initN());
   }
 
   Val* initAvg() const {
-    return init().avg();
+    return attributeVal(0);
   }
 
   Val* initVar() const {
-    return init().var();
+    return attributeVal(1);
   }
 
   Val* initN() const {
-    return init().N();
+    return attributeVal(2);
   }
 
   bool singleValue() const {
@@ -791,25 +737,21 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
     return !initN()->isZeroInt();
   }
 
+  //! True if using the fused reduction kernel (not implemented yet)
   bool isAllreduce() const {
-    return is_allreduce_;
+    return attribute(3)->as<Attribute<bool>>()->value;
   }
 
   std::vector<Val*> getInitVals() const;
 
   //! Return the init val for an output val
   Val* getInitValOfOutput(Val* output_val) const;
-
- private:
-  const WelfordTriplet output_;
-  const WelfordTriplet input_;
-  const WelfordTriplet init_;
-  //! True if using the fused reduction kernel (not implemented yet)
-  bool is_allreduce_ = false;
 };
 
 class TORCH_CUDA_CU_API GroupedWelfordOp : public Expr {
  public:
+  using Expr::Expr;
+
   GroupedWelfordOp(
       IrBuilderPasskey,
       std::vector<WelfordTriplet> output_vals,
@@ -817,13 +759,11 @@ class TORCH_CUDA_CU_API GroupedWelfordOp : public Expr {
       std::vector<WelfordTriplet> init_vals,
       bool is_allreduce = false);
 
-  GroupedWelfordOp(const GroupedWelfordOp* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "GroupedWelfordOp";
   }
-
-  Expr* shallowCopy() const override;
 
   //! Number of expressions grouped horizontally. It does not reflect
   //! iteration grouping. As horizontal grouping is not supported,
@@ -840,54 +780,70 @@ class TORCH_CUDA_CU_API GroupedWelfordOp : public Expr {
     return inAvg(index);
   }
 
-  bool sameAs(const Statement* const other) const override;
-
-  const std::vector<WelfordTriplet>& outputVals() const {
-    return output_vals_;
+  std::vector<WelfordTriplet> outputVals() const {
+    std::vector<WelfordTriplet> result;
+    auto size = outputs().size() / 3;
+    result.reserve(size);
+    for (auto i : c10::irange(size)) {
+      result.emplace_back(outAvg(i), outVar(i), outN(i));
+    }
+    return result;
   }
 
-  const std::vector<WelfordTriplet>& inputVals() const {
-    return input_vals_;
+  std::vector<WelfordTriplet> inputVals() const {
+    std::vector<WelfordTriplet> result;
+    auto size = inputs().size() / 3;
+    result.reserve(size);
+    for (auto i : c10::irange(size)) {
+      result.emplace_back(inAvg(i), inVar(i), inN(i));
+    }
+    return result;
   }
 
-  const std::vector<WelfordTriplet>& initVals() const {
-    return init_vals_;
+  std::vector<WelfordTriplet> initVals() const {
+    std::vector<WelfordTriplet> result;
+    auto size = inputs().size() / 3;
+    result.reserve(size);
+    for (auto i : c10::irange(size)) {
+      result.emplace_back(initAvg(i), initVar(i), initN(i));
+    }
+    return result;
   }
 
   Val* outAvg(size_t index) const {
-    return outputVals().at(index).avg();
+    return output(index * 3);
   }
 
   Val* outVar(size_t index) const {
-    return outputVals().at(index).var();
+    return output(index * 3 + 1);
   }
 
   Val* outN(size_t index) const {
-    return outputVals().at(index).N();
+    return output(index * 3 + 2);
   }
 
   Val* inAvg(size_t index) const {
-    return inputVals().at(index).avg();
+    return input(index * 3);
   }
 
   Val* inVar(size_t index) const {
-    return inputVals().at(index).var();
+    return input(index * 3 + 1);
   }
 
   Val* inN(size_t index) const {
-    return inputVals().at(index).N();
+    return input(index * 3 + 2);
   }
 
   Val* initAvg(size_t index) const {
-    return initVals().at(index).avg();
+    return attributeVal(1 + index * 3);
   }
 
   Val* initVar(size_t index) const {
-    return initVals().at(index).var();
+    return attributeVal(2 + index * 3);
   }
 
   Val* initN(size_t index) const {
-    return initVals().at(index).N();
+    return attributeVal(3 + index * 3);
   }
 
   //! Return the index of the corresponding welford expression for
@@ -906,15 +862,8 @@ class TORCH_CUDA_CU_API GroupedWelfordOp : public Expr {
   }
 
   bool isAllreduce() const {
-    return is_allreduce_;
+    return attribute(0)->as<Attribute<bool>>()->value;
   }
-
- private:
-  const std::vector<WelfordTriplet> output_vals_;
-  const std::vector<WelfordTriplet> input_vals_;
-  const std::vector<WelfordTriplet> init_vals_;
-  //! True if using the fused reduction kernel
-  bool is_allreduce_ = false;
 };
 
 //! Fused Matmul operation
@@ -936,6 +885,8 @@ class TORCH_CUDA_CU_API MmaOp : public Expr {
     }
   };
 
+  using Expr::Expr;
+
   MmaOp(IrBuilderPasskey, Val* out, Val* in_a, Val* in_b, Val* init);
 
   MmaOp(
@@ -946,181 +897,104 @@ class TORCH_CUDA_CU_API MmaOp : public Expr {
       Val* init,
       OptionsInMma options);
 
-  MmaOp(const MmaOp* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "MmaOp";
   }
 
-  Expr* shallowCopy() const override;
-
   Val* out() const {
-    return out_;
+    return output(0);
   }
 
   Val* inA() const {
-    return in_a_;
+    return input(0);
   }
 
   Val* inB() const {
-    return in_b_;
+    return input(1);
   }
 
   Val* init() const {
-    return init_;
+    return attributeVal(0);
   }
 
   const auto& options() const {
-    TORCH_INTERNAL_ASSERT(options_.has_value(), "MmaOp not configured:", this);
-    return options_.value();
+    return attribute(1)->as<Attribute<OptionsInMma>>()->value;
   }
-
-  bool sameAs(const Statement* const other) const override;
 
   auto accStride() const {
-    TORCH_INTERNAL_ASSERT(options_.has_value(), "MmaOp not configured:", this);
-    return options_->accumulator_stride;
+    return options().accumulator_stride;
   }
 
-  void configureOptions(MmaOptions options) {
-    options_ = OptionsInMma();
-    TORCH_INTERNAL_ASSERT(
-        options.macro != MmaOptions::MacroType::NoMMA,
-        "Un-configured mma type from options.");
-    TORCH_INTERNAL_ASSERT(
-        options.accumulator_stride > 0, "Un-configured accumulator stride.");
-    options_->accumulator_stride = options.accumulator_stride;
-    options_->macro = options.macro;
-    options_->operand_layout = options.operand_layout;
-  }
-
- private:
-  Val* const out_ = nullptr;
-  Val* const in_a_ = nullptr;
-  Val* const in_b_ = nullptr;
-  Val* const init_ = nullptr;
-  c10::optional<OptionsInMma> options_ = c10::nullopt;
+  void configureOptions(MmaOptions options);
 };
 
 class TORCH_CUDA_CU_API TransposeOp : public Expr {
  public:
+  using Expr::Expr;
+
   TransposeOp(
       IrBuilderPasskey,
       TensorView* out,
       TensorView* in,
       std::vector<int64_t> new2old);
 
-  TransposeOp(const TransposeOp* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "TransposeOp";
   }
 
-  Expr* shallowCopy() const override;
-
   TensorView* out() const {
-    return out_;
+    return output(0)->as<TensorView>();
   }
 
   TensorView* in() const {
-    return in_;
+    return input(0)->as<TensorView>();
   }
 
   const std::vector<int64_t>& new2old() const {
-    return new2old_;
+    return attribute(0)->as<Attribute<std::vector<int64_t>>>()->value;
   }
 
   std::vector<int64_t> old2new() const;
-
- private:
-  TensorView* const out_ = nullptr;
-  TensorView* const in_ = nullptr;
-  const std::vector<int64_t> new2old_;
 };
 
 class TORCH_CUDA_CU_API ExpandOp : public Expr {
  public:
+  using Expr::Expr;
+
   ExpandOp(
       IrBuilderPasskey,
       TensorView* out,
       TensorView* in,
       std::vector<Val*> _expanded_extents);
 
-  ExpandOp(const ExpandOp* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "ExpandOp";
   }
 
-  Expr* shallowCopy() const override;
-
   TensorView* out() const {
-    return out_;
+    return output(0)->as<TensorView>();
   }
 
   TensorView* in() const {
-    return in_;
+    return input(0)->as<TensorView>();
   }
 
-  const std::vector<Val*>& expanded_extents() const {
-    return expanded_extents_;
+  std::vector<Val*> expanded_extents() const {
+    return {inputs().begin() + 1, inputs().end()};
   }
-
- private:
-  TensorView* const out_ = nullptr;
-  TensorView* const in_ = nullptr;
-  std::vector<Val*> expanded_extents_;
-};
-
-class TORCH_CUDA_CU_API TernaryOp : public Expr {
- public:
-  TernaryOp(
-      IrBuilderPasskey,
-      TernaryOpType type,
-      Val* out,
-      Val* in1,
-      Val* in2,
-      Val* in3);
-
-  TernaryOp(const TernaryOp* src, IrCloner* ir_cloner);
-
-  virtual const char* getOpString() const override {
-    return "TernaryOp";
-  }
-
-  Expr* shallowCopy() const override;
-
-  Val* out() const {
-    return out_;
-  }
-
-  Val* in1() const {
-    return in1_;
-  }
-  Val* in2() const {
-    return in2_;
-  }
-  Val* in3() const {
-    return in3_;
-  }
-
-  TernaryOpType getTernaryOpType() const {
-    return ternary_op_type_;
-  }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  const TernaryOpType ternary_op_type_;
-  Val* const out_ = nullptr;
-  Val* const in1_ = nullptr;
-  Val* const in2_ = nullptr;
-  Val* const in3_ = nullptr;
 };
 
 //! Shift
 class TORCH_CUDA_CU_API ShiftOp : public Expr {
  public:
+  using Expr::Expr;
+
   //! \param out
   //! \param in
   //! \param offsets
@@ -1131,54 +1005,45 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
       std::vector<int> offsets,
       std::vector<int> pad_width);
 
-  ShiftOp(const ShiftOp* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "ShiftOp";
   }
 
-  Expr* shallowCopy() const override;
-
   Val* out() const {
-    return out_;
+    return output(0);
   }
   Val* in() const {
-    return in_;
+    return input(0);
   }
 
   int offset(size_t dim) const {
-    return offsets_.at(dim);
+    return offsets().at(dim);
   }
 
+  //! Each of the root axes is shifted by the corresponding value of
+  //! offsets. The sign of each value indicates the direction of shifting.
   const std::vector<int>& offsets() const {
-    return offsets_;
+    return attribute(0)->as<Attribute<std::vector<int>>>()->value;
   }
 
   const std::vector<int>& padWidth() const {
-    return pad_width_;
+    return attribute(1)->as<Attribute<std::vector<int>>>()->value;
   }
 
   bool hasPadding() const {
-    return std::any_of(pad_width_.begin(), pad_width_.end(), [](const auto p) {
+    return std::any_of(padWidth().begin(), padWidth().end(), [](const auto p) {
       return p > 0;
     });
   }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  Val* const out_ = nullptr;
-  Val* const in_ = nullptr;
-  //! Each of the root axes is shifted by the corresponding value of
-  //! offsets_. The sign of each value indicates the direction of
-  //! shifting.
-  const std::vector<int> offsets_;
-  const std::vector<int> pad_width_;
 };
 
 //! Gather a window around each element.
 class TORCH_CUDA_CU_API GatherOp : public Expr {
  public:
+  using Expr::Expr;
+
   GatherOp(
       IrBuilderPasskey,
       Val* out,
@@ -1186,51 +1051,43 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
       std::vector<int> window_shape,
       std::vector<std::vector<int>> pad_width);
 
-  GatherOp(const GatherOp* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "GatherOp";
   }
 
-  Expr* shallowCopy() const override;
-
   Val* out() const {
-    return out_;
+    return output(0);
   }
   Val* in() const {
-    return in_;
+    return input(0);
   }
 
+  //! Shape of a window gathered for each element.
   const auto& windowShape() const {
-    return window_shape_;
+    return attribute(0)->as<Attribute<std::vector<int>>>()->value;
   }
 
   //! Returns the gather axis that corresponds to an input axis
   int gatherAxis(int axis) const;
 
+  //! The size of zero-padding of each axis.
   const auto& padWidth() const {
-    return pad_width_;
+    return attribute(1)->as<Attribute<std::vector<std::vector<int>>>>()->value;
   }
 
   bool hasPadding() const {
-    return std::any_of(pad_width_.begin(), pad_width_.end(), [](const auto& p) {
+    return std::any_of(padWidth().begin(), padWidth().end(), [](const auto& p) {
       return p[0] > 0 || p[1] > 0;
     });
   }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  Val* const out_ = nullptr;
-  Val* const in_ = nullptr;
-  //! Shape of a window gathered for each element.
-  std::vector<int> window_shape_;
-  //! The size of zero-padding of each axis.
-  std::vector<std::vector<int>> pad_width_;
 };
 
 class TORCH_CUDA_CU_API ViewAsScalar : public Expr {
  public:
+  using Expr::Expr;
+
   ViewAsScalar(
       IrBuilderPasskey,
       Val* out,
@@ -1238,64 +1095,50 @@ class TORCH_CUDA_CU_API ViewAsScalar : public Expr {
       IterDomain* vector_id,
       Val* index = nullptr);
 
-  ViewAsScalar(const ViewAsScalar* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "ViewAsScalar";
   }
 
-  Expr* shallowCopy() const override;
-
   Val* out() const {
-    return out_;
+    return output(0);
   }
 
   Val* in() const {
-    return in_;
+    return input(0);
   }
-
-  IterDomain* vector_id() const {
-    return vector_id_;
-  }
-
-  Val* index() const {
-    return index_;
-  }
-
- private:
-  Val* const out_ = nullptr;
-  Val* const in_ = nullptr;
 
   // The IterDomain of type VectorComponent newly appended to the output
-  IterDomain* vector_id_ = nullptr;
+  IterDomain* vector_id() const {
+    return attribute(0)->as<IterDomain>();
+  }
 
   // The index that vector_id_ is lowered into
-  Val* index_ = nullptr;
+  Val* index() const {
+    return attributeVal(1);
+  }
 };
 
 class TORCH_CUDA_CU_API ViewOp : public Expr {
  public:
-  ViewOp(IrBuilderPasskey, TensorView* out, TensorView* in);
+  using Expr::Expr;
 
-  ViewOp(const ViewOp* src, IrCloner* ir_cloner);
+  ViewOp(IrBuilderPasskey, Val* out, Val* in);
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "ViewOp";
   }
 
-  Expr* shallowCopy() const override;
-
-  TensorView* out() const {
-    return out_;
+  Val* out() const {
+    return output(0);
   }
 
-  TensorView* in() const {
-    return in_;
+  Val* in() const {
+    return input(0);
   }
-
- private:
-  TensorView* const out_ = nullptr;
-  TensorView* const in_ = nullptr;
 };
 
 //! This operator explicitly models data movement between
@@ -1306,32 +1149,27 @@ class TORCH_CUDA_CU_API ViewOp : public Expr {
 //!   accelerated memory ops, i.e. ldmatrix, cp.async and more to come.
 class TORCH_CUDA_CU_API LoadStoreOp : public Expr {
  public:
+  using Expr::Expr;
+
   LoadStoreOp(IrBuilderPasskey, LoadStoreOpType op_type, Val* out, Val* in);
 
-  LoadStoreOp(const LoadStoreOp* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "LoadStoreOp";
   }
 
-  Expr* shallowCopy() const override;
-
   Val* out() const {
-    return out_;
+    return output(0);
   }
 
   Val* in() const {
-    return in_;
+    return input(0);
   }
 
   LoadStoreOpType opType() const {
-    return load_store_type_;
+    return attribute(0)->as<Attribute<LoadStoreOpType>>()->value;
   }
-
- private:
-  LoadStoreOpType load_store_type_ = LoadStoreOpType::LdMatrix;
-  Val* const out_ = nullptr;
-  Val* const in_ = nullptr;
 };
 
 // Convenience utility to initialize IterDomain's without having to sort through
@@ -1410,6 +1248,8 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
       bool is_mma_swizzled);
 
   IterDomain(const IterDomain* src, IrCloner* ir_cloner);
+
+  NVFUSER_DECLARE_CLONE
 
   bool sameAs(const Statement* other) const override;
 
@@ -1718,6 +1558,8 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
 
   TensorDomain(const TensorDomain* src, IrCloner* ir_cloner);
 
+  NVFUSER_DECLARE_CLONE
+
   bool operator==(const TensorDomain& other) const;
   bool operator!=(const TensorDomain& other) const {
     return !(*this == other);
@@ -1906,6 +1748,8 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
 //! remainer or outside.
 class TORCH_CUDA_CU_API Split : public Expr {
  public:
+  using Expr::Expr;
+
   // start_offset and stop_offset are used to express partial
   // split. Only the partial domain from start_offset to stop_offset
   // is split and the outer sub-regions are ignored. Note that both
@@ -1921,58 +1765,45 @@ class TORCH_CUDA_CU_API Split : public Expr {
       Val* start_offset = nullptr,
       Val* stop_offset = nullptr);
 
-  Split(const Split* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "Split";
   }
 
-  Expr* shallowCopy() const override;
-
   IterDomain* outer() const {
-    return outer_;
+    return output(0)->as<IterDomain>();
   }
   IterDomain* inner() const {
-    return inner_;
+    return output(1)->as<IterDomain>();
   }
   IterDomain* in() const {
-    return in_;
+    return input(0)->as<IterDomain>();
   }
   Val* factor() const {
-    return factor_;
+    return attributeVal(0);
   }
 
   bool innerSplit() const {
-    return inner_split_;
+    return attribute(1)->as<Attribute<bool>>()->value;
   }
 
+  //! Start position of the input domain. Non-zero means partial
+  //! split. Elements until this offset are ignored.
   Val* startOffset() const {
-    TORCH_INTERNAL_ASSERT(start_offset_ != nullptr);
-    return start_offset_;
+    TORCH_INTERNAL_ASSERT(attributeVal(2) != nullptr);
+    return attributeVal(2);
   }
 
+  //! Offset from extent of the input domain. Non-zero means partial
+  //! split. Elements after this offset are ignored.
   Val* stopOffset() const {
-    TORCH_INTERNAL_ASSERT(stop_offset_ != nullptr);
-    return stop_offset_;
+    TORCH_INTERNAL_ASSERT(attributeVal(3) != nullptr);
+    return attributeVal(3);
   }
 
   //! Utility function to compute the split extent.
   static Val* extent(Val* in_extent, Val* start_offset, Val* stop_offset);
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  IterDomain* const outer_ = nullptr;
-  IterDomain* const inner_ = nullptr;
-  IterDomain* const in_ = nullptr;
-  Val* const factor_ = nullptr;
-  bool inner_split_ = true;
-  //! Start position of the input domain. Non-zero means partial
-  //! split. Elements until this offset are ignored.
-  Val* const start_offset_ = nullptr;
-  //! Offset from extent of the input domain. Non-zero means partial
-  //! split. Elements after this offset are ignored.
-  Val* const stop_offset_ = nullptr;
 };
 
 //! Merge the IterDomains outer and inner into one domain, outer and inner
@@ -1981,41 +1812,36 @@ class TORCH_CUDA_CU_API Split : public Expr {
 //! strategy if there is one
 class TORCH_CUDA_CU_API Merge : public Expr {
  public:
+  using Expr::Expr;
+
   Merge(
       IrBuilderPasskey,
       IterDomain* out,
       IterDomain* outer,
       IterDomain* inner);
 
-  Merge(const Merge* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "Merge";
   }
 
-  Expr* shallowCopy() const override;
-
   IterDomain* out() const {
-    return out_;
+    return output(0)->as<IterDomain>();
   }
   IterDomain* outer() const {
-    return outer_;
+    return input(0)->as<IterDomain>();
   }
   IterDomain* inner() const {
-    return inner_;
+    return input(1)->as<IterDomain>();
   }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  IterDomain* const out_ = nullptr;
-  IterDomain* const outer_ = nullptr;
-  IterDomain* const inner_ = nullptr;
 };
 
 //! Applies 2D swizzles on a rectangular tile defined by 2 iterdomains.
 class TORCH_CUDA_CU_API Swizzle2D : public Expr {
  public:
+  using Expr::Expr;
+
   Swizzle2D(
       IrBuilderPasskey,
       IterDomain* out_x,
@@ -2025,53 +1851,36 @@ class TORCH_CUDA_CU_API Swizzle2D : public Expr {
       Swizzle2DType swizzle_type = Swizzle2DType::NoSwizzle,
       SwizzleMode swizzle_mode = SwizzleMode::Data);
 
-  Swizzle2D(const Swizzle2D* src, IrCloner* ir_cloner);
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "Swizzle2D";
   }
 
-  Expr* shallowCopy() const override;
-
+  // Output iterdomain pair corresponding
+  //  to the original input iterdomain pair.
   IterDomain* outX() const {
-    return out_x_;
+    return output(0)->as<IterDomain>();
   }
 
   IterDomain* outY() const {
-    return out_y_;
+    return output(1)->as<IterDomain>();
   }
 
+  // Input iterdomain pair.
   IterDomain* inX() const {
-    return in_x_;
+    return input(0)->as<IterDomain>();
   }
 
   IterDomain* inY() const {
-    return in_y_;
+    return input(1)->as<IterDomain>();
   }
-
-  auto swizzleType() const {
-    return swizzle_type_;
-  }
-
-  auto swizzleMode() const {
-    return swizzle_mode_;
-  }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  // Output iterdomain pair corresponding
-  //  to the original input iterdomain pair.
-  IterDomain* const out_x_ = nullptr;
-  IterDomain* const out_y_ = nullptr;
-
-  // Input iterdomain pair.
-  IterDomain* const in_x_ = nullptr;
-  IterDomain* const in_y_ = nullptr;
 
   // The type of predefined 1-to-1 functions
   //  used for swizzling math.
-  Swizzle2DType swizzle_type_ = Swizzle2DType::NoSwizzle;
+  auto swizzleType() const {
+    return attribute(0)->as<Attribute<Swizzle2DType>>()->value;
+  }
 
   // Swizzle mode of this swizzle instance.
   // [Note on swizzle mode]
@@ -2114,7 +1923,9 @@ class TORCH_CUDA_CU_API Swizzle2D : public Expr {
   // }
   //  TODO: Loop swizzles eventually will be piped through in all mappings
   //  and replay of the fusion IR infrastructure.
-  SwizzleMode swizzle_mode_ = SwizzleMode::Data;
+  auto swizzleMode() const {
+    return attribute(1)->as<Attribute<SwizzleMode>>()->value;
+  }
 };
 
 //! Integer value which has a special name
@@ -2130,6 +1941,8 @@ class TORCH_CUDA_CU_API NamedScalar : public Val {
   NamedScalar(IrBuilderPasskey passkey, std::string name, DataType dtype);
 
   NamedScalar(const NamedScalar* src, IrCloner* ir_cloner);
+
+  NVFUSER_DECLARE_CLONE
 
   const std::string& name() const {
     return name_;

@@ -111,6 +111,9 @@ class TORCH_CUDA_CU_API SimplifyingIrBuilder : public IrBuilder {
   static Val* minExpr(Val* lhs, Val* rhs);
 };
 
+template <DataType DT>
+NVFUSER_DEFINE_CLONE(FloatingPoint<DT>)
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

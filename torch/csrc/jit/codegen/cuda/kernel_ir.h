@@ -156,6 +156,8 @@ class TORCH_CUDA_CU_API TensorIndex final : public Val {
 //! describes the output of an operation.
 class TORCH_CUDA_CU_API Allocate final : public Expr {
  public:
+  using Expr::Expr;
+
   //! Allocation of a multi-dimensional buffer
   //!
   //! param shape Size of each dimension
@@ -165,7 +167,7 @@ class TORCH_CUDA_CU_API Allocate final : public Expr {
       MemoryType memory_type,
       std::vector<Val*> shape = {},
       bool zero_init = false,
-      const Allocate* alias = nullptr);
+      Allocate* alias = nullptr);
 
   //! Allocation of a non-dimensional buffer
   //!
@@ -181,44 +183,40 @@ class TORCH_CUDA_CU_API Allocate final : public Expr {
     return "Allocate";
   }
 
-  Expr* shallowCopy() const override;
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   Val* buffer() const {
-    return buffer_;
+    return attributeVal(0);
   }
 
   MemoryType memoryType() const {
-    return memory_type_;
+    return attribute(1)->as<Attribute<MemoryType>>()->value;
   }
 
+  //! Total size
   Val* size() const {
-    return size_;
+    return input(0);
   }
 
-  const std::vector<Val*>& shape() const {
-    return shape_;
+  //! Size of each dimension
+  std::vector<Val*> shape() const {
+    std::vector<Val*> result;
+    result.reserve(attributes().size() - 4);
+    for (auto i = attributes().begin() + 4; i != attributes().end(); ++i) {
+      result.emplace_back((*i)->as<Val>());
+    }
+    return result;
   }
 
   bool zeroInit() const {
-    return zero_init_;
+    return attribute(2)->as<Attribute<bool>>()->value;
   }
-
-  const Allocate* alias() const {
-    return alias_;
-  }
-
- private:
-  Val* buffer_ = nullptr;
-  MemoryType memory_type_ = MemoryType::Local;
-  //! Size of each dimension
-  std::vector<Val*> shape_;
-  bool zero_init_ = false;
-  //! Total size
-  Val* size_ = nullptr;
 
   // This alias tracks the next Allocate node in a linked chain of aliases
   // If the alias is nullptr, then the Allocate node uses memory in the kernel
-  const Allocate* alias_ = nullptr;
+  const Allocate* alias() const {
+    return dynamic_cast<const Allocate*>(attribute(3));
+  }
 };
 
 // Sync represents __syncthreads barrier for block level coordination.
@@ -227,43 +225,66 @@ class TORCH_CUDA_CU_API Allocate final : public Expr {
 //
 class TORCH_CUDA_CU_API BlockSync final : public Expr {
  public:
+  using Expr::Expr;
+
   explicit BlockSync(IrBuilderPasskey passkey, bool war_sync = false);
 
   virtual const char* getOpString() const override {
     return "BlockSync";
   }
 
-  Expr* shallowCopy() const override;
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
+  // TODO: war_sync_ is only used for testing/validation purposes.
   bool isWarHazardSync() const {
-    return war_sync_;
+    return attribute(0)->as<Attribute<bool>>()->value;
+  }
+};
+
+// Synchronize all blocks in device, implies cooperative group launch is
+// required.
+class TORCH_CUDA_CU_API GridSync final : public Expr {
+ public:
+  using Expr::Expr;
+
+  explicit GridSync(
+      IrBuilderPasskey passkey,
+      ParallelTypeBitmap sync_dims,
+      Val* sync_buffer);
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
+  virtual const char* getOpString() const override {
+    return "GridSync";
   }
 
- private:
-  // TODO: war_sync_ is only used for testing/validation purposes.
-  bool war_sync_ = false;
+  ParallelTypeBitmap syncDims() const {
+    return attribute(0)->as<Attribute<ParallelTypeBitmap>>()->value;
+  }
+
+  Val* syncBuffer() const {
+    return attributeVal(1);
+  }
 };
 
 // CpAsyncWait represents wait intrinsics for cp.async
 class TORCH_CUDA_CU_API CpAsyncWait final : public Expr {
  public:
+  using Expr::Expr;
+
   explicit CpAsyncWait(IrBuilderPasskey passkey, unsigned int keep_stages = 0);
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "CpAsyncWait";
   }
 
-  Expr* shallowCopy() const override;
-
   //! Returns the remaining number of stages that are not synchronized
   //!  after this op.
   unsigned int keepStages() const {
-    return keep_stages_;
+    return attribute(0)->as<Attribute<unsigned int>>()->value;
   }
-
- private:
-  //! Number of stage to leave un-sync'ed by this op.
-  unsigned int keep_stages_ = 0;
 };
 
 // CpAsyncCommit represents commit intrinsics for cp.async
@@ -271,67 +292,45 @@ class TORCH_CUDA_CU_API CpAsyncWait final : public Expr {
 // to the async load hardware. Example usage see [Cicular buffer].
 class TORCH_CUDA_CU_API CpAsyncCommit final : public Expr {
  public:
+  using Expr::Expr;
+
   explicit CpAsyncCommit(IrBuilderPasskey passkey);
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "CpAsyncCommit";
   }
-
-  Expr* shallowCopy() const override;
-};
-
-// Synchronize all blocks in device, implies cooperative group launch is
-// required.
-class TORCH_CUDA_CU_API GridSync final : public Expr {
- public:
-  explicit GridSync(
-      IrBuilderPasskey passkey,
-      ParallelTypeBitmap sync_dims,
-      Val* sync_buffer);
-
-  virtual const char* getOpString() const override {
-    return "GridSync";
-  }
-
-  Expr* shallowCopy() const override;
-
-  ParallelTypeBitmap syncDims() const {
-    return sync_dims_;
-  }
-
-  Val* syncBuffer() const {
-    return sync_buffer_;
-  }
-
- private:
-  ParallelTypeBitmap sync_dims_;
-  Val* sync_buffer_ = nullptr;
 };
 
 // Simply prints "DEFINE_MAGIC_ZERO" in the code in accordance with magic_zero
 // in helpers.cu
 class TORCH_CUDA_CU_API InitMagicZero final : public Expr {
  public:
+  using Expr::Expr;
+
   explicit InitMagicZero(IrBuilderPasskey passkey);
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "InitMagicZero";
   }
-
-  Expr* shallowCopy() const override;
 };
 
 // Simply prints "UPDATE_MAGIC_ZERO" in the code in accordance with magic_zero
 // in helpers.cu
 class TORCH_CUDA_CU_API UpdateMagicZero final : public Expr {
  public:
+  using Expr::Expr;
+
   explicit UpdateMagicZero(IrBuilderPasskey passkey);
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "UpdateMagicZero";
   }
-
-  Expr* shallowCopy() const override;
 };
 
 // TODO(kir): promote to IR node
@@ -386,6 +385,10 @@ class TORCH_CUDA_CU_API Scope {
     return owner_;
   }
 
+  bool operator==(const Scope&) const {
+    TORCH_INTERNAL_ASSERT(false, "Should not reach here");
+  }
+
  private:
   // Insert expr before pos
   void insert(std::vector<Expr*>::const_iterator pos, Expr* expr);
@@ -412,6 +415,8 @@ class TORCH_CUDA_CU_API Scope {
 //! be smaller than the extent of iter_domain_.
 class TORCH_CUDA_CU_API ForLoop final : public Expr {
  public:
+  using Expr::Expr;
+
   //! By default, start and stop are the same as those of iter_domain.
   //! Step is one by default.
   //!
@@ -432,14 +437,14 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 
   ForLoop(IrBuilderPasskey passkey, const ForLoop* other);
 
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
   virtual const char* getOpString() const override {
     return "ForLoop";
   }
 
-  Expr* shallowCopy() const override;
-
   Val* index() const {
-    return index_;
+    return input(0);
   }
 
   Val* start() const;
@@ -448,38 +453,42 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 
   Val* step() const;
 
+  // [pre | vectorize | post] <= inner-most, merged root domain
+  // shift_ is applied to vectorize and post sections.
   Val* vectorize_shift() const {
-    return vectorize_shift_;
+    return attributeVal(4);
   }
 
   IterDomain* iter_domain() const {
-    return iter_domain_;
+    return input(1)->as<IterDomain>();
   }
 
   // TODO: Return pointer instead of reference to be more consistent
   Scope& body() {
-    return body_;
+    return attribute(7)->as<Attribute<Scope>>()->value;
   }
 
   const Scope& body() const {
-    return body_;
+    return attribute(7)->as<Attribute<Scope>>()->value;
   }
 
+  // vectorize is true when the for-loop contains a vectorize set
+  // the flag is used to omit the for-loop from the kernel
   bool vectorize() const {
-    return vectorize_;
+    return attribute(3)->as<Attribute<bool>>()->value;
   }
 
   //! True if unrolled (i.e., "#pragma unroll" is attached)
   bool isUnrolled() const;
 
-  //! True if unrolling is required
+  //! True if unroll is required for avoiding stack allocation
   bool isUnrollRequired() const {
-    return unroll_required_;
+    return attribute(5)->as<Attribute<bool>>()->value;
   }
 
   //! Set unrolling required
   void requireUnroll() {
-    unroll_required_ = true;
+    attribute(5)->as<Attribute<bool>>()->value = true;
   }
 
   //! True if no actual for-loop is materialized
@@ -488,37 +497,12 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
   //! Returns the stage of a double buffered iterdomain
   //!  that this for loop materializes.
   auto doubleBufferLoopStage() const {
-    return double_buffer_loop_stage_;
+    return attribute(6)->as<Attribute<DoubleBufferLoopStage>>()->value;
   }
 
  private:
   //! Returns if a loop could be unrolled.
   bool isUnrollable() const;
-
- private:
-  IterDomain* const iter_domain_ = nullptr;
-
-  Val* index_ = nullptr;
-  Val* start_ = nullptr;
-  Val* stop_ = nullptr;
-  Val* step_ = nullptr;
-
-  // vectorize is true when the for-loop contains a vectorize set
-  // the flag is used to omit the for-loop from the kernel
-  bool vectorize_ = false;
-  // [pre | vectorize | post] <= inner-most, merged root domain
-  // shift_ is applied to vectorize and post sections.
-  Val* vectorize_shift_ = nullptr;
-
-  //! True if unroll is required for avoiding stack allocation
-  bool unroll_required_ = false;
-
-  Scope body_;
-
-  //! Tracks if this for loop is implementing a stage of
-  //!  a double buffered iterdomain.
-  DoubleBufferLoopStage double_buffer_loop_stage_ =
-      DoubleBufferLoopStage::NotApplicable;
 };
 
 //! IfThenElse provides scoping for an boolean operator. Exprs placed in its
@@ -530,36 +514,34 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 //!
 class TORCH_CUDA_CU_API IfThenElse final : public Expr {
  public:
+  using Expr::Expr;
+
   explicit IfThenElse(IrBuilderPasskey passkey, Predicate* cond);
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "IfThenElse";
   }
 
-  Expr* shallowCopy() const override;
-
   Scope& thenBody() {
-    return then_body_;
+    return attribute(0)->as<Attribute<Scope>>()->value;
   }
   const Scope& thenBody() const {
-    return then_body_;
+    return attribute(0)->as<Attribute<Scope>>()->value;
   }
 
   Scope& elseBody() {
-    return else_body_;
+    return attribute(1)->as<Attribute<Scope>>()->value;
   }
 
   const Scope& elseBody() const {
-    return else_body_;
+    return attribute(1)->as<Attribute<Scope>>()->value;
   }
 
   bool hasElse() const {
-    return !else_body_.empty();
+    return !elseBody().empty();
   }
-
- private:
-  Scope then_body_;
-  Scope else_body_;
 };
 
 //! Grid reduction operation
@@ -570,7 +552,11 @@ class TORCH_CUDA_CU_API IfThenElse final : public Expr {
 //! This node provides FusionExecutor the information it needs to allocate the
 //! reduction and sync buffers.
 class TORCH_CUDA_CU_API GridReduction final : public ReductionOp {
+  static constexpr int num_reduction_op_attr = 3;
+
  public:
+  using ReductionOp::ReductionOp;
+
   GridReduction(
       IrBuilderPasskey passkey,
       BinaryOpType reduction_op_type,
@@ -583,54 +569,57 @@ class TORCH_CUDA_CU_API GridReduction final : public ReductionOp {
       Val* entrances,
       bool is_allreduce = false);
 
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
   virtual const char* getOpString() const override {
     return "GridReduction";
   }
 
-  Expr* shallowCopy() const override;
-
   Allocate* reduction_buffer() const {
-    return reduction_buffer_;
+    return attribute(num_reduction_op_attr)->as<Allocate>();
   }
 
   Allocate* sync_buffer() const {
-    return sync_buffer_;
+    return attribute(num_reduction_op_attr + 1)->as<Allocate>();
   }
 
   // Which instance of entering this grid reduction is this iteration?
   Val* entrance_index() const {
-    return entrance_index_;
+    return attributeVal(num_reduction_op_attr + 2);
   }
 
   // How many times will this grid reduction be entered
   Val* entrances() const {
-    return entrances_;
+    return attributeVal(num_reduction_op_attr + 3);
   }
 
+  // gridReduce has template flags for thread predicates. In order to
+  // use them, the thread predicate is held here separately from
+  // Expr::predicate_.
   const ParallelTypeBitmap& threadPredicate() const {
-    return thread_predicate_;
+    return attribute(num_reduction_op_attr + 4)
+        ->as<Attribute<ParallelTypeBitmap>>()
+        ->value;
+  }
+
+  ParallelTypeBitmap& threadPredicate() {
+    return attribute(num_reduction_op_attr + 4)
+        ->as<Attribute<ParallelTypeBitmap>>()
+        ->value;
   }
 
   GridReduction* withThreadPredicate(
       const ParallelTypeBitmap& thread_predicate) {
     auto result = shallowCopy()->as<GridReduction>();
-    result->thread_predicate_ = thread_predicate;
+    result->threadPredicate() = thread_predicate;
     return result;
   }
-
- private:
-  Allocate* reduction_buffer_ = nullptr;
-  Allocate* sync_buffer_ = nullptr;
-  // gridReduce has template flags for thread predicates. In order to
-  // use them, the thread predicate is held here separately from
-  // Expr::predicate_.
-  ParallelTypeBitmap thread_predicate_;
-  Val* entrance_index_ = nullptr;
-  Val* entrances_ = nullptr;
 };
 
 class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
  public:
+  using GroupedReductionOp::GroupedReductionOp;
+
   GroupedGridReduction(
       IrBuilderPasskey passkey,
       std::vector<BinaryOpType> reduction_op_type,
@@ -644,60 +633,72 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
       Val* buffer_stride,
       bool is_allreduce = false);
 
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
+  // number of attributes in the parent class
+  int numGroupedReductionOpAttr() const {
+    return 2 + outputs().size();
+  }
+
   virtual const char* getOpString() const override {
     return "GroupedGridReduction";
   }
 
-  Expr* shallowCopy() const override;
-
-  const std::vector<Allocate*>& reduction_buffers() const {
-    return reduction_buffers_;
+  std::vector<Allocate*> reduction_buffers() const {
+    auto offset = numGroupedReductionOpAttr() + 5;
+    auto size = outputs().size();
+    std::vector<Allocate*> result;
+    result.reserve(size);
+    for (auto i : c10::irange(offset, offset + size)) {
+      result.emplace_back(attribute(i)->as<Allocate>());
+    }
+    return result;
   }
 
   Allocate* reduction_buffer(size_t i) const {
-    return reduction_buffers_.at(i);
+    return reduction_buffers().at(i);
   }
 
   Allocate* sync_buffer() const {
-    return sync_buffer_;
+    return attribute(numGroupedReductionOpAttr())->as<Allocate>();
   }
 
   // Which instance of entering this grid reduction is this iteration?
   Val* entrance_index() const {
-    return entrance_index_;
+    return attributeVal(numGroupedReductionOpAttr() + 1);
   }
 
   // How many times will this grid reduction be entered
   Val* entrances() const {
-    return entrances_;
+    return attributeVal(numGroupedReductionOpAttr() + 2);
   }
 
+  // Stride of reduction buffers
   Val* buffer_stride() const {
-    return buffer_stride_;
+    return attributeVal(numGroupedReductionOpAttr() + 3);
   }
 
+  // gridReduce has template flags for thread predicates. In order to
+  // use them, the thread predicate is held here separately from
+  // Expr::predicate_.
   const ParallelTypeBitmap& threadPredicate() const {
-    return thread_predicate_;
+    return attribute(numGroupedReductionOpAttr() + 4)
+        ->as<Attribute<ParallelTypeBitmap>>()
+        ->value;
+  }
+
+  ParallelTypeBitmap& threadPredicate() {
+    return attribute(numGroupedReductionOpAttr() + 4)
+        ->as<Attribute<ParallelTypeBitmap>>()
+        ->value;
   }
 
   GroupedGridReduction* withThreadPredicate(
       const ParallelTypeBitmap& thread_predicate) {
     auto result = shallowCopy()->as<GroupedGridReduction>();
-    result->thread_predicate_ = thread_predicate;
+    result->threadPredicate() = thread_predicate;
     return result;
   }
-
- private:
-  std::vector<Allocate*> reduction_buffers_;
-  Allocate* sync_buffer_ = nullptr;
-  // gridReduce has template flags for thread predicates. In order to
-  // use them, the thread predicate is held here separately from
-  // Expr::predicate_.
-  ParallelTypeBitmap thread_predicate_;
-  Val* entrance_index_ = nullptr;
-  Val* entrances_ = nullptr;
-  // Stride of reduction buffers
-  Val* buffer_stride_ = nullptr;
 };
 
 //! Grid broadcast operation
@@ -709,34 +710,31 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
 //! broadcast and sync buffers.
 class TORCH_CUDA_CU_API GridBroadcast final : public Expr {
  public:
+  using Expr::Expr;
+
   GridBroadcast(
       IrBuilderPasskey passkey,
       BroadcastOp* broadcast_op,
       Allocate* broadcast_buffer,
       Allocate* sync_buffer);
 
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
   virtual const char* getOpString() const override {
     return "GridBroadcast";
   }
 
-  Expr* shallowCopy() const override;
-
   BroadcastOp* broadcast_op() const {
-    return broadcast_op_;
+    return attribute(0)->as<BroadcastOp>();
   }
 
   Allocate* broadcast_buffer() const {
-    return broadcast_buffer_;
+    return attribute(1)->as<Allocate>();
   }
 
   Allocate* sync_buffer() const {
-    return sync_buffer_;
+    return attribute(2)->as<Allocate>();
   }
-
- private:
-  BroadcastOp* broadcast_op_ = nullptr;
-  Allocate* broadcast_buffer_ = nullptr;
-  Allocate* sync_buffer_ = nullptr;
 };
 
 //! Grid welford operation
@@ -750,6 +748,8 @@ class TORCH_CUDA_CU_API GridBroadcast final : public Expr {
 //! TODO: Make this a subclass of WelfordOp
 class TORCH_CUDA_CU_API GridWelford final : public Expr {
  public:
+  using Expr::Expr;
+
   GridWelford(
       IrBuilderPasskey passkey,
       WelfordOp* welford_op,
@@ -760,68 +760,63 @@ class TORCH_CUDA_CU_API GridWelford final : public Expr {
       Val* entrance_index,
       Val* entrances);
 
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
   virtual const char* getOpString() const override {
     return "GridWelford";
   }
 
-  Expr* shallowCopy() const override;
-
   WelfordOp* welford_op() const {
-    return welford_op_;
+    return attribute(0)->as<WelfordOp>();
   }
 
   Allocate* var_buffer() const {
-    return var_buffer_;
+    return attribute(1)->as<Allocate>();
   }
 
   Allocate* avg_buffer() const {
-    return avg_buffer_;
+    return attribute(2)->as<Allocate>();
   }
 
   Allocate* N_buffer() const {
-    return n_buffer_;
+    return attribute(3)->as<Allocate>();
   }
 
   Allocate* sync_buffer() const {
-    return sync_buffer_;
+    return attribute(4)->as<Allocate>();
   }
 
   // Which instance of entering this grid reduction is this iteration?
   Val* entrance_index() const {
-    return entrance_index_;
+    return attributeVal(5);
   }
 
   // How many times will this grid reduction be entered
   Val* entrances() const {
-    return entrances_;
+    return attributeVal(6);
   }
 
+  // gridReduce has template flags for thread predicates. In order to
+  // use them, the thread predicate is held here separately from
+  // Expr::predicate_.
   const ParallelTypeBitmap& threadPredicate() const {
-    return thread_predicate_;
+    return attribute(7)->as<Attribute<ParallelTypeBitmap>>()->value;
+  }
+  ParallelTypeBitmap& threadPredicate() {
+    return attribute(7)->as<Attribute<ParallelTypeBitmap>>()->value;
   }
 
   GridWelford* withThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
     auto result = shallowCopy()->as<GridWelford>();
-    result->thread_predicate_ = thread_predicate;
+    result->threadPredicate() = thread_predicate;
     return result;
   }
-
- private:
-  WelfordOp* welford_op_ = nullptr;
-  Allocate* var_buffer_ = nullptr;
-  Allocate* avg_buffer_ = nullptr;
-  Allocate* n_buffer_ = nullptr;
-  Allocate* sync_buffer_ = nullptr;
-  Val* entrance_index_ = nullptr;
-  Val* entrances_ = nullptr;
-  // gridReduce has template flags for thread predicates. In order to
-  // use them, the thread predicate is held here separately from
-  // Expr::predicate_.
-  ParallelTypeBitmap thread_predicate_;
 };
 
 class TORCH_CUDA_CU_API GroupedGridWelford final : public GroupedWelfordOp {
  public:
+  using GroupedWelfordOp::GroupedWelfordOp;
+
   // input, output and init vals are vectors of triplets
   GroupedGridWelford(
       IrBuilderPasskey passkey,
@@ -835,94 +830,117 @@ class TORCH_CUDA_CU_API GroupedGridWelford final : public GroupedWelfordOp {
       Val* buffer_stride,
       bool is_allreduce = false);
 
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
+  int numGroupedWelfordOpAttr() const {
+    return 1 + outputs().size();
+  }
+
   virtual const char* getOpString() const override {
     return "GroupedGridWelford";
   }
 
-  Expr* shallowCopy() const override;
-
-  const std::array<std::vector<Allocate*>, 3>& reduction_buffers() const {
-    return reduction_buffers_;
+  std::array<std::vector<Allocate*>, 3> reduction_buffers() const {
+    auto offset = numGroupedWelfordOpAttr() + 5;
+    auto size = outputs().size() / 3;
+    std::array<std::vector<Allocate*>, 3> result;
+    result[0].reserve(size);
+    result[1].reserve(size);
+    result[2].reserve(size);
+    for (auto i : c10::irange(size)) {
+      result[0].emplace_back(attribute(offset + i * 3)->as<Allocate>());
+      result[1].emplace_back(attribute(offset + i * 3 + 1)->as<Allocate>());
+      result[2].emplace_back(attribute(offset + i * 3 + 2)->as<Allocate>());
+    }
+    return result;
   }
 
   Allocate* sync_buffer() const {
-    return sync_buffer_;
+    return attribute(numGroupedWelfordOpAttr())->as<Allocate>();
   }
 
   // Which instance of entering this grid reduction is this iteration?
   Val* entrance_index() const {
-    return entrance_index_;
+    return attributeVal(numGroupedWelfordOpAttr() + 1);
   }
 
   // How many times will this grid reduction be entered
   Val* entrances() const {
-    return entrances_;
+    return attributeVal(numGroupedWelfordOpAttr() + 2);
   }
 
+  // Stride of reduction buffers
   Val* buffer_stride() const {
-    return buffer_stride_;
+    return attributeVal(numGroupedWelfordOpAttr() + 3);
   }
 
+  // gridReduce has template flags for thread predicates. In order to
+  // use them, the thread predicate is held here separately from
+  // Expr::predicate_.
   const ParallelTypeBitmap& threadPredicate() const {
-    return thread_predicate_;
+    return attribute(numGroupedWelfordOpAttr() + 4)
+        ->as<Attribute<ParallelTypeBitmap>>()
+        ->value;
+  }
+  ParallelTypeBitmap& threadPredicate() {
+    return attribute(numGroupedWelfordOpAttr() + 4)
+        ->as<Attribute<ParallelTypeBitmap>>()
+        ->value;
   }
 
   GroupedGridWelford* withThreadPredicate(
       const ParallelTypeBitmap& thread_predicate) {
     auto result = shallowCopy()->as<GroupedGridWelford>();
-    result->thread_predicate_ = thread_predicate;
+    result->threadPredicate() = thread_predicate;
     return result;
   }
-
- private:
-  std::array<std::vector<Allocate*>, 3> reduction_buffers_;
-  Allocate* sync_buffer_ = nullptr;
-  // gridReduce has template flags for thread predicates. In order to
-  // use them, the thread predicate is held here separately from
-  // Expr::predicate_.
-  ParallelTypeBitmap thread_predicate_;
-  Val* entrance_index_ = nullptr;
-  Val* entrances_ = nullptr;
-  // Stride of reduction buffers
-  Val* buffer_stride_ = nullptr;
 };
 
 // Allocate an instance of the fused reduction class.
 class TORCH_CUDA_CU_API AllocateFusedReduction final : public Expr {
+  explicit AllocateFusedReduction(IrBuilderPasskey passkey, Expr* grid_expr);
+
  public:
-  explicit AllocateFusedReduction(
-      IrBuilderPasskey passkey,
-      GridReduction* grid_reduction);
+  using Expr::Expr;
 
   explicit AllocateFusedReduction(
       IrBuilderPasskey passkey,
-      GridWelford* grid_welford);
+      GridReduction* grid_reduction)
+      : AllocateFusedReduction(passkey, dynamic_cast<Expr*>(grid_reduction)) {}
 
   explicit AllocateFusedReduction(
       IrBuilderPasskey passkey,
-      GroupedGridReduction* grouped_grid_reduction);
+      GridWelford* grid_welford)
+      : AllocateFusedReduction(passkey, dynamic_cast<Expr*>(grid_welford)) {}
 
   explicit AllocateFusedReduction(
       IrBuilderPasskey passkey,
-      GroupedGridWelford* grouped_grid_welford);
+      GroupedGridReduction* grouped_grid_reduction)
+      : AllocateFusedReduction(
+            passkey,
+            dynamic_cast<Expr*>(grouped_grid_reduction)) {}
+
+  explicit AllocateFusedReduction(
+      IrBuilderPasskey passkey,
+      GroupedGridWelford* grouped_grid_welford)
+      : AllocateFusedReduction(
+            passkey,
+            dynamic_cast<Expr*>(grouped_grid_welford)) {}
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
     return "AllocateFusedReduction";
   }
 
-  Expr* shallowCopy() const override;
-
+  //! GridReduction, GridWelford, GroupedGridReduction or GroupedGridWelford
   Expr* gridExpr() const {
-    return grid_expr_;
+    return attribute(0)->asExpr();
   }
 
   TensorIndex* out() const;
 
   const ParallelTypeBitmap& threadPredicate() const;
-
- private:
-  //! GridReduction, GridWelford, GroupedGridReduction or GroupedGridWelford
-  Expr* grid_expr_ = nullptr;
 };
 
 } // namespace kir

@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#include <torch/csrc/jit/codegen/cuda/ir_builder_passkey.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -69,6 +70,14 @@ class ExprPasskey {
 };
 
 TORCH_CUDA_CU_API void swap(Fusion& a, Fusion& b) noexcept;
+
+#define NVFUSER_DECLARE_CLONE \
+  virtual Statement* clone(IrCloner* ir_cloner) const override;
+
+#define NVFUSER_DEFINE_CLONE(ClassName)                    \
+  Statement* ClassName::clone(IrCloner* ir_cloner) const { \
+    return IrBuilder::clone(this, ir_cloner);              \
+  }
 
 //! Statement is the highest level node representation. Everything that is
 //! considered "IR" will be derived from this class at some point. Both Values
@@ -158,6 +167,8 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
 
   std::string toString() const;
   std::string toInlineString() const;
+
+  virtual Statement* clone(IrCloner* ir_cloner) const;
 
  protected:
   Statement(IrBuilderPasskey);
@@ -353,6 +364,8 @@ class TORCH_CUDA_CU_API Val : public Statement {
 
   void resolveIndexDtype();
 
+  NVFUSER_DECLARE_CLONE
+
  protected:
   friend Fusion;
 
@@ -389,6 +402,31 @@ class TORCH_CUDA_CU_API Val : public Statement {
 
   // Expr evaluator idx;
   int evaluator_index_ = -1;
+};
+
+//! A Val object that stores a plain data. Note that this class is only intended
+//! to hold non-IR data, such as DataType, std::vector<int>, etc. Please don't
+//! use this class to hold IR nodes or their pointers.
+template <typename T>
+class TORCH_CUDA_CU_API Attribute : public Val {
+ public:
+  T value;
+  Attribute(IrBuilderPasskey passkey, const T& value)
+      : Val(passkey, ValType::Attribute), value(value) {}
+  Attribute(const Attribute* src, IrCloner* ir_cloner)
+      : Val(src, ir_cloner), value(src->value) {}
+  template <typename... Args>
+  Attribute(IrBuilderPasskey passkey, Args... args)
+      : Val(passkey, ValType::Attribute), value(std::forward<Args>(args)...) {}
+
+  NVFUSER_DECLARE_CLONE
+
+  bool sameAs(const Statement* other) const override {
+    if (auto pv = dynamic_cast<const Attribute*>(other)) {
+      return pv->value == value;
+    }
+    return false;
+  }
 };
 
 //!  A Expr represents a "computation." These are functions that takes inputs
@@ -436,11 +474,24 @@ class TORCH_CUDA_CU_API Expr : public Statement {
 
   Expr(const Expr* src, IrCloner* ir_cloner);
 
+  Expr(
+      IrBuilderPasskey,
+      std::vector<Val*> inputs,
+      std::vector<Val*> outputs,
+      std::vector<Statement*> attributes);
+
   // Creates a new instance of the expression with all its field copied.
   // Note that unlike IrCloner, this function only do a shallow copy
-  virtual Expr* shallowCopy() const = 0;
+  Expr* shallowCopy() const;
 
   bool sameAs(const Statement* other) const override;
+
+  // Creates a new instance of the same expression type with the given inputs,
+  // outputs, and attributes.
+  virtual Expr* newObject(
+      std::vector<Val*> inputs,
+      std::vector<Val*> outputs,
+      std::vector<Statement*> attributes) const = 0;
 
   // Input/output accessors
   const auto& inputs() const {
@@ -451,12 +502,24 @@ class TORCH_CUDA_CU_API Expr : public Statement {
     return outputs_;
   }
 
+  const auto& attributes() const {
+    return attributes_;
+  }
+
   auto input(size_t index) const {
-    return inputs_[index];
+    return inputs_.at(index);
   }
 
   auto output(size_t index) const {
-    return outputs_[index];
+    return outputs_.at(index);
+  }
+
+  auto attribute(size_t index) const {
+    return attributes_.at(index);
+  }
+
+  auto attributeVal(size_t index) const {
+    return dynamic_cast<Val*>(attributes_.at(index));
   }
 
   // Dispatch functions, definitions in dispatch.cpp
@@ -494,8 +557,6 @@ class TORCH_CUDA_CU_API Expr : public Statement {
   // TODO: Protect based on being in kernel container
   void setWritePredicate(kir::Predicate* write_predicate);
 
-  void copyPredicatesFrom(const Expr* expr);
-
   // TODO: Add Fusion passkey
   void addInput(Val* input) {
     TORCH_INTERNAL_ASSERT(input != nullptr);
@@ -508,6 +569,11 @@ class TORCH_CUDA_CU_API Expr : public Statement {
     outputs_.push_back(output);
   }
 
+  // TODO: Add Fusion passkey
+  void addAttribute(Statement* attr) {
+    attributes_.push_back(attr);
+  }
+
   ExprPasskey exprPasskey() {
     return ExprPasskey();
   }
@@ -515,6 +581,7 @@ class TORCH_CUDA_CU_API Expr : public Statement {
  private:
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
+  std::vector<Statement*> attributes_;
 
   kir::Predicate* predicate_ = nullptr;
 
@@ -529,6 +596,24 @@ bool Val::isDefinitionType() const {
   }
   return false;
 }
+
+#define NVFUSER_DECLARE_CLONE_AND_CREATE                        \
+  virtual Statement* clone(IrCloner* ir_cloner) const override; \
+  virtual Expr* newObject(                                      \
+      std::vector<Val*> inputs,                                 \
+      std::vector<Val*> outputs,                                \
+      std::vector<Statement*> attributes) const override;
+
+#define NVFUSER_DEFINE_CLONE_AND_CREATE(ClassName)                    \
+  Statement* ClassName::clone(IrCloner* ir_cloner) const {            \
+    return IrBuilder::clone(this, ir_cloner);                         \
+  }                                                                   \
+  Expr* ClassName::newObject(                                         \
+      std::vector<Val*> inputs,                                       \
+      std::vector<Val*> outputs,                                      \
+      std::vector<Statement*> attributes) const {                     \
+    return IrBuilder::create<ClassName>(inputs, outputs, attributes); \
+  }
 
 } // namespace cuda
 } // namespace fuser

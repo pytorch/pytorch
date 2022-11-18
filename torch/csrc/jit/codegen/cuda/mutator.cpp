@@ -236,7 +236,7 @@ void OptOutMutator::mutate(RNGOp* rop) {
   Val* out = maybeMutated(rop->output(0));
   Val* philox_idx = maybeMutated(rop->getPhiloxIndex());
 
-  auto& parameters = rop->getParameters();
+  auto parameters = rop->getParameters();
   std::vector<Val*> mutated_parameters;
   bool all_mutated_same = true;
   for (auto v : parameters) {

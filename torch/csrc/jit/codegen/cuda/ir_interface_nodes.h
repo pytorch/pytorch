@@ -38,6 +38,8 @@ class TORCH_CUDA_CU_API Bool : public Val {
 
   Bool(const Bool* src, IrCloner* ir_cloner);
 
+  NVFUSER_DECLARE_CLONE
+
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
   }
@@ -75,6 +77,8 @@ class TORCH_CUDA_CU_API FloatingPoint : public Val {
 
   FloatingPoint(const FloatingPoint* src, IrCloner* ir_cloner)
       : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
+
+  NVFUSER_DECLARE_CLONE
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -120,6 +124,8 @@ class TORCH_CUDA_CU_API Int : public Val {
 
   Int(const Int* src, IrCloner* ir_cloner);
 
+  NVFUSER_DECLARE_CLONE
+
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
   }
@@ -152,6 +158,8 @@ class TORCH_CUDA_CU_API ComplexDouble : public Val {
       c10::optional<ScalarType> value);
 
   ComplexDouble(const ComplexDouble* src, IrCloner* ir_cloner);
+
+  NVFUSER_DECLARE_CLONE
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -229,6 +237,8 @@ class TORCH_CUDA_CU_API TensorView : public Val {
       const std::shared_ptr<Value>& jit_value);
 
   TensorView(const TensorView* src, IrCloner* ir_cloner);
+
+  NVFUSER_DECLARE_CLONE
 
   TensorDomain* domain() const {
     return domain_;

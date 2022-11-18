@@ -140,6 +140,8 @@ TensorView::TensorView(
       "Function invalid for kernel container.");
 }
 
+NVFUSER_DEFINE_CLONE(TensorView)
+
 void TensorView::convertRfactorToRootDomain() {
   // For a given TensorView, does its domain (root / rfactor) contain any
   // concrete sized extents?

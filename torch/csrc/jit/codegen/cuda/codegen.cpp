@@ -2003,10 +2003,14 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     ArgumentBuilder read_preds;
     ArgumentBuilder write_preds;
 
+    auto output_vals = grouped_gwop->outputVals();
+    auto input_vals = grouped_gwop->inputVals();
+    auto init_vals = grouped_gwop->initVals();
+
     for (const auto expr_index : c10::irange(grouped_gwop->numExprs())) {
-      const auto& output = grouped_gwop->outputVals().at(expr_index);
-      const auto& input = grouped_gwop->inputVals().at(expr_index);
-      const auto& init = grouped_gwop->initVals().at(expr_index);
+      const auto& output = output_vals.at(expr_index);
+      const auto& input = input_vals.at(expr_index);
+      const auto& init = init_vals.at(expr_index);
 
       for (const auto& group_index :
            c10::irange(index_replacement_maps.size())) {
