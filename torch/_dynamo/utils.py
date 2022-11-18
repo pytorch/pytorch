@@ -734,21 +734,15 @@ try:
             log.warning(msg)
             raise unimplemented(msg)
 
-    def wrap_to_fake_tensor(e, fake_mode):
-        if type(e) in (torch.Tensor, torch.nn.Parameter):
-            return wrap_fake_exception(
-                lambda: make_fake_tensor(
-                    e, fake_mode, static_shapes=config.dynamic_shapes is False
-                )
-            )
-        else:
-            return e
-
-    def wrap_to_fake_tensor_and_record(e, tx):
+    def wrap_to_fake_tensor_and_record(e, tx, source=None):
         if type(e) in (torch.Tensor, torch.nn.Parameter):
             static_shapes = config.dynamic_shapes is False
             if type(e) is torch.nn.Parameter:
                 # Always static for params
+                assert source is not None
+                assert source.guard_source().is_nn_module()
+            
+            if source and source.guard_source().is_nn_module():
                 static_shapes = True
             return wrap_fake_exception(
                 lambda: make_fake_tensor(e, tx.fake_mode, static_shapes, tx)
