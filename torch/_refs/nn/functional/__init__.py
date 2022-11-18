@@ -20,10 +20,6 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
-from torch._refs import (
-    _make_elementwise_binary_reference,
-    _make_elementwise_unary_reference,
-)
 
 from torch._subclasses.fake_tensor import FakeTensor
 
