@@ -50,7 +50,7 @@ namespace c10d {
           ucc_status_string(result),                        \
           ", system error code ",                           \
           errno);                                           \
-      free_request(_request)                                \
+      ucc_collective_finalize(_request)                     \
       TORCH_CHECK(false, err);                              \
     }                                                       \
   } while (0)
