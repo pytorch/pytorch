@@ -219,8 +219,7 @@ class TestOnnxDiagnostics(common_utils.TestCase):
         # after node-level shape type inference and processed symbolic_fn output type
         self.assertTrue(
             any(
-                isinstance(message, str)
-                and "torch::jit::NodeToONNX" in message
+                isinstance(message, str) and "torch::jit::NodeToONNX" in message
                 for message in frame_messages
             )
         )
