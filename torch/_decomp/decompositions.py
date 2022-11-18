@@ -1412,7 +1412,9 @@ def native_batch_norm_legit(
     momentum: float,
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor]:
-   return native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps)
+    return native_batch_norm(
+        input, weight, bias, running_mean, running_var, training, momentum, eps
+    )
 
 
 @register_decomposition(aten.native_batch_norm_legit.no_stats)
@@ -1457,7 +1459,9 @@ def native_batch_norm_legit_functional(
             unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (
                 n / (n - 1)
             )
-            new_running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
+            new_running_var.copy_(
+                momentum * unbiased_var + (1 - momentum) * running_var
+            )
     else:
         assert running_mean is not None and running_var is not None
         new_running_mean = running_mean.to(dtype=computation_dtype, copy=True)
@@ -1487,7 +1491,13 @@ def native_batch_norm_legit_functional(
     if input.device.type == "cpu":
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
-    return output.to(dtype=input.dtype), save_mean, save_rstd, new_running_mean, new_running_var
+    return (
+        output.to(dtype=input.dtype),
+        save_mean,
+        save_rstd,
+        new_running_mean,
+        new_running_var,
+    )
 
 
 # @register_decomposition(aten.native_batch_norm_legit_functional.no_stats)
