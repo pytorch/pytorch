@@ -160,22 +160,20 @@ class TestGetSubmoduleToStates(TestCase):
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             return self.seq2(self.lin(self.seq1(x)))  # equivalent to one matmul
 
-    def test_module_wrap_policy_parent_child_sharing(self):
+    def test_module_wrap_policy(self):
         """
         Tests the module wrap policy on a nested model with buffers and a
-        shared parameter, where the shared parameter is between a parent and
-        child module.
+        shared parameter.
 
         NOTE: This test is hard coded against ``Model``.
         """
         model = self.Model(TestGetSubmoduleToStates.SharedParameterMode.PARENT_CHILD)
 
-        # Compute the mapping from submodule to states and the mapping from
-        # shared parameter to LCA module according to a logical module wrap
-        # policy
+        # Compute the mapping from submodule to states according to a logical
+        # module wrap policy
         module_classes = (nn.Sequential,)
         auto_wrap_policy = ModuleWrapPolicy(set(module_classes))
-        submodule_to_states, shared_param_to_lca_module = _get_submodule_to_states(
+        submodule_to_states = _get_submodule_to_states(
             model, auto_wrap_policy, set(), set()
         )
         # Check the number of submodules with states in the mapping
@@ -187,98 +185,39 @@ class TestGetSubmoduleToStates(TestCase):
         assert num_submodules_with_states == 4, f"{num_submodules_with_states}"
         self.assertEqual(len(submodule_to_states), num_submodules_with_states)
 
-        # Check that the submodule to states mapping follows a post-order
-        # (~bottom up) traversal and that the contents are expected
+        # Check the mapping, i.e. that the dict order follows a post-order
+        # traversal and that the contents are expected
         submodules = list(submodule_to_states.keys())
         # - Root module `model`
-        self.assertEqual(submodules[3], model)
-        root_states = submodule_to_states[submodules[3]]
+        self.assertEqual(submodules[0], model)
+        root_states = submodule_to_states[submodules[0]]
         self.assertEqual(root_states.params, [model.lin.weight])
+        self.assertEqual(root_states.param_names, ["lin.weight"])
         self.assertEqual(root_states.buffers, [])
-        # - `seq2`
-        self.assertEqual(submodules[2], model.seq2)
-        seq2_states = submodule_to_states[submodules[2]]
+        self.assertEqual(root_states.buffer_names, [])
+        # # - `seq2`
+        self.assertEqual(submodules[1], model.seq2)
+        seq2_states = submodule_to_states[submodules[1]]
         self.assertEqual(seq2_states.params, [model.seq2[1].weight])
+        self.assertEqual(seq2_states.param_names, ["1.weight"])
         self.assertEqual(seq2_states.buffers, [model.seq2[1].seq2_1_buffer])
+        self.assertEqual(seq2_states.buffer_names, ["1.seq2_1_buffer"])
         # - `seq2[0]`
-        self.assertEqual(submodules[1], model.seq2[0])
-        seq2_0_states = submodule_to_states[submodules[1]]
+        self.assertEqual(submodules[2], model.seq2[0])
+        seq2_0_states = submodule_to_states[submodules[2]]
         self.assertEqual(seq2_0_states.params, [])  # shared parameter
+        self.assertEqual(seq2_0_states.param_names, [])
         self.assertEqual(seq2_0_states.buffers, [])
+        self.assertEqual(seq2_0_states.buffer_names, [])
         # - `seq1`
-        self.assertEqual(submodules[0], model.seq1)
-        seq1_states = submodule_to_states[submodules[0]]
+        self.assertEqual(submodules[3], model.seq1)
+        seq1_states = submodule_to_states[submodules[3]]
         self.assertEqual(
             seq1_states.params, [model.seq1[0].weight, model.seq1[1].weight]
         )
+        self.assertEqual(seq1_states.param_names, ["0.weight", "1.weight"])
         self.assertEqual(seq1_states.buffers, [model.seq1.seq1_buffer])
-
-        # Check the shared parameter to LCA module mapping
-        self.assertEqual(len(shared_param_to_lca_module), 1)
-        self.assertIn(model.seq2[0][0].weight, shared_param_to_lca_module)
-        self.assertIn(model.lin.weight, shared_param_to_lca_module)  # same reference
-        self.assertEqual(shared_param_to_lca_module[model.seq2[0][0].weight], model)
-
-    def test_module_wrap_policy_sibling_sharing(self):
-        """
-        Tests the module wrap policy on a nested model with buffers and a
-        shared parameter, where the shared parameter is between sibling
-        modules.
-
-        NOTE: This test is hard coded against ``Model``.
-        """
-        model = self.Model(TestGetSubmoduleToStates.SharedParameterMode.SIBLING)
-
-        # Compute the mapping from submodule to states and the mapping from
-        # shared parameter to LCA module according to a logical module wrap
-        # policy
-        module_classes = (nn.Sequential,)
-        auto_wrap_policy = ModuleWrapPolicy(set(module_classes))
-        submodule_to_states, shared_param_to_lca_module = _get_submodule_to_states(
-            model, auto_wrap_policy, set(), set()
-        )
-        # Check the number of submodules with states in the mapping
-        num_submodules_with_states = sum(
-            isinstance(submodule, module_classes) for submodule in model.modules()
-        )  # explicitly show how to compute the expected number
-        if not isinstance(model, module_classes):
-            num_submodules_with_states += 1  # always include the root
-        assert num_submodules_with_states == 4, f"{num_submodules_with_states}"
-        self.assertEqual(len(submodule_to_states), num_submodules_with_states)
-
-        # Check that the submodule to states mapping follows a post-order
-        # (~bottom up) traversal and that the contents are expected
-        submodules = list(submodule_to_states.keys())
-        # - Root module `model`
-        self.assertEqual(submodules[3], model)
-        root_states = submodule_to_states[submodules[3]]
-        self.assertEqual(
-            root_states.params, [model.seq2[0][0].weight, model.lin.weight]
-        )
-        self.assertEqual(root_states.buffers, [])
-        # - `seq2`
-        self.assertEqual(submodules[2], model.seq2)
-        seq2_states = submodule_to_states[submodules[2]]
-        self.assertEqual(seq2_states.params, [model.seq2[1].weight])
-        self.assertEqual(seq2_states.buffers, [model.seq2[1].seq2_1_buffer])
-        # - `seq2[0]`
-        self.assertEqual(submodules[1], model.seq2[0])
-        seq2_0_states = submodule_to_states[submodules[1]]
-        self.assertEqual(seq2_0_states.params, [])  # shared parameter
-        self.assertEqual(seq2_0_states.buffers, [])
-        # - `seq1`
-        self.assertEqual(submodules[0], model.seq1)
-        seq1_states = submodule_to_states[submodules[0]]
-        self.assertEqual(seq1_states.params, [model.seq1[1].weight])
-        self.assertEqual(seq1_states.buffers, [model.seq1.seq1_buffer])
-
-        # Check the shared parameter to LCA module mapping
-        self.assertEqual(len(shared_param_to_lca_module), 1)
-        self.assertIn(model.seq2[0][0].weight, shared_param_to_lca_module)
-        self.assertIn(
-            model.seq1[0].weight, shared_param_to_lca_module
-        )  # same reference
-        self.assertEqual(shared_param_to_lca_module[model.seq2[0][0].weight], model)
+        self.assertEqual(seq1_states.buffer_names, ["seq1_buffer"])
 
 
 instantiate_parametrized_tests(TestUtils)
