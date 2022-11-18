@@ -269,7 +269,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
   if (node->kind() == onnx::Slice) {
     if (opset_version == ONNX_OPSET_9) {
       return runTorchSlice_opset9(node, inputTensorValues);
-    } else if (opset_version >= ONNX_OPSET_10) {
+    } else {
       return runTorchSlice_opset10(node, inputTensorValues);
     }
   } else if (node->kind() == onnx::Concat) {
@@ -327,7 +327,8 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         updated_val = at::unsqueeze(updated_val, axes[i]);
       }
       return c10::optional<at::Tensor>(updated_val);
-    } else if (opset_version >= ONNX_OPSET_9) {
+    } else {
+      // 13 > opset version >= 9
       assert(inputTensorValues.size() == 1);
       if (!node->hasAttributeS("axes")) {
         return c10::nullopt;
@@ -367,7 +368,8 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         }
       }
       return c10::optional<at::Tensor>(updated_val);
-    } else if (opset_version >= ONNX_OPSET_9) {
+    } else {
+      // 13 > opset version >= 9
       assert(inputTensorValues.size() == 1);
       updated_val = inputTensorValues[0];
       if (node->hasAttributeS("axes")) {
