@@ -7,7 +7,7 @@ namespace at {
 namespace native {
 
 template <typename T>
-inline std::vector<T> expand_param_if_needed(
+inline std::vector<T> _expand_param_if_needed(
     ArrayRef<T> list_param,
     const char* param_name,
     int64_t expected_dim) {
@@ -22,6 +22,20 @@ inline std::vector<T> expand_param_if_needed(
   } else {
     return list_param.vec();
   }
+}
+
+inline std::vector<int64_t> expand_param_if_needed(
+    IntArrayRef list_param,
+    const char* param_name,
+    int64_t expected_dim) {
+  return _expand_param_if_needed(list_param, param_name, expected_dim);
+}
+
+inline std::vector<c10::SymInt> expand_param_if_needed(
+    SymIntArrayRef list_param,
+    const char* param_name,
+    int64_t expected_dim) {
+  return _expand_param_if_needed(list_param, param_name, expected_dim);
 }
 
 } // namespace native
