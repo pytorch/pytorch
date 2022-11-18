@@ -110,6 +110,7 @@ class OutputGraph(fx.Tracer):
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
         self.tensor_id_to_sym_shape_ref = {}
         self.intermediary_symbols = {}
+        self.base_symbols = {}
 
     @property
     def output(self):
