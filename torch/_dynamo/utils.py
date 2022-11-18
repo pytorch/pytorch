@@ -19,6 +19,7 @@ import re
 import sys
 import time
 import types
+import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache
@@ -273,6 +274,13 @@ def istype(obj, allowed_types):
     if isinstance(allowed_types, (tuple, list, set)):
         return type(obj) in allowed_types
     return type(obj) is allowed_types
+
+
+def is_typing(value):
+    if sys.version_info < (3, 9):
+        return isinstance(value, typing._GenericAlias)
+    else:
+        return isinstance(value, typing._SpecialGenericAlias)
 
 
 def is_numpy_int_type(value):
