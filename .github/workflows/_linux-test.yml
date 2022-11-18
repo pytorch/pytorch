@@ -220,6 +220,7 @@ jobs:
       - name: Collect backtraces from coredumps (if any)
         if: always()
         run: |
+          # shellcheck disable=SC2156
           find . -iname "core.[1-9]*" -exec docker exec "${DOCKER_CONTAINER_ID}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
 
       - name: Store Core dumps on S3
