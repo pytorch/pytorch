@@ -5276,11 +5276,14 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 return self.linear(x)
 
+        # to avoid reduce_range
+        torch.backends.quantized.engine = "qnnpack"
         m = M().eval()
         qconfig_mapping = get_default_qconfig_mapping("fbgemm") \
             .set_object_type(torch.nn.Linear, default_dynamic_qconfig)
         example_inputs = (torch.randn(1, 5),)
         m = prepare_fx(m, qconfig_mapping, example_inputs)
+        m(*example_inputs)
         m_ref = copy.deepcopy(m)
         m_ref = convert_to_reference_fx(m_ref)
         m = _convert_to_reference_decomposed_fx(m)
