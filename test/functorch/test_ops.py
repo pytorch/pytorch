@@ -390,39 +390,6 @@ class TestOperators(TestCase):
 
             self.assertEqual(result, expected)
 
-    def _jvp_helper(self, device, dtype, op):
-        # TODO: get rid of vjp_decomp when we add decomposition support to
-        # PyTorch's forward-mode ad. Currently the decomposition support only
-        # works for functorch.jvp
-        VJP_DECOMP = {
-            'nn.functional.logsigmoid',
-        }
-        if op.name in VJP_DECOMP:
-            fixme_ref_jvp_local = simulate_jvp
-        else:
-            fixme_ref_jvp_local = ref_jvp
-
-        if not op.supports_forward_ad and op.name not in VJP_DECOMP:
-            self.skipTest("Skipped! Forward AD not supported.")
-            return
-
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
-
-        outplace_variant = op if not is_inplace(op, op.get_op()) else None
-        inplace_variant = op.inplace_variant if op.supports_inplace_autograd else None
-
-        for sample in samples:
-            if outplace_variant:
-                self.jvp_opinfo_test(outplace_variant, sample,
-                                     sample.output_process_fn_grad,
-                                     clone_inputs=False,
-                                     fixme_ref_jvp_local=fixme_ref_jvp_local)
-            if is_valid_inplace_sample_input(sample, op, inplace_variant):
-                self.jvp_opinfo_test(inplace_variant, sample,
-                                     sample.output_process_fn_grad,
-                                     clone_inputs=True,
-                                     fixme_ref_jvp_local=fixme_ref_jvp_local)
-
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvp', set({
         # Composite ops that do bad things. Need to be fixed in PyTorch core.
@@ -456,7 +423,38 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
     ))
     def test_jvp(self, device, dtype, op):
-        self._jvp_helper(device, dtype, op)
+        # TODO: get rid of vjp_decomp when we add decomposition support to
+        # PyTorch's forward-mode ad. Currently the decomposition support only
+        # works for functorch.jvp
+        VJP_DECOMP = {
+            'nn.functional.logsigmoid',
+        }
+        if op.name in VJP_DECOMP:
+            fixme_ref_jvp_local = simulate_jvp
+        else:
+            fixme_ref_jvp_local = ref_jvp
+
+        if not op.supports_forward_ad and op.name not in VJP_DECOMP:
+            self.skipTest("Skipped! Forward AD not supported.")
+            return
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        outplace_variant = op if not is_inplace(op, op.get_op()) else None
+        inplace_variant = op.inplace_variant if op.supports_inplace_autograd else None
+
+        for sample in samples:
+            if outplace_variant:
+                self.jvp_opinfo_test(outplace_variant, sample,
+                                     sample.output_process_fn_grad,
+                                     clone_inputs=False,
+                                     fixme_ref_jvp_local=fixme_ref_jvp_local)
+            if is_valid_inplace_sample_input(sample, op, inplace_variant):
+                self.jvp_opinfo_test(inplace_variant, sample,
+                                     sample.output_process_fn_grad,
+                                     clone_inputs=True,
+                                     fixme_ref_jvp_local=fixme_ref_jvp_local)
+
 
     def jvp_opinfo_test(self, fn, sample, output_process_fn,
                         clone_inputs, fixme_ref_jvp_local):
