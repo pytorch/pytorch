@@ -172,7 +172,9 @@ std::vector<std::string> MetricsArena::GetCounterNames() {
   std::vector<std::string> names;
   std::lock_guard<std::mutex> lock(lock_);
   for (auto& name_data : counters_) {
-    names.push_back(name_data.first);
+    if (name_data.second->Value() > 0) {
+      names.push_back(name_data.first);
+    }
   }
   return names;
 }
@@ -350,6 +352,34 @@ std::string CreateMetricReport() {
 
   // Append the backend metrics report
   ss << getBackend()->CreateMetricReport();
+  return ss.str();
+}
+
+std::string CreateMetricReport(
+    const std::vector<std::string>& counter_names,
+    const std::vector<std::string>& metric_names) {
+  MetricsArena* arena = MetricsArena::Get();
+  std::stringstream ss;
+  for (const std::string& metric_name : metric_names) {
+    MetricData* data = arena->GetMetric(metric_name);
+    if (data && data->TotalSamples() > 0) {
+      EmitMetricInfo(metric_name, data, &ss);
+    }
+  }
+  for (const std::string& counter_name : counter_names) {
+    CounterData* data = arena->GetCounter(counter_name);
+    if (data && data->Value() > 0) {
+      EmitCounterInfo(counter_name, data, &ss);
+    }
+  }
+  static std::string fall_back_counter_prefix = "aten::";
+  arena->ForEachCounter([&ss](const std::string& name, CounterData* data) {
+    if (name.rfind(fall_back_counter_prefix, 0) == 0 && data->Value() > 0) {
+      // it might emit duplicated counter if user also specified exact aten
+      // counter in the `counter_names` but it should be very rare.
+      EmitCounterInfo(name, data, &ss);
+    }
+  });
   return ss.str();
 }
 
