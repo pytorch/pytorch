@@ -21,7 +21,7 @@ from .convert_functions import (
     convert_conv2d_pool_flatten_linear,
 )
 
-__all__ = ["BaseStructuredSparsifier", "get_default_structured_pruning_patterns"]
+__all__ = ["BaseStructuredSparsifier"]
 
 def _get_supported_structured_pruning_modules():
     SUPPORTED_STRUCTURED_PRUNING_MODULES = {  # added to config if None given
@@ -80,7 +80,7 @@ def _get_supported_activation_modules():
     }
     return SUPPORTED_ACTIVATION_MODULES
 
-def get_default_structured_pruning_patterns():
+def _get_default_structured_pruning_patterns():
     """
     Returns the patterns for conv2d / linear conversion for each element in the activation functions/modules defined above.
     """
@@ -134,7 +134,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
     def __init__(self, defaults, patterns=None):
         super().__init__(defaults)
         if patterns is None:
-            patterns = get_default_structured_pruning_patterns()
+            patterns = _get_default_structured_pruning_patterns()
         self.patterns = patterns
 
     def make_config_from_model(
