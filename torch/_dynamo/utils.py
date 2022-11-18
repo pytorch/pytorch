@@ -739,8 +739,7 @@ try:
             static_shapes = config.dynamic_shapes is False
             if type(e) is torch.nn.Parameter:
                 # Always static for params
-                assert source is not None
-                assert source.guard_source().is_nn_module()
+                static_shapes = True
             
             if source and source.guard_source().is_nn_module():
                 static_shapes = True

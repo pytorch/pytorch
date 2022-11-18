@@ -25,7 +25,7 @@ except ImportError:
 # logging.WARN print warnings (including graph breaks)
 # logging.ERROR print exceptions (and what user code was being processed when it occurred)
 # NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
-log_level = logging.DEBUG
+log_level = logging.WARNING
 
 # the name of a file to write the logs to
 log_file_name = None

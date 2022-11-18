@@ -210,6 +210,7 @@ class OutputGraph(fx.Tracer):
         if isinstance(target, torch.Tensor):
             if source:
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
+
             def wrap_name(module_key):
                 return wrap_fx_proxy(
                     self,
