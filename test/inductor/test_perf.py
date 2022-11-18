@@ -5,6 +5,8 @@ from torch._dynamo.optimizations.backends import register_backend
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
+from torch.testing._internal.common_utils import  TEST_WITH_ROCM
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
 
@@ -25,7 +27,7 @@ def count_numel(f, *args):
     """
     metrics.reset()
     torch._dynamo.optimize("count_bytes_inductor")(f)(*args)
-    return str(metrics.num_bytes_accessed // 1)
+    return str(metrics.num_bytes_accessed // 4)
 
 
 def T(*size, device="cuda"):
@@ -90,7 +92,6 @@ class NumBytesMetricTests(TorchTestCase):
     def test_extern(self):
         def f(x):
             return torch.mm(x, x)
-
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), "200")
 
@@ -248,6 +249,12 @@ class FusionTests(TorchTestCase):
         inp = (T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), "300")
 
+    def test_nn(self):
+        def f(a, b):
+            return ((a - b)**2).sum(dim=-1).amax(dim=1)
+        inp = (T(10, 10, 3), T(10, 10, 3))
+        self.assertExpectedInline(count_numel(f, *inp), "210")
+
 
 class SchedulerFusionTests(TorchTestCase):
     """
@@ -314,3 +321,9 @@ class WouldBeNiceIfItWorked:
 
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), "200")
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+        run_tests(needs="filelock")

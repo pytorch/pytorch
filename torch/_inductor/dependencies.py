@@ -3,9 +3,11 @@ import dataclasses
 import itertools
 import logging
 import typing
+import torch
 from typing import Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
+import functools
 
 from . import config
 from .codegen.common import index_prevent_reordering
@@ -15,6 +17,10 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 Dep = Union["MemoryDep", "StarDep"]
+
+@functools.lru_cache(8)
+def get_dtype_size(dtype):
+    return torch.empty((), dtype=dtype).element_size()
 
 
 class MemoryDep(typing.NamedTuple):
@@ -69,7 +75,7 @@ class MemoryDep(typing.NamedTuple):
             return MemoryDep(renames[self.name], self.index, self.size)
         return self
 
-    def numel_hint(self):
+    def numbytes_hint(self):
         vars = set(self.index.free_symbols)
         size_vars_used = []
         for var in vars:
@@ -80,7 +86,7 @@ class MemoryDep(typing.NamedTuple):
 
         return V.graph.sizevars.size_hint(
             sympy_product([self.size[i] for i in size_vars_used])
-        )
+        ) * get_dtype_size(V.graph.get_dtype(self.name))
 
     def is_contiguous(self) -> bool:
         return isinstance(self.index, (sympy.Symbol, sympy.Integer))
@@ -95,17 +101,19 @@ class StarDep(typing.NamedTuple):
             return StarDep(renames[self.name])
         return self
 
-    def numel_hint(self):
+    def numbytes_hint(self):
         from .ir import MultiOutputLayout
 
         if self.name in V.graph.name_to_buffer:
             buf = V.graph.name_to_buffer[self.name]
-        else:
+        elif self.name in V.graph.graph_inputs:
             buf = V.graph.graph_inputs[self.name]
+        else:
+            return 1
         if hasattr(buf, "layout") and isinstance(buf.layout, MultiOutputLayout):
             # NB: Too annoying to acquire, should only be used for instrumentation
             return 1
-        return V.graph.sizevars.size_hint(sympy_product(buf.get_size()))
+        return V.graph.sizevars.size_hint(sympy_product(buf.get_size())) * get_dtype_size(buf.get_dtype())
 
     def is_contiguous(self) -> bool:
         return False
