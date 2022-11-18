@@ -56,7 +56,6 @@ from torch.distributed.fsdp._runtime_utils import (
     _reshard,
     _root_pre_forward,
     _should_free_in_backward,
-    _wait_for_computation_stream,
 )
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
 from torch.distributed.fsdp.api import (
