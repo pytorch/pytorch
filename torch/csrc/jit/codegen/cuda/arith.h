@@ -157,6 +157,11 @@ TORCH_CUDA_CU_API TensorView* uniform(
     Val* low,
     Val* high,
     DataType dtype);
+TORCH_CUDA_CU_API TensorView* normal(
+    const std::vector<Val*>& shape,
+    Val* mean,
+    Val* std,
+    DataType dtype);
 
 // TENSOR FACTORIES
 TORCH_CUDA_CU_API TensorView* full(

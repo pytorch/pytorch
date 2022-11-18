@@ -777,7 +777,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // TODO: TORCH_INTERNAL_ASSERT that the scheduler correctly creates an
     // innermost ID of size 4 (float) or size 2 (double)?
     auto index = genTensorIndex(rop->getPhiloxIndex()->as<kir::TensorIndex>());
-    int multiple = rop->dtype() == DataType::Double ? 2 : 4;
+    int multiple = rop->getPhiloxMultiple();
     indent() << "nvfuser_index_t linear_index" << rop->name() << " = " << index
              << ";\n";
     indent() << "nvfuser_index_t rng_subseq" << rop->name() << " = linear_index"
@@ -804,6 +804,12 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     code_ << "(rng_result, rng_component" << rop->name();
     switch (op_type) {
       case RNGOpType::UniformRange: {
+        auto parameters = rop->getParameters();
+        TORCH_INTERNAL_ASSERT(parameters.size() == 2);
+        code_ << ", " << gen(parameters[0]) << ", " << gen(parameters[1]);
+        break;
+      }
+      case RNGOpType::NormalGeneral: {
         auto parameters = rop->getParameters();
         TORCH_INTERNAL_ASSERT(parameters.size() == 2);
         code_ << ", " << gen(parameters[0]) << ", " << gen(parameters[1]);

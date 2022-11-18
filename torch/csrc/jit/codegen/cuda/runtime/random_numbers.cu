@@ -46,7 +46,7 @@ __device__ uint4 philox(
 
 __device__ float uniformf(unsigned int x) {
   constexpr float kRanInvM32 = 2.3283064e-10f; // Inverse of 2^32.
-  float result = x * kRanInvM32;
+  float result = x * kRanInvM32 + kRanInvM32 / 2.0f;
   return result == 1 ? 0.0f : result;
 }
 
@@ -86,4 +86,61 @@ __device__ float rng_uniform_rangef(
   auto range = to - from;
   auto uniform01 = rng_uniformf(rng_result, rng_component);
   return from + range * uniform01;
+}
+
+__device__ float normalf(unsigned int x, unsigned int y, int rng_component) {
+  float u = uniformf(x);
+  float v = uniformf(y) * 6.2831855f;
+
+  if (rng_component % 2 == 0) {
+    return sqrtf(-2.0f * logf(u)) * sinf(v);
+  } else {
+    return sqrtf(-2.0f * logf(u)) * cosf(v);
+  }
+}
+
+__device__ double normal(unsigned int x0, unsigned int x1,
+                         unsigned int y0, unsigned int y1,
+                         int rng_component) {
+  double u = uniform(x0, x1);
+  double v = uniform(y0, y1) * 6.2831853071795860;
+
+  if (rng_component % 2 == 0) {
+    return sqrt(-2.0 * log(u)) * sin(v);
+  } else {
+    return sqrt(-2.0 * log(u)) * cos(v);
+  }
+}
+
+__device__ double rng_normal_standard(
+    const uint4& rng_result,
+    int rng_component) {
+  return normal(rng_result.x, rng_result.y, rng_result.z, rng_result.w, rng_component);
+}
+
+__device__ float rng_normal_standardf(
+    const uint4& rng_result,
+    int rng_component) {
+  return normalf(
+    (&rng_result.x)[rng_component / 2 * 2],
+    (&rng_result.y)[rng_component / 2 * 2],
+    rng_component);
+}
+
+__device__ double rng_normal_general(
+    const uint4& rng_result,
+    int rng_component,
+    double mean,
+    double std) {
+  auto normal01 = rng_normal_standard(rng_result, rng_component);
+  return normal01 * std + mean;
+}
+
+__device__ float rng_normal_generalf(
+    const uint4& rng_result,
+    int rng_component,
+    float mean,
+    float std) {
+  auto normal01 = rng_normal_standardf(rng_result, rng_component);
+  return normal01 * std + mean;
 }

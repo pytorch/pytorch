@@ -338,6 +338,10 @@ class TORCH_CUDA_CU_API RNGOp : public Expr {
     philox_index_ = index;
   }
 
+  int getPhiloxMultiple() const {
+    return dtype_ == DataType::Double ? 2 : 4;
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:

@@ -505,6 +505,23 @@ TensorView* uniform(
   return out;
 }
 
+TensorView* normal(
+    const std::vector<Val*>& shape,
+    Val* mean,
+    Val* std,
+    DataType dtype) {
+  auto n = shape.size();
+  auto out = TensorViewBuilder()
+                 .ndims(n)
+                 .dtype(dtype)
+                 .contiguity(std::vector<bool>(n, true))
+                 .shape(shape)
+                 .build();
+  IrBuilder::create<RNGOp>(
+      RNGOpType::NormalGeneral, out, dtype, std::vector<Val*>{mean, std});
+  return out;
+}
+
 TensorView* rand_like(TensorView* tv) {
   TORCH_CHECK(
       isFloatingPointType(tv->dtype()),
