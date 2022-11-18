@@ -315,6 +315,16 @@ class TestMPS(TestCase):
         self.assertEqual(output_cpu, output_mps)
         self.assertEqual(output_cpu.size(), output_mps.size())
 
+    def test_trace(self):
+        M_cpu = torch.randn(3, 3)
+        M_mps = M_cpu.detach().clone().to("mps")
+
+        output_cpu = torch.trace(M_cpu)
+        output_mps = torch.trace(M_mps)
+
+        self.assertEqual(output_cpu, output_mps)
+        self.assertEqual(output_cpu.size(), output_mps.size())
+
     def test_addbmm(self):
         M_cpu = torch.randn(3, 5)
         batch1_cpu = torch.randn(10, 3, 4)
@@ -2623,6 +2633,47 @@ class TestNLLLoss(TestCase):
         helper(2, 8, 4, 5, torch.float32)
         helper(2, 8, 4, 5, torch.int32)
         # helper(2, 8, 4, 5, torch.int64)
+
+    def test_median(self):
+        def helper_dtype_int32(n1, n2, n3):
+            cpu_x = torch.randint(50, (n1, n2, n3), device='cpu', dtype=torch.int32)
+            mps_x = cpu_x.detach().clone().to('mps')
+
+            result_cpu = torch.median(cpu_x)
+            result_mps = torch.median(mps_x)
+
+            self.assertEqual(result_cpu, result_mps)
+
+            for dim in [0, 1, 2]:
+                for keepdim in [True, False]:
+                    y, idx = torch.median(cpu_x, dim=dim, keepdim=keepdim)
+                    refy, refidx = torch.median(mps_x, dim=dim, keepdim=keepdim)
+                    self.assertEqual(y, refy)
+                    self.assertEqual(idx, refidx)
+
+        def helper_dtype_float32(n1, n2, n3):
+            cpu_x = torch.randn(n1, n2, n3, device='cpu', dtype=torch.float32)
+            mps_x = cpu_x.detach().clone().to('mps')
+
+            result_cpu = torch.median(cpu_x)
+            result_mps = torch.median(mps_x)
+
+            self.assertEqual(result_cpu, result_mps)
+
+            for dim in [0, 1, 2]:
+                for keepdim in [True, False]:
+                    y, idx = torch.median(cpu_x, dim=dim, keepdim=keepdim)
+                    refy, refidx = torch.median(mps_x, dim=dim, keepdim=keepdim)
+                    self.assertEqual(y, refy)
+                    self.assertEqual(idx, refidx)
+
+        helper_dtype_int32(10, 10, 10)  # median at even place
+        helper_dtype_int32(3, 3, 3)  # median at odd place
+        helper_dtype_int32(1, 1, 1)
+        helper_dtype_int32(1, 2, 3)
+        helper_dtype_float32(10, 10, 10)
+        helper_dtype_float32(3, 3, 3)
+        helper_dtype_float32(1, 1, 1)
 
     def test_any(self):
         def helper(shape):
@@ -5100,10 +5151,14 @@ class TestNNMPS(NNTestCase):
 
     # The test should not crash
     def test_permute(self):
-        X = torch.randn(5, 5).to('mps')
-        torch.log(X)
-        X = X.permute(1, 0)
-        torch.log(X)
+        M_cpu = torch.randn(5, 5)
+        M_mps = M_cpu.to('mps')
+
+        output_cpu = M_cpu.permute(1, 0)
+        output_mps = M_mps.permute(1, 0)
+
+        self.assertEqual(output_cpu, output_mps)
+        self.assertEqual(output_cpu.size(), output_mps.size())
 
     # Printing of non_contiguous should not crash
     def test_print_non_contiguous(self):
