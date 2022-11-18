@@ -93,9 +93,9 @@ def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
     with V.set_graph_handler(graph):
         graph.run(*example_inputs)
-        num_bytes, nodes_num_bytes = graph.count_bytes()
+        num_bytes, nodes_num_elem = graph.count_bytes()
         metrics.num_bytes_accessed += num_bytes
-        metrics.nodes_num_bytes += nodes_num_bytes
+        metrics.nodes_num_elem += nodes_num_elem
     return make_boxed_func(gm.forward)
 
 
