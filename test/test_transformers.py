@@ -1119,12 +1119,11 @@ class TestTransformers(NNTestCase):
             key = key.contiguous()
             value = value.contiguous()
 
-
         with sdp_kernel(enable_math=True, enable_mem_efficient=False, enable_flash=False):
             assert gradcheck(lambda *args, **kwargs:
-                                wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs),
-                                (query, key, value, None, 0.0, False, False)
-                                )
+                             wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs),
+                             (query, key, value, None, 0.0, False, False)
+                             )
 
     @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM or IS_WINDOWS, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
@@ -1158,9 +1157,9 @@ class TestTransformers(NNTestCase):
         with sdp_kernel(enable_math=True, enable_mem_efficient=False, enable_flash=False):
             out, atten = torch.nn.functional._scaled_dot_product_attention(query, key, value, None, 0.0, False, False)
 
-
         with sdp_kernel(enable_math=False, enable_mem_efficient=True, enable_flash=False):
-            out_lp, atten_lp = torch.nn.functional._scaled_dot_product_attention(query_lp, key_lp, value_lp, None, 0.0, False, False)
+            out_lp, atten_lp = torch.nn.functional._scaled_dot_product_attention(
+                query_lp, key_lp, value_lp, None, 0.0, False, False)
 
         rand_upward = torch.rand_like(out)
         rand_upward_lp = rand_upward.to(torch.float32)
