@@ -2,6 +2,7 @@ import copy
 import functools
 import itertools
 import operator
+import contextlib
 
 import torch
 from torch.fx.node import map_aggregate
@@ -128,7 +129,10 @@ def has_mutation(gm, example_inputs, fake_mode, inputs_only=False):
         # when dynamic shapes are enabled.
         # We don't actually care about the guards that are created
         # on those shapes though, so just suppress_guards here.
-        with fake_mode.shape_env.suppress_guards():
+        ctx = contextlib.nullcontext()
+        if fake_mode.shape_env:
+            ctx = fake_mode.shape_env.suppress_guards()
+        with ctx:
             new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
             with fake_mode, enable_python_dispatcher():
                 ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
