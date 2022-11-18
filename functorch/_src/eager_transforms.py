@@ -1107,7 +1107,7 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
                 kwargs = _wrap_all_tensors(kwargs, level)
                 diff_args = _slice_argnums(args, argnums, as_tuple=False)
                 tree_map_(partial(_create_differentiable, level=level), diff_args)
-
+                _unused_clone = tree_map(torch.clone, args)
                 output = func(*args, **kwargs)
                 if has_aux:
                     if not (isinstance(output, tuple) and len(output) == 2):

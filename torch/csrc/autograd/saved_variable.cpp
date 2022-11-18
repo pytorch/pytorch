@@ -6,7 +6,8 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
-
+#include <ATen/functorch/TensorWrapper.h>
+#include <iostream>
 #include <ATen/Tensor.h>
 
 #include <cstdint>
@@ -18,10 +19,15 @@ namespace torch {
 namespace autograd {
 
 SavedVariable::SavedVariable(
-    const Variable& variable,
+    const Variable& variable_,
     bool is_output,
     bool is_inplace_on_view) {
-  if (variable.defined()) {
+  if (variable_.defined()) {
+    auto variable = variable_;
+    if (variable.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::FuncTorchGradWrapper)) {
+      at::functorch::TensorWrapper* impl = reinterpret_cast<at::functorch::TensorWrapper*>(variable.unsafeGetTensorImpl());
+      variable = impl->value();
+    }
     // Note [Inference tensor cannot be saved for backward]
     // Invariant:
     //   You can't save an inference tensor for backwards.
@@ -204,8 +210,12 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
     return data_;
   }
 
-  const auto data = hooks_ ? hooks_->call_unpack_hook() : data_;
-
+  auto data = hooks_ ? hooks_->call_unpack_hook() : data_;
+  if (data.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::FuncTorchGradWrapper)) {
+    data = data.alias();
+    at::functorch::TensorWrapper* impl = reinterpret_cast<at::functorch::TensorWrapper*>(data.unsafeGetTensorImpl());
+    data = impl->value();
+  }
   // NB: saved views are unpacked as normal Variables (not views) even though
   // they still share the same storage. This works only because we never call
   // in-place functions on unpacked variables.
@@ -222,6 +232,8 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // should have saved the grad accumulator. Even if the Variable is no longer
   // alive, the accumulator should be kept alive by the references in the
   // graph.
+  // Why do we assume that?
+
   if (is_leaf_ && requires_grad_) {
     TORCH_INTERNAL_ASSERT(
         !grad_accumulator_.expired(), "No grad accumulator for a saved leaf");
