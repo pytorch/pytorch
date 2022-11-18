@@ -36,17 +36,25 @@ def count_numel(f, *args):
     return str(metrics.num_bytes_accessed // 4)
 
 
-def T(*size, dtype=torch.float32, device="cuda"):
+DEVICE = "cuda"
+
+
+def T(*size, dtype=torch.float32, device=DEVICE):
     return torch.randn(size, dtype=dtype, device=device)
 
 
+def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
+    return torch.randint(0, mx, size, dtype=dtype, device=device)
+
+
 class TestCase(TorchTestCase):
+    device = DEVICE
     pass
 
 
 class NumBytesMetricTests(TestCase):
     """
-    Primarily used for testing that the num_bytes_accessed metrics is correct.
+    Primarily used for sanity testing that the num_bytes_accessed metrics is correct.
     """
 
     def test_pointwise(self):
@@ -155,9 +163,18 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10),)
         self.assertExpectedInline(count_numel(f, *inp), """30""")
 
+    def test_index(self):
+        def f(a, b):
+            return a[b]
+
+        inp = (T(10), TI(10, mx=10))
+        self.assertExpectedInline(count_numel(f, *inp), """30""")
+
 
 class FusionTests(TestCase):
-    device = """cuda"""
+    """
+    Tests that things can be fused into a single kernel
+    """
 
     def test_horizontal_reduction_pointwise(self):
         def f(a):
@@ -267,10 +284,34 @@ class FusionTests(TestCase):
         inp = (T(10, 1, 4), T(1, 10, 4))
         self.assertExpectedInline(count_numel(f, *inp), """90""")
 
+    def test_factory_reduction(self):
+        def f():
+            a = torch.ones(10, device=self.device)
+            b = torch.ones(10, 10, device=self.device)
+            return (a + b).sum(dim=-1)
+
+        inp = ()
+        self.assertExpectedInline(count_numel(f, *inp), """10""")
+
+    def test_index_pointwise(self):
+        def f(a, b):
+            return a[b].cos()
+
+        inp = (T(10, 10), TI(20, mx=10))
+        self.assertExpectedInline(count_numel(f, *inp), """320""")
+
+    def test_index_reduction(self):
+        def f(a, b):
+            return a[b].cos().sum(dim=1)
+
+        inp = (T(10, 10), TI(20, mx=10))
+        self.assertExpectedInline(count_numel(f, *inp), """140""")
+
 
 class SchedulerFusionTests(TestCase):
     """
-    Testing the fusion group creation heuristic.
+    Testing the fusion group creation heuristic (i.e. cases where we can't fuse
+    everything into a single kernel)
     Disables inductor rematerialization for easier reasoning of tests.
     """
 
@@ -321,6 +362,28 @@ class SchedulerFusionTests(TestCase):
 
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """800""")
+
+
+class TilingTests(TestCase):
+    def test_tiling_simple(self):
+        def f(a, b):
+            return a + b.t()
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """300""")
+
+        def f(a, b):
+            return a.t() + b
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """300""")
+
+    def test_tiling_three(self):
+        def f(a, b, c):
+            return a + b.permute(1, 2, 0) + c.permute(2, 0, 1)
+
+        inp = (T(10, 10, 10), T(10, 10, 10), T(10, 10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """4000""")
 
 
 # Test cases where we don't do the right thing yet.
