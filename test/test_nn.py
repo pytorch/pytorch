@@ -36,6 +36,8 @@ from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 import torch.nn.utils.parametrize as parametrize
 import torch.nn.utils.prune as prune
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
+from torch.nn.utils.fusion import fuse_conv_bn_weights
+from torch.nn.utils.fusion import fuse_linear_bn_weights
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes
@@ -11778,6 +11780,36 @@ class TestNNDeviceType(NNTestCase):
         data = torch.rand(880801, 1, 1, 1, device=device, dtype=dtype)
         out = bn(data).sum().backward()
 
+    @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.complex128)
+    @dtypes(torch.float, torch.double, torch.bfloat16, torch.complex128)
+    def test_conv_empty_input(self, device, dtype):
+        def help(input, conv, memory_format):
+            ref_out = conv(input)
+            conv_cl = conv.to(memory_format=memory_format)
+            out_cl = conv_cl(input)
+            self.assertEqual(ref_out, out_cl)
+            input_cl = input.to(memory_format=memory_format)
+            out_cl2 = conv(input_cl)
+            self.assertEqual(out_cl, out_cl2)
+            out_cl3 = conv_cl(input_cl)
+            self.assertEqual(out_cl, out_cl3)
+
+        # channels_last case
+        input2d = torch.randn((0, 4, 20, 20)).to(device=device, dtype=dtype)
+        conv2d = torch.nn.Conv2d(4, 4, 3, 1).to(device=device, dtype=dtype)
+        help(input2d, conv2d, torch.channels_last)
+        # channels_last_3d case
+        input3d = torch.randn((0, 4, 20, 20, 20)).to(device=device, dtype=dtype)
+        conv3d = torch.nn.Conv3d(4, 4, 3, 1).to(device=device, dtype=dtype)
+        help(input3d, conv3d, torch.channels_last_3d)
+        # non-contiguous case
+        weight = torch.rand(4, 8, 3, 3)[:, ::2, :, :].to(device=device, dtype=dtype)
+        bias = torch.rand(4).to(device=device, dtype=dtype)
+        out = F.conv2d(input2d, weight, bias, (1, 1), 0, (1, 1), 1)
+        weight = weight.contiguous()
+        out_ref = F.conv2d(input2d, weight, bias, (1, 1), 0, (1, 1), 1)
+        self.assertEqual(out_ref, out)
+
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
@@ -14658,6 +14690,9 @@ class TestNNDeviceType(NNTestCase):
             test_bfloat16(torch.nn.Softshrink(), device, shape, prec=1e-2)
             test_bfloat16(torch.nn.Hardswish(), device, shape, prec=2e-2)
             test_bfloat16(torch.nn.Softplus(), device, shape, prec=1e-2)
+            test_bfloat16(torch.nn.SiLU(), device, shape, prec=1e-2)
+            test_bfloat16(torch.nn.Hardtanh(), device, shape, prec=1e-2)
+            test_bfloat16(torch.nn.Mish(), device, shape, prec=1e-2)
 
     @onlyCUDA
     def test_activations_bfloat16(self, device):
@@ -16317,6 +16352,32 @@ class TestStateDictHooks(TestCase):
             m.load_state_dict(sd)
             self.assertTrue(called)
 
+class TestFusionUtils(TestCase):
+    def test_fuse_conv_bn_requires_grad(self):
+        conv = torch.nn.Conv2d(3, 3, 3)
+        bn = torch.nn.BatchNorm2d(3)
+        cases = itertools.product([True, False], [True, False])
+        for w_rg, b_rg in cases:
+            conv.weight.requires_grad = w_rg
+            conv.bias.requires_grad = b_rg
+            weight, bias = \
+                fuse_conv_bn_weights(conv.weight, conv.bias,
+                                     bn.running_mean, bn.running_var, bn.eps, bn.weight, bn.bias)
+            self.assertEqual(weight.requires_grad, w_rg)
+            self.assertEqual(bias.requires_grad, b_rg)
+
+    def test_fuse_linear_bn_requires_grad(self):
+        linear = torch.nn.Linear(3, 3)
+        bn = torch.nn.BatchNorm1d(3)
+        cases = itertools.product([True, False], [True, False])
+        for w_rg, b_rg in cases:
+            linear.weight.requires_grad = w_rg
+            linear.bias.requires_grad = b_rg
+            weight, bias = \
+                fuse_linear_bn_weights(linear.weight, linear.bias,
+                                       bn.running_mean, bn.running_var, bn.eps, bn.weight, bn.bias)
+            self.assertEqual(weight.requires_grad, w_rg)
+            self.assertEqual(bias.requires_grad, b_rg)
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 instantiate_parametrized_tests(TestNN)
