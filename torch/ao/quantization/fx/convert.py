@@ -110,14 +110,14 @@ def _replace_observer_with_quantize_dequantize_node(
     assert modules is not None
     assert isinstance(node.target, str)
     module_path, prefix = get_module_path_and_prefix(node, node_name_to_scope, node_name_to_qconfig)
-    observer_module = modules[node.target]
+    activation_post_process = modules[node.target]
     # Skip replacing observers to quant/dequant nodes if the qconfigs of all
     # consumers and producers of this observer are None
     skip_replacement = all([
         has_none_qconfig(n, node_name_to_qconfig) for n in
         list(node.args) + list(node.users.keys())])
-    if skip_replacement or not _is_conversion_supported(observer_module):
-        # didn't find correponding quantize op and info for the observer_module
+    if skip_replacement or not _is_conversion_supported(activation_post_process):
+        # didn't find correponding quantize op and info for the activation_post_process
         # so we just remove the observer
         with graph.inserting_before(node):
             node.replace_all_uses_with(node.args[0])
