@@ -166,8 +166,8 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
                      * the appropriate bin via simple division.
                      */
                     pos = static_cast<int64_t>((elt - leftmost_edge[dim])
-                            / (rightmost_edge[dim] - leftmost_edge[dim])
-                            * (num_bin_edges[dim] - 1));
+                            * (num_bin_edges[dim] - 1)
+                            / (rightmost_edge[dim] - leftmost_edge[dim]));
 
                     /* Ensures consistency with bin_edges by checking the bins to the left and right
                      * of the selected position. Necessary for cases in which an element very close
