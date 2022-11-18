@@ -21,7 +21,8 @@ namespace at {
 
 TORCH_API std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b);
 TORCH_API DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b);
-TORCH_API SymDimVector infer_size_symdimvector(SymIntArrayRef a, SymIntArrayRef b);
+TORCH_API SymDimVector
+infer_size_symdimvector(SymIntArrayRef a, SymIntArrayRef b);
 
 // Named type instead of a pair/tuple so that we can be sure to
 // construct the vectors in place and get NRVO.

@@ -112,6 +112,10 @@ class OutputGraph(fx.Tracer):
         self.intermediary_symbols = {}
         self.base_symbols = {}
 
+        # Enables creating unique node names by tracking
+        # all current placeholder node names
+        self.name_to_input = collections.OrderedDict()
+
     @property
     def output(self):
         return self
@@ -149,6 +153,7 @@ class OutputGraph(fx.Tracer):
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
                 self.real_value_cache.pop(node, None)
+                self.name_to_input.pop(node.name, None)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -164,22 +169,22 @@ class OutputGraph(fx.Tracer):
         return obj
 
     def create_graph_input(self, name, type_expr=None):
-        placeholders = [n for n in self.graph.nodes if n.op == "placeholder"]
-
         # unique
-        used_names = {n.target for n in placeholders}
-        if name in used_names:
+        if name in self.name_to_input:
             for i in itertools.count():
-                if f"{name}_{i}" not in used_names:
+                if f"{name}_{i}" not in self.name_to_input:
                     name = f"{name}_{i}"
                     break
 
-        if placeholders:
-            ctx = self.graph.inserting_after(placeholders[-1])
+        if self.name_to_input:
+            prev_name = next(reversed(self.name_to_input))
+            ctx = self.graph.inserting_after(self.name_to_input[prev_name])
         else:
             ctx = self.graph.inserting_before(None)
         with ctx:
-            return self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
+            proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
+            self.name_to_input[name] = proxy.node
+            return proxy
 
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
@@ -508,6 +513,7 @@ class OutputGraph(fx.Tracer):
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
                 self.real_value_cache.pop(node, None)
+                self.name_to_input.pop(node.name, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
 
@@ -543,6 +549,7 @@ class OutputGraph(fx.Tracer):
             if "example_value" in node.meta:
                 del node.meta["example_value"]
         self.real_value_cache.clear()
+        self.name_to_input.clear()
 
     def create_proxy(
         self,

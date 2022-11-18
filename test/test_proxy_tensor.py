@@ -14,6 +14,7 @@ from torch.testing._internal.common_methods_invocations import op_db, wrapper_se
 from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
 from torch._decomp import decomposition_table
+from torch.fx.experimental.symbolic_shapes import sym_float
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule, has_proxy
@@ -962,8 +963,27 @@ def forward(self, a_1):
         # happened afterwards
         self.assertTrue(meta_inp.meta['val'].shape[0].get_pyobj().expr == 3)
 
+    def test_elementwise_meta_with_sym_numbers(self):
+        def f(x, offset, as_sym_float=False):
+            x0 = x.size()[0]
+            if as_sym_float:
+                x0 = sym_float(x0)
+            return torch.add(x0, offset)
 
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.rand(2, 3), 2.0, False)
+        meta_add = _get_node(fx_g, lambda x: x.target == aten.add.Tensor)
+        self.assertEqual(meta_add.meta['val'].shape, ())
+        self.assertEqual(meta_add.meta['val'].dtype, torch.float32)
 
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.rand(2, 3), 2, False)
+        meta_add = _get_node(fx_g, lambda x: x.target == aten.add.Tensor)
+        self.assertEqual(meta_add.meta['val'].shape, ())
+        self.assertEqual(meta_add.meta['val'].dtype, torch.int64)
+
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.rand(2, 3), 2, True)
+        meta_add = _get_node(fx_g, lambda x: x.target == aten.add.Tensor)
+        self.assertEqual(meta_add.meta['val'].shape, ())
+        self.assertEqual(meta_add.meta['val'].dtype, torch.float32)
 
     @unittest.expectedFailure
     def test_backwards(self):
@@ -1339,7 +1359,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta function/decompos...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('nn.functional.smooth_l1_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.unfold', ''),  # aten.im2col.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.upsample_nearest', ''),  # aten.upsample_nearest1d.vec - couldn't find symbolic meta function/deco...
     xfail('nonzero', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('norm', 'nuc'),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
@@ -1363,10 +1382,6 @@ symbolic_tensor_failures = {
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('roll', ''),  # Tensors of type TensorImpl do not have numel
-    xfail('round', ''),  # aten.round.default - couldn't find symbolic meta function/decomposition
-    xfail('round', 'decimals_0'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
-    xfail('round', 'decimals_3'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
-    xfail('round', 'decimals_neg_3'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
     xfail('searchsorted', ''),  # Could not run 'aten::searchsorted.Tensor' with arguments from the 'Meta' backend. ...
     xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
@@ -1495,6 +1510,10 @@ inplace_symbolic_tensor_failures = {
     xfail('uniform', ''),  # aten.uniform_.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('xlogy', ''),  # aten.xlogy_.Tensor - couldn't find symbolic meta function/decomposition
+    xfail('round', ''),  # aten.round_.default - couldn't find symbolic meta function/decomposition
+    xfail('round', 'decimals_0'),  # aten.round_.decimals - couldn't find symbolic meta function/decomposition
+    xfail('round', 'decimals_3'),  # aten.round_.decimals - couldn't find symbolic meta function/decomposition
+    xfail('round', 'decimals_neg_3')  # aten.round_.decimals - couldn't find symbolic meta function/decomposition
 }
 
 # Copies inputs to inplace operations to avoid inplace modifications
