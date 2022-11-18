@@ -24,27 +24,26 @@
 #endif
 
 template <typename index_t>
-kernel void compute_mps_kernel(device int64_t* _repeat_ptr,
-    	device int64_t* _cumsum_ptr,
-    	device index_t* _result_ptr,
-      int64_t idx [[thread_position_in_grid]])
+kernel void compute_mps_kernel(at::mps:device int64_t* _repeat_ptr,
+    	at::mps:device int64_t* _cumsum_ptr,
+    	at::mps:device index_t* _result_ptr,
+      uint idx [[thread_position_in_grid]])
     {
-    	using namespace at::mps;
 
-
+      using namespace mps;
 
     	int64_t stride = (threadGroupSize * block) / C10_WARP_SIZE;
     	int warp_id = idx / C10_WARP_SIZE;
     	int tid_in_warp = idx % C10_WARP_SIZE;
     	for (int64_t i = warp_id; i < size; i += stride)
     	{
-    		int64_t end = cumsum_ptr[i];
-    		index_t repeat = repeat_ptr[i];
+    		int64_t end = _cumsum_ptr[i];
+    		index_t repeat = _repeat_ptr[i];
     		for (int64_t j = start + tid_in_warp; j < end; j += C10_WARP_SIZE)
     		{
     			result_ptr[j] = i;
     		}
-    		}
+    	}
     }
 
 template <typename index_t>
@@ -59,7 +58,7 @@ void compute_mps(index_t* repeat_ptr,
             int64_t block = 512;
     			  int64_t warps_per_block = block / C10_WARP_SIZE;
 
-    			  NSUInteger threadGroupSize = ((size + warps_per_block - 1) / warps_per_block, 2048);
+    			  NSUInteger threadGroupSize = ((size + warps_per_block - 1) / warps_per_block);
     			  if (threadGroupSize > 2048)
     			  {
     				  threadGroupSize = 2048;
@@ -69,7 +68,7 @@ void compute_mps(index_t* repeat_ptr,
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
 dispatch_sync(mpsStream->queue(), ^(){
-
+@autoreleasepool {
   NSError* error = nil;
 
 
@@ -83,8 +82,8 @@ dispatch_sync(mpsStream->queue(), ^(){
   id<MTLBuffer> _cumsum_ptr = [device newBufferWithLength:size options:MTLResourceStorageModeShared];
   id<MTLBuffer> _result_ptr = [device newBufferWithLength:result_size options:MTLResourceStorageModeShared];
 
-  _repeat_ptr = repeat_ptr;
-  _cumsum_ptr = cumsum_ptr;
+  _repeat_ptr.contents = repeat_ptr;
+  _cumsum_ptr.contents = cumsum_ptr;
 
   [computeEncoder setComputePipelineState:_mAddFunctionPSO];
   [computeEncoder setBuffer:_repeat_ptr offset:0 atIndex:0];
@@ -97,12 +96,9 @@ dispatch_sync(mpsStream->queue(), ^(){
   [computeEncoder endEncoding];
 
   mpsStream->commit(true);
+  
+  result_ptr = _result_ptr.contents;
 
-  - (void) outputResults
-  {
-    index_t* result = _result_ptr.contents;
-
-    result_ptr = result
 }
 })
 }
@@ -130,6 +126,52 @@ Tensor permute_mps(const Tensor& self, IntArrayRef dims) {
   }
   return self.as_strided(newSizes, newStrides);
 }
+
+void set_apparent_shapes(NSArray<NSNumber*> * input_shape,
+                         NSArray<NSNumber*> * &apparent_input_shape,
+                         int64_t num_input_dims,
+                         IntArrayRef repeats,
+                         NSMutableArray<NSNumber*> * &repeats_shape,
+                         int64_t num_repeat_dims) {
+
+
+  bool repeat_empty = false;
+  if(num_repeat_dims == 0) {
+    num_repeat_dims = num_input_dims;
+    repeat_empty = true;
+  }
+
+  // Set repeats_shape
+  repeats_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_repeat_dims];
+
+  for(int i = 0; i < num_repeat_dims; i++) {
+    if(repeat_empty)
+      repeats_shape[i] = [NSNumber numberWithInteger:1];
+    else
+      repeats_shape[i] = [NSNumber numberWithInteger:repeats[i]];
+  }
+
+  // If no extension of the shape is needed
+  if(num_repeat_dims == num_input_dims) {
+    apparent_input_shape = input_shape;
+  }
+  // num_repeat_dims > num_input_dims
+  else {
+    auto rc = [NSMutableArray<NSNumber*> arrayWithCapacity:num_repeat_dims];
+
+    for(int i = 0; i < num_repeat_dims - num_input_dims; i++)
+      rc[i] = @1;
+
+    for(int i = num_repeat_dims - num_input_dims; i < num_repeat_dims; i++)
+      rc[i] = input_shape[i + num_input_dims - num_repeat_dims];
+    apparent_input_shape = rc;
+  }
+
+}
+
+
+
+
 
 Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
 
@@ -221,10 +263,12 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
+
+
 Tensor repeat_interleave_mps(const Tensor& repeats,c10::optional<int64_t> output_size) {
   Tensor output;
   AT_DISPATCH_INDEX_TYPES(
-      repeat.scalar_type(), "repeat_interleave_cuda", [&]() {
+      repeats.scalar_type(), "repeat_interleave_mps", [&]() {
         output = repeat_interleave_common<index_t, compute_mps<index_t>>(
             repeat, output_size);
       });
