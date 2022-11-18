@@ -8106,7 +8106,7 @@ class TestConsistency(TestCase):
         'round': ['f32', 'f16', 'i16', 'i32', 'i64'],
         'rsqrt': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'scatter_add': ['b8', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'scatter_add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'select_scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'sgn': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'short': ['i16'],

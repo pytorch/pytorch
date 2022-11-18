@@ -173,6 +173,7 @@ void scatter_mps_general
     // Do we need to slice into the src tensor?
     bool needSlice = false;
     bool inputNeedSlice = false;
+    bool needsCast = false;
 
     for (const auto i : c10::irange(num_input_dims)) {
       TORCH_CHECK(i == dim || [index_shape[i] intValue] <= [input_shape[i] intValue], "Index dim must not exceed input dim except at gathering axis")
@@ -184,8 +185,12 @@ void scatter_mps_general
     }
     TORCH_CHECK(reduce != "mean", "Scatter reduce mean mode not yet supported in MPS")
 
-    bool needsCast = isIntegralType(self.scalar_type(), true) &&
-                     (reduce != "set" || self.scalar_type() == ScalarType::Byte);
+    MPSDataType src_type = getMPSDataType(src.scalar_type());
+    if (reduce != "set" || self.scalar_type() == ScalarType::Byte) {
+      src_type = isFloatingType(src.scalar_type()) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
+      needsCast = true;
+    }
+
     string key = func_name + getTensorsStringKey({self, index, src, output}) + ":" + std::to_string(dim) + ":" + std::string(reduce);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
@@ -196,55 +201,53 @@ void scatter_mps_general
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()), input_shape);
-          MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(index.scalar_type()), index_shape);
-          MPSGraphTensor* srcTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(src.scalar_type()), src_shape);
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
+          MPSGraphTensor* srcTensor   = mpsGraphRankedPlaceHolder(mpsGraph, src);
 
-          MPSGraphTensor* getSrc = srcTensor;
-          MPSGraphTensor* getInput = inputTensor;
+          MPSGraphTensor* outputTensor = nil;
+          MPSGraphTensor* castSrcTensor = srcTensor;
+          MPSGraphTensor* castInputTensor = inputTensor;
+
+          if (needsCast) {
+            castSrcTensor = [mpsGraph castTensor:srcTensor toType:src_type name:@"cast"];
+            castInputTensor = [mpsGraph castTensor:inputTensor toType:src_type name:@"cast"];
+          }
+          MPSGraphTensor* castIndexTensor = [mpsGraph castTensor:indexTensor toType:MPSDataTypeInt32 name:@"cast"];
+
+          MPSGraphTensor* slicedSrc = castSrcTensor;
+          MPSGraphTensor* slicedInput = castInputTensor;
 
           // Use in case input needs to be smaller to get scatter
-          NSMutableArray<NSNumber*>* scatterInputShape = [NSMutableArray arrayWithArray:input_shape];;
+          NSMutableArray<NSNumber*>* scatterInputShape = [NSMutableArray arrayWithArray:input_shape];
 
-          // Slice into the src tensor IF NEEDED
+          // Slice into the src or input tensors IF NEEDED
           if (needSlice || inputNeedSlice) {
             NSMutableArray<NSNumber*> *starts = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
             NSMutableArray<NSNumber*> *strides = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
             NSMutableArray<NSNumber*> *ends_src = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
 
             for (const auto i : c10::irange(num_input_dims)) {
-              // All strides are 1
               strides[i] = @1;
-              // All starts are 0
               starts[i] = @0;
               ends_src[i] = index_shape[i];
               scatterInputShape[i] = (i != dim) ? index_shape[i] : input_shape[i];
             }
             if (needSlice) {
-              getSrc = [mpsGraph sliceTensor:srcTensor
+              slicedSrc = [mpsGraph sliceTensor:castSrcTensor
                                       starts:starts
                                         ends:ends_src
                                      strides:strides
                                         name:nil];
             }
             if (inputNeedSlice) {
-              getInput = [mpsGraph sliceTensor:inputTensor
+              slicedInput = [mpsGraph sliceTensor:castInputTensor
                                         starts:starts
                                           ends:scatterInputShape
                                        strides:strides
                                           name:nil];
             }
           }
-          MPSGraphTensor* outputTensor = nil;
-          MPSGraphTensor* castSrcTensor = getSrc;
-          MPSGraphTensor* castInputTensor = getInput;
-
-          if (needsCast) {
-            castSrcTensor = castMPSTensor(mpsGraph, getSrc, ScalarType::Int);
-            castInputTensor = castMPSTensor(mpsGraph, getInput, ScalarType::Int);
-          }
-          MPSGraphTensor* castIndexTensor = castMPSTensor(mpsGraph, indexTensor, ScalarType::Int);
-
           MPSGraphScatterMode scatter_mode = MPSGraphScatterModeSet;
 
           if(reduce == "sum" || reduce == "add")
@@ -258,8 +261,8 @@ void scatter_mps_general
 
           // Scatter this into the input with set mode
           MPSGraphTensor* scatterTensor = [mpsGraph scatterAlongAxis: (NSInteger) dim
-                                                      withDataTensor: castInputTensor
-                                                       updatesTensor: castSrcTensor
+                                                      withDataTensor: slicedInput
+                                                       updatesTensor: slicedSrc
                                                        indicesTensor: castIndexTensor
                                                                 mode: scatter_mode
                                                                 name: nil];
@@ -301,7 +304,7 @@ void scatter_mps_general
                                                              withShape:@[@-1]
                                                                   name:nil];
 
-            outputTensor = [mpsGraph scatterNDWithDataTensor:inputTensor
+            outputTensor = [mpsGraph scatterNDWithDataTensor:castInputTensor
                                                updatesTensor:flatValuesTensor
                                                indicesTensor:scatter_fullIndexTensor
                                              batchDimensions:0
