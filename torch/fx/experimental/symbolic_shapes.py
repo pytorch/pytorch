@@ -434,7 +434,6 @@ def _lru_cache(fn, maxsize=None):
 
 class ShapeEnv(object):
     def __init__(self):
-        print("NEW SHAPE ENV")
         self.guards = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors

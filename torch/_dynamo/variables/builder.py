@@ -215,7 +215,6 @@ class VariableBuilder:
         if istype(value, (torch.SymInt, torch.SymFloat)):
             return self.wrap_sym(value)
         if istensor(value):
-            # breakpoint()
             return self.wrap_tensor(value)
         elif istype(value, (tuple, list, odict_values)) or is_namedtuple(value):
             # One can index a tensor with a list/tuple. Therefore, we need to
