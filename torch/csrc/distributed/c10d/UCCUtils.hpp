@@ -31,6 +31,30 @@ namespace c10d {
     }                                     \
   } while (0)
 
+// Macro and throw on a non-successful UCC return value and free its request.
+#define TORCH_UCC_CHECK_REQUEST(_request, _cmd, _error_msg) \
+  do {                                                      \
+    ucc_status_t result = _cmd;                             \
+    if (result != UCC_OK) {                                 \
+      std::string err = c10::str(                           \
+          "[",                                              \
+          std::string(__FILE__),                            \
+          ":",                                              \
+          std::to_string(__LINE__),                         \
+          "] ",                                             \
+          logger->getLogPrefix(),                           \
+          _error_msg,                                       \
+          ", error code ",                                  \
+          result,                                           \
+          ": ",                                             \
+          ucc_status_string(result),                        \
+          ", system error code ",                           \
+          errno);                                           \
+      free_request(_request)                                \
+      TORCH_CHECK(false, err);                              \
+    }                                                       \
+  } while (0)
+
 // Macros to print logs with unified format
 #define TORCH_UCC_LOG_ERROR(_phase, _msg) \
   LOG(ERROR) << logger->getLogPrefix(_phase) << "[ERROR] " << _msg;
