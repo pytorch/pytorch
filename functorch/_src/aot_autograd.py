@@ -1522,22 +1522,6 @@ def aot_module_simplified(mod: nn.Module, inputs,
     # (2) is the correct long term direction, and we are at (1) for now, (3) can be done to make things a little more streamlined
     # w/r/t where fake tensor conversion happens.
 
-    # [Real vs Fake Params]
-    #
-    # We have a few options of what we need to do here, but a few rules for why this is the way it is:
-    #     - The "runtime" fwd must use real params, as these get invoked alongside real args
-    #     - _create_aot_dispatcher_function must be called with fake params and fake args
-    #
-    # So, we have a few ways of handling it
-    # 1) Dynamo passes only real params in, we fakify at the aot level (this current state)
-    # 2) Dynamo passes only fake params in, but we rewrite the def forward(*args): to def forward(*parms, *args):
-    #    (Not bad, but very annoying w/r/t changing dynamo's calling convention and contracts. Also, not having to close
-    #    over params is nice, and better w/r/t lifecycles and mutations)
-    # 3) Dynamo passes both real and fake tensor in (Not a bad future, but really a stopgap to 2)
-    #
-    # (2) is the correct long term direction, and we are at (1) for now, (3) can be done to make things a little more streamlined
-    # w/r/t where fake tensor conversion happens.
-
     if top_kwargs:
 
         def forward(*args, **kwargs):
