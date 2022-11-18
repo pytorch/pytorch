@@ -1,10 +1,9 @@
 //  Copyright © 2022 Apple Inc.
 
 #pragma once
+#include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <ATen/ATen.h>
-
 
 #ifdef __OBJC__
 #include <Foundation/Foundation.h>
@@ -66,7 +65,9 @@ class TORCH_API MPSDevice {
    */
   bool isMacOS13Plus(MacOSVersion version) const;
 
-  MTLFunction_t metalIndexingFunction(const std::string &kernel, MTLFunctionConstantValues_t constantValues);
+  MTLFunction_t metalIndexingFunction(
+      const std::string& kernel,
+      MTLFunctionConstantValues_t constantValues);
 
   ~MPSDevice();
 
