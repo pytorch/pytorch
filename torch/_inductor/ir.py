@@ -1962,7 +1962,11 @@ class ShapeAsConstantBuffer(IRNode):
         self.shape = shape
 
     def codegen_reference(self):
-        return str(self.shape)
+        if isinstance(self.shape, tuple):
+            return V.graph.sizevars.codegen_shape_tuple(self.shape)
+        else:
+            return V.graph.sizevars.codegen_sizevar(self.shape)
+
 
 
 @dataclasses.dataclass

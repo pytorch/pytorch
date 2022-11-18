@@ -11,6 +11,8 @@ from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
 from .triton import texpr
 
+from sympy import Expr
+
 pexpr = texpr
 
 
@@ -392,6 +394,9 @@ class WrapperCodeGen(CodeGen):
                 )
 
             for name, value in V.graph.graph_inputs.items():
+                # TODO: this is probably wrong
+                if isinstance(value, Expr):
+                    continue
                 shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
                 stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
                 add_fake_input(

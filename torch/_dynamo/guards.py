@@ -159,10 +159,11 @@ class Guard:
         ), "Guarded class id must be identical, or None"
         self.guarded_class_weakref = guarded_class
 
-        if not self.code_list:
-            self.code_list = code_list
-        else:
-            self.code_list.extend(code_list)
+        if code_list:
+            if not self.code_list:
+                self.code_list = code_list
+            else:
+                self.code_list.extend(code_list)
 
         assert self.obj_weakref in (
             obj_weakref,
@@ -448,26 +449,34 @@ class GuardBuilder:
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
-        else:
-            value = self.get(guard.name)
-            tensor_name = self.arg_ref(guard)
-            self.tensor_check_names.append(tensor_name)
-            self.tensor_check_examples.append(value)
+            if not config.dynamic_shapes:
+                # For dynamic shapes, we want to proceed to record tensor names
+                return
 
-            # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
-            self.tensor_check_ids[tensor_name] = id(value)
+        value = self.get(guard.name)
+        tensor_name = self.arg_ref(guard)
+        self.tensor_check_names.append(tensor_name)
+        self.tensor_check_examples.append(value)
 
-            # Note: Guard code produced for tensor_match is a little different.
-            # We accumulate tensor names, then do a single install of `___check_tensors`.
-            # See _guards.cpp and TensorGuard for more information.
-            # TODO(voz): Add tensor matching code to export
-            # Note: this is a bit of a special case, and so does not use _produce_guard_code
-            guard.set_export_info(
-                "TENSOR_MATCH",
-                weakref.ref(type(value)),
-                None,
-                weakref.ref(value),
-            )
+        # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
+        self.tensor_check_ids[tensor_name] = id(value)
+        if value._base is not None:
+            assert id(value._base) in self.guarded_code.output_graph.tensor_id_to_sym_shape_ref
+            refs = self.guarded_code.output_graph.tensor_id_to_sym_shape_ref[id(value._base)]
+            for ref in refs:
+                self.guarded_code.output_graph.base_symbols.update({ref.expr: f"{tensor_name}._base"})
+
+        # Note: Guard code produced for tensor_match is a little different.
+        # We accumulate tensor names, then do a single install of `___check_tensors`.
+        # See _guards.cpp and TensorGuard for more information.
+        # TODO(voz): Add tensor matching code to export
+        # Note: this is a bit of a special case, and so does not use _produce_guard_code
+        guard.set_export_info(
+            "TENSOR_MATCH",
+            weakref.ref(type(value)),
+            None,
+            weakref.ref(value),
+        )
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(self, guard, code_list, provided_guarded_object=None):
@@ -532,6 +541,7 @@ class TensorReference(object):
     # Note - this is untyped because of TypeError: '_SpecialForm' object does not support item assignment
     # But it is a Optional[Union["sympy.Expr", int]]
     expr: Optional[object] = None  # Populated after association
+    
 
     def __hash__(self):
         return hash((self.ref_id, self.kind, self.idx))
@@ -545,13 +555,14 @@ class DynamoGuardPrinter(StrPrinter):
         return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()"
 
     def __init__(
-        self, expr_to_tensor_ref, id_to_name_map, shape_env, intermediary_symbols
+        self, expr_to_tensor_ref, id_to_name_map, shape_env, intermediary_symbols, base_symbols
     ):
         super().__init__()
         self.expr_to_tensor_ref = expr_to_tensor_ref
         self.id_to_name_map = id_to_name_map
         self.shape_env = shape_env
         self.intermediary_symbols = intermediary_symbols
+        self.base_symbols = base_symbols
 
     def _print_Symbol(self, expr) -> str:
         assert isinstance(expr, sympy.Symbol)
@@ -559,7 +570,14 @@ class DynamoGuardPrinter(StrPrinter):
             return "0"
         if expr == 1:
             return "1"
-        assert expr in (self.expr_to_tensor_ref) or (expr in self.intermediary_symbols)
+        expr_found = expr in (self.expr_to_tensor_ref) or (
+            expr in self.intermediary_symbols
+        )
+        if not expr_found:
+            if config.dynamic_shapes_ignore_assert or expr in (self.base_symbols):
+                return f"{self.shape_env.var_to_val[expr]}"
+
+        assert expr_found, f"Failed to find {expr}"
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
@@ -607,7 +625,19 @@ class CheckFunctionManager:
         )
         global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if not config.guard_nn_modules and guard.is_nn_module():
+            if (
+                not config.guard_nn_modules
+                and guard.is_nn_module()
+                and guard.create_fn != GuardBuilder.TENSOR_MATCH
+            ):
+                # The `guard.create_fn != GuardBuilder.TENSOR_MATCH:` part is
+                # an exception to not guarding on nn_module properties
+                # In dynamic shapes mode, we sometimes get "weights" "bias" or other registered/named buffers
+                # accesed. We need to install their TENSOR_MATCH guards
+                # so that the names are known for symbolic shape guarding.
+                # This is also probably good for correctness anyway.
+                # TODO(voz): Revisit to see if we need to be more judicious
+                # with which we create guards for due to perf...
                 continue
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder, guards)
@@ -648,12 +678,13 @@ class CheckFunctionManager:
             id_to_name_map,
             self.output_graph.shape_env,
             self.output_graph.intermediary_symbols,
+            self.output_graph.base_symbols
         )
 
         # tensor_check_names is the primary tensor association mechanism in dynamo.
+        # tensor_check_ids is the names from tensor_check_names + their ._bases as keys
         # All other guards installations are driven off of it, so these ones will too.
-        for name in tensor_check_names:
-            tensor_id = tensor_check_ids[name]
+        for name, tensor_id in tensor_check_ids.items():
             id_to_name_map[tensor_id] = name
 
             if tensor_id in self.output_graph.tensor_id_to_sym_shape_ref:
@@ -666,13 +697,11 @@ class CheckFunctionManager:
                         expr_to_tensor_ref[obj_expr] = {}
                     expr_to_tensor_ref[obj_expr][tensor_ref] = ""
 
-        guard_expression = self.output_graph.shape_env.get_guard_expr()
-        expr_as_str = guard_printer.doprint(guard_expression)
-        # We may get into a state where symbolic shape keys (all should be found in replacements)
-        # Have not been removed from the expression. This is a serious enough error state that we need to assert.
-        for key in self.output_graph.shape_env.var_to_val.keys():
-            assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
-        finished_expressions.append(expr_as_str)
+        expr_as_str = " and \n".join(
+            [guard_printer.doprint(g) for g, _ in self.output_graph.shape_env.guards]
+        )
+        if self.output_graph.shape_env.guards:
+            finished_expressions.append(expr_as_str)
 
         for expr in expr_to_tensor_ref.keys():
             tensor_refs = expr_to_tensor_ref[expr].keys()
@@ -689,7 +718,7 @@ class CheckFunctionManager:
         if len(finished_expressions) == 0:
             return None
 
-        expression = " and ".join(finished_expressions)
+        expression = " and \n".join(finished_expressions)
         return f"({expression})"
 
     def compile_check_fn(self, local_builder, global_builder, guards_out):
@@ -771,14 +800,17 @@ class CheckFunctionManager:
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}):
-    return lambda {args}: {code}
+    return (lambda {args}: {code})
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
         out = dict()
-        # print("RUNNING PY CODE", py_code)
-        exec(py_code, global_builder.scope, out)
+        try:
+            exec(py_code, global_builder.scope, out)
+        except:
+            logging.error(f"Code that failed to compile:\n{py_code}")
+            raise
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both

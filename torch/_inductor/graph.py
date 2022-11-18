@@ -3,14 +3,16 @@ import operator
 import os
 import re
 import time
+from typing import Union
 
 import sympy
 
 import torch
 import torch.fx
 from torch._decomp import get_decompositions
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, guard_int
 from torch.utils._mode_utils import no_dispatch
+from torch import SymInt
 
 from . import config, ir
 from .codegen.wrapper import WrapperCodeGen
@@ -56,8 +58,8 @@ class GraphLowering(torch.fx.Interpreter):
         """
         Primarily used to weights
         """
-        size = [sympy.Integer(i) for i in ex.size()]
-        stride = [sympy.Integer(i) for i in ex.stride()]
+        size = [sympy.Integer(guard_int(i)) for i in ex.size()]
+        stride = [sympy.Integer(guard_int(i)) for i in ex.stride()]
         return size, stride
 
     def __init__(
@@ -200,7 +202,10 @@ class GraphLowering(torch.fx.Interpreter):
         return alt_name
 
     def placeholder(self, target, args, kwargs):
-        example: torch.Tensor = super().placeholder(target, args, kwargs)
+        example: Union[torch.Tensor, SymInt] = super().placeholder(target, args, kwargs)
+        if isinstance(example, SymInt):
+            self.graph_inputs[target] = example.node.expr
+            return example.node.expr
         if config.static_weight_shapes and (
             len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes
         ):
@@ -282,6 +287,8 @@ class GraphLowering(torch.fx.Interpreter):
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
         for name, value in self.graph_inputs.items():
+            if isinstance(value, sympy.Expr):
+                continue
             value.realize()
             assert isinstance(value, TensorBox)
             value = value.data

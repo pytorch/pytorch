@@ -22,7 +22,7 @@ from .normalize import normalize_ir
 log = logging.getLogger(__name__)
 
 
-def is_aot_autograd_safe_to_run(gm, example_inputs):
+def is_aot_autograd_safe_to_run(gm, example_inputs, fake_mode):
     """
     There are some known issues with Aot Autograd. This is a workaround to catch
     such cases, and fallback to eager. We should fix these quickly.
@@ -61,9 +61,9 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
                 #   to avoid AotAutograd on the mutated inputs, or if we some how
                 #   get custom autograd function to reflect metadata changes to the
                 #   original tensor)
-                mutated = has_mutation(gm, example_inputs, inputs_only=True)
+                mutated = has_mutation(gm, example_inputs, fake_mode, inputs_only=True)
             else:
-                mutated = has_mutation(gm, example_inputs)
+                mutated = has_mutation(gm, example_inputs, fake_mode)
         else:
             log.info(
                 "inference_mode enabled. TorchDynamo could not check for mutation."
@@ -88,12 +88,12 @@ class AotAutogradStrategy(object):
     """Base class for backend strategies that use AOT Autograd"""
 
     @classmethod
-    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs):
+    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs, fake_mode=None):
         if count_calls(gm.graph) < 2:
             return gm  # no point for tiny graphs
-        return cls(gm, example_inputs).verified_candidate()
+        return cls(gm, example_inputs, fake_mode).verified_candidate()
 
-    def __init__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __init__(self, gm: torch.fx.GraphModule, example_inputs, fake_mode):
         import functorch.compile
 
         functorch.compile.config.use_functionalize = True
@@ -104,6 +104,7 @@ class AotAutogradStrategy(object):
         self.use_fallback = False
         self.original_example_inputs = example_inputs
         self.gm = gm
+        self.fake_mode = fake_mode
 
         if not functorch.compile.config.use_functionalize and config.normalize_ir:
             try:
@@ -113,11 +114,17 @@ class AotAutogradStrategy(object):
                 self.use_fallback = True
                 pass
 
-        if not is_aot_autograd_safe_to_run(gm, example_inputs):
+        if not is_aot_autograd_safe_to_run(gm, example_inputs, fake_mode):
             self.use_fallback = True
 
     @property
     def example_inputs(self):
+        if config.fake_tensor_propagation:
+            # clone_inputs just recreates the tensors, as far as I can see,
+            # with their respective sizes and strides except with zeros
+            # with fake tensors, there is no need to do so, and in fact, it can throw
+            # on some of the `needed_size` logic if size is backed by a SymInt
+            return self.original_example_inputs
         return clone_inputs(self.original_example_inputs)
 
     def verified_candidate(self):
@@ -143,9 +150,12 @@ class AotNop(AotAutogradStrategy):
         from functorch._src.compilers import debug_nop
         from functorch.compile import nop
 
-        DEBUG = False
+        DEBUG = True
         return BACKENDS["aot_autograd"](
-            self.gm, self.example_inputs, fw_compiler=debug_nop if DEBUG else nop
+            self.gm,
+            self.example_inputs,
+            fw_compiler=debug_nop if DEBUG else nop,
+            fake_mode=self.fake_mode,
         )
 
 
@@ -489,7 +499,7 @@ def raw_aot_autograd_cudagraphs(model, inputs):
 
     from .. import disable
 
-    return aot_module_simplified(model, **kwargs)
+    return aot_module_simplified(model, inputs, **kwargs)
 
 
 class AotAutogradCudaGraphs(AotAutogradStrategy):

@@ -4,6 +4,7 @@ import logging
 import operator
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
+from torch.fx.experimental.symbolic_shapes import sym_float
 
 import sympy
 
@@ -139,6 +140,9 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
     def construct_input(inp):
         if isinstance(inp, Number):
             return inp
+        elif isinstance(inp, sympy.Expr):
+            # TODO: this is unsound
+            return 0
         else:
             assert hasattr(inp, "get_dtype")
             dim = len(inp.get_size())
@@ -3382,8 +3386,8 @@ def div(a, b):
     if is_integer_type(a) and is_integer_type(b):
         dtype = torch.get_default_dtype()
     return make_pointwise(fn, override_return_dtype=dtype)(
-        a if isinstance(a, Number) else to_dtype(a, dtype),
-        b if isinstance(b, Number) else to_dtype(b, dtype),
+        a if isinstance(a, Number + (sympy.Expr,)) else to_dtype(a, dtype),
+        b if isinstance(b, Number + (sympy.Expr,)) else to_dtype(b, dtype),
     )
 
 
@@ -3573,6 +3577,16 @@ def sym_numel(a):
     return a.get_numel()
 
 
+@register_lowering(sym_float)
+def sym_float(a):
+    return a
+
+
+@register_lowering(operator.truediv)
+def op_truediv(a, b):
+    return a / b
+
+
 @register_lowering(operator.mul)
 def op_mul(a, b):
     return a * b
@@ -3581,6 +3595,11 @@ def op_mul(a, b):
 @register_lowering(operator.add)
 def op_add(a, b):
     return a + b
+
+
+@register_lowering(operator.sub)
+def op_sub(a, b):
+    return a - b
 
 
 @register_lowering(operator.floordiv)
