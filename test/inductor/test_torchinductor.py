@@ -68,7 +68,6 @@ aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 torch._inductor.config.triton.autotune = False  # too slow
-torch.backends.cudnn.allow_tf32 = False
 
 
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
@@ -4179,15 +4178,10 @@ class CommonTemplate:
         )
 
     def test_conv_backward(self):
-        def fn(grad_out, inp, weight):
-            def shrink_rank(x, rank):
-                res = x
-                while res.dim() > rank:
-                    res = torch.select(res, -1, 0).contiguous()
-                return res
+        def fn(rank4_inps, rank3_inps, rank5_inps):
 
             out1 = aten.convolution_backward(
-                *[shrink_rank(x, 4) for x in [grad_out, inp, weight]],
+                *rank4_inps,
                 [C],
                 [1, 1],
                 [0, 0],
@@ -4198,7 +4192,7 @@ class CommonTemplate:
                 [True, True, True],
             )
             out2 = aten.convolution_backward(
-                *[shrink_rank(x, 4) for x in [grad_out, inp, weight]],
+                *rank4_inps,
                 [C],
                 [1, 1],
                 [0, 0],
@@ -4209,7 +4203,7 @@ class CommonTemplate:
                 [True, False, False],
             )
             out3 = aten.convolution_backward(
-                *[shrink_rank(x, 3) for x in [grad_out, inp, weight]],
+                *rank3_inps,
                 [C],
                 [1],
                 [0],
@@ -4220,7 +4214,7 @@ class CommonTemplate:
                 [True, True, True],
             )
             out4 = aten.convolution_backward(
-                *[shrink_rank(x, 5) for x in [grad_out, inp, weight]],
+                *rank5_inps,
                 [C],
                 [1, 1, 1],
                 [0, 0, 0],
@@ -4235,14 +4229,24 @@ class CommonTemplate:
         B = 3
         C = 4
         H = 5
-        self.common(
-            fn,
-            [
-                torch.randn(B, C, H - 2, H - 2, H - 2),
-                torch.randn(B, C, H, H, H),
-                torch.randn(C, C, 3, 3, 3),
-            ],
-        )
+        grad_out = torch.randn(B, C, H - 2, H - 2, H - 2)
+        inp = torch.randn(B, C, H, H, H)
+        weight = torch.randn(C, C, 3, 3, 3)
+
+        def shrink_rank(x, rank):
+            res = x
+            while res.dim() > rank:
+                res = torch.select(res, -1, 0)
+            return res.contiguous()
+        rank4_inps = [shrink_rank(x, 4) for x in [grad_out, inp, weight]]
+        rank3_inps = [shrink_rank(x, 4) for x in [grad_out, inp, weight]]
+        rank5_inps = [shrink_rank(x, 5) for x in [grad_out, inp, weight]]
+
+        with torch.backends.cudnn.flags(allow_tf32=False):
+            self.common(
+                fn,
+                [rank4_inps, rank3_inps, rank5_inps],
+            )
 
     @unittest.skip(
         """
