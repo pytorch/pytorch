@@ -1728,7 +1728,7 @@ QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int6
   return quantizer;
 }
 
-Tensor select(const Tensor& self, int64_t dim, int64_t index_) {
+Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index_) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "select() cannot be applied to a 0-dim tensor.");
@@ -1776,13 +1776,13 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index_) {
   return result;
 }
 
-Tensor select(const Tensor& self, Dimname dim, int64_t index) {
-  return at::select(self, dimname_to_position(self, dim), index);
+Tensor select_symint(const Tensor& self, Dimname dim, c10::SymInt index) {
+  return at::select_symint(self, dimname_to_position(self, dim), index);
 }
 
-Tensor select_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  grad_input.select(dim, index).copy_(grad);
+Tensor select_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
+  auto grad_input = at::zeros_symint(input_sizes, grad.options());
+  grad_input.select_symint(dim, index).copy_(grad);
   return grad_input;
 }
 
@@ -3789,9 +3789,9 @@ at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t 
     slice.copy_(src);
     return output;
 }
-at::Tensor select_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, int64_t index) {
+at::Tensor select_scatter_symint(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::SymInt index) {
     auto output = self.clone();
-    auto slice = output.select(dim, index);
+    auto slice = output.select_symint(dim, index);
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;
@@ -3931,8 +3931,8 @@ at::Tensor& _reshape_alias_copy_out(const at::Tensor & self, at::IntArrayRef siz
 }
 
 
-at::Tensor& select_copy_int_out(const at::Tensor & self, int64_t dim, int64_t index, at::Tensor & out) {
-  auto tmp = self.select(dim, index);
+at::Tensor& select_copy_symint_out(const at::Tensor & self, int64_t dim, c10::SymInt index, at::Tensor & out) {
+  auto tmp = self.select_symint(dim, index);
   out.copy_(tmp);
   return out;
 }

@@ -1511,8 +1511,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* pnode) {
         const auto& self = pnode->Input(0).toTensor();
         const auto dim = pnode->Input(1).toInt();
-        const auto index = pnode->Input(2).toInt();
-        pnode->Output(0) = at::native::select(self, dim, index);
+        const auto index = pnode->Input(2).toSymInt();
+        pnode->Output(0) = at::native::select_symint(self, dim, index);
       };
     });
 
