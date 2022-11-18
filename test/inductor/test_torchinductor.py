@@ -94,6 +94,7 @@ unary_list = [
     torch.nn.GELU(approximate="none"),
     torch.nn.GELU(approximate="tanh"),
     torch.nn.ReLU6(),
+    torch.nn.SiLU(),
 ]
 
 
