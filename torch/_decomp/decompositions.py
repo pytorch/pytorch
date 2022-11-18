@@ -1067,6 +1067,37 @@ def embedding_dense_backward(
     return grad_weight.index_put([indices], grad, accumulate=True)
 
 
+@register_decomposition(aten.embedding_renorm_)
+def embedding_renorm_(
+    self: Tensor,
+    indices: Tensor,
+    max_norm: float,
+    norm_type: float,
+) -> Tensor:
+    # TODO: Assert not ported over yet
+    #   checkDim("embedding_renorm_", self_arg, 2);
+    #   checkScalarTypes("embedding_renorm_", indices_arg, {kLong, kInt});
+
+    # TODO: index_put expects non-duplicate indices or the behavior is
+    # undefined. But unique is not implemented yet and is data-dependent.
+    # Flattens first because row indices can have any shape.
+    indices = indices.flatten()
+    num_cols = self.size(-1)
+    num_indices = indices.numel()
+
+    # Normalizes rows using the provided indices.
+    rows = self.index_select(dim=0, index=indices)
+    norm = torch.norm(rows, dim=1, p=norm_type, keepdim=True)
+    scale = max_norm / (norm + 1e-7)
+    rows = torch.where(norm > max_norm, rows * scale, rows)
+
+    # Converts to different index format and writes normalized values.
+    num_total = num_indices * num_cols
+    row_indices = indices.unsqueeze(-1).expand(num_indices, num_cols).reshape(num_total)
+    col_indices = torch.arange(num_total) % num_cols
+    return torch.index_put(self, (row_indices, col_indices), rows.flatten())
+
+
 def prod(x: List[int]):
     r = 1
     for i in x:
