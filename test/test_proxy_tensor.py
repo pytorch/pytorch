@@ -1354,6 +1354,10 @@ inplace_symbolic_tensor_failures = {
     xfail('addmm', 'decomposed'),
     xfail('logit', ''),
     xfail('nn.functional.hardsigmoid', ''),
+    xfail('round', ''),  # ref missing a kwarg
+    xfail('round', 'decimals_0'),  # ref missing a kwarg
+    xfail('round', 'decimals_3'),  # ref missing a kwarg
+    xfail('round', 'decimals_neg_3'),  # ref missing a kwarg
     xfail('unique', ''),
     # in-place has a different signature than out-of-place
     xfail('uniform', ''),
