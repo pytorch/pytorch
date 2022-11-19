@@ -464,9 +464,9 @@ class TestReductions(TestCase):
                torch.norm]
         for op in ops:
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
-                op(x, 64)
+                op(x, dim=64)
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
-                op(x, -1)
+                op(x, dim=-1)
 
     @onlyCPU
     @dtypes(torch.float, torch.bfloat16)
@@ -1793,11 +1793,9 @@ class TestReductions(TestCase):
         x = torch.randn(3, 3, 3, 3, device=device)
 
         error_msg = r'appears multiple times in the list of dims'
-        norm_error_msg = r'Expected dims to be different, got'
         for op in ops:
             for dim in [(0, 0), (0, -4)]:
-                e_msg = norm_error_msg if op == torch.norm else error_msg
-                with self.assertRaisesRegex(RuntimeError, e_msg):
+                with self.assertRaisesRegex(RuntimeError, error_msg):
                     op(x, dim=dim)
 
     # TODO: update this test to comapre against NumPy
