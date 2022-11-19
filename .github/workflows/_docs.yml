@@ -38,31 +38,42 @@ jobs:
   build-docs:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.4xlarge]
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
           - docs_type: cpp
-            # Nightly cpp docs take about 150m to finish, and the number is stable
-            timeout-minutes: 180
+            # We recently seeing lots of exit code 137 running this in Docker indicating
+            # an OOM issue when running the job, so this upgrades the runner from 4xlarge
+            # to the next available tier of 12xlarge. So much memory just to generate cpp
+            # doc
+            runner: linux.12xlarge
+            # TODO: Nightly cpp docs take longer and longer to finish (more than 3h now)
+            # Let's try to figure out how this can be improved
+            timeout-minutes: 240
           - docs_type: python
+            runner: linux.2xlarge
             # It takes less than 30m to finish python docs unless there are issues
             timeout-minutes: 30
           - docs_type: functorch
+            runner: linux.2xlarge
             # It takes less than 15m to finish functorch docs unless there are issues
             timeout-minutes: 15
+    # Set a fixed name for this job instead of using the current matrix-generated name, i.e. build-docs (cpp, linux.12xlarge, 180)
+    # The current name requires updating the Rockset last docs push query from test-infra every time the matrix is updated
+    name: build-docs-${{ matrix.docs_type }}-${{ inputs.push }}
     steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-
-      - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
@@ -88,7 +99,10 @@ jobs:
         timeout-minutes: ${{ matrix.timeout-minutes }}
         id: build-docs
         env:
-          WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
+          # After https://github.com/pytorch/pytorch/pull/88373, pull workflow can now be run periodically,
+          # so using a schedule event to determine if the docs should be pushed or not doesn't hold true
+          # anymore
+          WITH_PUSH: ${{ inputs.push }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           DOCS_TYPE: ${{ matrix.docs_type }}
           RUN_DOXYGEN: ${{ inputs.run-doxygen }}

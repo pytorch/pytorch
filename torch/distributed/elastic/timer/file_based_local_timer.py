@@ -10,6 +10,7 @@ import logging
 import os
 import select
 import signal
+import sys
 import threading
 import time
 from typing import Callable, Dict, List, Optional, Set, Tuple
@@ -75,10 +76,11 @@ class FileTimerClient(TimerClient):
         file_path: str, the path of a FIFO special file. ``FileTimerServer``
                         must have created it by calling os.mkfifo().
 
-        signal: singal, the signal to use to kill the process. Using a
+        signal: signal, the signal to use to kill the process. Using a
                         negative or zero signal will not kill the process.
     """
-    def __init__(self, file_path: str, signal=signal.SIGKILL) -> None:
+    def __init__(self, file_path: str, signal=(signal.SIGKILL if sys.platform != "win32" else
+                                               signal.CTRL_C_EVENT)) -> None:  # type: ignore[attr-defined]
         super().__init__()
         self._file_path = file_path
         self.signal = signal
@@ -237,6 +239,7 @@ class FileTimerServer:
             signal = 0
             expired_timer = None
             for timer in expired_timers:
+                self._log_event("timer expired", timer)
                 if timer.signal > 0:
                     signal = timer.signal
                     expired_timer = timer
@@ -298,15 +301,12 @@ class FileTimerServer:
             if expiration_time < 0:
                 if key in self._timers:
                     del self._timers[key]
-                    self._log_event("clear timer", request)
             else:
                 self._timers[key] = request
-                self._log_event("set timer", request)
 
     def clear_timers(self, worker_pids: Set[int]) -> None:
         for (pid, scope_id) in list(self._timers.keys()):
             if pid in worker_pids:
-                self._log_event("clear timer", self._timers[(pid, scope_id)])
                 del self._timers[(pid, scope_id)]
 
     def get_expired_timers(self, deadline: float) -> Dict[int, List[FileTimerRequest]]:

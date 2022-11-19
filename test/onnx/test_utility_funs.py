@@ -3,9 +3,12 @@
 import copy
 import functools
 import io
+import warnings
 from typing import Callable
 
 import onnx
+import parameterized
+import pytorch_test_common
 
 import torch
 import torch.onnx
@@ -17,7 +20,7 @@ from pytorch_test_common import (
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
 )
-from torch.onnx import OperatorExportTypes, TrainingMode, utils
+from torch.onnx import _constants, OperatorExportTypes, TrainingMode, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
@@ -25,13 +28,7 @@ from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
 from verify import verify
 
 
-class _BaseTestCase(common_utils.TestCase):
-    def setUp(self):
-        super().setUp()
-        torch.manual_seed(0)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(0)
-
+class _BaseTestCase(pytorch_test_common.ExportTestCase):
     def _model_to_graph(
         self,
         model,
@@ -62,7 +59,7 @@ class _BaseTestCase(common_utils.TestCase):
 
 
 @common_utils.instantiate_parametrized_tests
-class TestUnconvertibleOps(common_utils.TestCase):
+class TestUnconvertibleOps(pytorch_test_common.ExportTestCase):
     """Unit tests for the `unconvertible_ops` function."""
 
     def setUp(self):
@@ -128,8 +125,15 @@ class TestUnconvertibleOps(common_utils.TestCase):
         self.assertEqual(unconvertible_ops, [])
 
 
-class TestUtilityFuns_opset9(_BaseTestCase):
-    opset_version = 9
+@parameterized.parameterized_class(
+    [
+        {"opset_version": opset}
+        for opset in range(_constants.ONNX_BASE_OPSET, _constants.ONNX_MAX_OPSET + 1)
+    ],
+    class_name_func=lambda cls, num, params_dict: f"{cls.__name__}_opset_{params_dict['opset_version']}",
+)
+class TestUtilityFuns(_BaseTestCase):
+    opset_version = None
 
     def test_is_in_onnx_export(self):
         test_self = self
@@ -148,8 +152,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             self.assertFalse(torch.onnx.is_in_onnx_export())
 
     def test_validate_dynamic_axes_invalid_input_output_name(self):
-        import warnings
-
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             utils._validate_dynamic_axes(
@@ -792,6 +794,31 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         # verify that the model state is preserved
         self.assertEqual(model.training, old_state)
 
+    def test_export_does_not_fail_on_frozen_scripted_module(self):
+        class Inner(torch.nn.Module):
+            def forward(self, x):
+                if x > 0:
+                    return x
+                else:
+                    return x * x
+
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = torch.jit.script(Inner())
+
+            def forward(self, x):
+                return self.inner(x)
+
+        x = torch.zeros(1)
+        # Freezing is only implemented in eval mode. So we need to call eval()
+        outer_module = Outer().eval()
+        module = torch.jit.trace_module(outer_module, {"forward": (x)})
+        # jit.freeze removes the training attribute in the module
+        module = torch.jit.freeze(module)
+
+        torch.onnx.export(module, (x,), io.BytesIO(), opset_version=self.opset_version)
+
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_local_function(self):
         class N(torch.nn.Module):
@@ -1059,20 +1086,20 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         model = M(3)
         expected_scope_names = {
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
             "torch.nn.modules.activation.GELU::gelu1",
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
             "torch.nn.modules.activation.GELU::gelu2",
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
             "torch.nn.modules.normalization.LayerNorm::lns.0",
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
             "torch.nn.modules.normalization.LayerNorm::lns.1",
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
             "torch.nn.modules.normalization.LayerNorm::lns.2",
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.N::relu/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.N::relu/"
             "torch.nn.modules.activation.ReLU::relu",
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::",
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::",
         }
 
         graph, _, _ = self._model_to_graph(
@@ -1096,6 +1123,110 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         )
         for node in graph.nodes():
             self.assertIn(node.scopeName(), expected_torch_script_scope_names)
+
+    def test_scope_of_constants_when_combined_by_cse_pass(self):
+        layer_num = 3
+
+        class M(torch.nn.Module):
+            def __init__(self, constant):
+                super().__init__()
+                self.constant = constant
+
+            def forward(self, x):
+                # 'self.constant' is designed to be the same for all layers,
+                # hence it is common sub expression.
+                return x + self.constant
+
+        class N(torch.nn.Module):
+            def __init__(self, layers: int = layer_num):
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [M(constant=torch.tensor(1.0)) for i in range(layers)]
+                )
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        graph, _, _ = self._model_to_graph(
+            N(), (torch.randn(2, 3)), input_names=[], dynamic_axes={}
+        )
+
+        # NOTE: Duplicated constants are populated due to implicit casting in scalar_type_analysis,
+        #       so we expect 3 constants with different scopes. The 3 constants are for the 3 layers.
+        #       If CSE in exporter is improved later, this test needs to be updated.
+        #       It should expect 1 constant, with same scope as root.
+        scope_prefix = "test_utility_funs.TestUtilityFuns.test_scope_of_constants_when_combined_by_cse_pass.<locals>"
+        expected_root_scope_name = f"{scope_prefix}.N::"
+        expected_layer_scope_name = f"{scope_prefix}.M::layers"
+        expected_constant_scope_name = [
+            f"{expected_root_scope_name}/{expected_layer_scope_name}.{i}"
+            for i in range(layer_num)
+        ]
+
+        constant_scope_names = []
+        for node in graph.nodes():
+            if node.kind() == "onnx::Constant":
+                constant_scope_names.append(node.scopeName())
+        self.assertEqual(constant_scope_names, expected_constant_scope_name)
+
+    def test_scope_of_nodes_when_combined_by_cse_pass(self):
+        layer_num = 3
+
+        class M(torch.nn.Module):
+            def __init__(self, constant, bias):
+                super().__init__()
+                self.constant = constant
+                self.bias = bias
+
+            def forward(self, x):
+                # 'constant' and 'x' is designed to be the same for all layers,
+                # hence `x + self.constant` is common sub expression.
+                # 'bias' is designed to be different for all layers,
+                # hence `* self.bias` is not common sub expression.
+                return (x + self.constant) * self.bias
+
+        class N(torch.nn.Module):
+            def __init__(self, layers: int = layer_num):
+                super().__init__()
+
+                self.layers = torch.nn.ModuleList(
+                    [
+                        M(constant=torch.tensor([1.0]), bias=torch.randn(1))
+                        for i in range(layers)
+                    ]
+                )
+
+            def forward(self, x):
+                y = []
+                for layer in self.layers:
+                    y.append(layer(x))
+                return y[0], y[1], y[2]
+
+        graph, _, _ = self._model_to_graph(
+            N(), (torch.randn(2, 3)), input_names=[], dynamic_axes={}
+        )
+        scope_prefix = "test_utility_funs.TestUtilityFuns.test_scope_of_nodes_when_combined_by_cse_pass.<locals>"
+        expected_root_scope_name = f"{scope_prefix}.N::"
+        expected_layer_scope_name = f"{scope_prefix}.M::layers"
+        expected_add_scope_names = [
+            f"{expected_root_scope_name}/{expected_layer_scope_name}.0"
+        ]
+        expected_mul_scope_names = [
+            f"{expected_root_scope_name}/{expected_layer_scope_name}.{i}"
+            for i in range(layer_num)
+        ]
+
+        add_scope_names = []
+        mul_scope_names = []
+        for node in graph.nodes():
+            if node.kind() == "onnx::Add":
+                add_scope_names.append(node.scopeName())
+            elif node.kind() == "onnx::Mul":
+                mul_scope_names.append(node.scopeName())
+        self.assertEqual(add_scope_names, expected_add_scope_names)
+        self.assertEqual(mul_scope_names, expected_mul_scope_names)
 
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
@@ -1778,30 +1909,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             ),
         )
         torch.onnx.unregister_custom_op_symbolic("::cat", _onnx_opset_version)
-
-
-class TestUtilityFuns_opset10(TestUtilityFuns_opset9):
-    opset_version = 10
-
-
-class TestUtilityFuns_opset11(TestUtilityFuns_opset9):
-    opset_version = 11
-
-
-class TestUtilityFuns_opset12(TestUtilityFuns_opset9):
-    opset_version = 12
-
-
-class TestUtilityFuns_opset13(TestUtilityFuns_opset9):
-    opset_version = 13
-
-
-class TestUtilityFuns_opset14(TestUtilityFuns_opset9):
-    opset_version = 14
-
-
-class TestUtilityFuns_opset15(TestUtilityFuns_opset9):
-    opset_version = 15
 
 
 if __name__ == "__main__":

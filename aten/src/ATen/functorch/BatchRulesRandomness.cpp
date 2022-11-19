@@ -18,10 +18,10 @@ namespace at {
 namespace functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
-Tensor random_batching_rule(IntArrayRef shape, ExtraArgs... extra_args) {
+Tensor random_batching_rule(SymIntArrayRef shape, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  VmapDimVector shapeVec(1, maybe_layer->batchSize());
+  c10::SmallVector<SymInt> shapeVec(1, maybe_layer->batchSize());
   shapeVec.reserve(shape.size() + 1);
   shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
   RandomnessType randomness = maybe_layer->randomness();
@@ -259,13 +259,13 @@ struct RandomBatchRuleHelper;
 
 template <typename F, F Func, typename T1, typename... T>
 struct RandomBatchRuleHelper<F, Func, typelist<T1, T...>> {
-  static Tensor apply(IntArrayRef shape, T... extra_args) {
+  static Tensor apply(SymIntArrayRef shape, T... extra_args) {
     return random_batching_rule<F, Func, T...>(shape, std::forward<T>(extra_args)...);
   }
 };
 
 template <typename F, F Func, typename... T>
-Tensor rand_int_wrapper(IntArrayRef shape, int64_t high, T... extra_args) {
+Tensor rand_int_wrapper(SymIntArrayRef shape, int64_t high, T... extra_args) {
   return Func(high, shape, std::forward<T>(extra_args)...);
 }
 
@@ -284,7 +284,7 @@ struct RandIntBatchRuleHelper;
 
 template <typename F, F Func, typename T1, typename T2, typename... T>
 struct RandIntBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
-  static Tensor apply(int64_t high, IntArrayRef shape, T... extra_args) {
+  static Tensor apply(int64_t high, SymIntArrayRef shape, T... extra_args) {
     return random_batching_rule<decltype(&rand_int_wrapper<F, Func, T...>),
                                 &rand_int_wrapper<F, Func, T...>,
                                 int64_t, T...>(shape, high, std::forward<T>(extra_args)...);
@@ -292,7 +292,7 @@ struct RandIntBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
 };
 
 template <typename F, F Func, typename T0, typename T1, typename... T>
-Tensor rand_int_low_wrapper(IntArrayRef shape, T0 scalar0, T1 scalar1, T... extra_args) {
+Tensor rand_int_low_wrapper(SymIntArrayRef shape, T0 scalar0, T1 scalar1, T... extra_args) {
   return Func(scalar0, scalar1, shape, std::forward<T>(extra_args)...);
 }
 
@@ -301,7 +301,7 @@ struct RandTwoLeadingScalarsBatchRuleHelper;
 
 template <typename F, F Func, typename T0, typename T1, typename T2, typename... T>
 struct RandTwoLeadingScalarsBatchRuleHelper<F, Func, typelist<T0, T1, T2, T...>> {
-  static Tensor apply(T0 scalar0, T1 scalar1, IntArrayRef shape, T... extra_args) {
+  static Tensor apply(T0 scalar0, T1 scalar1, SymIntArrayRef shape, T... extra_args) {
     return random_batching_rule<decltype(&rand_int_low_wrapper<F, Func, T0, T1, T...>),
                                 &rand_int_low_wrapper<F, Func, T0, T1, T...>,
                                 int64_t, int64_t, T...>(shape, scalar0, scalar1, std::forward<T>(extra_args)...);

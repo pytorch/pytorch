@@ -7,6 +7,8 @@
 #include <ideep.hpp>
 #include <cpuinfo.h>
 
+#include <c10/util/CallOnce.h>
+
 using PrimitiveCacheKey = std::tuple<
     double, // input_scale
     int64_t, // input_zero_point

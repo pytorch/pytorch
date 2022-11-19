@@ -297,9 +297,9 @@ def get_op_node_and_weight_eq_obs(
     if op_node.op == 'call_module':
         # If the op_node is a nn.Linear layer, then it must have a
         # WeightEqualizationObserver configuration
-        equalization_qconfig_map: Dict[str, Any] = model._equalization_qconfig_map  # type: ignore[assignment]
-        assert(equalization_qconfig_map.get(op_node.name, None) is not None)
-        weight_eq_obs = equalization_qconfig_map.get(op_node.name, None).weight()
+        equalization_node_name_to_qconfig: Dict[str, Any] = model._equalization_node_name_to_qconfig  # type: ignore[assignment]
+        assert(equalization_node_name_to_qconfig.get(op_node.name, None) is not None)
+        weight_eq_obs = equalization_node_name_to_qconfig.get(op_node.name, None).weight()
 
         assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
         return op_node, weight_eq_obs

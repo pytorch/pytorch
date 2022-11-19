@@ -51,6 +51,7 @@ class TORCH_API FileStore : public Store {
 
   int numWorkers_;
   const std::string cleanupKey_;
+  const std::string refCountKey_;
   const std::string regularPrefix_;
   const std::string deletePrefix_;
 

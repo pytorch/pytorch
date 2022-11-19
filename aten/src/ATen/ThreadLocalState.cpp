@@ -6,6 +6,7 @@
 
 #include <ATen/record_function.h>
 #include <ATen/SavedTensorHooks.h>
+#include <ATen/FunctionalTensorWrapper.h>
 
 namespace at {
 
@@ -15,7 +16,8 @@ ThreadLocalState::ThreadLocalState()
       functorch_tls_(functorch::getCopyOfFuncTorchTLS()),
       autograd_tls_(c10::AutogradState::get_tls_state()),
       python_dispatcher_state_(c10::impl::PythonDispatcherTLS::get_state()),
-      python_torch_function_state_(at::impl::PythonTorchFunctionTLS::get_state()) {
+      python_torch_function_state_(at::impl::PythonTorchFunctionTLS::get_state()),
+      functionalization_reapply_views_state_(at::functionalization::impl::getFunctionalizationReapplyViewsTLS()) {
   rf_tls_ = at::get_record_function_tls_();
 
   saved_tensors_default_hooks_state_ = at::SavedTensorDefaultHooks::get_tls_state();
@@ -25,6 +27,10 @@ ThreadLocalState::ThreadLocalState()
 
 void ThreadLocalState::set_grad_mode(bool enabled) {
   autograd_tls_.set_grad_mode(enabled);
+}
+
+void ThreadLocalState::set_multithreading_enabled(bool enabled) {
+  autograd_tls_.set_multithreading_enabled(enabled);
 }
 
 /* static */
@@ -49,6 +55,8 @@ void ThreadLocalState::setThreadLocalState(
   c10::impl::_force_tls_local_dispatch_key_set(state.dispatch_key_);
 
   functorch::setFuncTorchTLS(state.functorch_tls_);
+
+  at::functionalization::impl::setFunctionalizationReapplyViewsTLS(state.functionalization_reapply_views_state_);
 }
 
 } // namespace at

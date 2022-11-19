@@ -1,136 +1,189 @@
 #version 450 core
 #define PRECISION $precision
-#define FORMAT    $format
+#define FORMAT $format
 
-layout(std430) buffer;
+/*
+ * TILE_SIZE = (2, 2, 1)
+ * WEIGHT_STORAGE = TEXTURE_3D
+ * BIAS_STORAGE = TEXTURE_3D
+ */
 
-/* Qualifiers: layout - storage - precision - memory */
+/*
+ * Output Image
+ */
+layout(set = 0, binding = 0, rgba8ui) uniform PRECISION restrict writeonly uimage3D uOutput;
 
-layout(set = 0, binding = 0, rgba8ui) uniform PRECISION restrict writeonly uimage3D   uOutput;
-layout(set = 0, binding = 1)          uniform PRECISION                    isampler3D uInput;
-layout(set = 0, binding = 2)          uniform PRECISION                    isampler3D uKernel;
-layout(set = 0, binding = 3)          uniform PRECISION                    isampler3D uBias;
-layout(set = 0, binding = 4)          uniform PRECISION restrict           Block {
-  ivec4 size;
-  ivec4 kernel;
-  vec2 scale;
-  ivec2 zero_point;
-  vec2 other_inp_scale;
-  ivec2 other_inp_zero_point;
-  ivec2 ikernel;
+/*
+ * Input Textures
+ */
+layout(set = 0, binding = 1) uniform PRECISION isampler3D uInput;
+layout(set = 0, binding = 2) uniform PRECISION isampler3D uKernel;
+layout(set = 0, binding = 3) uniform PRECISION isampler3D uBias;
+
+/*
+ * Params Buffer
+ */
+layout(set = 0, binding = 4) uniform PRECISION restrict Block {
+  // quantization scales, xyzw corresponds to output, input, kernel, bias
+  vec4 scales;
+  // quantization zero points, xyzw corresponds to output, input, kernel, bias
+  ivec4 zero_points;
+  // extents of the output texture
+  ivec4 out_extents;
+  // extents of the input texture
+  ivec4 in_extents;
+  // size of the overlay region of the kernel
+  ivec4 overlay_region;
+  // width and height of the kernel
+  ivec2 kernel_size;
+  // convolution parameters
   ivec2 stride;
   ivec2 padding;
   ivec2 dilate;
-  vec2 clamp;
-} uBlock;
+  vec2 clamp_thresh;
+}
+uBlock;
 
+/*
+ * Local Work Group
+ */
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
+/*
+ * Dequantizes a float texel based on a scale and zero point.
+ */
+vec4 dequantize(vec4 tex, float scale, int zero_point) {
+  return scale * (tex - zero_point);
+}
+
+/*
+ * Quantizes a float texel based on a scale and zero point.
+ */
+uvec4 quantize(vec4 tex, float scale, int zero_point) {
+  return uvec4(tex / scale + zero_point);
+}
+
+/*
+ * Computes a 2D quantized pointwise convolution. Each shader invocation
+ * calculates the output of a 2x2 output tile. Currently this is implemented in
+ * a naive way, where inputs are dequantized upon reading in, and requantized
+ * upon writing out.
+ */
 void main() {
-  const ivec3 pos = ivec3(gl_GlobalInvocationID);
+  const ivec3 gpos = ivec3(gl_GlobalInvocationID);
 
-  const ivec3 pos00 = ivec3(pos.x*2  , pos.y*2  , pos.z);
-  const ivec3 pos10 = ivec3(pos.x*2+1, pos.y*2  , pos.z);
-  const ivec3 pos01 = ivec3(pos.x*2  , pos.y*2+1, pos.z);
-  const ivec3 pos11 = ivec3(pos.x*2+1, pos.y*2+1, pos.z);
+  // Determine the output positions that will be written to.
+  // +--------+--------+
+  // | pos[0] | pos[1] |
+  // +--------+--------+
+  // | pos[2] | pos[3] |
+  // +--------+--------+
+  ivec3 pos[4];
+  pos[0] = ivec3(gpos.x * 2, gpos.y * 2, gpos.z);
+  pos[1] = ivec3(gpos.x * 2 + 1, gpos.y * 2, gpos.z);
+  pos[2] = ivec3(gpos.x * 2, gpos.y * 2 + 1, gpos.z);
+  pos[3] = ivec3(gpos.x * 2 + 1, gpos.y * 2 + 1, gpos.z);
 
-  if (all(lessThan(pos00, uBlock.size.xyz))) {
-    const ivec2 ipos00 = pos00.xy * uBlock.stride - uBlock.padding;
-    const ivec2 ipos10 = pos10.xy * uBlock.stride - uBlock.padding;
-    const ivec2 ipos01 = pos01.xy * uBlock.stride - uBlock.padding;
-    const ivec2 ipos11 = pos11.xy * uBlock.stride - uBlock.padding;
+  // If the top left position is out of bounds, then this invocation will have
+  // no work to do.
+  if (any(greaterThanEqual(pos[0], uBlock.out_extents.xyz))) {
+    return;
+  }
 
-    vec4 q_sum00 = texelFetch(uBias, ivec3(pos.z, 0, 0), 0);
-    vec4 sum00 = uBlock.other_inp_scale.y * (q_sum00 - uBlock.other_inp_zero_point.y);
-    vec4 sum10 = sum00;
-    vec4 sum01 = sum00;
-    vec4 sum11 = sum00;
+  // Compute the index of the input texture that needs to be loaded for each
+  // output position. Note that negative indices can be produced indicating that
+  // the top-left element is in a region added by padding.
+  ivec2 ipos[4];
+  for (int i = 0; i < 4; ++i) {
+    ipos[i] = pos[i].xy * uBlock.stride - uBlock.padding;
+  }
 
-    for (int z = 0, z4 = 0; z < uBlock.size.w; z += 4, ++z4) {
-      const ivec4 kxs = z + ivec4(0, 1, 2, 3);
-      const vec4 q_k1 = texelFetch(uKernel, ivec3(kxs.x, pos.z, 0), 0);
-      const vec4 k1 = uBlock.other_inp_scale.x * (q_k1 - uBlock.other_inp_zero_point.x);
-      const vec4 q_k2 = texelFetch(uKernel, ivec3(kxs.y, pos.z, 0), 0);
-      const vec4 k2 = uBlock.other_inp_scale.x * (q_k2 - uBlock.other_inp_zero_point.x);
-      const vec4 q_k3 = texelFetch(uKernel, ivec3(kxs.z, pos.z, 0), 0);
-      const vec4 k3 = uBlock.other_inp_scale.x * (q_k3 - uBlock.other_inp_zero_point.x);
-      const vec4 q_k4 = texelFetch(uKernel, ivec3(kxs.w, pos.z, 0), 0);
-      const vec4 k4 = uBlock.other_inp_scale.x * (q_k4 - uBlock.other_inp_zero_point.x);
+  vec4 sum[4];
+  sum[0] = dequantize(
+      texelFetch(uBias, ivec3(gpos.z, 0, 0), 0),
+      uBlock.scales.w,
+      uBlock.zero_points.w);
+  for (int i = 1; i < 4; ++i) {
+    sum[i] = sum[0];
+  }
 
-      const vec4 In00 = texelFetch(uInput, ivec3(ipos00, z4), 0);
-      vec4 deq_In00 = uBlock.scale.y * (In00 - uBlock.zero_point.y);
-      const vec4 In10 = texelFetch(uInput, ivec3(ipos10, z4), 0);
-      vec4 deq_In10 = uBlock.scale.y * (In10 - uBlock.zero_point.y);
-      const vec4 In01 = texelFetch(uInput, ivec3(ipos01, z4), 0);
-      vec4 deq_In01 = uBlock.scale.y * (In01 - uBlock.zero_point.y);
-      const vec4 In11 = texelFetch(uInput, ivec3(ipos11, z4), 0);
-      vec4 deq_In11 = uBlock.scale.y * (In11 - uBlock.zero_point.y);
+  // Since the kernel is 1x1, we only have to loop over the depth dimension.
+  const int ic_aligned = uBlock.overlay_region.z;
+  for (int z = 0, z4 = 0; z < ic_aligned; z += 4, ++z4) {
+    // During prepacking, the weight tensor has been permuted so that the
+    // channel (IC) dim is along the x axis, and the batch (OC) dim is along
+    // the z axis.
+    const vec4 ktex_0 = dequantize(
+        texelFetch(uKernel, ivec3(z + 0, gpos.z, 0), 0),
+        uBlock.scales.z,
+        uBlock.zero_points.z);
+    const vec4 ktex_1 = dequantize(
+        texelFetch(uKernel, ivec3(z + 1, gpos.z, 0), 0),
+        uBlock.scales.z,
+        uBlock.zero_points.z);
+    const vec4 ktex_2 = dequantize(
+        texelFetch(uKernel, ivec3(z + 2, gpos.z, 0), 0),
+        uBlock.scales.z,
+        uBlock.zero_points.z);
+    const vec4 ktex_3 = dequantize(
+        texelFetch(uKernel, ivec3(z + 3, gpos.z, 0), 0),
+        uBlock.scales.z,
+        uBlock.zero_points.z);
 
-      if (q_k1 != vec4(0.0)) {
-        sum00 = fma(deq_In00.xxxx, k1, sum00);
-        sum10 = fma(deq_In10.xxxx, k1, sum10);
-        sum01 = fma(deq_In01.xxxx, k1, sum01);
-        sum11 = fma(deq_In11.xxxx, k1, sum11);
-      }
+    for (int i = 0; i < 4; ++i) {
+      const vec4 in_tex = dequantize(
+          texelFetch(uInput, ivec3(ipos[i], z4), 0),
+          uBlock.scales.y,
+          uBlock.zero_points.y);
 
-      if (q_k2 != vec4(0.0)) {
-        sum00 = fma(deq_In00.yyyy, k2, sum00);
-        sum10 = fma(deq_In10.yyyy, k2, sum10);
-        sum01 = fma(deq_In01.yyyy, k2, sum01);
-        sum11 = fma(deq_In11.yyyy, k2, sum11);
-      }
+      // To explain the calculations below, the contents one in_tex and the
+      // group of 4 texels loaded from uKernel are shown:
+      //
+      //   in_tex               uKernel
+      //    -x->                   ---x--->
+      //   +---+              +----+----+----+----+
+      // ^ | w |           ^  | D0 | D1 | D2 | D3 |
+      // | +---+           |  +----+----+----+----+
+      // | | z |           |  | C0 | C1 | C2 | C3 |
+      // z +---+           z  +----+----+----+----+
+      // | | y |           |  | B0 | B2 | B2 | B3 |
+      // | +---+           |  +----+----+----+----+
+      //   | x |              | A0 | A1 | A2 | A3 |
+      //   +---+              +----+----+----+----+
+      //
+      // In the uKernel graphic, cells sharing the the same letter are from
+      // the same batch/output channel index, and the number denotes a unique
+      // channel index. To calculate the output texel, the following
+      // calculation is performed:
+      //
+      //  +---+ +----+   +---+ +----+   +---+ +----+   +---+ +----+
+      //  | x | | D0 |   | y | | D1 |   | z | | D2 |   | w | | D3 |
+      //  +---+ +----+   +---+ +----+   +---+ +----+   +---+ +----+
+      //  | x | | C0 |   | y | | C1 |   | z | | C2 |   | w | | C3 |
+      //  +---+X+----+ + +---+X+----+ + +---+X+----+ + +---+X+----+
+      //  | x | | B0 |   | y | | B1 |   | z | | B2 |   | w | | B3 |
+      //  +---+ +----+   +---+ +----+   +---+ +----+   +---+ +----+
+      //  | x | | A0 |   | y | | A1 |   | z | | A2 |   | w | | A3 |
+      //  +---+ +----+   +---+ +----+   +---+ +----+   +---+ +----+
+      //
+      //  which is what is expressed in the following calculations. This is done
+      //  for each output position.
 
-      if (q_k3 != vec4(0.0)) {
-        sum00 = fma(deq_In00.zzzz, k3, sum00);
-        sum10 = fma(deq_In10.zzzz, k3, sum10);
-        sum01 = fma(deq_In01.zzzz, k3, sum01);
-        sum11 = fma(deq_In11.zzzz, k3, sum11);
-      }
-
-      if (q_k4 != vec4(0.0)) {
-        sum00 = fma(deq_In00.wwww, k4, sum00);
-        sum10 = fma(deq_In10.wwww, k4, sum10);
-        sum01 = fma(deq_In01.wwww, k4, sum01);
-        sum11 = fma(deq_In11.wwww, k4, sum11);
-      }
+      sum[i] = fma(in_tex.xxxx, ktex_0, sum[i]);
+      sum[i] = fma(in_tex.yyyy, ktex_1, sum[i]);
+      sum[i] = fma(in_tex.zzzz, ktex_2, sum[i]);
+      sum[i] = fma(in_tex.wwww, ktex_3, sum[i]);
     }
-    sum00 = clamp(sum00, uBlock.clamp.x, uBlock.clamp.y);
-    vec4 q_ret00 = sum00 / uBlock.scale.x + uBlock.zero_point.x;
-    uvec4 res00 = uvec4(int(q_ret00.x), int(q_ret00.y), int(q_ret00.z), int(q_ret00.w));
+  }
 
-    sum10 = clamp(sum10, uBlock.clamp.x, uBlock.clamp.y);
-    vec4 q_ret10 = sum10 / uBlock.scale.x + uBlock.zero_point.x;
-    uvec4 res10 = uvec4(int(q_ret10.x), int(q_ret10.y), int(q_ret10.z), int(q_ret10.w));
+  for (int i = 0; i < 4; ++i) {
+    uvec4 out_tex = quantize(
+        clamp(sum[i], uBlock.clamp_thresh.x, uBlock.clamp_thresh.y),
+        uBlock.scales.x,
+        uBlock.zero_points.x);
 
-    sum01 = clamp(sum01, uBlock.clamp.x, uBlock.clamp.y);
-    vec4 q_ret01 = sum01 / uBlock.scale.x + uBlock.zero_point.x;
-    uvec4 res01 = uvec4(int(q_ret01.x), int(q_ret01.y), int(q_ret01.z), int(q_ret01.w));
-
-    sum11 = clamp(sum11, uBlock.clamp.x, uBlock.clamp.y);
-    vec4 q_ret11 = sum11 / uBlock.scale.x + uBlock.zero_point.x;
-    uvec4 res11 = uvec4(int(q_ret11.x), int(q_ret11.y), int(q_ret11.z), int(q_ret11.w));
-
-    imageStore(
-        uOutput,
-        pos00,
-        res00);
-    if (all(lessThan(pos10, uBlock.size.xyz))) {
-      imageStore(
-          uOutput,
-          pos10,
-          res10);
-    }
-    if (all(lessThan(pos01, uBlock.size.xyz))) {
-      imageStore(
-          uOutput,
-          pos01,
-          res01);
-    }
-    if (all(lessThan(pos11, uBlock.size.xyz))) {
-      imageStore(
-          uOutput,
-          pos11,
-          res11);
+    if (all(lessThan(pos[i], uBlock.out_extents.xyz))) {
+      imageStore(uOutput, pos[i], out_tex);
     }
   }
 }

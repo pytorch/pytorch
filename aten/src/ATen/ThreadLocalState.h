@@ -30,6 +30,12 @@ class TORCH_API ThreadLocalState {
   //  autograd engine.
   void set_grad_mode(bool enabled);
 
+  // set_multithreading_enabled - force the value of the multithreadinmaximum
+  // threads TLS in
+  //  the current state object. This is used for example in the
+  //  autograd engine.
+  void set_multithreading_enabled(bool enabled);
+
   // Sets thread local variables in the current thread,
   // according to the thread boundary specified
   static void setThreadLocalState(const ThreadLocalState& state);
@@ -67,6 +73,8 @@ class TORCH_API ThreadLocalState {
 
   // TLS for saved tensors default hooks
   at::impl::SavedTensorDefaultHooksTLS saved_tensors_default_hooks_state_;
+
+  bool functionalization_reapply_views_state_;
 
   friend class ThreadLocalStateGuard;
 };

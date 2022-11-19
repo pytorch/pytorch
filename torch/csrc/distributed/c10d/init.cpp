@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -233,6 +234,61 @@ void _register_builtin_comm_hook(
     ::c10d::Reducer& reducer,
     ::c10d::BuiltinCommHookType comm_hook_type) {
   reducer.register_builtin_comm_hook(comm_hook_type);
+}
+
+// Customize the metaclass of ::c10d::ReduceOp for the backward compatibility.
+// https://github.com/pytorch/pytorch/pull/84243 changed ::c10d::ReduceOp to
+// struct from enum, sacrificing some of the Python built-in function supports
+// such as `isinstance` (see https://github.com/pytorch/pytorch/issues/87191)
+// and `copy` (see
+// https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700). Below,
+// we define a custom `isinstance` in CPython/pybind11
+// (`reduceopmeta___instancecheck__`) and modify the default metaclass of
+// pybind11 (`GetReduceOpMetaclass`) so that
+// `isinstance(torch.distributed.ReduceOp.SUM, torch.distributed.ReduceOp)`
+// returns :obj:`True` as if `ReduceOp` is enum.
+// Ref:
+//   - https://docs.python.org/3/extending/newtypes_tutorial.html
+//   - https://docs.python.org/3/c-api/typeobj.html?highlight=tp_methods
+//   - https://github.com/pybind/pybind11/issues/2696
+static PyObject* reduceopmeta___instancecheck__(
+    PyObject* self,
+    PyObject* args) {
+  if (Py_TYPE(self) == Py_TYPE(args)) {
+    Py_RETURN_TRUE;
+  }
+  if (c10::string_view(args->ob_type->tp_name).find("RedOpType") !=
+      c10::string_view::npos) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+static PyMethodDef reduceopmeta_methods[] = {
+    {"__instancecheck__",
+     (PyCFunction)reduceopmeta___instancecheck__,
+     METH_O,
+     "Custom `__instancecheck__` for ReduceOp"},
+    {NULL, NULL}};
+PyTypeObject* GetReduceOpMetaclass() {
+  static auto* metaclass = [] {
+    PyTypeObject* base_metaclass =
+        pybind11::detail::get_internals().default_metaclass;
+    PyType_Slot slots[] = {
+        {Py_tp_base, base_metaclass},
+        {Py_tp_methods, reduceopmeta_methods},
+        {0},
+    };
+    PyType_Spec spec = {};
+    spec.name = "torch._C._distributed_c10d._ReduceOpMeta";
+    spec.basicsize = base_metaclass->tp_basicsize;
+    spec.flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
+    spec.slots = slots;
+    PyTypeObject* metaclass = (PyTypeObject*)PyType_FromSpec(&spec);
+    if (!metaclass)
+      throw py::error_already_set();
+    return metaclass;
+  }();
+  return metaclass;
 }
 
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
@@ -515,10 +571,15 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           R"(Sets the debug level of the torch.distributed package from the
           ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
+  // TODO(crcrpar): Hardening `ReduceOp`.
+  //    While keeping most op types as enum value,
+  //    making `PREMUL_SUM` callable, i.e., allowing for
+  //    `ReduceOp.PREMUL_SUM(scale)` might be better as per @wanchaol.
   // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
-  py::class_<::c10d::ReduceOp> reduce_op(module, "ReduceOp", R"(
+  py::class_<::c10d::ReduceOp> reduce_op(
+      module, "ReduceOp", py::metaclass((PyObject*)GetReduceOpMetaclass()), R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
-``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
+``MIN``, ``MAX``, ``BAND``, ``BOR``, ``BXOR``, and ``PREMUL_SUM``.
 
 ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
 using the ``NCCL`` backend.
@@ -529,13 +590,16 @@ and only for NCCL versions 2.10 or later.
 
 ``PREMUL_SUM`` multiplies inputs by a given scalar locally before reduction.
 ``PREMUL_SUM`` is only available with the ``NCCL`` backend,
-and only available for NCCL versions 2.11 or later.
+and only available for NCCL versions 2.11 or later. Users are supposed to
+use ``torch.distributed._make_nccl_premul_sum``.
 
 Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
-:func:`reduce`, :func:`all_reduce_multigpu`, etc.)");
+:func:`reduce`, :func:`all_reduce_multigpu`, etc.
+
+This class does not support ``__members__`` property.)");
 
   reduce_op.def(py::init<::c10d::ReduceOp::RedOpType>())
       .def_readwrite("op", &::c10d::ReduceOp::op_);
@@ -555,7 +619,50 @@ They are used in specifying strategies for reduction collectives, e.g.,
           [](const ::c10d::ReduceOp& self, const ::c10d::ReduceOp& other) {
             return self == other.op_;
           })
-      .def("__hash__", [](const ::c10d::ReduceOp& self) { return self.op_; });
+      .def(
+          "__hash__",
+          [](const ::c10d::ReduceOp& self) {
+            return static_cast<uint8_t>(self.op_);
+          })
+      .def(
+          "__copy__",
+          [](const ::c10d::ReduceOp& self) { return ::c10d::ReduceOp(self); })
+      .def(
+          "__deepcopy__",
+          [](const ::c10d::ReduceOp& self, const py::dict& memo) {
+            return ::c10d::ReduceOp(self);
+          })
+      .def(py::pickle(
+          [](const ::c10d::ReduceOp& r) {
+            // __getstate__
+            if (r.op_ != ::c10d::ReduceOp::RedOpType::PREMUL_SUM) {
+              return py::make_tuple(r.op_, py::none());
+            }
+            TORCH_CHECK(r.supplement_.defined(), "Invalid PREMUL_SUM ReduceOp");
+            const auto* preMulSupplement =
+                reinterpret_cast<::c10d::NCCLPreMulSumSupplement*>(
+                    r.supplement_.get());
+            if (!preMulSupplement->tensor_factor.defined()) {
+              return py::make_tuple(r.op_, preMulSupplement->double_factor);
+            } else {
+              return py::make_tuple(r.op_, preMulSupplement->tensor_factor);
+            }
+          },
+          [](const py::tuple t) {
+            // __setstate__
+            TORCH_CHECK(t.size() == 2, "Invalid state");
+            const auto op =
+                static_cast<::c10d::ReduceOp::RedOpType>(t[0].cast<uint8_t>());
+            if (op != ::c10d::ReduceOp::RedOpType::PREMUL_SUM) {
+              return ::c10d::ReduceOp(op);
+            }
+            const auto preMulSupplement_factor = t[1];
+            if (py::isinstance<py::float_>(preMulSupplement_factor)) {
+              return ::c10d::makeNCCLPreMulSum(t[1].cast<double>());
+            } else {
+              return ::c10d::makeNCCLPreMulSum(t[1].cast<at::Tensor>());
+            }
+          }));
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
@@ -569,7 +676,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM)
       .export_values();
 
-  // Ref: [Implicit
+  // note(crcrpar): This could be removed because users will not pass
+  // `RedOpType` to reduce collective ops Ref: [Implicit
   // conversions](https://pybind11.readthedocs.io/en/stable/advanced/classes.html#implicit-conversions)
   // Let us skip the explicit construction of `c10d::ReduceOp` from
   // `c10d::ReduceOp::RedOpType` in Python.
@@ -584,7 +692,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_make_nccl_premul_sum",
-          &::c10d::makeNCCLPreMulSum<std::vector<at::Tensor>>,
+          &::c10d::makeNCCLPreMulSum<at::Tensor>,
           py::arg("factor").noconvert(),
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>());
@@ -1121,10 +1229,10 @@ Arguments:
 
           .def(
               "allreduce_coalesced",
-              [](::c10d::ProcessGroup& self,
-                 std::vector<at::Tensor>& xs,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& xs,
                  ::c10d::AllreduceCoalescedOptions opts) {
-                return self.allreduce_coalesced(xs, opts);
+                return ::c10d::ops::allreduce_coalesced(self, xs, opts);
               },
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceCoalescedOptions(),
@@ -1174,7 +1282,13 @@ Arguments:
 
           .def(
               "_allgather_base",
-              &::c10d::ProcessGroup::_allgather_base,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 at::Tensor& output_tensor,
+                 at::Tensor& input_tensor,
+                 const ::c10d::AllgatherOptions& opts) {
+                return ::c10d::ops::_allgather_base(
+                    self, output_tensor, input_tensor, opts);
+              },
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
@@ -1833,8 +1947,7 @@ Example::
         };
 
         auto set = [&store](const std::string& key, const std::string& value) {
-          std::vector<uint8_t> value_(value.begin(), value.end());
-          store->set(key, value_);
+          store->set(key, value);
         };
 
         auto get = [&store](const std::string& key) {
@@ -1888,7 +2001,7 @@ Example::
         Returns:
             A ``Work`` object which is associated with the completion of
             the ``torch.futures.Future``.
-        This is the prefered way of constructing Work objects when writing a custom ProcessGroup
+        This is the preferred way of constructing Work objects when writing a custom ProcessGroup
         in python.
         Example::
             >>> class SingleRankProcessGroup(torch.distributed.ProcessGroup):

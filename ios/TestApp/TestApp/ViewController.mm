@@ -1,6 +1,9 @@
 #import "ViewController.h"
 
+
+#ifdef BUILD_LITE_INTERPRETER
 #import "Benchmark.h"
+#endif
 
 @interface ViewController ()
 @property(nonatomic, strong) UITextView* textView;
@@ -11,6 +14,7 @@
 - (void)viewDidLoad {
   [super viewDidLoad];
 
+#ifdef BUILD_LITE_INTERPRETER
   self.textView = [[UITextView alloc] initWithFrame:self.view.bounds];
   self.textView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   [self.view addSubview:self.textView];
@@ -30,8 +34,10 @@
 
   [Benchmark setup:config];
   [self runBenchmark];
+#endif
 }
 
+#ifdef BUILD_LITE_INTERPRETER
 - (void)runBenchmark {
   self.textView.text = @"Start benchmarking...\n";
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -41,5 +47,6 @@
     });
   });
 }
+#endif
 
 @end

@@ -4,14 +4,14 @@ from torch.nn import Module
 from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._pytree import tree_map
-import torchdynamo  # type: ignore[import]
-from torchdynamo.optimizations.training import AOTAutogradStrategy  # type: ignore[import]
+import torch._dynamo  # type: ignore[import]
+from torch._dynamo.optimizations.training import AotAutogradStrategy  # type: ignore[import]
 
 import operator
 from collections import defaultdict
 from typing import Set
 
-# TODO: maybe this should live in torchdynamo instead
+# TODO: maybe this should live in torch._dynamo instead
 
 __all__ = ['aot_autograd_cudagraphs']
 
@@ -89,7 +89,7 @@ def find_input_mutations(g):
     mutated_inputs = set()
     for n in g.nodes:
         if n.op == 'placeholder':
-            inputs[StorageWeakRef(n.meta[FK].storage())].add(input_idx)
+            inputs[StorageWeakRef(n.meta[FK]._typed_storage())].add(input_idx)
             input_idx += 1
         elif n.op == 'call_function':
             if n.target is operator.getitem:
@@ -109,7 +109,7 @@ def find_input_mutations(g):
                 if mut_arg:
                     # TODO: not correct for args that contain tensors in a struct
                     # like list
-                    mutated_inputs |= inputs[StorageWeakRef(argument.meta[FK].storage())]
+                    mutated_inputs |= inputs[StorageWeakRef(argument.meta[FK]._typed_storage())]
         # TODO: error on unrecognized nodes
     return mutated_inputs
 
@@ -140,8 +140,8 @@ def raw_aot_autograd_cudagraphs(model, inputs):
     }
 
     def _wrapped_bw_compiler(*args, **kwargs):
-        # stop TorchDynamo from trying to compile our generated backwards pass
-        return torchdynamo.disable(bw_compiler(*args, **kwargs))  # type: ignore[operator]
+        # stop dynamo from trying to compile our generated backwards pass
+        return torch._dynamo.disable(bw_compiler(*args, **kwargs))  # type: ignore[operator]
 
     bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
     kwargs["bw_compiler"] = _wrapped_bw_compiler
@@ -151,7 +151,7 @@ def raw_aot_autograd_cudagraphs(model, inputs):
     return aot_module_simplified(model, **kwargs)
 
 
-class AOTAutogradCudaGraphs(AOTAutogradStrategy):
+class AOTAutogradCudaGraphs(AotAutogradStrategy):
     def candidate(self):
         return raw_aot_autograd_cudagraphs(self.gm, self.example_inputs)
 

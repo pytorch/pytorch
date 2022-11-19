@@ -1,4 +1,10 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Utils.h>
+#include <ATen/core/TensorBody.h>
+#include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type_base.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/conv_serialization.h>
 #include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
@@ -13,6 +19,12 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/cat.h>
+#endif
 
 int register_linear_params();
 int register_embedding_params();
@@ -548,6 +560,7 @@ int register_embedding_params() {
             return PackedEmbeddingBagWeight::prepack(weight);
           })
       .def("bit_rate", &EmbeddingPackedParamsBase::bit_rate)
+      .def("unpack", &EmbeddingPackedParamsBase::unpack)
       .def("version", &EmbeddingPackedParamsBase::version);
 
   return 0;

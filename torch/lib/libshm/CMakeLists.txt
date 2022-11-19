@@ -1,6 +1,5 @@
 project(libshm C CXX)
-cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)
-cmake_policy(VERSION 2.8.12)
+cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
 
 set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../../)
 include(${TORCH_ROOT}/cmake/public/threads.cmake)
@@ -16,12 +15,6 @@ if(MSVC)
   add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
 endif(MSVC)
 
-if(CMAKE_VERSION VERSION_LESS "3.1")
-  set(CMAKE_CXX_FLAGS "-std=c++14 ${CMAKE_CXX_FLAGS}")
-else()
-  set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
-endif()
-
 add_library(shm SHARED core.cpp)
 if(HAVE_SOVERSION)
   set_target_properties(shm PROPERTIES
@@ -29,26 +22,22 @@ if(HAVE_SOVERSION)
 endif()
 
 target_include_directories(shm PUBLIC
-  ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
   ${TORCH_ROOT}/torch/lib # provides "libshm/libshm.h"
-  )
+)
 
-add_executable(torch_shm_manager manager.cpp)
-target_link_libraries(torch_shm_manager shm)
-set_target_properties(torch_shm_manager PROPERTIES INSTALL_RPATH "${_rpath_portable_origin}/../lib")
 ### Torch packages supposes libraries prefix is "lib"
 set_target_properties(shm PROPERTIES
   PREFIX "lib"
-  IMPORT_PREFIX "lib")
-target_link_libraries(shm torch c10)
+  IMPORT_PREFIX "lib"
+  CXX_STANDARD 14)
+target_link_libraries(shm PUBLIC torch)
 
 if(UNIX AND NOT APPLE)
   include(CheckLibraryExists)
   # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
   check_library_exists(rt clock_gettime "time.h" NEED_LIBRT)
   if(NEED_LIBRT)
-    target_link_libraries(shm rt)
-    target_link_libraries(torch_shm_manager rt)
+    target_link_libraries(shm PUBLIC rt)
   else()
     message(STATUS "Checking if rt requires pthread")
     # Sometimes, rt won't be available unless you also link against
@@ -72,12 +61,15 @@ if(UNIX AND NOT APPLE)
     unset(CMAKE_REQUIRED_LIBRARIES)
     if(NEED_RT_AND_PTHREAD)
       message(STATUS "Needs it, linking against pthread and rt")
-      target_link_libraries(shm rt caffe2::Threads)
-      target_link_libraries(torch_shm_manager rt caffe2::Threads)
+      target_link_libraries(shm PUBLIC rt caffe2::Threads)
     endif()
   endif()
 endif()
 
+add_executable(torch_shm_manager manager.cpp)
+target_link_libraries(torch_shm_manager PRIVATE shm)
+set_target_properties(torch_shm_manager PROPERTIES
+  INSTALL_RPATH "${_rpath_portable_origin}/../lib")
 
 install(TARGETS shm LIBRARY DESTINATION ${LIBSHM_INSTALL_LIB_SUBDIR})
 install(FILES libshm.h DESTINATION "include")
