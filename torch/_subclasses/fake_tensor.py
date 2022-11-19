@@ -231,7 +231,11 @@ class FakeTensorConverter(object):
                     constant=t if make_constant else None,
                 )
 
-        out = self.meta_converter(t, shape_env=shape_env, callback=mk_fake_tensor)
+        ctx = contextlib.nullcontext()
+        if shape_env is not None:
+            ctx = shape_env.suppress_guards()
+        with ctx:
+            out = self.meta_converter(t, shape_env=shape_env, callback=mk_fake_tensor)
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
         if make_constant:
