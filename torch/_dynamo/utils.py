@@ -816,7 +816,9 @@ def same(
             res = res.to_dense()
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
-            assert ref.dtype == res.dtype, f"dtype mismatch {ref.dtype}, {res.dtype}"
+            if ref.dtype != res.dtype:
+                log.error(f"dtype mismatch {ref.dtype}, {res.dtype}")
+                return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
                 return torch.allclose(
