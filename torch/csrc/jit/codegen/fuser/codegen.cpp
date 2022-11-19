@@ -490,7 +490,7 @@ std::string generateKernel(
         env.s("access", format("t${formal}.data[t${formal}_offset]", env));
         env.s("access_vec4", format("t${formal}_buf[i]", env));
       }
-      env.s("lhs_type", calcScalarTypeName(input.second.value().scalar_type));
+      env.s("lhs_type", calcScalarTypeName(input.second->scalar_type));
 
       // load input in vectorized code path
       auto ele_size = at::elementSize((*input.second).scalar_type);

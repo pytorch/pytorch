@@ -9,9 +9,11 @@ on:
       - release/*
       - landchecks/*
   workflow_dispatch:
+  schedule:
+    - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 jobs:
@@ -306,3 +308,8 @@ jobs:
       build-environment: linux-focal-rocm5.2-py3.8
       docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
       sync-tag: rocm-build
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+        ]}
