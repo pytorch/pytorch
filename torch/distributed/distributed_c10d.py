@@ -2517,7 +2517,7 @@ def all_gather_coalesced(
     if _rank_not_in_group(group):
         _warn_not_in_group("all_gather_coalesced")
         return
-    _check_tensor_list(input_tensor_list, "tensor_list")
+    _check_tensor_list(input_tensor_list, "input_tensor_list")
     _ensure_all_tensors_same_dtype(input_tensor_list)
     if not isinstance(output_tensor_lists, list):
         raise RuntimeError(
