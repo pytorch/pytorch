@@ -1,4 +1,6 @@
+#ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
+#endif
 
 // Order of these includes matters, which should be fixed.
 // clang-format off
