@@ -33,18 +33,18 @@ class TensorParallelAPITests(DTensorTestBase):
 
     @with_comms
     def test_creat_1d_device_mesh(self):
-        tp_size = 2
+        dim_one_size = 2
         mesh_shape = (
             torch.arange(self.world_size)
             .reshape(
-                self.world_size // (self.world_size // tp_size),
-                self.world_size // tp_size,
+                self.world_size // dim_one_size,
+                dim_one_size,
             )
             .to(torch.int)
         )
         mesh = DeviceMesh(self.device_type, mesh_shape)
         # When 1D dim is 1.
-        one_dimention_mesh_shape = mesh_shape[self.rank // tp_size, :]
+        one_dimention_mesh_shape = mesh_shape[self.rank // dim_one_size, :]
         pg = mesh.get_dim_groups()[1]
         new_mesh = _create_1d_device_mesh(mesh, 1)
         expected_mesh = DeviceMesh(
@@ -53,7 +53,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self.assertEqual(new_mesh.mesh, expected_mesh.mesh)
         self.assertEqual(new_mesh.device_type, expected_mesh.device_type)
         # When 1D dim is 0.
-        one_dimention_mesh_shape = mesh_shape[:, self.rank % tp_size]
+        one_dimention_mesh_shape = mesh_shape[:, self.rank % dim_one_size]
         pg = mesh.get_dim_groups()[0]
         new_mesh = _create_1d_device_mesh(mesh, 0)
         expected_mesh = DeviceMesh(
