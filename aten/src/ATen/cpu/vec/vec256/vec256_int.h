@@ -1209,7 +1209,7 @@ Vectorized<int8_t> inline maximum(const Vectorized<int8_t>& a, const Vectorized<
 
 template <>
 Vectorized<uint8_t> inline maximum(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
-  return _mm256_max_epi8(a, b);
+  return _mm256_max_epu8(a, b);
 }
 
 template <>

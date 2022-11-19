@@ -26,7 +26,7 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .lists import ListVariable, TupleVariable
-from .misc import AutocastModeVariable, ProfilerContextWrapperVariable
+from .misc import AutocastModeVariable, NullContextVariable
 from .nn_module import NNModuleVariable
 from .tensor import TensorWithTFOverrideVariable
 
@@ -163,8 +163,7 @@ class TorchVariable(VariableTracker):
             torch.finfo,
             torch.iinfo,
             torch.is_floating_point,
-            torch.is_tensor,
-            torch.overrides.is_tensor_like,
+            torch.cuda.is_available,
         ):
             return True
         return getattr(self.value, "__module__", None) == "math"
@@ -177,9 +176,9 @@ class TorchVariable(VariableTracker):
             DynamicShapeVariable,
             GradModeVariable,
             TensorVariable,
+            UserDefinedObjectVariable,
         )
 
-        # print("CALLING ON TORCH", self.value)
         from .builder import wrap_fx_proxy
 
         constant_args = check_constant_args(args, kwargs)
@@ -206,21 +205,26 @@ class TorchVariable(VariableTracker):
                 return self._call_cross_entropy_loss(tx, args, kwargs, options)
             else:
                 unimplemented(f"construct nn.Module: {self.value.__name__}")
+        elif self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
+            assert len(args) == 1
+            if isinstance(args[0], TensorVariable) or (
+                self.value is torch.overrides.is_tensor_like
+                and isinstance(args[0], UserDefinedObjectVariable)
+                and hasattr(args[0].value, "__torch_function__")
+            ):
+                return ConstantVariable(True, **options)
+            else:
+                return ConstantVariable(False, **options)
         elif (
             self.value
             in (
-                torch.is_tensor,
                 torch.is_floating_point,
-                torch.is_complex,
-                torch.overrides.is_tensor_like,
                 torch.is_complex,
             )
             and isinstance(args[0], TensorVariable)
             and args[0].dtype is not None
         ):
-            if self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
-                return ConstantVariable(True, **options)
-            elif self.value is torch.is_floating_point:
+            if self.value is torch.is_floating_point:
                 return ConstantVariable(args[0].dtype.is_floating_point, **options)
             elif self.value is torch.is_complex:
                 return ConstantVariable(args[0].dtype.is_complex, **options)
@@ -289,7 +293,7 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_type,
             )
         elif self.value is torch.amp.autocast_mode.autocast:
-            return AutocastModeVariable.create(tx, target_values=args, kwargs=kwargs)
+            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
         elif self.value in (
             torch.profiler.profile,
             torch.profiler.record_function,
@@ -297,7 +301,7 @@ class TorchVariable(VariableTracker):
             torch.autograd.profiler.record_function,
         ):
             log.warning("Profiler will be ignored")
-            return ProfilerContextWrapperVariable(**options)
+            return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
         elif self.value is torch.jit.annotate:
