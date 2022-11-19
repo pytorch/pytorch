@@ -63,14 +63,23 @@ dispatch_sync(mpsStream->queue(), ^(){
   id<MTLBuffer> _result_ptr = [device newBufferWithLength:result_size options:MTLResourceStorageModeShared];
   id<MTLBuffer> _size = [device newBufferWithLength:1 options:MTLResourceStorageModeShared];
 
-  _repeat_ptr.contents = repeat_ptr;
-  _cumsum_ptr.contents = cumsum_ptr;
-  _size.contents = size;
+  index_t* dataPtr = _repeat_ptr.contents;
+  int64_t* dataPtr2 = _cumsum_ptr.contents;
+  
+  index_t* resultPtr = _result_ptr.contents;
+
+  
+  dataPtr = repeat_ptr;
+  dataPtr2 = cumsum_ptr;
+  resultPtr = result_ptr;
 
   [computeEncoder setComputePipelineState:_mAddFunctionPSO];
   [computeEncoder setBuffer:_repeat_ptr offset:0 atIndex:0];
-  [computeEncoder setBuffer:_cumsum_ptr offset:0 atIndex:0];
-  [computeEncoder setBuffer:_result_ptr offset:0 atIndex:0];
+  [computeEncoder setBuffer:_cumsum_ptr offset:0 atIndex:1];
+  [computeEncoder setBuffer:_result_ptr offset:0 atIndex:2];
+  [computeEncoder setBytes:&size length:sizeof(size) atIndex:3];
+  [computeEncoder setBytes:&threadGroupSize length:sizeof(threadGroupSize) atIndex:4];
+
 
   [computeEncoder dispatchThreads:gridSize
           threadsPerThreadgroup:threadgroupSize];
@@ -82,7 +91,7 @@ dispatch_sync(mpsStream->queue(), ^(){
   result_ptr = _result_ptr.contents;
 
 }
-})
+});
 }
 
 
@@ -247,10 +256,10 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
 
 
 
-Tensor repeat_interleave_mps(const Tensor& repeats,c10::optional<int64_t> output_size) {
+Tensor repeat_interleave_mps(const Tensor& repeat,c10::optional<int64_t> output_size) {
   Tensor output;
   AT_DISPATCH_INDEX_TYPES(
-      repeats.scalar_type(), "repeat_interleave_mps", [&]() {
+      repeat.scalar_type(), "repeat_interleave_mps", [&]() {
         output = repeat_interleave_common<index_t, compute_mps<index_t>>(
             repeat, output_size);
       });

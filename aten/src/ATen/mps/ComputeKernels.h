@@ -10,10 +10,11 @@ static const char* computing_metal_shaders = R"COMPUTE_METAL(
 using namespace metal;
 
 template <typename index_t>
-kernel void compute_mps_kernel(metal::device int64_t* _repeat_ptr,
-    	metal::device int64_t* _cumsum_ptr,
-    	metal::device index_t* _result_ptr,
-      metal::device int64_t& _size,
+kernel void compute_mps_kernel(device index_t* _repeat_ptr,
+    	device int64_t* _cumsum_ptr,
+    	device index_t* _result_ptr,
+      device int64_t& _size,
+      device NSUInteger& _threadGroupSize,
       uint idx [[thread_position_in_grid]])
     {
 
