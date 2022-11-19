@@ -163,6 +163,7 @@ class TorchVariable(VariableTracker):
             torch.finfo,
             torch.iinfo,
             torch.is_floating_point,
+            torch.cuda.is_available,
         ):
             return True
         return getattr(self.value, "__module__", None) == "math"
