@@ -229,6 +229,28 @@ bool IsValidONNXNode(const Node* n) {
   return true;
 }
 
+bool CustomSettype(Node* node) {
+  // This is a helper function to decide if the non-ONNX node actually has
+  // custom setType from user
+  // Go through every symbolic_sizes and if one of them > 0, we say this
+  // is set by user. On the other hand, if all of them are *, we take this
+  // node does not have given type, since unreliable nodes have * shape
+  // anyway.
+  auto all_output_has_type = [](Value* output) {
+    if (auto output_type = output->type()->cast<TensorType>()) {
+      if (auto sizes = output_type->symbolic_sizes().sizes()) {
+        return std::any_of(std::begin(*sizes), std::end(*sizes), [](auto size) {
+          return size.is_static();
+        });
+      }
+    }
+    return false;
+  };
+
+  return std::all_of(
+      node->outputs().begin(), node->outputs().end(), all_output_has_type);
+}
+
 Value* CloneValueFromListConstruct(
     Value* v,
     std::shared_ptr<Graph> n_graph,
@@ -1950,28 +1972,6 @@ void ONNXShapeTypeInference(
   GRAPH_UPDATE(
       "Running ONNX shape inference for node: ", n->kind().toDisplayString());
 
-  // Go through every output to check if they all have shape
-  // If they all do, this should be reliable even if the Op is not from ONNX.
-  size_t all_output_has_value = 0;
-  for (auto node_output : n->outputs()) {
-    if (auto output_type = node_output->type()->cast<TensorType>()) {
-      if (output_type->dim().has_value()) {
-        // Go through every symbolic_sizes and if one of them > 0, we say this
-        // is set by user. On the other hand, if all of them are *, we take this
-        // node does not have given type, since unreliable nodes have * shape
-        // anyway.
-        for (size_t i = 0; i < output_type->dim().value(); i++) {
-          if (output_type->symbolic_sizes()[i].value() > 0) {
-            all_output_has_value += 1;
-            break;
-          }
-        }
-      }
-    }
-  }
-  bool custom_setType =
-      (all_output_has_value == n->outputs().size()) ? true : false;
-
   if (IsValidONNXNode(n)) {
     // Create a Graph containing only the single node n.
     // This graph is later converted to ONNX to run shape inference.
@@ -2064,10 +2064,13 @@ void ONNXShapeTypeInference(
       GRAPH_DEBUG(
           "ONNX graph after shape inference: ", prettyPrint(*model_proto));
     }
-  } else if (custom_setType) {
-    // Custom setType output should get in here if it's set correctly. They
-    // will be updated to inferred for later updatereliable function.
+  } else if (CustomSettype(n)) {
+    // If the node is not ONNX standard, go through every output to check if
+    // they all have shape. If they all do, this should be reliable even if the
+    // Op is not from ONNX.
     for (auto node_output : n->outputs()) {
+      // Custom setType output should get in here if it's set correctly. They
+      // will be updated to inferred for later updatereliable function.
       ConstantValueMap::SetUseInferredType(node_output->debugName(), true);
     }
   }

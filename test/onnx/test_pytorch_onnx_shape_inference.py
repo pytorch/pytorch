@@ -286,9 +286,10 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         self.run_test(g, reduce_prod.node(), expect_tensor("Long", shape=(1,)))
 
 
-class TestONNXCustomOpShapeInference(common_utils.TestCase):
-
-    opset_version = _constants.ONNX_MAX_OPSET
+class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
+    def setUp(self):
+        super().setUp()
+        self.opset_version = _constants.ONNX_MAX_OPSET
 
     def test_setType_maintains_output_shape_for_single_custom_op(self):
 
@@ -436,7 +437,7 @@ class TestONNXCustomOpShapeInference(common_utils.TestCase):
             if node.op_type == "Inverse":
                 output_name = node.output[0]
                 break
-
+        assert output_name
         model_value_info = model_proto.graph.value_info
         self.assertIsNotNone(model_value_info)
         assert model_value_info
