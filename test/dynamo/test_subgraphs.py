@@ -367,6 +367,18 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # just one graph now rather than 10
         self.assertEqual(cnt_dynamic.frame_count, 1)
 
+    def test_dynamic_kwarg(self):
+        def fn(a, b):
+            return a - b * 10
+
+        torch._dynamo.reset()
+        cnt_dynamic = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        for i in range(10):
+            opt_fn(torch.randn(i), torch.randn(i))
+        # just one graph
+        self.assertEqual(cnt_dynamic.frame_count, 1)
+
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_no_graph_break_on_item(self):
         def fn(a, b):
