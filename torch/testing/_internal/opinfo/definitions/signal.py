@@ -407,13 +407,6 @@ op_db: List[OpInfo] = [
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
         ),
     ),
     make_signal_windows_opinfo(
@@ -502,9 +495,7 @@ op_db: List[OpInfo] = [
                 device_type="cpu",
             ),
             DecorateInfo(
-                unittest.skip(
-                    "Buggy on MPS for now (mistakenly promotes to float64)"
-                ),
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
                 "TestCommon",
                 "test_numpy_ref_mps",
             ),
@@ -555,9 +546,7 @@ op_db: List[OpInfo] = [
                 device_type="cpu",
             ),
             DecorateInfo(
-                unittest.skip(
-                    "Buggy on MPS for now (mistakenly promotes to float64)"
-                ),
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
                 "TestCommon",
                 "test_numpy_ref_mps",
             ),
@@ -701,13 +690,6 @@ op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestMeta",
                 "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
