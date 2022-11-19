@@ -1184,7 +1184,7 @@ IterDomain::IterDomain(
     bool is_padded_dimension,
     c10::optional<int64_t> padded_to_size,
     bool is_mma_swizzled)
-    : Val(passkey, ValType::IterDomain, DataType::Int),
+    : Val(passkey, ValType::IterDomain),
       start_(start),
       extent_(extent),
       expanded_extent_(expanded_extent),
