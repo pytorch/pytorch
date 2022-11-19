@@ -36,6 +36,8 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
 from collections import defaultdict
 from datetime import datetime
 from os.path import abspath, exists
@@ -132,10 +134,15 @@ def flag_compression_ratio(x):
     return x < 0.9
 
 
+def flag_accuracy(x):
+    return "pass" not in x
+
+
 FLAG_FNS = {
     "speedup": flag_speedup,
     "compilation_latency": flag_compilation_latency,
     "compression_ratio": flag_compression_ratio,
+    "accuracy": flag_accuracy,
 }
 
 
@@ -214,6 +221,12 @@ def parse_args():
         action="store_true",
         default=False,
         help="Updates to dashboard",
+    )
+    parser.add_argument(
+        "--update-dashboard-test",
+        action="store_true",
+        default=False,
+        help="Do not udpate lookup file or upload images/comments when --update-dashboard is specified",
     )
     parser.add_argument(
         "--dashboard-image-uploader",
@@ -409,6 +422,20 @@ def archive(src_dir, dest_dir_prefix, archive_name, dtype):
     dest = os.path.join(dest_dir_prefix, archive_name)
     shutil.copytree(src_dir, dest, dirs_exist_ok=True)
     print(f"copied contents of {src_dir} to {dest}")
+
+
+def get_metric_title(metric):
+    if metric == "speedup":
+        return "Performance speedup"
+    elif metric == "accuracy":
+        return "Accuracy"
+    elif metric == "compilation_latency":
+        return "Compilation latency (sec)"
+    elif metric == "compression_ratio":
+        return "Peak Memory Compression Ratio"
+    elif metric == "abs_latency":
+        return "Absolute latency (ms)"
+    raise RuntimeError("unknown metric")
 
 
 class Parser:
@@ -692,28 +719,18 @@ class ParsePerformanceLogs(Parser):
         df = df.assign(suite=suite)
         return df.reindex(columns=["suite", "name"] + self.flag_compilers)
 
-    def get_metric_title(self, metric):
-        if metric == "speedup":
-            return "Performance speedup"
-        elif metric == "accuracy":
-            return "Accuracy"
-        elif metric == "compilation_latency":
-            return "Compilation latency (sec)"
-        elif metric == "compression_ratio":
-            return "Peak Memory Compression Ratio"
-        elif metric == "abs_latency":
-            return "Absolute latency (ms)"
-        raise RuntimeError("unknown metric")
-
     def generate_warnings(self):
         title = "## Warnings ##"
         body = (
             "We flag models where:\n\n"
-            " - speedup < 0.95x\n"
+            " - accuracy fails\n"
+            " - speedup < 0.95x (NOTE: 0.0 speedup typically signifies a failure in the performance test)\n"
             " - compilation latency > 120 sec.\n"
-            " - compression ratio < 0.9\n\n"
+            " - compression ratio < 0.9\n"
+            "\n"
         )
         for metric in [
+            "accuracy",
             "speedup",
             "compilation_latency",
             "compression_ratio",
@@ -727,7 +744,7 @@ class ParsePerformanceLogs(Parser):
             tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
             str_io = io.StringIO()
             str_io.write("\n")
-            str_io.write(self.get_metric_title(metric) + " warnings\n")
+            str_io.write(get_metric_title(metric) + " warnings\n")
             str_io.write("~~~\n")
             str_io.write(f"{tabform}\n")
             str_io.write("~~~\n")
@@ -752,7 +769,7 @@ class ParsePerformanceLogs(Parser):
             tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
             str_io = io.StringIO()
             str_io.write("\n")
-            str_io.write(self.get_metric_title(metric) + "\n")
+            str_io.write(get_metric_title(metric) + "\n")
             str_io.write("~~~\n")
             str_io.write(f"{tabform}\n")
             str_io.write("~~~\n")
@@ -778,18 +795,15 @@ class ParsePerformanceLogs(Parser):
 
         with open(f"{self.output_dir}/gh_executive_summary.txt", "w") as gh_fh:
             gh_fh.write(self.executive_summary)
-        print(self.executive_summary)
 
         with open(f"{self.output_dir}/gh_warnings.txt", "w") as gh_fh:
             warnings_body = self.generate_warnings()
             gh_fh.write(warnings_body)
-            print(warnings_body)
 
         str_io = io.StringIO()
         for suite in self.suites:
             str_io.write(self.prepare_message(suite))
         str_io.write("\n")
-        print(str_io.getvalue())
         with open(f"{self.output_dir}/gh_{self.mode}.txt", "w") as gh_fh:
             gh_fh.write(str_io.getvalue())
 
@@ -819,10 +833,88 @@ def get_date(log_info):
     return datetime.strptime(f"{log_info.day}", "%j").strftime("%m-%d")
 
 
-class AccuracyRegressionTracker:
+def find_last_2_with_filenames(lookup_file, dashboard_archive_path, dtype, filenames):
+    df = pd.read_csv(lookup_file, names=("day", "mode", "prec", "path"))
+    df = df[df["mode"] == "performance"]
+    df = df[df["prec"] == dtype]
+    df = df[::-1]
+    last2 = []
+    for path in df["path"]:
+        output_dir = os.path.join(dashboard_archive_path, path)
+        fullpaths = [
+            os.path.join(dashboard_archive_path, path, name) for name in filenames
+        ]
+        if all([os.path.exists(fullpath) for fullpath in fullpaths]):
+            last2.append(output_dir)
+        if len(last2) >= 2:
+            return last2
+    return None
+
+
+class SummaryStatDiffer:
+    def __init__(self, args):
+        self.args = args
+        self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
+        assert os.path.exists(self.lookup_file)
+
+    def generate_diff(self, last2, filename, caption):
+        df_cur, df_prev = [pd.read_csv(os.path.join(path, filename)) for path in last2]
+        df_merge = df_cur.merge(df_prev, on="Compiler", suffixes=("_cur", "_prev"))
+        data = {col: [] for col in ("compiler", "suite", "prev_value", "cur_value")}
+        for _, row in df_merge.iterrows():
+            if row["Compiler"] in self.args.flag_compilers:
+                for suite in self.args.suites:
+                    if suite + "_prev" not in row or suite + "_cur" not in row:
+                        continue
+                    data["compiler"].append(row["Compiler"])
+                    data["suite"].append(suite)
+                    data["prev_value"].append(row[suite + "_prev"])
+                    data["cur_value"].append(row[suite + "_cur"])
+
+        df = pd.DataFrame(data)
+        tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
+        str_io = io.StringIO()
+        str_io.write("\n")
+        str_io.write(f"{caption}\n")
+        str_io.write("~~~\n")
+        str_io.write(f"{tabform}\n")
+        str_io.write("~~~\n")
+        return str_io.getvalue()
+
+    def generate_comment(self):
+        title = "## Summary Statistics Diff ##\n"
+        body = (
+            "For each relevant compiler, we compare the summary statistics "
+            "for the most 2 recent reports that actually run the compiler.\n\n"
+        )
+        dtype = self.args.dtypes[0]
+        last2 = find_last_2_with_filenames(
+            self.lookup_file,
+            self.args.dashboard_archive_path,
+            dtype,
+            ["geomean.csv", "passrate.csv"],
+        )
+
+        if last2 is None:
+            body += "Could not find most 2 recent reports.\n\n"
+        else:
+            for state, path in zip(("Current", "Previous"), last2):
+                body += f"{state} report name: {path}\n\n"
+            body += self.generate_diff(last2, "passrate.csv", "Passrate diff")
+            body += self.generate_diff(
+                last2, "geomean.csv", "Geometric mean speedup diff"
+            )
+
+        comment = generate_dropdown_comment(title, body)
+
+        with open(f"{self.args.output_dir}/gh_summary_diff.txt", "w") as gh_fh:
+            gh_fh.write(comment)
+
+
+class RegressionDetector:
     """
-    Compares the most recent 2 accuracy benchmarks to find previously
-    passing models that now fail.
+    Compares the most recent 2 benchmarks to find previously unflagged models
+    that are now flagged.
     """
 
     def __init__(self, args):
@@ -830,97 +922,113 @@ class AccuracyRegressionTracker:
         self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
         assert os.path.exists(self.lookup_file)
 
-    def find_last_2(self, suite, device, dtype, compiler):
-        df = pd.read_csv(self.lookup_file, names=("day", "mode", "prec", "path"))
-        df = df[df["mode"] == "performance"]
-        df = df[df["prec"] == dtype]
-        df = df[::-1]
-        parsers = []
-        for path in df["path"]:
-            output_dir = os.path.join(self.args.dashboard_archive_path, path)
-            if os.path.exists(
-                os.path.join(
-                    output_dir,
-                    generate_csv_name(
-                        self.args, dtype, suite, device, compiler, "accuracy"
-                    ),
-                )
-            ):
-                parsers.append(
-                    ParsePerformanceLogs(
-                        [suite],
-                        [device],
-                        [dtype],
-                        [compiler],
-                        [compiler],
-                        get_mode(self.args),
-                        output_dir,
-                    )
-                )
-            if len(parsers) >= 2:
-                return parsers
-        return None
-
     def generate_comment(self):
-        title = "## Accuracy Regressions ##\n"
+        title = "## Recent Regressions ##\n"
         body = (
             "For each relevant compiler, we compare the most recent 2 reports "
-            "(that run actually the compiler) to find models where previously "
-            "successful accuracy tests now fail.\n\n"
+            "(that actually run the compiler) to find previously unflagged "
+            "models that are now flagged as problematic (according to the "
+            "'Warnings' section).\n\n"
         )
         dtype = self.args.dtypes[0]
         device = self.args.devices[0]
-        regressions_present = False
         for suite in self.args.suites:
-            dfs = []
+            body += f"### Regressions for {suite} ###\n"
+            last2 = {}
+
             for compiler in self.args.flag_compilers:
-                last2 = self.find_last_2(suite, device, dtype, compiler)
-                if last2 is None:
-                    continue
-
-                df_cur, df_prev = [
-                    last2[i].untouched_parsed_frames[suite]["accuracy"] for i in (0, 1)
-                ]
-                df_merge = df_cur.merge(df_prev, on="name", suffixes=("_cur", "_prev"))
-                flag = np.logical_and(
-                    df_merge[compiler + "_prev"].apply(lambda x: "pass" in x),
-                    df_merge[compiler + "_cur"].apply(lambda x: "pass" not in x),
-                )
-                df_bad = df_merge[flag]
-                dfs.append(
-                    pd.DataFrame(
-                        data={
-                            "compiler": compiler,
-                            "name": df_bad["name"],
-                            "prev_status": df_bad[compiler + "_prev"],
-                            "cur_status": df_bad[compiler + "_cur"],
-                        }
+                filenames = [
+                    generate_csv_name(
+                        self.args, dtype, suite, device, compiler, testing
                     )
+                    for testing in ["performance", "accuracy"]
+                ]
+                compiler_last2 = find_last_2_with_filenames(
+                    self.lookup_file, self.args.dashboard_archive_path, dtype, filenames
                 )
+                if compiler_last2 is not None:
+                    last2[compiler] = [
+                        ParsePerformanceLogs(
+                            [suite],
+                            [device],
+                            [dtype],
+                            [compiler],
+                            [compiler],
+                            get_mode(self.args),
+                            output_dir,
+                        )
+                        for output_dir in compiler_last2
+                    ]
+                    for state, path in zip(("Current", "Previous"), compiler_last2):
+                        body += (
+                            f"{state} report name (compiler: {compiler}, "
+                            f"suite: {suite}): {path}\n\n"
+                        )
 
-            if not dfs:
-                continue
-            df = pd.concat(dfs, axis=0)
-            if df.empty:
-                continue
-            regressions_present = True
-            tabform = tabulate(df, headers="keys", tablefmt="pretty", showindex="never")
-            str_io = io.StringIO()
-            str_io.write("\n")
-            str_io.write(f"Accuracy regressions for {suite}\n")
-            str_io.write("~~~\n")
-            str_io.write(f"{tabform}\n")
-            str_io.write("~~~\n")
-            body += str_io.getvalue()
+            for metric in [
+                "accuracy",
+                "speedup",
+                "compilation_latency",
+                "compression_ratio",
+            ]:
+                regressions_present = False
+                dfs = []
+                for compiler in self.args.flag_compilers:
+                    if last2[compiler] is None:
+                        continue
 
-        if not regressions_present:
-            body += "No accuracy regressions found.\n"
+                    df_cur, df_prev = [
+                        last2[compiler][i].untouched_parsed_frames[suite][metric]
+                        for i in (0, 1)
+                    ]
+                    df_merge = df_cur.merge(
+                        df_prev, on="name", suffixes=("_cur", "_prev")
+                    )
+                    flag_fn = FLAG_FNS[metric]
+                    flag = np.logical_and(
+                        df_merge[compiler + "_prev"].apply(
+                            lambda x: not pd.isna(x) and not flag_fn(x)
+                        ),
+                        df_merge[compiler + "_cur"].apply(
+                            lambda x: not pd.isna(x) and flag_fn(x)
+                        ),
+                    )
+                    df_bad = df_merge[flag]
+                    dfs.append(
+                        pd.DataFrame(
+                            data={
+                                "compiler": compiler,
+                                "name": df_bad["name"],
+                                "prev_status": df_bad[compiler + "_prev"],
+                                "cur_status": df_bad[compiler + "_cur"],
+                            }
+                        )
+                    )
+
+                if not dfs:
+                    continue
+                df = pd.concat(dfs, axis=0)
+                if df.empty:
+                    continue
+                regressions_present = True
+                tabform = tabulate(
+                    df, headers="keys", tablefmt="pretty", showindex="never"
+                )
+                str_io = io.StringIO()
+                str_io.write("\n")
+                str_io.write(f"{get_metric_title(metric)} regressions\n")
+                str_io.write("~~~\n")
+                str_io.write(f"{tabform}\n")
+                str_io.write("~~~\n")
+                body += str_io.getvalue()
+
+            if not regressions_present:
+                body += "No regressions found.\n"
 
         comment = generate_dropdown_comment(title, body)
 
-        with open(f"{self.args.output_dir}/gh_accuracy_regression.txt", "w") as gh_fh:
+        with open(f"{self.args.output_dir}/gh_metric_regression.txt", "w") as gh_fh:
             gh_fh.write(comment)
-            print(comment)
 
 
 class RegressionTracker:
@@ -954,13 +1062,14 @@ class RegressionTracker:
     def generate_comment(self):
         title = "## Metrics over time ##\n"
         str_io = io.StringIO()
-        for name in glob.glob(self.args.output_dir + "/*over_time.png"):
-            output = (
-                subprocess.check_output([self.args.dashboard_image_uploader, name])
-                .decode("ascii")
-                .rstrip()
-            )
-            str_io.write(f"\n{name} : ![]({output})\n")
+        if not self.args.update_dashboard_test:
+            for name in glob.glob(self.args.output_dir + "/*over_time.png"):
+                output = (
+                    subprocess.check_output([self.args.dashboard_image_uploader, name])
+                    .decode("ascii")
+                    .rstrip()
+                )
+                str_io.write(f"\n{name} : ![]({output})\n")
         comment = generate_dropdown_comment(title, str_io.getvalue())
 
         with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
@@ -1030,6 +1139,25 @@ class DashboardUpdater:
         self.output_dir = args.output_dir
         self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
         assert os.path.exists(self.lookup_file)
+        try:
+            if not self.args.update_dashboard_test:
+                self.update_lookup_file()
+        except subprocess.CalledProcessError:
+            sys.stderr.write("failed to update lookup file\n")
+
+    def update_lookup_file(self):
+        dtype = self.args.dtypes[0]
+        day, _ = archive_data(self.args.archive_name)
+        target_dir = (
+            default_archive_name(dtype)
+            if self.args.archive_name is None
+            else self.args.archive_name
+        )
+        # Update lookup csv the folder to arhived logs
+        subprocess.check_call(
+            f'echo "{day},performance,{dtype},{target_dir}" >> {self.lookup_file}',
+            shell=True,
+        )
 
     def archive(self):
         dtype = self.args.dtypes[0]
@@ -1040,30 +1168,21 @@ class DashboardUpdater:
             self.args.archive_name,
             dtype,
         )
-        day, _ = archive_data(self.args.archive_name)
-        target_dir = (
-            default_archive_name(dtype)
-            if self.args.archive_name is None
-            else self.args.archive_name
-        )
-
-        # Update lookup csv the folder to arhived logs
-        subprocess.check_call(
-            f'echo "{day},performance,{dtype},{target_dir}" >> {self.lookup_file}',
-            shell=True,
-        )
 
     def upload_graphs(self):
         title = "## Performance graphs ##\n"
         str_io = io.StringIO()
-        for name in glob.glob(self.output_dir + "/*png"):
-            if "over_time" not in name:
-                output = (
-                    subprocess.check_output([self.args.dashboard_image_uploader, name])
-                    .decode("ascii")
-                    .rstrip()
-                )
-                str_io.write(f"\n{name} : ![]({output})\n")
+        if not self.args.update_dashboard_test:
+            for name in glob.glob(self.output_dir + "/*png"):
+                if "over_time" not in name:
+                    output = (
+                        subprocess.check_output(
+                            [self.args.dashboard_image_uploader, name]
+                        )
+                        .decode("ascii")
+                        .rstrip()
+                    )
+                    str_io.write(f"\n{name} : ![]({output})\n")
         comment = generate_dropdown_comment(title, str_io.getvalue())
 
         with open(f"{self.output_dir}/gh_graphs.txt", "w") as gh_fh:
@@ -1073,9 +1192,10 @@ class DashboardUpdater:
         files = [
             "gh_title.txt",
             "gh_executive_summary.txt",
+            "gh_summary_diff.txt",
             "gh_warnings.txt",
-            "gh_regression.txt",
-            "gh_accuracy_regression.txt",
+            # "gh_regression.txt",
+            "gh_metric_regression.txt",
             "gh_training.txt",
             "gh_graphs.txt",
         ]
@@ -1093,6 +1213,10 @@ class DashboardUpdater:
         """
         Send a commment to dashboard
         """
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write(comment)
+            filename = f.name
+
         subprocess.check_call(
             [
                 self.args.dashboard_gh_cli_path,
@@ -1100,14 +1224,17 @@ class DashboardUpdater:
                 "comment",
                 "--repo=https://github.com/pytorch/torchdynamo.git",
                 "681",
-                "-b",
-                comment,
+                "-F",
+                filename,
             ]
         )
 
+        os.remove(filename)
+
     def update(self):
         self.upload_graphs()
-        AccuracyRegressionTracker(self.args).generate_comment()
+        SummaryStatDiffer(self.args).generate_comment()
+        RegressionDetector(self.args).generate_comment()
         try:
             RegressionTracker(self.args).diff()
         except Exception as e:
@@ -1116,9 +1243,11 @@ class DashboardUpdater:
                 gh_fh.write("")
 
         comment = self.gen_comment()
-        self.comment_on_gh(comment)
+        print(comment)
 
-        self.archive()
+        if not self.args.update_dashboard_test:
+            self.comment_on_gh(comment)
+            self.archive()
 
 
 if __name__ == "__main__":
