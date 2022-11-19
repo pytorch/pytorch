@@ -19,6 +19,8 @@ from torch.nn.modules.utils import _pair
 from torch.nn.utils.fusion import fuse_conv_bn_eval
 from torch.overrides import TorchFunctionMode
 
+from . import config
+
 log = logging.getLogger(__name__)
 
 
@@ -157,6 +159,11 @@ class ConvBinary2d(nn.Conv2d):
         self.unary_scalars = []
         self.unary_algorithm = None
 
+    def _update_unary_params(self, unary):
+        self.unary_attr, self.unary_scalars, self.unary_algorithm = unary_modules_map[
+            unary.__class__
+        ](unary)
+
     def _conv_forward(self, input, other, weight, bias):
         if self.padding_mode != "zeros":
             return torch.ops.mkldnn._convolution_pointwise(
@@ -226,9 +233,9 @@ class ConvBinaryInplace2d(nn.Conv2d):
         self.unary_algorithm = None
 
     def _update_unary_params(self, unary):
-        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
-            unary
-        )
+        self.unary_attr, self.unary_scalars, self.unary_algorithm = unary_modules_map[
+            unary.__class__
+        ](unary)
 
     def _conv_forward(self, input, other, weight, bias):
         if self.padding_mode != "zeros":
@@ -344,6 +351,13 @@ def fused_conv_binary_inplace_eval(conv: nn.Module, binary_op_name: str):
     )
 
 
+def fused_binary_unary_eval(conv_binary: nn.Module, unary: nn.Module):
+    assert not (conv_binary.training), "Fusion only for eval!"
+    # reuse origin conv module, and just update its' unary attr.
+    conv_binary._update_unary_params(unary)
+    return conv_binary
+
+
 def is_bfloat16_module(m):
     weight_is_bf16 = m.weight.dtype == torch.bfloat16
     bias_is_bf16 = m.bias is None or m.bias.dtype == torch.bfloat16
@@ -413,14 +427,23 @@ def check_node_is_add_inplace(node):
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
+    is_cpu = all(
+        example_input.device == torch.device("cpu") for example_input in example_inputs
+    )
+
+    if config.permute_fusion and not is_cpu:
+        # For linear permute fusion, we need to check input info to identify
+        # and perform proper permutation/transpose
+        ShapeProp(gm).propagate(*example_inputs)
+        gm = linear_permute_fusion(gm)
+        gm = permute_linear_fusion(gm)
+        gm = permute_matmul_fusion(gm)
+
     # make sure the autograd is disabled.
     if torch.is_grad_enabled():
         return gm
     if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
         return gm
-    is_cpu = all(
-        example_input.device == torch.device("cpu") for example_input in example_inputs
-    )
     if not is_cpu:
         return gm
     gm = fuse_conv_bn(gm)
@@ -430,6 +453,9 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     gm = fuse_unary(gm)
     gm = fuse_binary_inplace(gm)
     gm = fuse_binary(gm)
+    # why re-run fuse_unary? we want to enable conv+binary+unary fusion,
+    # such as conv+add+relu for vision model.
+    gm = fuse_unary(gm)
 
     return gm
 
@@ -484,7 +510,11 @@ def fuse_unary(gm: torch.fx.GraphModule):
                 eval_mode = all(not n.training for n in [computation_node, unary_node])
                 if not eval_mode:
                     continue
-
+                # TODO: support padding str input("valid", "same").
+                if type(computation_node) in [nn.Conv2d] and isinstance(
+                    computation_node.padding, str
+                ):
+                    continue
                 # only fuse for linear when the dtype is bf16
                 if type(computation_node) in [nn.Linear] and not is_bfloat16_module(
                     computation_node
@@ -507,6 +537,195 @@ def _philox_rand_like_meta(input, seed, offset):
 def _philox_rand_like(input, seed, offset):
     # placeholder only used in tracing
     return torch.rand_like(input)
+
+
+class NormalizedLinearNode:
+    def __init__(self, node: torch.fx.Node) -> None:
+        assert node.op == "call_function"
+        assert node.target in [torch.nn.functional.linear]
+        self.node: torch.fx.Node = node
+
+    def get_input(self) -> torch.fx.Node:
+        if len(self.node.args) > 0:
+            return self.node.args[0]
+        else:
+            return self.node.kwargs["input"]
+
+    def get_weight(self) -> torch.fx.Node:
+        if len(self.node.args) > 1:
+            return self.node.args[1]
+        else:
+            return self.node.kwargs["weight"]
+
+    def get_bias(self) -> torch.fx.Node:
+        if len(self.node.args) > 2:
+            return self.node.args[2]
+        else:
+            return self.node.kwargs["bias"]
+
+
+class NormalizedMatmulNode:
+    def __init__(self, node: torch.fx.Node) -> None:
+        assert node.op == "call_function"
+        assert node.target in [torch.bmm, torch.matmul]
+        self.node: torch.fx.Node = node
+
+    def get_input(self) -> torch.fx.Node:
+        if len(self.node.args) > 0:
+            return self.node.args[0]
+        else:
+            return self.node.kwargs["input"]
+
+    def get_other(self) -> torch.fx.Node:
+        if len(self.node.args) > 1:
+            return self.node.args[1]
+        else:
+            return self.node.kwargs["other"]
+
+
+def check_permute(node: torch.fx.Node):
+    ranks = len(node.meta["tensor_meta"].shape)
+    if len(node.args) > 3:
+        permutation = [node.args[i] % ranks for i in range(1, ranks + 1)]
+    elif (
+        "permutation" in node.kwargs
+        and node.kwargs["permutation"] is not None
+        and len(node.kwargs["permutation"]) > 2
+    ):
+        permutation = [i % ranks for i in node.kwargs["permutation"]]
+    else:
+        return False
+    allowed_permutation = list(range(ranks))
+    allowed_permutation[-1] = ranks - 2
+    allowed_permutation[-2] = ranks - 1
+    return permutation == allowed_permutation
+
+
+def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    for node in module.graph.nodes:
+        if (
+            node.op == "call_method"
+            and node.target == "permute"
+            and check_permute(node)
+        ):
+            if len(node.args) > 0:
+                input_node = node.args[0]
+            else:
+                input_node = node.kwargs["input"]
+            if (
+                input_node.op == "call_function"
+                and input_node.target == torch.nn.functional.linear
+            ):
+                normalized = NormalizedLinearNode(input_node)
+                input = normalized.get_input()
+                weight = normalized.get_weight()
+                bias = normalized.get_bias()
+                with module.graph.inserting_before(node):
+                    fused_node = module.graph.call_function(
+                        linear_transpose, args=(input, weight, bias)
+                    )
+                    node.replace_all_uses_with(fused_node)
+
+    module.graph.lint()
+    module.graph.eliminate_dead_code()
+    module.recompile()
+    return module
+
+
+# Y1 = X * W^T + bias
+# Y2 = Y1.permute(0, 2, 1)
+# ---->
+# Y2 = (W * X^T + bias.unsqueeze(-1))^T
+def linear_transpose(
+    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+) -> torch.Tensor:
+    return torch.matmul(weight, input.transpose(-1, -2)) + bias.unsqueeze(-1)
+
+
+def permute_linear_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    for node in module.graph.nodes:
+        if node.op == "call_function" and node.target == torch.nn.functional.linear:
+            if len(node.args) > 0:
+                input_node = node.args[0]
+            else:
+                input_node = node.kwargs["input"]
+            if (
+                input_node.op == "call_method"
+                and input_node.target == "permute"
+                and check_permute(input_node)
+            ):
+                normalized = NormalizedLinearNode(node)
+                if len(input_node.args) > 0:
+                    input = input_node.args[0]
+                else:
+                    input = input_node.kwargs["input"]
+                weight = normalized.get_weight()
+                bias = normalized.get_bias()
+                with module.graph.inserting_before(node):
+                    fused_node = module.graph.call_function(
+                        transpose_linear, args=(input, weight, bias)
+                    )
+                    node.replace_all_uses_with(fused_node)
+
+    module.graph.lint()
+    module.graph.eliminate_dead_code()
+    module.recompile()
+    return module
+
+
+def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    for node in module.graph.nodes:
+        if node.op == "call_function" and (
+            node.target == torch.bmm or node.target == torch.matmul
+        ):
+            normalized = NormalizedMatmulNode(node)
+            A = normalized.get_input()
+            B = normalized.get_other()
+            Atrans = Btrans = False
+            if A.op == "call_method" and A.target == "permute" and check_permute(A):
+                Atrans = True
+                if len(A.args) > 0:
+                    A = A.args[0]
+                else:
+                    A = A.kwargs["input"]
+
+            if B.op == "call_method" and B.target == "permute" and check_permute(B):
+                Btrans = True
+                if len(B.args) > 0:
+                    B = B.args[0]
+                else:
+                    B = B.kwargs["input"]
+
+            if Atrans or Btrans:
+                with module.graph.inserting_before(node):
+                    fused_node = module.graph.call_function(
+                        transpose_matmul,
+                        args=(A, B, Atrans, Btrans),
+                    )
+                node.replace_all_uses_with(fused_node)
+
+    module.graph.lint()
+    module.graph.eliminate_dead_code()
+    module.recompile()
+    return module
+
+
+# X1 = X.permute(0, 2, 1)
+# Y1 = X1 * W1^T + bias1
+# ---->
+# Y2 = X1.transpose(-1, -2) * W1^T + bias1
+def transpose_linear(
+    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+) -> torch.Tensor:
+    return torch.matmul(input.transpose(-1, -2), weight.t()) + bias
+
+
+def transpose_matmul(A: torch.Tensor, B: torch.Tensor, Atrans: bool, Btrans: bool):
+    if Atrans:
+        A = A.transpose(-1, -2)
+    if Btrans:
+        B = B.transpose(-1, -2)
+    return torch.matmul(A, B)
 
 
 def replace_and_fuse_for_binary(
@@ -555,6 +774,11 @@ def fuse_binary(gm: torch.fx.GraphModule):
                         if len(node.args[index_node].users) > 1:
                             continue
                         computation_node = modules[node.args[index_node].target]
+                        # TODO: support padding str input("valid", "same").
+                        if type(computation_node) in [nn.Conv2d] and isinstance(
+                            computation_node.padding, str
+                        ):
+                            continue
                         # only fuse for linear when the dtype is bf16
                         if type(computation_node) in [
                             nn.Linear
@@ -600,6 +824,11 @@ def fuse_binary_inplace(gm: torch.fx.GraphModule):
                     if node.args[1].args[0] == node.args[0]:
                         continue
                     computation_node = modules[node.args[1].target]
+                    # TODO: support padding str input("valid", "same").
+                    if type(computation_node) in [nn.Conv2d] and isinstance(
+                        computation_node.padding, str
+                    ):
+                        continue
                     replace_and_fuse_for_binary(
                         computation_node,
                         node,
@@ -741,6 +970,8 @@ replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: ra
 computation_op_unary_op_fusion_map = {
     nn.Conv2d: fused_conv_unary_eval,
     nn.Linear: fused_linear_unary_eval,
+    ConvBinary2d: fused_binary_unary_eval,
+    ConvBinaryInplace2d: fused_binary_unary_eval,
 }
 
 
