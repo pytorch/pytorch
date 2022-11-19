@@ -30,8 +30,11 @@ window_common_args = merge_dicts(
 """
     ),
     factory_common_args,
-    {"normalization": "The window is normalized to 1 (maximum value is 1). However, the 1 doesn't appear if "
-                      ":attr:`M` is even and :attr:`sym` is `True`."}
+    {
+        "normalization": "The window is normalized to 1 (maximum value is 1). However, the 1 doesn't appear if "
+                         ":attr:`M` is even and :attr:`sym` is `True`.",
+        "return": "Tensor: A 1-D tensor of size :math:`(M,)` containing the window."
+    }
 )
 
 
@@ -105,7 +108,7 @@ Keyword args:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+    {return}
 
 Examples::
 
@@ -191,7 +194,7 @@ Keyword args:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+    {return}
 
 Examples::
 
@@ -263,7 +266,7 @@ Keyword args:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+    {return}
 
 Examples::
 
@@ -400,7 +403,7 @@ Computes the Hamming window.
 The Hamming window is defined as follows:
 
 .. math::
-    w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{M - 1} \right),
+    w_n = \alpha - \beta\ \cos \left( \frac{2 \pi n}{M - 1} \right)
     """,
     r"""
 
@@ -419,7 +422,7 @@ Keyword args:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+    {return}
 
 Examples::
 
@@ -437,33 +440,10 @@ Examples::
 def hamming(M: int,
             *,
             sym: bool = True,
-            alpha: float = 0.54,
-            beta: float = 0.46,
             dtype: torch.dtype = None,
             layout: torch.layout = torch.strided,
             device: torch.device = None,
             requires_grad: bool = False) -> Tensor:
-    if dtype is None:
-        dtype = torch.get_default_dtype()
-
-    _window_function_checks('hamming', M, dtype, layout)
-
-    if M == 0:
-        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
-
-    if M == 1:
-        return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
-
-    constant = 2 * torch.pi / (M if not sym else M - 1)
-
-    k = torch.linspace(start=0,
-                       end=(M - 1) * constant,
-                       steps=M,
-                       dtype=dtype,
-                       layout=layout,
-                       device=device,
-                       requires_grad=requires_grad)
-
     return general_hamming(M, sym=sym, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
 
@@ -474,8 +454,8 @@ Computes the Hann window.
 The Hann window is defined as follows:
 
 .. math::
-    w[n] = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{M - 1} \right)\right] =
-    \sin^2 \left( \frac{\pi n}{M - 1} \right),
+    w_n = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{M - 1} \right)\right] =
+    \sin^2 \left( \frac{\pi n}{M - 1} \right)
     """,
     r"""
 
@@ -492,7 +472,7 @@ Keyword args:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+    {return}
 
 Examples::
 
@@ -514,11 +494,6 @@ def hann(M: int,
          layout: torch.layout = torch.strided,
          device: torch.device = None,
          requires_grad: bool = False) -> Tensor:
-    if dtype is None:
-        dtype = torch.get_default_dtype()
-
-    _window_function_checks('hann', M, dtype, layout)
-
     return general_hamming(M,
                            alpha=0.5,
                            sym=sym,
@@ -535,7 +510,7 @@ Computes the Blackman window.
 The Blackman window is defined as follows:
 
 .. math::
-    w[n] = 0.42 - 0.5 \cos \left( \frac{2 \pi n}{M - 1} \right) + 0.08 \cos \left( \frac{4 \pi n}{M - 1} \right)
+    w_n = 0.42 - 0.5 \cos \left( \frac{2 \pi n}{M - 1} \right) + 0.08 \cos \left( \frac{4 \pi n}{M - 1} \right)
 
 where :math:`M` is the full window size.
     """,
@@ -554,7 +529,7 @@ Keyword args:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+    {return}
 
 Examples::
 
@@ -581,13 +556,8 @@ def blackman(M: int,
 
     _window_function_checks('blackman', M, dtype, layout)
 
-    if M == 0:
-        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
-
-    if M == 1:
-        return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
-
-    return general_cosine(M, a=[0.42, 0.5, 0.08], sym=sym, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+    return general_cosine(M, a=[0.42, 0.5, 0.08], sym=sym, dtype=dtype, layout=layout, device=device,
+                          requires_grad=requires_grad)
 
 
 @_add_docstr(
@@ -597,10 +567,9 @@ Computes the Bartlett window.
 The Bartlett window is defined as follows:
 
 .. math::
-    w[n] = 1 - \left| \frac{2n}{M - 1} - 1 \right| = \begin{cases}
+    w_n = 1 - \left| \frac{2n}{M - 1} - 1 \right| = \begin{cases}
         \frac{2n}{M - 1} & \text{if } 0 \leq n \leq \frac{M - 1}{2} \\
-        2 - \frac{2n}{M - 1} & \text{if } \frac{M - 1}{2} < n < M \\
-    \end{cases},
+        2 - \frac{2n}{M - 1} & \text{if } \frac{M - 1}{2} < n < M \\ \end{cases}
 
 where :math:`M` is the full window size.
     """,
@@ -619,7 +588,7 @@ Keyword args:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+    {return}
 
 Examples::
 
@@ -673,7 +642,7 @@ Computes the general cosine window.
 The general cosine window is defined as follows:
 
 .. math::
-    w[n] = \sum^{M-1}_{i=0} (-1)^i a_i \cos{ \left( \frac{i \times 2 \pi n}{M - 1}\right)}
+    w_n = \sum^{M-1}_{i=0} (-1)^i a_i \cos{ \left( \frac{i \times 2 \pi n}{M - 1}\right)}
 
 where ``M`` is the full window size, and the cosine coefficients are ``a``.
     """,
@@ -693,7 +662,7 @@ Keyword args:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+    {return}
 
 Examples::
 
@@ -709,7 +678,7 @@ Examples::
     ),
 )
 def general_cosine(M, *,
-                   a: Union[List, Tuple] = None,
+                   a: Union[List, Tuple] = (),
                    sym: bool = True,
                    dtype: torch.dtype = None,
                    layout: torch.layout = torch.strided,
@@ -718,7 +687,7 @@ def general_cosine(M, *,
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('blackman', M, dtype, layout)
+    _window_function_checks('general_cosine', M, dtype, layout)
 
     if M == 0:
         return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
@@ -732,7 +701,6 @@ def general_cosine(M, *,
     if len(a) == 0:
         raise ValueError("Coefficients cannot be empty")
 
-    window = 0
     constant = 2 * torch.pi / (M if not sym else M - 1)
 
     k = torch.linspace(start=0,
@@ -743,10 +711,9 @@ def general_cosine(M, *,
                        device=device,
                        requires_grad=requires_grad)
 
-    for i, w in enumerate(a):
-        window += (-1) ** i * w * torch.cos(i * k)
-
-    return window
+    a_i = torch.tensor([(-1) ** i * w for i, w in enumerate(a)])
+    i = torch.arange(a_i.shape[0], dtype=a_i.dtype, device=a_i.device)
+    return (a_i.unsqueeze(-1) * torch.cos(i.unsqueeze(-1) * k)).sum(0)
 
 
 @_add_docstr(
@@ -756,7 +723,7 @@ Computes the general Hamming window.
 The general Hamming window is defined as follows:
 
 .. math::
-    w[n] = \alpha - (1 - \alpha) \cos{ \left( \frac{2 \pi n}{M-1} \right)}
+    w_n = \alpha - (1 - \alpha) \cos{ \left( \frac{2 \pi n}{M-1} \right)}
 
 where ``M`` is the full window size.
     """,
@@ -776,14 +743,14 @@ Keyword args:
     {requires_grad}
 
 Returns:
-    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+    {return}
 
 Examples::
 
     >>> # Generate a symmetric Hamming window with the general Hamming window.
     >>> torch.signal.windows.general_hamming(10, sym=True)
     tensor([0.0800, 0.1876, 0.4601, 0.7700, 0.9723, 0.9723, 0.7700, 0.4601, 0.1876, 0.0800])
-    
+
     >>> # Generating a periodic Hann window with the general Hamming window.
     >>> torch.signal.windows.general_hamming(10, alpha=0.5, sym=False)
     tensor([0.0000, 0.0955, 0.3455, 0.6545, 0.9045, 1.0000, 0.9045, 0.6545, 0.3455, 0.0955])
