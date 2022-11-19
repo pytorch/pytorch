@@ -1078,7 +1078,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.tensorinv', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.tensorsolve', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.vander', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('linalg.vector_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('logaddexp2', ''),  # aten.logaddexp2.default - couldn't find symbolic meta function/decomposition
     xfail('logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
     xfail('logcumsumexp', ''),  # aten.logcumsumexp.default - couldn't find symbolic meta function/decomposition
@@ -1105,9 +1104,6 @@ symbolic_aot_autograd_failures = {
     xfail('min', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mv', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('mvlgamma', 'mvlgamma_p_1'),  # aten.digamma_.default - couldn't find symbolic meta function/decom...
-    xfail('mvlgamma', 'mvlgamma_p_3'),  # aten.digamma_.default - couldn't find symbolic meta function/decom...
-    xfail('mvlgamma', 'mvlgamma_p_5'),  # aten.digamma_.default - couldn't find symbolic meta function/decom...
 
     # Deleting this in a followup
     xfail('nn.functional.poisson_nll_loss', ''),
@@ -1121,7 +1117,6 @@ symbolic_aot_autograd_failures = {
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail('nn.functional.bilinear', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
-    xfail('nn.functional.cosine_embedding_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.cosine_similarity', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.cross_entropy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.ctc_loss', ''),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/deco...
@@ -1130,7 +1125,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.fractional_max_pool3d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.grid_sample', ''),  # RuntimeError: aten.grid_sampler_3d.default - couldn't find sym ...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.hinge_embedding_loss', ''),  # aten.zeros_like.default - couldn't find symbolic meta...
     xfail('nn.functional.interpolate', 'area'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'bicubic'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1148,10 +1142,8 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.multi_margin_loss', ''),  # could not find kernel
     xfail('nn.functional.multilabel_margin_loss', ''),  # could not find kernel
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.normalize', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pad', 'reflect'),  # aten.reflection_pad1d.default - couldn't find symbolic meta fu...
     xfail('nn.functional.pad', 'replicate'),  # aten.replication_pad1d.default - couldn't find symbolic meta...
-    xfail('nn.functional.pairwise_distance', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pdist', ''),  # could not find kernel
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
@@ -1160,7 +1152,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.smooth_l1_loss', ''),  # could not find kernel
     xfail('nn.functional.unfold', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.upsample_nearest', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('norm', 'nuc'),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
     xfail('normal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides

@@ -317,6 +317,39 @@ def bmm_decomp(mat1, mat2):
     return NotImplemented  # go directly to lowering
 
 
+@register_decomposition([aten.convolution_backward])
+def convolution_backward(
+    grad_output,
+    input,
+    weight,
+    bias_sizes,
+    stride,
+    padding,
+    dilation,
+    transposed,
+    output_padding,
+    groups,
+    output_mask,
+):
+    if not output_mask[2] or grad_output.device.type != "cuda":
+        return NotImplemented
+    grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
+    grad_inp, grad_weight, _ = aten.convolution_backward(
+        grad_output,
+        input,
+        weight,
+        bias_sizes,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+        [output_mask[0], output_mask[1], False],
+    )
+    return (grad_inp, grad_weight, grad_bias)
+
+
 @register_decomposition([aten.rsqrt])
 def rsqrt(x):
     return torch.reciprocal(torch.sqrt(x))
