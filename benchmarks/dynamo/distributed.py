@@ -18,6 +18,8 @@ except ImportError:
     from dist_util import apply_fsdp, cleanup, get_model, model_iter_fn, setup
 
 from torch.distributed.fsdp.flat_param import whc_debug_views
+
+
 def torchviz_model(args, model, inputs, rank):
     from torchviz import make_dot
 

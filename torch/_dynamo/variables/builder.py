@@ -297,7 +297,7 @@ class VariableBuilder:
                 return self.tx.output.side_effects.track_object_existing(
                     self.source, value, result
                 )
-            elif issubclass(
+            elif getattr(value, "_is_fsdp_wrapped_module", False) or issubclass(
                 value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
             ):
                 return UnspecializedNNModuleVariable(
