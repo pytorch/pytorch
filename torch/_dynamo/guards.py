@@ -461,10 +461,10 @@ class GuardBuilder:
         # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
         self.tensor_check_ids[tensor_name] = id(value)
         if value._base is not None:
-            assert id(value._base) in self.guarded_code.output_graph.tensor_id_to_sym_shape_ref
-            refs = self.guarded_code.output_graph.tensor_id_to_sym_shape_ref[id(value._base)]
-            for ref in refs:
-                self.guarded_code.output_graph.base_symbols.update({ref.expr: f"{tensor_name}._base"})
+            if id(value._base) in self.guarded_code.output_graph.tensor_id_to_sym_shape_ref:
+                refs = self.guarded_code.output_graph.tensor_id_to_sym_shape_ref[id(value._base)]
+                for ref in refs:
+                    self.guarded_code.output_graph.base_symbols.update({ref.expr: f"{tensor_name}._base"})
 
         # Note: Guard code produced for tensor_match is a little different.
         # We accumulate tensor names, then do a single install of `___check_tensors`.
