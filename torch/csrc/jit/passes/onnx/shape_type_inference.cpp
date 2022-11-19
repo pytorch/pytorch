@@ -232,10 +232,10 @@ bool IsValidONNXNode(const Node* n) {
 bool CustomSettype(Node* node) {
   // This is a helper function to decide if the non-ONNX node actually has
   // custom setType from user
-  // Go through every symbolic_sizes and if one of them > 0, we say this
-  // is set by user. On the other hand, if all of them are *, we take this
-  // node does not have given type, since unreliable nodes have * shape
-  // anyway.
+  // Go through every symbolic_sizes and if any one of them is static, we say
+  // this is set by user. On the other hand, if all of them are * (dynamic), we
+  // take this node does not have given type, since unreliable nodes have *
+  // shape anyway.
   auto all_output_has_type = [](Value* output) {
     if (auto output_type = output->type()->cast<TensorType>()) {
       if (auto sizes = output_type->symbolic_sizes().sizes()) {
