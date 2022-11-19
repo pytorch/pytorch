@@ -53,29 +53,17 @@ dispatch_sync(mpsStream->queue(), ^(){
 
 
   MTLSize gridSize = MTLSizeMake(threadGroupSize, 1, 1);
+  MTLSize theadGridSize = MTLSizeMake(1, 1, 1);
+
   id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
   id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
   id<MTLFunction> addFunction = MPSDevice::getInstance()->metalIndexingFunction("compute_mps_kernel", nil);
   id<MTLComputePipelineState> _mAddFunctionPSO = [device newComputePipelineStateWithFunction: addFunction error:&error];
 
-  id<MTLBuffer> _repeat_ptr = [device newBufferWithLength:size options:MTLResourceStorageModeShared];
-  id<MTLBuffer> _cumsum_ptr = [device newBufferWithLength:size options:MTLResourceStorageModeShared];
-  id<MTLBuffer> _result_ptr = [device newBufferWithLength:result_size options:MTLResourceStorageModeShared];
+  id<MTLBuffer> _repeat_ptr = [device newBufferWithBytes:repeat_ptr length:sizeof(repeat_ptr) options:MTLResourceStorageModeShared];
+  id<MTLBuffer> _cumsum_ptr = [device newBufferWithBytes:cumsum_ptr length:sizeof(cumsum_ptr) options:MTLResourceStorageModeShared];
+  id<MTLBuffer> _result_ptr = [device newBufferWithBytes:result_ptr length:sizeof(result_size) options:MTLResourceStorageModeShared];
   id<MTLBuffer> _size = [device newBufferWithLength:1 options:MTLResourceStorageModeShared];
-
-  index_t* dataPtr = _repeat_ptr.contents;
-  int64_t* dataPtr2 = _cumsum_ptr.contents;
-
-  for (int64_t index = 0; index < size; index++)
-  {
-    _repeat_ptr.contents[index] = repeat_ptr[index];
-    _cumsum_ptr.contents[index] = cumsum_ptr[index];
-  }
-
-  
-  dataPtr = repeat_ptr;
-  dataPtr2 = cumsum_ptr;
-  resultPtr = result_ptr;
 
   [computeEncoder setComputePipelineState:_mAddFunctionPSO];
   [computeEncoder setBuffer:_repeat_ptr offset:0 atIndex:0];
@@ -86,7 +74,7 @@ dispatch_sync(mpsStream->queue(), ^(){
 
 
   [computeEncoder dispatchThreads:gridSize
-          threadsPerThreadgroup:threadgroupSize];
+          threadsPerThreadgroup:theadGridSize];
 
   [computeEncoder endEncoding];
 
