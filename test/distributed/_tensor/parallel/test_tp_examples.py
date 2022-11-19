@@ -11,11 +11,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
 )
 from torch.distributed._tensor import (
-    distribute_tensor,
     distribute_module,
     DeviceMesh,
-    DTensor,
-    Shard,
     Replicate,
 )
 from torch.distributed._tensor.parallel import (
@@ -24,6 +21,8 @@ from torch.distributed._tensor.parallel import (
     replicate_input,
     replicate_output,
 )
+from torch.distributed._tensor.parallel import PairwiseParallel
+from torch.distributed._tensor.parallel.api import _parallelize_mlp
 
 
 class MLPModule(torch.nn.Module):
@@ -36,73 +35,6 @@ class MLPModule(torch.nn.Module):
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
-
-
-def _aggregate_local_tensor(module: torch.nn.Module) -> torch.nn.Module:
-    def hook_func(_module, _input, output):
-        if isinstance(output, DTensor):
-            replica_placement = [Replicate()] * device_mesh.ndim
-            return (
-                output.redistribute(output.device_mesh, replica_placement)
-                .contiguous()
-                .to_local()
-            )
-
-    module.register_forward_hook(hook_func)
-    return module
-
-
-def shard_mlp(m, device_type, tp_size):
-    start_idx = 0
-    device_mesh = DeviceMesh(
-        device_type,
-        list(range(start_idx, start_idx + tp_size)),
-    )
-    col_wise_sharding = [Shard(0)]
-    row_wise_sharding = [Shard(1)]
-    replicate = [Replicate()] * device_mesh.ndim
-
-    def shard_params(name, module, device_mesh):
-        if isinstance(module, nn.Linear):
-            if name == "net1":
-                sharded_weight = nn.Parameter(
-                    distribute_tensor(
-                        module.weight, device_mesh, col_wise_sharding
-                    )
-                )
-                sharded_bias = nn.Parameter(
-                    distribute_tensor(
-                        module.bias, device_mesh, col_wise_sharding
-                    )
-                )
-                module.register_parameter("weight", sharded_weight)
-                module.register_parameter("bias", sharded_bias)
-            elif name == "net2":
-                sharded_weight = nn.Parameter(
-                    distribute_tensor(
-                        module.weight, device_mesh, row_wise_sharding
-                    )
-                )
-                replicated_bias = nn.Parameter(
-                    distribute_tensor(module.bias, device_mesh, replicate)
-                )
-                module.register_parameter("weight", sharded_weight)
-                module.register_parameter("bias", replicated_bias)
-
-    def aggregate_output(outputs, device_mesh):
-        assert isinstance(outputs, DTensor)
-        return (
-            outputs.redistribute(device_mesh, replicate).contiguous().to_local()
-        )
-
-    dist_mod = distribute_module(
-        m,
-        device_mesh,
-        partition_fn=shard_params,
-        input_fn=replicate_input,
-        output_fn=aggregate_output,
-    )
-    return dist_mod
 
 
 class MultiheadAttnWrap(nn.Module):
@@ -134,7 +66,11 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
         # Shard module and initialize optimizer.
         LR = 0.25
-        shard_mlp(model_tp, self.device_type, NUM_DEVICES)
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+        _parallelize_mlp(model_tp, device_mesh, PairwiseParallel())
         optim = torch.optim.SGD(model.parameters(), lr=LR)
         optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)
 

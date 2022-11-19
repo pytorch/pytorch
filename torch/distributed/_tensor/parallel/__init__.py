@@ -8,3 +8,15 @@ from torch.distributed._tensor.parallel.api import (
     replicate_input,
     replicate_output,
 )
+
+from torch.distributed._tensor.parallel.style import (
+    ParallelStyle,
+    PairwiseParallel,
+    RowwiseParallel,
+    ColwiseParallel,
+    make_input_shard_1d,
+    make_input_replicate_1d,
+    make_output_shard_1d,
+    make_output_replicate_1d,
+    make_output_tensor,
+)
