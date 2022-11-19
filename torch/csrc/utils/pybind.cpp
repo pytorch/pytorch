@@ -7,8 +7,14 @@ namespace detail {
 
 bool type_caster<c10::SymInt>::load(py::handle src, bool) {
   if (torch::is_symint(src)) {
+    auto node = src.attr("node");
+    if (py::isinstance<c10::SymNodeImpl>(node)) {
+      value = c10::SymInt(py::cast<c10::SymNode>(node));
+      return true;
+    }
+
     value = c10::SymInt(static_cast<c10::SymNode>(
-        c10::make_intrusive<torch::impl::PythonSymNodeImpl>(src.attr("node"))));
+        c10::make_intrusive<torch::impl::PythonSymNodeImpl>(node)));
     return true;
   }
 
