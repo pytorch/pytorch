@@ -502,7 +502,9 @@ op_db: List[OpInfo] = [
                 device_type="cpu",
             ),
             DecorateInfo(
-                unittest.expectedFailure("Buggy on MPS for now (mistakenly promotes to float64)"),
+                unittest.skip(
+                    "Buggy on MPS for now (mistakenly promotes to float64)"
+                ),
                 "TestCommon",
                 "test_numpy_ref_mps",
             ),
@@ -553,7 +555,9 @@ op_db: List[OpInfo] = [
                 device_type="cpu",
             ),
             DecorateInfo(
-                unittest.expectedFailure("Buggy on MPS for now (mistakenly promotes to float64)"),
+                unittest.skip(
+                    "Buggy on MPS for now (mistakenly promotes to float64)"
+                ),
                 "TestCommon",
                 "test_numpy_ref_mps",
             ),
