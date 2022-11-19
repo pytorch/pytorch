@@ -4,7 +4,6 @@ import logging
 import operator
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
-from torch.fx.experimental.symbolic_shapes import sym_float
 
 import sympy
 
@@ -18,6 +17,7 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
+from torch.fx.experimental.symbolic_shapes import sym_float
 
 from . import config, ir, overrides
 from .cuda_properties import current_device

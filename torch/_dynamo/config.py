@@ -61,12 +61,12 @@ constant_functions = {
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 # DO NOT LAND THIS TO MASTER - THIS IS UNDER DEVELOPMENT
-# 
+#
 # We have internal tensors created today (ex, .grad) that are not tracked by dynamo.
-# This means we make symbolics for them, that dynamo does not know about. When we surface these 
+# This means we make symbolics for them, that dynamo does not know about. When we surface these
 # for guard creation, today, dynamo asserts (correctly) so as not to throw out guards as it does not
 # have enough info to make sane guards.
-# 
+#
 # The plan of record is as follows, for now:
 #
 # 1) Make dynamo trace everything it needs to (grad? _base?)

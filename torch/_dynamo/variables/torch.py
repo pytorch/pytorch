@@ -381,9 +381,22 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         else:
-            any_symints_or_symfloats = any([isinstance(x, DynamicShapeVariable) for x in args])
-            all_ints_or_floats = all([isinstance(x, (variables.ConstantVariable, variables.DynamicShapeVariable)) for x in args])
-            if any_symints_or_symfloats and all_ints_or_floats and self.value != math.sqrt:
+            any_symints_or_symfloats = any(
+                [isinstance(x, DynamicShapeVariable) for x in args]
+            )
+            all_ints_or_floats = all(
+                [
+                    isinstance(
+                        x, (variables.ConstantVariable, variables.DynamicShapeVariable)
+                    )
+                    for x in args
+                ]
+            )
+            if (
+                any_symints_or_symfloats
+                and all_ints_or_floats
+                and self.value != math.sqrt
+            ):
                 msg = f"""\
 Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.
 To support this behavior, we need to allow const-propping tensors that store symint data.

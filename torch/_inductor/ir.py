@@ -1968,7 +1968,6 @@ class ShapeAsConstantBuffer(IRNode):
             return V.graph.sizevars.codegen_sizevar(self.shape)
 
 
-
 @dataclasses.dataclass
 class ComputedBuffer(Buffer):
     data: Loops

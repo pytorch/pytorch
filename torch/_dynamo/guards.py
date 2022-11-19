@@ -461,10 +461,17 @@ class GuardBuilder:
         # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
         self.tensor_check_ids[tensor_name] = id(value)
         if value._base is not None:
-            if id(value._base) in self.guarded_code.output_graph.tensor_id_to_sym_shape_ref:
-                refs = self.guarded_code.output_graph.tensor_id_to_sym_shape_ref[id(value._base)]
+            if (
+                id(value._base)
+                in self.guarded_code.output_graph.tensor_id_to_sym_shape_ref
+            ):
+                refs = self.guarded_code.output_graph.tensor_id_to_sym_shape_ref[
+                    id(value._base)
+                ]
                 for ref in refs:
-                    self.guarded_code.output_graph.base_symbols.update({ref.expr: f"{tensor_name}._base"})
+                    self.guarded_code.output_graph.base_symbols.update(
+                        {ref.expr: f"{tensor_name}._base"}
+                    )
 
         # Note: Guard code produced for tensor_match is a little different.
         # We accumulate tensor names, then do a single install of `___check_tensors`.
@@ -541,7 +548,6 @@ class TensorReference(object):
     # Note - this is untyped because of TypeError: '_SpecialForm' object does not support item assignment
     # But it is a Optional[Union["sympy.Expr", int]]
     expr: Optional[object] = None  # Populated after association
-    
 
     def __hash__(self):
         return hash((self.ref_id, self.kind, self.idx))
@@ -555,7 +561,12 @@ class DynamoGuardPrinter(StrPrinter):
         return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()"
 
     def __init__(
-        self, expr_to_tensor_ref, id_to_name_map, shape_env, intermediary_symbols, base_symbols
+        self,
+        expr_to_tensor_ref,
+        id_to_name_map,
+        shape_env,
+        intermediary_symbols,
+        base_symbols,
     ):
         super().__init__()
         self.expr_to_tensor_ref = expr_to_tensor_ref
@@ -678,7 +689,7 @@ class CheckFunctionManager:
             id_to_name_map,
             self.output_graph.shape_env,
             self.output_graph.intermediary_symbols,
-            self.output_graph.base_symbols
+            self.output_graph.base_symbols,
         )
 
         # tensor_check_names is the primary tensor association mechanism in dynamo.
