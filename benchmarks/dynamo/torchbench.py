@@ -50,6 +50,7 @@ def setup_torchbench_cwd():
 # size to test the accuracy.
 USE_SMALL_BATCH_SIZE = {
     "demucs": 4,
+    "dlrm": 1024,
     "densenet121": 4,
     "hf_Reformer": 4,
     "timm_efficientdet": 1,
