@@ -65,8 +65,12 @@ dispatch_sync(mpsStream->queue(), ^(){
 
   index_t* dataPtr = _repeat_ptr.contents;
   int64_t* dataPtr2 = _cumsum_ptr.contents;
-  
-  index_t* resultPtr = _result_ptr.contents;
+
+  for (int64_t index = 0; index < size; index++)
+  {
+    _repeat_ptr.contents[index] = repeat_ptr[index];
+    _cumsum_ptr.contents[index] = cumsum_ptr[index];
+  }
 
   
   dataPtr = repeat_ptr;
@@ -88,8 +92,10 @@ dispatch_sync(mpsStream->queue(), ^(){
 
   mpsStream->commit(true);
   
-  result_ptr = _result_ptr.contents;
-
+  for (int64_t index = 0; index < result_size; index++)
+  {
+    result_ptr[index] = _result_ptr.contents[index];
+  }
 }
 });
 }
