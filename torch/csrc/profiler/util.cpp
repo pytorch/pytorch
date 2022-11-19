@@ -347,7 +347,7 @@ static bool validateInput(
     const c10::ArrayRef<int>& should_be_tensor) {
   std::stringstream ss;
   if (inputs.size() < min_size) {
-    ss << "Failed to save extra arguments for flops compuation of op "
+    ss << "Failed to save extra arguments for flops computation of op "
        << op_name << ", min size: " << min_size
        << ", actual size: " << inputs.size();
     TORCH_WARN(ss.str());
@@ -355,7 +355,7 @@ static bool validateInput(
   }
   for (auto index : should_be_tensor) {
     if (!inputs[index].isTensor()) {
-      ss << "Failed to save extra arguments for flops compuation of op "
+      ss << "Failed to save extra arguments for flops computation of op "
          << op_name << ", input[" << index << "] must be a tensor.";
       TORCH_WARN(ss.str());
       return false;
