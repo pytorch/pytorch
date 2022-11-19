@@ -1359,10 +1359,8 @@ inplace_symbolic_tensor_failures = {
     # bugs
     xfail('float_power', ''),  # base given to float_power_ has dtype Float but the operation's result requires dtype Double
     # decomp not implemented
-    xfail('addbmm', ''),
     xfail('addmm', ''),
     xfail('addmm', 'decomposed'),
-    xfail('logit', ''),
     xfail('nn.functional.hardsigmoid', ''),
     xfail('round', ''),  # ref missing a kwarg
     xfail('round', 'decimals_0'),  # ref missing a kwarg
@@ -1372,10 +1370,8 @@ inplace_symbolic_tensor_failures = {
     # in-place has a different signature than out-of-place
     xfail('uniform', ''),
     # Views
-    xfail('squeeze', ''),
     xfail('t', ''),
     xfail('transpose', ''),
-    xfail('nn.functional.dropout3d', ''),  # calls unsqueeze_
 }
 
 # Copies inputs to inplace operations to avoid inplace modifications
