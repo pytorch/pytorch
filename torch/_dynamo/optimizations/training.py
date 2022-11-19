@@ -254,6 +254,7 @@ class AotInductorDebug(AotAutogradStrategy):
             "partition_fn": functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
+            "fake_mode": self.fake_mode,
         }
         return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
 
@@ -481,11 +482,13 @@ def cudagraphs(model, inputs):
     return model
 
 
-def raw_aot_autograd_cudagraphs(model, inputs):
+def raw_aot_autograd_cudagraphs(model, inputs, fake_mode):
+    breakpoint()
     kwargs = {
         # these are taken from memory_efficient_fusion()
         "fw_compiler": cudagraphs,
         "bw_compiler": cudagraphs,
+        "fake_mode": fake_mode,
     }
 
     def _wrapped_bw_compiler(*args, **kwargs):
@@ -504,7 +507,7 @@ def raw_aot_autograd_cudagraphs(model, inputs):
 
 class AotAutogradCudaGraphs(AotAutogradStrategy):
     def candidate(self):
-        return raw_aot_autograd_cudagraphs(self.gm, self.example_inputs)
+        return raw_aot_autograd_cudagraphs(self.gm, self.example_inputs, self.fake_mode)
 
 
 aot_cudagraphs = AotAutogradCudaGraphs.compile_fn

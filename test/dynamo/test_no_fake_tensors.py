@@ -10,6 +10,8 @@ except ImportError:
     import test_repros
     import test_unspec
 
+import unittest
+
 
 def make_no_fake_cls(cls):
     return make_test_cls_with_patches(
@@ -28,6 +30,11 @@ NoFakeTensorsReproTests.test_numpy_list_no_fake_tensors.__unittest_expecting_fai
 )
 NoFakeTensorsUnspecTests.test_builtin_getitem_no_fake_tensors.__unittest_expecting_failure__ = (
     False
+)
+
+# AOTAutograd invocation without fake tensors
+unittest.expectedFailure(
+    NoFakeTensorsReproTests.test_reinplacing_no_fake_tensors
 )
 
 if __name__ == "__main__":

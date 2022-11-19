@@ -233,7 +233,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         gms = []
         counter = CompileCounter()
 
-        def capturing_fn(gm, inputs):
+        def capturing_fn(gm, inputs, **kwargs):
             nonlocal gms
             gms.append(gm)
             return counter(gm, inputs)

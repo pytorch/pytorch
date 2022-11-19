@@ -6,7 +6,6 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from inspect import signature
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch.nn
@@ -461,11 +460,15 @@ class OutputGraph(fx.Tracer):
                 else ""
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            if "fake_mode" in signature(self.compiler_fn).parameters.keys():
+            # This is temporary, hopefully, while we decide if we want the
+            # user provided compiler signature to have a **kwargs
+            if config.fake_tensor_propagation:
+                breakpoint()
                 compiled_fn = self.compiler_fn(
-                    gm, self.example_inputs(), fake_mode=self.fake_mode
+                    gm, self.example_inputs(fake=True), fake_mode=self.fake_mode
                 )
             else:
+                breakpoint()
                 compiled_fn = self.compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
@@ -474,10 +477,11 @@ class OutputGraph(fx.Tracer):
             raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
-    def example_inputs(self):
+    def example_inputs(self, fake=False):
         result = []
         for arg in self.graphargs:
-            if config.fake_tensor_propagation:
+            if fake:
+                assert config.fake_tensor_propagation
                 example = arg.get_fake_examples()
                 if example:
                     result.extend(example)

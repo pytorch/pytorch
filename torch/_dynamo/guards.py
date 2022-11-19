@@ -162,7 +162,8 @@ class Guard:
         if not self.code_list:
             self.code_list = code_list
         else:
-            self.code_list.extend(code_list)
+            if code_list:
+                self.code_list.extend(code_list)
 
         assert self.obj_weakref in (
             obj_weakref,

@@ -17,6 +17,8 @@ if fake_tensors_available:
 
     from ..utils import deepcopy_to_fake_tensor
 
+from torch._dispatch.python import enable_python_dispatcher
+
 
 class ShapeAliasingAndMutationProp(ShapeProp):
     def __init__(self, *args, **kwargs):

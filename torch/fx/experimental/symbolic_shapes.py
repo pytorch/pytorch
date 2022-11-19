@@ -12,6 +12,8 @@ import collections
 import textwrap
 from torch._subclasses.meta_utils import MetaConverter
 from torch import SymInt, SymFloat
+from contextlib import contextmanager
+import threading
 
 try:
     import sympy  # type: ignore[import]
@@ -442,6 +444,18 @@ class ShapeEnv(object):
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
+        self.tls = threading.local()
+
+    def _suppress_guards_tls(self):
+        return getattr(self.tls, "suppress_guards", False)
+
+    @contextmanager
+    def suppress_guards(self):
+        self.tls.suppress_guards = True
+        try:
+            yield
+        finally:
+            self.tls.suppress_guards = False
 
     def _get_key(self):
         """

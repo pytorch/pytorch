@@ -33,6 +33,7 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
+from inspect import signature
 
 from . import config, logging as torchdynamo_logging
 

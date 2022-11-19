@@ -812,7 +812,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
     """
 
     @functools.wraps(compiler_fn)
-    def debug_wrapper(gm, example_inputs, **kwargs):
+    def debug_wrapper(gm, example_inputs, fake_mode=None, **kwargs):
         assert config.repro_after in ("dynamo", "aot", None)
         if config.repro_after == "dynamo":
             if config.repro_level == 3:
@@ -821,7 +821,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
             # Check for either accuracy (level 4) or other type of failures.
             if config.repro_level == 4:
                 # Check Accuracy
-                compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+                compiled_gm = compiler_fn(gm, example_inputs, fake_mode=fake_mode, **kwargs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
                         "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
@@ -838,7 +838,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     raise exc
             else:
                 try:
-                    compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+                    compiled_gm = compiler_fn(gm, example_inputs, fake_mode=fake_mode, **kwargs)
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
@@ -862,7 +862,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     )
                     raise
         else:
-            compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+            compiled_gm = compiler_fn(gm, example_inputs, fake_mode=fake_mode, **kwargs)
 
         return compiled_gm
 

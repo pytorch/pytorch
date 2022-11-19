@@ -12,6 +12,7 @@ import types
 import warnings
 from importlib import import_module
 from unittest.mock import patch
+from inspect import signature
 
 import torch
 import torch.utils._pytree as pytree
@@ -298,6 +299,7 @@ def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context):
 
 
 class WrapperBackend:
+
     def __init__(self, backend=None):
         self.backend = backend
 
@@ -305,7 +307,7 @@ class WrapperBackend:
     def example_inputs(self):
         return clone_inputs(self.original_example_inputs)
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs, fake_mode):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs, fake_mode=None):
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
@@ -313,7 +315,7 @@ class WrapperBackend:
         needs_fake_tensor = False
         # This is temporary, hopefully, while we decide if we want the
         # user provided compiler signature to have a **kwargs
-        if fake_mode and "fake_mode" in signature(self.backend).parameters.keys():
+        if fake_mode:
             needs_fake_tensor = True
             self.candidate = self.backend(
                 copy_gm, self.original_example_inputs, fake_mode
@@ -456,7 +458,7 @@ def explain(f, *args, **kwargs):
     op_count = 0
     break_reasons = []
 
-    def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs):
+    def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs, **kwargs):
         nonlocal graphs
         nonlocal op_count
         nonlocal ops_per_graph
@@ -570,7 +572,7 @@ def export(
         out_guards = guards
 
     def dynamo_normalization_capturing_compiler(
-        gm: torch.fx.GraphModule, example_inputs, fake_mode
+        gm: torch.fx.GraphModule, example_inputs, **kwargs,
     ):
         nonlocal graph
 
