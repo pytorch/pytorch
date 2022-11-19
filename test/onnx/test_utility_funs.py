@@ -134,7 +134,6 @@ class TestUnconvertibleOps(pytorch_test_common.ExportTestCase):
                 out = self.conv1(x)
                 out += x  # caused `aten::relu_` unconvertible op for torch 1.13
                 out = self.relu(out)
-
                 return out    
 
         module = SkipConnectionModule()
