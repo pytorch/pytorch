@@ -3,7 +3,7 @@
 namespace at {
 namespace mps {
 
-static const char * indexing_metal_shaders = R"INDEX_METAL(
+static const char* computing_metal_shaders = R"COMPUTE_METAL(
 #include <metal_stdlib>
 #include <metal_atomic>
 
