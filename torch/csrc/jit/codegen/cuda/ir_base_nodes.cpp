@@ -342,6 +342,21 @@ Expr* Expr::shallowCopy() const {
   return result;
 }
 
+std::string Expr::getGraphvizLabel() const {
+  if (attributes().empty()) {
+    return getOpString();
+  }
+  std::stringstream ss;
+  const char* separator = "";
+  ss << "{" << getOpString() << "|{";
+  for (auto attr : attributes()) {
+    ss << separator << attr->toString();
+    separator = "|";
+  }
+  ss << "}}";
+  return ss.str();
+}
+
 bool Expr::sameAs(const Statement* other) const {
   if (this == other) {
     return true;

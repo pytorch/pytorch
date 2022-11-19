@@ -165,8 +165,8 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
 
   static bool lessThan(const Statement* stmt1, const Statement* stmt2);
 
-  std::string toString() const;
-  std::string toInlineString() const;
+  virtual std::string toString() const;
+  virtual std::string toInlineString() const;
 
   virtual Statement* clone(IrCloner* ir_cloner) const;
 
@@ -427,6 +427,10 @@ class TORCH_CUDA_CU_API Attribute : public Val {
     }
     return false;
   }
+
+  virtual std::string toString() const override {
+    return Printer<T>::toString(value);
+  }
 };
 
 using newObjectFuncType = Expr*(
@@ -547,6 +551,9 @@ class TORCH_CUDA_CU_API Expr : public Statement {
 
   // Get the name of an expression
   virtual const char* getOpString() const = 0;
+
+  // Get the label for Graphviz
+  virtual std::string getGraphvizLabel() const;
 
  protected:
   // TODO: Protect based on being in kernel container

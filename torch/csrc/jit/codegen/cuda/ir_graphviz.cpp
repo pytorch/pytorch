@@ -195,7 +195,7 @@ void IrGraphGenerator::addArc(
 
 void IrGraphGenerator::printExpr(const Expr* expr, const std::string& label) {
   graph_def_ << "    " << getid(expr) << " "
-             << "[label=\"" << label << "\", shape=oval, color=blue, "
+             << "[label=\"" << label << "\", shape=Mrecord, color=blue, "
              << "style=filled, fillcolor=";
   if (expr_color_map_ != nullptr && expr_color_map_->count(expr)) {
     graph_def_ << getColorFromIndex(expr_color_map_->at(expr));
@@ -335,7 +335,17 @@ void IrGraphGenerator::handle(const Val* v) {
 void IrGraphGenerator::handle(const Expr* e) {
   if (!visited(e)) {
     visited_.insert(e);
-    OptInConstDispatch::handle(e);
+
+    // node
+    printExpr(e, e->getGraphvizLabel());
+
+    // inputs & outputs
+    for (auto v : e->inputs()) {
+      addArc(v, e);
+    }
+    for (auto v : e->outputs()) {
+      addArc(e, v);
+    }
   }
 }
 
@@ -405,128 +415,6 @@ void IrGraphGenerator::handle(const TensorView* tv) {
              << "\", shape=Mrecord, color=brown, " << style << "];\n";
 
   tensor_views_.push_back(tv);
-}
-
-void IrGraphGenerator::handle(const FullOp* fop) {
-  // node
-  printExpr(fop, "full");
-
-  // inputs & outputs
-  addArc(fop->getFillValue(), fop);
-  addArc(fop, fop->output(0));
-}
-
-void IrGraphGenerator::handle(const ARangeOp* aop) {
-  // node
-  printExpr(aop, "arange");
-
-  // inputs & outputs
-  addArc(aop->start(), aop);
-  addArc(aop->end(), aop);
-  addArc(aop->step(), aop);
-  addArc(aop, aop->output(0));
-}
-
-void IrGraphGenerator::handle(const EyeOp* eop) {
-  // node
-  printExpr(eop, "eye");
-
-  // inputs & outputs
-  addArc(eop, eop->output(0));
-}
-
-void IrGraphGenerator::handle(const UnaryOp* uop) {
-  // node
-  std::stringstream label;
-  label << uop->getUnaryOpType();
-  printExpr(uop, label.str());
-
-  // inputs & outputs
-  addArc(uop->in(), uop);
-  addArc(uop, uop->out());
-}
-
-void IrGraphGenerator::handle(const BinaryOp* bop) {
-  // node
-  std::stringstream label;
-  label << bop->getBinaryOpType();
-  printExpr(bop, label.str());
-
-  // inputs & outputs
-  addArc(bop->lhs(), bop);
-  addArc(bop->rhs(), bop, "[color=blue]");
-  addArc(bop, bop->out());
-}
-
-void IrGraphGenerator::handle(const TernaryOp* op) {
-  // node
-  std::stringstream label;
-  label << op->getTernaryOpType();
-  printExpr(op, label.str());
-
-  // inputs & outputs
-  addArc(op->in1(), op);
-  addArc(op->in2(), op, "[color=blue]");
-  addArc(op->in3(), op, "[color=brown]");
-  addArc(op, op->out());
-}
-
-void IrGraphGenerator::handle(const SelectOp* op) {
-  // node
-  printExpr(op, "select");
-
-  // inputs & outputs
-  addArc(op->input(0), op);
-  addArc(op->input(1), op, "[color=blue]");
-  addArc(op, op->output(0));
-}
-
-void IrGraphGenerator::handle(const RNGOp* op) {
-  // node
-  std::stringstream label;
-  label << op->getRNGOpType();
-  printExpr(op, label.str());
-
-  // inputs & outputs
-  addArc(op, op->output(0));
-}
-
-void IrGraphGenerator::handle(const BroadcastOp* op) {
-  printExpr(op, "Broadcast");
-  addArc(op->in(), op);
-  addArc(op, op->out());
-}
-
-void IrGraphGenerator::handle(const SqueezeOp* op) {
-  printExpr(op, "Squeeze");
-  addArc(op->in(), op);
-  addArc(op, op->out());
-}
-
-void IrGraphGenerator::handle(const ReductionOp* op) {
-  // node
-  std::stringstream label;
-  label << "Reduction(" << op->getReductionOpType() << ")";
-  printExpr(op, label.str());
-
-  // inputs & outputs
-  addArc(op->in(), op);
-  addArc(op->init(), op, "[color=blue]");
-  addArc(op, op->out());
-}
-
-void IrGraphGenerator::handle(const Split* split) {
-  printExpr(split, IrNodeLabel::gen(split));
-  addArc(split->in(), split);
-  addArc(split, split->outer());
-  addArc(split, split->inner());
-}
-
-void IrGraphGenerator::handle(const Merge* merge) {
-  printExpr(merge, IrNodeLabel::gen(merge));
-  addArc(merge->outer(), merge);
-  addArc(merge->inner(), merge);
-  addArc(merge, merge->out());
 }
 
 } // namespace cuda

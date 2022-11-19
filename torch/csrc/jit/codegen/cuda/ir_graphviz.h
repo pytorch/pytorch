@@ -82,21 +82,6 @@ class TORCH_CUDA_CU_API IrGraphGenerator : private OptInConstDispatch {
   void handle(const ComplexDouble*) override;
   void handle(const NamedScalar*) override;
 
-  void handle(const FullOp*) override;
-  void handle(const ARangeOp*) override;
-  void handle(const EyeOp*) override;
-  void handle(const UnaryOp*) override;
-  void handle(const BinaryOp*) override;
-  void handle(const TernaryOp*) override;
-  void handle(const SelectOp*) override;
-  void handle(const RNGOp*) override;
-  void handle(const BroadcastOp*) override;
-  void handle(const SqueezeOp*) override;
-  void handle(const ReductionOp*) override;
-
-  void handle(const Split*) override;
-  void handle(const Merge*) override;
-
   // lookup the graph id, creating one if not found
   std::string getid(const Statement* stm);
 
