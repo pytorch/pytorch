@@ -34,6 +34,6 @@ kernel void compute_mps_kernel(metal::device int64_t* _repeat_ptr,
     	}
     }
 
-)INDEX_METAL";
+)COMPUTE_METAL";
 }
-}
+} // namespace at
