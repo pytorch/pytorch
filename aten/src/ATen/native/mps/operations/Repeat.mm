@@ -12,7 +12,6 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <torch/library.h>
 #include <c10/util/irange.h>
-#include <ATen/native/ComputeKernels.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
