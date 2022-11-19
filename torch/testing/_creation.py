@@ -160,7 +160,7 @@ def make_tensor(
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
     elif memory_format is not None:
-        result = result.to(memory_format=memory_format)
+        result = result.clone(memory_format=memory_format)
 
     if exclude_zero:
         if dtype in _integral_types or dtype is torch.bool:

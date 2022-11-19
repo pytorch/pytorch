@@ -2572,7 +2572,13 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
         except Exception:
             requires_grad = False
 
-        return empty((0,), dtype=t.dtype, device=t.device, requires_grad=requires_grad, memory_format=memory_format)
+        return empty(
+            (0,),
+            dtype=t.dtype,
+            device=t.device,
+            requires_grad=requires_grad,
+            memory_format=memory_format,
+        )
 
     return prims.cat(filtered, dim).clone(memory_format=memory_format)
 
