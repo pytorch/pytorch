@@ -221,7 +221,7 @@ def error_inputs_kaiser_window(op_info, device, **kwargs):
 
 def error_inputs_general_cosine_window(op_info, device, **kwargs):
     # Yield common error inputs
-    yield from error_inputs_window(op_info, device, a=[0.5, 0.5], **kwargs)
+    yield from error_inputs_window(op_info, device, a=[0.54, 0.46], **kwargs)
 
     # Tests for negative beta
     yield ErrorInput(

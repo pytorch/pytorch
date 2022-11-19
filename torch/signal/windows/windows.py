@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple, Union
+from typing import Optional, List, Tuple, Union, Iterable
 
 import torch
 from math import sqrt
@@ -118,7 +118,7 @@ Examples::
     tensor([0.0111, 0.0302, 0.0821, 0.2231, 0.6065, 0.6065, 0.2231, 0.0821, 0.0302, 0.0111])
 
     >>> # Generate a periodic exponential window and decay factor equal to .5
-    >>> torch.signal.windows.exponential(10,sym=False,tau=.5)
+    >>> torch.signal.windows.exponential(10, sym=False,tau=.5)
     tensor([4.5400e-05, 3.3546e-04, 2.4788e-03, 1.8316e-02, 1.3534e-01, 1.0000e+00, 1.3534e-01, 1.8316e-02, 2.4788e-03, 3.3546e-04])
     """.format(
         **window_common_args
@@ -203,7 +203,7 @@ Examples::
     tensor([0.1564, 0.4540, 0.7071, 0.8910, 0.9877, 0.9877, 0.8910, 0.7071, 0.4540, 0.1564])
 
     >>> # Generate a periodic cosine window.
-    >>> torch.signal.windows.cosine(10,sym=False)
+    >>> torch.signal.windows.cosine(10, sym=False)
     tensor([0.1423, 0.4154, 0.6549, 0.8413, 0.9595, 1.0000, 0.9595, 0.8413, 0.6549, 0.4154])
 """.format(
         **window_common_args,
@@ -275,7 +275,7 @@ Examples::
     tensor([4.0065e-05, 2.1875e-03, 4.3937e-02, 3.2465e-01, 8.8250e-01, 8.8250e-01, 3.2465e-01, 4.3937e-02, 2.1875e-03, 4.0065e-05])
 
     >>> # Generate a periodic gaussian window and standard deviation equal to 0.9.
-    >>> torch.signal.windows.gaussian(10,sym=False,std=0.9)
+    >>> torch.signal.windows.gaussian(10, sym=False,std=0.9)
     tensor([1.9858e-07, 5.1365e-05, 3.8659e-03, 8.4658e-02, 5.3941e-01, 1.0000e+00, 5.3941e-01, 8.4658e-02, 3.8659e-03, 5.1365e-05])
 """.format(
         **window_common_args,
@@ -328,8 +328,6 @@ The Kaiser window is defined as follows:
 
 where ``I_0`` is the zeroth order modified Bessel function of the first kind (see :func:`torch.special.i0`), and
 ``N = M - 1 if sym else M``.
-
-``M`` is the window length.
     """,
     r"""
 
@@ -352,7 +350,7 @@ Examples::
     >>> torch.signal.windows.kaiser(5)
     tensor([4.0065e-05, 2.1875e-03, 4.3937e-02, 3.2465e-01, 8.8250e-01, 8.8250e-01, 3.2465e-01, 4.3937e-02, 2.1875e-03, 4.0065e-05])
     >>> # Generate a periodic gaussian window and standard deviation equal to 0.9.
-    >>> torch.signal.windows.kaiser(5,sym=False,std=0.9)
+    >>> torch.signal.windows.kaiser(5, sym=False,std=0.9)
     tensor([1.9858e-07, 5.1365e-05, 3.8659e-03, 8.4658e-02, 5.3941e-01, 1.0000e+00, 5.3941e-01, 8.4658e-02, 3.8659e-03, 5.1365e-05])
 """.format(
         **window_common_args,
@@ -431,7 +429,7 @@ Examples::
     tensor([0.0800, 0.1876, 0.4601, 0.7700, 0.9723, 0.9723, 0.7700, 0.4601, 0.1876, 0.0800])
 
     >>> # Generate a periodic Hamming window.
-    >>> torch.signal.windows.hamming(10,sym=False)
+    >>> torch.signal.windows.hamming(10, sym=False)
     tensor([0.0800, 0.1679, 0.3979, 0.6821, 0.9121, 1.0000, 0.9121, 0.6821, 0.3979, 0.1679])
 """.format(
         **window_common_args
@@ -481,7 +479,7 @@ Examples::
     tensor([0.0000, 0.1170, 0.4132, 0.7500, 0.9698, 0.9698, 0.7500, 0.4132, 0.1170, 0.0000])
 
     >>> # Generate a periodic Hann window.
-    >>> torch.signal.windows.hann(10,sym=False)
+    >>> torch.signal.windows.hann(10, sym=False)
     tensor([0.0000, 0.0955, 0.3455, 0.6545, 0.9045, 1.0000, 0.9045, 0.6545, 0.3455, 0.0955])
 """.format(
         **window_common_args
@@ -511,8 +509,6 @@ The Blackman window is defined as follows:
 
 .. math::
     w_n = 0.42 - 0.5 \cos \left( \frac{2 \pi n}{M - 1} \right) + 0.08 \cos \left( \frac{4 \pi n}{M - 1} \right)
-
-where :math:`M` is the full window size.
     """,
     r"""
 
@@ -538,7 +534,7 @@ Examples::
     tensor([-1.4901e-08,  3.4000e-01,  1.0000e+00,  3.4000e-01, -1.4901e-08])
 
     >>> # Generate a periodic Blackman window.
-    >>> torch.signal.windows.blackman(5,sym=False)
+    >>> torch.signal.windows.blackman(5, sym=False)
     tensor([-1.4901e-08,  2.0077e-01,  8.4923e-01,  8.4923e-01,  2.0077e-01])
 """.format(
         **window_common_args
@@ -570,8 +566,6 @@ The Bartlett window is defined as follows:
     w_n = 1 - \left| \frac{2n}{M - 1} - 1 \right| = \begin{cases}
         \frac{2n}{M - 1} & \text{if } 0 \leq n \leq \frac{M - 1}{2} \\
         2 - \frac{2n}{M - 1} & \text{if } \frac{M - 1}{2} < n < M \\ \end{cases}
-
-where :math:`M` is the full window size.
     """,
     r"""
 
@@ -597,7 +591,7 @@ Examples::
     tensor([0.0000, 0.2222, 0.4444, 0.6667, 0.8889, 0.8889, 0.6667, 0.4444, 0.2222, 0.0000])
 
     >>> # Generate a periodic Bartlett window.
-    >>> torch.signal.windows.bartlett(10,sym=False)
+    >>> torch.signal.windows.bartlett(10, sym=False)
     tensor([0.0000, 0.2000, 0.4000, 0.6000, 0.8000, 1.0000, 0.8000, 0.6000, 0.4000, 0.2000])
 """.format(
         **window_common_args
@@ -643,8 +637,6 @@ The general cosine window is defined as follows:
 
 .. math::
     w_n = \sum^{M-1}_{i=0} (-1)^i a_i \cos{ \left( \frac{i \times 2 \pi n}{M - 1}\right)}
-
-where ``M`` is the full window size, and the cosine coefficients are ``a``.
     """,
     r"""
 
@@ -678,7 +670,7 @@ Examples::
     ),
 )
 def general_cosine(M, *,
-                   a: Union[List, Tuple] = (),
+                   a: Union[List, Tuple],
                    sym: bool = True,
                    dtype: torch.dtype = None,
                    layout: torch.layout = torch.strided,
@@ -695,7 +687,7 @@ def general_cosine(M, *,
     if M == 1:
         return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
-    if not hasattr(a, "__iter__"):
+    if not isinstance(a, Iterable):
         raise TypeError("Coefficients must be a list/tuple")
 
     if len(a) == 0:
@@ -724,8 +716,6 @@ The general Hamming window is defined as follows:
 
 .. math::
     w_n = \alpha - (1 - \alpha) \cos{ \left( \frac{2 \pi n}{M-1} \right)}
-
-where ``M`` is the full window size.
     """,
     r"""
 
