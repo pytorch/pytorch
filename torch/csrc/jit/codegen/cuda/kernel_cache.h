@@ -155,13 +155,6 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
       const KernelArgumentHolder& args,
       SegmentedGroup* sg);
 
-  //! Interface to run a the whole graph in a segmented fusion and return the
-  //! complete
-  //!  fusion outputs.
-  std::vector<at::Tensor> runMultiKernelWithInput(
-      const at::ArrayRef<IValue>& inputs,
-      size_t input_id);
-
   //! Access the list of schedulers maintained in this runtime instance
   const std::vector<SchedulerEntryPtr>& schedulers();
 
