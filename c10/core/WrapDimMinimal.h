@@ -38,7 +38,7 @@ inline c10::SymInt maybe_wrap_dim(
     c10::SymInt dim,
     c10::SymInt dim_post_expr,
     bool wrap_scalar = true) {
-  return _maybe_wrap_dim(dim, dim_post_expr, wrap_scalar);
+  return _maybe_wrap_dim(std::move(dim), std::move(dim_post_expr), wrap_scalar);
 }
 
 } // namespace c10
