@@ -112,7 +112,9 @@ def reference_inputs_kaiser_window(op_info, device, dtype, requires_grad, **kwar
         yield SampleInput(size, sym=True, **kw)
 
 
-def reference_inputs_general_cosine_window(op_info, device, dtype, requires_grad, **kwargs):
+def reference_inputs_general_cosine_window(
+    op_info, device, dtype, requires_grad, **kwargs
+):
     yield from sample_inputs_window(op_info, device, dtype, requires_grad, **kwargs)
 
     cases = (
@@ -129,7 +131,9 @@ def reference_inputs_general_cosine_window(op_info, device, dtype, requires_grad
         yield SampleInput(size, sym=True, **kw)
 
 
-def reference_inputs_general_hamming_window(op_info, device, dtype, requires_grad, **kwargs):
+def reference_inputs_general_hamming_window(
+    op_info, device, dtype, requires_grad, **kwargs
+):
     yield from sample_inputs_window(op_info, device, dtype, requires_grad, **kwargs)
 
     cases = (
@@ -233,7 +237,7 @@ def error_inputs_general_cosine_window(op_info, device, **kwargs):
     yield ErrorInput(
         SampleInput(3, a=[], dtype=torch.float32, device=device, **kwargs),
         error_type=ValueError,
-        error_regex="Coefficients cannot be empty"
+        error_regex="Coefficients cannot be empty",
     )
 
 
@@ -684,7 +688,9 @@ op_db: List[OpInfo] = [
         if TEST_SCIPY
         else None,
         sample_inputs_func=partial(sample_inputs_window, a=[0.54, 0.46]),
-        reference_inputs_func=partial(reference_inputs_general_cosine_window, a=[0.54, 0.46]),
+        reference_inputs_func=partial(
+            reference_inputs_general_cosine_window, a=[0.54, 0.46]
+        ),
         error_inputs_func=error_inputs_general_cosine_window,
         skips=(
             DecorateInfo(
@@ -730,7 +736,9 @@ op_db: List[OpInfo] = [
         if TEST_SCIPY
         else None,
         sample_inputs_func=partial(sample_inputs_window, alpha=0.54),
-        reference_inputs_func=partial(reference_inputs_general_hamming_window, alpha=0.54),
+        reference_inputs_func=partial(
+            reference_inputs_general_hamming_window, alpha=0.54
+        ),
         error_inputs_func=error_inputs_window,
         skips=(
             DecorateInfo(
