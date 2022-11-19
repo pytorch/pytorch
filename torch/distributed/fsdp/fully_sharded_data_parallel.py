@@ -330,7 +330,11 @@ class FullyShardedDataParallel(nn.Module):
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
+
         module._is_fsdp_wrapped_module = True
+        for mod in module.modules():
+            mod._is_fsdp_wrapped_module = True
+
         _init_ignored_module_states(self, module, ignored_modules)
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
@@ -695,7 +699,6 @@ class FullyShardedDataParallel(nn.Module):
                     "Expected `FlatParameter` to be on the compute device "
                     f"{self.compute_device} but got {handle.flat_param.device}",
                 )
-            print(f"FSDP.forward call self._fsdp_wrapped_module()\nself={self}")
             output = self._fsdp_wrapped_module(*args, **kwargs)
             return _post_forward(
                 self, self._handles, reshard_fn, unused, unused, output

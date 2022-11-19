@@ -1276,7 +1276,6 @@ class FlatParamHandle:
                 original parameters from :meth:`nn.Module.named_parameters`.
         """
         self._check_unsharded(self.flat_param)
-        print(f"_use_unsharded_views {self}")
         views = self._get_unflat_views(self.flat_param)
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, self.flat_param._param_infos)
@@ -1311,10 +1310,9 @@ class FlatParamHandle:
                         param_var = tensor
                 setattr(module, param_name, param_var)
                 if self._use_orig_params and self._training_state == HandleTrainingState.FORWARD:
-                    print(f"flat_params: module_forward is {module.forward}")
                     module._parameters[param_name] = param_var  # type: ignore[assignment]
                     stash_key = f"{id(self)}_{param_name}"
-                    print(f"stashing view for {stash_key}")
+                    # print(f"stashing view for {stash_key}")
                     whc_debug_views[stash_key] = param_var
         for i, (
             param_name,
