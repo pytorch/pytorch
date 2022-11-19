@@ -337,7 +337,8 @@ Expr::Expr(
       attributes_(std::move(attributes)) {}
 
 Expr* Expr::shallowCopy() const {
-  auto result = newObject(inputs(), outputs(), attributes());
+  auto result =
+      newObjectFunc()(ir_container_, inputs(), outputs(), attributes());
   if (container()->isA<kir::Kernel>()) {
     result->predicate_ = predicate_;
     result->write_predicate_ = write_predicate_;

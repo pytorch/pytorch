@@ -326,50 +326,6 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(kir::Predicate*);
   virtual void mutate(kir::TensorIndex*);
 
-  // Exprs
-  virtual void mutate(FullOp*);
-  virtual void mutate(ARangeOp*);
-  virtual void mutate(EyeOp*);
-  virtual void mutate(UnaryOp*);
-  virtual void mutate(BinaryOp*);
-  virtual void mutate(TernaryOp*);
-  virtual void mutate(SelectOp*);
-  virtual void mutate(RNGOp*);
-  virtual void mutate(ReductionOp*);
-  virtual void mutate(GroupedReductionOp*);
-  virtual void mutate(WelfordOp*);
-  virtual void mutate(GroupedWelfordOp*);
-  virtual void mutate(LoadStoreOp*);
-  virtual void mutate(MmaOp*);
-  virtual void mutate(BroadcastOp*);
-  virtual void mutate(SqueezeOp*);
-
-  virtual void mutate(Split*);
-  virtual void mutate(Merge*);
-  virtual void mutate(Swizzle2D*);
-  virtual void mutate(TransposeOp*);
-  virtual void mutate(ExpandOp*);
-  virtual void mutate(ShiftOp*);
-  virtual void mutate(GatherOp*);
-  virtual void mutate(ViewAsScalar*);
-  virtual void mutate(ViewOp*);
-
-  virtual void mutate(kir::Allocate*);
-  virtual void mutate(kir::BlockSync*);
-  virtual void mutate(kir::GridSync*);
-  virtual void mutate(kir::CpAsyncWait*);
-  virtual void mutate(kir::CpAsyncCommit*);
-  virtual void mutate(kir::InitMagicZero*);
-  virtual void mutate(kir::UpdateMagicZero*);
-  virtual void mutate(kir::ForLoop*);
-  virtual void mutate(kir::IfThenElse*);
-  virtual void mutate(kir::GridReduction*);
-  virtual void mutate(kir::GroupedGridReduction*);
-  virtual void mutate(kir::GridBroadcast*);
-  virtual void mutate(kir::GridWelford*);
-  virtual void mutate(kir::GroupedGridWelford*);
-  virtual void mutate(kir::AllocateFusedReduction*);
-
  protected:
   void removeExpr(IrContainer*, Expr*);
 };

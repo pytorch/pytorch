@@ -429,6 +429,12 @@ class TORCH_CUDA_CU_API Attribute : public Val {
   }
 };
 
+using newObjectFuncType = Expr*(
+    IrContainer*,
+    std::vector<Val*>,
+    std::vector<Val*>,
+    std::vector<Statement*>);
+
 //!  A Expr represents a "computation." These are functions that takes inputs
 //!  and produce outputs, inputs and outputs all being Vals. There are
 //!  specializations of BinaryOp which takes 2 inputs and produces 1 output, and
@@ -480,18 +486,13 @@ class TORCH_CUDA_CU_API Expr : public Statement {
       std::vector<Val*> outputs,
       std::vector<Statement*> attributes);
 
+  virtual newObjectFuncType* newObjectFunc() const = 0;
+
   // Creates a new instance of the expression with all its field copied.
   // Note that unlike IrCloner, this function only do a shallow copy
   Expr* shallowCopy() const;
 
   bool sameAs(const Statement* other) const override;
-
-  // Creates a new instance of the same expression type with the given inputs,
-  // outputs, and attributes.
-  virtual Expr* newObject(
-      std::vector<Val*> inputs,
-      std::vector<Val*> outputs,
-      std::vector<Statement*> attributes) const = 0;
 
   // Input/output accessors
   const auto& inputs() const {
@@ -528,9 +529,6 @@ class TORCH_CUDA_CU_API Expr : public Statement {
 
   template <typename T>
   static void constDispatch(T handler, const Expr* const);
-
-  template <typename T>
-  static void mutatorDispatch(T mutator, Expr*);
 
   // TODO: Protect based on being in kernel container
   kir::Predicate* predicate() const;
@@ -599,20 +597,26 @@ bool Val::isDefinitionType() const {
 
 #define NVFUSER_DECLARE_CLONE_AND_CREATE                        \
   virtual Statement* clone(IrCloner* ir_cloner) const override; \
-  virtual Expr* newObject(                                      \
+  static Expr* newObject(                                       \
+      IrContainer* container,                                   \
       std::vector<Val*> inputs,                                 \
       std::vector<Val*> outputs,                                \
-      std::vector<Statement*> attributes) const override;
+      std::vector<Statement*> attributes);                      \
+  virtual newObjectFuncType* newObjectFunc() const override {   \
+    return newObject;                                           \
+  }
 
-#define NVFUSER_DEFINE_CLONE_AND_CREATE(ClassName)                    \
-  Statement* ClassName::clone(IrCloner* ir_cloner) const {            \
-    return IrBuilder::clone(this, ir_cloner);                         \
-  }                                                                   \
-  Expr* ClassName::newObject(                                         \
-      std::vector<Val*> inputs,                                       \
-      std::vector<Val*> outputs,                                      \
-      std::vector<Statement*> attributes) const {                     \
-    return IrBuilder::create<ClassName>(inputs, outputs, attributes); \
+#define NVFUSER_DEFINE_CLONE_AND_CREATE(ClassName)         \
+  Statement* ClassName::clone(IrCloner* ir_cloner) const { \
+    return IrBuilder::clone(this, ir_cloner);              \
+  }                                                        \
+  Expr* ClassName::newObject(                              \
+      IrContainer* container,                              \
+      std::vector<Val*> inputs,                            \
+      std::vector<Val*> outputs,                           \
+      std::vector<Statement*> attributes) {                \
+    return IrBuilder::create<ClassName>(                   \
+        container, inputs, outputs, attributes);           \
   }
 
 } // namespace cuda

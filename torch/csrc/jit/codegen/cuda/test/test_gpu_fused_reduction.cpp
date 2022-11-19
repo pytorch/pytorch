@@ -2500,8 +2500,6 @@ TEST_F(NVFuserTest, FusionGeluBwdReduction_CUDA) {
   fusion.addOutput(t26);
   fusion.addOutput(t27);
 
-  fusion.printMath();
-
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::manual_seed(1);
 
@@ -2524,7 +2522,7 @@ TEST_F(NVFuserTest, FusionGeluBwdReduction_CUDA) {
   auto reduction_params = getReductionHeuristics(&fusion, {at_grad, at_xvar});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
   scheduleReduction(&fusion, *reduction_params);
-  fusion.printKernel();
+
   FusionExecutor fe;
   fe.compileFusion(&fusion, {at_grad, at_xvar}, reduction_params->lparams);
   auto cg_outputs = fe.runFusion({at_grad, at_xvar}, reduction_params->lparams);
