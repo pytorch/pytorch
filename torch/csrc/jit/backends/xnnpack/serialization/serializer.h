@@ -51,7 +51,8 @@ class XNNSerializer {
   // finish and serialize xnngraph returning serialized data
   std::string finishAndSerialize(
       std::vector<uint32_t> input_ids,
-      std::vector<uint32_t> output_ids);
+      std::vector<uint32_t> output_ids,
+      size_t num_extern_ids);
 
  private:
   // xnnpack version we are serializing
