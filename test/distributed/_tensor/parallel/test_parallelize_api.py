@@ -26,6 +26,11 @@ class MLPModule(torch.nn.Module):
 
 
 class TensorParallelAPITests(DTensorTestBase):
+    @property
+    def world_size(self):
+        gpu_num = torch.cuda.device_count()
+        return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
+
     @with_comms
     def test_creat_1d_device_mesh(self):
         tp_size = 2

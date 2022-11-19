@@ -3,7 +3,7 @@
 
 import torch
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import DTensorTestBase, with_comms, NUM_DEVICES
+from torch.testing._internal.distributed._tensor.common_dtensor import DTensorTestBase, with_comms
 from torch.distributed._tensor import distribute_tensor, DeviceMesh, Shard, Replicate
 from torch.distributed._tensor.parallel.style import (
     RowwiseParallel,
@@ -17,6 +17,11 @@ from torch.distributed._tensor.parallel.style import (
 
 
 class TensorParallelStyleTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        gpu_num = torch.cuda.device_count()
+        return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
+
     def _1d_input_func_check(
         self, input_local_tensor, expected_local_tensor, func
     ) -> None:
@@ -34,7 +39,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         ):
             dtensor = func(input_local_tensor, device_mesh)
 
-        device_mesh = DeviceMesh(self.device_type, list(range(NUM_DEVICES)))
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         # test 1: replicate local tensor
         dtensor = func(input_local_tensor, device_mesh)
         self.assertEqual(expected_local_tensor, dtensor.to_local())
@@ -59,7 +64,7 @@ class TensorParallelStyleTest(DTensorTestBase):
     def _test_prepare_output(
         self, func, spec, dim=None, device_mesh_input_none=False
     ):
-        device_mesh = DeviceMesh(self.device_type, torch.arange(NUM_DEVICES))
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         tensor = torch.rand(8, 16, device=self.device_type)
         dtensor = distribute_tensor(tensor, device_mesh, spec)
         device_mesh_input = None if device_mesh_input_none else device_mesh
@@ -130,7 +135,7 @@ class TensorParallelStyleTest(DTensorTestBase):
     # Common logic for testing prepare output funcs errors.
     def _test_prepare_output_error(self, func):
         tensor = torch.rand(8, 16, device=self.device_type)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(NUM_DEVICES))
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
         output = [dtensor]
         with self.assertRaisesRegex(
