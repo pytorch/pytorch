@@ -67,12 +67,14 @@ void XNNSerializer::serializeTensorValue(
 
 std::string XNNSerializer::finishAndSerialize(
     std::vector<uint32_t> input_ids,
-    std::vector<uint32_t> output_ids) {
+    std::vector<uint32_t> output_ids,
+    size_t num_extern_ids) {
   auto xnnGraph = CreateXNNGraphDirect(
       _builder,
       _version_sha1,
       &_nodes,
       &_values,
+      num_extern_ids,
       &input_ids,
       &output_ids,
       &_constantBuffer,
