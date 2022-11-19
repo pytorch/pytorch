@@ -1053,13 +1053,13 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   if (onesided) {
     if (n_fft / 2 + 1 != fft_size) {
       std::ostringstream ss;
-      REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft / 2 + 1 when onsided=True, but got " << fft_size;
+      REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft / 2 + 1 when onesided=True, but got " << fft_size;
       AT_ERROR(ss.str());
     }
   } else {
     if (n_fft != fft_size) {
       std::ostringstream ss;
-      REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft when onsided=False, but got " << fft_size;
+      REPR(ss) << ": expected the frequency dimension (3rd to the last) of the input tensor to match n_fft when onesided=False, but got " << fft_size;
       AT_ERROR(ss.str());
     }
   }
