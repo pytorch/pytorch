@@ -124,6 +124,23 @@ class TestUnconvertibleOps(pytorch_test_common.ExportTestCase):
         _, unconvertible_ops = utils.unconvertible_ops(module, (x,), opset_version=12)
         self.assertEqual(unconvertible_ops, [])
 
+    def test_it_returns_empty_list_for_skip_connection_unconvertible_ops(self):
+        class SkipConnectionModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 1)
+                self.relu = torch.nn.ReLU(inplace=True)
+            def forward(self, x):
+                out = self.conv1(x)
+                out += x  # caused `aten::relu_` unconvertible op for torch 1.13
+                out = self.relu(out)
+
+                return out    
+
+        module = SkipConnectionModule()
+        x = torch.randn(1, 3, 10, 10)
+        _, unconvertible_ops = utils.unconvertible_ops(module, (x,), opset_version=13)
+        self.assertEqual(unconvertible_ops, [])
 
 @parameterized.parameterized_class(
     [
