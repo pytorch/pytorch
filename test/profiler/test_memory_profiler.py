@@ -87,7 +87,9 @@ class RecordInputOutputDispatchMode(torch.utils._python_dispatch.TorchDispatchMo
         flat_inputs = self.flat_ids(args) + self.flat_ids(kwargs)
         out = func(*args, **kwargs)
         flat_outputs = self.flat_ids(out)
-        if (flat_inputs or flat_outputs) and "_record_function_enter" not in func.name():
+        if (
+            flat_inputs or flat_outputs
+        ) and "_record_function_enter" not in func.name():
             self.results.append((func.name(), flat_inputs, flat_outputs))
         return out
 
@@ -1412,6 +1414,222 @@ class TestMemoryProfilerE2E(TestCase):
             aten::detach                             29 (GRADIENT)                                 -> 29 (GRADIENT)
             aten::detach                             29 (GRADIENT)                                 -> ???""",
         )
+
+    def test_memory_timeline(self) -> None:
+        model = torch.nn.Sequential(
+            torch.nn.Linear(2, 4, bias=True),
+            torch.nn.ReLU(),
+            torch.nn.Linear(4, 4, bias=False),
+            torch.nn.Softmax(dim=1),
+        )
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+
+        with profile() as prof:
+            x = torch.ones((2, 2))
+            targets = torch.ones((2, 4))
+            y = model(x)
+            loss = torch.sum((y - targets) ** 2).mean()
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+        memory_profile = prof._memory_profile()
+        timeline = memory_profile.timeline
+        times = tuple(t for t, _, _ in timeline)
+        self.assertTrue(all(t1 >= t0 for t0, t1 in zip(times, times[1:])), times)
+        self.assertTrue(
+            all(
+                (t == -1) if action == _memory_profiler.Action.PREEXISTING else (t > 0)
+                for t, action, _ in timeline
+            )
+        )
+
+        def category_name(category):
+            return category.name if category else "???"
+
+        def format_action(action, key, version):
+            category = memory_profile._categories.get(key, version)
+            if action == _memory_profiler.Action.INCREMENT_VERSION:
+                new_category = memory_profile._categories.get(key, version + 1)
+                if category != new_category:
+                    return f"{category_name(category)} -> {category_name(new_category)}"
+            return category_name(category)
+
+        lines = [
+            f"{action.name.lower():<25}  {format_action(action, key, version):<25}  "
+            f"{key.storage.allocation_id:>2}  v{version}"
+            for _, action, (key, version) in prof._memory_profile().timeline
+        ]
+
+        self.assertExpectedInline(
+            textwrap.indent("\n".join(lines), " " * 12),
+            """\
+            preexisting                PARAMETER                   3  v0
+            preexisting                PARAMETER                   3  v0
+            preexisting                PARAMETER                   4  v0
+            preexisting                PARAMETER                   4  v0
+            preexisting                PARAMETER                   7  v0
+            preexisting                PARAMETER                   7  v0
+            create                     INPUT                       1  v0
+            create                     INPUT                       2  v0
+            create                     ACTIVATION                  5  v0
+            create                     ACTIVATION                  6  v0
+            destroy                    ACTIVATION                  5  v0
+            create                     ACTIVATION                  8  v0
+            create                     ACTIVATION                  9  v0
+            destroy                    ACTIVATION                  8  v0
+            create                     ACTIVATION                 10  v0
+            create                     ACTIVATION                 11  v0
+            create                     ACTIVATION                 12  v0
+            destroy                    ACTIVATION                 11  v0
+            create                     ACTIVATION                 13  v0
+            create                     TEMPORARY                  14  v0
+            create                     TEMPORARY                  15  v0
+            destroy                    TEMPORARY                  15  v0
+            destroy                    TEMPORARY                  14  v0
+            create                     ACTIVATION                 16  v0
+            create                     TEMPORARY                  17  v0
+            create                     TEMPORARY                  18  v0
+            create                     AUTOGRAD_DETAIL            19  v0
+            destroy                    TEMPORARY                  18  v0
+            destroy                    TEMPORARY                  17  v0
+            destroy                    ACTIVATION                 12  v0
+            create                     TEMPORARY                  20  v0
+            create                     TEMPORARY                  21  v0
+            create                     TEMPORARY                  22  v0
+            create                     TEMPORARY                  23  v0
+            destroy                    TEMPORARY                  22  v0
+            destroy                    TEMPORARY                  21  v0
+            create                     AUTOGRAD_DETAIL            24  v0
+            destroy                    TEMPORARY                  23  v0
+            destroy                    TEMPORARY                  20  v0
+            destroy                    AUTOGRAD_DETAIL            19  v0
+            destroy                    ACTIVATION                 10  v0
+            increment_version          AUTOGRAD_DETAIL            24  v0
+            create                     AUTOGRAD_DETAIL            25  v0
+            destroy                    AUTOGRAD_DETAIL            24  v1
+            create                     GRADIENT                   26  v0
+            create                     AUTOGRAD_DETAIL            27  v0
+            destroy                    AUTOGRAD_DETAIL            25  v0
+            create                     AUTOGRAD_DETAIL            28  v0
+            destroy                    AUTOGRAD_DETAIL            27  v0
+            destroy                    ACTIVATION                  6  v0
+            create                     GRADIENT                   29  v0
+            create                     GRADIENT                   30  v0
+            destroy                    AUTOGRAD_DETAIL            28  v0
+            destroy                    ACTIVATION                 16  v0
+            create                     ???                        31  v0
+            destroy                    ???                        31  v0
+            create                     OPTIMIZER_STATE            33  v0
+            increment_version          OPTIMIZER_STATE            33  v0
+            create                     OPTIMIZER_STATE            34  v0
+            create                     OPTIMIZER_STATE            35  v0
+            create                     OPTIMIZER_STATE            36  v0
+            increment_version          OPTIMIZER_STATE            36  v0
+            create                     OPTIMIZER_STATE            37  v0
+            create                     OPTIMIZER_STATE            38  v0
+            create                     OPTIMIZER_STATE            39  v0
+            increment_version          OPTIMIZER_STATE            39  v0
+            create                     OPTIMIZER_STATE            40  v0
+            create                     OPTIMIZER_STATE            41  v0
+            create                     ???                        42  v0
+            increment_version          OPTIMIZER_STATE            33  v1
+            create                     TEMPORARY                  43  v0
+            destroy                    TEMPORARY                  43  v0
+            destroy                    ???                        42  v0
+            create                     INPUT                      44  v0
+            increment_version          OPTIMIZER_STATE            34  v0
+            create                     TEMPORARY                  45  v0
+            destroy                    TEMPORARY                  45  v0
+            destroy                    INPUT                      44  v0
+            increment_version          OPTIMIZER_STATE            34  v1
+            create                     INPUT                      46  v0
+            increment_version          OPTIMIZER_STATE            35  v0
+            create                     TEMPORARY                  47  v0
+            destroy                    TEMPORARY                  47  v0
+            destroy                    INPUT                      46  v0
+            increment_version          OPTIMIZER_STATE            35  v1
+            create                     ???                        48  v0
+            create                     INPUT                      49  v0
+            create                     TEMPORARY                  50  v0
+            create                     ???                        51  v0
+            destroy                    TEMPORARY                  50  v0
+            destroy                    INPUT                      49  v0
+            destroy                    ???                        48  v0
+            create                     INPUT                      52  v0
+            increment_version          ???                        51  v0
+            create                     TEMPORARY                  53  v0
+            destroy                    TEMPORARY                  53  v0
+            destroy                    INPUT                      52  v0
+            increment_version          PARAMETER                   3  v0
+            create                     ???                        54  v0
+            increment_version          OPTIMIZER_STATE            36  v1
+            create                     TEMPORARY                  55  v0
+            destroy                    TEMPORARY                  55  v0
+            destroy                    ???                        54  v0
+            create                     INPUT                      56  v0
+            increment_version          OPTIMIZER_STATE            37  v0
+            create                     TEMPORARY                  57  v0
+            destroy                    TEMPORARY                  57  v0
+            destroy                    INPUT                      56  v0
+            increment_version          OPTIMIZER_STATE            37  v1
+            create                     INPUT                      58  v0
+            increment_version          OPTIMIZER_STATE            38  v0
+            create                     TEMPORARY                  59  v0
+            destroy                    TEMPORARY                  59  v0
+            destroy                    INPUT                      58  v0
+            increment_version          OPTIMIZER_STATE            38  v1
+            create                     ???                        60  v0
+            create                     INPUT                      61  v0
+            create                     TEMPORARY                  62  v0
+            create                     ???                        63  v0
+            destroy                    TEMPORARY                  62  v0
+            destroy                    INPUT                      61  v0
+            destroy                    ???                        60  v0
+            create                     INPUT                      64  v0
+            increment_version          ???                        63  v0
+            create                     TEMPORARY                  65  v0
+            destroy                    TEMPORARY                  65  v0
+            destroy                    INPUT                      64  v0
+            destroy                    ???                        51  v1
+            increment_version          PARAMETER                   4  v0
+            create                     ???                        66  v0
+            increment_version          OPTIMIZER_STATE            39  v1
+            create                     TEMPORARY                  67  v0
+            destroy                    TEMPORARY                  67  v0
+            destroy                    ???                        66  v0
+            create                     INPUT                      68  v0
+            increment_version          OPTIMIZER_STATE            40  v0
+            create                     TEMPORARY                  69  v0
+            destroy                    TEMPORARY                  69  v0
+            destroy                    INPUT                      68  v0
+            increment_version          OPTIMIZER_STATE            40  v1
+            create                     INPUT                      70  v0
+            increment_version          OPTIMIZER_STATE            41  v0
+            create                     TEMPORARY                  71  v0
+            destroy                    TEMPORARY                  71  v0
+            destroy                    INPUT                      70  v0
+            increment_version          OPTIMIZER_STATE            41  v1
+            create                     ???                        72  v0
+            create                     INPUT                      73  v0
+            create                     TEMPORARY                  74  v0
+            create                     ???                        75  v0
+            destroy                    TEMPORARY                  74  v0
+            destroy                    INPUT                      73  v0
+            destroy                    ???                        72  v0
+            create                     INPUT                      76  v0
+            increment_version          ???                        75  v0
+            create                     TEMPORARY                  77  v0
+            destroy                    TEMPORARY                  77  v0
+            destroy                    INPUT                      76  v0
+            destroy                    ???                        63  v1
+            increment_version          PARAMETER                   7  v0
+            destroy                    ???                        75  v1
+            create                     ???                        78  v0
+            destroy                    ???                        78  v0
+            increment_version          GRADIENT                   29  v0
+            increment_version          GRADIENT                   30  v0
+            increment_version          GRADIENT                   26  v0""")
 
 
 if __name__ == "__main__":

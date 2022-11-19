@@ -41,6 +41,13 @@ class Category(enum.Enum):
     OPTIMIZER_STATE = enum.auto()
 
 
+class Action(enum.Enum):
+    PREEXISTING = enum.auto()
+    CREATE = enum.auto()
+    INCREMENT_VERSION = enum.auto()
+    DESTROY = enum.auto()
+
+
 @dataclasses.dataclass
 class _Storage:
     """Bundle storage pointer and id.
@@ -566,6 +573,45 @@ class MemoryProfile:
         self._set_activations()
         self._set_optimizer_state()
         self._set_autograd_detail()
+
+    @property
+    def timeline(self) -> Tuple[Tuple[int, Action, TensorAndID]]:
+        t0 = min(event.start_time_ns for event in self._op_tree.dfs())
+        allocation_times: Dict[Tuple[TensorKey, bool], int] = {}
+        for event in self._op_tree.dfs():
+            if event.typed[0] == _EventType.Allocation:
+                key = TensorKey.from_allocation(event.typed[1])
+                if key is not None:
+                    is_allocation = event.extra_fields.alloc_size > 0
+                    allocation_times[(key, is_allocation)] = event.start_time_ns - t0
+
+        snapshot = self._category_snapshot()
+        last_version = {key: version for key, version in sorted(snapshot.keys())}
+
+        events: List[Tuple[int, Action, TensorAndID]] = [
+            (-1, Action.PREEXISTING, (key, version))
+            for key, version in snapshot.keys()
+            if (key, True) not in allocation_times and version == 0
+        ]
+
+        for node in self._data_flow_graph.flow_nodes:
+            for key, edge in node._edges.items():
+                if edge.is_allocation:
+                    t = allocation_times[(key, True)]
+                    events.append((t, Action.CREATE, (key, 0)))
+
+                elif edge.mutated:
+                    t = node._event.start_time_ns - t0
+                    version = edge.input_version
+                    assert version is not None
+                    events.append((t, Action.INCREMENT_VERSION, (key, version)))
+
+                if edge.is_deletion:
+                    t = allocation_times[(key, False)]
+                    events.append((t, Action.DESTROY, (key, last_version[key])))
+
+        events.sort(key=lambda x: (x[0], x[1].value))
+        return tuple(events)
 
     def _is_gradient(self, *args, **kwargs) -> bool:
         return self._categories.get(*args, **kwargs) == Category.GRADIENT
