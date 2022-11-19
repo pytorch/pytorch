@@ -1318,6 +1318,7 @@ class BenchmarkRunner:
         experiment,
         diff=False,
         branch=None,
+        explain=False,
     ):
         if diff:
             self.compare_branches(
@@ -1337,6 +1338,8 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment
             )
             print(status)
+        if explain:
+            print(torch._dynamo.explain(model, *example_inputs)[0])
 
 
 def help(fn):
@@ -1513,6 +1516,12 @@ def parse_args(args=None):
         "--diff_main",
         action="store_true",
         help="Delta this branch against main. In the future, we may add support for picking the branch.",
+    )
+
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="run .explain() on the graph at the end of the run.",
     )
 
     parser.add_argument(
@@ -1982,6 +1991,7 @@ def run(runner, args, original_dir=None):
                 optimize_ctx,
                 experiment,
                 diff=args.diff_main,
+                explain=args.explain,
             )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"

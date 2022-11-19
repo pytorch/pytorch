@@ -429,6 +429,7 @@ def optimize(
     )
 
 
+# TODO(voz): Consider making "explain" output alongside a run / part of a run
 @patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
     # TODO(voz): Do we want a decorator for this?
@@ -487,15 +488,23 @@ def explain(f, *args, **kwargs):
         msg = f"{break_reason.reason}\n{formatted_stack}"
         formatted_list += f"{idx + 1}. {msg} \n"
 
-    explanation = f"Dynamo produced {graph_count} graphs"
+    explanation = f"Dynamo produced {graph_count} graphs "
     explanation += f"with {graph_count - 1} graph break and {op_count} ops"
-    explanation += f"\n Break reasons: \n\n{formatted_list}"
+    explanation_verbose = explanation
+    explanation_verbose += f"\n Break reasons: \n\n{formatted_list}"
 
-    explanation += compile_times()
+    explanation_verbose += compile_times()
 
     # TODO(voz): Do we want a decorator for this?
     reset()
-    return explanation, out_guards, graphs, ops_per_graph, break_reasons
+    return (
+        explanation,
+        out_guards,
+        graphs,
+        ops_per_graph,
+        break_reasons,
+        explanation_verbose,
+    )
 
 
 def export(
