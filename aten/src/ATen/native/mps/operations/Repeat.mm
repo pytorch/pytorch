@@ -79,13 +79,20 @@ dispatch_sync(mpsStream->queue(), ^(){
   [computeEncoder endEncoding];
 
   mpsStream->commit(true);
-  
+
+  void *output = [_result_ptr contents];
+  NSData *data = [NSData dataWithBytesNoCopy:resultsBuffer.contents length:(sizeof(float) * 3 * resultsCount)freeWhenDone:NO];
+  index_t *finalArray = new index_t [result_size];
+  [data getBytes:&finalArray[0] length:result_size];
+
   for (int64_t index = 0; index < result_size; index++)
   {
-    result_ptr[index] = _result_ptr.contents[index];
+    result_ptr[index] = finalArray[index];
   }
 }
 });
+
+
 }
 
 
