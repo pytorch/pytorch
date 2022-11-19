@@ -107,7 +107,7 @@ class cpp:
 class triton:
 
     # Use cudagraphs on output code
-    cudagraphs = False
+    cudagraphs = False  # TODO fix
 
     # choose conv backend, "aten" or "triton" or "autotune"
     convolution = "aten"

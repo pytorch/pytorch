@@ -181,7 +181,7 @@ def align_inputs(model, inputs, static_input_idxs=()):
             )
             != 0
         )
-        and inputs[i].device.type == "cuda"
+        and (isinstance(inputs[i], torch.Tensor) and inputs[i].device.type == "cuda")
     ]
 
     if len(check_inputs) == 0:
