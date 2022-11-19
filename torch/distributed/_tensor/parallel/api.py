@@ -182,7 +182,7 @@ def _parallelize_mlp(
                 m,
                 device_mesh,
                 _colwise_parallelize_fn,
-                input_fn=parallel_style._prepare_input  # pyre-ignore[6]  # type: ignore[arg-type, misc]
+                input_fn=parallel_style._prepare_input  # type: ignore[arg-type, misc] # pyre-ignore[6]
                 if i == 0
                 else None,
             )
@@ -192,7 +192,7 @@ def _parallelize_mlp(
                 m,
                 device_mesh,
                 _rowwise_parallelize_fn,
-                output_fn=parallel_style._prepare_output  # pyre-ignore[6]  # type: ignore[arg-type, misc]
+                output_fn=parallel_style._prepare_output  # type: ignore[arg-type, misc] # pyre-ignore[6]
                 if i == (len(linear_submodules) - 1)
                 else None,
             )
