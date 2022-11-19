@@ -117,7 +117,7 @@ def quantize_per_channel(input, scales, zero_points, axis, quant_min, quant_max,
 
     for i in range(input.size(0)):
         res[i] = torch.clamp(
-            torch.round(input[i] * (1.0 / scales[i]) + zero_points[i]),
+            torch.round(input[i] * (1.0 / scales[i])) + zero_points[i],
             quant_min,
             quant_max
         )
