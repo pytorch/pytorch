@@ -403,6 +403,19 @@ def forward(self, x_1):
             )
         )
 
+    def test_val_metadata_mutation(self):
+        def f(x):
+            y = x.clone()
+            y.unsqueeze_(0)
+            return y
+
+        traced = make_fx(f, tracing_mode=self.tracing_mode)(torch.randn(3, requires_grad=True))
+        self.assertEqual([
+            tuple(node.meta['val'].shape)
+            for node in traced.graph.nodes
+            if 'val' in node.meta
+        ], [(3,), (3,), (1, 3)])
+
     def test_make_fx_overloads(self):
         def f(x):
             return x.cos() + torch.randn(x.shape)
