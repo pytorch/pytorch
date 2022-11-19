@@ -5640,7 +5640,7 @@ void CompilationUnit::define_interface(
   for (const Stmt& stmt : classDef.body()) {
     if (stmt.kind() != TK_DEF) {
       throw ErrorReport(stmt)
-          << "interface declartions can only contain method definitions";
+          << "interface declarations can only contain method definitions";
     }
     auto method_def = Def(stmt);
     if (!method_def.decl().return_type().present()) {
