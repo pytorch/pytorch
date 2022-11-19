@@ -1611,6 +1611,15 @@ class TestMPS(TestCase):
 
         self.assertEqual(a1, a2)
 
+    def test_slice_reshape(self):
+        x = torch.randn([1, 6, 4, 2], dtype=torch.float, device="mps")
+        x_cpu = x.detach().clone().to("cpu")
+
+        x = x[:,3:].view(2, 3, 4, 1)
+        x_cpu = x_cpu[:,3:].view(2, 3, 4, 1)
+
+        self.assertEqual(x, x_cpu)
+
     def test_view_slice(self):
         # https://github.com/pytorch/pytorch/issues/83995
         NUM_SAMPLES = 60
