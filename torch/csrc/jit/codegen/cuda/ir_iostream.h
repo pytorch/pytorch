@@ -77,7 +77,6 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
   void handle(const TensorView*) final;
 
   void handle(const Bool*) final;
-  void handle(const Float*) final;
   void handle(const Double*) final;
   void handle(const Int*) final;
   void handle(const ComplexDouble*) final;

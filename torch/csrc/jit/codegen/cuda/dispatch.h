@@ -61,12 +61,11 @@ class IterDomain;
 class TensorDomain;
 class TensorView;
 
-class Bool;
-template <DataType DT>
-class FloatingPoint;
-using Float = FloatingPoint<DataType::Float>;
-using Double = FloatingPoint<DataType::Double>;
-class Int;
+template <typename DT>
+class Scalar;
+using Bool = Scalar<bool>;
+using Double = Scalar<double>;
+using Int = Scalar<int64_t>;
 class ComplexDouble;
 class NamedScalar;
 
@@ -138,7 +137,6 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const TensorDomain* stmt);
   virtual void handle(const TensorView* stmt);
   virtual void handle(const Bool* stmt);
-  virtual void handle(const Float* stmt);
   virtual void handle(const Double* stmt);
   virtual void handle(const Int* stmt);
   virtual void handle(const ComplexDouble* stmt);
@@ -204,7 +202,6 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
 
   // Vals
   virtual void handle(Bool* stmt);
-  virtual void handle(Float* stmt);
   virtual void handle(Double* stmt);
   virtual void handle(Int* stmt);
   virtual void handle(ComplexDouble* stmt);
@@ -314,7 +311,6 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
 
   // Vals
   virtual void mutate(Bool*);
-  virtual void mutate(Float*);
   virtual void mutate(Double*);
   virtual void mutate(Int*);
   virtual void mutate(ComplexDouble*);

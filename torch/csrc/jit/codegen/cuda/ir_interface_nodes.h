@@ -23,59 +23,44 @@ class ViewTransform;
 
 class IrCloner;
 
-//! A Bool value
-//!
-//! This value can be a symbolic value (defined after the kernel
-//! is compiled) or a constant value (inlined into the kernel definition).
-//!
-class TORCH_CUDA_CU_API Bool : public Val {
- public:
-  Bool(IrBuilderPasskey passkey);
-
-  explicit Bool(IrBuilderPasskey passkey, bool value);
-
-  explicit Bool(IrBuilderPasskey passkey, c10::optional<bool> value);
-
-  Bool(const Bool* src, IrCloner* ir_cloner);
-
-  NVFUSER_DECLARE_CLONE
-
-  bool isSymbolic() const {
-    return !(maybe_value_.has_value());
-  }
-  bool isConst() const final {
-    return maybe_value_.has_value();
-  }
-  c10::optional<bool> value() const {
-    return maybe_value_;
-  }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  const c10::optional<bool> maybe_value_;
-};
-
-//! A floating-point value. This value can be a symbolic value (defined after
+//! A scalr value. This value can be a symbolic value (defined after
 //! the kernel is compiled) or a constant value (inlined into the kernel
 //! definition).
-template <DataType DT>
-class TORCH_CUDA_CU_API FloatingPoint : public Val {
+template <typename UnderlyingType>
+class TORCH_CUDA_CU_API Scalar : public Val {
  public:
-  using ScalarType = typename DataTypeToNativeType<DT>::type;
+  using ScalarType = UnderlyingType;
+  static constexpr DataType kDefaultDataType =
+      NativeTypeToDataType<UnderlyingType>::type;
 
-  FloatingPoint(IrBuilderPasskey passkey)
-      : Val(passkey, ValType::Scalar, DT), maybe_value_{c10::nullopt} {}
+  explicit Scalar(IrBuilderPasskey passkey, DataType dtype = kDefaultDataType)
+      : Val(passkey, ValType::Scalar, dtype), maybe_value_{c10::nullopt} {
+    TORCH_INTERNAL_ASSERT(
+        (std::is_integral<UnderlyingType>::value && isIntegralType(dtype)) ||
+            (std::is_same<UnderlyingType, bool>::value &&
+             isBooleanType(dtype)) ||
+            (std::is_floating_point<UnderlyingType>::value &&
+             isFloatingPointType(dtype)),
+        "Invalid data type: ",
+        dtype);
+  }
 
-  explicit FloatingPoint(IrBuilderPasskey passkey, ScalarType value)
-      : Val(passkey, ValType::Scalar, DT), maybe_value_{value} {}
-
-  explicit FloatingPoint(
+  explicit Scalar(
       IrBuilderPasskey passkey,
-      c10::optional<ScalarType> value)
-      : Val(passkey, ValType::Scalar, DT), maybe_value_{value} {}
+      c10::optional<UnderlyingType> value,
+      DataType dtype = kDefaultDataType)
+      : Val(passkey, ValType::Scalar, dtype), maybe_value_{value} {
+    TORCH_INTERNAL_ASSERT(
+        (std::is_integral<UnderlyingType>::value && isIntegralType(dtype)) ||
+            (std::is_same<UnderlyingType, bool>::value &&
+             isBooleanType(dtype)) ||
+            (std::is_floating_point<UnderlyingType>::value &&
+             isFloatingPointType(dtype)),
+        "Invalid data type: ",
+        dtype);
+  }
 
-  FloatingPoint(const FloatingPoint* src, IrCloner* ir_cloner)
+  Scalar(const Scalar* src, IrCloner* ir_cloner)
       : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
   NVFUSER_DECLARE_CLONE
@@ -86,7 +71,7 @@ class TORCH_CUDA_CU_API FloatingPoint : public Val {
   bool isConst() const final {
     return maybe_value_.has_value();
   }
-  c10::optional<ScalarType> value() const {
+  c10::optional<UnderlyingType> value() const {
     return maybe_value_;
   }
 
@@ -94,59 +79,23 @@ class TORCH_CUDA_CU_API FloatingPoint : public Val {
     if (this == other) {
       return true;
     }
-    if (!other->isA<FloatingPoint>()) {
+    if (!other->isA<Scalar>()) {
       return false;
     }
-    const auto other_val = other->as<FloatingPoint>();
-    if (isConst() && other_val->isConst())
+    const auto other_val = other->as<Scalar>();
+    if (isConst() && other_val->isConst()) {
       return *value() == *(other_val->value());
+    }
     return false;
   }
 
  private:
-  const c10::optional<ScalarType> maybe_value_;
+  const c10::optional<UnderlyingType> maybe_value_;
 };
 
-using Float = FloatingPoint<DataType::Float>;
-using Double = FloatingPoint<DataType::Double>;
-
-//! An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
-//! inlined literal in the kernel.
-class TORCH_CUDA_CU_API Int : public Val {
- public:
-  using ScalarType = int64_t;
-
-  explicit Int(IrBuilderPasskey passkey, DataType dtype = DataType::Int);
-
-  explicit Int(
-      IrBuilderPasskey passkey,
-      ScalarType value,
-      DataType dtype = DataType::Int);
-
-  explicit Int(
-      IrBuilderPasskey passkey,
-      c10::optional<ScalarType> value,
-      DataType dtype = DataType::Int);
-
-  Int(const Int* src, IrCloner* ir_cloner);
-
-  NVFUSER_DECLARE_CLONE
-
-  bool isSymbolic() const {
-    return !(maybe_value_.has_value());
-  }
-  bool isConst() const final {
-    return maybe_value_.has_value();
-  }
-  c10::optional<ScalarType> value() const {
-    return maybe_value_;
-  }
-
-  bool sameAs(const Statement* other) const override;
-
- private:
-  const c10::optional<ScalarType> maybe_value_;
-};
+using Bool = Scalar<bool>;
+using Int = Scalar<int64_t>;
+using Double = Scalar<double>;
 
 //! An c10::complex<double> value. This value can be a symbolic value (defined
 //! after the kernel is compiled) or a constant value (inlined into the kernel

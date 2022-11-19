@@ -172,14 +172,20 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   void initStringStreamFormat(std::stringstream& ss) {
     ss.imbue(std::locale("C"));
     ss << std::scientific;
-    setPrecistion(ss);
+    // Set the default precision as Double
+    setPrecision(ss, DataType::Double);
   }
 
-  // By default use double precision format
-  template <typename FloatingPointScalarType = Double>
-  void setPrecistion(std::stringstream& ss) {
-    const int digits = std::numeric_limits<
-        typename FloatingPointScalarType::ScalarType>::max_digits10;
+  void setPrecision(std::stringstream& ss, DataType dtype) {
+    TORCH_INTERNAL_ASSERT(isFloatingPointType(dtype));
+    int digits = 0;
+    if (dtype == DataType::Float) {
+      digits = std::numeric_limits<float>::max_digits10;
+    } else if (dtype == DataType::Double) {
+      digits = std::numeric_limits<double>::max_digits10;
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Unexpected floating point type: ", dtype);
+    }
     ss << std::setprecision(digits);
   }
 
@@ -413,32 +419,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  void handle(const Float* f) final {
-    const auto def = f->definition();
-    const bool has_alloc = alloc_map_.find(f) != alloc_map_.end();
-    if (def != nullptr && !has_alloc) {
-      code_ << "(" << gen(def) << ")";
-    } else if (f->isConst()) {
-      auto val = *f->value();
-      // note: default inf/nan doesn't work and should be replaced with macros
-      // `NAN`, `POS_INFINITY` and `NEG_INFINITY` instead.
-      if (std::isinf(val)) {
-        if (val > 0) {
-          code_ << "POS_INFINITY";
-        } else {
-          code_ << "NEG_INFINITY";
-        }
-      } else if (std::isnan(val)) {
-        code_ << "NAN";
-      } else {
-        setPrecistion<Float>(code_);
-        code_ << val << "f";
-      }
-    } else {
-      code_ << varName(f);
-    }
-  }
-
   void handle(const Double* d) final {
     const auto def = d->definition();
     const bool has_alloc = alloc_map_.find(d) != alloc_map_.end();
@@ -457,7 +437,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       } else if (std::isnan(val)) {
         code_ << "NAN";
       } else {
-        setPrecistion<Double>(code_);
+        setPrecision(code_, d->getDataType().value());
         code_ << val;
       }
     } else {
@@ -939,14 +919,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       if (val_float->isConst()) {
         auto fp_exp = val_float->value().value();
         double int_exp = 0;
-        if (std::modf(fp_exp, &int_exp) == 0) {
-          exponent = int_exp;
-        }
-      }
-    } else if (auto val_float = dynamic_cast<Float*>(rhs)) {
-      if (val_float->isConst()) {
-        auto fp_exp = val_float->value().value();
-        float int_exp = 0;
         if (std::modf(fp_exp, &int_exp) == 0) {
           exponent = int_exp;
         }

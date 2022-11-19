@@ -84,11 +84,11 @@ enum class KernelIndexMode { INT32, INT64 };
 DataType indexModeToDtype(KernelIndexMode index_mode);
 
 // Returns if the datatype is a floating point type
-bool isFloatingPointType(DataType dtype);
+TORCH_CUDA_CU_API bool isFloatingPointType(DataType dtype);
 // Returns if the datatype is an boolean type
-bool isIntegralType(DataType dtype);
+TORCH_CUDA_CU_API bool isIntegralType(DataType dtype);
 // Returns if the datatype is an integer type
-bool isBooleanType(DataType dtype);
+TORCH_CUDA_CU_API bool isBooleanType(DataType dtype);
 // Returns if the datatype is a complex type
 bool isComplexType(DataType dtype);
 // Returns if the datatype is a vector type
@@ -107,15 +107,25 @@ TORCH_CUDA_CU_API bool isSupportedTypeByDevice(DataType dtype);
 template <DataType DT>
 struct DataTypeToNativeType;
 
+template <typename NativeType>
+struct NativeTypeToDataType;
+
 #define DEFINE_DATATYPE_TO_NATIVE_TYPE(data_type, native_type) \
   template <>                                                  \
   struct DataTypeToNativeType<data_type> {                     \
     using type = native_type;                                  \
+  };                                                           \
+  template <>                                                  \
+  struct NativeTypeToDataType<native_type> {                   \
+    static constexpr DataType type = data_type;                \
   };
 
 // TODO: Add more type specializations
 DEFINE_DATATYPE_TO_NATIVE_TYPE(DataType::Float, float);
 DEFINE_DATATYPE_TO_NATIVE_TYPE(DataType::Double, double);
+DEFINE_DATATYPE_TO_NATIVE_TYPE(DataType::Int, int64_t);
+DEFINE_DATATYPE_TO_NATIVE_TYPE(DataType::Int32, int);
+DEFINE_DATATYPE_TO_NATIVE_TYPE(DataType::Bool, bool);
 
 #undef DEFINE_DATATYPE_TO_NATIVE_TYPE
 

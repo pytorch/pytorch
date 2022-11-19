@@ -44,10 +44,6 @@ class ScalarCheck : OptInConstDispatch {
     same_ = v1_->as<Bool>()->sameAs(v2_->as<Bool>());
   }
 
-  void handle(const Float* d) final {
-    same_ = v1_->as<Float>()->sameAs(v2_->as<Float>());
-  }
-
   void handle(const Double* d) final {
     same_ = v1_->as<Double>()->sameAs(v2_->as<Double>());
   }
@@ -76,80 +72,9 @@ bool areEqualScalars(Val* v1, Val* v2) {
   return ScalarCheck::sameAs(v1, v2);
 }
 
-Bool::Bool(IrBuilderPasskey passkey)
-    : Val(passkey, ValType::Scalar, DataType::Bool),
-      maybe_value_{c10::nullopt} {}
-
-Bool::Bool(IrBuilderPasskey passkey, bool value)
-    : Val(passkey, ValType::Scalar, DataType::Bool), maybe_value_{value} {}
-
-Bool::Bool(IrBuilderPasskey passkey, c10::optional<bool> value)
-    : Val(passkey, ValType::Scalar, DataType::Bool), maybe_value_{value} {}
-
-Bool::Bool(const Bool* src, IrCloner* ir_cloner)
-    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
-
-NVFUSER_DEFINE_CLONE(Bool)
-
-bool Bool::sameAs(const Statement* other) const {
-  if (this == other) {
-    return true;
-  }
-  if (!other->isA<Bool>()) {
-    return false;
-  }
-  const auto other_bool = other->as<Bool>();
-  if (isConst() && other_bool->isConst()) {
-    return *value() == *(other_bool->value());
-  }
-  return false;
-}
-
-Int::Int(IrBuilderPasskey passkey, DataType dtype)
-    : Val(passkey, ValType::Scalar, dtype), maybe_value_{c10::nullopt} {
-  TORCH_CHECK(
-      dtype == DataType::Int || dtype == DataType::Int32,
-      "Invalid data type: ",
-      dtype);
-}
-
-Int::Int(IrBuilderPasskey passkey, ScalarType value, DataType dtype)
-    : Val(passkey, ValType::Scalar, dtype), maybe_value_{value} {
-  TORCH_CHECK(
-      dtype == DataType::Int || dtype == DataType::Int32,
-      "Invalid data type: ",
-      dtype);
-}
-
-Int::Int(
-    IrBuilderPasskey passkey,
-    c10::optional<ScalarType> value,
-    DataType dtype)
-    : Val(passkey, ValType::Scalar, DataType::Int), maybe_value_{value} {
-  TORCH_CHECK(
-      dtype == DataType::Int || dtype == DataType::Int32,
-      "Invalid data type: ",
-      dtype);
-}
-
-Int::Int(const Int* src, IrCloner* ir_cloner)
-    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
-
-NVFUSER_DEFINE_CLONE(Int)
-
-bool Int::sameAs(const Statement* other) const {
-  if (this == other) {
-    return true;
-  }
-  if (!other->isA<Int>()) {
-    return false;
-  }
-  const auto other_int = other->as<Int>();
-  if (isConst() && other_int->isConst()) {
-    return *value() == *(other_int->value());
-  }
-  return false;
-}
+template class Scalar<bool>;
+template class Scalar<int64_t>;
+template class Scalar<double>;
 
 ComplexDouble::ComplexDouble(IrBuilderPasskey passkey)
     : Val(passkey, ValType::Scalar, DataType::ComplexDouble),

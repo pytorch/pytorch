@@ -6882,24 +6882,45 @@ TEST_F(NVFuserTest, FusionFloatingPointType_CUDA) {
     auto tv0 = makeConcreteTensor({2}, DataType::Float);
     fusion.addInput(tv0);
 
-    auto f2 = IrBuilder::create<Float>(float_val);
-    auto d3 = IrBuilder::create<Double>(double_val);
+    auto f2 = IrBuilder::create<Double>(float_val, DataType::Float);
+    TORCH_CHECK(
+        f2->getDataType() == DataType::Float,
+        "Invalid data type: ",
+        f2->getDataType().value());
+
+    auto d3 = IrBuilder::create<Double>(double_val, DataType::Double);
+    TORCH_CHECK(
+        d3->getDataType() == DataType::Double,
+        "Invalid data type: ",
+        d3->getDataType().value());
 
     // Adding two Floats produces a Float
     auto f4 = add(f2, f2);
-    TORCH_CHECK(f4->isA<Float>(), "Invalid result: ", f4->toString());
+    TORCH_CHECK(
+        f4->getDataType() == DataType::Float,
+        "Invalid data type: ",
+        f4->getDataType().value());
 
     // Adding a Double and a Float produces a Double
     auto d5 = add(f2, d3);
-    TORCH_CHECK(d5->isA<Double>(), "Invalid result: ", d5->toString());
+    TORCH_CHECK(
+        d5->getDataType() == DataType::Double,
+        "Invalid data type: ",
+        d5->getDataType().value());
 
     // Adding a Float and a Double produces a Double
     auto d6 = add(d3, f2);
-    TORCH_CHECK(d6->isA<Double>(), "Invalid result: ", d6->toString());
+    TORCH_CHECK(
+        d6->getDataType() == DataType::Double,
+        "Invalid data type: ",
+        d6->getDataType().value());
 
     // Adding two Doubles produce a Double
     auto d7 = add(d5, d6);
-    TORCH_CHECK(d7->isA<Double>(), "Invalid result: ", d7->toString());
+    TORCH_CHECK(
+        d7->getDataType() == DataType::Double,
+        "Invalid data type: ",
+        d7->getDataType().value());
 
     // Adding a Float to a Float tensor produces a Float tensor
     auto tv1 = add(tv0, f4);

@@ -214,24 +214,6 @@ void IrPrinter::handle(const Bool* b) {
   }
 }
 
-void IrPrinter::handle(const Float* f) {
-  if (print_inline_ && f->definition() != nullptr) {
-    os_ << "( ";
-    handle(f->definition());
-    os_ << " )";
-    return;
-  }
-
-  if (f->isSymbolic()) {
-    os_ << "f" << varName(f);
-  } else {
-    os_ << "float("
-        << std::setprecision(
-               std::numeric_limits<Float::ScalarType>::max_digits10)
-        << *(f->value()) << ")";
-  }
-}
-
 void IrPrinter::handle(const Double* d) {
   if (print_inline_ && d->definition() != nullptr) {
     os_ << "( ";
@@ -241,12 +223,19 @@ void IrPrinter::handle(const Double* d) {
   }
 
   if (d->isSymbolic()) {
-    os_ << "d" << varName(d);
+    os_ << typePrefix(d->getDataType().value()) << varName(d);
   } else {
-    os_ << "double("
-        << std::setprecision(
-               std::numeric_limits<Double::ScalarType>::max_digits10)
-        << *(d->value()) << ")";
+    os_ << d->getDataType().value() << "(";
+    if (d->getDataType() == DataType::Double) {
+      os_ << std::setprecision(std::numeric_limits<double>::max_digits10)
+          << *(d->value()) << ")";
+    } else if (d->getDataType() == DataType::Float) {
+      os_ << std::setprecision(std::numeric_limits<float>::max_digits10)
+          << (float)*(d->value()) << ")";
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "Invalid data type: ", d->getDataType().value());
+    }
   }
 }
 

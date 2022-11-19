@@ -150,10 +150,6 @@ class ConstCheck : private OptOutConstDispatch {
     is_const_ = is_const_ && b->isConst();
   }
 
-  void handle(const Float* f) final {
-    is_const_ = is_const_ && f->isConst();
-  }
-
   void handle(const Double* d) final {
     is_const_ = is_const_ && d->isConst();
   }

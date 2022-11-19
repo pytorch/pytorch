@@ -18,8 +18,10 @@ class IrBuilderPasskey;
 class ExprPasskey;
 class OptOutMutator;
 
-class Int;
-class Bool;
+template <typename DT>
+class Scalar;
+using Int = Scalar<int64_t>;
+using Bool = Scalar<bool>;
 class NamedScalar;
 
 // Passkey for container to register names with statements
