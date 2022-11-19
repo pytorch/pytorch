@@ -13252,18 +13252,39 @@
     CPU, NestedTensorCPU, Meta: _fused_sdp_choice_cpp
     CUDA, NestedTensorCUDA: _fused_sdp_choice_cuda
 
-# Register the math kernel for cpu
-- func: _scaled_dot_product_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CUDA: _scaled_dot_product_attention_forward_cuda
-    CPU: _scaled_dot_product_attention_forward_math
-    NestedTensorCUDA: _scaled_dot_product_attention_forward_nested
-    NestedTensorCPU: _scaled_dot_product_attention_forward_math
-    Meta: _scaled_dot_product_attention_forward_math
-
 - func: _scaled_dot_product_attention_math(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> (Tensor, Tensor)
   variants: function
+
+- func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool return_softmax=False, bool is_causal=False) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _scaled_dot_product_flash_attention_cuda
+    NestedTensorCUDA: _scaled_dot_product_flash_attention_nestedtensor_cuda
+
+- func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: _scaled_dot_product_efficient_attention_cuda
+    NestedTensorCUDA: _scaled_dot_product_efficient_attention_nestedtensor_cuda
+
+- func: _scaled_dot_product_efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: _scaled_dot_product_efficient_attention_backward_cuda
+
+# Returns ouput, softmax_logsumexp, softmax
+- func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, bool return_softmax, float dropout_p, bool is_causal) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _flash_attention_forward
+
+# Returns ouput, logsumexp if compute_logsumexp
+- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _efficient_attention_forward
+
+- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _efficient_attention_backward
 
 - func: _triton_scaled_dot_attention(Tensor q, Tensor k, Tensor v, float dropout_p=0.0) -> Tensor
   variants: function
@@ -13289,21 +13310,6 @@
   structured_inherits: TensorIteratorBase
   structured: True
   variants: function
-
-- func: _flash_scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal) -> Tensor
-  variants: function
-  dispatch:
-    CUDA: flash_scaled_dot_product_attention
-
-- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CUDA: _efficient_attention_forward
-
-- func: _efficient_attention_backward(Tensor grad, Tensor query, Tensor key, Tensor value, Tensor logsumexp, Tensor out, bool is_causal=False) -> (Tensor, Tensor, Tensor)
-  variants: function
-  dispatch:
-    CUDA: _efficient_attention_backward
 
 - func: _transformer_decoder_only_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None) -> (Tensor, Tensor, Tensor)
   variants: function

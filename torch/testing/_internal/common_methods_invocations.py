@@ -12008,16 +12008,21 @@ op_db: List[OpInfo] = [
             # This is only failing on Linux Bionic 3.10 Cuda 11.6
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
                          device_type='cuda', active_if=_get_torch_cuda_version() >= (11, 6)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
+                         device_type='cuda', dtypes=(torch.float32,)),
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # Doesn't support autocasting
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensorNonErroring', 'test_fake_autocast', device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
+            # Forward works for dtype=float64 which is the math path
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
             # No meta function
             DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', device_type='cuda'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),),
     ),
     UnaryUfuncInfo(
