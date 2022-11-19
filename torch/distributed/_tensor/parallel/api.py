@@ -146,8 +146,8 @@ def _parallelize_mlp(
     # Define partition functions needed.
     def _rowwise_parallelize_fn(name, module, device_mesh):  # pyre-ignore[2, 3]
         for name, param in module.named_parameters():
-            dist_spec = (  # type: ignore[list-item]
-                [Shard(1)] if name == "weight" else [Replicate()]
+            dist_spec = (
+                [Shard(1)] if name == "weight" else [Replicate()]  # type: ignore[list-item]
             )
             dist_param = torch.nn.Parameter(
                 distribute_tensor(param, device_mesh, dist_spec)
@@ -182,7 +182,7 @@ def _parallelize_mlp(
                 m,
                 device_mesh,
                 _colwise_parallelize_fn,
-                input_fn=parallel_style._prepare_input  # pyre-ignore[6]  # type: ignore[arg-type]
+                input_fn=parallel_style._prepare_input  # pyre-ignore[6]  # type: ignore[arg-type, misc]
                 if i == 0
                 else None,
             )
@@ -192,7 +192,7 @@ def _parallelize_mlp(
                 m,
                 device_mesh,
                 _rowwise_parallelize_fn,
-                output_fn=parallel_style._prepare_output  # pyre-ignore[6]  # type: ignore[arg-type]
+                output_fn=parallel_style._prepare_output  # pyre-ignore[6]  # type: ignore[arg-type, misc]
                 if i == (len(linear_submodules) - 1)
                 else None,
             )

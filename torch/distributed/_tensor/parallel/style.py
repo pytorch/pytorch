@@ -23,8 +23,8 @@ class ParallelStyle(ABC):
 
     @abstractmethod
     def __init__(self, _prepare_input, _prepare_output) -> None:
-        self._prepare_input = _prepare_input
-        self._prepare_output = _prepare_output
+        self._prepare_input = _prepare_input  # type: ignore[assignment, misc]
+        self._prepare_output = _prepare_output  # type: ignore[assignment, misc]
 
 
 class PairwiseParallel(ParallelStyle):
