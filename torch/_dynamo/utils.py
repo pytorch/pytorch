@@ -1055,13 +1055,20 @@ def get_fake_value(node, tx):
     except Unsupported:
         raise
     except RuntimeError as e:
-        if isinstance(e, torch._subclasses.fake_tensor.DataDependentOutputException):
+        cause = e
+        if e.__cause__ is not None:
+            cause = e.__cause__
+        if isinstance(
+            cause, torch._subclasses.fake_tensor.DataDependentOutputException
+        ):
             if config.capture_scalar_outputs and node.target == "item":
                 return torch.zeros(size=(), dtype=args[0].dtype).item()
             else:
-                unimplemented(f"data dependent operator: {e.func}")
-        elif isinstance(e, torch._subclasses.fake_tensor.DynamicOutputShapeException):
-            unimplemented(f"dynamic shape operator: {e.func}")
+                unimplemented(f"data dependent operator: {cause.func}")
+        elif isinstance(
+            cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
+        ):
+            unimplemented(f"dynamic shape operator: {cause.func}")
         raise TorchRuntimeError() from e
 
 
