@@ -1,7 +1,7 @@
 import collections
 import functools
 import warnings
-from typing import Any, Callable, Deque, Dict, List, NamedTuple, Set, Tuple
+from typing import Any, Deque, Dict, List, NamedTuple, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -10,6 +10,7 @@ from torch.distributed.fsdp._utils import (
     _override_batchnorm_mixed_precision,
 )
 from torch.distributed.fsdp.wrap import (
+    _FSDPPolicy,
     _or_policy,
     _recursive_wrap,
     _wrap_batchnorm_individually,
@@ -45,6 +46,9 @@ def _auto_wrap(
     ``fsdp_kwargs`` contains all FSDP arguments except ``module``.
     """
     auto_wrap_policy = auto_wrap_kwargs["auto_wrap_policy"]
+    # Support new way to pass an auto wrap policy
+    if isinstance(auto_wrap_policy, _FSDPPolicy):
+        auto_wrap_policy = auto_wrap_policy.policy
     root_module = auto_wrap_kwargs["module"]
     assert auto_wrap_policy is not None
     # For auto wrapping, submodules should not already be wrapped with FSDP
@@ -68,13 +72,13 @@ def _auto_wrap(
             "instances with mixed precision disabled since some batch norm "
             "kernels do not support low precision."
         )
-        auto_wrap_kwargs["auto_wrap_policy"] = auto_wrap_policy
+    auto_wrap_kwargs["auto_wrap_policy"] = auto_wrap_policy
     _recursive_wrap(**auto_wrap_kwargs, **fsdp_kwargs)
 
 
 def _get_submodule_to_states(
     root_module: nn.Module,
-    auto_wrap_policy: Callable,
+    auto_wrap_policy: _FSDPPolicy,
     ignored_modules: Set[nn.Module],
     ignored_params: Set[nn.Parameter],
 ) -> Dict[nn.Module, SubmoduleState]:
@@ -99,7 +103,7 @@ def _get_submodule_to_states(
     wrapper_cls = functools.partial(_record_module_wrapper_cls, wrapped_modules)
     _recursive_wrap(
         root_module,
-        auto_wrap_policy=auto_wrap_policy,
+        auto_wrap_policy=auto_wrap_policy.policy,
         wrapper_cls=wrapper_cls,
         ignored_modules=ignored_modules,
         ignored_params=ignored_params,
@@ -158,8 +162,9 @@ def _record_module_wrapper_cls(
     **kwargs,
 ) -> nn.Module:
     """
-    This defines a wrapper class to be passed to ``_recursive_wrap()`` that
-    records the wrapped module to the input ``wrapped_modules``.
+    This defines a pseudo-wrapper class to be passed to ``_recursive_wrap()``
+    that records the wrapped module to the input ``wrapped_modules`` without
+    actually wrapping with a class.
     """
     wrapped_modules.append(module)
     return module

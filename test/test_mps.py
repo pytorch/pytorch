@@ -315,6 +315,16 @@ class TestMPS(TestCase):
         self.assertEqual(output_cpu, output_mps)
         self.assertEqual(output_cpu.size(), output_mps.size())
 
+    def test_trace(self):
+        M_cpu = torch.randn(3, 3)
+        M_mps = M_cpu.detach().clone().to("mps")
+
+        output_cpu = torch.trace(M_cpu)
+        output_mps = torch.trace(M_mps)
+
+        self.assertEqual(output_cpu, output_mps)
+        self.assertEqual(output_cpu.size(), output_mps.size())
+
     def test_addbmm(self):
         M_cpu = torch.randn(3, 5)
         batch1_cpu = torch.randn(10, 3, 4)
@@ -1688,6 +1698,68 @@ class TestMPS(TestCase):
         y.permute(3, 2, 1, 0)[1::, ::2] = z
         self.assertEqual(x, y.to('cpu'))
 
+    # See https://github.com/pytorch/pytorch/pull/84742
+    # and https://github.com/pytorch/pytorch/pull/78319
+    def test_binops_dtype_precedence(self):
+        # Test dtype precedence (casting order) in binary operations by comparing to CPU result
+        # Example values for all dtypes supported on the MPS backend
+        sample_vals = {
+            torch.bool: [False, True],
+            torch.int16: [-15, 0, 1, 10],
+            torch.int32: [-376, 0, 1, 13],
+            torch.int64: [-8, 0, 1, 77],
+            torch.float16: [-234.5, 0.0, 1.0, 2.0],
+            torch.float32: [-1.0, 0.0, 0.1, 111.99],
+        }
+        # Test all combinations of dtypes, operations, dimensionality
+        for dtype1, dtype2, binop in itertools.product(
+                sample_vals.keys(), sample_vals.keys(), ['add', 'sub', 'mul', 'div']):
+            # bool minus bool is generally unsupported, so skip
+            if binop == 'sub' and (dtype1 == torch.bool or dtype2 == torch.bool):
+                continue
+            full_shape = (10,)
+            for val1, val2 in itertools.product(sample_vals[dtype1], sample_vals[dtype2]):
+                # print(f'{dtype1},{dtype2}: ({val1}).{binop}({val2})')
+                # print(getattr(torch.tensor(val1, dtype=dtype1, device='mps'), binop)
+                #            (torch.tensor(val2, dtype=dtype2, device='mps')))
+                # print(getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
+                #            (torch.tensor(val2, dtype=dtype2, device='cpu')))
+                self.assertEqual(
+                    getattr(torch.tensor(val1, dtype=dtype1, device='mps'), binop)
+                           (torch.tensor(val2, dtype=dtype2, device='mps')),
+                    getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
+                           (torch.tensor(val2, dtype=dtype2, device='cpu')))
+                self.assertEqual(
+                    getattr(torch.tensor([val1], dtype=dtype1, device='mps'), binop)
+                           (torch.tensor([val2], dtype=dtype2, device='mps')),
+                    getattr(torch.tensor([val1], dtype=dtype1, device='cpu'), binop)
+                           (torch.tensor([val2], dtype=dtype2, device='cpu')))
+                self.assertEqual(
+                    getattr(torch.tensor(val1, dtype=dtype1, device='mps'), binop)
+                           (torch.tensor([val2], dtype=dtype2, device='mps')),
+                    getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
+                           (torch.tensor([val2], dtype=dtype2, device='cpu')))
+                self.assertEqual(
+                    getattr(torch.tensor([val1], dtype=dtype1, device='mps'), binop)
+                           (torch.tensor(val2, dtype=dtype2, device='mps')),
+                    getattr(torch.tensor([val1], dtype=dtype1, device='cpu'), binop)
+                           (torch.tensor(val2, dtype=dtype2, device='cpu')))
+                # Test tensors created with torch.full
+                x1 = torch.full(full_shape, val1, dtype=dtype1, device='mps')
+                y1 = torch.tensor(val2, dtype=dtype2, device='mps')
+                x2 = torch.full(full_shape, val1, dtype=dtype1, device='cpu')
+                y2 = torch.tensor(val2, dtype=dtype2, device='cpu')
+                self.assertEqual(getattr(x1, binop)(y1), getattr(x2, binop)(y2))
+                x3 = torch.tensor(val1, dtype=dtype1, device='mps')
+                y3 = torch.full(full_shape, val2, dtype=dtype2, device='mps')
+                x4 = torch.tensor(val1, dtype=dtype1, device='cpu')
+                y4 = torch.full(full_shape, val2, dtype=dtype2, device='cpu')
+                self.assertEqual(getattr(x3, binop)(y3), getattr(x4, binop)(y4))
+                self.assertEqual(
+                    getattr(torch.tensor(val1, dtype=dtype1, device='mps'), binop)
+                           (torch.full(full_shape, val2, dtype=dtype2, device='mps')),
+                    getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
+                           (torch.full(full_shape, val2, dtype=dtype2, device='cpu')))
 
 
 class TestLogical(TestCase):
@@ -2561,6 +2633,47 @@ class TestNLLLoss(TestCase):
         helper(2, 8, 4, 5, torch.float32)
         helper(2, 8, 4, 5, torch.int32)
         # helper(2, 8, 4, 5, torch.int64)
+
+    def test_median(self):
+        def helper_dtype_int32(n1, n2, n3):
+            cpu_x = torch.randint(50, (n1, n2, n3), device='cpu', dtype=torch.int32)
+            mps_x = cpu_x.detach().clone().to('mps')
+
+            result_cpu = torch.median(cpu_x)
+            result_mps = torch.median(mps_x)
+
+            self.assertEqual(result_cpu, result_mps)
+
+            for dim in [0, 1, 2]:
+                for keepdim in [True, False]:
+                    y, idx = torch.median(cpu_x, dim=dim, keepdim=keepdim)
+                    refy, refidx = torch.median(mps_x, dim=dim, keepdim=keepdim)
+                    self.assertEqual(y, refy)
+                    self.assertEqual(idx, refidx)
+
+        def helper_dtype_float32(n1, n2, n3):
+            cpu_x = torch.randn(n1, n2, n3, device='cpu', dtype=torch.float32)
+            mps_x = cpu_x.detach().clone().to('mps')
+
+            result_cpu = torch.median(cpu_x)
+            result_mps = torch.median(mps_x)
+
+            self.assertEqual(result_cpu, result_mps)
+
+            for dim in [0, 1, 2]:
+                for keepdim in [True, False]:
+                    y, idx = torch.median(cpu_x, dim=dim, keepdim=keepdim)
+                    refy, refidx = torch.median(mps_x, dim=dim, keepdim=keepdim)
+                    self.assertEqual(y, refy)
+                    self.assertEqual(idx, refidx)
+
+        helper_dtype_int32(10, 10, 10)  # median at even place
+        helper_dtype_int32(3, 3, 3)  # median at odd place
+        helper_dtype_int32(1, 1, 1)
+        helper_dtype_int32(1, 2, 3)
+        helper_dtype_float32(10, 10, 10)
+        helper_dtype_float32(3, 3, 3)
+        helper_dtype_float32(1, 1, 1)
 
     def test_any(self):
         def helper(shape):
@@ -3853,12 +3966,12 @@ class TestNLLLoss(TestCase):
 
     # Test softplus
     def test_softplus(self):
-        def helper(shape):
+        def helper(shape, beta=0.5, threshold=0.5):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
-            softplus_result = torch.nn.Softplus(beta=0.5, threshold=0.5)(x)
-            softplus_result_cpu = torch.nn.Softplus(beta=0.5, threshold=0.5)(cpu_x)
+            softplus_result = torch.nn.Softplus(beta=beta, threshold=threshold)(x)
+            softplus_result_cpu = torch.nn.Softplus(beta=beta, threshold=threshold)(cpu_x)
 
             cpu_grad = torch.randn(softplus_result.shape)
             grad = cpu_grad.to('mps')
@@ -3872,6 +3985,8 @@ class TestNLLLoss(TestCase):
         # Test empty shape too
         for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
             helper(shape)
+            helper(shape, beta=0.6, threshold=0.6)  # relu path
+            helper(shape, beta=1, threshold=20)  # softplus path
 
     # Test silu
 
@@ -4280,8 +4395,9 @@ class TestNLLLoss(TestCase):
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
             embeddingMPS = nn.Embedding(n, d, max_norm=True, device='mps')
+            emedding_weight = embeddingMPS.weight.detach().cpu()
             W_MPS = torch.randn((m, d), requires_grad=True, device='mps')
-            idx_MPS = torch.tensor(idx).to('mps')
+            idx_MPS = torch.tensor(idx, device='mps')
             a_MPS = embeddingMPS.weight.clone() @ W_MPS.t()  # weight must be cloned for this to be differentiable
             a_MPS.retain_grad()
             b_MPS = embeddingMPS(idx_MPS) @ W_MPS.t()  # modifies weight in-place
@@ -4290,7 +4406,7 @@ class TestNLLLoss(TestCase):
             loss_MPS = out_MPS.sigmoid().prod()
             loss_MPS.backward()
 
-            embeddingCPU = nn.Embedding(n, d, max_norm=True, scale_grad_by_freq=True)
+            embeddingCPU = nn.Embedding(n, d, max_norm=True, _weight=emedding_weight)
             W_CPU = W_MPS.to('cpu')
             idx_CPU = torch.tensor(idx)
             a_CPU = embeddingCPU.weight.clone() @ W_CPU.t()  # weight must be cloned for this to be differentiable
@@ -5035,10 +5151,14 @@ class TestNNMPS(NNTestCase):
 
     # The test should not crash
     def test_permute(self):
-        X = torch.randn(5, 5).to('mps')
-        torch.log(X)
-        X = X.permute(1, 0)
-        torch.log(X)
+        M_cpu = torch.randn(5, 5)
+        M_mps = M_cpu.to('mps')
+
+        output_cpu = M_cpu.permute(1, 0)
+        output_mps = M_mps.permute(1, 0)
+
+        self.assertEqual(output_cpu, output_mps)
+        self.assertEqual(output_cpu.size(), output_mps.size())
 
     # Printing of non_contiguous should not crash
     def test_print_non_contiguous(self):
@@ -7322,6 +7442,7 @@ class TestConsistency(TestCase):
         'nn.functional.smooth_l1_loss': ['f16', 'f32'],
         'nn.functional.soft_margin_loss': ['f32'],
         'nn.functional.softmin': ['f32'],
+        'nn.functional.softplus': ['f32'],
         'nn.functional.softsign': ['f16', 'f32', 'i16', 'u8'],
         'nn.functional.tanhshrink': ['f32', 'i16', 'i32', 'u8'],
         'nn.functional.threshold': ['f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7522,6 +7643,7 @@ class TestConsistency(TestCase):
         'nn.functional.silu': ['f32'],
         'nn.functional.soft_margin_loss': ['f32'],
         'nn.functional.softmin': ['f32'],
+        'nn.functional.softplus': ['f32'],
         'nn.functional.softsign': ['f16', 'f32'],
         'nn.functional.threshold': ['f32'],
         'nn.functional.triplet_margin_loss': ['f32'],
@@ -7614,7 +7736,6 @@ class TestConsistency(TestCase):
         'nn.functional.huber_loss': [torch.float16],
         'nn.functional.local_response_norm': [torch.int64],
         'nn.functional.padcircular': [torch.uint8],
-        'nn.functional.softplus': [torch.float32],
         'pow': [torch.int64],
         'select_scatter': [torch.uint8],
         'sigmoid': [torch.int64],
