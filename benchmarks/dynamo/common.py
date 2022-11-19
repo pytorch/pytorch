@@ -1336,14 +1336,13 @@ class BenchmarkRunner:
             status = self.check_accuracy(
                 name, model, example_inputs, optimize_ctx, experiment
             )
-            print(f"{prefix} {status}")
         elif self.args.performance:
             status = self.run_performance_test(
                 name, model, example_inputs, optimize_ctx, experiment
             )
-            print(f"{prefix} {status}")
         if explain:
             print(torch._dynamo.explain(model, *example_inputs)[0])
+        print(f"{prefix} {status}")
 
 
 def help(fn):
