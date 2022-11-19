@@ -1873,6 +1873,9 @@ def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
     for input_shape1, input_shape2, kwargs in cases:
         yield SampleInput([make_arg(input_shape1), make_arg(input_shape2)], kwargs=kwargs)
 
+    # from coat_lite_mini
+    yield SampleInput([make_arg((2, 2, 2, 2), memory_format=torch.channels_last)], args=(1,),)
+
 def error_inputs_cat(op_info, device, **kwargs):
 
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
