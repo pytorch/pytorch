@@ -698,7 +698,9 @@ try:
                 def _record(tensor_ref):
                     if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
                         tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
-                    tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
+                    tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(
+                        tensor_ref
+                    )
 
                 def _extract(symbol):
                     if isinstance(symbol, int):
@@ -711,7 +713,9 @@ try:
                 def _record_ref(src_tensor, index, symbol, kind):
                     sym_expr = _extract(symbol)
                     if sym_expr:
-                        tensor_ref = TensorReference(id(src_tensor), kind, index, sym_expr)
+                        tensor_ref = TensorReference(
+                            id(src_tensor), kind, index, sym_expr
+                        )
                         _record(tensor_ref)
 
                 for index, symbol in enumerate(fake_tensor.size()):

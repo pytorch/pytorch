@@ -5,13 +5,13 @@ import hashlib
 from itertools import count
 from typing import Any, Dict, List
 
+from sympy import Expr
+
 from .. import codecache, config, ir
 from ..utils import dynamo_utils, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
 from .triton import texpr
-
-from sympy import Expr
 
 pexpr = texpr
 
