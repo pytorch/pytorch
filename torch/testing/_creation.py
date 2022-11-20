@@ -31,7 +31,8 @@ def make_tensor(
     high: Optional[float] = None,
     requires_grad: bool = False,
     noncontiguous: bool = False,
-    exclude_zero: bool = False
+    exclude_zero: bool = False,
+    memory_format: Optional[torch.memory_format] = None,
 ) -> torch.Tensor:
     r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
     values uniformly drawn from ``[low, high)``.
@@ -74,6 +75,8 @@ def make_tensor(
             :attr:`dtype`'s :func:`~torch.finfo` object), and for complex types it is replaced with a complex number
             whose real and imaginary parts are both the smallest positive normal number representable by the complex
             type. Default ``False``.
+        memory_format (Optional[torch.memory_format]): The memory format of the returned tensor.  Incompatible
+            with :attr:`noncontiguous`.
 
     Raises:
         ValueError: if ``requires_grad=True`` is passed for integral `dtype`
@@ -152,9 +155,12 @@ def make_tensor(
         raise TypeError(f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
                         " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
 
+    assert not (noncontiguous and memory_format is not None)
     if noncontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
+    elif memory_format is not None:
+        result = result.clone(memory_format=memory_format)
 
     if exclude_zero:
         if dtype in _integral_types or dtype is torch.bool:
