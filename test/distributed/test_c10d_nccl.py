@@ -1031,8 +1031,10 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         self._create_process_group_nccl(store, self.opts())
 
         # Both rank 0 and 1 will use the same CUDA device resulting in ncclInvalidUsage
-        with self.assertRaises(dist.DistBackendError):
+        with self.assertRaises(dist.DistBackendError) as cm:
             dist.broadcast(torch.tensor([1, 2, 3]).cuda(), 0)
+
+        self.assertIsInstance(cm.exception, RuntimeError)
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase

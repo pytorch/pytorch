@@ -1,19 +1,31 @@
+# TODO(zhxchen17) Expose API through functorhc.experimental.control_flow
+#                 and rename this file to _cond.py.
 import torch
+
+import torch.utils._pytree as pytree
+
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from torch._ops import PyOperator
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.proxy_tensor import (
+    get_isolated_graphmodule,
+    get_proxy_slot,
+    ProxyTorchDispatchMode,
+    track_tensor_tree,
+)
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode,
+    _pop_mode_temporarily,
+)
 from torch.utils._pytree import tree_flatten
-from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, get_proxy_slot
-import torch.utils._pytree as pytree
-from torch.utils._python_dispatch import _get_current_dispatch_mode, _pop_mode_temporarily
-from torch.fx.experimental.proxy_tensor import track_tensor_tree
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
 
 """
 We're going to define a `cond` operation.
 In order to do this, we need implementations for each of the dispatch keys.
 """
-cond = PyOperator('cond')
+cond = PyOperator("cond")
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
@@ -113,6 +125,30 @@ def inner(pred, true_fn, false_fn, operands):
     with _pop_mode_temporarily() as mode:
         res = trace_cond(mode, cond, pred, true_fn, false_fn, operands)
     return res
+
+
+@cond.py_impl(FakeTensorMode)
+def cond_fake_tensor_mode(pred, true_fn, false_fn, operands):
+    true_outs = true_fn(*operands)
+    flat_true_outs, _ = pytree.tree_flatten(true_outs)
+    flat_false_outs, _ = pytree.tree_flatten(false_fn(*operands))
+    if len(flat_true_outs) != len(flat_false_outs):
+        raise RuntimeError("Unmatched number of outputs from cond() branches.")
+
+    for true_out, false_out in zip(flat_true_outs, flat_false_outs):
+        true_meta = _extract_tensor_metadata(true_out)
+        false_meta = _extract_tensor_metadata(false_out)
+        if true_meta != false_meta:
+            raise RuntimeError(
+                f"Unmatched tensor metadata from cond() branches.\ntrue branch: {true_meta}, false branch: {false_meta}")
+    return true_outs
+
+
+# We cannot directly call fallthrough here due to issue #89037.
+@cond.py_impl(DispatchKey.PythonDispatcher)
+def cond_python_dispatcher(*args):
+    _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.PythonDispatcher))
+    return cond(*args)
 
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm
