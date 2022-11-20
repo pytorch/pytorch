@@ -72,15 +72,13 @@ void compute_mps(
           [device newBufferWithBytes:result_ptr
                               length:sizeof(result_size)
                              options:MTLResourceStorageModeShared];
-      id<MTLBuffer> _size =
-          [device newBufferWithLength:1 options:MTLResourceStorageModeShared];
 
       [computeEncoder setComputePipelineState:_mAddFunctionPSO];
       [computeEncoder setBuffer:_repeat_ptr offset:0 atIndex:0];
       [computeEncoder setBuffer:_cumsum_ptr offset:0 atIndex:1];
       [computeEncoder setBuffer:_result_ptr offset:0 atIndex:2];
       [computeEncoder setBytes:&size length:sizeof(size) atIndex:3];
-      [computeEncoder setBytes:&threadGroupSize
+      [computeEncoder setBytes:&threadGroupSizexs
                         length:sizeof(threadGroupSize)
                        atIndex:4];
 
@@ -92,14 +90,9 @@ void compute_mps(
       mpsStream->commit(true);
 
       void* output = [_result_ptr contents];
-      NSData* data = [NSData dataWithBytesNoCopy:_result_ptr.contents
-                                          length:result_size
-                                    freeWhenDone:NO];
-      index_t* finalArray = new index_t[result_size];
-      [data getBytes:&finalArray[0] length:result_size];
 
       for (int64_t index = 0; index < result_size; index++) {
-        result_ptr[index] = finalArray[index];
+        result_ptr[index] = output[index];
       }
     }
   });
