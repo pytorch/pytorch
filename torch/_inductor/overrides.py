@@ -426,7 +426,7 @@ def check_node_is_add_inplace(node):
     )
 
 
-def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
+def fuse_fx(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     is_cpu = all(
         example_input.device == torch.device("cpu") for example_input in example_inputs
     )

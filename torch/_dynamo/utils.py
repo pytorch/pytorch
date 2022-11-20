@@ -944,7 +944,7 @@ class CompileProfiler:
         self.op_count = 0
         self.backend_ctx_ctor = lambda: disable_cache_limit()
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs, **kwargs):
         self.frame_count += 1
         for node in gm.graph.nodes:
             if "call" in node.op:

@@ -23,7 +23,7 @@ from .normalize import long_name, normalize_ir
 log = logging.getLogger(__name__)
 
 
-def string_key(gm: torch.fx.GraphModule, example_inputs):
+def string_key(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     out = io.StringIO()
     node_to_id = defaultdict(iter(itertools.count()).__next__)
 
@@ -59,13 +59,13 @@ def string_key(gm: torch.fx.GraphModule, example_inputs):
     return out.getvalue()
 
 
-def graph_hash(gm: torch.fx.GraphModule, example_inputs):
+def graph_hash(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     return "g" + base64.urlsafe_b64encode(
         hashlib.sha256(string_key(gm, example_inputs).encode("utf-8")).digest()
     )[:39].decode("utf-8")
 
 
-def folder_name(gm: torch.fx.GraphModule, example_inputs):
+def folder_name(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     base = os.path.join(config.base_dir, "subgraphs")
     if not os.path.exists(base):
         os.mkdir(base)
@@ -128,7 +128,7 @@ class TorchScriptStrategy(object):
             return gm.forward  # no point for tiny graphs
         return cls(gm, example_inputs).verified_candidate()
 
-    def __init__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __init__(self, gm: torch.fx.GraphModule, example_inputs, **kwargs):
         super(TorchScriptStrategy, self).__init__()
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = example_inputs

@@ -61,9 +61,9 @@ def is_aot_autograd_safe_to_run(gm, example_inputs, **kwargs):
                 #   to avoid AotAutograd on the mutated inputs, or if we some how
                 #   get custom autograd function to reflect metadata changes to the
                 #   original tensor)
-                mutated = has_mutation(gm, example_inputs, inputs_only=True)
+                mutated = has_mutation(gm, example_inputs, inputs_only=True, **kwargs)
             else:
-                mutated = has_mutation(gm, example_inputs)
+                mutated = has_mutation(gm, example_inputs, **kwargs)
         else:
             log.info(
                 "inference_mode enabled. TorchDynamo could not check for mutation."
@@ -93,7 +93,7 @@ class AotAutogradStrategy(object):
             return gm  # no point for tiny graphs
         return cls(gm, example_inputs, **kwargs).verified_candidate()
 
-    def __init__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __init__(self, gm: torch.fx.GraphModule, example_inputs, **kwargs):
         import functorch.compile
 
         functorch.compile.config.use_functionalize = True
@@ -113,7 +113,7 @@ class AotAutogradStrategy(object):
                 self.use_fallback = True
                 pass
 
-        if not is_aot_autograd_safe_to_run(gm, example_inputs):
+        if not is_aot_autograd_safe_to_run(gm, example_inputs, **kwargs):
             self.use_fallback = True
 
     @property
@@ -258,11 +258,13 @@ class AOTMemEfficientFusionWithContext:
         self.backend_ctx_ctor = lambda: torch.jit.fuser("fuser2")
         self.use_decomps = use_decomps
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs, **kwargs):
         if self.use_decomps:
-            return AotMemEfficientFusion.compile_fn(gm, example_inputs)
+            return AotMemEfficientFusion.compile_fn(gm, example_inputs, **kwargs)
         else:
-            return AotMemEfficientFusionNoDecomps.compile_fn(gm, example_inputs)
+            return AotMemEfficientFusionNoDecomps.compile_fn(
+                gm, example_inputs, **kwargs
+            )
 
 
 aot_mem_efficient_fusion = AOTMemEfficientFusionWithContext(True)
@@ -328,7 +330,7 @@ def nvprims_fw_bw_partition_fn(joint_module, joint_inputs):
 
 def create_nvprims_backend(*, executor):
     class NvPrims(AotAutogradStrategy):
-        def __init__(self, gm: torch.fx.GraphModule, example_inputs):
+        def __init__(self, gm: torch.fx.GraphModule, example_inputs, **kwargs):
             super(NvPrims, self).__init__(gm, example_inputs)
             self.executor = executor
 
@@ -341,6 +343,7 @@ def create_nvprims_backend(*, executor):
                 fw_compiler=partial(prims_executor, executor=self.executor),
                 bw_compiler=partial(prims_executor, executor=self.executor),
                 partition_fn=disable(nvprims_fw_bw_partition_fn),
+                **kwargs,
             )
 
     return NvPrims

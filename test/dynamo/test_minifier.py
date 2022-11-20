@@ -19,7 +19,7 @@ class DynamoCompileError(Exception):
     pass
 
 @register_backend
-def test_relu_compile_error(gm: torch.fx.GraphModule, example_inputs):
+def test_relu_compile_error(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     for node in gm.graph.nodes:
         if node.target == torch.relu:
             raise DynamoCompileError("relu found")
@@ -31,7 +31,7 @@ import copy
 from torch._dynamo.optimizations.backends import register_backend
 
 @register_backend
-def test_relu_runtime_error(gm: torch.fx.GraphModule, example_inputs):
+def test_relu_runtime_error(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     gm = copy.deepcopy(gm)
     for node in gm.graph.nodes:
         if node.target == torch.relu:
@@ -46,7 +46,7 @@ import copy
 from torch._dynamo.optimizations.backends import register_backend
 
 @register_backend
-def test_relu_accuracy_error(gm: torch.fx.GraphModule, example_inputs):
+def test_relu_accuracy_error(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     gm = copy.deepcopy(gm)
     for node in gm.graph.nodes:
         if node.target == torch.relu:
@@ -61,7 +61,7 @@ RELU_CUSTOM_ERROR_BACKEND = """\
 class CustomError(Exception):
     pass
 
-def test_relu_custom_error(gm: torch.fx.GraphModule, example_inputs):
+def test_relu_custom_error(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     for node in gm.graph.nodes:
         if node.target == torch.relu:
             raise CustomError("relu found")

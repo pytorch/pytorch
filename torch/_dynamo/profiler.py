@@ -150,7 +150,7 @@ def shapes_of(it):
         return [tuple(getattr(x, "shape", [])) for x in it]
 
 
-def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any]):
+def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any], **kwargs):
     input_shapes = shapes_of(example_inputs)
     output_shapes = None
 

@@ -328,7 +328,7 @@ class WrapperBackend:
     def example_inputs(self):
         return clone_inputs(self.original_example_inputs)
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs, **kwargs):
 
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = clone_inputs(example_inputs)
@@ -475,7 +475,9 @@ def explain(f, *args, **kwargs):
     op_count = 0
     break_reasons = []
 
-    def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs):
+    def dynamo_graph_accumulating_compiler(
+        gm: torch.fx.GraphModule, example_inputs, **kwargs
+    ):
         nonlocal graphs
         nonlocal op_count
         nonlocal ops_per_graph
@@ -589,7 +591,7 @@ def export(
         out_guards = guards
 
     def dynamo_normalization_capturing_compiler(
-        gm: torch.fx.GraphModule, example_inputs
+        gm: torch.fx.GraphModule, example_inputs, **kwargs
     ):
         nonlocal graph
 

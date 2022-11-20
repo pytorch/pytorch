@@ -764,12 +764,12 @@ def _init_ltc():
         raise
 
 
-def ltc_reuse_graph(gm: torch.fx.GraphModule, example_inputs):
+def ltc_reuse_graph(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     ltc = _init_ltc()
     return ltc.extract_compiled_graph.extract_compiled_graph(gm, example_inputs)
 
 
-def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
+def ltc_trivial(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     ltc = _init_ltc()
     lazy_model = copy.deepcopy(gm).to(device="lazy")
     ltc.extract_compiled_graph.force_lazy_device(lazy_model)
@@ -823,17 +823,17 @@ def torchxla_trace_once(subgraph, **kwargs):
     return integration.extract_compiled_graph(model, example_inputs)
 
 
-def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):
+def ipex_fp32(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     kwargs_ipex = {"datatype": "fp32"}
     return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
 
 
-def ipex_bf16(gm: torch.fx.GraphModule, example_inputs):
+def ipex_bf16(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     kwargs_ipex = {"datatype": "bf16"}
     return BACKENDS["ipex"](gm, example_inputs, **kwargs_ipex)
 
 
-def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
+def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     kwargs_fx2trt = {"fp16_mode": True}
     trt_compiled = BACKENDS["fx2trt"](gm, example_inputs, **kwargs_fx2trt)
     if trt_compiled is not None:
@@ -845,7 +845,7 @@ def fx2trt_compiler_fp16(gm: torch.fx.GraphModule, example_inputs):
         return gm.forward
 
 
-def fx2trt_compiler(gm: torch.fx.GraphModule, example_inputs):
+def fx2trt_compiler(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     kwargs_fx2trt = {"fp16_mode": False}
     trt_compiled = BACKENDS["fx2trt"](gm, example_inputs, **kwargs_fx2trt)
     if trt_compiled is not None:
