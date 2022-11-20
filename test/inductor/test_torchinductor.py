@@ -282,7 +282,7 @@ def check_model(
 
     called = False
 
-    def compile_fx_wrapper(model_, example_inputs_):
+    def compile_fx_wrapper(model_, example_inputs_, **kwargs):
         nonlocal called
         called = True
         return compile_fx(model_, example_inputs_)
