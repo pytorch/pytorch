@@ -463,12 +463,10 @@ class OutputGraph(fx.Tracer):
             # This is temporary, hopefully, while we decide if we want the
             # user provided compiler signature to have a **kwargs
             if config.fake_tensor_propagation:
-                breakpoint()
                 compiled_fn = self.compiler_fn(
                     gm, self.example_inputs(fake=True), fake_mode=self.fake_mode
                 )
             else:
-                breakpoint()
                 compiled_fn = self.compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"

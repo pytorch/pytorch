@@ -483,7 +483,6 @@ def cudagraphs(model, inputs):
 
 
 def raw_aot_autograd_cudagraphs(model, inputs, fake_mode):
-    breakpoint()
     kwargs = {
         # these are taken from memory_efficient_fusion()
         "fw_compiler": cudagraphs,

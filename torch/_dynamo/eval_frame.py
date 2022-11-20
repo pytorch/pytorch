@@ -13,6 +13,8 @@ import warnings
 from importlib import import_module
 from unittest.mock import patch
 from inspect import signature
+from torch.utils._mode_utils import no_dispatch
+
 
 import torch
 import torch.utils._pytree as pytree
@@ -299,17 +301,19 @@ def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context):
 
 
 class WrapperBackend:
-
     def __init__(self, backend=None):
         self.backend = backend
 
     @property
     def example_inputs(self):
+        # with no_dispatch():
         return clone_inputs(self.original_example_inputs)
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs, fake_mode=None):
         self.restore = checkpoint_params(gm)
+        # with no_dispatch():
         self.original_example_inputs = clone_inputs(example_inputs)
+
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
         needs_fake_tensor = False
@@ -335,11 +339,12 @@ class WrapperBackend:
             # This is temporary, hopefully, while we decide if we want the
             # user provided compiler signature to have a **kwargs
             if needs_fake_tensor:
-                result = self.candidate(*self.example_inputs, fake_tensor=fake_tensor)
+                result = self.candidate(*self.example_inputs, fake_mode=fake_mode)
             else:
                 result = self.candidate(*self.example_inputs)
 
             # TODO: replace `same` function with the one in testing
+            # with no_dispatch():
             if same(correct, result):
                 return self.candidate
 

@@ -977,7 +977,7 @@ def aot_module_simplified(mod: nn.Module, inputs,
 
     else:
 
-        def forward(*args):
+        def forward(*args, **kwargs):
             return compiled_function(
                 *params_flat,
                 *args,
