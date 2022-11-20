@@ -1277,11 +1277,16 @@ class KernelGroup:
         if self.count == 0:
             return
 
+        kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
         arg_defs, call_args = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
         code = BracesBuffer()
+        if config.cpp.enable_kernel_profile:
+            code.writelines(["#include <ATen/record_function.h>"])
         code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
+            if config.cpp.enable_kernel_profile:
+                code.writelines([f'RECORD_FUNCTION("{kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'])
             for old, new in self.args.aliases():
                 code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
@@ -1291,7 +1296,6 @@ class KernelGroup:
         codecache_def.splice(code)
         codecache_def.writeline("''')")
 
-        kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
         codecache_str = codecache_def.getvalue()
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.

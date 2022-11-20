@@ -215,7 +215,7 @@ def supported_vector_isa():
 
 def cpp_compile_command(input, output, include_pytorch=False):
     valid_isa = supported_vector_isa()
-    if include_pytorch or valid_isa:
+    if include_pytorch or valid_isa or config.cpp.enable_kernel_profile:
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
