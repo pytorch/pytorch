@@ -1728,22 +1728,29 @@ QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int6
   return quantizer;
 }
 
-Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index_) {
+Tensor select(const Tensor& self, int64_t dim, int64_t index) {
+  return at::select_symint(self, dim, c10::SymInt{index});
+}
+
+Tensor select(const Tensor& self, Dimname dim, int64_t index) {
+  return at::select_symint(self, dimname_to_position(self, dim), c10::SymInt{index});
+}
+
+Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "select() cannot be applied to a 0-dim tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.sym_sizes()[dim];
-  if (size < -index_ || size <= index_) {
+  if (size < -index || size <= index) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
-      TORCH_CHECK_INDEX(false, "select(): index ", index_, " out of range for tensor of size ",
+      TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()[dim]);
     }
-    TORCH_CHECK_INDEX(false, "select(): index ", index_, " out of range for tensor of size ",
+    TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
-  SymInt index = index_;
   if (index < 0) {
     index += size;
   }
@@ -1776,8 +1783,8 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index_) {
   return result;
 }
 
-Tensor select_symint(const Tensor& self, Dimname dim, c10::SymInt index) {
-  return at::select_symint(self, dimname_to_position(self, dim), index);
+Tensor select_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
+  return at::native::select_backward_symint(grad, c10::fromIntArrayRefSlow(input_sizes), dim, SymInt{index});
 }
 
 Tensor select_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
