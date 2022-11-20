@@ -45,12 +45,10 @@ def create_backend(fn):
 
         if not isinstance(model, SubGraph):
             with tempfile.TemporaryDirectory() as tmp:
-                return inner(SubGraph(model, example_inputs, tmp), **kwargs)
-        else:
-            assert example_inputs is None
+                return inner(SubGraph(model, example_inputs, tmp), example_inputs=example_inputs, **kwargs)
 
         try:
-            return fn(model, **kwargs)
+            return fn(model, example_inputs, **kwargs)
         except KeyboardInterrupt:
             raise
         except Exception:
@@ -549,7 +547,7 @@ def cudagraphs_inner(model, inputs, copy_outputs=True):
 
 
 @create_backend
-def aot_autograd(subgraph, **kwargs):
+def aot_autograd(subgraph, inputs, **kwargs):
     def _wrapped_bw_compiler(*args, **kwargs):
         # stop TorchDynamo from trying to compile our generated backwards pass
         return disable(disable(bw_compiler)(*args, **kwargs))
@@ -561,7 +559,7 @@ def aot_autograd(subgraph, **kwargs):
 
     from .. import disable
 
-    return aot_module_simplified(subgraph.model, **kwargs)
+    return aot_module_simplified(subgraph.model, inputs, **kwargs)
 
 
 def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):

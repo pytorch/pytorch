@@ -326,15 +326,21 @@ class WrapperBackend:
 
     @property
     def example_inputs(self):
-        return clone_inputs(self.original_example_inputs)
+        if config.fake_mode:
+            return clone_inputs(self.original_example_inputs_fake)    
+        return clone_inputs(self.original_example_inputs_real)
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs_real, example_inputs_fake):
 
         self.restore = checkpoint_params(gm)
-        self.original_example_inputs = clone_inputs(example_inputs)
+        self.original_example_inputs_real = clone_inputs(example_inputs_real)
+        self.original_example_inputs_fake = clone_inputs(original_example_inputs_fake)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
-        self.candidate = self.backend(copy_gm, self.original_example_inputs, **kwargs)
+        if config.fake_mode:
+            self.candidate = self.backend(copy_gm, self.original_example_inputs_fake)
+        else:
+            self.candidate = self.backend(copy_gm, self.original_example_inputs_real)
 
         if self.candidate is None or self.candidate is self.gm.forward:
             return self.gm.forward
@@ -344,8 +350,8 @@ class WrapperBackend:
 
         # if verify_correctness=True
         try:
-            correct = self.gm.forward(*self.example_inputs)
-            result = self.candidate(*self.example_inputs)
+            correct = self.gm.forward(*self.original_example_inputs_real)
+            result = self.candidate(*self.original_example_inputs_real)
 
             # TODO: replace `same` function with the one in testing
             if same(correct, result):
