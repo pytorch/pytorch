@@ -7368,7 +7368,7 @@ class TestConsistency(TestCase):
         'half': ['f16'],
         'hstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'index_select': ['f16', 'f32', 'i16', 'i32', 'i64'],
-        'index_add': ['f16', 'f32', 'i16', 'i32', 'i64'],
+        'index_add': ['f16', 'f32', 'i16', 'i32'],
         'int': ['i32'],
         'isclose': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'isfinite': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],

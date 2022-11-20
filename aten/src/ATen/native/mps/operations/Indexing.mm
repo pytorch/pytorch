@@ -317,8 +317,8 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
     return;
   }
 
-  TORCH_CHECK(source.scalar_type() == ScalarType::Long, "index_add(): Expected non int64 dtype for source.")
-  auto casted_type = isFloatingType(source.scalar_type()) ? ScalarType::Float : ScalarType::Int
+  TORCH_CHECK(source.scalar_type() != ScalarType::Long, "index_add(): Expected non int64 dtype for source.");
+  auto casted_type = isFloatingType(source.scalar_type()) ? ScalarType::Float : ScalarType::Int;
 
   struct CachedGraph : public MPSCachedGraph
   {
