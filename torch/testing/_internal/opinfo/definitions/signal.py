@@ -495,6 +495,13 @@ op_db: List[OpInfo] = [
                 device_type="cpu",
             ),
             DecorateInfo(
+                unittest.expectedFailure,
+                "TestSchemaCheckModeOpInfo",
+                "test_schema_check",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
                 unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
                 "TestCommon",
                 "test_numpy_ref_mps",

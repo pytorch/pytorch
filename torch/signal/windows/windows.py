@@ -703,8 +703,8 @@ def general_cosine(M, *,
                        device=device,
                        requires_grad=requires_grad)
 
-    a_i = torch.tensor([(-1) ** i * w for i, w in enumerate(a)])
-    i = torch.arange(a_i.shape[0], dtype=a_i.dtype, device=a_i.device)
+    a_i = torch.tensor([(-1) ** i * w for i, w in enumerate(a)], device=device, dtype=dtype, requires_grad=requires_grad)
+    i = torch.arange(a_i.shape[0], dtype=a_i.dtype, device=a_i.device, requires_grad=a_i.requires_grad)
     return (a_i.unsqueeze(-1) * torch.cos(i.unsqueeze(-1) * k)).sum(0)
 
 
