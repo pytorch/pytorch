@@ -33,7 +33,7 @@ window_common_args = merge_dicts(
     {
         "normalization": "The window is normalized to 1 (maximum value is 1). However, the 1 doesn't appear if "
                          ":attr:`M` is even and :attr:`sym` is `True`.",
-        "return": "Tensor: A 1-D tensor of size :math:`(M,)` containing the window."
+        "return": "Tensor: A 1-D tensor of size ``M`` containing the window."
     }
 )
 
