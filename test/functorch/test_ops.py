@@ -559,7 +559,8 @@ class TestOperators(TestCase):
                 self.assertEqual(out, result)
                 result_vjps = vjp_fn(cotangents)
 
-                _, vjp_fn = vjp(noncontig_fn, *noncontig_primals)
+                out_noncontig, vjp_fn = vjp(noncontig_fn, *noncontig_primals)
+                self.assertEqual(out_noncontig, result)
                 noncontig_result_vjps = vjp_fn(noncontig_cotangents)
 
                 _, vjp_fn = ref_vjp(fn, *primals)
