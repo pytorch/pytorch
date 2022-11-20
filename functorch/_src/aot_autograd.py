@@ -916,6 +916,8 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         decompositions: Optional[Dict] = None,
         hasher_type=None,
         static_argnums=None,
+        fake_mode=None,
+        fake_inputs=None,
     ) -> Callable:
         assert static_argnums is None
         if bw_compiler is None:

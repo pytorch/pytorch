@@ -88,12 +88,18 @@ class AotAutogradStrategy(object):
     """Base class for backend strategies that use AOT Autograd"""
 
     @classmethod
-    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs, **kwargs):
+    def compile_fn(
+        cls, gm: torch.fx.GraphModule, example_inputs, fake_mode=None, **kwargs
+    ):
         if count_calls(gm.graph) < 2:
             return gm  # no point for tiny graphs
-        return cls(gm, example_inputs, **kwargs).verified_candidate()
+        return cls(
+            gm, example_inputs, fake_mode=fake_mode, **kwargs
+        ).verified_candidate()
 
-    def __init__(self, gm: torch.fx.GraphModule, example_inputs, **kwargs):
+    def __init__(
+        self, gm: torch.fx.GraphModule, example_inputs, fake_mode=None, **kwargs
+    ):
         import functorch.compile
 
         functorch.compile.config.use_functionalize = True
@@ -104,6 +110,7 @@ class AotAutogradStrategy(object):
         self.use_fallback = False
         self.original_example_inputs = example_inputs
         self.gm = gm
+        self.fake_mode = fake_mode
 
         if not functorch.compile.config.use_functionalize and config.normalize_ir:
             try:
@@ -113,7 +120,9 @@ class AotAutogradStrategy(object):
                 self.use_fallback = True
                 pass
 
-        if not is_aot_autograd_safe_to_run(gm, example_inputs, **kwargs):
+        if not is_aot_autograd_safe_to_run(
+            gm, example_inputs, fake_mode=fake_mode, **kwargs
+        ):
             self.use_fallback = True
 
     @property
@@ -244,6 +253,7 @@ class AotInductorDebug(AotAutogradStrategy):
             "partition_fn": functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
+            "fake_mode": self.fake_mode,
         }
         return BACKENDS["aot_autograd"](self.gm, self.example_inputs, **kwargs)
 

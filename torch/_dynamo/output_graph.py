@@ -458,7 +458,11 @@ class OutputGraph(fx.Tracer):
                 else ""
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            compiled_fn = self.compiler_fn(gm, self.example_inputs())
+            kwargs = {}
+            if config.fake_tensor_propagation:
+                kwargs["fake_mode"] = self.fake_mode
+                kwargs["fake_inputs"] = self.fake_inputs()
+            compiled_fn = self.compiler_fn(gm, self.example_inputs(), **kwargs)
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
@@ -470,6 +474,19 @@ class OutputGraph(fx.Tracer):
         result = []
         for arg in self.graphargs:
             result.extend(arg.get_examples())
+        return result
+
+    def fake_inputs(self):
+        result = []
+        assert config.fake_tensor_propagation
+        for arg in self.graphargs:
+            example = arg.get_fake_examples()
+            if example:
+                result.extend(example)
+            else:
+                # Fallback, in case fake_tensor was not set
+                # Particularly for graph args that are not tensors
+                result.extend(arg.get_examples())
         return result
 
     def remove_unused_graphargs(self):
