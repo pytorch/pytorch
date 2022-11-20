@@ -83,11 +83,10 @@ ncclRedOpRAII unpackPreMulSum(
   const auto* preMulSupplement =
       reinterpret_cast<NCCLPreMulSumSupplement*>(reduceOp.supplement_.get());
   ncclRedOp_t preMulSum;
-  bool has_tensor = !preMulSupplement->tensor_factors.empty();
+  bool has_tensor = preMulSupplement->tensor_factor.defined();
   auto residence = has_tensor ? ncclScalarDevice : ncclScalarHostImmediate;
-  T* ptr_factor = has_tensor
-      ? preMulSupplement->tensor_factors[dev_in_group].data_ptr<T>()
-      : nullptr;
+  T* ptr_factor =
+      has_tensor ? preMulSupplement->tensor_factor.data_ptr<T>() : nullptr;
   T scalar_factor = T(preMulSupplement->double_factor);
   ncclRedOpCreatePreMulSum(
       &preMulSum,
