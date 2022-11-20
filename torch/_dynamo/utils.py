@@ -397,6 +397,9 @@ def clone_tensor(x):
 
 def clone_input(x):
     """copy while preserving strides"""
+    if isinstance(x, torch._subclasses.FakeTensor):
+        # this func fails on fake tensors in __torch_dispatch__
+        return x
     with torch.no_grad():
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())

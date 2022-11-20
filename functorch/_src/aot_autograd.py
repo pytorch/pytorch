@@ -872,7 +872,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
 def aot_module_simplified(
         mod: nn.Module,
-        *real_inputs,
+        inputs,
         fw_compiler: Callable,
         bw_compiler: Optional[Callable] = None,
         partition_fn: Callable = default_partition,
@@ -893,7 +893,6 @@ def aot_module_simplified(
     :func:`aot_module_simplified` removes these overheads.
     """
     #########################################################
-
     params = {
         **dict(_named_parameters(mod, remove_duplicate=False)),
         **dict(_named_buffers(mod, remove_duplicate=False)),
@@ -901,12 +900,26 @@ def aot_module_simplified(
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = tuple(params_flat)
     params_len = len(params_flat)
-
+    
     # TODO(voz): Pull up to dynamo
     # See [Real vs Fake Parms] below
+    fake_mode = None
+    
     def fakify_params_and_buffers(flat_args):
+        nonlocal fake_mode
         if config.use_fake_tensor:
-            assert fake_mode, "Fake Mode must be passed in"
+            flat_inputs = pytree.tree_flatten(inputs)
+            for input in flat_inputs:
+                if isinstance(input, torch._subclasses.FakeTensor):
+                    breakpoint()
+                    if fake_mode is None:
+                        fake_mode = input.fake_mode
+                    else:
+                        assert fake_mode == input.fake_mode
+            if fake_mode is None:
+                # No fake inputs, just make a mode
+                shape_env = ShapeEnv() if config.use_dynamic_shapes else None
+                fake_mode = FakeTensorMode(shape_env=shape_env)
 
             def convert(x):
                 if not isinstance(x, torch.Tensor):
@@ -915,6 +928,7 @@ def aot_module_simplified(
 
             return [convert(x) for x in flat_args]
         else:
+            fake_mode = nullcontext()
             return flat_args
 
     fake_flat_tensor_args = fakify_params_and_buffers(params_flat)
@@ -953,11 +967,8 @@ def aot_module_simplified(
         num_params_buffers=params_len,
     )
 
-    if config.use_fake_tensor:
-        joined_args = fake_flat_tensor_args + fake_inputs
-    else:
-        joined_args = fake_flat_tensor_args + real_inputs
-
+    
+    joined_args = fake_flat_tensor_args + list(inputs)
     aot_dispatcher_function = _create_aot_dispatcher_function(functional_call, joined_args, aot_config, fake_mode)
 
     @wraps(functional_call)

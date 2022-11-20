@@ -326,7 +326,7 @@ class WrapperBackend:
 
     @property
     def example_inputs(self):
-        if config.fake_mode:
+        if config.fake_tensor_propagation:
             return clone_inputs(self.original_example_inputs_fake)    
         return clone_inputs(self.original_example_inputs_real)
 
@@ -334,10 +334,10 @@ class WrapperBackend:
 
         self.restore = checkpoint_params(gm)
         self.original_example_inputs_real = clone_inputs(example_inputs_real)
-        self.original_example_inputs_fake = clone_inputs(original_example_inputs_fake)
+        self.original_example_inputs_fake = clone_inputs(example_inputs_fake)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
-        if config.fake_mode:
+        if config.fake_tensor_propagation:
             self.candidate = self.backend(copy_gm, self.original_example_inputs_fake)
         else:
             self.candidate = self.backend(copy_gm, self.original_example_inputs_real)
