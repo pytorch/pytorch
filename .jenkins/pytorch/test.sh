@@ -249,26 +249,22 @@ test_inductor_distributed() {
 }
 
 test_inductor() {
-  python test/run_test.py --include test_modules --verbose
+  python test/run_test.py --include test_modules test_ops --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor --include inductor/test_torchinductor_opinfo --verbose
   # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
   # seen intest_ops_gradients.py
   # pytest test/test_ops_gradients.py --verbose -k "not _complex and not test_inplace_grad_acos_cuda_float64"
 }
 
-test_inductor_huggingface_shard() {
-  if [[ -z "$NUM_TEST_SHARDS" ]]; then
-    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
-    exit 1
-  fi
+test_inductor_huggingface() {
   # Use test-reports directory under test folder will allow the CI to automatically pick up
   # the test reports and upload them to S3. Need to use full path here otherwise the script
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
-    --output "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
+    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_huggingface.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_huggingface.csv
 }
 
 test_inductor_timm_shard() {
@@ -285,6 +281,14 @@ test_inductor_timm_shard() {
     --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
+}
+
+test_inductor_torchbench() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --ci --training --accuracy \
+    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_torchbench.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_torchbench.csv
 }
 
 test_python_gloo_with_tls() {
@@ -741,25 +745,32 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
-elif [[ "${TEST_CONFIG}" == *inductor_timm* && $SHARD_NUMBER -lt 3 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_huggingface
+elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   install_timm
   id=$((SHARD_NUMBER-1))
   test_inductor_timm_shard $id
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  install_triton
+  checkout_install_torchbench
+  test_inductor_torchbench
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   test_inductor
   test_inductor_distributed
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  install_filelock
-  install_triton
-  install_huggingface
-  test_inductor_huggingface_shard 0
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
