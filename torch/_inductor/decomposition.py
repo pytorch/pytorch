@@ -104,6 +104,7 @@ decompositions = get_decompositions(
         aten.upsample_nearest2d_backward,
         aten.softplus,
         aten.softplus_backward,
+        aten.bucketize,
     ]
 )
 
@@ -266,6 +267,31 @@ def should_pad_bench(mat1, mat2, op, input=None):
             return ori_time > pad_time * 2
 
 
+@register_decomposition([aten.mm])
+def mm_decomp(mat1, mat2):
+    if (
+        config.shape_padding
+        and check_device_dtype(mat1, mat2)
+        and should_pad_bench(mat1, mat2, torch.ops.aten.mm)
+    ):
+        m_padded_length = get_padded_length(mat1.shape[0])
+        k_padded_length = get_padded_length(mat1.shape[1])
+        n_padded_length = get_padded_length(mat2.shape[1])
+
+        if k_padded_length != 0:
+            mat1 = pad_dim(mat1, k_padded_length, 1)
+            mat2 = pad_dim(mat2, k_padded_length, 0)
+            return torch.ops.aten.mm(mat1, mat2)
+        elif m_padded_length != 0:
+            mat1 = pad_dim(mat1, m_padded_length, 0)
+            return torch.ops.aten.mm(mat1, mat2)[:-m_padded_length, :]
+        elif n_padded_length != 0:
+            mat2 = pad_dim(mat2, n_padded_length, 1)
+            return torch.ops.aten.mm(mat1, mat2)[:, :-n_padded_length]
+
+    return NotImplemented  # go directly to lowering
+
+
 @register_decomposition([aten.bmm])
 def bmm_decomp(mat1, mat2):
     if (
@@ -289,6 +315,39 @@ def bmm_decomp(mat1, mat2):
             return torch.ops.aten.bmm(mat1, mat2)[:, :, :-n_padded_length].contiguous()
 
     return NotImplemented  # go directly to lowering
+
+
+@register_decomposition([aten.convolution_backward])
+def convolution_backward(
+    grad_output,
+    input,
+    weight,
+    bias_sizes,
+    stride,
+    padding,
+    dilation,
+    transposed,
+    output_padding,
+    groups,
+    output_mask,
+):
+    if not output_mask[2] or grad_output.device.type != "cuda":
+        return NotImplemented
+    grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
+    grad_inp, grad_weight, _ = aten.convolution_backward(
+        grad_output,
+        input,
+        weight,
+        bias_sizes,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+        [output_mask[0], output_mask[1], False],
+    )
+    return (grad_inp, grad_weight, grad_bias)
 
 
 @register_decomposition([aten.rsqrt])
