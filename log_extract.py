@@ -40,7 +40,7 @@ for bench, name, log in chunker(entries, 3):
     if len(split) == 2:
         log = split[1]
     log = log.split("Original traceback:")[0]
-    errors = re.findall(r'[A-Za-z]+(?:Error|Exception): .+', log)
+    errors = re.findall(r'[A-Za-z]+(?:Error|Exception|NotImplementedError): ?.*', log)
     if errors:
         r = "FAIL"
         explain = errors[-1]
