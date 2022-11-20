@@ -69,6 +69,7 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 
 torch._inductor.config.triton.autotune = False  # too slow
 
+TEST_FAST = not hasattr(torch.version, "git_version")
 
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
 # avx512vl, and avx512dq at least. So we will skip the test case if one processor
@@ -1366,6 +1367,9 @@ class CommonTemplate:
             [1, 2],
             [1, 4],
         )
+        if TEST_FAST:
+            options = list(options)
+            del options[1:-1]
 
         for (
             dim,
@@ -1419,6 +1423,9 @@ class CommonTemplate:
             ["same", 0],
             test_memory_format,
         )
+        if TEST_FAST:
+            options = list(options)
+            del options[1:-1]
 
         for (
             unary_fn,
@@ -1512,6 +1519,9 @@ class CommonTemplate:
             ["same", 0],
             test_memory_format,
         )
+        if TEST_FAST:
+            options = list(options)
+            del options[1:-1]
 
         for (
             binary_fn,

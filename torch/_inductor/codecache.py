@@ -54,7 +54,7 @@ logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else loggin
 @functools.lru_cache(None)
 def cache_dir():
     return os.environ.get(
-        "TORCHINDUCTOR_CACHE_DIR", f"/tmp/torchinductor_{getpass.getuser()}"
+        "TORCHINDUCTOR_CACHE_DIR", f"/tmp/{getpass.getuser()}/inductor"
     )
 
 
@@ -215,22 +215,24 @@ def supported_vector_isa():
 
 def cpp_compile_command(input, output, include_pytorch=False):
     valid_isa = supported_vector_isa()
-    if include_pytorch or valid_isa:
-        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
+    if valid_isa:
+        macros = _SupportedVecIsa.vec_macro(valid_isa)
+        macros = f"-D{macros}"
+    else:
+        macros = ""
+
+    if include_pytorch:
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
-        macros = _SupportedVecIsa.vec_macro(valid_isa)
-        if macros:
-            macros = f"-D{macros}"
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
         # For those cases, include the lpath and libs command as we do for pytorch above.
         # This approach allows us to only pay for what we use.
-        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = []
         libs = ["gomp"]
-        macros = ""
+
+    ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
