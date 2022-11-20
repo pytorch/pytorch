@@ -741,9 +741,15 @@ def run_tests(argv=UNITTEST_ARGS):
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
         print("If in CI, skip info is located in the xml test reports, please either go to s3 or the hud to download them")
-        # exitcode of 5 means no tests were found, which happens since some test configs don't
-        # run tests from certain files
-        exit(0 if exit_code == 5 else exit_code)
+
+        if not RERUN_DISABLED_TESTS:
+            # exitcode of 5 means no tests were found, which happens since some test configs don't
+            # run tests from certain files
+            exit(0 if exit_code == 5 else exit_code)
+        else:
+            # Only record the test report and always return a success code when running under rerun
+            # disabled tests mode
+            exit(0)
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
@@ -770,6 +776,9 @@ def run_tests(argv=UNITTEST_ARGS):
                         # it stands for `verbose_str` captured in the closure
                         c.cell_contents = f"skip: {reason}"
 
+            def printErrors(self) -> None:
+                super().printErrors()
+                self.printErrorList("XPASS", self.unexpectedSuccesses)
         test_report_path = get_report_path()
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
