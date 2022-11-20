@@ -7,6 +7,7 @@
 from typing import Callable, Union, Tuple, List, Any, Optional
 import torch
 from functools import partial, wraps
+from itertools import accumulate
 import contextlib
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from .pytree_hacks import tree_map_, treespec_pprint
@@ -465,17 +466,35 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         # See NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
         flat_output, output_spec = tree_flatten(output)
 
+        primals = _slice_argnums(args, argnums)
+        flat_primals, primals_spec = tree_flatten(primals)
+
         # NB: vjp already checks that all outputs are tensors
         # Step 1: Construct grad_outputs by splitting the standard basis
         flat_output_numels = tuple(out.numel() for out in flat_output)
-        flat_basis = _construct_standard_basis_for(flat_output, flat_output_numels)
-        basis = tree_unflatten(flat_basis, output_spec)
 
-        results = vmap(vjp_fn)(basis)
+        out_vec_size = sum(flat_output_numels)
+        stacked_results = [torch.zeros(out_vec_size, *primal.shape) for primal in flat_primals]
+        for idx in range(out_vec_size):
+            # Generate Basis
+            basis = flat_output[0].new_zeros(out_vec_size)
+            basis[idx] = 1
+            flat_acc = list(accumulate(flat_output_numels))
 
-        primals = _slice_argnums(args, argnums)
-        flat_primals, primals_spec = tree_flatten(primals)
-        flat_results, results_spec = tree_flatten(results)
+            prev_end = 0
+            tensors = []
+            for end in flat_acc:
+                view_t = basis[prev_end:end]
+                tensors.append(view_t)
+                prev_end = end
+
+            tensors = tuple(t.view_as(o) for t, o in zip(tensors, flat_output))
+            r = vjp_fn(tensors)
+
+            for r_, sr in zip(r, stacked_results):
+                sr[idx].copy_(r_)
+
+        flat_results, results_spec = tree_flatten(stacked_results)
 
         # Step 2: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.
