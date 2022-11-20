@@ -81,7 +81,7 @@ dispatch_sync(mpsStream->queue(), ^(){
   mpsStream->commit(true);
 
   void *output = [_result_ptr contents];
-  NSData *data = [NSData dataWithBytesNoCopy:resultsBuffer.contents length:(sizeof(float) * 3 * resultsCount)freeWhenDone:NO];
+  NSData *data = [NSData dataWithBytesNoCopy:_result_ptr.contents length:result_size freeWhenDone:NO];
   index_t *finalArray = new index_t [result_size];
   [data getBytes:&finalArray[0] length:result_size];
 
