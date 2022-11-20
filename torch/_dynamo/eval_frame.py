@@ -334,7 +334,7 @@ class WrapperBackend:
         self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
-        self.candidate = self.backend(copy_gm, self.original_example_inputs)
+        self.candidate = self.backend(copy_gm, self.original_example_inputs, **kwargs)
 
         if self.candidate is None or self.candidate is self.gm.forward:
             return self.gm.forward
