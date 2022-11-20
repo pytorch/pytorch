@@ -7,6 +7,7 @@ from unittest.mock import patch
 import torch
 
 import torch._dynamo
+from torch._dynamo import config
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 from torch._dynamo.optimizations import backends
@@ -87,7 +88,11 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
 
         def compiler_fn(graph, example_inputs, **kwargs):
             nonlocal r1
-            r1 = graph(*example_inputs)[0]
+            if config.fake_tensor_propagation:
+                self.assertIsNotNone(kwargs["real_inputs"])
+                r1 = graph(*kwargs["real_inputs"])[0]
+            else:
+                r1 = graph(*example_inputs)[0]
             return graph.forward
 
         a = torch.empty(2).fill_(1)

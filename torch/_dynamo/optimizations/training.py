@@ -88,7 +88,7 @@ class AotAutogradStrategy(object):
     """Base class for backend strategies that use AOT Autograd"""
 
     @classmethod
-    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs, fake_mode=None):
+    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs, fake_mode=None, **kwargs):
         if count_calls(gm.graph) < 2:
             return gm  # no point for tiny graphs
         return cls(gm, example_inputs, fake_mode).verified_candidate()

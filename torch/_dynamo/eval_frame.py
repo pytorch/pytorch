@@ -348,7 +348,7 @@ class WrapperBackend:
             assert real_inputs
             needs_fake_tensor = True
             self.candidate = self.backend(
-                copy_gm, self.original_example_inputs, fake_mode
+                copy_gm, self.original_example_inputs, fake_mode=fake_mode, real_inputs=real_inputs
             )
         else:
             self.candidate = self.backend(copy_gm, self.original_example_inputs)
