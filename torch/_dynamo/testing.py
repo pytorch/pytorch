@@ -48,10 +48,10 @@ def collect_results(model, prediction, loss, example_inputs):
     results = []
     results.append(prediction)
     results.append(loss)
-    if isinstance(loss, torch.Tensor) and loss.item() > 1:
-        log.warning(
-            f"High loss value alert - {loss:.2f}. Can result in unstable gradients."
-        )
+    # if isinstance(loss, torch.Tensor) and loss.item() > 1:
+    #     log.warning(
+    #         f"High loss value alert - {loss:.2f}. Can result in unstable gradients."
+    #     )
 
     grads = dict()
     params = dict()
@@ -236,7 +236,7 @@ def rand_strided(size, stride, dtype=torch.float32, device="cpu"):
     if dtype.is_floating_point:
         buffer = torch.randn(needed_size, dtype=dtype, device=device)
     else:
-        buffer = torch.ones(size=[needed_size], dtype=dtype, device=device)
+        buffer = torch.zeros(size=[needed_size], dtype=dtype, device=device)
     return torch.as_strided(buffer, size, stride)
 
 
