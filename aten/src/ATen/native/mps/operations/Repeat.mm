@@ -78,7 +78,7 @@ void compute_mps(
       [computeEncoder setBuffer:_cumsum_ptr offset:0 atIndex:1];
       [computeEncoder setBuffer:_result_ptr offset:0 atIndex:2];
       [computeEncoder setBytes:&size length:sizeof(size) atIndex:3];
-      [computeEncoder setBytes:&threadGroupSizexs
+      [computeEncoder setBytes:&threadGroupSize
                         length:sizeof(threadGroupSize)
                        atIndex:4];
 
@@ -89,11 +89,10 @@ void compute_mps(
 
       mpsStream->commit(true);
 
-      void* output = [_result_ptr contents];
-
-      for (int64_t index = 0; index < result_size; index++) {
-        result_ptr[index] = output[index];
-      }
+      NSData* data = [NSData dataWithBytesNoCopy:_result_ptr.contents
+                                          length:result_size
+                                    freeWhenDone:NO];
+      [data getBytes:&result_ptr[0] length:result_size];
     }
   });
 }

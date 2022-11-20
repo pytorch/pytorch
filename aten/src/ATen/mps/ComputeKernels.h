@@ -21,7 +21,7 @@ kernel void compute_mps_kernel(device index_t* _repeat_ptr,
       using namespace at::mps;
 
       int64_t block = 512;
-    	int64_t stride = (threadGroupSize * block) / C10_WARP_SIZE;
+    	int64_t stride = (_threadGroupSize * block) / C10_WARP_SIZE;
     	int warp_id = idx / C10_WARP_SIZE;
     	int tid_in_warp = idx % C10_WARP_SIZE;
     	for (int64_t i = warp_id; i < _size; i += stride)
