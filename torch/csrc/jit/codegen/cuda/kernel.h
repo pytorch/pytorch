@@ -210,6 +210,9 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   void print() const;
 
  protected:
+  using IrContainer::registerExpr;
+  using IrContainer::registerVal;
+
   //! Register the Val with this fusion
   void registerVal(Val* val) override;
 

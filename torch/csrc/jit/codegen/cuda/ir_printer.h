@@ -30,6 +30,8 @@ class TORCH_CUDA_CU_API IrMathPrinter : public IrPrinter {
  public:
   IrMathPrinter(std::ostream& os) : IrPrinter(os) {}
 
+  using IrPrinter::handle;
+
   void handle(const Split* const) override {}
   void handle(const Merge* const) override {}
   void handle(const Swizzle2D* const) override {}
@@ -46,6 +48,8 @@ class TORCH_CUDA_CU_API IrMathPrinter : public IrPrinter {
 class TORCH_CUDA_CU_API IrTransformPrinter : public IrPrinter {
  public:
   IrTransformPrinter(std::ostream& os) : IrPrinter(os) {}
+
+  using IrPrinter::handle;
 
   void handle(Fusion* f) override;
 

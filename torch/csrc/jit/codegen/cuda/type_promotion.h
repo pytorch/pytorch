@@ -25,6 +25,7 @@ namespace cuda {
 //!
 struct TypePromotionConfig {
   bool promote_integer_inputs_to_float = false;
+  TypePromotionConfig() = default;
 };
 
 namespace TypePromotion {

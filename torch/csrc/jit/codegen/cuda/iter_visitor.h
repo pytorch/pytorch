@@ -55,6 +55,8 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
 
   virtual std::vector<Statement*> next(Expr* expr);
 
+  using OptOutDispatch::handle;
+
   // This handle functions is called on every Statement* in topological order,
   // starting from outputs to inputs.
   void handle(Statement* s) override;
@@ -183,6 +185,8 @@ class TORCH_CUDA_CU_API BackwardVisitor : public OptOutDispatch {
 
   virtual std::vector<Statement*> next(Val* val);
 
+  using OptOutDispatch::handle;
+
   // This handle functions is called on every Statement* in topological order,
   // starting from outputs to inputs.
   // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
@@ -272,6 +276,8 @@ class StmtSort : public IterVisitor {
 
   std::vector<Statement*> stmts;
 
+  using IterVisitor::handle;
+
   void handle(Statement* stmt) override;
 
  public:
@@ -334,6 +340,8 @@ class TORCH_CUDA_CU_API InputsOf : public IterVisitor {
  private:
   std::unordered_set<Val*> grabbed_inputs;
   std::vector<Val*> ordered_inputs;
+
+  using IterVisitor::handle;
 
   void handle(Val* v) final;
 

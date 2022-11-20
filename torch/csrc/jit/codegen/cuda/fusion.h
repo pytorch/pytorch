@@ -245,6 +245,9 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
 
   static IrCloner copy(const Fusion* from, Fusion* to);
 
+  using IrContainer::registerExpr;
+  using IrContainer::registerVal;
+
   //! Register the Val with this fusion
   virtual void registerVal(Val* val) override;
 

@@ -56,6 +56,8 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptInConstDispatch {
  private:
   c10::optional<EvaluatorValue> getValue(const Val* value);
 
+  using OptInConstDispatch::handle;
+
   void handle(const UnaryOp* unary_op) final;
   void handle(const BinaryOp* binary_op) final;
   void handle(const TernaryOp* binary_op) final;
