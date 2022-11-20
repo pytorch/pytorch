@@ -4697,7 +4697,7 @@ if HAS_CPU:
             b = torch.rand((100,))
             with profile() as prof:
                 fn(a, b)
-            assert "kernel_cpp_0" in [e.name for e in prof.profiler.function_events]
+            assert "kernel_cpp_0" in (e.name for e in prof.profiler.function_events)
 
 
 if HAS_CUDA:
