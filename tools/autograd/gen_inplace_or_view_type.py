@@ -18,7 +18,6 @@ from torchgen.api.types import (
     boolT,
     ConstRefCType,
     CType,
-    dimnameT,
     DispatcherSignature,
     intArrayRefT,
     longT,
@@ -327,7 +326,6 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
     updated_unpacked_args: List[str] = []
     known_view_arg_simple_types: List[CType] = [
         BaseCType(longT),
-        BaseCType(dimnameT),
         OptionalCType(BaseCType(longT)),
         BaseCType(SymIntT),
         OptionalCType(BaseCType(SymIntT)),
