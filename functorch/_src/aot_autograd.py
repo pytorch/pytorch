@@ -908,10 +908,9 @@ def aot_module_simplified(
     def fakify_params_and_buffers(flat_args):
         nonlocal fake_mode
         if config.use_fake_tensor:
-            flat_inputs = pytree.tree_flatten(inputs)
+            flat_inputs, _ = pytree.tree_flatten(inputs)
             for input in flat_inputs:
                 if isinstance(input, torch._subclasses.FakeTensor):
-                    breakpoint()
                     if fake_mode is None:
                         fake_mode = input.fake_mode
                     else:
@@ -967,7 +966,6 @@ def aot_module_simplified(
         num_params_buffers=params_len,
     )
 
-    
     joined_args = fake_flat_tensor_args + list(inputs)
     aot_dispatcher_function = _create_aot_dispatcher_function(functional_call, joined_args, aot_config, fake_mode)
 

@@ -9,7 +9,6 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._pytree import tree_map, tree_flatten
 
-
 from .. import config
 from ..utils import clone_inputs, fake_tensors_available
 
@@ -138,11 +137,11 @@ def has_mutation(gm, example_inputs, inputs_only=False):
         # We don't actually care about the guards that are created
         # on those shapes though, so just create a fresh ShapeEnv here.
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
         fake_mode = None
-        flat_inputs = tree_flatten(example_inputs)
+        flat_inputs, _ = tree_flatten(example_inputs)
         for input in flat_inputs:
             if isinstance(input, torch._subclasses.FakeTensor):
-                breakpoint()
                 if fake_mode is None:
                     fake_mode = input.fake_mode
                 else:
@@ -151,9 +150,12 @@ def has_mutation(gm, example_inputs, inputs_only=False):
             # No fake inputs, just make a mode
             shape_env = ShapeEnv() if config.dynamic_shapes else None
             fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        fake_wrapper = functools.partial(_wrap_to_fake_tensor, f_mode=fake_mode)
+        example_inputs = tree_map(fake_wrapper, example_inputs)
         new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
-        with fake_mode:
-            ShapeAliasingAndMutationProp(gm).run(*example_inputs)
+        with fake_mode.restore() if hasattr(fake_mode, "restore") else fake_mode:
+            ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
     else:
         # Clone the inputs such that intermediate tensors (not leaf tensors) with
         # requires_grad to True are now converted to False to avoid Runtime Error

@@ -10,6 +10,7 @@ import uuid
 from collections import Counter
 from importlib import import_module
 from tempfile import TemporaryFile
+from inspect import signature
 
 import torch
 import torch.fx as fx
@@ -389,7 +390,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
     """
 
     @functools.wraps(compiler_fn)
-    def debug_wrapper(gm, example_inputs, **kwargs):
+    def debug_wrapper(gm, example_inputs, real_inputs=None, **kwargs):
         from torch._subclasses import FakeTensorMode
 
         orig_graph = copy.deepcopy(gm.graph)
@@ -470,7 +471,10 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
             compiled_fn = deferred_for_real_inputs
             compiled_fn._boxed_call = True
         else:
-            compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+            if "real_inputs" in signature(compiler_fn).parameters:
+                compiled_fn = compiler_fn(gm, example_inputs, real_inputs=real_inputs, **kwargs)
+            else:
+                compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
 
         return compiled_fn
 
@@ -812,7 +816,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
     """
 
     @functools.wraps(compiler_fn)
-    def debug_wrapper(gm, example_inputs, **kwargs):
+    def debug_wrapper(gm, example_inputs, real_inputs=None, **kwargs):
         assert config.repro_after in ("dynamo", "aot", None)
         if config.repro_after == "dynamo":
             if config.repro_level == 3:
@@ -862,7 +866,11 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     )
                     raise
         else:
-            compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+            if "real_inputs" in signature(compiler_fn).parameters:
+                compiled_gm = compiler_fn(gm, example_inputs, real_inputs=real_inputs, **kwargs)
+            else:
+                compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
+            
 
         return compiled_gm
 

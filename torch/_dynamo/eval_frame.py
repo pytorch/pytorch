@@ -43,6 +43,7 @@ null_context = contextlib.nullcontext
 unset = object()
 compile_lock = threading.RLock()
 most_recent_backend = None
+from inspect import signature
 
 
 class OptimizedModule(torch.nn.Module):
@@ -330,14 +331,19 @@ class WrapperBackend:
             return clone_inputs(self.original_example_inputs_fake)    
         return clone_inputs(self.original_example_inputs_real)
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs_real, example_inputs_fake):
+    def __call__(self, gm: torch.fx.GraphModule, fake_inputs, real_inputs):
 
         self.restore = checkpoint_params(gm)
-        self.original_example_inputs_real = clone_inputs(example_inputs_real)
-        self.original_example_inputs_fake = clone_inputs(example_inputs_fake)
+        self.original_example_inputs_real = clone_inputs(real_inputs)
+        self.original_example_inputs_fake = clone_inputs(fake_inputs)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
         if config.fake_tensor_propagation:
+            # This is a *huge hack* to get around the fact that 
+            # AOTAutograd mutation analysis only works with taking real inputs atm
+            # it has its own weird and brittle fakification story that is solved on
+            # the symbolic shapes branch. 
+            # this wil be removed ASAP.
             self.candidate = self.backend(copy_gm, self.original_example_inputs_fake)
         else:
             self.candidate = self.backend(copy_gm, self.original_example_inputs_real)

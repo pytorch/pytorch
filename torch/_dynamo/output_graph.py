@@ -458,9 +458,9 @@ class OutputGraph(fx.Tracer):
                 else ""
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            from .eval_frame import WrapperBackend
-            if isinstance(self.compiler_fn, WrapperBackend):
-                compiled_fn = self.compiler_fn(gm, self.real_inputs(), self.example_inputs())
+            from inspect import signature
+            if "real_inputs" in signature(self.compiler_fn).parameters:
+                compiled_fn = self.compiler_fn(gm, self.example_inputs(), real_inputs=self.real_inputs())
             else:
                 compiled_fn = self.compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
