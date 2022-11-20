@@ -1,5 +1,8 @@
 #!/bin/bash
 set -x
+if getent hosts fwdproxy; then
+    export https_proxy=http://fwdproxy:8080 http_proxy=http://fwdproxy:8080 no_proxy=.fbcdn.net,.facebook.com,.thefacebook.com,.tfbnw.net,.fb.com,.fburl.com,.facebook.net,.sb.fbsbx.com,localhost
+fi
 pytest --csv test_torchinductor.csv -v test/inductor/test_torchinductor.py 2>&1 | tee test_torchinductor.log
 gh gist create test_torchinductor.log | tee gist.test_torchinductor.csv
 python test_extract.py test_torchinductor.csv > final_test_torchinductor.csv
