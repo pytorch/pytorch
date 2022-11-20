@@ -9,8 +9,8 @@ import textwrap
 import uuid
 from collections import Counter
 from importlib import import_module
-from tempfile import TemporaryFile
 from inspect import signature
+from tempfile import TemporaryFile
 
 import torch
 import torch.fx as fx
@@ -472,7 +472,9 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
             compiled_fn._boxed_call = True
         else:
             if "real_inputs" in signature(compiler_fn).parameters:
-                compiled_fn = compiler_fn(gm, example_inputs, real_inputs=real_inputs, **kwargs)
+                compiled_fn = compiler_fn(
+                    gm, example_inputs, real_inputs=real_inputs, **kwargs
+                )
             else:
                 compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
 
@@ -867,10 +869,11 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     raise
         else:
             if "real_inputs" in signature(compiler_fn).parameters:
-                compiled_gm = compiler_fn(gm, example_inputs, real_inputs=real_inputs, **kwargs)
+                compiled_gm = compiler_fn(
+                    gm, example_inputs, real_inputs=real_inputs, **kwargs
+                )
             else:
                 compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
-            
 
         return compiled_gm
 

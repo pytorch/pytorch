@@ -7,7 +7,7 @@ import torch
 from torch.fx.node import map_aggregate
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._pytree import tree_map, tree_flatten
+from torch.utils._pytree import tree_flatten, tree_map
 
 from .. import config
 from ..utils import clone_inputs, fake_tensors_available

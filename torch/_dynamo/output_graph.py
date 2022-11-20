@@ -459,8 +459,11 @@ class OutputGraph(fx.Tracer):
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             from inspect import signature
+
             if "real_inputs" in signature(self.compiler_fn).parameters:
-                compiled_fn = self.compiler_fn(gm, self.example_inputs(), real_inputs=self.real_inputs())
+                compiled_fn = self.compiler_fn(
+                    gm, self.example_inputs(), real_inputs=self.real_inputs()
+                )
             else:
                 compiled_fn = self.compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
@@ -477,8 +480,9 @@ class OutputGraph(fx.Tracer):
         return result
 
     def example_inputs(self):
+        if not config.fake_tensor_propagation:
+            return self.real_inputs()
         result = []
-        assert config.fake_tensor_propagation
         for arg in self.graphargs:
             example = arg.get_fake_examples()
             if example:

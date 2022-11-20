@@ -900,11 +900,11 @@ def aot_module_simplified(
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = tuple(params_flat)
     params_len = len(params_flat)
-    
+
     # TODO(voz): Pull up to dynamo
     # See [Real vs Fake Parms] below
     fake_mode = None
-    
+
     def fakify_params_and_buffers(flat_args):
         nonlocal fake_mode
         if config.use_fake_tensor:
