@@ -87,6 +87,8 @@ unittest.expectedFailure(
 )
 unittest.expectedFailure(DynamicShapesSubGraphTests.test_restore_state_dynamic_shapes)
 
+unittest.expectedFailure(DynamicShapesExportTests.test_export_compare_optimize_with_make_fx_dynamic_shapes)
+
 # DynamicShapesUnspecTests
 # Missing decomp
 # RuntimeError: Failed running call_function <function batch_norm at 0x7f7d1ce38310>
@@ -100,6 +102,7 @@ unittest.expectedFailure(DynamicShapesSubGraphTests.test_restore_state_dynamic_s
 # FakeTensor(FakeTensor(..., device='meta', size=()), cpu)), **{}):
 # aten._local_scalar_dense.default
 unittest.expectedFailure(test_unspec.UnspecReproTests.test_batch_norm_act_unspec)
+
 
 # SymIntArrayRef expected to contain only concrete integers
 unittest.expectedFailure(

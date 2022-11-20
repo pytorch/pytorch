@@ -805,11 +805,10 @@ def aot_function(
                     return flat_args
 
             fake_flat_tensor_args = process_inputs(flat_args)
-
+            inputs = flat_args + fake_flat_tensor_args
             compiled_fn = _create_aot_dispatcher_function(
                 flat_fn,
-                flat_args,
-                fake_flat_tensor_args,
+                inputs,
                 aot_config,
                 fake_mode,
             )

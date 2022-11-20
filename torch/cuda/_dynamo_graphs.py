@@ -148,7 +148,7 @@ def raw_aot_autograd_cudagraphs(model, inputs):
 
     from functorch.compile import aot_module_simplified  # type: ignore[import]
 
-    return aot_module_simplified(model, **kwargs)
+    return aot_module_simplified(model, inputs, **kwargs)
 
 
 class AOTAutogradCudaGraphs(AotAutogradStrategy):

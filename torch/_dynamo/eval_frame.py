@@ -43,7 +43,6 @@ null_context = contextlib.nullcontext
 unset = object()
 compile_lock = threading.RLock()
 most_recent_backend = None
-from inspect import signature
 
 
 class OptimizedModule(torch.nn.Module):
