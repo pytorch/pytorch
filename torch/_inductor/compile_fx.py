@@ -390,7 +390,7 @@ def compile_fx(
 
     with overrides.patch_functions():
 
-        # TODO: can add logging before/after the call to create_aot_dispatcher_function
+        # TODO: can add logging before/after the call to _create_aot_dispatcher_function
         # in functorch/_src/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch
         return aot_autograd(
