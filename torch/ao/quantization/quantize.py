@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.ao.nn.quantized as nnq
 from torch.nn.intrinsic import _FusedModule
+from torch.nn.modules.module import _ForwardHook, _ForwardPreHook
 
 from torch.ao.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
@@ -143,11 +144,13 @@ def register_activation_post_process_hook(module, pre_hook=False):
     assert hasattr(module, 'activation_post_process'), \
         'Expect activation_post_process attribute already attached to the module'
     if pre_hook:
-        handle = module.register_forward_pre_hook(_observer_forward_pre_hook)
-        module._forward_pre_hooks.move_to_end(handle.id, last=False)
+        handle = module.register_forward_pre_hook(
+            _observer_forward_pre_hook, prepend=True
+        )
     else:
-        handle = module.register_forward_hook(_observer_forward_hook)
-        module._forward_hooks.move_to_end(handle.id, last=False)
+        handle = module.register_forward_hook(
+            _observer_forward_hook, prepend=True
+        )
 
 
 def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=None, device=None, custom_module_class_mapping=None):
@@ -331,6 +334,10 @@ def _remove_activation_post_process(module):
         observer_hook = _observer_forward_pre_hook if pre_hook else _observer_forward_hook
         handle_ids_to_remove = set()
         for handle_id, hook_fn in hook_map.items():
+            if isinstance(hook_fn, _ForwardPreHook) or isinstance(hook_fn, _ForwardHook):
+                # Extract original hook_fn from wrapper class _ForwardPreHook or
+                # _ForwardHook.
+                hook_fn = hook_fn.hook
             if hook_fn is observer_hook:
                 handle_ids_to_remove.add(handle_id)
         for handle_id in handle_ids_to_remove:

@@ -1546,7 +1546,9 @@ class Module:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
 
         if _global_forward_pre_hooks:
-            for hook in _global_forward_pre_hooks.values():
+            # N.B.: Wrapping OrderedDic values into a list is necessary as
+            # LazyModuleMixin might change OrderedDict content during iteration.
+            for hook in list(_global_forward_pre_hooks.values()):
                 result = hook(self, input)
                 if result is not None:
                     if not isinstance(result, tuple):
@@ -1554,7 +1556,9 @@ class Module:
                     input = result
 
         if self._forward_pre_hooks:
-            for hook in self._forward_pre_hooks.values():
+            # N.B.: Wrapping OrderedDic values into a list is necessary as
+            # LazyModuleMixin might change OrderedDict content during iteration.
+            for hook in list(self._forward_pre_hooks.values()):
                 assert isinstance(hook, _ForwardPreHook), (
                     "forward_pre hooks must be an instance of "
                     f"`_ForwardPreHook`, but got {type(hook)}. This "
@@ -1570,13 +1574,13 @@ class Module:
 
         result = forward_call(*input, **kwargs)
         if _global_forward_hooks:
-            for hook in _global_forward_hooks.values():
+            for hook in list(_global_forward_hooks.values()):
                 hook_result = hook(self, input, result)
                 if hook_result is not None:
                     result = hook_result
 
         if self._forward_hooks:
-            for hook in self._forward_hooks.values():
+            for hook in list(self._forward_hooks.values()):
                 assert isinstance(hook, _ForwardHook), (
                     "forward hooks must be an instance of "
                     f"`_ForwardHook`, but got {type(hook)}. This "
