@@ -83,6 +83,7 @@ class OutputGraph(fx.Tracer):
         code_options: Dict[str, Any],
         compiler_fn: Callable,
         root_tx,
+        export,
     ):
         super(OutputGraph, self).__init__()
 
@@ -109,6 +110,7 @@ class OutputGraph(fx.Tracer):
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
         self.tensor_id_to_sym_shape_ref = {}
         self.intermediary_symbols = {}
+        self.export = export
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -478,7 +480,7 @@ class OutputGraph(fx.Tracer):
     def example_inputs(self, fake=False):
         result = []
         for arg in self.graphargs:
-            if fake:
+            if fake and not self.export:
                 assert config.fake_tensor_propagation
                 example = arg.get_fake_examples()
                 if example:

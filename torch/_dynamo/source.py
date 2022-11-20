@@ -169,6 +169,14 @@ class GetItemSource(Source):
         else:
             return f"{self.base.name()}[{self.index!r}]"
 
+@dataclasses.dataclass
+class GetModuleElementSource(GetItemSource):
+    accessed: str
+    def name(self):
+        if isinstance(self.index, Source):
+            return f"{self.base.name()}.{self.index.name()}".replace("'", "")
+        else:
+            return f"{self.base.name()}.{self.index!r}".replace("'", "")
 
 @dataclasses.dataclass
 class TupleIteratorGetItemSource(GetItemSource):

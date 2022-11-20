@@ -13,7 +13,7 @@ from ..allowed_functions import is_allowed
 from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
-from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource
+from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource, GetModuleElementSource
 from ..utils import (
     is_lazy_module,
     is_safe_constant,
@@ -300,7 +300,7 @@ class NNModuleVariable(VariableTracker):
                 )
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
 
-        def named_embed(name, obj):
+        def named_embed(accessed, name, obj):
             return TupleVariable(
                 [
                     ConstantVariable(name, **options),
@@ -308,7 +308,7 @@ class NNModuleVariable(VariableTracker):
                         obj,
                         key,
                         name,
-                        source=NNModuleSource(GetItemSource(self.source, name)),
+                        source=NNModuleSource(GetModuleElementSource(self.source, name, accessed)),
                         **options,
                     ),
                 ]
@@ -322,21 +322,21 @@ class NNModuleVariable(VariableTracker):
             for name, param in module.named_parameters(
                 **get_kwargs("prefix", "recurse")
             ):
-                result.append(named_embed(name, param))
+                result.append(named_embed("named_parameters", name, param))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "named_buffers":
             result = []
             for name, buffer in module.named_buffers(
                 **get_kwargs("prefix", "recurse", "remove_duplicate")
             ):
-                result.append(named_embed(name, buffer))
+                result.append(named_embed("named_buffers", name, buffer))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "named_modules":
             result = []
             for name, submod in module.named_modules(
                 **get_kwargs("memo", "prefix", "remove_duplicate")
             ):
-                result.append(named_embed(name, submod))
+                result.append(named_embed("named_modules", name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "modules":
             return wrap_values(module.named_modules())
@@ -349,7 +349,7 @@ class NNModuleVariable(VariableTracker):
             assert not (args or kwargs)
             result = []
             for name, submod in module.items():
-                result.append(named_embed(name, submod))
+                result.append(named_embed("items", name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "__len__":
             assert not (args or kwargs)

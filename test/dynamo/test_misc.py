@@ -1835,7 +1835,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # which contains the modules. remove the reference in this backend
         # and test that no additional references are being held.
         class NoLeakBackend:
-            def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+            def __call__(self, gm: torch.fx.GraphModule, example_inputs, **kwargs):
                 gm.mod = None
 
                 def foo(*args, **kwargs):

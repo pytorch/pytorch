@@ -454,6 +454,7 @@ class GuardBuilder:
                 return
 
         value = self.get(guard.name)
+
         tensor_name = self.arg_ref(guard)
         self.tensor_check_names.append(tensor_name)
         self.tensor_check_examples.append(value)
