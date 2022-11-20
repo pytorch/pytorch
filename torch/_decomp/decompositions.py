@@ -1125,8 +1125,10 @@ def embedding_renorm_(
         "embedding_renorm_", indices, "indices", 2, (torch.long, torch.int)
     )
 
-    # TODO: index_put expects non-duplicate indices or the behavior is
-    # undefined. But unique is not implemented yet and is data-dependent.
+    # Note: index_put_ expects non-duplicate indices or the behavior is
+    # undefined. We deliberately do not test this precondition because it is
+    # data-dependent.
+
     # Flattens first because row indices can have any shape.
     indices = indices.flatten()
     num_cols = self.size(-1)
@@ -1142,7 +1144,8 @@ def embedding_renorm_(
     num_total = num_indices * num_cols
     row_indices = indices.unsqueeze(-1).expand(num_indices, num_cols).reshape(num_total)
     col_indices = torch.arange(num_total) % num_cols
-    return torch.index_put(self, (row_indices, col_indices), rows.flatten())
+    # Note: uses the inplace variant to keep strides the same.
+    return self.index_put_((row_indices, col_indices), rows.flatten())
 
 
 def prod(x: List[int]):
