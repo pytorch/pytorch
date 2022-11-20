@@ -90,7 +90,6 @@ class _WrappedHook:
 # forward hooks take in args and kwargs as Tuple and Dict instead of unpacked
 # positional and keyword arguments.
 class _ForwardPreHook:
-
     def __init__(self, hook: Callable, with_kwargs: bool = False):
         self.hook: Callable = hook
         self.with_kwargs: bool = with_kwargs
@@ -104,8 +103,14 @@ class _ForwardPreHook:
         self.hook = state["hook"]
         self.with_kwargs = state["with_kwargs"]
 
-    def __call__(self, module: "Module", args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Tuple[Any, Any]:
-        results = self.hook(module, args, kwargs) if self.with_kwargs else self.hook(module, args)
+    def __call__(
+        self, module: "Module", args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> Tuple[Any, Any]:
+        results = (
+            self.hook(module, args, kwargs)
+            if self.with_kwargs
+            else self.hook(module, args)
+        )
 
         if results is None:
             return args, kwargs
@@ -117,7 +122,11 @@ class _ForwardPreHook:
                 f"got {results}"
             )
         else:
-            results = (results, kwargs) if isinstance(results, tuple) else ((results, ), kwargs)
+            results = (
+                (results, kwargs)
+                if isinstance(results, tuple)
+                else ((results,), kwargs)
+            )
 
         return results
 
@@ -126,7 +135,6 @@ class _ForwardPreHook:
 # forward hooks take in args and kwargs as Tuple and Dict instead of unpacked
 # positional and keyword arguments.
 class _ForwardHook:
-
     def __init__(self, hook: Callable, with_kwargs: bool = False):
         self.hook: Callable = hook
         self.with_kwargs: bool = with_kwargs
@@ -140,8 +148,18 @@ class _ForwardHook:
         self.hook = state["hook"]
         self.with_kwargs = state["with_kwargs"]
 
-    def __call__(self, module: "Module", args: Tuple[Any, ...], kwargs: Dict[str, Any], out: Any) -> Any:
-        results = self.hook(module, args, kwargs, out) if self.with_kwargs else self.hook(module, args, out)
+    def __call__(
+        self,
+        module: "Module",
+        args: Tuple[Any, ...],
+        kwargs: Dict[str, Any],
+        out: Any,
+    ) -> Any:
+        results = (
+            self.hook(module, args, kwargs, out)
+            if self.with_kwargs
+            else self.hook(module, args, out)
+        )
 
         return out if results is None else results
 
