@@ -119,12 +119,12 @@ class AotAutogradStrategy(object):
 
     @property
     def example_inputs(self):
-        if config.fake_tensor_propagation:
+        # if config.fake_tensor_propagation:
             # clone_inputs just recreates the tensors, as far as I can see,
             # with their respective sizes and strides except with zeros
             # with fake tensors, there is no need to do so, and in fact, it can throw
             # on some of the `needed_size` logic if size is backed by a SymInt
-            return self.original_example_inputs
+            # return self.original_example_inputs
         return clone_inputs(self.original_example_inputs)
 
     def verified_candidate(self):

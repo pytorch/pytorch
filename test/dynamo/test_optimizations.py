@@ -14,6 +14,9 @@ from torch._dynamo.optimizations.analysis import has_mutation
 from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.optimizations.normalize import Inplacifier, normalize
 from torch._dynamo.testing import same
+from torch._subclasses import FakeTensorMode
+from torch._dynamo import config
+from contextlib import contextmanager, nullcontext
 
 
 def has_onnxruntime():
@@ -76,18 +79,35 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertIn("out=linear_1", code)
 
     def test_has_mutation(self):
-        gm = torch.fx.symbolic_trace(Seq())
-        self.assertFalse(has_mutation(gm, torch.rand([10, 10])))
+        if config.fake_tensor_propagation:
+            fake_mode = FakeTensorMode()
+            gm = torch.fx.symbolic_trace(Seq())
+            fake_input = fake_mode.from_tensor(torch.rand([10, 10])) 
+            self.assertFalse(has_mutation(gm, fake_input, fake_mode=fake_mode))
 
-        class Mutating(torch.nn.Module):
-            def __init__(self):
-                super(Mutating, self).__init__()
+            class Mutating(torch.nn.Module):
+                def __init__(self):
+                    super(Mutating, self).__init__()
 
-            def forward(self, arg):
-                return arg.add_(1)
+                def forward(self, arg):
+                    return arg.add_(1)
 
-        gm = torch.fx.symbolic_trace(Mutating())
-        self.assertTrue(has_mutation(gm, torch.rand([10, 1, 1, 1])))
+            gm = torch.fx.symbolic_trace(Mutating())
+            fake_input = fake_mode.from_tensor(torch.rand([10, 1, 1, 1])) 
+            self.assertTrue(has_mutation(gm, fake_input, fake_mode=fake_mode))
+        else:
+            gm = torch.fx.symbolic_trace(Seq())
+            self.assertFalse(has_mutation(gm, torch.rand([10, 10])))
+
+            class Mutating(torch.nn.Module):
+                def __init__(self):
+                    super(Mutating, self).__init__()
+
+                def forward(self, arg):
+                    return arg.add_(1)
+
+            gm = torch.fx.symbolic_trace(Mutating())
+            self.assertTrue(has_mutation(gm, torch.rand([10, 1, 1, 1])))
 
     def test_has_mutation_factory(self):
         def fn():
@@ -95,8 +115,12 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
             x.fill_(2)
             return x
 
-        def compiler_fn(graph, example_inputs):
-            self.assertTrue(has_mutation(graph, example_inputs))
+        def compiler_fn(graph, example_inputs, **kwargs):
+            if config.fake_tensor_propagation:
+                self.assertIsNotNone(kwargs["fake_mode"])
+                self.assertTrue(has_mutation(graph, example_inputs, fake_mode=kwargs["fake_mode"]))
+            else:
+                self.assertTrue(has_mutation(graph, example_inputs))
             return graph
 
         opt_fn = torch._dynamo.optimize(compiler_fn)(fn)
@@ -107,7 +131,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
             b, c = bc
             return a / d - b / c
 
-        def compiler_fn(graph, example_inputs):
+        def compiler_fn(graph, example_inputs, **kwargs):
             nonlocal r1
             r1 = graph(*example_inputs)[0]
             return graph.forward

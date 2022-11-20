@@ -74,10 +74,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             else:
                 return 2
 
-        if config.dynamic_shapes:
-            self._common(fn, 2, 5)
-        else:
-            self._common(fn, 3, 5)
+        self._common(fn, 2, 5)
 
     def test_control_flow5(self):
         def fn(a, b):
@@ -88,10 +85,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             else:
                 return 2, tmp1, tmp2
 
-        if config.dynamic_shapes:
-            self._common(fn, 4, 13)
-        else:
-            self._common(fn, 6, 13)
+        self._common(fn, 4, 13)
 
     def test_capi_call1(self):
         def fn(a, b):
@@ -293,10 +287,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         r2 = opt_fn(v1, v2, f)
         self.assertTrue(torch._dynamo.testing.same(r1, correct1))
         self.assertTrue(torch._dynamo.testing.same(r2, correct2))
-        if config.dynamic_shapes:
-            self.assertEqual(cnt.frame_count, 2)
-        else:
-            self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 4)
 
     def test_resume_freevars(self):

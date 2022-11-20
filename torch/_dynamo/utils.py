@@ -398,6 +398,9 @@ def clone_tensor(x):
 
 def clone_input(x):
     """copy while preserving strides"""
+    if isinstance(x, torch._subclasses.FakeTensor):
+        # No need to clone fake tensors?
+        return x
     with torch.no_grad():
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())

@@ -465,9 +465,15 @@ class OutputGraph(fx.Tracer):
             # This is temporary, hopefully, while we decide if we want the
             # user provided compiler signature to have a **kwargs
             if config.fake_tensor_propagation:
-                compiled_fn = self.compiler_fn(
-                    gm, self.example_inputs(fake=True), fake_mode=self.fake_mode
-                )
+                from .eval_frame import WrapperBackend
+                if isinstance(self.compiler_fn, WrapperBackend):
+                    compiled_fn = self.compiler_fn(
+                        gm, self.example_inputs(fake=True), fake_mode=self.fake_mode, real_inputs=self.example_inputs(fake=False)
+                    )
+                else:
+                    compiled_fn = self.compiler_fn(
+                        gm, self.example_inputs(fake=True), fake_mode=self.fake_mode
+                    )
             else:
                 compiled_fn = self.compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")

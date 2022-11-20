@@ -85,7 +85,7 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
             b, c = bc
             return a / d - b / c
 
-        def compiler_fn(graph, example_inputs):
+        def compiler_fn(graph, example_inputs, **kwargs):
             nonlocal r1
             r1 = graph(*example_inputs)[0]
             return graph.forward
@@ -146,7 +146,7 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
         i1 = torch.randn(10)
         i2 = torch.randn(10)
 
-        def incorrect_compile_fn(gm, example_inputs):
+        def incorrect_compile_fn(gm, example_inputs, **kwargs):
             return transform(gm).forward
 
         r1 = toy_example(i1, i2)

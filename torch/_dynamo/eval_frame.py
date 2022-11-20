@@ -332,7 +332,9 @@ class WrapperBackend:
         # with no_dispatch():
         return clone_inputs(self.original_example_inputs)
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs, fake_mode=None):
+    # real_inputs is a fake mode only thing. Ouputs of funcs executed with fake tensor inputs
+    # return fake tensors, which are invalid for comparison. We pipe in real inputs only to verify correctness.
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs, fake_mode=None, real_inputs=None):
         self.restore = checkpoint_params(gm)
         # with no_dispatch():
         self.original_example_inputs = clone_inputs(example_inputs)
@@ -343,6 +345,7 @@ class WrapperBackend:
         # This is temporary, hopefully, while we decide if we want the
         # user provided compiler signature to have a **kwargs
         if fake_mode:
+            assert real_inputs
             needs_fake_tensor = True
             self.candidate = self.backend(
                 copy_gm, self.original_example_inputs, fake_mode
@@ -358,16 +361,15 @@ class WrapperBackend:
 
         # if verify_correctness=True
         try:
-            correct = self.gm.forward(*self.example_inputs)
-            # This is temporary, hopefully, while we decide if we want the
-            # user provided compiler signature to have a **kwargs
             if needs_fake_tensor:
-                result = self.candidate(*self.example_inputs, fake_mode=fake_mode)
+                assert real_inputs
+                correct = self.gm.forward(*real_inputs)
+                result = self.candidate(*real_inputs)
             else:
+                correct = self.gm.forward(*self.example_inputs)
                 result = self.candidate(*self.example_inputs)
 
             # TODO: replace `same` function with the one in testing
-            # with no_dispatch():
             if same(correct, result):
                 return self.candidate
 

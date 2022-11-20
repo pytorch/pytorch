@@ -66,7 +66,7 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
         return result
 
 
-def conv_args_analysis(gm: torch.fx.GraphModule, example_inputs):
+def conv_args_analysis(gm: torch.fx.GraphModule, example_inputs, **kwargs):
     # lowering graph
     gm = make_fx(gm)(*example_inputs)
     # use Interpreter to logs the args of conv

@@ -118,7 +118,7 @@ class ShapeAliasingAndMutationProp(ShapeProp):
             self.env.clear()
 
 
-def has_mutation(gm, example_inputs, fake_mode, inputs_only=False):
+def has_mutation(gm, example_inputs, fake_mode=None, inputs_only=False):
     """Check if the graph module has any form of mutation.  If inputs_only is
     true, we only check for mutation of inputs"""
     # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.

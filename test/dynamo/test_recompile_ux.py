@@ -34,7 +34,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             nonlocal triggered
             triggered = True
 
-        def compiler(gm, input):
+        def compiler(gm, input, **kwargs):
             nonlocal attached
             f = gm.forward
             assert not attached
