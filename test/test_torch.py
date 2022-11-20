@@ -1846,7 +1846,6 @@ else:
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
 
-    @skipIfMps
     def test_repeat_interleave(self, device):
         y = torch.tensor([[1, 2], [3, 4]], device=device)
         # exercise single argument function signature

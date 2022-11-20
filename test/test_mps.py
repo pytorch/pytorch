@@ -1852,29 +1852,6 @@ class TestMPS(TestCase):
         helper((3, 4, 5), (2, 3, 4, 5))
         helper((3, 4, 5), (2, 2, 2))
 
-    def test_repeat_interleave(self):
-        def helper(shape, repeats, dim=0, output_size=0):
-
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            y = x.repeat_interleave(repeats, dim, output_size)
-            ref_y = cpu_x.repeat_interleave(repeats, dim, output_size)
-
-            cpu_grad = torch.randn(ref_y.shape)
-            grad = cpu_grad.to('mps')
-
-            y.backward(gradient=grad)
-            ref_y.backward(gradient=cpu_grad)
-
-            self.assertEqual(y, ref_y)
-            self.assertEqual(x.grad, cpu_x.grad)
-
-        helper((2, 3, 4, 5), torch.tensor([2, 3, 4, 5]), dim=1)
-        helper((2, 3, 4), torch.tensor([4, 3, 2, 5, 7, 2]), dim=0, output_size=3)
-        helper((3, 4, 5), torch.tensor([2, 3, 4, 5]))
-        helper((3, 4, 5), torch.tensor([2, 2, 2]), dim=2)
-
     def test_count_nonzero(self):
         def helper(dtype):
             n = [
