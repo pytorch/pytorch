@@ -448,8 +448,8 @@ class GuardBuilder:
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
-            self.ID_MATCH(guard)
             if not config.dynamic_shapes:
+                self.ID_MATCH(guard)
                 # For dynamic shapes, we want to proceed to record tensor names
                 return
 
@@ -611,20 +611,27 @@ class CheckFunctionManager:
         )
         global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if (
-                not config.guard_nn_modules
-                and guard.is_nn_module()
-                and guard.create_fn != GuardBuilder.TENSOR_MATCH
-            ):
-                # The `guard.create_fn != GuardBuilder.TENSOR_MATCH:` part is
-                # an exception to not guarding on nn_module properties
-                # In dynamic shapes mode, we sometimes get "weights" "bias" or other registered/named buffers
-                # accesed. We need to install their TENSOR_MATCH guards
-                # so that the names are known for symbolic shape guarding.
-                # This is also probably good for correctness anyway.
-                # TODO(voz): Revisit to see if we need to be more judicious
-                # with which we create guards for due to perf...
-                continue
+            if config.dynamic_shapes:
+                if (
+                    not config.guard_nn_modules
+                    and guard.is_nn_module()
+                    and guard.create_fn != GuardBuilder.TENSOR_MATCH
+                ):
+                    # The `guard.create_fn != GuardBuilder.TENSOR_MATCH:` part is
+                    # an exception to not guarding on nn_module properties
+                    # In dynamic shapes mode, we sometimes get "weights" "bias" or other registered/named buffers
+                    # accesed. We need to install their TENSOR_MATCH guards
+                    # so that the names are known for symbolic shape guarding.
+                    # This is also probably good for correctness anyway.
+                    # TODO(voz): Revisit to see if we need to be more judicious
+                    # with which we create guards for due to perf...
+                    continue
+            else:
+                if (
+                    not config.guard_nn_modules
+                    and guard.is_nn_module()
+                ):
+                    continue
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder, guards)
         self._seen_ids.clear()

@@ -937,7 +937,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
 
-        def compiler(gm, sample_inputs):
+        def compiler(gm, sample_inputs, **kwargs):
             aten_gm = make_fx(gm)(*sample_inputs)
 
             self.assertEqual(len(aten_gm.graph.nodes), len(out_graph.graph.nodes))
