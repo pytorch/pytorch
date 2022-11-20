@@ -13,6 +13,8 @@ import weakref
 from typing import Any, Callable
 from unittest.mock import patch
 
+import numpy as np
+
 import torch
 
 import torch._dynamo
@@ -667,6 +669,12 @@ class CommonTemplate:
             return torch.sgn(a), torch.sgn(a + 1) - 1
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
+
+    def test_sgn_extremal(self):
+        def fn(a):
+            return (torch.sgn(a),)
+
+        self.common(fn, [torch.tensor([np.nan, np.inf, -np.inf, 0])])
 
     def test_max_min(self):
         def fn(a, b):
