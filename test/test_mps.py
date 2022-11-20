@@ -1852,6 +1852,32 @@ class TestMPS(TestCase):
         helper((3, 4, 5), (2, 3, 4, 5))
         helper((3, 4, 5), (2, 2, 2))
 
+    def test_repeat_interleave(self, device="mps"):
+        y = torch.tensor([[1, 2], [3, 4]], device=device)
+        # exercise single argument function signature
+        temp = y.repeat_interleave(2)
+        self.assertEqual(torch.Size([8]), temp.size())
+
+        for dtype in [torch.int, torch.long]:
+            lengths = torch.tensor([1, 2], dtype=dtype, device="mps")
+            output_size = torch.sum(lengths)
+            a = torch.repeat_interleave(
+                y,
+                lengths,
+                dim=0,
+            )
+            self.assertEqual(a.dtype, y.dtype)
+            self.assertEqual(a.size(), torch.Size([3, 2]))
+
+            a_with_output = torch.repeat_interleave(
+                y,
+                lengths,
+                dim=0,
+                output_size=output_size,
+            )
+            self.assertEqual(a_with_output.dtype, y.dtype)
+            self.assertEqual(a_with_output.size(), torch.Size([3, 2]))
+
     def test_count_nonzero(self):
         def helper(dtype):
             n = [
