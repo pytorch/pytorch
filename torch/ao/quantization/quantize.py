@@ -628,11 +628,11 @@ def swap_module(mod, mapping, custom_module_class_mapping):
 
         if swapped:
             # Preserve module's pre forward hooks. They'll be called on quantized input
-            for pre_hook_fn in mod._forward_pre_hooks.values():
+            for pre_hook_fn in mod._get_forward_pre_hooks():
                 new_mod.register_forward_pre_hook(pre_hook_fn)
             # Preserve module's post forward hooks except _observer_forward_hook
             # After convert they'll work with quantized output
-            for hook_fn in mod._forward_hooks.values():
+            for hook_fn in mod._get_forward_hooks():
                 if hook_fn is not _observer_forward_hook:
                     new_mod.register_forward_hook(hook_fn)
 

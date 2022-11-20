@@ -3666,7 +3666,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         # prune again
         prune.ln_structured(m, name='weight', amount=0.3, n=2, dim=0)
-        hook = next(iter(m._forward_pre_hooks.values()))
+        hook = next(iter(m._get_forward_pre_hooks()))
         self.assertIsInstance(
             hook,
             torch.nn.utils.prune.PruningContainer
@@ -3692,7 +3692,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         prune.ln_structured(m, name='weight', amount=0.1, n=float('inf'), dim=1)
         # check that container._tensor_name is correctly set no matter how
         # many pruning methods are in the container
-        hook = next(iter(m._forward_pre_hooks.values()))
+        hook = next(iter(m._get_forward_pre_hooks()))
         self.assertEqual(hook._tensor_name, 'weight')
 
     def test_pruning_container(self):

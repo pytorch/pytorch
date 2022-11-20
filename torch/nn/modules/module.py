@@ -86,6 +86,66 @@ class _WrappedHook:
             self.module = weakref.ref(state["module"])
 
 
+# N.B.: This calss is NOT deriving from `_WrappedHook`, because pre- and post-
+# forward hooks take in args and kwargs as Tuple and Dict instead of unpacked
+# positional and keyword arguments.
+class _ForwardPreHook:
+
+    def __init__(self, hook: Callable, with_kwargs: bool = False):
+        self.hook: Callable = hook
+        self.with_kwargs: bool = with_kwargs
+
+        functools.update_wrapper(self, hook)
+
+    def __getstate__(self) -> Dict[str, Any]:
+        return {"hook": self.hook, "with_kwargs": self.with_kwargs}
+
+    def __setstate__(self, state: Dict[str, Any]):
+        self.hook = state["hook"]
+        self.with_kwargs = state["with_kwargs"]
+
+    def __call__(self, module: "Module", args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Tuple[Any, Any]:
+        results = self.hook(module, args, kwargs) if self.with_kwargs else self.hook(module, args)
+
+        if results is None:
+            return args, kwargs
+
+        if self.with_kwargs:
+            assert isinstance(results, tuple) and len(results) == 2, (
+                f"Forward-pre hook {self.hook} was registered as "
+                "`use_kwargs=True`, which must return a two-element tuple, but "
+                f"got {results}"
+            )
+        else:
+            results = (results, kwargs) if isinstance(results, tuple) else ((results, ), kwargs)
+
+        return results
+
+
+# N.B.: This calss is NOT deriving from `_WrappedHook`, because pre- and post-
+# forward hooks take in args and kwargs as Tuple and Dict instead of unpacked
+# positional and keyword arguments.
+class _ForwardHook:
+
+    def __init__(self, hook: Callable, with_kwargs: bool = False):
+        self.hook: Callable = hook
+        self.with_kwargs: bool = with_kwargs
+
+        functools.update_wrapper(self, hook)
+
+    def __getstate__(self) -> Dict[str, Any]:
+        return {"hook": self.hook, "with_kwargs": self.with_kwargs}
+
+    def __setstate__(self, state: Dict[str, Any]):
+        self.hook = state["hook"]
+        self.with_kwargs = state["with_kwargs"]
+
+    def __call__(self, module: "Module", args: Tuple[Any, ...], kwargs: Dict[str, Any], out: Any) -> Any:
+        results = self.hook(module, args, kwargs, out) if self.with_kwargs else self.hook(module, args, out)
+
+        return out if results is None else results
+
+
 r"""This tracks hooks common to all modules that are executed before/after
 calling forward and backward. This is global state used for debugging/profiling
 purposes"""
@@ -417,8 +477,8 @@ class Module:
     _backward_pre_hooks: Dict[int, Callable]
     _backward_hooks: Dict[int, Callable]
     _is_full_backward_hook: Optional[bool]
-    _forward_hooks: Dict[int, Callable]
-    _forward_pre_hooks: Dict[int, Callable]
+    _forward_hooks: Dict[int, _ForwardHook]
+    _forward_pre_hooks: Dict[int, _ForwardPreHook]
     _state_dict_hooks: Dict[int, Callable]
     _load_state_dict_pre_hooks: Dict[int, Callable]
     _load_state_dict_post_hooks: Dict[int, Callable]
@@ -1322,7 +1382,11 @@ class Module:
                               "behavior.")
 
     def register_forward_pre_hook(
-        self, hook: Callable[..., None], prepend: bool = False
+        self,
+        hook: Callable[..., None],
+        *,
+        prepend: bool = False,
+        with_kwargs: bool = False,
     ) -> RemovableHandle:
         r"""Registers a forward pre-hook on the module.
 
@@ -1331,11 +1395,18 @@ class Module:
 
             hook(module, input) -> None or modified input
 
-        The input contains only the positional arguments given to the module.
-        Keyword arguments won't be passed to the hooks and only to the ``forward``.
-        The hook can modify the input. User can either return a tuple or a
-        single modified value in the hook. We will wrap the value into a tuple
-        if a single value is returned(unless that value is already a tuple).
+        If ``with_kwargs`` is false or not specified, the input contains only
+        the positional arguments given to the module. Keyword arguments won't be
+        passed to the hooks and only to the ``forward``. The hook can modify the
+        input. User can either return a tuple or a single modified value in the
+        hook. We will wrap the value into a tuple if a single value is returned
+        (unless that value is already a tuple).
+
+        If ``with_kwargs`` is true, then the forward hook will be passed the
+        kwargs given to the forward function and be expected to return them
+        possibly modified:
+
+            hook(module, input) -> None or a tuple of modified input and kwargs
 
         Args:
             hook (Callable): The user defined hook to be registered.
@@ -1347,6 +1418,10 @@ class Module:
                 ``forward_pre`` hooks registered with
                 :func:`register_module_forward_pre_hook` will fire before all
                 hooks registered by this method.
+                Default: ``False``
+            with_kwargs (bool): If true, the ``hook`` will be passed with kwargs
+                given to the forward function.
+                Default: ``False``
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -1354,13 +1429,22 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
-        self._forward_pre_hooks[handle.id] = hook
+        if not isinstance(hook, _ForwardPreHook):
+            wrapped_hook = _ForwardPreHook(hook, with_kwargs=with_kwargs)
+        self._forward_pre_hooks[handle.id] = wrapped_hook
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
+    def _get_forward_pre_hooks(self) -> List[Callable[..., None]]:
+        return [w.hook for w in self._forward_pre_hooks.values()]
+
     def register_forward_hook(
-        self, hook: Callable[..., None], prepend: bool = False
+        self,
+        hook: Callable[..., None],
+        *,
+        prepend: bool = False,
+        with_kwargs: bool = False,
     ) -> RemovableHandle:
         r"""Registers a forward hook on the module.
 
@@ -1385,6 +1469,10 @@ class Module:
                 ``forward`` hooks registered with
                 :func:`register_module_forward_hook` will fire before all hooks
                 registered by this method.
+                Default: ``False``
+            with_kwargs (bool): If true, the ``hook`` will be passed with kwargs
+                given to the forward function.
+                Default: ``False``
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -1392,10 +1480,15 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
-        self._forward_hooks[handle.id] = hook
+        if not isinstance(hook, _ForwardHook):
+            wrapped_hook = _ForwardHook(hook, with_kwargs=with_kwargs)
+        self._forward_hooks[handle.id] = wrapped_hook
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
+
+    def _get_forward_hooks(self) -> List[Callable[..., None]]:
+        return [w.hook for w in self._forward_hooks.values()]
 
     def _slow_forward(self, *input, **kwargs):
         tracing_state = torch._C._get_tracing_state()
@@ -1433,13 +1526,24 @@ class Module:
 
         if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
-        if _global_forward_pre_hooks or self._forward_pre_hooks:
-            for hook in (*_global_forward_pre_hooks.values(), *self._forward_pre_hooks.values()):
+
+        if _global_forward_pre_hooks:
+            for hook in _global_forward_pre_hooks.values():
                 result = hook(self, input)
                 if result is not None:
                     if not isinstance(result, tuple):
                         result = (result,)
                     input = result
+
+        if self._forward_pre_hooks:
+            for hook in self._forward_pre_hooks.values():
+                assert isinstance(hook, _ForwardPreHook), (
+                    "forward_pre hooks must be an instance of "
+                    f"`_ForwardPreHook`, but got {type(hook)}. This "
+                    "means the hook was not registered through the "
+                    "``register_forward_pre_hook`` API."
+                )
+                input, kwargs = hook(self, input, kwargs)  # type: ignore[misc]
 
         bw_hook = None
         if full_backward_hooks or backward_pre_hooks:
@@ -1447,11 +1551,21 @@ class Module:
             input = bw_hook.setup_input_hook(input)
 
         result = forward_call(*input, **kwargs)
-        if _global_forward_hooks or self._forward_hooks:
-            for hook in (*_global_forward_hooks.values(), *self._forward_hooks.values()):
+        if _global_forward_hooks:
+            for hook in _global_forward_hooks.values():
                 hook_result = hook(self, input, result)
                 if hook_result is not None:
                     result = hook_result
+
+        if self._forward_hooks:
+            for hook in self._forward_hooks.values():
+                assert isinstance(hook, _ForwardHook), (
+                    "forward hooks must be an instance of "
+                    f"`_ForwardHook`, but got {type(hook)}. This "
+                    "means the hook was not registered through the "
+                    "``register_forward_hook`` API."
+                )
+                result = hook(self, input, kwargs, result)
 
         if bw_hook:
             result = bw_hook.setup_output_hook(result)
