@@ -91,12 +91,14 @@ void triu_tril_cuda_template(const Tensor& result, const Tensor& self, int64_t k
 }
 
 TORCH_IMPL_FUNC(tril_cuda)(const Tensor& self, int64_t k, const Tensor &result) {
+  TORCH_CHECK(self.dim() >= 2, "tril: input tensor must have at least 2 dimensions")
   if (self.numel() != 0) {
     triu_tril_cuda_template<false>(result, self, k, "tril");
   }
 }
 
 TORCH_IMPL_FUNC(triu_cuda)(const Tensor& self, int64_t k, const Tensor &result) {
+  TORCH_CHECK(self.dim() >= 2, "triu: input tensor must have at least 2 dimensions")
   if (self.numel() != 0) {
     triu_tril_cuda_template<true>(result, self, k, "triu");
   }

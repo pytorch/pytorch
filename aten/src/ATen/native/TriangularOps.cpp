@@ -171,10 +171,12 @@ void compute_triu_tril(const Tensor& self, int64_t k, const Tensor &result) {
 }  // namespace
 
 TORCH_IMPL_FUNC(tril_cpu)(const Tensor& self, int64_t k, const Tensor &result) {
+  TORCH_CHECK(self.dim() >= 2, "tril: input tensor must have at least 2 dimensions")
   compute_triu_tril<LowerTriangle>(self, k, result);
 }
 
 TORCH_IMPL_FUNC(triu_cpu)(const Tensor& self, int64_t k, const Tensor &result) {
+  TORCH_CHECK(self.dim() >= 2, "triu: input tensor must have at least 2 dimensions")
   compute_triu_tril<UpperTriangle>(self, k, result);
 }
 
