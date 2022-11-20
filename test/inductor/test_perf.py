@@ -17,8 +17,8 @@ aten = torch.ops.aten
 
 
 @register_backend
-def count_bytes_inductor(gm, example_inputs):
-    return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
+def count_bytes_inductor(gm, example_inputs, **kwargs):
+    return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner, **kwargs)
 
 
 @torch._dynamo.optimize("count_bytes_inductor")

@@ -872,7 +872,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
 
 
 @register_backend
-def dynamo_minifier_backend(gm, example_inputs, compiler_name):
+def dynamo_minifier_backend(gm, example_inputs, compiler_name, **kwargs):
     from functorch.compile import minifier
 
     from .eval_frame import lookup_backend
@@ -880,7 +880,7 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     compiler_fn = lookup_backend(compiler_name)
 
     try:
-        compiled_gm = compiler_fn(gm, example_inputs)
+        compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
         run_fwd_maybe_bwd(compiled_gm, example_inputs)
         raise ValueError("No issue was detected")
     except Exception as exc:
@@ -907,7 +907,7 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 
 
 @register_backend
-def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
+def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name, **kwargs):
     from functorch.compile import minifier
 
     from torch._dynamo.optimizations.backends import BACKENDS

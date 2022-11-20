@@ -123,7 +123,7 @@ class TorchScriptStrategy(object):
     """Common base for backend strategies that use TorchScript"""
 
     @classmethod
-    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs):
+    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs, **kwargs):
         if count_calls(gm.graph) < 2:
             return gm.forward  # no point for tiny graphs
         return cls(gm, example_inputs).verified_candidate()

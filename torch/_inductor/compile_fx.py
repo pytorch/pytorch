@@ -108,6 +108,7 @@ def compile_fx_inner(
     num_fixed=0,
     is_backward=False,
     graph_id=None,
+    **kwargs,
 ):
     if dynamo_utils.count_calls(gm.graph) == 0:
         return make_boxed_func(gm.forward)
@@ -346,6 +347,7 @@ def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
     inner_compile=compile_fx_inner,
+    **kwargs,
 ):
     """Main entrypoint to a compile given FX graph"""
 
@@ -374,6 +376,7 @@ def compile_fx(
             num_fixed=fixed,
             cudagraphs=cudagraphs,
             graph_id=graph_id,
+            **kwargs,
         )
 
     @dynamo_utils.dynamo_timed
@@ -386,6 +389,7 @@ def compile_fx(
             cudagraphs=cudagraphs,
             is_backward=True,
             graph_id=graph_id,
+            **kwargs,
         )
 
     with overrides.patch_functions():
@@ -402,4 +406,5 @@ def compile_fx(
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
+            **kwargs,
         )

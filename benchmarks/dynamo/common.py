@@ -560,12 +560,12 @@ def overhead_experiment(*args, model_iter_fn):
     return speedup_experiment(*args, model_iter_fn)
 
 
-def print_fx(gm, example_inputs):
+def print_fx(gm, example_inputs, **kwargs):
     print(gm.graph)
     return gm
 
 
-def print_aten_ops(gm, example_inputs):
+def print_aten_ops(gm, example_inputs, **kwargs):
     from functorch.compile import aot_module
 
     def trace_printer(gm, _):

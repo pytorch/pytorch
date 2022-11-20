@@ -62,12 +62,12 @@ def create_backend(fn):
 
 
 @create_backend
-def eager(subgraph):
+def eager(subgraph, **kwargs):
     return subgraph.model
 
 
 @create_backend
-def ts(subgraph):
+def ts(subgraph, **kwargs):
     return subgraph.scripted
 
 
@@ -88,42 +88,42 @@ def reload_jit_model_ofi(subgraph):
 
 
 @create_backend
-def nnc(subgraph):
+def nnc(subgraph, **kwargs):
     with torch.jit.fuser("fuser1"):
         return reload_jit_model(subgraph)
 
 
 @create_backend
-def nnc_ofi(subgraph):
+def nnc_ofi(subgraph, **kwargs):
     with torch.jit.fuser("fuser1"):
         return reload_jit_model_ofi(subgraph)
 
 
 @create_backend
-def ts_nvfuser(subgraph):
+def ts_nvfuser(subgraph, **kwargs):
     with torch.jit.fuser("fuser2"):
         return reload_jit_model(subgraph)
 
 
 @create_backend
-def ts_nvfuser_ofi(subgraph):
+def ts_nvfuser_ofi(subgraph, **kwargs):
     with torch.jit.fuser("fuser2"):
         return reload_jit_model_ofi(subgraph)
 
 
 @create_backend
-def onednn(subgraph):
+def onednn(subgraph, **kwargs):
     with torch.jit.fuser("fuser3"):
         return reload_jit_model(subgraph)
 
 
 @create_backend
-def ofi(subgraph):
+def ofi(subgraph, **kwargs):
     return torch.jit.optimize_for_inference(subgraph.scripted)
 
 
 @create_backend
-def static_runtime(subgraph):
+def static_runtime(subgraph, **kwargs):
     scripted = subgraph.scripted
     if hasattr(scripted, "_c"):
         static_module = torch._C._jit_to_static_module(scripted._c)
@@ -177,17 +177,17 @@ def onnxrt_common(subgraph, provider, onnx_filename=None):
 
 
 @create_backend
-def onnxrt_cpu(subgraph):
+def onnxrt_cpu(subgraph, **kwargs):
     return onnxrt_common(subgraph, provider="CPUExecutionProvider")
 
 
 @create_backend
-def onnxrt_cuda(subgraph):
+def onnxrt_cuda(subgraph, **kwargs):
     return onnxrt_common(subgraph, provider="CUDAExecutionProvider")
 
 
 @create_backend
-def onnx2tensorrt(subgraph):
+def onnx2tensorrt(subgraph, **kwargs):
     if subgraph.will_tensorrt_barf():
         # TensorRT fails violently with an abort() on this
         return None
@@ -196,7 +196,7 @@ def onnx2tensorrt(subgraph):
 
 
 @create_backend
-def onnxrt_cpu_numpy(subgraph, provider="CPUExecutionProvider"):
+def onnxrt_cpu_numpy(subgraph, provider="CPUExecutionProvider", **kwargs):
     """Alternate version that integrates via numpy"""
     import onnxruntime
 
@@ -222,7 +222,7 @@ def onnxrt_cpu_numpy(subgraph, provider="CPUExecutionProvider"):
 
 
 @create_backend
-def onnxrt(subgraph):
+def onnxrt(subgraph, **kwargs):
     if subgraph.is_cuda:
         return onnxrt_cuda(subgraph)
     else:
@@ -241,7 +241,7 @@ def _init_tensorflow():
 
 
 @create_backend
-def onnx2tf(subgraph):
+def onnx2tf(subgraph, **kwargs):
     import onnx
     from onnx_tf.backend import prepare
 
@@ -278,7 +278,7 @@ def onnx2tf(subgraph):
 
 
 @create_backend
-def taso(subgraph):
+def taso(subgraph, **kwargs):
     taso_filename = subgraph.filename("taso")
     subprocess.check_call(
         [
@@ -412,7 +412,7 @@ def fx2trt(subgraph, **kwargs):
 
 
 @create_backend
-def torch2trt(subgraph):
+def torch2trt(subgraph, **kwargs):
     if subgraph.will_tensorrt_barf():
         # TensorRT fails violently with an abort() on this
         return None
@@ -430,7 +430,7 @@ def torch2trt(subgraph):
 
 
 @create_backend
-def tensorrt(subgraph):
+def tensorrt(subgraph, **kwargs):
     if subgraph.will_tensorrt_barf():
         # TensorRT fails violently with an abort() on this
         return None
@@ -442,7 +442,7 @@ def tensorrt(subgraph):
 
 
 @create_backend
-def onnx2tensorrt_alt(subgraph):
+def onnx2tensorrt_alt(subgraph, **kwargs):
     if subgraph.will_tensorrt_barf():
         # TensorRT fails violently with an abort() on this
         return None
@@ -481,7 +481,7 @@ def onnx2tensorrt_alt(subgraph):
 
 
 @create_backend
-def cudagraphs(subgraph):
+def cudagraphs(subgraph, **kwargs):
     model = subgraph.model
     inputs = subgraph.example_inputs
     assert subgraph.is_cuda
@@ -489,7 +489,7 @@ def cudagraphs(subgraph):
 
 
 @create_backend
-def cudagraphs_ts(subgraph):
+def cudagraphs_ts(subgraph, **kwargs):
     assert subgraph.is_cuda
     model = subgraph.scripted
     inputs = subgraph.example_inputs
@@ -502,7 +502,7 @@ def cudagraphs_ts(subgraph):
 
 
 @create_backend
-def cudagraphs_ts_ofi(subgraph):
+def cudagraphs_ts_ofi(subgraph, **kwargs):
     assert subgraph.is_cuda
     model = torch.jit.optimize_for_inference(torch.jit.freeze(subgraph.scripted))
     inputs = subgraph.example_inputs
@@ -579,7 +579,7 @@ def tvm_compile(jit_mod, example_inputs, log_file=None, **kwargs):
 
 
 @create_backend
-def tvm(subgraph):
+def tvm(subgraph, **kwargs):
     return subgraph.wrap_returns(
         tvm_compile_inner(
             subgraph.scripted,
@@ -591,7 +591,7 @@ def tvm(subgraph):
 
 
 @create_backend
-def ansor(subgraph):
+def ansor(subgraph, **kwargs):
     """
     WARNING: this backend takes hours or days to train and
     often produces a slower result than the default schedule.
@@ -608,7 +608,7 @@ def ansor(subgraph):
 
 
 @create_backend
-def tvm_meta_schedule(subgraph):
+def tvm_meta_schedule(subgraph, **kwargs):
     return subgraph.wrap_returns(
         tvm_compile_inner(
             subgraph.scripted,
@@ -796,7 +796,7 @@ def _init_torchxla():
 
 
 @create_backend
-def torchxla_trivial(subgraph):
+def torchxla_trivial(subgraph, **kwargs):
     _init_torchxla()
 
     xla_dev = xm.xla_device()
@@ -815,7 +815,7 @@ def torchxla_trivial(subgraph):
 
 
 @create_backend
-def torchxla_trace_once(subgraph):
+def torchxla_trace_once(subgraph, **kwargs):
     import torch._dynamo.optimizations.torchxla_integration as integration
 
     model = subgraph.model

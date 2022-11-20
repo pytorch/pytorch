@@ -22,7 +22,7 @@ from .normalize import normalize_ir
 log = logging.getLogger(__name__)
 
 
-def is_aot_autograd_safe_to_run(gm, example_inputs):
+def is_aot_autograd_safe_to_run(gm, example_inputs, **kwargs):
     """
     There are some known issues with Aot Autograd. This is a workaround to catch
     such cases, and fallback to eager. We should fix these quickly.
@@ -88,10 +88,10 @@ class AotAutogradStrategy(object):
     """Base class for backend strategies that use AOT Autograd"""
 
     @classmethod
-    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs):
+    def compile_fn(cls, gm: torch.fx.GraphModule, example_inputs, **kwargs):
         if count_calls(gm.graph) < 2:
             return gm  # no point for tiny graphs
-        return cls(gm, example_inputs).verified_candidate()
+        return cls(gm, example_inputs, **kwargs).verified_candidate()
 
     def __init__(self, gm: torch.fx.GraphModule, example_inputs):
         import functorch.compile

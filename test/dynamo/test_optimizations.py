@@ -95,7 +95,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
             x.fill_(2)
             return x
 
-        def compiler_fn(graph, example_inputs):
+        def compiler_fn(graph, example_inputs, **kwargs):
             self.assertTrue(has_mutation(graph, example_inputs))
             return graph
 
@@ -107,7 +107,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
             b, c = bc
             return a / d - b / c
 
-        def compiler_fn(graph, example_inputs):
+        def compiler_fn(graph, example_inputs, **kwargs):
             nonlocal r1
             r1 = graph(*example_inputs)[0]
             return graph.forward

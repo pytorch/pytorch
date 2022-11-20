@@ -131,7 +131,9 @@ class DDPOptimizer:
     def _ignore_parameter(self, parameter):
         return hasattr(parameter, "_ddp_ignored") and parameter._ddp_ignored
 
-    def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
+    def compile_fn(
+        self, gm: fx.GraphModule, example_inputs: List[torch.Tensor], **kwargs
+    ):
         """
         Implements graph splitting, first determining a set of of buckets by counting
         parameter sizes in reverse graph order, then invoking the user/backend compiler
@@ -182,7 +184,7 @@ class DDPOptimizer:
 
         if len(buckets) == 1:
             # bypass split/fuse logic if there is only one bucket
-            return self.backend_compile_fn(gm, example_inputs)
+            return self.backend_compile_fn(gm, example_inputs, **kwargs)
 
         # 2: partition the graphmodule according to bucket capacity
         partition_map = {}
