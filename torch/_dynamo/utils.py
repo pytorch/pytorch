@@ -19,6 +19,7 @@ import re
 import sys
 import time
 import types
+import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache
@@ -273,6 +274,13 @@ def istype(obj, allowed_types):
     if isinstance(allowed_types, (tuple, list, set)):
         return type(obj) in allowed_types
     return type(obj) is allowed_types
+
+
+def is_typing(value):
+    if sys.version_info < (3, 9):
+        return isinstance(value, typing._GenericAlias)
+    else:
+        return isinstance(value, typing._SpecialGenericAlias)
 
 
 def is_numpy_int_type(value):
@@ -808,7 +816,9 @@ def same(
             res = res.to_dense()
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
-            assert ref.dtype == res.dtype, f"dtype mismatch {ref.dtype}, {res.dtype}"
+            if ref.dtype != res.dtype:
+                log.error(f"dtype mismatch {ref.dtype}, {res.dtype}")
+                return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
                 return torch.allclose(
@@ -1045,13 +1055,20 @@ def get_fake_value(node, tx):
     except Unsupported:
         raise
     except RuntimeError as e:
-        if isinstance(e, torch._subclasses.fake_tensor.DataDependentOutputException):
+        cause = e
+        if e.__cause__ is not None:
+            cause = e.__cause__
+        if isinstance(
+            cause, torch._subclasses.fake_tensor.DataDependentOutputException
+        ):
             if config.capture_scalar_outputs and node.target == "item":
                 return torch.zeros(size=(), dtype=args[0].dtype).item()
             else:
-                unimplemented(f"data dependent operator: {e.func}")
-        elif isinstance(e, torch._subclasses.fake_tensor.DynamicOutputShapeException):
-            unimplemented(f"dynamic shape operator: {e.func}")
+                unimplemented(f"data dependent operator: {cause.func}")
+        elif isinstance(
+            cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
+        ):
+            unimplemented(f"dynamic shape operator: {cause.func}")
         raise TorchRuntimeError() from e
 
 
