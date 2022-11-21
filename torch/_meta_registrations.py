@@ -251,7 +251,7 @@ def batched_matrix_contiguous_strides(sizes, f_contig: bool = False):
         strides[dim - 2] = 1
     return strides
 
-
+# From aten/src/ATen/native/BatchLinearAlgebra.cpp
 @register_meta(aten.linalg_cholesky_ex.default)
 def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = False):
     squareCheckInputs(A, "linalg.cholesky")
@@ -269,7 +269,7 @@ def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = Fals
     infos = A.new_empty(A_shape[0 : ndim - 2], dtype=torch.int32)
     return L, infos
 
-
+# From aten/src/ATen/native/BatchLinearAlgebra.cpp
 @register_meta(aten.linalg_cholesky.default)
 def meta_linalg_cholesky(A: Tensor, upper=False):
     # All the checks done on info in the corresponding C++ function
