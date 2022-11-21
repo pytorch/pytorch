@@ -59,6 +59,8 @@ class UnaryAttr(object):
         super(UnaryAttr, self).__init__()
 
     def __call__(self, unary_module: nn.Module):
+        if type(unary_module) is nn.ReLU6:
+            unary_module = nn.Hardtanh(min_val=0, max_val=6)
         assert all(hasattr(unary_module, item) for item in self.scalars_attr)
         scalars = [getattr(unary_module, item) for item in self.scalars_attr]
 
@@ -983,6 +985,8 @@ unary_modules_map = {
     nn.LeakyReLU: UnaryAttr("leaky_relu", scalars_attr=["negative_slope"]),
     nn.Hardtanh: UnaryAttr("hardtanh", scalars_attr=["min_val", "max_val"]),
     nn.GELU: UnaryAttr("gelu", algorithm_attr="approximate"),
+    nn.ReLU6: UnaryAttr("hardtanh", scalars_attr=["min_val", "max_val"]),
+    nn.SiLU: UnaryAttr("swish"),
 }
 
 
