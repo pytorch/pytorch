@@ -160,6 +160,7 @@ from torch.testing._internal.common_quantization import (
     LinearReluModel,
     QuantizationTestCase,
     skipIfNoFBGEMM,
+    skipIfNoQNNPACK,
     skip_if_no_torchvision,
     train_one_epoch,
     run_ddp,
@@ -5343,6 +5344,7 @@ class TestQuantizeFx(QuantizationTestCase):
         res = m(*example_inputs)
         self.assertEqual(res, res_ref)
 
+    @skipIfNoQNNPACK
     def test__convert_to_reference_decomposed_fx_dynamic_quant(self):
         class M(torch.nn.Module):
             def __init__(self):
