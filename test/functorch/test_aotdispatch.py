@@ -310,8 +310,8 @@ class TestAOTAutograd(AOTTestCase):
                 if test_mutation:
                     # This tests that autograd meta is set properly on the output we can
                     # mutate it.
-                    ref_o.mul_(1)
-                    test_o.mul_(1)
+                    ref_o.mul_(2)
+                    test_o.mul_(2)
                     self.assertEqual(ref_o, test_o)
         for ref_i, test_i in zip(inp, inp_copy):
             if isinstance(ref_i, torch.Tensor):
@@ -425,7 +425,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
         self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
 
-    def test_input_output_view_mutate_simple(self):
+    def test_input_output_view_simple(self):
         def f(a):
             return a.view(-1)
         inp = [
@@ -436,7 +436,7 @@ def forward(self, primals_1, primals_2, primals_3):
         # Outputs that alias inputs are pulled out of the graph entirely, so we don't compile anything here
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
-    return []""")
+    return [4, 1, 0]""")
 
     def test_input_output_view_mutate_multiple(self):
         def f(a, b, c):
@@ -460,7 +460,7 @@ def forward(self, primals_1, primals_2, primals_3):
     clone_1 = torch.ops.aten.clone.default(primals_3);  primals_3 = None
     mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
     mul_1 = torch.ops.aten.mul.Tensor(clone_1, 3);  clone_1 = None
-    return [mul, mul_1]""")
+    return [mul, mul_1, 2, 2, 2, 1, 0, 2, 2, 2, 1, 0]""")
 
     def test_input_output_view_metadata_mutate_multiple(self):
         def f(a, b, c):
@@ -483,7 +483,7 @@ def forward(self, primals_1, primals_2, primals_3):
 def forward(self, primals_1, primals_2, primals_3):
     clone = torch.ops.aten.clone.default(primals_2);  primals_2 = None
     mul = torch.ops.aten.mul.Tensor(clone, 3);  clone = None
-    return [mul]""")
+    return [mul, 2, 2, 1, 2, 0, 2, 2, 2, 1, 0, 2, 2, 2, 1, 0, 2, 2, 1, 2, 0]""")
 
     def test_input_mutation_and_output_view(self):
         def f(a):
@@ -501,7 +501,7 @@ def forward(self, primals_1, primals_2, primals_3):
 def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
-    return [add]""")
+    return [add, 4, 1, 0]""")
 
 
     def test_input_mutation_output_view_multiple(self):
@@ -523,7 +523,178 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
     add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
     add_1 = torch.ops.aten.add.Tensor(primals_4, 1);  primals_4 = None
     add_2 = torch.ops.aten.add.Tensor(primals_1, add);  primals_1 = None
-    return [add, add_1, add_2]""")
+    return [add, add_1, add_2, 2, 2, 1, 2, 0, 2, 3, 0]""")
+
+    def test_output_aliases_intermediate_single(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            return out.view(-1)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        # In AOTAutograd, we are obligated to make the compiled forward directly return `out`,
+        # and reconstruct `out.view(-1)` as a fresh output.
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    return [mul, 9, 1, 0]""")
+
+    def test_output_aliases_intermediate_multiple(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            # AOTAutograd should manually generate these two output views in the epilogue.
+            return out.view(-1), out.view(-1)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    return [mul, mul, 9, 1, 0, 9, 1, 0]""")
+
+    def test_output_aliases_intermediate_and_returned(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            # AOTAutograd should manually generate the first output (a view of an intermediate)
+            # but not the second (which is itself the intermediate for the first)
+            return out.view(-1), out
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    return [mul, mul, 9, 1, 0]""")
+
+    def test_output_aliases_intermediate_multiple_mixed(self):
+        def f(a):
+            out1 = torch.mul(a, 3)
+            out2 = torch.mul(a, 4)
+            # AOTAutograd should manually generate these two output views in the epilogue.
+            return out1.view(-1), out2.transpose(1, 0), out1.transpose(1, 0)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3)
+    mul_1 = torch.ops.aten.mul.Tensor(primals_1, 4);  primals_1 = None
+    return [mul, mul_1, mul, 9, 1, 0, 3, 3, 1, 3, 0, 3, 3, 1, 3, 0]""")
+
+    def test_output_all_alias_types(self):
+        # There are 3 types of aliasing that require us to return metadata in the compiled fw:
+        # (1) outputs that are views of inputs
+        # (2) outputs that are views of intermediates
+        # (3) inputs that get metadata mutations
+        # test all 3 of them here
+        def f(a):
+            a.transpose_(1, 0)
+            tmp = a.mul(2)
+            return tmp.squeeze(), tmp.transpose(1, 0), a.unsqueeze(0)
+        inp = [torch.ones(1, 2, 4, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        # TODO: make this test run with dynamic shapes so it is more meaningful
+        # metadata output order: (a_updated_meta, out1_meta, out2_meta, out3_meta)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    view = torch.ops.aten.view.default(primals_1, [1, 2, 4]);  primals_1 = None
+    transpose = torch.ops.aten.transpose.int(view, 1, 0);  view = None
+    mul = torch.ops.aten.mul.Tensor(transpose, 2);  transpose = None
+    return [mul, mul, 2, 1, 4, 4, 8, 1, 0, 2, 4, 4, 1, 0, 1, 2, 4, 8, 4, 1, 0, 1, 2, 1, 4, 8, 4, 8, 1, 0]""")
+
+    def test_input_data_and_metadata_mutation(self):
+        def f(a):
+            a.t_()
+            a[0].mul_(2)
+            return a.view(a.shape)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+    t = torch.ops.aten.t.default(clone)
+    select = torch.ops.aten.select.int(t, 0, 0);  t = None
+    mul = torch.ops.aten.mul.Tensor(select, 2);  select = None
+    t_1 = torch.ops.aten.t.default(clone);  clone = None
+    select_scatter = torch.ops.aten.select_scatter.default(t_1, mul, 0, 0);  t_1 = mul = None
+    t_2 = torch.ops.aten.t.default(select_scatter);  select_scatter = None
+    t_3 = torch.ops.aten.t.default(t_2);  t_2 = None
+    return [t_3, 3, 3, 1, 3, 0]""")
+
+    def test_view_and_inplace_view(self):
+        def f(a, b):
+            a.t_()
+            return b.view(b.shape), a.view(a.shape)
+        inp = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=True)
+        ]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1, primals_2):
+    return [3, 3, 1, 3, 0, 3, 3, 3, 1, 0, 3, 3, 1, 3, 0]""")
+
+    def test_view_detach(self):
+        def f(a):
+            tmp = a.detach()
+            a.mul_(2)
+            return a, tmp
+        inp = [
+            torch.ones(3, 3, requires_grad=True),
+        ]
+
+        self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+
+    def test_input_inplace_requires_grad_true(self):
+        def f(a, b):
+            a.requires_grad_(True)
+            return a.mul(3), b.mul(4)
+        inp = [
+            # First inp doesnt require grad, but we switch it on
+            torch.ones(3, 3, requires_grad=False),
+            torch.ones(3, 3, requires_grad=True),
+        ]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1, primals_2):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(primals_2, 4);  primals_2 = None
+    return [mul, mul_1]""")
+
+    def test_input_data_and_metadata_mutation_aliases_other_input(self):
+        # a and b are aliased
+        def f(a, b):
+            a.t_()
+            b.mul_(2)
+            return a.mul(3)
+
+        def inp_callable():
+            base = torch.ones(2, 2, requires_grad=True)
+            # Note: in our test, the add() is important because we need the graph inputs to be non-leaves so we can mutate them.
+            x = base.add(1)
+            inp1 = x.view(-1)
+            inp2 = x.view(-1)
+            return [base], [inp1, inp2]
+
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        # Important parts of the graph:
+        # - the compiled graph takes in a base, and we generate a and b (the views) off of the base
+        # - clone() is still in the graph, because we need to call grad() on the original (non-mutated) inputs
+        # - We re-generate the views *after* the clone, to preserve view relationships.
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+    as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
+    mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = None
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    t_1 = torch.ops.aten.t.default(as_strided_5);  as_strided_5 = None
+    mul_1 = torch.ops.aten.mul.Tensor(t_1, 3);  t_1 = None
+    return [mul, mul_1, 4, 1, 0]""")
 
     def test_input_mutation_aliases_other_input(self):
         def f(a, b):
@@ -596,7 +767,33 @@ def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0);  clone = None
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    return [add]""")
+    return [add, 4, 1, 0]""")
+
+    def test_input_aliased_with_mutation_output_alias(self):
+        def f(a, b, c):
+            # a and c alias
+            c.mul_(2)
+            # The main thing we're testing here is that
+            # (1) We need to reconstruct c.view(-1) from the 3rd input to the forward
+            # (2) But we need to be careful to do this *before* converting aliased inputs into synthetic bases.
+            #     The original fw takes in 3 args, but the compiled fw takes in only 2 args.
+            return b.add(1), c.view(-1)
+
+        def inp_callable():
+            base1 = torch.ones(2, 2, requires_grad=True)
+            base2 = torch.ones(2, 2, requires_grad=True)
+            x = base1.add(1)
+            y = base2.add(1)
+            return [base1, base2], [x.view(-1), y, x.view(-1)]
+
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1, primals_2):
+    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+    as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0);  clone = None
+    mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
+    add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
+    return [mul, add, 4, 1, 0]""")
 
     def test_input_metadata_mutation_aliases(self):
         def f(a, b):
@@ -618,7 +815,7 @@ def forward(self, primals_1, primals_2):
     view = torch.ops.aten.view.default(primals_1, [4]);  primals_1 = None
     t = torch.ops.aten.t.default(view);  view = None
     add = torch.ops.aten.add.Tensor(t, primals_2);  t = primals_2 = None
-    return [add]""")
+    return [add, 4, 1, 0]""")
 
     def test_input_mutation_aliases_and_none_require_gradients(self):
         def f(a, b, c):
@@ -671,15 +868,59 @@ def forward(self, primals_1, primals_2):
         # (there are also 2 input mutations, but one is a metadata-only mutation so the compiled forward doesn't return it)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2, primals_3):
-    clone = torch.ops.aten.clone.default(primals_2);  primals_2 = None
-    as_strided = torch.ops.aten.as_strided.default(primals_1, [4], [1], 0)
+    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+    as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    add_1 = torch.ops.aten.add.Tensor(clone, primals_3);  clone = primals_3 = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(primals_1, add, [4], [1], 0);  primals_1 = None
+    add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = None
     as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
     t_1 = torch.ops.aten.t.default(as_strided_4);  as_strided_4 = None
     add_2 = torch.ops.aten.add.Tensor(add_1, t_1);  add_1 = t_1 = None
-    return [add, add_2]""")
+    return [add, add_2, 4, 1, 0, 4, 1, 0]""")
+
+    # Mondo test that tests a combination of:
+    # input is mutated, that aliases another input (so we make a synthetic base)
+    # an output is an alias of another output
+    # an output is an alias of an intermediate
+    def test_input_mutation_alias_everything(self):
+        # a and c are aliased
+        def f(a, b, c):
+            c.add_(1)  # mutates c
+            b.t_()  # metadata mutate b
+            tmp = a + c
+            out1 = tmp.view(-1)
+            out2 = b.t()
+            out3 = out1.unsqueeze(0)
+            # out1 and out3 are aliases of an intermediate, and alias each other!
+            # out2 aliases an input, so we don't return it
+            return out1, out2, out3
+
+        def inp_callable():
+            base1 = torch.ones(2, 2, requires_grad=True)
+            base2 = torch.ones(2, 2, requires_grad=True)
+            # Note: in our test, the add() is important because we need the graph inputs to be non-leaves so we can mutate them.
+            base1_ = base1.add(1)
+            base2_ = base2.add(1)
+            a = base1_.view(-1)
+            b = base2_
+            c = base1_.view(-1)
+            return [base1, base2], [a, b, c]
+
+        fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True, return_fw_graph=True)
+        # Expected:
+        # - 2 inputs in the forward: synthetic_base_a_c, b
+        # - 1 output in the forward: "tmp"
+        #   out2 is an alias of an input, and will be generated off of b outside of the compiled fn
+        #   out1 and out3 are aliases of tmp, that we generate outside of the compiled function
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1, primals_2):
+    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+    as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
+    add = torch.ops.aten.add.Tensor(as_strided_1, 1);  as_strided_1 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = None
+    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0);  as_strided_scatter = None
+    add_1 = torch.ops.aten.add.Tensor(as_strided_4, add);  as_strided_4 = None
+    return [add, add_1, add_1, 2, 2, 1, 2, 0, 4, 1, 0, 2, 2, 2, 1, 0, 1, 4, 4, 1, 0]""")
 
     def test_no_grad_input_output(self):
         def f(a, b):
@@ -1107,15 +1348,20 @@ class TestPartitioning(AOTTestCase):
         (compiled_outs[0].sum() + compiled_outs[2].sum()).backward()
         bw_graph = bw_graph_cell[0]
 
-        self.assertEqual(get_num_ins_outs(fw_graph), (4, 13))
-        self.assertEqual(get_num_ins_outs(bw_graph), (13, 4))
+        # 12 outs because:
+        # - 5 original outputs -> 4 graph outputs (the 3rd output is an input alias, gets moved outside)
+        # - 8 saved outputs for backward: 5 tensors, 3 symints
+        self.assertEqual(get_num_ins_outs(fw_graph), (4, 12))
+        self.assertEqual(get_num_ins_outs(bw_graph), (12, 4))
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
             #
             # TODO(whc)- are the saved-tensors/saved-symints correct here?
             # i just made the test pass based on what default partition did
-            [False, True, True, False, False] + [False] * 5 + [True] * 3,
+            # Of the 5 original forward outputs, the 4th (c) is an input,
+            # which won't show up in the compiled forward graph
+            [False, True, True, False] + [False] * 5 + [True] * 3,
             [is_sym_node(n) for n in fw_graph_out_nodes]
         )
 
@@ -1163,14 +1409,14 @@ class TestPartitioning(AOTTestCase):
         (compiled_outs[0].sum() + compiled_outs[2].sum()).backward()
         bw_graph = bw_graph_cell[0]
 
-        self.assertEqual(get_num_ins_outs(fw_graph), (4, 13))
-        self.assertEqual(get_num_ins_outs(bw_graph), (13, 4))
+        self.assertEqual(get_num_ins_outs(fw_graph), (4, 12))
+        self.assertEqual(get_num_ins_outs(bw_graph), (12, 4))
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
             # then 4 tensors (transposes of matricies used for mm) are saved
             # finally 4 symints are saved
-            [False, True, True, False, False] + [False] * 4 + [True] * 4,
+            [False, True, True, False] + [False] * 4 + [True] * 4,
             [is_sym_node(n) for n in fw_graph_out_nodes]
         )
 
@@ -1432,10 +1678,8 @@ symbolic_aot_autograd_failures = {
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('deg2rad', ''),  # aten.deg2rad.default - couldn't find symbolic meta function/decomposition
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
-    xfail('dist', ''),  # aten.dist.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.fft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.fft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1499,7 +1743,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.tensorinv', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.tensorsolve', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.vander', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('linalg.vector_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('logaddexp2', ''),  # aten.logaddexp2.default - couldn't find symbolic meta function/decomposition
     xfail('logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
     xfail('logcumsumexp', ''),  # aten.logcumsumexp.default - couldn't find symbolic meta function/decomposition
@@ -1526,9 +1769,6 @@ symbolic_aot_autograd_failures = {
     xfail('min', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mv', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('mvlgamma', 'mvlgamma_p_1'),  # aten.digamma_.default - couldn't find symbolic meta function/decom...
-    xfail('mvlgamma', 'mvlgamma_p_3'),  # aten.digamma_.default - couldn't find symbolic meta function/decom...
-    xfail('mvlgamma', 'mvlgamma_p_5'),  # aten.digamma_.default - couldn't find symbolic meta function/decom...
 
     # Deleting this in a followup
     xfail('nn.functional.poisson_nll_loss', ''),
@@ -1542,16 +1782,14 @@ symbolic_aot_autograd_failures = {
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail('nn.functional.bilinear', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
-    xfail('nn.functional.cosine_embedding_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.cosine_similarity', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.cross_entropy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.ctc_loss', ''),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/deco...
     xfail('nn.functional.embedding_bag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.fractional_max_pool2d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.fractional_max_pool3d', ''),  # rand() received an invalid combination of arguments - g...
-    xfail('nn.functional.grid_sample', ''),  # prims::arange() Expected a value of type 'number' for argument...
+    xfail('nn.functional.grid_sample', ''),  # RuntimeError: aten.grid_sampler_3d.default - couldn't find sym ...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.hinge_embedding_loss', ''),  # aten.zeros_like.default - couldn't find symbolic meta...
     xfail('nn.functional.interpolate', 'area'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'bicubic'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1569,10 +1807,8 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.multi_margin_loss', ''),  # could not find kernel
     xfail('nn.functional.multilabel_margin_loss', ''),  # could not find kernel
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.normalize', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pad', 'reflect'),  # aten.reflection_pad1d.default - couldn't find symbolic meta fu...
     xfail('nn.functional.pad', 'replicate'),  # aten.replication_pad1d.default - couldn't find symbolic meta...
-    xfail('nn.functional.pairwise_distance', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pdist', ''),  # could not find kernel
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
@@ -1581,7 +1817,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.smooth_l1_loss', ''),  # could not find kernel
     xfail('nn.functional.unfold', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.upsample_nearest', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('norm', 'nuc'),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
     xfail('normal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1598,15 +1833,10 @@ symbolic_aot_autograd_failures = {
     xfail('prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('put', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('qr', ''),  # aten.linalg_qr.default - couldn't find symbolic meta function/decomposition
-    xfail('rad2deg', ''),  # aten.rad2deg.default - couldn't find symbolic meta function/decomposition
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('reshape_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('roll', ''),  # narrow() received an invalid combination of arguments - got (FakeTensor, int, torch._C...
-    xfail('round', ''),  # aten.round.default - couldn't find symbolic meta function/decomposition
-    xfail('round', 'decimals_0'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
-    xfail('round', 'decimals_3'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
-    xfail('round', 'decimals_neg_3'),  # aten.round.decimals - couldn't find symbolic meta function/decompos...
     xfail('segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
