@@ -419,11 +419,10 @@ def default_archive_name(dtype):
     _, prefix = archive_data(None)
     return f"{prefix}_performance_{dtype}_{randint(100, 999)}"
 
+
 def get_archive_name(args, dtype):
     return (
-        default_archive_name(dtype)
-        if args.archive_name is None
-        else args.archive_name
+        default_archive_name(dtype) if args.archive_name is None else args.archive_name
     )
 
 
