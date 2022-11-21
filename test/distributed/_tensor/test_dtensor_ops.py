@@ -657,8 +657,9 @@ def check_dtensor_func(test_case, test_func, opinfo, dry_run=False):
     else:
         test_case.destroy_pg()
 
+from torch.testing._internal.common_distributed import MultiThreadedTestCase
 
-class TestDTensorOps(DTensorTestBase):
+class TestDTensorOps(MultiThreadedTestCase):
     @property
     def world_size(self) -> int:
         return 4
@@ -670,11 +671,11 @@ class TestDTensorOps(DTensorTestBase):
     @ops(dtensor_lagging_op_db, allowed_dtypes=(torch.float,))
     @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)
     def test_dtensor_op_db(self, dtype, op):
-        pg_backend = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
-        if pg_backend == "nccl" and torch.cuda.device_count() < self.world_size:
+        # pg_backend = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
+        if DEVICE_TYPE == "cuda" and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        self.init_pg(backend=pg_backend)
+        # self.init_pg(backend=pg_backend)
         self.mesh = DeviceMesh(DEVICE_TYPE, torch.arange(self.world_size))
 
         # test each op with dist tensor inputs and normal inputs
