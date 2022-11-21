@@ -1179,11 +1179,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             num_inner_fwd_outputs = _num_mutated_data_inputs + _num_non_aliased_outs + _num_aliasing_metadata_outs
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs)
-            orig_fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
+            fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
-            fw_outs_saved_for_bw = orig_fw_outs[num_inner_fwd_outputs:]
-            non_symint_outs = [n for n in fw_outs if not is_sym_node(n)]
+            fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
             symint_outs_saved_for_bw = [n for n in fw_outs_saved_for_bw if is_sym_node(n)]
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
@@ -1298,17 +1297,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             all_args = list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             del contiguous_args
             if CompiledFunction.compiled_bw is None:
-                # TODO: pass in static arguments as real tensors, not fake
-                # tensor
-                all_fake_args = (
-                    [n.meta['val'] for n in symint_outs]
-                    + [n if isinstance(n, int) else n.meta['val'] for n in non_symint_outs]
-                    + [n if isinstance(n, int) else n.meta['val'] for n in orig_fw_outs[:_num_outs]]
-                )
+                # TODO - pass in fake tensors ?
                 context = disable_autocast_manager if disable_amp else nullcontext
                 with context(), track_graph_compiling("backward", True):
                     CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                        bw_module, all_fake_args
+                        bw_module, all_args
                     )
 
             ctx.maybe_clear_saved_tensors()
