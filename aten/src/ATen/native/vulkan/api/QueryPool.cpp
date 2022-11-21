@@ -232,7 +232,8 @@ std::tuple<std::string, uint64_t> QueryPool::
     log_idx += 1;
   }
 
-  const ShaderDuration& entry = shader_logs_[log_idx][query_index - entry_count_acc];
+  const ShaderDuration& entry =
+      shader_logs_[log_idx][query_index - entry_count_acc];
 
   return std::tuple<std::string, uint64_t>(
       entry.kernel_name, entry.execution_duration_ns);
