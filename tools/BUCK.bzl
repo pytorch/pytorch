@@ -62,10 +62,11 @@ def define_tools_targets(
             ("code_analyzer", "gen_oplist.py"),
             ("code_analyzer", "gen_op_registration_allowlist.py"),
         ]),
-        base_module = "",
+        base_module = "tools.code_analyzer",
         tests = [
             ":gen_oplist_test",
         ],
+        visibility = ["PUBLIC"],
         deps = [
             ":gen_selected_mobile_ops_header",
             torchgen_deps,
@@ -75,7 +76,7 @@ def define_tools_targets(
 
     python_binary(
         name = "gen_oplist",
-        main_module = "gen_oplist",
+        main_module = "tools.code_analyzer.gen_oplist",
         visibility = ["PUBLIC"],
         deps = [
             ":gen_oplist_lib",
