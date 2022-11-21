@@ -1,12 +1,11 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates
-
+# Owner(s): ["oncall: distributed"]
 
 from collections import OrderedDict
 import torch
+
+import torch.distributed.checkpoint.traverse as tv
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.testing._internal.common_utils import run_tests, TestCase
-import torch.distributed.checkpoint.traverse as tv
-
 
 # TODO: add comments for TestTraverse
 class TestTraverse(TestCase):
