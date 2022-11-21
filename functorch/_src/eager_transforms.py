@@ -474,7 +474,9 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         flat_output_numels = tuple(out.numel() for out in flat_output)
 
         out_vec_size = sum(flat_output_numels)
-        stacked_results = [torch.zeros(out_vec_size, *primal.shape) for primal in flat_primals]
+        # Pre-allocate to avoid holding list of Tensors.
+        # stacked_results = [torch.zeros(out_vec_size, *primal.shape) for primal in flat_primals]
+        results = []
         for idx in range(out_vec_size):
             # Generate Basis
             basis = flat_output[0].new_zeros(out_vec_size)
@@ -489,12 +491,19 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
                 prev_end = end
 
             tensors = tuple(t.view_as(o) for t, o in zip(tensors, flat_output))
-            r = vjp_fn(tensors)
+            r = vjp_fn(tree_unflatten(tensors, output_spec))
+            r, _ = tree_flatten(r)
+            # for r_, sr in zip(r, stacked_results):
+            #     sr.index_put_((torch.tensor([idx]),), r_)
+            results.append(r)
 
-            for r_, sr in zip(r, stacked_results):
-                sr[idx].copy_(r_)
-
-        flat_results, results_spec = tree_flatten(stacked_results)
+        # flat_results, results_spec = tree_flatten(stacked_results)
+        flat_results = []
+        for idx in range(len(flat_primals)):
+            r = tuple(map(lambda r_: r_[idx], results))
+            # Stack is not memory efficient as
+            # it allocates a new large Tensor!
+            flat_results.append(torch.stack(r))
 
         # Step 2: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.
