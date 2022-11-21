@@ -27,7 +27,12 @@ from torch.ao.quantization.qconfig import (
     float_qparams_weight_only_qconfig_4bit,
     _activation_is_memoryless)
 from torch.nn.utils.parametrize import type_before_parametrizations
-from torch.ao.quantization.observer import _is_activation_post_process
+
+from torch.ao.quantization.observer import (  # noqa: F401
+    _is_activation_post_process,
+    _is_activation_post_process as is_activation_post_process,
+    # TODO remove this once problems from name change are resolved
+)
 
 __all__ = [
     "get_default_custom_config_dict",
@@ -138,11 +143,13 @@ def register_activation_post_process_hook(module, pre_hook=False):
     assert hasattr(module, 'activation_post_process'), \
         'Expect activation_post_process attribute already attached to the module'
     if pre_hook:
-        handle = module.register_forward_pre_hook(_observer_forward_pre_hook)
-        module._forward_pre_hooks.move_to_end(handle.id, last=False)
+        handle = module.register_forward_pre_hook(
+            _observer_forward_pre_hook, prepend=True
+        )
     else:
-        handle = module.register_forward_hook(_observer_forward_hook)
-        module._forward_hooks.move_to_end(handle.id, last=False)
+        handle = module.register_forward_hook(
+            _observer_forward_hook, prepend=True
+        )
 
 
 def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=None, device=None, custom_module_class_mapping=None):

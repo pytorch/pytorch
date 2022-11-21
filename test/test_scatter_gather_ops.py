@@ -289,10 +289,16 @@ class TestScatterGather(TestCase):
             idx2 = idx.contiguous()
             src = torch.randn(expanded_shape, device=device).to(dtype=dtype)
 
-            input.scatter_add_(0, idx, src)
-            input2.scatter_add_(0, idx2, src)
+            out = input.scatter_add(0, idx, src)
+            out2 = input2.scatter_add(0, idx2, src)
 
-            self.assertEqual(input, input2)
+            self.assertEqual(out, out2)
+
+            for reduce in ["sum", "prod", "mean", "amax", "amin"]:
+                for include_self in [True, False]:
+                    out = input.scatter_reduce(0, idx, src, reduce=reduce, include_self=include_self)
+                    out2 = input2.scatter_reduce(0, idx2, src, reduce=reduce, include_self=include_self)
+                    self.assertEqual(out, out2)
 
         helper([50, 17], 100)
         helper([50, 1], 100)
