@@ -100,7 +100,6 @@ c10::intrusive_ptr<Work> allgather_coalesced_(
     const std::vector<std::vector<at::Tensor>>& output_lists,
     const at::TensorList& input_list,
     const c10::intrusive_ptr<ProcessGroup>& process_group) {
-
   auto input_list_vec = input_list.vec();
   return process_group->allgather_coalesced(
       const_cast<std::vector<std::vector<at::Tensor>>&>(output_lists),
@@ -142,7 +141,7 @@ c10::intrusive_ptr<Work> gather_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t root_rank,
     int64_t timeout) {
- auto input_tensors_vec = input_tensors.vec();
+  auto input_tensors_vec = input_tensors.vec();
   return process_group->gather(
       const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
       input_tensors_vec,
@@ -155,7 +154,7 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t root_rank,
     int64_t timeout) {
-    auto output_tensors_vec = output_tensors.vec();
+  auto output_tensors_vec = output_tensors.vec();
   auto work = process_group->scatter(
       output_tensors_vec,
       const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),

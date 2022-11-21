@@ -252,9 +252,10 @@ c10::intrusive_ptr<Work> allgather_coalesced_cpu_(
     const at::TensorList& input_list,
     const c10::intrusive_ptr<ProcessGroup>& process_group) {
   auto input_list_vec = input_list.vec();
-  return process_group->getBackend(c10::DeviceType::CPU)->allgather_coalesced(
-      const_cast<std::vector<std::vector<at::Tensor>>&>(output_lists),
-      input_list_vec);
+  return process_group->getBackend(c10::DeviceType::CPU)
+      ->allgather_coalesced(
+          const_cast<std::vector<std::vector<at::Tensor>>&>(output_lists),
+          input_list_vec);
 }
 
 c10::intrusive_ptr<Work> allgather_coalesced_cuda_(
@@ -262,9 +263,10 @@ c10::intrusive_ptr<Work> allgather_coalesced_cuda_(
     const at::TensorList& input_list,
     const c10::intrusive_ptr<ProcessGroup>& process_group) {
   auto input_list_vec = input_list.vec();
-  return process_group->getBackend(c10::DeviceType::CUDA)->allgather_coalesced(
-      const_cast<std::vector<std::vector<at::Tensor>>&>(output_lists),
-      input_list_vec);
+  return process_group->getBackend(c10::DeviceType::CUDA)
+      ->allgather_coalesced(
+          const_cast<std::vector<std::vector<at::Tensor>>&>(output_lists),
+          input_list_vec);
 }
 
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>
@@ -339,11 +341,12 @@ c10::intrusive_ptr<Work> gather_cpu_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t root_rank,
     int64_t timeout) {
- auto input_tensors_vec = input_tensors.vec();
-  return process_group->getBackend(c10::DeviceType::CPU)->gather(
-      const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
-      input_tensors_vec,
-      GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
+  auto input_tensors_vec = input_tensors.vec();
+  return process_group->getBackend(c10::DeviceType::CPU)
+      ->gather(
+          const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
+          input_tensors_vec,
+          GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
 }
 c10::intrusive_ptr<Work> gather_cuda_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
@@ -351,11 +354,12 @@ c10::intrusive_ptr<Work> gather_cuda_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t root_rank,
     int64_t timeout) {
- auto input_tensors_vec = input_tensors.vec();
-  return process_group->getBackend(c10::DeviceType::CUDA)->gather(
-      const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
-      input_tensors_vec,
-      GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
+  auto input_tensors_vec = input_tensors.vec();
+  return process_group->getBackend(c10::DeviceType::CUDA)
+      ->gather(
+          const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
+          input_tensors_vec,
+          GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
 }
 
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_cpu_(
@@ -364,11 +368,13 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_cpu_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t root_rank,
     int64_t timeout) {
-    auto output_tensors_vec = output_tensors.vec();
-  auto work = process_group->getBackend(c10::DeviceType::CPU)->scatter(
-      output_tensors_vec,
-      const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
-      ScatterOptions{root_rank, std::chrono::milliseconds(timeout)});
+  auto output_tensors_vec = output_tensors.vec();
+  auto work =
+      process_group->getBackend(c10::DeviceType::CPU)
+          ->scatter(
+              output_tensors_vec,
+              const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
+              ScatterOptions{root_rank, std::chrono::milliseconds(timeout)});
 
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
       std::move(output_tensors_vec), work);
@@ -380,11 +386,13 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_cuda_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t root_rank,
     int64_t timeout) {
-    auto output_tensors_vec = output_tensors.vec();
-  auto work = process_group->getBackend(c10::DeviceType::CUDA)->scatter(
-      output_tensors_vec,
-      const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
-      ScatterOptions{root_rank, std::chrono::milliseconds(timeout)});
+  auto output_tensors_vec = output_tensors.vec();
+  auto work =
+      process_group->getBackend(c10::DeviceType::CUDA)
+          ->scatter(
+              output_tensors_vec,
+              const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
+              ScatterOptions{root_rank, std::chrono::milliseconds(timeout)});
 
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
       std::move(output_tensors_vec), work);
@@ -442,9 +450,10 @@ void monitored_barrier_cpu_(
     const std::vector<int64_t>& device_ids,
     int64_t timeout,
     bool wait_all_ranks) {
-  process_group->getBackend(c10::DeviceType::CPU)->monitoredBarrier(
-      BarrierOptions{device_ids, std::chrono::milliseconds(timeout)},
-      wait_all_ranks);
+  process_group->getBackend(c10::DeviceType::CPU)
+      ->monitoredBarrier(
+          BarrierOptions{device_ids, std::chrono::milliseconds(timeout)},
+          wait_all_ranks);
 }
 
 // register functions to dispatcher

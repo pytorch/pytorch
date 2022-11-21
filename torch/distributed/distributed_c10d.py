@@ -993,8 +993,9 @@ def _new_process_group_helper(
                 return GroupMember.NON_GROUP_MEMBER
 
         if backend == Backend.GLOO:
-            if pg_options is not None:
-                raise RuntimeError("GLOO options not supported")
+            # TODO: remove this check after lazy initialization is supported
+            # if pg_options is not None:
+            #     raise RuntimeError("GLOO options not supported")
             backend_pg = ProcessGroupGloo(prefix_store, group_rank, group_size, timeout=timeout)
         elif backend == Backend.NCCL:
             if not is_nccl_available():
@@ -2601,7 +2602,7 @@ def all_gather_coalesced(
     if _rank_not_in_group(group):
         _warn_not_in_group("all_gather_coalesced")
         return
-    _check_tensor_list(input_tensor_list, "tensor_list")
+    _check_tensor_list(input_tensor_list, "input_tensor_list")
     _ensure_all_tensors_same_dtype(input_tensor_list)
     if not isinstance(output_tensor_lists, list):
         raise RuntimeError(
