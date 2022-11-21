@@ -24,7 +24,7 @@ def cpp_runtime_error(x):
 
 CPP_ACCURACY_ERROR = """\
 def cpp_accuracy_error(x):
-    return f"{x} + 1"
+    return f"{x} + decltype({x})(1)"
 """
 
 TRITON_COMPILE_ERROR = """\
@@ -60,8 +60,10 @@ class MinifierTests(MinifierTestBase):
             patch_code = f"""\
 import torch._inductor.codegen.{"cpp" if device == "cpu" else "triton"} as codegen
 overrides = codegen.{"CppOverrides" if device == "cpu" else "TritonOverrides"}
+vec_overrides = codegen.{"CppVecOverrides" if device == "cpu" else "TritonOverrides"}
 {new_fn_code}
 overrides.{old_fn_name} = staticmethod({new_fn_name})
+vec_overrides.{old_fn_name} = staticmethod({new_fn_name})
 """
         return f"""\
 {patch_code}
