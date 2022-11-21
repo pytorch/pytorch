@@ -70,6 +70,7 @@ Features described in this documentation are classified by release status:
    torch.distributed.elastic <distributed.elastic>
    torch.distributed.fsdp <fsdp>
    torch.distributed.optim <distributed.optim>
+   torch.distributed.checkpoint <distributed.checkpoint>
    torch.distributions <distributions>
    torch.fft <fft>
    futures
@@ -85,6 +86,7 @@ Features described in this documentation are classified by release status:
    profiler
    nn.init
    onnx
+   onnx_diagnostics
    optim
    complex_numbers
    ddp_comm_hooks

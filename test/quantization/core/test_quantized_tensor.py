@@ -1498,6 +1498,29 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
         self.assertEqual(dequantized_X, dequantized_decomposed_X)
 
+    def test_decomposed_dynamic_quant_pattern(self):
+        import torch.ao.quantization.fx._decomposed
+        X = torch.randn(5, 10)
+        dtype = torch.uint8
+        qdtype = torch.quint8
+        scale, zero_point = torch._choose_qparams_per_tensor(X, False)
+        quant_min, quant_max = 0, 255
+
+        quantized_X = torch.quantize_per_tensor(X, scale, zero_point, qdtype)
+        dequantized_X = torch.dequantize(quantized_X)
+
+        # Now try decomposed pattern
+        (scale_decomposed, zero_point_decomposed) = torch.ops.quantized_decomposed.choose_qparams.tensor(
+            X, quant_min, quant_max, dtype)
+        quantized_decomposed_X = torch.ops.quantized_decomposed.quantize_per_tensor.tensor(
+            X, scale_decomposed, zero_point_decomposed, quant_min, quant_max, dtype)
+
+        dequantized_decomposed_X = torch.ops.quantized_decomposed.dequantize_per_tensor.tensor(
+            quantized_decomposed_X, scale_decomposed, zero_point_decomposed, quant_min, quant_max, dtype
+        )
+        self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
+        self.assertEqual(dequantized_X, dequantized_decomposed_X)
+
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"
