@@ -7,7 +7,7 @@
 #ifndef GPU_LAMBDA
 #define GPU_LAMBDA __host__ __device__
 #endif
-.
+
 #if defined(USE_ROCM) && (ROCM_VERSION >= 50300)
 constexpr int num_threads() { return 1024; }
 constexpr int thread_work_size() { return 2; }
