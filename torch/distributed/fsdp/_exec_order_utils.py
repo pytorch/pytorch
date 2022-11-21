@@ -401,12 +401,13 @@ class _ExecOrderData:
                 pre_backward_str = self._handles_order_to_str(
                     self.handles_pre_backward_order
                 )
-                raise RuntimeError(
+                raise warnings.warn(
                     "Reverse post-forward order differs from the pre-backward "
                     f"order on rank {self.rank}:\n"
                     f"Reverse post-forward: {reverse_post_forward_str}\n"
                     f"Pre-backward: {pre_backward_str}"
                 )
+                assert 0
         self.handles_to_post_forward_order_index.clear()
         self.handles_post_forward_order.clear()
         self.handles_pre_backward_order.clear()
