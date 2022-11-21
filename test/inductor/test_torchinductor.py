@@ -238,6 +238,7 @@ def check_model(
     assert_equal=True,
     check_gradient=False,
 ):
+    # breakpoint()
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
