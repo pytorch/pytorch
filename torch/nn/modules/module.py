@@ -86,7 +86,7 @@ class _WrappedHook:
             self.module = weakref.ref(state["module"])
 
 
-# N.B.: This calss is NOT deriving from `_WrappedHook`, because pre- and post-
+# N.B.: This class does NOT derive from `_WrappedHook`, because pre- and post-
 # forward hooks take in args and kwargs as Tuple and Dict instead of unpacked
 # positional and keyword arguments.
 class _ForwardPreHook:
@@ -131,7 +131,7 @@ class _ForwardPreHook:
         return results
 
 
-# N.B.: This calss is NOT deriving from `_WrappedHook`, because pre- and post-
+# N.B.: This class does NOT derive from `_WrappedHook`, because pre- and post-
 # forward hooks take in args and kwargs as Tuple and Dict instead of unpacked
 # positional and keyword arguments.
 class _ForwardHook:
@@ -1552,7 +1552,7 @@ class Module:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
 
         if _global_forward_pre_hooks:
-            # N.B.: Wrapping OrderedDic values into a list is necessary as
+            # N.B.: Wrapping OrderedDict values into a list is necessary as
             # LazyModuleMixin might change OrderedDict content during iteration.
             for hook in list(_global_forward_pre_hooks.values()):
                 result = hook(self, input)
@@ -1562,7 +1562,7 @@ class Module:
                     input = result
 
         if self._forward_pre_hooks:
-            # N.B.: Wrapping OrderedDic values into a list is necessary as
+            # N.B.: Wrapping OrderedDict values into a list is necessary as
             # LazyModuleMixin might change OrderedDict content during iteration.
             for hook in list(self._forward_pre_hooks.values()):
                 assert isinstance(hook, _ForwardPreHook), (
