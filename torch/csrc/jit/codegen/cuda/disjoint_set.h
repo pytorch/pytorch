@@ -345,7 +345,7 @@ DisjointSets<T, Hash>::DisjointSets(const DisjointSets<T, Hash>& other) {
 
   // Deep copy the vector of the disjoint sets, keeping the same
   // ordering of the sets.
-  for (const auto other_set : other.disjoint_sets_) {
+  for (const auto& other_set : other.disjoint_sets_) {
     auto new_set = std::make_shared<VectorOfUniqueEntries<T, Hash>>(*other_set);
     int new_set_index = disjoint_sets_.size();
     disjoint_sets_.emplace_back(new_set);
@@ -356,7 +356,7 @@ DisjointSets<T, Hash>::DisjointSets(const DisjointSets<T, Hash>& other) {
   }
 
   // Copy the mappings using the new sets
-  for (const auto kv : other.disjoint_set_maps_) {
+  for (const auto& kv : other.disjoint_set_maps_) {
     const auto key = kv.first;
     const auto new_set_index = ptr_map.at(kv.second);
     disjoint_set_maps_.emplace(key, disjoint_sets_.at(new_set_index));
