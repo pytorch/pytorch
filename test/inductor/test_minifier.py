@@ -90,7 +90,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         patch_code = self._gen_codegen_fn_patch_code("relu", backend_code, device)
         self.assertIsNotNone(patch_code)
         (test_proc, _, repro_proc), _ = self._run_full_test(
-            run_code, "aot", repro_level, patch_code
+            run_code, "aot", repro_level, patch_code, True
         )
         return (
             (test_proc.stderr.decode("utf-8"), repro_proc.stderr.decode("utf-8")),
@@ -139,7 +139,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         self.assertIsNotNone(patch_code)
 
         (test_proc, _, repro_proc), _ = self._run_full_test(
-            run_code, "aot", 3, patch_code
+            run_code, "aot", 3, patch_code, True
         )
 
         self.assertNotIn("CompilerError", test_proc.stderr.decode("utf-8"))
@@ -174,7 +174,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         patch_code = self._gen_codegen_fn_patch_code("relu", backend_code, device)
         self.assertIsNotNone(patch_code)
 
-        test_code = self._gen_test_code(run_code, "aot", repro_level, patch_code)
+        test_code = self._gen_test_code(run_code, "aot", repro_level, patch_code, True)
         proc, repro_dir = self._run_test_code(test_code)
         self.assertEqual(proc.returncode, 0)
         self.assertIsNone(repro_dir)

@@ -462,6 +462,7 @@ class OutputGraph(fx.Tracer):
 
             try: 
                 print("COMPILER FN", self.compiler_fn)
+                print("FAKE?", config.fake_tensor_propagation)
                 if "real_inputs" in signature(self.compiler_fn).parameters:
                     compiled_fn = self.compiler_fn(
                         gm, self.example_inputs(), real_inputs=self.real_inputs()
