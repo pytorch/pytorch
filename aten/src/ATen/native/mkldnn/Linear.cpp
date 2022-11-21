@@ -350,6 +350,25 @@ Tensor mkl_linear(
     const Tensor& origin_weight_t,
     const c10::optional<Tensor>& bias_opt,
     const int64_t prepack_batch_size) {
+  TORCH_CHECK(
+      self.options().type_equal(origin_weight_t.options()),
+      "Input type (",
+      self.toString(),
+      ") and weight type (",
+      origin_weight_t.toString(),
+      ") should be the same");
+  TORCH_CHECK(
+      !bias_opt.defined() || (self.options().type_equal(bias_opt.options())),
+      "Input type (",
+      self.toString(),
+      ") and bias type (",
+      bias_opt.toString(),
+      ") should be the same");
+  TORCH_CHECK(
+      mkl_weight_t.scalar_type() == origin_weight_t.scalar_type() &&
+          origin_weight_t.scalar_type() == kFloat,
+      "mkl_linear: weight dtype should be float");
+
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   auto input_size = self.sizes();
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
