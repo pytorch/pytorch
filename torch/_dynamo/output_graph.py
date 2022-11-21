@@ -460,12 +460,17 @@ class OutputGraph(fx.Tracer):
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             from inspect import signature
 
-            if "real_inputs" in signature(self.compiler_fn).parameters:
-                compiled_fn = self.compiler_fn(
-                    gm, self.example_inputs(), real_inputs=self.real_inputs()
-                )
-            else:
-                compiled_fn = self.compiler_fn(gm, self.example_inputs())
+            try: 
+                if "real_inputs" in signature(self.compiler_fn).parameters:
+                    compiled_fn = self.compiler_fn(
+                        gm, self.example_inputs(), real_inputs=self.real_inputs()
+                    )
+                else:
+                    compiled_fn = self.compiler_fn(gm, self.example_inputs())
+            except Exception as e:
+                # Lowering exceptions can occur. Instead of relying on compiler_fn to not return a callable
+                # let's handle it properly
+                raise BackendCompilerFailed(self.compiler_fn, e) from e
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:

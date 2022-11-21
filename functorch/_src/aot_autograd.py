@@ -971,7 +971,6 @@ def aot_module_simplified(
     @wraps(functional_call)
     def compiled_function(*args):
         return aot_dispatcher_function(args)
-
     # [Real vs Fake Params]
     #
     # We have a few options of what we need to do here, but a few rules for why this is the way it is:
@@ -997,7 +996,7 @@ def aot_module_simplified(
             )
 
     else:
-        def forward(*args, **kwargs):
+        def forward(*args):
             return compiled_function(
                 *params_flat,
                 *args,

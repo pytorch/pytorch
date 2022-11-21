@@ -55,7 +55,7 @@ def create_backend(fn):
             raise
         except Exception:
             log.exception(f"{fn.__name__} error")
-            return None
+            raise
 
     BACKENDS[fn.__name__] = inner
     return inner
