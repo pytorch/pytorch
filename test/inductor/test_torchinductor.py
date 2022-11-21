@@ -13,6 +13,8 @@ import weakref
 from typing import Any, Callable
 from unittest.mock import patch
 
+import numpy as np
+
 import torch
 
 import torch._dynamo
@@ -21,6 +23,7 @@ from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -668,6 +671,12 @@ class CommonTemplate:
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
 
+    def test_sgn_extremal(self):
+        def fn(a):
+            return (torch.sgn(a),)
+
+        self.common(fn, [torch.tensor([np.nan, np.inf, -np.inf, 0])])
+
     def test_max_min(self):
         def fn(a, b):
             return (torch.maximum(a, b), torch.minimum(a, b))
@@ -1157,6 +1166,45 @@ class CommonTemplate:
             )
 
         self.common(fn, (1024, 100))
+
+    def test_div_zero_dim(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
+            )
+
+        for dtype in (torch.float32, torch.int64):
+            self.common(
+                fn,
+                (
+                    make_tensor(10, device="cpu", dtype=dtype),
+                    make_tensor((), device="cpu", dtype=dtype, exclude_zero=True),
+                ),
+            )
+            self.common(
+                fn,
+                (
+                    make_tensor((), device="cpu", dtype=dtype),
+                    make_tensor(10, device="cpu", dtype=dtype, exclude_zero=True),
+                ),
+            )
+
+    def test_div_prim(self):
+        def fn(a, b):
+            return (torch.ops.prims.div(a, b),)
+
+        for dtype in (torch.float32, torch.int64):
+            self.common(
+                fn,
+                (
+                    make_tensor(100, device="cpu", dtype=dtype),
+                    make_tensor(100, device="cpu", dtype=dtype, exclude_zero=True),
+                ),
+            )
 
     def test_both_scalars(self):
         def fn(a, b):
@@ -2580,6 +2628,25 @@ class CommonTemplate:
 
         shape = [1, 2, 6, 6]
         self.common(fn, (torch.randn(shape), torch.randn(shape)))
+
+    def test_fmod_zero_dim(self):
+        def fn(a, b):
+            return (torch.fmod(a, b),)
+
+        self.common(
+            fn,
+            (
+                make_tensor(10, device="cpu", dtype=torch.float32),
+                make_tensor((), device="cpu", dtype=torch.float32),
+            ),
+        )
+        self.common(
+            fn,
+            (
+                make_tensor((), device="cpu", dtype=torch.float32),
+                make_tensor(10, device="cpu", dtype=torch.float32),
+            ),
+        )
 
     def test_log2(self):
         def fn(x):
