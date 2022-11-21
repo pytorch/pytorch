@@ -59,7 +59,7 @@ pushd "$pt_checkout/docs/torchdynamo"
 
 pip -q install -r requirements.txt
 
-make VERBOSE=1
+make html VERBOSE=1
 
 popd
 
