@@ -77,8 +77,9 @@ class TORCH_CUDA_CU_API IrBuilder {
   // Ternary operations
   static Val* whereExpr(Val* pred, Val* lhs, Val* rhs);
 
+  static Val* newScalar(DataType dtype);
+
  private:
-  static Val* newResult(DataType dtype);
   static Val* newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
   static Val* newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
 };

@@ -577,6 +577,8 @@ WelfordOp::WelfordOp(
   addAttribute(init.N());
   addAttribute(
       IrBuilder::create<Attribute<bool>>(passkey.ir_container_, is_fused));
+
+  TORCH_INTERNAL_ASSERT(attributes().size() == kNumAttrs);
 }
 
 WelfordOp::WelfordOp(

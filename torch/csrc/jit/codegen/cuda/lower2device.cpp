@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_validation.h>
+#include <torch/csrc/jit/codegen/cuda/lower_vectorize_welford.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
 
 #include <list>
@@ -412,11 +413,19 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   const auto exprs_common_index_allocated =
       allocateCommonIndices(exprs_conditional_loops);
 
+  std::vector<Expr*> exprs_welford_vectorized;
+  if (!isOptionDisabled(DisableOption::WelfordVectorization)) {
+    dumpExprsIfEnabled(exprs_common_index_allocated, "Before vectorizeWelford");
+    exprs_welford_vectorized = vectorizeWelford(exprs_common_index_allocated);
+  } else {
+    exprs_welford_vectorized = exprs_common_index_allocated;
+  }
+
   // Insert fake zero updates to make sure nvrtc doesn't blow out register use
   // on index and predicate reuse
   dumpExprsIfEnabled(exprs_common_index_allocated, "Before insertMagicZero");
   const auto exprs_register_adjusted =
-      insertMagicZero(exprs_common_index_allocated);
+      insertMagicZero(exprs_welford_vectorized);
 
   dumpExprsIfEnabled(exprs_register_adjusted, "Before KIRCleaner");
   const auto exprs_cleaned_up_loops =

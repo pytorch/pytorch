@@ -143,7 +143,8 @@ auto parseDisableOptions() {
       {DisableOption::Fma, false},
       {DisableOption::IndexHoist, false},
       {DisableOption::Nvtx, false},
-      {DisableOption::PredicateElimination, false}};
+      {DisableOption::PredicateElimination, false},
+      {DisableOption::WelfordVectorization, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DISABLE")) {
     c10::string_view options_view(dump_options);
@@ -166,13 +167,16 @@ auto parseDisableOptions() {
         options_map[DisableOption::Nvtx] = true;
       } else if (token == "predicate_elimination") {
         options_map[DisableOption::PredicateElimination] = true;
+      } else if (token == "welford_vectorization") {
+        options_map[DisableOption::WelfordVectorization] = true;
       } else {
         TORCH_CHECK(
             false,
             "Invalid disable option: '",
             token,
             "'\nAvailable options:\n",
-            "\tarch_check, fallback, fma, index_hoist, nvtx, predicate_elimination\n");
+            "\tarch_check, fallback, fma, index_hoist, nvtx, predicate_elimination,\n",
+            "\twelford_vectorization\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)

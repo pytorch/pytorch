@@ -11,16 +11,16 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-Val* IrBuilder::newResult(DataType dtype) {
+Val* IrBuilder::newScalar(DataType dtype) {
   switch (dtype) {
     case DataType::Bool:
-      return IrBuilder::create<Bool>(c10::nullopt);
+      return IrBuilder::create<Bool>();
     case DataType::Float:
-      return IrBuilder::create<Double>(DataType::Float);
     case DataType::Double:
-      return IrBuilder::create<Double>(DataType::Double);
+      return IrBuilder::create<Double>(dtype);
     case DataType::Int:
-      return IrBuilder::create<Int>(c10::nullopt);
+    case DataType::Int32:
+      return IrBuilder::create<Int>(dtype);
     default:
       TORCH_CHECK(false, "Unexpected data type");
   }
@@ -36,7 +36,7 @@ Val* IrBuilder::newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
       lhs->dtype(),
       " and ",
       rhs->dtype());
-  auto result = newResult(lhs->dtype());
+  auto result = newScalar(lhs->dtype());
   IrBuilder::create<BinaryOp>(op_type, result, lhs, rhs);
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return result;
@@ -57,28 +57,28 @@ Val* IrBuilder::whereExpr(Val* pred, Val* lhs, Val* rhs) {
       pred != nullptr && lhs != nullptr && rhs != nullptr,
       "Either pred, lhs, or rhs is a nullptr in whereExpr.");
   TORCH_CHECK(lhs->dtype() == rhs->dtype(), "Incompatible operand types");
-  auto result = newResult(lhs->dtype());
+  auto result = newScalar(lhs->dtype());
   IrBuilder::create<TernaryOp>(TernaryOpType::Where, result, pred, lhs, rhs);
   return result;
 }
 
 Val* IrBuilder::negExpr(Val* val) {
   TORCH_CHECK(val != nullptr, "val is a nullptr in negExpr.");
-  auto result = newResult(val->dtype());
+  auto result = newScalar(val->dtype());
   IrBuilder::create<UnaryOp>(UnaryOpType::Neg, result, val);
   return result;
 }
 
 Val* IrBuilder::notExpr(Val* val) {
   TORCH_CHECK(val != nullptr, "val is a nullptr in notExpr.");
-  auto result = newResult(val->dtype());
+  auto result = newScalar(val->dtype());
   IrBuilder::create<UnaryOp>(UnaryOpType::Not, result, val);
   return result;
 }
 
 Val* IrBuilder::setExpr(Val* val) {
   TORCH_CHECK(val != nullptr, "val is a nullptr in setExpr.");
-  auto result = newResult(val->dtype());
+  auto result = newScalar(val->dtype());
   IrBuilder::create<UnaryOp>(UnaryOpType::Set, result, val);
   return result;
 }

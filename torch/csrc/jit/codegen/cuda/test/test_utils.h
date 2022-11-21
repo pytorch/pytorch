@@ -330,6 +330,29 @@ struct TransformPropagatorWithCheck : public TransformPropagator {
   using TransformPropagator::TransformPropagator;
 };
 
+class KernelExprVisitor : private kir::IrVisitor {
+ public:
+  static std::vector<Expr*> getAllExprs(const kir::Kernel* kernel) {
+    KernelExprVisitor visitor(kernel);
+    return visitor.all_exprs_;
+  }
+
+ private:
+  KernelExprVisitor(const kir::Kernel* kernel) {
+    handle(kernel->topLevelExprs());
+  }
+
+  using kir::IrVisitor::handle;
+
+  void handle(Expr* expr) final {
+    all_exprs_.push_back(expr);
+    kir::IrVisitor::handle(expr);
+  }
+
+ private:
+  std::vector<Expr*> all_exprs_;
+};
+
 } // namespace
 
 class ContextCudnnTF32Disabled {

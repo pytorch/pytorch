@@ -114,6 +114,7 @@ class GroupedGridReduction;
 class GridBroadcast;
 class GridWelford;
 class GroupedGridWelford;
+class VectorizedWelfordOp;
 class AllocateFusedReduction;
 class InitMagicZero;
 class UpdateMagicZero;
@@ -187,6 +188,7 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const kir::GridBroadcast*);
   virtual void handle(const kir::GridWelford*);
   virtual void handle(const kir::GroupedGridWelford*);
+  virtual void handle(const kir::VectorizedWelfordOp*);
   virtual void handle(const kir::AllocateFusedReduction*);
 };
 
@@ -255,6 +257,7 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(kir::GridBroadcast* stmt);
   virtual void handle(kir::GridWelford* stmt);
   virtual void handle(kir::GroupedGridWelford* stmt);
+  virtual void handle(kir::VectorizedWelfordOp* stmt);
   virtual void handle(kir::AllocateFusedReduction* stmt);
 };
 

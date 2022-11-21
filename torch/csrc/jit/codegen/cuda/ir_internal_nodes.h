@@ -646,6 +646,7 @@ class TORCH_CUDA_CU_API WelfordTriplet {
 class TORCH_CUDA_CU_API WelfordOp : public Expr {
  public:
   using Expr::Expr;
+  static constexpr int kNumAttrs = 4;
 
   WelfordOp(
       IrBuilderPasskey,

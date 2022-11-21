@@ -719,6 +719,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/lower_unroll.cpp",
     "torch/csrc/jit/codegen/cuda/lower_utils.cpp",
     "torch/csrc/jit/codegen/cuda/lower_validation.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_vectorize_welford.cpp",
     "torch/csrc/jit/codegen/cuda/lower_warp_reduce.cpp",
     "torch/csrc/jit/codegen/cuda/lower2device.cpp",
     "torch/csrc/jit/codegen/cuda/lower_bank_conflict.cpp",

@@ -642,6 +642,20 @@ GroupedGridWelford::GroupedGridWelford(
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(GroupedGridWelford)
 
+VectorizedWelfordOp::VectorizedWelfordOp(
+    IrBuilderPasskey passkey,
+    const WelfordTriplet& output,
+    const WelfordTriplet& input,
+    const WelfordTriplet& init,
+    Val* count,
+    Val* reciprocal_of_count,
+    Bool* hoisted_predicate)
+    : WelfordOp(passkey, output, input, init, false) {
+  addAttribute(count);
+  addAttribute(reciprocal_of_count);
+  addAttribute(hoisted_predicate);
+}
+
 AllocateFusedReduction::AllocateFusedReduction(
     IrBuilderPasskey passkey,
     Expr* grid_expr)
