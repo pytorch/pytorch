@@ -263,11 +263,13 @@ test_inductor_huggingface() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_huggingface_accuracy.csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_huggingface_accuracy.csv
+    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_accuracy_huggingface.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_accuracy_huggingface.csv
   # Performance run to collect memory compression ratio
-  python benchmarks/dynamo/huggingface.py --ci --training --performance --batch_size 1 \
-    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_huggingface_performance.csv
+  python benchmarks/dynamo/huggingface.py --ci --training --performance \
+    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_performance_huggingface.csv
+  python benchmarks/dynamo/check_memory.py --actual "$TEST_REPORTS_DIR"/inductor_performance_huggingface.csv \
+    --expected benchmarks/dynamo/expected_ci_perf_inductor_huggingface.csv
 }
 
 test_inductor_timm_shard() {
@@ -285,20 +287,24 @@ test_inductor_timm_shard() {
     --output "$TEST_REPORTS_DIR"/inductor_timm_accuracy_"$1".csv
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_accuracy_"$1".csv
   # Performance run to collect memory compression ratio
-  python benchmarks/dynamo/timm_models.py --ci --training --performance --batch_size 2 \
+  python benchmarks/dynamo/timm_models.py --ci --training --performance \
     --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
-    --output "$TEST_REPORTS_DIR"/inductor_timm_performance_"$1".csv
+    --output "$TEST_REPORTS_DIR"/inductor_performance_timm_"$1".csv
+  python benchmarks/dynamo/check_memory.py --actual "$TEST_REPORTS_DIR"/inductor_performance_timm_"$1".csv \
+    --expected benchmarks/dynamo/expected_ci_perf_inductor_timm.csv
 }
 
 test_inductor_torchbench() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_torchbench_accuracy.csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_torchbench_accuracy.csv
+    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_accuracy_torchbench.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_accuracy_torchbench.csv
   # Performance run to collect memory compression ratio
-  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --ci --training --performance --batch_size 2 \
-    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_torchbench_performance.csv
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --ci --training --performance \
+    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_performance_torchbench.csv
+  python benchmarks/dynamo/check_memory.py --actual "$TEST_REPORTS_DIR"/inductor_performance_torchbench.csv \
+    --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
 }
 
 test_python_gloo_with_tls() {

@@ -1318,6 +1318,7 @@ class BenchmarkRunner:
         experiment,
         diff=False,
         branch=None,
+        explain=False,
     ):
         if diff:
             self.compare_branches(
@@ -1337,6 +1338,8 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment
             )
             print(status)
+        if explain:
+            print(torch._dynamo.explain(model, *example_inputs)[0])
 
 
 def help(fn):
@@ -1516,6 +1519,12 @@ def parse_args(args=None):
     )
 
     parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="run .explain() on the graph at the end of the run.",
+    )
+
+    parser.add_argument(
         "--cold_start_latency",
         action="store_true",
         help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
@@ -1652,6 +1661,12 @@ def run(runner, args, original_dir=None):
         # Only dump error on CI
         args.quiet = True
         args.repeat = 2
+        # CI machine has smaller GPU memory
+        if args.batch_size is None:
+            if runner.suite_name == "huggingface":
+                args.batch_size = 1
+            else:
+                args.batch_size = 2
         if args.backend == "aot_eager":
             args.exclude = (
                 CI_SKIP_AOT_EAGER_TRAINING
@@ -1982,6 +1997,7 @@ def run(runner, args, original_dir=None):
                 optimize_ctx,
                 experiment,
                 diff=args.diff_main,
+                explain=args.explain,
             )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
