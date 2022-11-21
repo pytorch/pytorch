@@ -393,7 +393,13 @@ class TorchVariable(VariableTracker):
                     for x in args
                 ]
             )
-            if any_symints_or_symfloats and all_ints_or_floats:
+            bin_ops = set(["add", "sub", "mul", "div", "sqrt"])
+            if (
+                self.value.__module__ == "torch"
+                and self.value.__name__ in bin_ops
+                and any_symints_or_symfloats
+                and all_ints_or_floats
+            ):
                 msg = f"""\
 Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.
 To support this behavior, we need to allow const-propping tensors that store symint data.
