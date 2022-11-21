@@ -1,4 +1,3 @@
-import argparse
 import os
 import re
 import subprocess
@@ -150,25 +149,19 @@ _SANITY_CHECK_ARGS = (
 )
 
 
-def main(ci):
-    if not ci:
-        python_ver = check_python()
-        torch_ver = check_torch()
-        cuda_ver = check_cuda()
-        print(
-            f"Python version: {python_ver.major}.{python_ver.minor}.{python_ver.micro}\n"
-            f"`torch` version: {torch_ver}\n"
-            f"CUDA version: {cuda_ver}\n"
-        )
+def main():
+    python_ver = check_python()
+    torch_ver = check_torch()
+    cuda_ver = check_cuda()
+    print(
+        f"Python version: {python_ver.major}.{python_ver.minor}.{python_ver.micro}\n"
+        f"`torch` version: {torch_ver}\n"
+        f"CUDA version: {cuda_ver}\n"
+    )
     for args in _SANITY_CHECK_ARGS:
         check_dynamo(*args)
     print("All required checks passed")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Smoke test for TorchDynamo/TorchInductor"
-    )
-    parser.add_argument("--ci", action="store_true", default=False)
-    args = parser.parse_args()
-    main(args.ci)
+    main()

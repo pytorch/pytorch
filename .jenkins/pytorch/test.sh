@@ -199,14 +199,12 @@ test_python_shard() {
     exit 1
   fi
 
-  python tools/dynamo/verify_dynamo.py --ci
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
 
   assert_git_not_dirty
 }
 
 test_python() {
-  python tools/dynamo/verify_dynamo.py --ci
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose
   assert_git_not_dirty
 }
@@ -217,7 +215,7 @@ test_dynamo_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  python tools/dynamo/verify_dynamo.py --ci
+  python tools/dynamo/verify_dynamo.py
   # Temporarily disable test_fx for dynamo pending the investigation on TTS
   # regression in https://github.com/pytorch/torchdynamo/issues/784
   time python test/run_test.py \
@@ -252,7 +250,7 @@ test_inductor_distributed() {
 }
 
 test_inductor() {
-  python tools/dynamo/verify_dynamo.py --ci
+  python tools/dynamo/verify_dynamo.py
   python test/run_test.py --include test_modules test_ops --verbose
   PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor --include inductor/test_torchinductor_opinfo --verbose
   # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
