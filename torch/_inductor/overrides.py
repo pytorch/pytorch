@@ -548,7 +548,7 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # why re-run fuse_unary? we want to enable conv+binary+unary fusion,
     # such as conv+add+relu for vision model.
     gm = fuse_unary(gm)
-    gm = packed_module(gm)
+    gm = pack_module(gm)
     return gm
 
 
@@ -948,7 +948,7 @@ def fuse_binary_inplace(gm: torch.fx.GraphModule):
     return gm
 
 
-def packed_module(gm: torch.fx.GraphModule):
+def pack_module(gm: torch.fx.GraphModule):
     modules = dict(gm.named_modules())
     for node in gm.graph.nodes:
         if node.op == "call_module":
