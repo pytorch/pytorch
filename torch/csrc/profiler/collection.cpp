@@ -360,9 +360,8 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
 template <size_t BlockSize>
 void materialize_vulkan(
     std::vector<std::shared_ptr<Result>>& out,
-    AppendOnlyList<
-        ExtraFields<EventType::Vulkan>::raw_event_t,
-        BlockSize>& raw_events,
+    AppendOnlyList<ExtraFields<EventType::Vulkan>::raw_event_t, BlockSize>&
+        raw_events,
     const std::function<time_t(approx_time_t)> time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
@@ -980,16 +979,16 @@ void adjust_timestamps_dfs(std::shared_ptr<Result>& r) {
       adjust_timestamps_dfs(i);
     }
     r->visit(c10::overloaded(
-      [](ExtraFields<EventType::TorchOp>& i) {
-        // pass
-      },
-      [](ExtraFields<EventType::Vulkan>& i) {
-        // pass
-      },
-      [&](auto&) {
-        SOFT_ASSERT(false, "unexpected event type in mobile profiler: ", r->name());
-      }
-    ));
+        [](ExtraFields<EventType::TorchOp>& i) {
+          // pass
+        },
+        [](ExtraFields<EventType::Vulkan>& i) {
+          // pass
+        },
+        [&](auto&) {
+          SOFT_ASSERT(
+              false, "unexpected event type in mobile profiler: ", r->name());
+        }));
   }
 }
 
