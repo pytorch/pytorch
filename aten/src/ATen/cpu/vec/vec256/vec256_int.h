@@ -1181,6 +1181,8 @@ Vectorized<int16_t> inline shift_256_16(const Vectorized<int16_t>& a, const Vect
   __m256i c0;
   if (left_shift)
     c0 = _mm256_sllv_epi32(a0, b0);
+  else
+    c0 = _mm256_srav_epi32(a0, b0);
   c0 = _mm256_shuffle_epi8(c0, ctl_1_0);
 
   // Peform shifting the same way for input array elements with
@@ -1190,6 +1192,8 @@ Vectorized<int16_t> inline shift_256_16(const Vectorized<int16_t>& a, const Vect
   __m256i c1;
   if (left_shift)
     c1 = _mm256_sllv_epi32(a1, b1);
+  else
+    c1 = _mm256_srav_epi32(a1, b1);
   c1 = _mm256_and_si256(c1, keep_1);
 
   // Merge partial results into the final result.
@@ -1271,6 +1275,8 @@ Vectorized<int8_t> inline shift_256_8(const Vectorized<int8_t>& a, const Vectori
   __m256i c0;
   if (left_shift)
     c0 = _mm256_sllv_epi32(a0, b0);
+  else
+    c0 = _mm256_srav_epi32(a0, b0);
   c0 = _mm256_shuffle_epi8(c0, ctl_3_0);
 
   // Peform shifting the same way for input array elements with
@@ -1280,6 +1286,8 @@ Vectorized<int8_t> inline shift_256_8(const Vectorized<int8_t>& a, const Vectori
   __m256i c1;
   if (left_shift)
     c1 = _mm256_sllv_epi32(a1, b1);
+  else
+    c1 = _mm256_srav_epi32(a1, b1);
   c1 = _mm256_shuffle_epi8(c1, ctl_3_1);
 
   // Peform shifting the same way for input array elements with
@@ -1289,6 +1297,8 @@ Vectorized<int8_t> inline shift_256_8(const Vectorized<int8_t>& a, const Vectori
   __m256i c2;
   if (left_shift)
     c2 = _mm256_sllv_epi32(a2, b2);
+  else
+    c2 = _mm256_srav_epi32(a2, b2);
   c2 = _mm256_shuffle_epi8(c2, ctl_3_2);
 
   // Peform shifting the same way for input array elements with
@@ -1298,6 +1308,8 @@ Vectorized<int8_t> inline shift_256_8(const Vectorized<int8_t>& a, const Vectori
   __m256i c3;
   if (left_shift)
     c3 = _mm256_sllv_epi32(a3, b3);
+  else
+    c3 = _mm256_srav_epi32(a3, b3);
   c3 = _mm256_and_si256(c3, keep_3);
 
   // Merge partial results into the final result.
@@ -1326,6 +1338,38 @@ Vectorized<int16_t> inline operator<<(const Vectorized<int16_t>& a, const Vector
 template <>
 Vectorized<int8_t> inline operator<<(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
   return shift_256_8<true>(a, b);
+}
+
+template <>
+Vectorized<int64_t> inline operator>>(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
+  // No vector instruction for right shifting int64_t, so emulating it
+  // instead.
+
+  // Shift the number logically to the right, thus filling the most
+  // significant bits with 0s.  Then, replace these bits with the sign
+  // bit.
+  __m256i sign_bits = _mm256_cmpgt_epi64(_mm256_set1_epi64x(0), a);
+  __m256i b_inv_mod_64 = _mm256_sub_epi64(_mm256_set1_epi64x(64), b);
+  __m256i sign_ext = _mm256_sllv_epi64(sign_bits, b_inv_mod_64);
+  __m256i c = _mm256_srlv_epi64(a, b);
+  c = _mm256_or_si256(c, sign_ext);
+
+  return c;
+}
+
+template <>
+Vectorized<int32_t> inline operator>>(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return _mm256_srav_epi32(a, b);
+}
+
+template <>
+Vectorized<int16_t> inline operator>>(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  return shift_256_16<false>(a, b);
+}
+
+template <>
+Vectorized<int8_t> inline operator>>(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
+  return shift_256_8<false>(a, b);
 }
 
 #endif

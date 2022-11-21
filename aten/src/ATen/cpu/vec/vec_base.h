@@ -807,6 +807,14 @@ template <class T> Vectorized<T> inline operator<<(const Vectorized<T> &a, const
   return c;
 }
 
+template <class T> Vectorized<T> inline operator>>(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    c[i] = a[i] >> b[i];
+  }
+  return c;
+}
+
 template <typename T>
 inline Vectorized<T>& operator += (Vectorized<T>& a, const Vectorized<T>& b) {
   a = a + b;
@@ -836,6 +844,12 @@ inline Vectorized<T>& operator *= (Vectorized<T>& a, const Vectorized<T>& b) {
 template <typename T>
 inline Vectorized<T>& operator <<= (Vectorized<T>& a, const Vectorized<T>& b) {
   a = a << b;
+  return a;
+}
+
+template <typename T>
+inline Vectorized<T>& operator >>= (Vectorized<T>& a, const Vectorized<T>& b) {
+  a = a >> b;
   return a;
 }
 
