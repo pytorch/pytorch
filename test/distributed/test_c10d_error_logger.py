@@ -22,8 +22,6 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 class C10dErrorLoggerTest(TestCase):
     def test_get_or_create_logger(self):
         logger = _get_or_create_logger()
-        print(logger)
-        print(logger.handlers)
         self.assertIsNotNone(logger)
         self.assertEqual(1, len(logger.handlers))
         self.assertIsInstance(logger.handlers[0], logging.NullHandler)
@@ -73,7 +71,7 @@ class C10dExceptionHandlerTest(MultiThreadedTestCase):
             # In this test case, local_rank = global_rank, since we don't have multiple processes on one node.
             self.assertEqual(str(dist.get_rank()), error_msg_dict["local_rank"])
             print("print after all assert")
-            # timeout on rank 1 if world_size = 2 
+            # timeout on rank 1 if world_size = 2
 
 
 if __name__ == "__main__":
