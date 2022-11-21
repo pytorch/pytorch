@@ -2431,6 +2431,17 @@ class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
         dist.all_gather_coalesced([output_tensor_list], [input_tensor])
         self.assertEqual(output_tensor_list, [input_tensor])
 
+    @requires_gloo()
+    def test_monitored_barrier(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "gloo",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        dist.monitored_barrier()
+
 class CompilerTest(test_c10d_common.CompilerTest):
 
     @property
