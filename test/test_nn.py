@@ -3666,7 +3666,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         # prune again
         prune.ln_structured(m, name='weight', amount=0.3, n=2, dim=0)
-        hook = next(iter(m._get_forward_pre_hooks()).values())
+        hook = next(iter(m._get_forward_pre_hooks().values()))
         self.assertIsInstance(
             hook,
             torch.nn.utils.prune.PruningContainer
