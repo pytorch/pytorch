@@ -279,6 +279,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //          cause confusion for AutogradOther. It's pretty straightforward to use Autograd (if available)
   //          in this case.
   //    (2.4) Use kernel from DispatchKey::Autograd if available
+  //    (2.5) Use kernel from DispatchKey::CompositeImplicitBatched if available
   //    The implementation of (2.2) relies on the invariant that for a given backend,
   //    `computeDispatchTableEntryWithDebug()` will be called for that backend's autograd key after the
   //    backend key. See Note [Refresh Runtime Autograd entries in dispatchTable_]
@@ -355,7 +356,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     }
   }
 
-  // 2.5. For batched backend keys, use kernel from DispatchKey::FuncTorchBatched if available
+  // 2.5. For batched backend keys, use kernel from DispatchKey::CompositeImplicitBatched if available
   if (isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitBatched)) {
     if (auto batched_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitBatched)) {
       return {*batched_registration, "batched kernel"};
