@@ -33,11 +33,6 @@
 
 namespace at { namespace native {
 
-Tensor embedding(const Tensor & weight, const Tensor & indices,
-                 int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
-  return at::native::embedding_symint(weight, indices, SymInt{padding_idx}, scale_grad_by_freq, sparse);
-}
-
 Tensor embedding_symint(const Tensor & weight, const Tensor & indices,
                         c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
   TORCH_CHECK(weight.dim() == 2,  "'weight' must be 2-D");
