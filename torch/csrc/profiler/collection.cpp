@@ -356,6 +356,27 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   inputs_outputs_.clear();
 }
 
+template <size_t BlockSize>
+void materialize_vulkan(
+    std::vector<std::shared_ptr<Result>>& out,
+    AppendOnlyList<
+        ExtraFields<EventType::Vulkan>::raw_event_t,
+        BlockSize>& raw_events,
+    const std::function<time_t(approx_time_t)> time_converter,
+    const uint64_t tid,
+    const kineto::DeviceAndResource& kineto_info) {
+  for (const auto& i : raw_events) {
+    int64_t duration_ns = 0;
+
+    out.emplace_back(Result::create(
+        /*start_time_ns_=*/time_converter(i.first),
+        /*start_tid_=*/tid,
+        /*kineto_info_=*/kineto_info,
+        /*extra_fields_=*/
+        ExtraFields<EventType::Vulkan>{/*duration_ns_=*/duration_ns}));
+  }
+}
+
 namespace {
 // See `RecordQueue::getSubqueue()` for an overview of this cache.
 struct SubQueueThreadCache {
@@ -423,6 +444,7 @@ auto kinetoEventCorrelationID(
 
 std::string Result::name() const {
   return visit(c10::overloaded(
+      ATTRIBUTE(Vulkan, std::string("[vulkan]")),
       ATTRIBUTE(Allocation, std::string("[memory]")),
       ATTRIBUTE(OutOfMemory, std::string("[OutOfMemory]")),
       ATTRIBUTE(PyCall, toString(e)),
@@ -434,6 +456,7 @@ libkineto::ActivityType Result::kinetoType() const {
   return visit(c10::overloaded(
       ATTRIBUTE(TorchOp, scopeToType(e.scope_)),
       ATTRIBUTE(Backend, scopeToType(e.scope_)),
+      ATTRIBUTE(Vulkan, libkineto::ActivityType::CPU_OP),
       ATTRIBUTE(Allocation, libkineto::ActivityType::CPU_INSTANT_EVENT),
       ATTRIBUTE(OutOfMemory, libkineto::ActivityType::CPU_INSTANT_EVENT),
       ATTRIBUTE(PyCall, libkineto::ActivityType::PYTHON_FUNCTION),
@@ -452,6 +475,7 @@ int64_t Result::endTimeNS() const {
   auto end_time_ns = visit(c10::overloaded(
       ATTRIBUTE(TorchOp, torchOpEndNS(e, finished_, parent_)),
       ATTRIBUTE(Backend, e.end_time_us_ * 1000),
+      ATTRIBUTE(Vulkan, start_time_ns_ + e.duration_ns_),
       ATTRIBUTE(Allocation, start_time_ns_),
       ATTRIBUTE(OutOfMemory, start_time_ns_),
       ATTRIBUTE(Kineto, start_time_ns_ + e.duration_us_ * 1000),
@@ -475,6 +499,7 @@ uint64_t Result::endTID() const {
 c10::DeviceType Result::deviceType() const {
   using torch::autograd::profiler::deviceTypeFromActivity;
   return visit(c10::overloaded(
+      ATTRIBUTE(Vulkan, c10::DeviceType::Vulkan),
       ATTRIBUTE(Allocation, e.device_type_),
       ATTRIBUTE(OutOfMemory, e.device_type_),
       ATTRIBUTE(Kineto, deviceTypeFromActivity(e.activity_type_)),
@@ -942,6 +967,35 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
     end_events_.pop();
   }
 }
+
+// Just and example
+void adjust_timestamps_dfs(std::shared_ptr<Result>& r) {
+  if (SOFT_ASSERT(r != nullptr)) {
+    for (auto& i : r->children_) {
+      adjust_timestamps_dfs(i);
+    }
+    r->visit(c10::overloaded(
+      [](ExtraFields<EventType::TorchOp>& i) {
+        // pass
+      },
+      [](ExtraFields<EventType::Vulkan>& i) {
+        // pass
+      },
+      [&](auto&) {
+        SOFT_ASSERT(false, "unexpected event type in mobile profiler: ", r->name());
+      }
+    ));
+  }
+}
+
+void adjust_timestamps(std::vector<std::shared_ptr<Result>>& out) {
+  for (auto& i : out) {
+    // Only begin traversal for root nodes.
+    if (i->parent_.expired()) {
+      adjust_timestamps_dfs(i);
+    }
+  }
+}
 } // namespace
 
 std::pair<
@@ -978,6 +1032,8 @@ RecordQueue::getRecords(
     queue.torch_ops_.materialize(
         out, converter, queue.tid(), queue.kineto_info());
     materialize(queue.backend_events_);
+    materialize_vulkan(
+        out, queue.vulkan_events_, converter, queue.tid(), queue.kineto_info());
     for (auto& i : queue.allocations_) {
       out.emplace_back(Result::create(
           /*start_time_ns_=*/converter(i.start_time_),
@@ -999,6 +1055,20 @@ RecordQueue::getRecords(
       out.push_back(i);
     }
     python_tracer_.reset();
+  }
+
+  if (config_.experimental_config.adjust_timestamps) {
+    std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
+      return a->start_time_ns_ < b->start_time_ns_;
+    });
+    build_tree(out);
+    adjust_timestamps(out);
+    for (auto& r : out) {
+      r->parent_.reset();
+      // Reset these so that second build_tree can happen
+      r->finished_ = false;
+      r->children_.clear();
+    }
   }
 
   auto trace = addKinetoEvents(out, start_time_us, end_time_us, config_);
