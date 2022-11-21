@@ -595,29 +595,6 @@ class ModuleAttributePrecedence(ModuleAttributePrecedenceBase):
         return self.activation(self.linear(self.initializer + x)) * self.scale
 
 
-class Exp(torch.autograd.Function):
-    # the forward function can be staticmethod or classmethod
-    @classmethod
-    def forward(cls, ctx, i):
-        result = i.exp()
-        ctx.save_for_backward(result)
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        (result,) = ctx.saved_tensors
-        return grad_output * result
-
-
-class CustomizedFunctionModule(torch.nn.Module):
-    """
-    Test the customized operation from a torch.autograd.Function subclass.
-    """
-
-    def forward(self, i):
-        return Exp.apply(i)
-
-
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -668,7 +645,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_forward_directly = make_test(CallForwardDirectly())
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
-    test_customized_function = make_test(CustomizedFunctionModule())
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()
