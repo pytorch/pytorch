@@ -1042,7 +1042,7 @@ symbolic_aot_autograd_failures = {
     xfail('inner', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kron', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('linalg.cholesky_ex', ''),  # aten.linalg_cholesky_ex.default - couldn't find symbolic meta functio...
+    xfail('linalg.cholesky_ex', ''),  # could not find kernel for aten.linalg_solve_triangular.default
     xfail('linalg.cond', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('linalg.cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.det', ''),  # aten._linalg_det.default - couldn't find symbolic meta function/decomposition

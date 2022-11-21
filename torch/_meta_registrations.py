@@ -178,13 +178,30 @@ def meta_angle_out(self, out):
     return out.copy_(torch.angle(self))
 
 
-def squareCheckInputs(self, f_name):
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def squareCheckInputs(self: Tensor, f_name: str):
     assert (
         self.dim() >= 2
     ), f"{f_name}: The input tensor must have at least 2 dimensions."
     assert self.size(-1) == self.size(
         -2
     ), f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
+
+
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def checkFloatingOrComplex(
+    t: Tensor, f_name: str, allow_low_precision_dtypes: bool = True
+):
+    dtype = t.dtype
+    check(
+        t.is_floating_point() or t.is_complex(),
+        lambda: f"{f_name}, : Expected a floating point or complex tensor as input. Got , {dtype}",
+    )
+    if allow_low_precision_dtypes:
+        check(
+            dtype in (torch.float, torch.double, torch.cfloat, torch.cdouble),
+            lambda: f"{f_name} : Low precision dtypes not supported. Got {dtype}",
+        )
 
 
 def checkUplo(uplo: str):
@@ -204,6 +221,61 @@ def meta_linalg_eigh(self, uplo="L"):
     values.transpose_(-2, -1)
     vectors = self.new_empty(self.shape[:-1])
     return (values, vectors)
+
+
+# From c10/util/strides.h
+def contiguous_strides(sizes):
+    """Computes the contiguous strides of a tensor, given its sizes."""
+    # With this intialisation we get the case dim == 0 or 1 right
+    dims = len(sizes)
+    strides = [1] * dims
+
+    i = dims - 2
+    while i >= 0:
+        # Strides can't be 0 even if sizes are 0.
+        strides[i] = strides[i + 1] * max(sizes[i + 1], 1)
+        i -= 1
+
+    return strides
+
+
+def batched_matrix_contiguous_strides(sizes, f_contig: bool = False):
+    # f_contig chooses between the strides of a batch of Fortran (F-contiguous)
+    # and C-contiguous matrices
+    strides = contiguous_strides(sizes)
+    dim = len(strides)
+    if f_contig and dim >= 2:
+        # Fix the strides of the last two dimensions, so that we return
+        # C-contiguous batches of F-contiguous matrices.
+        strides[dim - 1] = max(sizes[dim - 2], 1)
+        strides[dim - 2] = 1
+    return strides
+
+
+@register_meta(aten.linalg_cholesky_ex.default)
+def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = False):
+    squareCheckInputs(A, "linalg.cholesky")
+    checkFloatingOrComplex(A, "linalg.cholesky")
+
+    A_shape = A.shape
+    ndim = len(A_shape)
+
+    # L
+    L_strides = batched_matrix_contiguous_strides(A_shape, True)
+    L = A.new_empty(A_shape)
+    L.as_strided_(A_shape, L_strides)
+
+    # infos
+    infos = A.new_empty(A_shape[0 : ndim - 2], dtype=torch.int32)
+    return L, infos
+
+
+@register_meta(aten.linalg_cholesky.default)
+def meta_linalg_cholesky(A: Tensor, upper=False):
+    # All the checks done on info in the corresponding C++ function
+    # are data dependent, so we skip info computation
+    L, infos = linalg_cholesky_ex(A, upper, False)
+    return L, infos
 
 
 # From aten/src/ATen/native/ReflectionPad.cpp
