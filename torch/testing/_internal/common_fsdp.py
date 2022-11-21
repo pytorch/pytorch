@@ -697,6 +697,7 @@ class FSDPTest(MultiProcessTestCase):
     def setUp(self):
         super(FSDPTest, self).setUp()
         self._spawn_processes()
+        dist.set_debug_level(dist.DebugLevel.DETAIL)
 
     @property
     def world_size(self):
