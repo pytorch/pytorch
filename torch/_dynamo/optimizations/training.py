@@ -291,7 +291,7 @@ def prims_executor(gm, inputs, *, executor):
     return make_boxed_func(partial(execute, gm, executor=executor))
 
 
-def nvprims_fw_bw_partition_fn(joint_module, joint_inputs):
+def nvprims_fw_bw_partition_fn(joint_module, joint_inputs, *, num_fwd_outputs):
     # This function is called once per forward+backward pass of a graph in AOT
     # Autograd. We use it to set up the nvFuser-specific FX graph that is later
     # passed to the executor.
@@ -319,7 +319,7 @@ def nvprims_fw_bw_partition_fn(joint_module, joint_inputs):
     }
 
     fw_gm, bw_gm = min_cut_rematerialization_partition(
-        prim_gm, joint_inputs, recomputable_ops=recomputable_ops
+        prim_gm, joint_inputs, recomputable_ops=recomputable_ops, num_fwd_outputs=num_fwd_outputs
     )
     # AOT Autograd might not use the partitioner, so we need to make sure that
     # the graph is marked as already transformed to use nvFuser-compatible nodes
