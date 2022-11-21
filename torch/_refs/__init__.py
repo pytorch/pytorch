@@ -2530,6 +2530,18 @@ def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
+    def cat_compute_output_memory_format(inputs):
+        format = None
+        for t in inputs:
+            f = utils.suggest_memory_format(t)
+            if f == torch.contiguous_format:
+                return f
+            if format is not None and format != f:
+                return torch.contiguous_format
+            format = f
+        assert format is not None
+        return format
+
     if len(tensors) == 0:
         msg = "cat expects at least one tensor, but received zero!"
         raise ValueError(msg)
@@ -2547,6 +2559,8 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
         utils.validate_idx(t.ndim, dim)
         break
 
+    memory_format = cat_compute_output_memory_format(tensors)
+
     # Filters tensors with one dimension of length zero
     filtered = tuple(x for x in tensors if not (x.ndim == 1 and x.numel() == 0))
     if len(filtered) == 0:
@@ -2558,9 +2572,15 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
         except Exception:
             requires_grad = False
 
-        return empty((0,), dtype=t.dtype, device=t.device, requires_grad=requires_grad)
+        return empty(
+            (0,),
+            dtype=t.dtype,
+            device=t.device,
+            requires_grad=requires_grad,
+            memory_format=memory_format,
+        )
 
-    return prims.cat(filtered, dim)
+    return prims.cat(filtered, dim).clone(memory_format=memory_format)
 
 
 # CompositeImplicitAutograd - don't register decomp
