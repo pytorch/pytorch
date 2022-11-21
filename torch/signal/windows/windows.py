@@ -83,7 +83,7 @@ Also known as Poisson window.
 The exponential window is defined as follows:
 
 .. math::
-    w(n) = \exp{\left(-\frac{|n - c|}{\tau}\right)}
+    w_n = \exp{\left(-\frac{|n - c|}{\tau}\right)}
 
 where `c` is the center of the window.
     """,
@@ -177,7 +177,7 @@ Also known as the sine window.
 The cosine window is defined as follows:
 
 .. math::
-    w(n) = \cos{\left(\frac{\pi n}{M} - \frac{\pi}{2}\right)} = \sin{\left(\frac{\pi n}{M}\right)}
+    w_n = \cos{\left(\frac{\pi n}{M} - \frac{\pi}{2}\right)} = \sin{\left(\frac{\pi n}{M}\right)}
     """,
     r"""
 
@@ -247,7 +247,7 @@ Computes a window with a gaussian waveform.
 The gaussian window is defined as follows:
 
 .. math::
-    w(n) = \exp{\left(-\left(\frac{n}{2\sigma}\right)^2\right)}
+    w_n = \exp{\left(-\left(\frac{n}{2\sigma}\right)^2\right)}
     """,
     r"""
 
@@ -636,7 +636,7 @@ Computes the general cosine window.
 The general cosine window is defined as follows:
 
 .. math::
-    w_n = \sum^{M-1}_{i=0} (-1)^i a_i \cos{ \left( \frac{i \times 2 \pi n}{M - 1}\right)}
+    w_n = \sum^{M-1}_{i=0} (-1)^i a_i \cos{ \left( \frac{2 \pi i n}{M - 1}\right)}
     """,
     r"""
 
@@ -646,7 +646,7 @@ Arguments:
     {M}
 
 Keyword args:
-    a (Union[list,tuple]): the coefficients associated to each of the cosine functions.
+    a (Iterable): the coefficients associated to each of the cosine functions.
     {sym}
     {dtype}
     {layout}
