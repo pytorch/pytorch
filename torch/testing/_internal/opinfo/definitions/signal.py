@@ -373,7 +373,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestSchemaCheckModeOpInfo",
-                "test_schema_check",
+                "test_schema_correctness",
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
@@ -417,7 +417,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestSchemaCheckModeOpInfo",
-                "test_schema_check",
+                "test_schema_correctness",
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
@@ -511,7 +511,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestSchemaCheckModeOpInfo",
-                "test_schema_check",
+                "test_schema_correctness",
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
@@ -717,7 +717,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestSchemaCheckModeOpInfo",
-                "test_schema_check",
+                "test_schema_correctness",
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
@@ -765,7 +765,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestSchemaCheckModeOpInfo",
-                "test_schema_check",
+                "test_schema_correctness",
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
