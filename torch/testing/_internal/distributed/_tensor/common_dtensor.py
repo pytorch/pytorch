@@ -1,334 +1,661 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates
+# Copyright (c) Facebook, Inc. and its affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+from typing import List
+from torch.testing._internal.common_methods_invocations import op_db, OpInfo
 
-from contextlib import contextmanager
-from dataclasses import dataclass
-import itertools
-import sys
-from functools import wraps
-from typing import (
-    Any,
-    Callable,
-    Generator,
-    Iterator,
-    Tuple,
-    Dict,
-    Optional,
-    List,
-    Sequence,
-    TypeVar,
-    cast,
-)
+# Generated from test/gen_dtensor_op_db.py via
+# python spmd/testing/gen_dtensor_lagging_op_db.py > spmd/testing/dtensor_lagging_op_db.py
+#
+# This approach is copied from functorch:
+# People add new OpInfos to PyTorch all the time.
+# We want them to be able to add OpInfos without breaking our CI.
+# To achieve this, we keep our OpInfo library behind that of Pytorch's and
+# we periodically update our OpInfo library by regenerating this file
+_dtensor_lagging_meta = {
+    ("H", ""),
+    ("T", ""),
+    ("__getitem__", ""),
+    ("__radd__", ""),
+    ("__rand__", ""),
+    ("__rdiv__", ""),
+    ("__rmatmul__", ""),
+    ("__rmod__", ""),
+    ("__rmul__", ""),
+    ("__ror__", ""),
+    ("__rpow__", ""),
+    ("__rsub__", ""),
+    ("__rxor__", ""),
+    ("abs", ""),
+    ("acos", ""),
+    ("acosh", ""),
+    ("add", ""),
+    ("addbmm", ""),
+    ("addcdiv", ""),
+    ("addcmul", ""),
+    ("addmm", ""),
+    ("addmm", "decomposed"),
+    ("addmv", ""),
+    ("addr", ""),
+    ("all", ""),
+    ("allclose", ""),
+    ("amax", ""),
+    ("amin", ""),
+    ("aminmax", ""),
+    ("angle", ""),
+    ("any", ""),
+    ("arange", ""),
+    ("argmax", ""),
+    ("argmin", ""),
+    ("argsort", ""),
+    ("argwhere", ""),
+    ("as_strided", ""),
+    ("as_strided_scatter", ""),
+    ("asin", ""),
+    ("asinh", ""),
+    ("atan", ""),
+    ("atan2", ""),
+    ("atanh", ""),
+    ("atleast_1d", ""),
+    ("atleast_2d", ""),
+    ("atleast_3d", ""),
+    ("baddbmm", ""),
+    ("bernoulli", ""),
+    ("bfloat16", ""),
+    ("bincount", ""),
+    ("bitwise_and", ""),
+    ("bitwise_left_shift", ""),
+    ("bitwise_not", ""),
+    ("bitwise_or", ""),
+    ("bitwise_right_shift", ""),
+    ("bitwise_xor", ""),
+    ("block_diag", ""),
+    ("bmm", ""),
+    ("bool", ""),
+    ("broadcast_shapes", ""),
+    ("broadcast_tensors", ""),
+    ("broadcast_to", ""),
+    ("bucketize", ""),
+    ("byte", ""),
+    ("cartesian_prod", ""),
+    ("cat", ""),
+    ("cdist", ""),
+    ("cdouble", ""),
+    ("ceil", ""),
+    ("cfloat", ""),
+    ("chalf", ""),
+    ("char", ""),
+    ("cholesky", ""),
+    ("cholesky_inverse", ""),
+    ("cholesky_solve", ""),
+    ("chunk", ""),
+    ("clamp", ""),
+    ("clamp_max", ""),
+    ("clamp_min", ""),
+    ("clone", ""),
+    ("column_stack", ""),
+    ("combinations", ""),
+    ("complex", ""),
+    ("conj", ""),
+    ("conj_physical", ""),
+    ("constant_pad_nd", ""),
+    ("contiguous", ""),
+    ("copysign", ""),
+    ("corrcoef", ""),
+    ("cos", ""),
+    ("cosh", ""),
+    ("count_nonzero", ""),
+    ("cov", ""),
+    ("cross", ""),
+    ("cummax", ""),
+    ("cummin", ""),
+    ("cumprod", ""),
+    ("cumsum", ""),
+    ("cumulative_trapezoid", ""),
+    ("deg2rad", ""),
+    ("diag", ""),
+    ("diag_embed", ""),
+    ("diagflat", ""),
+    ("diagonal", ""),
+    ("diagonal_copy", ""),
+    ("diagonal_scatter", ""),
+    ("diff", ""),
+    ("digamma", ""),
+    ("dist", ""),
+    ("div", "floor_rounding"),
+    ("div", "no_rounding_mode"),
+    ("div", "trunc_rounding"),
+    ("dot", ""),
+    ("double", ""),
+    ("dsplit", ""),
+    ("dstack", ""),
+    ("einsum", ""),
+    ("empty", ""),
+    ("empty_like", ""),
+    ("eq", ""),
+    ("equal", ""),
+    ("erf", ""),
+    ("erfc", ""),
+    ("erfinv", ""),
+    ("exp", ""),
+    ("exp2", ""),
+    ("expand", ""),
+    ("expand_as", ""),
+    ("expm1", ""),
+    ("eye", ""),
+    ("fft.fft", ""),
+    ("fft.fft2", ""),
+    ("fft.fftn", ""),
+    ("fft.fftshift", ""),
+    ("fft.hfft", ""),
+    ("fft.hfft2", ""),
+    ("fft.hfftn", ""),
+    ("fft.ifft", ""),
+    ("fft.ifft2", ""),
+    ("fft.ifftn", ""),
+    ("fft.ifftshift", ""),
+    ("fft.ihfft", ""),
+    ("fft.ihfft2", ""),
+    ("fft.ihfftn", ""),
+    ("fft.irfft", ""),
+    ("fft.irfft2", ""),
+    ("fft.irfftn", ""),
+    ("fft.rfft", ""),
+    ("fft.rfft2", ""),
+    ("fft.rfftn", ""),
+    ("fill", ""),
+    ("flatten", ""),
+    ("flip", ""),
+    ("fliplr", ""),
+    ("flipud", ""),
+    ("float", ""),
+    ("float_power", ""),
+    ("floor", ""),
+    ("floor_divide", ""),
+    ("fmax", ""),
+    ("fmin", ""),
+    ("fmod", ""),
+    ("frac", ""),
+    ("frexp", ""),
+    ("full", ""),
+    ("full_like", ""),
+    ("gather", ""),
+    ("gcd", ""),
+    ("ge", ""),
+    ("geqrf", ""),
+    ("gradient", ""),
+    ("gt", ""),
+    ("half", ""),
+    ("heaviside", ""),
+    ("histc", ""),
+    ("histogram", ""),
+    ("histogramdd", ""),
+    ("hsplit", ""),
+    ("hstack", ""),
+    ("hypot", ""),
+    ("i0", ""),
+    ("igamma", ""),
+    ("igammac", ""),
+    ("imag", ""),
+    ("index_add", ""),
+    ("index_copy", ""),
+    ("index_fill", ""),
+    ("index_put", ""),
+    ("index_reduce", ""),
+    ("index_select", ""),
+    ("inner", ""),
+    ("int", ""),
+    ("isclose", ""),
+    ("isfinite", ""),
+    ("isin", ""),
+    ("isinf", ""),
+    ("isnan", ""),
+    ("isneginf", ""),
+    ("isposinf", ""),
+    ("isreal", ""),
+    ("istft", ""),
+    ("jiterator_2inputs_2outputs", ""),
+    ("jiterator_4inputs_with_extra_args", ""),
+    ("jiterator_binary", ""),
+    ("jiterator_binary_return_by_ref", ""),
+    ("jiterator_unary", ""),
+    ("kron", ""),
+    ("kthvalue", ""),
+    ("lcm", ""),
+    ("ldexp", ""),
+    ("le", ""),
+    ("lerp", ""),
+    ("lgamma", ""),
+    ("linalg.cholesky", ""),
+    ("linalg.cholesky_ex", ""),
+    ("linalg.cond", ""),
+    ("linalg.cross", ""),
+    ("linalg.det", ""),
+    ("linalg.det", "singular"),
+    ("linalg.eig", ""),
+    ("linalg.eigh", ""),
+    ("linalg.eigvals", ""),
+    ("linalg.eigvalsh", ""),
+    ("linalg.householder_product", ""),
+    ("linalg.inv", ""),
+    ("linalg.inv_ex", ""),
+    ("linalg.ldl_factor", ""),
+    ("linalg.ldl_factor_ex", ""),
+    ("linalg.ldl_solve", ""),
+    ("linalg.lstsq", ""),
+    ("linalg.lstsq", "grad_oriented"),
+    ("linalg.lu", ""),
+    ("linalg.lu_factor", ""),
+    ("linalg.lu_factor_ex", ""),
+    ("linalg.lu_solve", ""),
+    ("linalg.matrix_norm", ""),
+    ("linalg.matrix_power", ""),
+    ("linalg.matrix_rank", ""),
+    ("linalg.matrix_rank", "hermitian"),
+    ("linalg.multi_dot", ""),
+    ("linalg.norm", ""),
+    ("linalg.norm", "subgradients_at_zero"),
+    ("linalg.pinv", ""),
+    ("linalg.pinv", "hermitian"),
+    ("linalg.pinv", "singular"),
+    ("linalg.qr", ""),
+    ("linalg.slogdet", ""),
+    ("linalg.solve", ""),
+    ("linalg.solve_ex", ""),
+    ("linalg.solve_triangular", ""),
+    ("linalg.svd", ""),
+    ("linalg.svdvals", ""),
+    ("linalg.tensorinv", ""),
+    ("linalg.tensorsolve", ""),
+    ("linalg.vander", ""),
+    ("linalg.vecdot", ""),
+    ("linalg.vector_norm", ""),
+    ("linspace", ""),
+    ("log", ""),
+    ("log10", ""),
+    ("log1p", ""),
+    ("log2", ""),
+    ("log_softmax", ""),
+    ("log_softmax", "with_dtype"),
+    ("logaddexp", ""),
+    ("logaddexp2", ""),
+    ("logcumsumexp", ""),
+    ("logdet", ""),
+    ("logical_and", ""),
+    ("logical_not", ""),
+    ("logical_or", ""),
+    ("logical_xor", ""),
+    ("logit", ""),
+    ("logspace", ""),
+    ("logsumexp", ""),
+    ("long", ""),
+    ("lt", ""),
+    ("lu", ""),
+    ("lu_solve", ""),
+    ("lu_unpack", ""),
+    ("mH", ""),
+    ("mT", ""),
+    ("masked.amax", ""),
+    ("masked.amin", ""),
+    ("masked.argmax", ""),
+    ("masked.argmin", ""),
+    ("masked.cumprod", ""),
+    ("masked.cumsum", ""),
+    ("masked.log_softmax", ""),
+    ("masked.logaddexp", ""),
+    ("masked.logsumexp", ""),
+    ("masked.mean", ""),
+    ("masked.median", ""),
+    ("masked.norm", ""),
+    ("masked.normalize", ""),
+    ("masked.prod", ""),
+    ("masked.softmax", ""),
+    ("masked.softmin", ""),
+    ("masked.std", ""),
+    ("masked.sum", ""),
+    ("masked.var", ""),
+    ("masked_fill", ""),
+    ("masked_scatter", ""),
+    ("masked_select", ""),
+    ("matmul", ""),
+    ("matrix_exp", ""),
+    ("max", "binary"),
+    ("max", "reduction_no_dim"),
+    ("max", "reduction_with_dim"),
+    ("max_pool2d_with_indices_backward", ""),
+    ("maximum", ""),
+    ("mean", ""),
+    ("median", ""),
+    ("meshgrid", "list_of_tensors"),
+    ("meshgrid", "variadic_tensors"),
+    ("min", "binary"),
+    ("min", "reduction_no_dim"),
+    ("min", "reduction_with_dim"),
+    ("minimum", ""),
+    ("mm", ""),
+    ("mode", ""),
+    ("movedim", ""),
+    ("msort", ""),
+    ("mul", ""),
+    ("multinomial", ""),
+    ("mv", ""),
+    ("mvlgamma", "mvlgamma_p_1"),
+    ("mvlgamma", "mvlgamma_p_3"),
+    ("mvlgamma", "mvlgamma_p_5"),
+    ("nan_to_num", ""),
+    ("nanmean", ""),
+    ("nanmedian", ""),
+    ("nanquantile", ""),
+    ("nansum", ""),
+    ("narrow", ""),
+    ("narrow_copy", ""),
+    ("native_batch_norm", ""),
+    ("native_layer_norm", ""),
+    ("ne", ""),
+    ("neg", ""),
+    ("new_empty", ""),
+    ("new_empty_strided", ""),
+    ("new_full", ""),
+    ("new_ones", ""),
+    ("new_zeros", ""),
+    ("nextafter", ""),
+    ("nn.functional._scaled_dot_product_attention", ""),
+    ("nn.functional.adaptive_avg_pool1d", ""),
+    ("nn.functional.adaptive_avg_pool2d", ""),
+    ("nn.functional.adaptive_avg_pool3d", ""),
+    ("nn.functional.adaptive_max_pool1d", ""),
+    ("nn.functional.adaptive_max_pool2d", ""),
+    ("nn.functional.adaptive_max_pool3d", ""),
+    ("nn.functional.alpha_dropout", ""),
+    ("nn.functional.avg_pool1d", ""),
+    ("nn.functional.avg_pool2d", ""),
+    ("nn.functional.avg_pool3d", ""),
+    ("nn.functional.batch_norm", ""),
+    ("nn.functional.batch_norm", "without_cudnn"),
+    ("nn.functional.bilinear", ""),
+    ("nn.functional.binary_cross_entropy", ""),
+    ("nn.functional.binary_cross_entropy_with_logits", ""),
+    ("nn.functional.celu", ""),
+    ("nn.functional.conv1d", ""),
+    ("nn.functional.conv2d", ""),
+    ("nn.functional.conv_transpose1d", ""),
+    ("nn.functional.conv_transpose2d", ""),
+    ("nn.functional.conv_transpose3d", ""),
+    ("nn.functional.cosine_embedding_loss", ""),
+    ("nn.functional.cosine_similarity", ""),
+    ("nn.functional.cross_entropy", ""),
+    ("nn.functional.ctc_loss", ""),
+    ("nn.functional.dropout", ""),
+    ("nn.functional.dropout2d", ""),
+    ("nn.functional.dropout3d", ""),
+    ("nn.functional.elu", ""),
+    ("nn.functional.embedding", ""),
+    ("nn.functional.embedding_bag", ""),
+    ("nn.functional.feature_alpha_dropout", "with_train"),
+    ("nn.functional.feature_alpha_dropout", "without_train"),
+    ("nn.functional.fractional_max_pool2d", ""),
+    ("nn.functional.fractional_max_pool3d", ""),
+    ("nn.functional.gaussian_nll_loss", ""),
+    ("nn.functional.gelu", ""),
+    ("nn.functional.glu", ""),
+    ("nn.functional.grid_sample", ""),
+    ("nn.functional.group_norm", ""),
+    ("nn.functional.hardshrink", ""),
+    ("nn.functional.hardsigmoid", ""),
+    ("nn.functional.hardswish", ""),
+    ("nn.functional.hardtanh", ""),
+    ("nn.functional.hinge_embedding_loss", ""),
+    ("nn.functional.huber_loss", ""),
+    ("nn.functional.instance_norm", ""),
+    ("nn.functional.interpolate", "area"),
+    ("nn.functional.interpolate", "bicubic"),
+    ("nn.functional.interpolate", "bilinear"),
+    ("nn.functional.interpolate", "linear"),
+    ("nn.functional.interpolate", "nearest"),
+    ("nn.functional.interpolate", "trilinear"),
+    ("nn.functional.kl_div", ""),
+    ("nn.functional.l1_loss", ""),
+    ("nn.functional.layer_norm", ""),
+    ("nn.functional.leaky_relu", ""),
+    ("nn.functional.linear", ""),
+    ("nn.functional.local_response_norm", ""),
+    ("nn.functional.logsigmoid", ""),
+    ("nn.functional.margin_ranking_loss", ""),
+    ("nn.functional.max_pool1d", ""),
+    ("nn.functional.max_pool2d", ""),
+    ("nn.functional.max_pool3d", ""),
+    ("nn.functional.max_unpool1d", ""),
+    ("nn.functional.max_unpool1d", "grad"),
+    ("nn.functional.max_unpool2d", ""),
+    ("nn.functional.max_unpool2d", "grad"),
+    ("nn.functional.max_unpool3d", ""),
+    ("nn.functional.max_unpool3d", "grad"),
+    ("nn.functional.mish", ""),
+    ("nn.functional.mse_loss", ""),
+    ("nn.functional.multi_margin_loss", ""),
+    ("nn.functional.multilabel_margin_loss", ""),
+    ("nn.functional.multilabel_soft_margin_loss", ""),
+    ("nn.functional.nll_loss", ""),
+    ("nn.functional.normalize", ""),
+    ("nn.functional.one_hot", ""),
+    ("nn.functional.pad", "circular"),
+    ("nn.functional.pad", "constant"),
+    ("nn.functional.pad", "reflect"),
+    ("nn.functional.pad", "replicate"),
+    ("nn.functional.pairwise_distance", ""),
+    ("nn.functional.pdist", ""),
+    ("nn.functional.pixel_shuffle", ""),
+    ("nn.functional.pixel_unshuffle", ""),
+    ("nn.functional.poisson_nll_loss", ""),
+    ("nn.functional.prelu", ""),
+    ("nn.functional.relu", ""),
+    ("nn.functional.relu6", ""),
+    ("nn.functional.rrelu", ""),
+    ("nn.functional.selu", ""),
+    ("nn.functional.silu", ""),
+    ("nn.functional.silu", "complex"),
+    ("nn.functional.smooth_l1_loss", ""),
+    ("nn.functional.soft_margin_loss", ""),
+    ("nn.functional.softmin", ""),
+    ("nn.functional.softmin", "with_dtype"),
+    ("nn.functional.softplus", ""),
+    ("nn.functional.softshrink", ""),
+    ("nn.functional.softsign", ""),
+    ("nn.functional.tanhshrink", ""),
+    ("nn.functional.threshold", ""),
+    ("nn.functional.triplet_margin_loss", ""),
+    ("nn.functional.triplet_margin_with_distance_loss", ""),
+    ("nn.functional.unfold", ""),
+    ("nn.functional.upsample_bilinear", ""),
+    ("nn.functional.upsample_nearest", ""),
+    ("nonzero", ""),
+    ("norm", ""),
+    ("norm", "fro"),
+    ("norm", "inf"),
+    ("norm", "nuc"),
+    ("normal", ""),
+    ("normal", "number_mean"),
+    ("ones", ""),
+    ("ones_like", ""),
+    ("ormqr", ""),
+    ("outer", ""),
+    ("pca_lowrank", ""),
+    ("permute", ""),
+    ("pinverse", ""),
+    ("polar", ""),
+    ("polygamma", "polygamma_n_0"),
+    ("polygamma", "polygamma_n_1"),
+    ("polygamma", "polygamma_n_2"),
+    ("polygamma", "polygamma_n_3"),
+    ("polygamma", "polygamma_n_4"),
+    ("positive", ""),
+    ("pow", ""),
+    ("prod", ""),
+    ("put", ""),
+    ("qr", ""),
+    ("quantile", ""),
+    ("rad2deg", ""),
+    ("rand_like", ""),
+    ("randint", ""),
+    ("randint_like", ""),
+    ("randn", ""),
+    ("randn_like", ""),
+    ("ravel", ""),
+    ("real", ""),
+    ("reciprocal", ""),
+    ("remainder", ""),
+    ("renorm", ""),
+    ("repeat", ""),
+    ("repeat_interleave", ""),
+    ("reshape", ""),
+    ("reshape_as", ""),
+    ("resize_", ""),
+    ("resize_as_", ""),
+    ("resolve_conj", ""),
+    ("resolve_neg", ""),
+    ("roll", ""),
+    ("rot90", ""),
+    ("round", ""),
+    ("round", "decimals_0"),
+    ("round", "decimals_3"),
+    ("round", "decimals_neg_3"),
+    ("rsqrt", ""),
+    ("rsub", ""),
+    ("scalar_tensor", ""),
+    ("scatter", ""),
+    ("scatter_add", ""),
+    ("scatter_reduce", "amax"),
+    ("scatter_reduce", "amin"),
+    ("scatter_reduce", "mean"),
+    ("scatter_reduce", "prod"),
+    ("scatter_reduce", "sum"),
+    ("searchsorted", ""),
+    ("segment_reduce", "lengths"),
+    ("segment_reduce", "offsets"),
+    ("select", ""),
+    ("select_scatter", ""),
+    ("sgn", ""),
+    ("short", ""),
+    ("sigmoid", ""),
+    ("sign", ""),
+    ("signal.windows.cosine", ""),
+    ("signal.windows.exponential", ""),
+    ("signal.windows.gaussian", ""),
+    ("signal.windows.kaiser", ""),
+    ("signbit", ""),
+    ("sin", ""),
+    ("sinc", ""),
+    ("sinh", ""),
+    ("slice", ""),
+    ("slice_scatter", ""),
+    ("softmax", ""),
+    ("softmax", "with_dtype"),
+    ("sort", ""),
+    ("sparse.sampled_addmm", ""),
+    ("special.airy_ai", ""),
+    ("special.bessel_j0", ""),
+    ("special.bessel_j1", ""),
+    ("special.bessel_y0", ""),
+    ("special.bessel_y1", ""),
+    ("special.chebyshev_polynomial_t", ""),
+    ("special.chebyshev_polynomial_u", ""),
+    ("special.chebyshev_polynomial_v", ""),
+    ("special.chebyshev_polynomial_w", ""),
+    ("special.entr", ""),
+    ("special.erfcx", ""),
+    ("special.hermite_polynomial_h", ""),
+    ("special.hermite_polynomial_he", ""),
+    ("special.i0e", ""),
+    ("special.i1", ""),
+    ("special.i1e", ""),
+    ("special.laguerre_polynomial_l", ""),
+    ("special.legendre_polynomial_p", ""),
+    ("special.log_ndtr", ""),
+    ("special.modified_bessel_i0", ""),
+    ("special.modified_bessel_i1", ""),
+    ("special.modified_bessel_k0", ""),
+    ("special.modified_bessel_k1", ""),
+    ("special.ndtr", ""),
+    ("special.ndtri", ""),
+    ("special.polygamma", "special_polygamma_n_0"),
+    ("special.scaled_modified_bessel_k0", ""),
+    ("special.scaled_modified_bessel_k1", ""),
+    ("special.shifted_chebyshev_polynomial_t", ""),
+    ("special.shifted_chebyshev_polynomial_u", ""),
+    ("special.shifted_chebyshev_polynomial_v", ""),
+    ("special.shifted_chebyshev_polynomial_w", ""),
+    ("special.spherical_bessel_j0", ""),
+    ("special.xlog1py", ""),
+    ("special.zeta", ""),
+    ("split", ""),
+    ("split", "list_args"),
+    ("split_with_sizes", ""),
+    ("sqrt", ""),
+    ("square", ""),
+    ("squeeze", ""),
+    ("stack", ""),
+    ("std", ""),
+    ("std_mean", ""),
+    ("stft", ""),
+    ("sub", ""),
+    ("sum", ""),
+    ("sum_to_size", ""),
+    ("svd", ""),
+    ("svd_lowrank", ""),
+    ("symeig", ""),
+    ("t", ""),
+    ("take", ""),
+    ("take_along_dim", ""),
+    ("tan", ""),
+    ("tanh", ""),
+    ("tensor_split", ""),
+    ("tensordot", ""),
+    ("tile", ""),
+    ("to", ""),
+    ("to_sparse", ""),
+    ("topk", ""),
+    ("trace", ""),
+    ("transpose", ""),
+    ("trapezoid", ""),
+    ("trapz", ""),
+    ("triangular_solve", ""),
+    ("tril", ""),
+    ("tril_indices", ""),
+    ("triu", ""),
+    ("triu_indices", ""),
+    ("true_divide", ""),
+    ("trunc", ""),
+    ("unbind", ""),
+    ("unflatten", ""),
+    ("unfold", ""),
+    ("unfold_copy", ""),
+    ("uniform", ""),
+    ("unique", ""),
+    ("unique_consecutive", ""),
+    ("unsqueeze", ""),
+    ("var", ""),
+    ("var_mean", ""),
+    ("vdot", ""),
+    ("view", ""),
+    ("view_as", ""),
+    ("view_as_complex", ""),
+    ("view_as_real", ""),
+    ("vsplit", ""),
+    ("vstack", ""),
+    ("where", ""),
+    ("xlogy", ""),
+    ("zero_", ""),
+    ("zeros", ""),
+    ("zeros_like", ""),
+}
 
-import torch
-import torch.distributed as dist
 
-from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
-from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
-    TEST_SKIPS,
-    skip_if_lt_x_gpu,
-)
-
-from torch.distributed._tensor import (
-    DeviceMesh,
-    Shard,
-    Replicate,
-    distribute_tensor,
-    redistribute,
-)
-from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.placement_types import Placement
-
-DEVICE_TYPE = "cuda" if torch.cuda.is_available() else "cpu"
-NUM_DEVICES = 4
-
-# We use this as a proxy for "multiple GPUs exist"
-if torch.cuda.is_available() and torch.cuda.device_count() > 1:
-    # when we actually have multiple GPUs, relax the requirement to smaller counts.
-    NUM_DEVICES = min(NUM_DEVICES, torch.cuda.device_count())
-
-T = TypeVar("T")
+def in_dtensor_lagging_op_db(opinfo: OpInfo) -> bool:
+    return (opinfo.name, opinfo.variant_test_name) in _dtensor_lagging_meta
 
 
-def skip_unless_torch_gpu(method: T) -> T:
-    """
-    Test decorator which skips the test unless there's a GPU available to torch.
-
-    >>> @skip_unless_torch_gpu
-    >>> def test_some_method(self) -> None:
-    >>>   ...
-    """
-    # The builtin @skip_if_no_gpu relies on os.environ['WORLD_SIZE'] being set.
-    return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
-
-
-@dataclass
-class RedistributeProfile:
-    num_calls: int
-
-
-@contextmanager
-def redistribute_profiler() -> Generator[RedistributeProfile, None, None]:
-
-    orig_redistribute_dtensor = redistribute.redistribute_dtensor
-    profile: RedistributeProfile = RedistributeProfile(num_calls=0)
-
-    # pyre-ignore[53]
-    def patched_redistribute_dtensor(
-        input: DTensor,
-        device_mesh: DeviceMesh,
-        placements: Sequence[Placement],
-    ) -> DTensor:
-        result = orig_redistribute_dtensor(input, device_mesh, placements)
-        profile.num_calls += 1
-        return result
-
-    try:
-        # pyre-ignore[9]
-        redistribute.redistribute_dtensor = patched_redistribute_dtensor
-        yield profile
-    finally:
-        redistribute.redistribute_dtensor = orig_redistribute_dtensor
-
-
-class DTensorTestBase(MultiProcessTestCase):
-    @property
-    def world_size(self) -> int:
-        return NUM_DEVICES
-
-    def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(DEVICE_TYPE, list(range(NUM_DEVICES)))
-
-    def init_pg(self, backend: str = "nccl") -> None:
-        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-
-        if backend not in ["nccl", "gloo", "mpi"]:
-            raise RuntimeError(f"Backend {backend} not supported!")
-
-        dist.init_process_group(
-            backend=backend,
-            world_size=self.world_size,
-            rank=self.rank,  # pyre-ignore[16]
-            init_method=f"file://{self.file_name}",  # pyre-ignore[16]
-        )
-
-        # set device for nccl pg for collectives
-        if backend == "nccl":
-            torch.cuda.set_device(self.rank)
-
-    def destroy_pg(self) -> None:
-        # Wait for all ranks to reach here before starting shutdown.
-        dist.barrier()
-        dist.destroy_process_group()
-
-    def setUp(self) -> None:
-        super().setUp()
-        self._spawn_processes()
-
-    # pyre-ignore[2]:
-    def _test_op(self, mesh: DeviceMesh, op_call, *args, **kwargs) -> None:
-        with redistribute_profiler() as profile:
-            out = op_call(*args, **kwargs)
-            dtc = DTensorConverter(mesh, args, kwargs)
-            for d_args, d_kwargs in dtc:
-                # pyre can't find assertTrue anymore?
-                self.assertEqual(dtc.successful(), True)
-                d_out = op_call(*d_args, **d_kwargs)
-                self.assertEqual(
-                    d_out.redistribute(
-                        mesh, [Replicate()] * mesh.ndim
-                    ).to_local(),
-                    out,
-                )
-
-
-# wrapper to initialize comms (processgroup)
-def with_comms(
-    func: Optional[  # pyre-fixme[24]: Generic type `Callable` expects 2 type parameters.
-        Callable
-    ] = None,
-    backend: Optional[str] = None,
-) -> Optional[  # pyre-fixme[24]: Generic type `Callable` expects 2 type parameters.
-    Callable
-]:
-    assert func is not None
-
-    @wraps(func)  # pyre-ignore[6]
-    def wrapper(
-        self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
-    ) -> None:
-        # if backend not specified, and cuda available, then use nccl, else gloo
-        pg_backend = (
-            "nccl" if backend is None and torch.cuda.is_available() else "gloo"
-        )
-        if pg_backend == "nccl" and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-
-        self.device_type = "cuda" if pg_backend == "nccl" else "cpu"
-        self.init_pg(backend=pg_backend)
-        func(self)  # type: ignore[misc]
-        self.destroy_pg()
-
-    return wrapper
-
-
-# This is a class for converting args/kwargs of an op into distributed args/kwargs
-class DTensorConverter(object):
-    def __init__(
-        self,
-        mesh: DeviceMesh,
-        args: Tuple[object, ...],
-        kwargs: Dict[str, object],
-    ) -> None:
-        self.hit = 0
-        self.miss = 0
-        self.mesh = mesh
-        self.args = args
-        self.kwargs = kwargs
-        flatten_args, flatten_args_spec = tree_flatten(args)
-        flatten_kwargs, flatten_kwargs_spec = tree_flatten(kwargs)
-
-        self.flatten_args: List[object] = flatten_args
-        self.flatten_args_spec: TreeSpec = flatten_args_spec
-        self.flatten_kwargs: List[object] = flatten_kwargs
-        self.flatten_kwargs_spec: TreeSpec = flatten_kwargs_spec
-
-        choices_for_args = []
-        for arg in self.flatten_args:
-            if isinstance(arg, torch.Tensor):
-                choices_for_args.append(self.gen_sharding_choices_for_arg(arg))
-
-        for arg in self.flatten_kwargs:
-            if isinstance(arg, torch.Tensor):
-                choices_for_args.append(self.gen_sharding_choices_for_arg(arg))
-
-        self.sharding_combs: Iterator[Sequence[Placement]] = iter(
-            itertools.product(*choices_for_args)
-        )
-
-    def successful(self) -> bool:
-        return self.hit > 0 and self.miss == 0
-
-    def is_supported_tensor(self, t: torch.Tensor) -> bool:
-        # TODO: dist tensor need to support quantized and sparse
-        # tensors, quantized tensor might be relatively easy, but
-        # sparse tensor have special layouts that we need to possibly
-        # deal with, until we are clear about them, we don't officially
-        # support them.
-        return not any(
-            [
-                t.is_sparse_csr,
-                t.is_sparse,
-                t.is_mkldnn,
-                t.is_quantized,
-                t.is_nested,
-                torch._is_functional_tensor(t),
-                t.is_neg(),
-                t.is_conj(),
-                t.device.type in ("lazy", "meta"),
-                # We need a way to test if a tensor is batched but there
-                # is no official APi to do it
-                # torch._C._is_batched(t),
-            ]
-        )
-
-    def gen_sharding_choices_for_arg(
-        self, arg: torch.Tensor
-    ) -> Sequence[Placement]:
-        mesh_size = self.mesh.size()
-        sharding_choices: List[Placement] = [Replicate()]
-        # c10d collective does not support bool tensor
-        # for bool tensor we treat it as replicated
-        if arg.dtype != torch.bool:
-            # only generating choices with: replicate, or sharding
-            # evenly on a dimension that could be sharded
-            sharding_choices = sharding_choices + [
-                Shard(i)
-                for i, s in enumerate(arg.shape)
-                if s > 1 and s % mesh_size == 0
-            ]
-        # TODO: add multi mesh choices
-        # all_choices = itertools.product(
-        #     *(self.mesh.ndim * [sharding_choices])
-        # )
-        return sharding_choices
-
-    def __iter__(self) -> "DTensorConverter":
-        return self
-
-    def __next__(self) -> Tuple[Tuple[object, ...], Dict[str, object]]:
-        try:
-            next_sharding_choices = next(self.sharding_combs)
-            idx = 0
-
-            new_args: List[object] = []
-            for arg in self.flatten_args:
-                if isinstance(arg, torch.Tensor):
-                    new_args.append(
-                        self.to_dist_tensor(
-                            arg, self.mesh, [next_sharding_choices[idx]]
-                        )
-                    )
-                    idx += 1
-                else:
-                    new_args.append(arg)
-
-            new_kwargs: List[object] = []
-            for arg in self.flatten_kwargs:
-                if isinstance(arg, torch.Tensor):
-                    new_kwargs.append(
-                        self.to_dist_tensor(
-                            arg, self.mesh, [next_sharding_choices[idx]]
-                        )
-                    )
-                    idx += 1
-                else:
-                    new_kwargs.append(arg)
-
-            return (
-                tree_unflatten(new_args, self.flatten_args_spec),
-                tree_unflatten(new_kwargs, self.flatten_kwargs_spec),
-            )
-        except StopIteration:
-            raise StopIteration
-
-    def to_dist_tensor(
-        self, t: torch.Tensor, mesh: DeviceMesh, placements: List[Placement]
-    ) -> torch.Tensor:
-        if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
-            if self.is_supported_tensor(t):
-                self.hit += 1
-                # We cannot use distribute_tensor for bool tensors as c10d
-                # collectives does not support the dtype, we assume op with
-                # bool tensor args the same tensor so we don't need to broadcast
-                # TODO: add bool tensor dtype support in c10d collective
-                if t.dtype == torch.bool:
-                    r = DTensor(
-                        t,
-                        mesh,
-                        placements,
-                        size=t.size(),
-                        requires_grad=t.requires_grad,
-                    )
-                else:
-                    r = distribute_tensor(t, mesh, placements)
-                if type(t) is torch.nn.Parameter:
-                    r = torch.nn.Parameter(  # type: ignore[assignment]
-                        r, requires_grad=r.requires_grad
-                    )
-                return r
-            else:
-                self.miss += 1
-                return t
-        elif torch.overrides.is_tensor_like(t):
-            # Blindly converting tensor subclasses to dist tensor can cause
-            # unpredictable problems, we explicitly disable this conversion
-            # for now (i.e. we don't support DTensor holding tensor subclass
-            # until there's a strong reason later).
-            self.miss += 1
-            return t
-        else:
-            raise RuntimeError(
-                f"Trying to convert to DTensor, but got {type(t)}"
-            )
+dtensor_lagging_op_db: List[OpInfo] = [
+    opinfo for opinfo in op_db if in_dtensor_lagging_op_db(opinfo)
+]
