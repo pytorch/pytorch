@@ -45,6 +45,16 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
             dist.broadcast(cloned_input, src=rank)
             self.assertEqual(cloned_input, torch.ones(3, 3) * rank)
 
+    def test_scatter(self):
+        if dist.get_rank() == 0:
+            scatter_list = [torch.ones(3, 3) * rank for rank in range(self.world_size)]
+        else:
+            scatter_list = None
+        output_tensor = torch.empty(3, 3)
+
+        dist.scatter(output_tensor, scatter_list)
+        self.assertEqual(output_tensor, torch.ones(3, 3) * dist.get_rank())
+
     def test_broadcast_object_list(self):
         val = 99 if dist.get_rank() == 0 else None
         object_list = [val] * dist.get_world_size()
@@ -53,8 +63,6 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         dist.broadcast_object_list(object_list=object_list)
         self.assertEqual(99, object_list[0])
 
-    def test_something_else(self):
-        pass
 
 if __name__ == "__main__":
     run_tests()
