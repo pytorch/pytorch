@@ -469,6 +469,13 @@ op_db: List[OpInfo] = [
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestSchemaCheckModeOpInfo",
+                "test_schema_correctness",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
         ),
     ),
     make_signal_windows_opinfo(
