@@ -1873,6 +1873,9 @@ def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
     for input_shape1, input_shape2, kwargs in cases:
         yield SampleInput([make_arg(input_shape1), make_arg(input_shape2)], kwargs=kwargs)
 
+    # from coat_lite_mini
+    yield SampleInput([make_arg((2, 2, 2, 2), memory_format=torch.channels_last)], args=(1,),)
+
 def error_inputs_cat(op_info, device, **kwargs):
 
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
@@ -12008,21 +12011,16 @@ op_db: List[OpInfo] = [
             # This is only failing on Linux Bionic 3.10 Cuda 11.6
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
                          device_type='cuda', active_if=_get_torch_cuda_version() >= (11, 6)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
-                         device_type='cuda', dtypes=(torch.float32,)),
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # Doesn't support autocasting
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensorNonErroring', 'test_fake_autocast', device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
-            # Forward works for dtype=float64 which is the math path
-            DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
             # No meta function
             DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', device_type='cuda'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),),
     ),
     UnaryUfuncInfo(
@@ -15016,6 +15014,8 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True,
            skips=(
+               # https://github.com/pytorch/pytorch/issues/89353
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref_mps'),
                # RuntimeError: Arguments for call not valid.
                #               Expected a value of type 'List[Tensor]' for argument
                #               'tensors' but instead found type 'Tensor (inferred)'.
