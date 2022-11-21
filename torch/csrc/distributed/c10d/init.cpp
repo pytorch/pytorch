@@ -1310,7 +1310,13 @@ Arguments:
 
           .def(
               "allgather_coalesced",
-              &::c10d::ProcessGroup::allgather_coalesced,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<std::vector<at::Tensor>>& output_lists,
+                 const std::vector<at::Tensor>& input_list,
+                 const ::c10d::AllgatherOptions& opts) {
+                return ::c10d::ops::allgather_coalesced(
+                    self, output_lists, input_list, opts);
+              },
               py::arg("output_lists"),
               py::arg("input_list"),
               py::arg("opts") = ::c10d::AllgatherOptions(),

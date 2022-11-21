@@ -95,6 +95,15 @@ c10::intrusive_ptr<Work> _allgather_base_(
   return process_group->_allgather_base(output_tensor, input_tensor);
 }
 
+c10::intrusive_ptr<Work> allgather_coalesced_(
+    const std::vector<std::vector<at::Tensor>>& output_lists,
+    const std::vector<at::Tensor>& input_list,
+    const c10::intrusive_ptr<ProcessGroup>& process_group) {
+  return process_group->allgather_coalesced(
+      const_cast<std::vector<std::vector<at::Tensor>>&>(output_lists),
+      const_cast<std::vector<at::Tensor>&>(input_list));
+}
+
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> reduce_scatter_(
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
@@ -221,6 +230,10 @@ TORCH_LIBRARY(c10d, m) {
       "_allgather_base_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, _allgather_base_));
   m.def(
+      "allgather_coalesced_",
+      dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, allgather_coalesced_));
+  m.def(
       "reduce_scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
   m.def(
@@ -343,6 +356,21 @@ c10::intrusive_ptr<Work> _allgather_base(
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
 
   return op.call(output_tensor, input_tensor, process_group);
+}
+
+c10::intrusive_ptr<Work> allgather_coalesced(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const std::vector<std::vector<at::Tensor>>& output_lists,
+    const std::vector<at::Tensor>& input_list,
+    const AllgatherOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::allgather_coalesced_", "")
+                       .typed<c10::intrusive_ptr<Work>(
+                           const std::vector<std::vector<at::Tensor>>&,
+                           const std::vector<at::Tensor>&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
+
+  return op.call(output_lists, input_list, process_group);
 }
 
 c10::intrusive_ptr<Work> reduce_scatter(
