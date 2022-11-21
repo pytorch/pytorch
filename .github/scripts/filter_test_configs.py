@@ -188,7 +188,9 @@ def main() -> None:
         # No PR number, no tag, we can just return the test matrix as it is
         filtered_test_matrix = test_matrix
 
-    if args.event_name == "schedule":
+    # if args.event_name == "schedule":
+    # TODO: REVERT BEFORE COMMIT
+    if args.event_name != "schedule":
         filtered_test_matrix = set_periodic_modes(filtered_test_matrix)
 
     # Set the filtered test matrix as the output
