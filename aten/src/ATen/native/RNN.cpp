@@ -737,8 +737,6 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
 
     const auto gates = params.linear_hh(hx).add_(
         pre_compute_input ? input : params.linear_ih(input));
-
-    
     auto chunked_gates = gates.unsafe_chunk(4, 1);
     auto ingate = chunked_gates[0].sigmoid_();
     auto forgetgate = chunked_gates[1].sigmoid_();
@@ -746,7 +744,6 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
     auto outgate = chunked_gates[3].sigmoid_();
     auto cy = (forgetgate * cx).add_(ingate * cellgate);
     auto hy = outgate * cy.tanh();
-  
     hy = params.matmul_hr(hy);
     return std::make_tuple(std::move(hy), std::move(cy));
   }
