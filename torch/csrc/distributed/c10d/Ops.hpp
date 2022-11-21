@@ -44,6 +44,12 @@ TORCH_API c10::intrusive_ptr<Work> reduce_scatter(
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const ReduceScatterOptions& opts = {});
 
+TORCH_API c10::intrusive_ptr<Work> _reduce_scatter_base(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+     at::Tensor& output_tensor,
+     at::Tensor& input_tensor,
+    const ReduceScatterOptions& opts = {});
+
 TORCH_API c10::intrusive_ptr<Work> reduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,

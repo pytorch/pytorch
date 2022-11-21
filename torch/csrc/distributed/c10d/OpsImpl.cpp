@@ -259,6 +259,32 @@ reduce_scatter_cuda_(
       output_tensors, work);
 }
 
+c10::intrusive_ptr<Work> _reduce_scatter_base_cpu_(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t timeout) {
+  return process_group->_reduce_scatter_base(
+      output_tensor,
+      input_tensor,
+      ReduceScatterOptions{
+          *reduce_op.get(), std::chrono::milliseconds(timeout)});
+}
+
+c10::intrusive_ptr<Work> _reduce_scatter_base_cuda_(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t timeout) {
+  return process_group->_reduce_scatter_base(
+      output_tensor,
+      input_tensor,
+      ReduceScatterOptions{
+          *reduce_op.get(), std::chrono::milliseconds(timeout)});
+}
+
 c10::intrusive_ptr<Work> gather_cpu_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
@@ -437,6 +463,14 @@ TORCH_LIBRARY_IMPL(c10d, CPU, m) {
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("reduce_scatter_", reduce_scatter_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("_reduce_scatter_base_", _reduce_scatter_base_cpu_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("_reduce_scatter_base_", _reduce_scatter_base_cuda_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
