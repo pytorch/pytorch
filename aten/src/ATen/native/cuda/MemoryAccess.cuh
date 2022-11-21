@@ -240,8 +240,10 @@ struct unroll {
 // has its job to do. So the reminders should be handled by the the caller manually.
 template <int vec_size, typename data_t>  // vec_size: number of scalars, can be 1, 2, or 4.
 struct vectorized {
-
-  static_assert(thread_work_size() % vec_size == 0, "The workload per thread must be a multiple of vec_size");
+  #if defined(USE_ROCM) && (ROCM_VERSION >= 50300)
+  #else
+    static_assert(thread_work_size() % vec_size == 0, "The workload per thread must be a multiple of vec_size");
+  #endif
   static constexpr int loop_size = thread_work_size() / vec_size;
 
   data_t data;

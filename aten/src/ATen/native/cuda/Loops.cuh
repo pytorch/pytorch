@@ -69,8 +69,11 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 }}  // namespace at::native
 
 
-#include <ATen/native/cuda/CUDALoops.cuh>
-
+#if defined(USE_ROCM) && (ROCM_VERSION < 50300)
+  #include <ATen/native/cuda/ROCmLoops.cuh>
+#else
+  #include <ATen/native/cuda/CUDALoops.cuh>
+#endif
 
 namespace at { namespace native {
 
