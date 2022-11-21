@@ -48,8 +48,6 @@ __all__ = [
 ]
 
 
-whc_debug_views = {}
-
 class ParamInfo(NamedTuple):
     """Information for an original module parameter."""
 
@@ -1311,9 +1309,6 @@ class FlatParamHandle:
                 setattr(module, param_name, param_var)
                 if self._use_orig_params and self._training_state == HandleTrainingState.FORWARD:
                     module._parameters[param_name] = param_var  # type: ignore[assignment]
-                    stash_key = f"{id(self)}_{param_name}"
-                    # print(f"stashing view for {stash_key}")
-                    whc_debug_views[stash_key] = param_var
         for i, (
             param_name,
             module,

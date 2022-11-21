@@ -330,12 +330,12 @@ class FullyShardedDataParallel(nn.Module):
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-
-        module._is_fsdp_wrapped_module = True
-        for mod in module.modules():
-            mod._is_fsdp_wrapped_module = True
-
         _init_ignored_module_states(self, module, ignored_modules)
+
+        for submodule in module.modules():
+            if submodule not in self._ignored_modules:
+                submodule._is_fsdp_managed_module = True
+
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
                 "module": module,
