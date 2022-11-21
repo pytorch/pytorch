@@ -324,7 +324,7 @@ def _remove_activation_post_process(module):
     # TODO: maybe we should change activation_post_process to _activation_post_process
     # to prevent it from being used by user
     if hasattr(module, 'activation_post_process') and \
-       is_activation_post_process(module.activation_post_process):
+       _is_activation_post_process(module.activation_post_process):
         delattr(module, 'activation_post_process')
 
     # remove activation_post_proceess pre and post hooks
