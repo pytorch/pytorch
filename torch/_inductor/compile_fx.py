@@ -13,7 +13,7 @@ from functorch.compile import min_cut_rematerialization_partition
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
 
-from . import config, overrides
+from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
@@ -82,6 +82,22 @@ def complex_memory_overlap(t):
 @functools.lru_cache(None)
 def _step_logger():
     return dynamo_logging.get_step_logger(log)
+
+
+@DebugContext.wrap
+def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
+    shape_env = None
+    for inp in example_inputs:
+        if isinstance(inp, FakeTensor) and inp.fake_mode.shape_env is not None:
+            shape_env = inp.fake_mode.shape_env
+
+    graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
+    with V.set_graph_handler(graph):
+        graph.run(*example_inputs)
+        num_bytes, nodes_num_elem = graph.count_bytes()
+        metrics.num_bytes_accessed += num_bytes
+        metrics.nodes_num_elem += nodes_num_elem
+    return make_boxed_func(gm.forward)
 
 
 @DebugContext.wrap
@@ -338,6 +354,7 @@ _graph_counter = itertools.count(0)
 def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
+    inner_compile=compile_fx_inner,
     fake_mode=nullcontext,
 ):
     """Main entrypoint to a compile given FX graph"""
@@ -361,7 +378,7 @@ def compile_fx(
     @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = len(example_inputs) - num_example_inputs
-        return compile_fx_inner(
+        return inner_compile(
             model,
             example_inputs,
             num_fixed=fixed,
@@ -372,7 +389,7 @@ def compile_fx(
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = count_tangents(model)
-        return compile_fx_inner(
+        return inner_compile(
             model,
             example_inputs,
             num_fixed=fixed,
