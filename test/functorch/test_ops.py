@@ -402,7 +402,7 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
         xfail("native_batch_norm"),          # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
         xfail("native_batch_norm_legit"),    # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
-        
+
         xfail('nn.functional._scaled_dot_product_attention', device_type='cuda'),
 
         xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
