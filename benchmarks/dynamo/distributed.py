@@ -13,9 +13,11 @@ from torch.profiler import profile, ProfilerActivity, record_function
 try:
     from .common import timed
     from .dist_util import apply_fsdp, cleanup, get_model, model_iter_fn, setup
+    from .gpu_memory import Memory_Maximizer
 except ImportError:
     from common import timed
     from dist_util import apply_fsdp, cleanup, get_model, model_iter_fn, setup
+    from gpu_memory import Memory_Maximizer
 
 from torch.distributed.fsdp.flat_param import whc_debug_views
 
@@ -98,11 +100,28 @@ def run_model(args, model, inputs, key):
         )
         model = dynamo_ctx(model)
 
+    wrapped_model_iter_fn = model_iter_fn
+    if args.gpu_memory_stats and rank == 0:
+        memmax = Memory_Maximizer()
+        memmax.start()
+
+        def memmax_wrapped_model_iter_fn(*args, **kwargs):
+            try:
+                return model_iter_fn(*args, **kwargs)
+            finally:
+                memmax.update()
+
+        wrapped_model_iter_fn = memmax_wrapped_model_iter_fn
+
     # warmup
-    _ = timed(model, model_iter_fn, inputs, times=3, return_result=False)
+    _ = timed(model, wrapped_model_iter_fn, inputs, times=3, return_result=False)
     t_total = timed(
-        model, model_iter_fn, inputs, times=args.repeat, return_result=False
+        model, wrapped_model_iter_fn, inputs, times=args.repeat, return_result=False
     )
+
+    if args.gpu_memory_stats and rank == 0:
+        memmax.stop()
+
     if args.torchviz:
         torchviz_model(args, model, inputs, rank)
     if args.profile:
@@ -126,6 +145,9 @@ if __name__ == "__main__":
         "--torchviz", action="store_true", help="Dump autograd graph with torchviz"
     )
     parser.add_argument("--profile", action="store_true", help="Run the profiler")
+    parser.add_argument(
+        "--gpu_memory_stats", action="store_true", help="Run the gpu memory profiler"
+    )
     parser.add_argument("--trace_file", default="profile.json", help="Run the profiler")
     parser.add_argument("--repeat", default=10, help="Repeats for timing run")
     parser.add_argument(
