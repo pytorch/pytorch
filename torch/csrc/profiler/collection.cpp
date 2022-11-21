@@ -993,31 +993,119 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
   set_in_tree_building(sorted_events, false);
 }
 
-// Just and example
-void adjust_timestamps_dfs(std::shared_ptr<Result>& r) {
+/**
+ * Adjust r's duration to be the max of its current duration and the sum of all
+ * of its children's adjusted durations (keeping its start time the same)
+ * (adjust all child durations recursively)
+ */
+int64_t adjust_durations_dfs(std::shared_ptr<Result>& r) {
   if (SOFT_ASSERT(r != nullptr)) {
-    for (auto& i : r->children_) {
-      adjust_timestamps_dfs(i);
+    int64_t original_duration = r->endTimeNS() - r->start_time_ns_;
+    int64_t children_total_duration = std::accumulate(
+        r->children_.begin(),
+        r->children_.end(),
+        0,
+        [](int64_t acc, std::shared_ptr<Result>& child) {
+          return acc + adjust_durations_dfs(child);
+        });
+
+    if (children_total_duration > original_duration) {
+      r->visit(c10::overloaded(
+          [&r, &children_total_duration](ExtraFields<EventType::TorchOp>& i) {
+            i.end_time_ns_ = r->start_time_ns_ + children_total_duration;
+          },
+          [&children_total_duration](ExtraFields<EventType::Vulkan>& i) {
+            i.duration_ns_ = children_total_duration;
+          },
+          [](ExtraFields<EventType::Allocation>& _) {
+            // Pass- Allocation events can't have children
+          },
+          [&](auto&) {
+            SOFT_ASSERT(
+                false,
+                "unexpected event type in mobile profiler adjust_durations_dfs: ",
+                r->name());
+          }));
+      return children_total_duration;
+    } else {
+      return original_duration;
     }
-    r->visit(c10::overloaded(
-      [](ExtraFields<EventType::TorchOp>& i) {
-        // pass
-      },
-      [](ExtraFields<EventType::Vulkan>& i) {
-        // pass
-      },
-      [&](auto&) {
-        SOFT_ASSERT(false, "unexpected event type in mobile profiler: ", r->name());
-      }
-    ));
+  } else {
+    return 0;
   }
 }
 
+/**
+ * 1) Adjust r's start time to be [new_start_time] (also adjusting end time and
+      keeping duration the same)
+ * 2) Recursively adjust r's children's start times, making them line up such
+      that the last one ends at the same time as r
+ * 3) Return r's final end time
+ */
+int64_t adjust_timestamps_dfs(
+    std::shared_ptr<Result>& r,
+    int64_t new_start_time) {
+  if (SOFT_ASSERT(r != nullptr)) {
+    if (r->start_time_ns_ != new_start_time) {
+      // Adjust start time (keeping duration constant)
+      r->visit(c10::overloaded(
+          [&r, &new_start_time](ExtraFields<EventType::TorchOp>& i) {
+            i.end_time_ns_ =
+                new_start_time + (i.end_time_ns_ - r->start_time_ns_);
+          },
+          [](ExtraFields<EventType::Vulkan>& i) {
+            // Pass- We don't need to manually adjust end time for Vulkan events
+          },
+          [](ExtraFields<EventType::Allocation>& _) {
+            // Pass- No duration or end time to adjust
+          },
+          [&](auto&) {
+            SOFT_ASSERT(
+                false,
+                "unexpected event type in mobile profiler adjust_timestamps_dfs: ",
+                r->name());
+          }));
+      r->start_time_ns_ = new_start_time;
+    }
+    int64_t children_total_duration = std::accumulate(
+        r->children_.begin(),
+        r->children_.end(),
+        0,
+        [](int64_t acc, std::shared_ptr<Result>& child) {
+          return acc + (child->endTimeNS() - child->start_time_ns_);
+        });
+
+    int64_t child_start_time = r->endTimeNS() - children_total_duration;
+    for (std::shared_ptr<Result>& child : r->children_) {
+      child_start_time = adjust_timestamps_dfs(child, child_start_time);
+    }
+  }
+  return r->endTimeNS();
+}
+
+/**
+ * Adjust timestamps and durations of nodes in [out] such that
+ *  - Vulkan event timelines are synchronized with CPU event times
+ *  - Parent event timelines fully contain their child timelines
+ *  - No overlaps in timelines for nodes at the same depth
+ */
 void adjust_timestamps(std::vector<std::shared_ptr<Result>>& out) {
-  for (auto& i : out) {
+  if (out.empty()) {
+    return;
+  }
+
+  int64_t min_start_time = out[0]->start_time_ns_;
+  for (std::shared_ptr<Result>& r : out) {
     // Only begin traversal for root nodes.
-    if (i->parent_.expired()) {
-      adjust_timestamps_dfs(i);
+    if (r->parent_.expired()) {
+      adjust_durations_dfs(r);
+      min_start_time = adjust_timestamps_dfs(
+          r,
+          std::max(
+              r->tag() != EventType::Vulkan
+                  ? r->start_time_ns_
+                  : std::numeric_limits<int64_t>::min(),
+              min_start_time));
     }
   }
 }
