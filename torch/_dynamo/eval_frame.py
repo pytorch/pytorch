@@ -100,6 +100,17 @@ def innermost_fn(fn):
     return unaltered_fn
 
 
+@contextlib.contextmanager
+def enable_dynamic(enable: bool = True):
+    if not enable:
+        yield
+        return
+    with patch("torch._dynamo.config.dynamic_shapes", True), patch(
+        "functorch._src.config.use_dynamic_shapes", True
+    ):
+        yield
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -108,6 +119,8 @@ class _TorchDynamoContext:
         backend_ctx_ctor=null_context,
         patch_fn=nothing,
         first_ctx=False,
+        *,
+        dynamic=False,
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -116,6 +129,7 @@ class _TorchDynamoContext:
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
+        self.dynamic = dynamic
         patch_fn()
 
     def __enter__(self):
@@ -129,10 +143,14 @@ class _TorchDynamoContext:
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
+        self.dynamic_ctx = enable_dynamic(self.dynamic)
+        self.dynamic_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         set_eval_frame(self.prior)
         self.prior = unset
+        # TODO: This is totally not the right way to chain contexts manually
+        self.dynamic_ctx.__exit__(exc_type, exc_val, exc_tb)
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
@@ -170,10 +188,13 @@ class _TorchDynamoContext:
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
+            dynamic_ctx = enable_dynamic(self.dynamic)
+            dynamic_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
             finally:
                 set_eval_frame(prior)
+                dynamic_ctx.__exit__(None, None, None)
                 backend_ctx.__exit__(None, None, None)
 
         # hooks to properly handle inlining
@@ -229,7 +250,7 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
-    def __init__(self, callback, backend_ctx_ctor, first_ctx=False):
+    def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):
         def on_enter():
             global most_recent_backend
             if (
@@ -247,6 +268,7 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
+            dynamic=dynamic,
         )
 
 
@@ -289,11 +311,12 @@ def catch_errors_wrapper(callback):
     return catch_errors
 
 
-def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context):
+def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context, dynamic=False):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
+        dynamic=dynamic,
     )
 
 
@@ -375,7 +398,12 @@ class _NullDecorator(contextlib.nullcontext):
 
 
 def optimize(
-    backend="inductor", *, nopython=False, guard_export_fn=None, disable=False
+    backend="inductor",
+    *,
+    nopython=False,
+    guard_export_fn=None,
+    disable=False,
+    dynamic=False,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -393,6 +421,7 @@ def optimize(
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
         disable: If True, turn this decorator into a no-op
+        dynamic: If True, turn on dynamic shapes support
 
     Example Usage:
 
@@ -422,13 +451,17 @@ def optimize(
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     if nopython:
-        return optimize_assert(backend, guard_export_fn=guard_export_fn)
+        return optimize_assert(
+            backend, guard_export_fn=guard_export_fn, dynamic=dynamic
+        )
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, guard_export_fn=guard_export_fn),
         backend_ctx_ctor,
+        dynamic=dynamic,
     )
 
 
+# TODO(voz): Consider making "explain" output alongside a run / part of a run
 @patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
     # TODO(voz): Do we want a decorator for this?
@@ -487,15 +520,23 @@ def explain(f, *args, **kwargs):
         msg = f"{break_reason.reason}\n{formatted_stack}"
         formatted_list += f"{idx + 1}. {msg} \n"
 
-    explanation = f"Dynamo produced {graph_count} graphs"
+    explanation = f"Dynamo produced {graph_count} graphs "
     explanation += f"with {graph_count - 1} graph break and {op_count} ops"
-    explanation += f"\n Break reasons: \n\n{formatted_list}"
+    explanation_verbose = explanation
+    explanation_verbose += f"\n Break reasons: \n\n{formatted_list}"
 
-    explanation += compile_times()
+    explanation_verbose += compile_times()
 
     # TODO(voz): Do we want a decorator for this?
     reset()
-    return explanation, out_guards, graphs, ops_per_graph, break_reasons
+    return (
+        explanation,
+        out_guards,
+        graphs,
+        ops_per_graph,
+        break_reasons,
+        explanation_verbose,
+    )
 
 
 def export(
@@ -646,7 +687,7 @@ def assume_constant_result(fn):
     return fn
 
 
-def optimize_assert(backend, *, guard_export_fn=None, export=False):
+def optimize_assert(backend, *, guard_export_fn=None, export=False, dynamic=False):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
@@ -658,6 +699,7 @@ def optimize_assert(backend, *, guard_export_fn=None, export=False):
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(backend, guard_export_fn, export=export),
         backend_ctx_ctor,
+        dynamic=dynamic,
     )
 
 
