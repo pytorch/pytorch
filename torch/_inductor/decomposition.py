@@ -366,30 +366,6 @@ def round_dec(x, decimals=0):
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
-@register_decomposition([aten.special_erf, aten.erf])
-def special_erf(x):
-    # TODO(jansel): this might be crazy slow.  Triton doesn't have the
-    #               cuda ::erf() builtin.  I've made a feature request for this,
-    #               so it may be coming soon.
-
-    # from https://www.johndcook.com/blog/2009/01/19/stand-alone-error-function-erf/
-    a1 = 0.254829592
-    a2 = -0.284496736
-    a3 = 1.421413741
-    a4 = -1.453152027
-    a5 = 1.061405429
-    p = 0.3275911
-
-    sign = torch.sign(x)
-    x = torch.abs(x)
-
-    # A & S 7.1.26
-    t = 1.0 / (1.0 + p * x)
-    y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * torch.exp(-x * x)
-
-    return sign * y
-
-
 @register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar])
 def rsub(a, b):
     if isinstance(b, numbers.Number):
