@@ -278,6 +278,58 @@ def meta_linalg_cholesky(A: Tensor, upper=False):
     return L, infos
 
 
+# From aten/src/ATen/ExpandUtils.cpp
+def infer_size(a, b):
+    dimsA, dimsB = len(a), len(b)
+    ndim = dimsA if dimsA > dimsB else dimsB
+    expandedSizes = [1] * ndim
+    i = ndim - 1
+    while i >= 0:
+        offset = ndim - 1 - i
+        dimA = dimsA - 1 - offset
+        dimB = dimsB - 1 - offset
+        sizeA = a[dimA] if (dimA >= 0) else 1
+        sizeB = b[dimB] if (dimB >= 0) else 1
+        check(
+            sizeA == sizeB or sizeA == 1 or sizeB == 1,
+            lambda: f"The size of tensor a ({sizeA},\
+        ) must match the size of tensor b (, {sizeB},\
+        ) at non-singleton dimension {i}",
+        )
+        expandedSizes[i] = sizeB if sizeA == 1 else sizeA
+        i -= 1
+    return expandedSizes
+
+
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def _linalg_broadcast_batch_dims(arg1, arg2):
+    arg1_batch_sizes = arg1.shape[:-2]
+    arg2_batch_sizes = arg2.shape[:-2]
+    expand_batch_portion = infer_size(arg1_batch_sizes, arg2_batch_sizes)
+    arg1_expand_size = expand_batch_portion + list(arg1.shape[-2:])
+    arg2_expand_size = expand_batch_portion + list(arg2.shape[-2:])
+    args_broadcasted = (
+        arg1 if arg1_expand_size == arg1.shape else arg1.expand(arg1_expand_size),
+        arg2 if arg2_expand_size == arg2.shape else arg2.expand(arg2_expand_size),
+    )
+    return args_broadcasted
+
+
+# From aten/src/ATen/native/BatchLinearAlgebra.cpp
+@register_meta(aten.cholesky_solve.default)
+def meta_cholesky_solve(self: Tensor, A: Tensor, upper: bool = False):
+    check(
+        self.dim() >= 2,
+        lambda: f"b should have at least 2 dimensions, but has {self.dim()}, dimensions instead",
+    )
+    check(
+        A.dim() >= 2,
+        lambda: f"u should have at least 2 dimensions, but has {A.dim()} dimensions instead",
+    )
+    self_broadcasted, A_broadcasted = _linalg_broadcast_batch_dims(self, A)
+    return self_broadcasted
+
+
 # From aten/src/ATen/native/ReflectionPad.cpp
 @register_meta(
     [aten.reflection_pad2d_backward.default, aten.replication_pad2d_backward.default]

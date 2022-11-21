@@ -1155,7 +1155,6 @@ symbolic_tensor_failures = {
     xfail('bucketize', ''),  # aten.bucketize.Tensor - couldn't find symbolic meta function/decomposition
     xfail('cartesian_prod', ''),  # Tensors of type TensorImpl do not have numel
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
     xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
     xfail('combinations', ''),
     xfail('count_nonzero', ''),  # Could not run 'aten::count_nonzero.dim_IntList' with arguments from the 'Meta' ba...
