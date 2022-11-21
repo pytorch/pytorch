@@ -17,7 +17,7 @@ except ImportError:
     from common import timed
     from dist_util import apply_fsdp, cleanup, get_model, model_iter_fn, setup
 
-from torch.distributed.fsdp.flat_param import whc_debug_views
+log = logging.getLogger(__name__)
 
 
 def torchviz_model(args, model, inputs, rank):
@@ -25,11 +25,8 @@ def torchviz_model(args, model, inputs, rank):
 
     outputs = model(*inputs)
     loss = reduce_to_scalar_loss(outputs)
-    x = [whc_debug_views[k] for k in whc_debug_views]
-    tensors = (loss, *x)
     parameter_names = dict(model.named_parameters())
-    parameter_names.update(whc_debug_views)
-    dot = make_dot(tensors, params=parameter_names, show_attrs=True, show_saved=True)
+    dot = make_dot(loss, params=parameter_names, show_attrs=True, show_saved=True)
     if rank == 0:
         dot.render("torchviz.dot")
 
@@ -86,6 +83,9 @@ def run_model(args, model, inputs, key):
             dynamo.config.log_level = logging.DEBUG
         if args.dynamo_no_optimize_ddp:
             dynamo.config.optimize_ddp = False
+        if args.dynamo == "inductor" and args.fsdp:
+            torch._inductor.config.triton.cudagraphs = False
+            log.warn("disabling inductor cudagraphs for compatibility with FSDP")
 
         def print_compile(gm, ex):
             print(
