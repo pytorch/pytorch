@@ -1,4 +1,4 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates
+# Owner(s): ["oncall: distributed"]
 
 import dataclasses
 import torch
@@ -7,7 +7,7 @@ from torch.distributed.checkpoint.planner_helpers import (
     _create_write_item_for_tensor,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
-from spmd.checkpoint import dedup_tensors
+from torch.distributed.checkpoint import dedup_tensors
 
 
 # TODO: add comments for create_plan
