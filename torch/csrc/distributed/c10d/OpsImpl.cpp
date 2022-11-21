@@ -225,6 +225,24 @@ c10::intrusive_ptr<Work> _allgather_base_cuda_(
   return process_group->_allgather_base(output_tensor, input_tensor);
 }
 
+c10::intrusive_ptr<Work> allgather_coalesced_cpu_(
+    const std::vector<std::vector<at::Tensor>>& output_lists,
+    const std::vector<at::Tensor>& input_list,
+    const c10::intrusive_ptr<ProcessGroup>& process_group) {
+  return process_group->allgather_coalesced(
+      const_cast<std::vector<std::vector<at::Tensor>>&>(output_lists),
+      const_cast<std::vector<at::Tensor>&>(input_list));
+}
+
+c10::intrusive_ptr<Work> allgather_coalesced_cuda_(
+    const std::vector<std::vector<at::Tensor>>& output_lists,
+    const std::vector<at::Tensor>& input_list,
+    const c10::intrusive_ptr<ProcessGroup>& process_group) {
+  return process_group->allgather_coalesced(
+      const_cast<std::vector<std::vector<at::Tensor>>&>(output_lists),
+      const_cast<std::vector<at::Tensor>&>(input_list));
+}
+
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>
 reduce_scatter_cpu_(
     const std::vector<at::Tensor>& output_tensors,
@@ -455,6 +473,14 @@ TORCH_LIBRARY_IMPL(c10d, CPU, m) {
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("_allgather_base_", _allgather_base_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("allgather_coalesced_", allgather_coalesced_cpu_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("allgather_coalesced_", allgather_coalesced_cuda_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
