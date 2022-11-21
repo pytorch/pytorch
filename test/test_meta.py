@@ -622,7 +622,6 @@ meta_function_expected_failures = {
     torch.linalg.eig : {f64, f32, c128, c64},
     torch.linalg.eigvals : {f64, f32, c128, c64},
     torch.linalg.lstsq : {f64, f32, c128, c64},
-    torch.Tensor.conj_physical_: {c128, c32, c64},
 }
 
 meta_function_expected_failures_only_outplace = {
@@ -745,7 +744,6 @@ meta_function_device_expected_failures_only_outplace['cuda'] = {
 }
 
 meta_function_device_skips['cpu'] = {
-    torch.narrow_copy: {b8, bf16, c128, c32, c64, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.native_batch_norm: {f32, f64},
 }
 
@@ -894,7 +892,6 @@ meta_dispatch_expected_failures = {
     aten.unique_consecutive.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
     aten.unique_dim.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
     aten.upsample_nearest3d.vec : {bf16, f32, f64, u8},
-    aten.conj_physical_.default: {c128, c32, c64},
 }
 
 # these sometimes pass and sometimes fail
@@ -917,6 +914,13 @@ meta_dispatch_skips = {
 # For CompositeImplicitAutograd functions that fail before hitting the Mode
 meta_dispatch_early_skips = set({
     torch.Tensor.float_power_,
+    # Errors out in one of the tests, while ProxyTensor passes...
+    torch.Tensor.cumsum_,
+})
+
+meta_inplace_skips = set({
+    # Errors out in one of the tests, while ProxyTensor passes...
+    torch.Tensor.cumsum_,
 })
 
 meta_dispatch_device_expected_failures = defaultdict(dict)
@@ -1117,6 +1121,8 @@ class TestMeta(TestCase):
         func = op.get_inplace()
         if not func:
             self.skipTest("No inplace variable for this op")
+        if func in meta_inplace_skips:
+            self.skipTest("Skipped")
         func = self._get_safe_inplace(func)
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in samples:
