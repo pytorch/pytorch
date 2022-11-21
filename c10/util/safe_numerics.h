@@ -22,7 +22,13 @@ C10_ALWAYS_INLINE bool add_overflows(uint64_t a, uint64_t b, uint64_t* out) {
   return __builtin_add_overflow(a, b, out);
 #else
   unsigned long long tmp;
+#if defined(_M_IX86) || defined(_M_X64)
   auto carry = _addcarry_u64(0, a, b, &tmp);
+#else
+  tmp = a + b;
+  unsigned long long vector = (a & b) ^ ((a ^ b) & ~tmp);
+  auto carry = vector >> 63;
+#endif
   *out = tmp;
   return carry;
 #endif
