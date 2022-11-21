@@ -33,6 +33,7 @@ from torch._dynamo.utils import clone_inputs
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map
 
@@ -1105,6 +1106,10 @@ class BenchmarkRunner:
             model = copy.deepcopy(model)
             if self.args.ddp:
                 model = DDP(model, find_unused_parameters=True)
+            elif self.args.fsdp:
+                model = FSDP(model)
+                torch._inductor.config.triton.cudagraphs = False
+                log.warn("Disabling cudagraphs for FSDP compatibility")
             return model
 
         # Collect the fp64 reference outputs to be used later for accuracy checking.
@@ -1462,6 +1467,13 @@ def parse_args(args=None):
         help="Wraps model in DDP before running it, and uses dynamo DDPOptmizer (graph breaks) by default.",
     )
     parser.add_argument(
+        "--fsdp",
+        action="store_true",
+        help="""Wraps model in FSDP before running it. Disables cudagraphs by default.
+        Doesn't recursively wrap, mainly useful for checking dynamo UnspecNNModule compatibility
+    """,
+    )
+    parser.add_argument(
         "--no-optimize-ddp",
         action="store_true",
         help="Disables dynamo DDPOptimizer (graph breaks). (Applies only when using --ddp benchmark mode).",
@@ -1652,7 +1664,7 @@ def parse_args(args=None):
 def main(runner, original_dir=None):
     args = parse_args()
     with maybe_init_distributed(
-        args.ddp and args.only, port=args.distributed_master_port
+        (args.ddp or args.fsdp) and args.only, port=args.distributed_master_port
     ):
         return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
             runner, args, original_dir
