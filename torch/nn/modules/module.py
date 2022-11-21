@@ -1411,7 +1411,7 @@ class Module:
         The hook will be called every time before :func:`forward` is invoked.
         It should have the following signature::
 
-            hook(module, input) -> None or modified input
+            hook(module, args) -> None or modified input
 
         If ``with_kwargs`` is false or not specified, the input contains only
         the positional arguments given to the module. Keyword arguments won't be
@@ -1420,11 +1420,11 @@ class Module:
         hook. We will wrap the value into a tuple if a single value is returned
         (unless that value is already a tuple).
 
-        If ``with_kwargs`` is true, then the forward hook will be passed the
+        If ``with_kwargs`` is true, the forward pre hook will be passed the
         kwargs given to the forward function and be expected to return them
         possibly modified:
 
-            hook(module, input) -> None or a tuple of modified input and kwargs
+            hook(module, args, kwargs) -> None or a tuple of modified input and kwargs
 
         Args:
             hook (Callable): The user defined hook to be registered.
@@ -1472,13 +1472,19 @@ class Module:
         The hook will be called every time after :func:`forward` has computed an output.
         It should have the following signature::
 
-            hook(module, input, output) -> None or modified output
+            hook(module, args, output) -> None or modified output
 
-        The input contains only the positional arguments given to the module.
-        Keyword arguments won't be passed to the hooks and only to the ``forward``.
-        The hook can modify the output. It can modify the input inplace but
-        it will not have effect on forward since this is called after
-        :func:`forward` is called.
+        If ``with_kwargs`` is false or not specified, the input contains only
+        the positional arguments given to the module. Keyword arguments won't be
+        passed to the hooks and only to the ``forward``. The hook can modify the
+        output. It can modify the input inplace but it will not have effect on
+        forward since this is called after :func:`forward` is called.
+
+        If ``with_kwargs`` is true, the forward hook will be passed the
+        ``kwargs`` given to the forward function and be expected to return the
+        output possibly modified:
+
+            hook(module, args, kwargs, output) -> None or modified output
 
         Args:
             hook (Callable): The user defined hook to be registered.
