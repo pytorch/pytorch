@@ -111,6 +111,19 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> reduce_scatter_(
       output_tensors, work);
 }
 
+c10::intrusive_ptr<Work> _reduce_scatter_base_(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t timeout) {
+  return process_group->_reduce_scatter_base(
+      output_tensor,
+      input_tensor,
+      ReduceScatterOptions{
+          *reduce_op.get(), std::chrono::milliseconds(timeout)});
+}
+
 c10::intrusive_ptr<Work> gather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
@@ -210,6 +223,10 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "reduce_scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
+  m.def(
+      "_reduce_scatter_base_",
+      dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, _reduce_scatter_base_));
   m.def(
       "reduce_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_));
@@ -348,6 +365,27 @@ c10::intrusive_ptr<Work> reduce_scatter(
       process_group,
       c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
       opts.timeout.count()));
+}
+
+c10::intrusive_ptr<Work> _reduce_scatter_base(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const ReduceScatterOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::_reduce_scatter_base_", "")
+                       .typed<c10::intrusive_ptr<Work>(
+                           at::Tensor&,
+                           at::Tensor&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                           int64_t)>();
+  return op.call(
+      output_tensor,
+      input_tensor,
+      process_group,
+      c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
+      opts.timeout.count());
 }
 
 c10::intrusive_ptr<Work> reduce(
