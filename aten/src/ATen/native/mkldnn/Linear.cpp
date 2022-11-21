@@ -413,7 +413,7 @@ Tensor mkl_linear(
         K,
         weight_ptr,
         K,
-        bias->defined() ? 1.f : 0.f,
+        bias.defined() ? 1.f : 0.f,
         out_ptr,
         N);
   } else {
