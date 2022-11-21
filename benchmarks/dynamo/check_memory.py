@@ -11,9 +11,13 @@ def main(args):
     failed = []
 
     for name in actual["name"]:
-        actual_memory_compression = float(actual.loc[actual["name"] == name]["compression_ratio"])
+        actual_memory_compression = float(
+            actual.loc[actual["name"] == name]["compression_ratio"]
+        )
         try:
-            expected_memory_compression = float(expected.loc[expected["name"] == name]["compression_ratio"])
+            expected_memory_compression = float(
+                expected.loc[expected["name"] == name]["compression_ratio"]
+            )
         except TypeError:
             print(f"{name:34} is missing from {args.expected}")
             continue
@@ -37,6 +41,7 @@ def main(args):
             )
         )
         sys.exit(1)
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--actual", type=str, required=True)
