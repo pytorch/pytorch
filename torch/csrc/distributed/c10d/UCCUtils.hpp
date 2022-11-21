@@ -50,7 +50,10 @@ namespace c10d {
           ucc_status_string(result),                        \
           ", system error code ",                           \
           errno);                                           \
-      ucc_collective_finalize(_request);                    \
+      TORCH_UCC_CHECK(                                      \
+        ucc_collective_finalize(_request),                  \
+        "failed to finalize posted collective"              \
+      );                                                    \
       TORCH_CHECK(false, err);                              \
     }                                                       \
   } while (0)
