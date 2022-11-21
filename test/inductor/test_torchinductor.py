@@ -1871,6 +1871,7 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn(2, 4, 16, 16),),
+            check_lowp=False,
         )
 
         # lowering to avg_pool2d case
@@ -1888,12 +1889,13 @@ class CommonTemplate:
     def test_adaptive_avg_pool2d2(self):
         # Big kernel size, use fallback
         def fn(x):
-            return aten._adaptive_avg_pool2d(x, (1, 1))
+            return aten._adaptive_avg_pool2d(x, (4, 4))
 
         torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
-            (torch.randn(2, 4, 16, 16),),
+            (torch.randn(2, 4, 21, 21),),
+            check_lowp=False,
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
@@ -2018,7 +2020,7 @@ class CommonTemplate:
         torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
-            (-torch.arange(1 * 14 * 14, dtype=torch.float32).view(1, 1, 14, 14),),
+            (-torch.arange(1 * 24 * 24, dtype=torch.float32).view(1, 1, 24, 24),),
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
@@ -3932,7 +3934,7 @@ class CommonTemplate:
             )
 
         torch._inductor.metrics.generated_kernel_count = 0
-        x = torch.randn([2, 64, 16, 16])
+        x = torch.randn([2, 64, 20, 20])
         result, indices = aten.max_pool2d_with_indices(
             x,
             [13, 13],
@@ -4033,9 +4035,10 @@ class CommonTemplate:
         self.common(
             fn,
             [
-                torch.randn([1, 16, 2, 2]),
-                torch.randn([1, 16, 14, 14]),
+                torch.randn([1, 16, 12, 12]),
+                torch.randn([1, 16, 24, 24]),
             ],
+            check_lowp=False,
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
