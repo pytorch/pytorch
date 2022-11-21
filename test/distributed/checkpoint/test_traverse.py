@@ -8,6 +8,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 import torch.distributed.checkpoint.traverse as tv
 
 
+# TODO: add comments for TestTraverse
 class TestTraverse(TestCase):
     def test_traverse_shallow(self) -> None:
         state_dict = {
