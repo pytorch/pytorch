@@ -337,6 +337,7 @@ def _check_trace(
                 _module_class=_module_class,
                 _compilation_unit=torch._C.CompilationUnit(),
                 example_inputs_is_kwarg=example_inputs_is_kwarg,
+                _store_inputs=False
             )
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
@@ -351,6 +352,7 @@ def _check_trace(
                     _force_outplace=force_outplace,
                     _module_class=_module_class,
                     example_kwarg_inputs=_clone_inputs(inputs),
+                    _store_inputs=False
                 )
             else:
                 check_mod = torch.jit.trace(
@@ -360,9 +362,8 @@ def _check_trace(
                     strict=strict,
                     _force_outplace=force_outplace,
                     _module_class=_module_class,
+                    _store_inputs=False
                 )
-
-
             check_mod_func = check_mod
 
         def graph_diagnostic_info():
@@ -621,7 +622,8 @@ def trace(
     _force_outplace=False,
     _module_class=None,
     _compilation_unit=_python_cu,
-    example_kwarg_inputs=None
+    example_kwarg_inputs=None,
+    _store_inputs=True
 ):
     """
     Trace a function and return an executable  or :class:`ScriptFunction`
@@ -800,8 +802,8 @@ def trace(
             _force_outplace,
             _module_class,
             example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            _store_inputs=_store_inputs
         )
-
     if (
         hasattr(func, "__self__")
         and isinstance(func.__self__, torch.nn.Module)
@@ -823,6 +825,7 @@ def trace(
             _force_outplace,
             _module_class,
             example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            _store_inputs=_store_inputs
         )
 
     # Special case for common case of passing a single Tensor
@@ -908,6 +911,7 @@ def trace_module(
     _module_class=None,
     _compilation_unit=_python_cu,
     example_inputs_is_kwarg=False,
+    _store_inputs=True,
 ):
     """
     Trace a module and return an executable :class:`ScriptModule` that will be optimized
@@ -1043,6 +1047,7 @@ def trace_module(
                     strict,
                     _force_outplace,
                     argument_names,
+                    _store_inputs
                 )
             else:
                 example_inputs = make_tuple(example_inputs)
@@ -1054,6 +1059,7 @@ def trace_module(
                     strict,
                     _force_outplace,
                     argument_names,
+                    _store_inputs
                 )
 
             check_trace_method = module._c._get_method(method_name)

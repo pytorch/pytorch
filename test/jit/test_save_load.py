@@ -550,6 +550,50 @@ class TestSaveLoad(JitTestCase):
         self.assertTrue(m_buffers["buffer"].is_meta)
         self.assertTrue(m_loaded_buffers["buffer"].is_meta)
 
+    def test_save_load_with_saved_traced_inputs(self):
+        """
+        Check that saving and loading with traced inputs works as expected
+        """
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: Tensor):
+                return x
+
+        module = Module()
+        input_tensor = torch.rand(1, 3, 24, 24)
+        # Validate that with no input specified the traced inputs are stored
+        traced_module = torch.jit.trace(module, input_tensor)
+        traced_inputs = [ x for x in traced_module.graph.inputs() ]
+        self.assertEquals(traced_module._c._retrieve_traced_inputs()['forward'], [input_tensor])
+        with TemporaryFileName() as fname:
+            path = pathlib.Path(fname)
+            traced_module.save(path)
+            loaded_module = torch.jit.load(path, _restore_shapes=True)
+            loaded_inputs = list(loaded_module.graph.inputs())
+            self.assertEqual(traced_inputs[1].type(), loaded_inputs[1].type())
+            # Validate that if no shapes are requested previous functionality remains
+            loaded_module = torch.jit.load(path)
+            loaded_inputs = list(loaded_module.graph.inputs())
+            self.assertEqual(loaded_inputs[1].type().sizes(), None)
+
+        # Validate that inputs aren't saved when requested not to
+        traced_module = torch.jit.trace(module, input_tensor, _store_inputs=False)
+        traced_inputs = [ x for x in traced_module.graph.inputs() ]
+        self.assertEquals(len(traced_module._c._retrieve_traced_inputs()), 0)
+
+        with TemporaryFileName() as fname:
+            path = pathlib.Path(fname)
+            traced_module.save(path)
+            loaded_module = torch.jit.load(path, _restore_shapes=True)
+            loaded_inputs = list(loaded_module.graph.inputs())
+            self.assertEqual(loaded_inputs[1].type().sizes(), None)
+            # Validate that if no shapes are requested previous functionality remains
+            loaded_module = torch.jit.load(path)
+            loaded_inputs = list(loaded_module.graph.inputs())
+            self.assertEqual(loaded_inputs[1].type().sizes(), None)
 
 def script_module_to_buffer(script_module):
     module_buffer = io.BytesIO(

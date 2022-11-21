@@ -22,9 +22,11 @@
 #include <torch/csrc/jit/serialization/import_legacy.h>
 #endif
 #include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/ir/graph_utils.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/import_source.h>
@@ -122,7 +124,8 @@ class ScriptModuleDeserializer final {
 
   Module deserialize(
       c10::optional<at::Device> device,
-      ExtraFilesMap& extra_files);
+      ExtraFilesMap& extra_files,
+      bool restore_shapes = false);
 
  private:
   IValue readArchive(const std::string& archive_name);
@@ -251,7 +254,8 @@ graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_ze
 
 Module ScriptModuleDeserializer::deserialize(
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    ExtraFilesMap& extra_files,
+    bool restore_shapes) {
   // we populate the upgraders map before any load starts
   populate_upgraders_graph_map();
 
@@ -280,8 +284,34 @@ Module ScriptModuleDeserializer::deserialize(
   for (auto constant : tuple->elements()) {
     constants_table_.push_back(constant.toIValue());
   }
-  auto m = Module(readArchive("data").toObject());
+  auto m_ivalue = readArchive("data");
+  auto m = Module(m_ivalue.toObject());
   rewriteQuantizedConvForBC(m);
+  // Checking for and loading saved traced inputs
+  if (reader_->hasRecord("traced_inputs.pkl")) {
+    auto dict = readArchive("traced_inputs").toGenericDict();
+    for (const auto& entry : dict) {
+      auto inputs = entry.value().toList().vec();
+      m.store_traced_inputs(entry.key().toStringRef(), inputs);
+      if (restore_shapes) {
+        auto g =
+            toGraphFunction(m.get_method(entry.key().toStringRef()).function())
+                .graph();
+        Stack stack(inputs.begin(), inputs.end());
+        // Added the module as the first input if we are missing
+        // an input as traced modules refer to self as an additional input
+        if (g->inputs().size() == stack.size() + 1) {
+          stack.insert(stack.begin(), m_ivalue);
+        }
+        setInputTensorTypes(*g, stack, /*complete=*/true);
+        PropagateInputShapes(g);
+      }
+    }
+  } else {
+    if (restore_shapes) {
+      TORCH_WARN("Cannot restore shapes as no traced inputs were stored");
+    }
+  }
   return m;
 }
 } // namespace
@@ -305,25 +335,28 @@ static Module _load_jit_module_from_bytes(
     size_t size,
     std::shared_ptr<CompilationUnit> cu,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files);
+    ExtraFilesMap& extra_files,
+    bool restore_shapes);
 
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::istream& in,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    ExtraFilesMap& extra_files,
+    bool restore_shapes) {
   in.seekg(0, in.beg);
   // NOTE: Zipformat can be large files. So using stream version directly
   // instead of reading the file all at once.
   if (getFileFormat(in) != FileFormat::FlatbufferFileFormat) {
     auto reader = torch::make_unique<PyTorchStreamReader>(&in);
     ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-    return deserializer.deserialize(device, extra_files);
+    return deserializer.deserialize(device, extra_files, restore_shapes);
   }
   std::shared_ptr<char> data;
   size_t size = 0;
   std::tie(data, size) = get_stream_content(in);
-  return _load_jit_module_from_bytes(data, size, cu, device, extra_files);
+  return _load_jit_module_from_bytes(
+      data, size, cu, device, extra_files, restore_shapes);
 }
 
 // For reading unified serialization format from torch.Package.
@@ -355,18 +388,20 @@ Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& filename,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    ExtraFilesMap& extra_files,
+    bool restore_shapes) {
   // NOTE: Zipformat can be large files. So using stream version directly
   // instead of reading the file all at once.
   if (getFileFormat(filename) != FileFormat::FlatbufferFileFormat) {
     auto reader = torch::make_unique<PyTorchStreamReader>(filename);
     ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-    return deserializer.deserialize(device, extra_files);
+    return deserializer.deserialize(device, extra_files, restore_shapes);
   }
   std::shared_ptr<char> data;
   size_t size = 0;
   std::tie(data, size) = get_file_content(filename.c_str());
-  return _load_jit_module_from_bytes(data, size, cu, device, extra_files);
+  return _load_jit_module_from_bytes(
+      data, size, cu, device, extra_files, restore_shapes);
 }
 
 Module import_ir_module(
@@ -443,7 +478,8 @@ Module _load_jit_module_from_bytes(
     size_t size,
     std::shared_ptr<CompilationUnit> cu,
     c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files) {
+    ExtraFilesMap& extra_files,
+    bool restore_shapes) {
   TORCH_CHECK(size >= kFileFormatHeaderSize, "Unrecognized data format");
   auto format = getFileFormat(data.get());
   switch (format) {
@@ -461,7 +497,7 @@ Module _load_jit_module_from_bytes(
       auto rai = std::make_unique<MemoryReadAdapter>(data.get(), size);
       auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
       ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-      return deserializer.deserialize(device, extra_files);
+      return deserializer.deserialize(device, extra_files, restore_shapes);
     }
 
     default:

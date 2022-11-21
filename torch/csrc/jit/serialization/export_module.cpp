@@ -481,6 +481,13 @@ void ScriptModuleSerializer::serialize(
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/");
   }
+  if (module.retrieve_traced_inputs().size() > 0) {
+    writeArchive(
+        module.retrieve_traced_inputs(),
+        /*archive_name=*/"traced_inputs",
+        /*archive_dir=*/"",
+        /*tensor_dir=*/"traced_inputs/");
+  }
   // Acquires and sets minimum (dynamic) version
   for (auto& item : file_streams_) {
     writer_.setMinVersion(item.value().minVersion());
