@@ -1,6 +1,10 @@
 #include <ATen/native/vulkan/api/QueryPool.h>
 #include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/vulkan/ops/Tensor.h>
+#ifdef USE_KINETO
+#include <torch/csrc/autograd/profiler_kineto.h>
+#include <torch/csrc/profiler/orchestration/vulkan.h>
+#endif // USE_KINETO
 
 #include <cmath>
 #include <iostream>
@@ -42,6 +46,13 @@ QueryPool::QueryPool(const QueryPoolConfig& config, const Adapter* adapter_p)
   TORCH_CHECK(adapter_p, "Valid GPU device must be created for QueryPool");
   ns_per_tick_ = std::lround(adapter_p->timestamp_period());
   ns_per_tick_ = (ns_per_tick_ == 0) ? default_ns_per_tick : ns_per_tick_;
+
+#ifdef USE_KINETO
+  torch::profiler::impl::vulkan::registerGetShaderNameAndDurationNs(
+      [this](int64_t vulkan_id) {
+        return get_shader_name_and_execution_duration_ns(vulkan_id);
+      });
+#endif // USE_KINETO
 }
 
 QueryPool::~QueryPool() {
@@ -49,6 +60,10 @@ QueryPool::~QueryPool() {
     return;
   }
   vkDestroyQueryPool(device_, querypool_, nullptr);
+
+#ifdef USE_KINETO
+  torch::profiler::impl::vulkan::deregisterGetShaderNameAndDurationNs();
+#endif // USE_KINETO
 }
 
 void QueryPool::reset(const CommandBuffer& cmd) {
@@ -102,6 +117,13 @@ uint32_t QueryPool::shader_profile_begin(
   shader_log().emplace_back(log_entry);
 
   results_pending_ = true;
+
+#ifdef USE_KINETO
+  torch::profiler::impl::vulkan_id_t vulkan_id =
+      torch::profiler::impl::vulkan_id_t(previous_shader_count_ + log_idx);
+
+  torch::profiler::impl::_reportVulkanEventToProfiler(vulkan_id);
+#endif // USE_KINETO
 
   return log_idx;
 }
