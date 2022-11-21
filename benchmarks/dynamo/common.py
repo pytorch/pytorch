@@ -1506,6 +1506,15 @@ def parse_args(args=None):
         help="Overrides the output filename",
     )
     parser.add_argument(
+        "--output-directory",
+        help="Overrides the directory to place output files.",
+    )
+    parser.add_argument(
+        "--part",
+        default=None,
+        help="Specify the part of the model to run.",
+    )
+    parser.add_argument(
         "--export-profiler-trace",
         action="store_true",
         help="exports trace of kineto profiler",
@@ -1918,7 +1927,12 @@ def run(runner, args, original_dir=None):
         output_filename = args.output
 
     if output_filename:
-        output_filename = os.path.join(torch._dynamo.config.base_dir, output_filename)
+        if args.output_directory:
+            output_filename = os.path.join(args.output_directory, output_filename)
+        else:
+            output_filename = os.path.join(
+                torch._dynamo.config.base_dir, output_filename
+            )
 
     if args.find_batch_sizes and args.only:
         for device in args.devices:
@@ -1955,11 +1969,24 @@ def run(runner, args, original_dir=None):
                 example_inputs = tree_map(lambda x: x.to(device=device), example_inputs)
             else:
                 try:
-                    device, name, model, example_inputs, batch_size = runner.load_model(
-                        device,
-                        model_name,
-                        batch_size=batch_size,
-                    )
+                    if args.part:
+                        (
+                            device,
+                            name,
+                            model,
+                            example_inputs,
+                            batch_size,
+                        ) = runner.load_model(
+                            device, model_name, batch_size=batch_size, part=args.part
+                        )
+                    else:
+                        (
+                            device,
+                            name,
+                            model,
+                            example_inputs,
+                            batch_size,
+                        ) = runner.load_model(device, model_name, batch_size=batch_size)
                 except NotImplementedError as e:
                     print(e)
                     import traceback
