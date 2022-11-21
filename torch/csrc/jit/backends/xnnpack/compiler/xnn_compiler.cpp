@@ -51,8 +51,8 @@ void XNNCompiler::compileModel(
         const auto& constant_buffer = *flatbuffer_graph->constant_buffer();
         auto buffer_idx = tensor_value->constant_buffer_idx();
         const auto buffer_ptr = buffer_idx == 0
-                ? nullptr
-                : constant_buffer[buffer_idx]->storage()->data();
+            ? nullptr
+            : constant_buffer[buffer_idx]->storage()->data();
         status = xnn_define_tensor_value(
             /*subgraph=*/subgraph_ptr,
             /*datatype=*/xnn_datatype_fp32,

@@ -13,7 +13,6 @@ namespace delegate {
 
 using namespace fb_xnnpack; // Specified in the schema
 
-
 class XNNSerializer {
  public:
   // Constructors
@@ -26,8 +25,9 @@ class XNNSerializer {
       : _builder(bufferSize),
         _nodes(),
         _values(),
-        _constantBuffer(
-            {CreateBuffer(_builder, {})}), // index 0 is reserved for non-const data
+        _constantBuffer({CreateBuffer(
+            _builder,
+            {})}), // index 0 is reserved for non-const data
         _bufferSizes({0}) {}
 
   // Serializing Nodes
