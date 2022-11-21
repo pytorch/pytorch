@@ -93,6 +93,7 @@ unary_list = [
     torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False),
     torch.nn.GELU(approximate="none"),
     torch.nn.GELU(approximate="tanh"),
+    torch.nn.ReLU6(),
 ]
 
 
