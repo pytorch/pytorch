@@ -17,7 +17,7 @@ The list of support files are as follows:
     test jobs to setup the conda environment
   * conda-env-macOS-X64. This is use by MacOS (x86-64) build and test
     jobs to setup the conda environment
-  * conda-env-ubuntu-X64. Thus used by Ubuntu build and test jobs
+  * conda-env-ubuntu-X64. This is used by Ubuntu build and test jobs
     to setup the conda environment
 * Pip:
   * pip-requirements-macOS.txt. This is used by MacOS build and test jobs to
