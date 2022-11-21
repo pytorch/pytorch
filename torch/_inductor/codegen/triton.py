@@ -16,6 +16,7 @@ from .. import config, ir, scheduler
 from ..ir import ReductionHint
 from ..utils import (
     free_symbol_startswith,
+    get_fused_kernel_name,
     instance_descriptor,
     sympy_product,
     sympy_subs,
@@ -23,6 +24,7 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from .common import (
+    CSEVariable,
     DeferredLine,
     ExprPrinter,
     IndentedBuffer,
@@ -106,6 +108,17 @@ def triton_constant(value):
     elif math.isnan(value):
         return 'float("nan")'
     return repr(value)
+
+
+class TritonCSEVariable(CSEVariable):
+    def __init__(self, name):
+        super().__init__(name)
+        self.is_scalar = False
+
+    def update_on_args(self, args, kwargs):
+        self.is_scalar = all(
+            not (isinstance(arg, TritonCSEVariable)) or arg.is_scalar for arg in args
+        )
 
 
 class TritonOverrides(OpOverrides):
@@ -204,6 +217,10 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def lgamma(x):
         return f"tl.libdevice.lgamma({x})"
+
+    @staticmethod
+    def erf(x):
+        return f"tl.libdevice.erf({x})"
 
     @staticmethod
     def logical_and(a, b):
@@ -751,7 +768,13 @@ class TritonKernel(Kernel):
             # https://github.com/openai/triton/issues/633
             mask = ["None"]
 
-        return index_str, " & ".join(mask)
+        if (
+            index_str in self.cse.varname_map
+            and self.cse.varname_map[index_str].is_scalar
+        ):
+            mask = ["None"]
+
+        return index_str, " & ".join(map(str, mask))
 
     def var_ranges(self):
         return dict(
@@ -1105,6 +1128,9 @@ class TritonKernel(Kernel):
             f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name})"
         )
 
+    def create_cse_var(self, *args, **kwargs):
+        return TritonCSEVariable(*args, **kwargs)
+
 
 class TritonScheduling:
     def __init__(self, scheduler):
@@ -1281,7 +1307,11 @@ class TritonScheduling:
         if src_code in wrapper.kernels:
             kernel_name = wrapper.kernels[src_code]
         else:
-            kernel_name = wrapper.next_kernel_name()
+            kernel_name = (
+                "triton_"
+                + get_fused_kernel_name(node_schedule)
+                + wrapper.next_kernel_suffix()
+            )
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
