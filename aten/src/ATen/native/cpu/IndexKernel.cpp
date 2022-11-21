@@ -594,7 +594,7 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       if (iter_dtype == kByte) {
         return cpu_vflip_memcpy<uint8_t>(iter);
       } else if (iter_dtype == kShort) {
-        return cpu_hflip_vec<int16_t>(iter);
+        return cpu_vflip_memcpy<int16_t>(iter);
       } else if (iter_dtype == kInt) {
         return cpu_vflip_memcpy<int32_t>(iter);
       } else if (iter_dtype == kLong) {
