@@ -1783,10 +1783,6 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
   return result;
 }
 
-Tensor select_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
-  return at::native::select_backward_symint(grad, c10::fromIntArrayRefSlow(input_sizes), dim, SymInt{index});
-}
-
 Tensor select_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
   auto grad_input = at::zeros_symint(input_sizes, grad.options());
   grad_input.select_symint(dim, index).copy_(grad);
