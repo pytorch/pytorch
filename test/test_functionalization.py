@@ -1232,7 +1232,8 @@ def forward(self, a_1):
  def test_instance_norm(self):
         def f(x):
             with enable_python_dispatcher():
-                return torch.instance_norm(x, None, None, running_mean=torch.zeros(100), running_var=torch.ones(100), use_input_stats=True, momentum=0.1, eps=1e-5, cudnn_enabled=False)
+                return torch.instance_norm(x, None, None, running_mean=torch.zeros(100), running_var=torch.ones(100),
+                                           use_input_stats=True, momentum=0.1, eps=1e-5, cudnn_enabled=False)
         self.assert_functionalization(f, torch.randn(20, 100, 35, 45))
         logs = self.get_logs(f, torch.randn(20, 100, 35, 45))
         self.assertExpectedInline(logs, """\
