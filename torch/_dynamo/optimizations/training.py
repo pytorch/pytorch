@@ -78,8 +78,10 @@ def is_aot_autograd_safe_to_run(gm, example_inputs):
             raise e
         pass
 
-    if mutated:
-        return raise_or_warn("mutation")
+    # TODO: delete the logic for this later.
+    # Now that aot autograd supports aliasing and mutation, we don't need it.
+    # if mutated:
+    # return raise_or_warn("mutation")
 
     return True
 

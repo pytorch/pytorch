@@ -183,7 +183,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.rfft": {f32, f64},
     "fft.rfft2": {f32, f64},
     "fft.rfftn": {f32, f64},
-    "index_add": {f16},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
     "linalg.eig": {f32, f64},
@@ -229,8 +228,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "randint": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
-    "scatter_add": {f16},
-    "scatter_reduce.sum": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64},
     "sgn": {f16, f32, f64},
@@ -247,7 +244,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "unique_consecutive": {b8, f32, f64, i32, i64},
     "var": {f16},
     "var_mean": {f16},
-    "view_as_complex": {f16, f32, f64},
+    "view_as_complex": {f16},
 }
 
 
@@ -342,7 +339,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
-    "view_as_complex": {f16, f32, f64},
+    "view_as_complex": {f16},
     # AssertionError: Tensor-likes are not close!
     "nn.functional.triplet_margin_loss": {f16},
 }
