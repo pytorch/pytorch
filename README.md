@@ -343,7 +343,7 @@ ccmake build  # or cmake-gui build
 
 #### Using pre-built images
 
-You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
+You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+.
 
 ```bash
 docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
