@@ -105,6 +105,7 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
 
 @register_meta(aten.copy_.default)
 def meta_copy_(self, src, non_blocking=False):
+    assert self.stride() == src.stride()
     return self
 
 
@@ -1204,11 +1205,11 @@ def meta_unary_inplace(self, **kwargs):
     meta_tensor = _elementwise_meta(
         self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
     )
-    # TODO: check memory overlap
-    # sanity check
-    assert meta_tensor.stride() == self.stride()
+    # # TODO: check memory overlap
+    # # sanity check
+    check(meta_tensor.stride() == self.stride(), lambda x: f"fail")
     assert meta_tensor.dtype == self.dtype
-    return self
+    return self.copy_(meta_tensor)
 
 
 @register_meta([aten.round.default, aten.round.decimals])
@@ -1557,12 +1558,49 @@ def full(size, fill_value, *args, **kwargs):
         aten.randn_like.default,
         aten.rand_like.default,
         aten.full_like.default,
-        aten.zeros_like.default,
         aten.ones_like.default,
     ]
 )
 def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
+
+
+# zeros_like is special cased to work for sparse
+@register_meta(aten.zeros_like.default)
+def zeros_like(
+    self, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None
+):
+    if layout == torch.sparse_coo:
+        check(
+            memory_format is None,
+            lambda: "memory format option is only supported by strided tensors",
+        )
+
+        res = torch.empty(
+            0,
+            dtype=self.dtype if dtype is None else dtype,
+            layout=layout,
+            device=self.device if device is None else device,
+            pin_memory=pin_memory,
+        )
+
+        if self.is_sparse:
+            res.sparse_resize_and_clear_(
+                self.size(), self.sparse_dim(), self.dense_dim()
+            )
+        else:
+            res.sparse_resize_and_clear_(self.size(), self.dim(), 0)
+
+        res._coalesced_(True)
+        return res
+    return aten.empty_like.default(
+        self,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
+    )
 
 
 # hacky: Please remove after math.ceil works with arange

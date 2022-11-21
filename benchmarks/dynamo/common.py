@@ -110,27 +110,18 @@ CI_SKIP_INDUCTOR_TRAINING = [
     # *CI_SKIP_AOT_EAGER_TRAINING,
     # *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
-    "attention_is_all_you_need_pytorch",
-    "drq",
-    "hf_Albert",
-    "hf_Bart",
-    "hf_GPT2",
-    "hf_Reformer",
+    "DALLE2_pytorch",
+    "detectron2",
+    "functorch_dp_cifar10",
     "mobilenet_v3_large",
     "moco",
-    "pytorch_struct",
-    "vgg16",
-    "speech_transformer",  # from functionalization
-    "vision_maskrcnn",  # from functionalization
-    "timm_efficientnet",  # from functionalization (only fails for inductor)
-    "hf_Bert",
-    "soft_actor_critic",
     "tacotron2",
-    "yolov3",
+    "vision_maskrcnn",  # from functionalization
     # OOM
     "Background_Matting",
     "fastNLP_Bert",
     "hf_BigBird",
+    "hf_T5_base",  # fp64_OOM
     "mobilenet_v2",
     "mobilenet_v2_quantized_qat",
     "resnet50_quantized_qat",
@@ -1327,6 +1318,7 @@ class BenchmarkRunner:
         experiment,
         diff=False,
         branch=None,
+        explain=False,
     ):
         if diff:
             self.compare_branches(
@@ -1346,6 +1338,8 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment
             )
             print(status)
+        if explain:
+            print(torch._dynamo.explain(model, *example_inputs)[0])
 
 
 def help(fn):
@@ -1522,6 +1516,12 @@ def parse_args(args=None):
         "--diff_main",
         action="store_true",
         help="Delta this branch against main. In the future, we may add support for picking the branch.",
+    )
+
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="run .explain() on the graph at the end of the run.",
     )
 
     parser.add_argument(
@@ -1991,6 +1991,7 @@ def run(runner, args, original_dir=None):
                 optimize_ctx,
                 experiment,
                 diff=args.diff_main,
+                explain=args.explain,
             )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"

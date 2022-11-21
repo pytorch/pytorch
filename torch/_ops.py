@@ -282,7 +282,10 @@ class OpOverload(PyOperatorABC):
         )
 
     def __call__(self, *args, **kwargs):
-        return self._op(*args, **kwargs or {})
+        print("BEFORE", self.__name__, *args) # , args[0].stride()
+        out = self._op(*args, **kwargs or {})
+        print("AFTER: ", out, out.stride())
+        return out
 
     def __hash__(self):
         return hash(self._op)
@@ -365,6 +368,7 @@ class OpOverload(PyOperatorABC):
             return handler
 
         final_key = resolve_key(self, key)
+        # print(self, key, final_key)
         r = self.py_kernels.get(final_key, final_key)
         self._dispatch_cache[key] = r
         return r

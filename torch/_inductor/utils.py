@@ -375,3 +375,8 @@ def fresh_inductor_cache(cache_entries=None):
 
 def argsort(seq):
     return sorted(range(len(seq)), key=seq.__getitem__)
+
+
+@functools.lru_cache(8)
+def get_dtype_size(dtype):
+    return torch.empty((), dtype=dtype).element_size()
