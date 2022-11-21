@@ -317,7 +317,11 @@ def cpp_compile_command(
     include_pytorch=False,
     vec_isa: VecISA = invalid_vec_isa,
 ):
-    if include_pytorch or vec_isa != invalid_vec_isa or config.cpp.enable_kernel_profile:
+    if (
+        include_pytorch
+        or vec_isa != invalid_vec_isa
+        or config.cpp.enable_kernel_profile
+    ):
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
