@@ -9,7 +9,7 @@ import operator
 import re
 import types
 from abc import ABCMeta
-from typing import Any, List, Union
+from typing import Any, Union
 
 import numpy as np
 from functorch.experimental.ops import PyOperator
@@ -43,6 +43,7 @@ from ..utils import (
     global_key_name,
     is_namedtuple,
     is_numpy_int_type,
+    is_typing,
     istensor,
     istype,
     odict_values,
@@ -360,7 +361,8 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif value is List:
+        elif is_typing(value):
+            # typing.List, typing.Mapping, etc.
             return TypingVariable(
                 value,
                 guards=make_guards(GuardBuilder.ID_MATCH),

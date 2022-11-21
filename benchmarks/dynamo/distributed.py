@@ -54,7 +54,6 @@ def run_model(args, model, inputs, key):
     setup(rank, world_size)
     if args.device == "cuda":
         # needed for FSDP
-        print(f"rank is {rank}, {type(rank)}")
         torch.cuda.set_device(rank)
 
     dev_rank = f"{args.device}:{rank}"
