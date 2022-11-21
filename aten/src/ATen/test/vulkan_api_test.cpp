@@ -4970,8 +4970,8 @@ TEST_F(VulkanAPITest, querypool_flushed_shader_log) {
     (-1)  vulkan.image_to_nchw
   */
 
-  const size_t entry_count = at::native::vulkan::api::context()
-          ->querypool().shader_logs_entry_count();
+  const size_t entry_count =
+      at::native::vulkan::api::context()->querypool().shader_logs_entry_count();
 
   std::tuple<std::string, uint64_t> add_shader_details =
       at::native::vulkan::api::context()
