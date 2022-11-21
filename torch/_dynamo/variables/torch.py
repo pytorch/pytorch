@@ -26,7 +26,7 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .lists import ListVariable, TupleVariable
-from .misc import AutocastModeVariable, ProfilerContextWrapperVariable
+from .misc import AutocastModeVariable, NullContextVariable
 from .nn_module import NNModuleVariable
 from .tensor import TensorWithTFOverrideVariable
 
@@ -163,6 +163,7 @@ class TorchVariable(VariableTracker):
             torch.finfo,
             torch.iinfo,
             torch.is_floating_point,
+            torch.cuda.is_available,
         ):
             return True
         return getattr(self.value, "__module__", None) == "math"
@@ -292,7 +293,7 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_type,
             )
         elif self.value is torch.amp.autocast_mode.autocast:
-            return AutocastModeVariable.create(tx, target_values=args, kwargs=kwargs)
+            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
         elif self.value in (
             torch.profiler.profile,
             torch.profiler.record_function,
@@ -300,7 +301,7 @@ class TorchVariable(VariableTracker):
             torch.autograd.profiler.record_function,
         ):
             log.warning("Profiler will be ignored")
-            return ProfilerContextWrapperVariable(**options)
+            return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
         elif self.value is torch.jit.annotate:
