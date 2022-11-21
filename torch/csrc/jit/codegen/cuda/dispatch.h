@@ -299,13 +299,13 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   void registerMutation(Val* val, Val* mutation);
 
   Val* maybeMutated(Val* val) {
-    if (mutations.find(val) == mutations.end()) {
+    if (mutations_.find(val) == mutations_.end()) {
       return val;
     }
-    return mutations.at(val);
+    return mutations_.at(val);
   }
 
-  std::unordered_map<Val*, Val*> mutations;
+  std::unordered_map<Val*, Val*> mutations_;
 
   //****Functions below defined in mutator.cpp*****
 
@@ -323,7 +323,8 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(kir::TensorIndex*);
 
  protected:
-  void removeExpr(IrContainer*, Expr*);
+  virtual void removeExpr(IrContainer*, Expr*) const;
+  virtual void registerNewExpr(Expr*) {}
 };
 
 } // namespace cuda
