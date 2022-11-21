@@ -11,6 +11,7 @@ from torch._C._distributed_c10d import (
     _create_work_from_future,
     AllgatherOptions,
     BroadcastOptions,
+    ScatterOptions,
     Store,
 )
 from torch.futures import Future
@@ -50,6 +51,23 @@ class AllGather:
                 with torch.no_grad():
                     dest_tensor.copy_(src_tensor)
 
+class Scatter:
+    def __init__(self, src):
+        self.src = src
+
+    def work(self, data):
+        src_in_tensor_list = data[self.src][1]
+        # Can't handle scatter with multiple input tensor list
+        assert len(src_in_tensor_list) == 1
+        src_in_tensors = src_in_tensor_list[0]
+
+        for rank, each_rank_data in enumerate(data):
+            out_tensor_list = each_rank_data[0]
+            # Can't handle scatter with multiple output tensor
+            assert len(out_tensor_list) == 1
+            dest_tensor = out_tensor_list[0]
+            with torch.no_grad():
+                dest_tensor.copy_(src_in_tensors[rank])
 
 class Broadcast:
     def __init__(self, src):
@@ -149,6 +167,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
     def broadcast(self, tensor_list, opts=BroadcastOptions()):
         coll = ProcessLocalGroup._start_coll(self._world, Broadcast(opts.rootRank))
         res = coll.join(self._rank, tensor_list)
+        ProcessLocalGroup._end_coll(coll)
+        return res
+
+    def scatter(self, output_tensors, input_tensors, opts=ScatterOptions()):
+        coll = ProcessLocalGroup._start_coll(self._world, Scatter(opts.rootRank))
+        res = coll.join(self._rank, (output_tensors, input_tensors))
         ProcessLocalGroup._end_coll(coll)
         return res
 
