@@ -171,6 +171,9 @@ struct ExtraFields<EventType::Vulkan> {
   using raw_event_t = std::pair<approx_time_t, vulkan_id_t>;
   std::string name_;
   int64_t duration_ns_{0};
+  // While building the event tree, we want to report a vulkan event's duration
+  // as 0 so that its end time doesn't exceed that of its parent cpu op
+  bool in_tree_building_{false};
 };
 
 struct RawAllocation {
