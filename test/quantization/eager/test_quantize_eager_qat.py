@@ -539,8 +539,9 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                 self.assertEqual(len(model.quant._get_forward_hooks()), 1,
                                  "Quantization observer hook has disappeared")
                 forward_hooks = 2
-            self.assertObjectIn(fw_pre_hook, model.fc._get_forward_pre_hooks())
-            self.assertObjectIn(fw_hook, model.fc._get_forward_hooks())
+            print(model.fc._get_forward_pre_hooks().values())
+            self.assertObjectIn(fw_pre_hook, model.fc._get_forward_pre_hooks().values())
+            self.assertObjectIn(fw_hook, model.fc._get_forward_hooks().values())
             self.assertEqual(len(model.fc._get_forward_pre_hooks()), 1,
                              "Extra pre forward hooks have appeared on a layer")
             self.assertEqual(len(model.fc._get_forward_hooks()), forward_hooks,

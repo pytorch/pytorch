@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import torch.ao.nn.quantized as nnq
 from torch.nn.intrinsic import _FusedModule
-from torch.nn.modules.module import _ForwardHook, _ForwardPreHook
 
 from torch.ao.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
@@ -324,20 +323,23 @@ def prepare(model, inplace=False, allow_list=None,
 def _remove_activation_post_process(module):
     # TODO: maybe we should change activation_post_process to _activation_post_process
     # to prevent it from being used by user
-    if hasattr(module, 'activation_post_process') and \
-       _is_activation_post_process(module.activation_post_process):
-        delattr(module, 'activation_post_process')
+    if hasattr(
+        module, "activation_post_process"
+    ) and _is_activation_post_process(module.activation_post_process):
+        delattr(module, "activation_post_process")
 
     # remove activation_post_proceess pre and post hooks
     def remove_hooks(pre_hook=False):
-        hook_map = module._forward_pre_hooks if pre_hook else module._forward_hooks
-        observer_hook = _observer_forward_pre_hook if pre_hook else _observer_forward_hook
+        hook_map = (
+            module._get_forward_pre_hooks()
+            if pre_hook
+            else module._get_forward_hooks()
+        )
+        observer_hook = (
+            _observer_forward_pre_hook if pre_hook else _observer_forward_hook
+        )
         handle_ids_to_remove = set()
         for handle_id, hook_fn in hook_map.items():
-            if isinstance(hook_fn, _ForwardPreHook) or isinstance(hook_fn, _ForwardHook):
-                # Extract original hook_fn from wrapper class _ForwardPreHook or
-                # _ForwardHook.
-                hook_fn = hook_fn.hook
             if hook_fn is observer_hook:
                 handle_ids_to_remove.add(handle_id)
         for handle_id in handle_ids_to_remove:
@@ -345,6 +347,7 @@ def _remove_activation_post_process(module):
 
     remove_hooks(pre_hook=True)
     remove_hooks(pre_hook=False)
+
 
 # TODO: rename to something more general
 def _remove_qconfig(module):
@@ -635,11 +638,11 @@ def swap_module(mod, mapping, custom_module_class_mapping):
 
         if swapped:
             # Preserve module's pre forward hooks. They'll be called on quantized input
-            for pre_hook_fn in mod._get_forward_pre_hooks():
+            for pre_hook_fn in mod._get_forward_pre_hooks().values():
                 new_mod.register_forward_pre_hook(pre_hook_fn)
             # Preserve module's post forward hooks except _observer_forward_hook
             # After convert they'll work with quantized output
-            for hook_fn in mod._get_forward_hooks():
+            for hook_fn in mod._get_forward_hooks().values():
                 if hook_fn is not _observer_forward_hook:
                     new_mod.register_forward_hook(hook_fn)
 

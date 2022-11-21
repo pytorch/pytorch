@@ -341,9 +341,9 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             concrete_type_builder.add_failed_attribute(name, hint)
 
     # add hooks to concrete type
-    for hook in nn_module._get_forward_hooks():
+    for hook in nn_module._get_forward_hooks().values():
         concrete_type_builder.add_forward_hook(hook)
-    for pre_hook in nn_module._get_forward_pre_hooks():
+    for pre_hook in nn_module._get_forward_pre_hooks().values():
         concrete_type_builder.add_forward_pre_hook(pre_hook)
 
     return concrete_type_builder
@@ -767,7 +767,7 @@ def get_hook_stubs(nn_module):
     hook_map: Dict = {}
 
     hook_stubs = []
-    for hook in nn_module._get_forward_hooks():
+    for hook in nn_module._get_forward_hooks().values():
         if hook.__name__ in hook_map:
             if id(hook) != id(hook_map[hook.__name__]):
                 raise RuntimeError(
@@ -780,7 +780,7 @@ def get_hook_stubs(nn_module):
         hook_stubs.append(make_stub(hook, hook.__name__))
 
     pre_hook_stubs = []
-    for pre_hook in nn_module._get_forward_pre_hooks():
+    for pre_hook in nn_module._get_forward_pre_hooks().values():
         if pre_hook.__name__ in hook_map:
             if id(pre_hook) != id(hook_map[pre_hook.__name__]):
                 raise RuntimeError(

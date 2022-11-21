@@ -115,7 +115,7 @@ class SpectralNorm:
 
     @staticmethod
     def apply(module: Module, name: str, n_power_iterations: int, dim: int, eps: float) -> 'SpectralNorm':
-        for k, hook in module._forward_pre_hooks.items():
+        for k, hook in module._get_forward_pre_hooks().items():
             if isinstance(hook, SpectralNorm) and hook.name == name:
                 raise RuntimeError("Cannot register two spectral_norm hooks on "
                                    "the same parameter {}".format(name))
@@ -294,7 +294,7 @@ def remove_spectral_norm(module: T_module, name: str = 'weight') -> T_module:
         >>> m = spectral_norm(nn.Linear(40, 10))
         >>> remove_spectral_norm(m)
     """
-    for k, hook in module._forward_pre_hooks.items():
+    for k, hook in module._get_forward_pre_hooks().items():
         if isinstance(hook, SpectralNorm) and hook.name == name:
             hook.remove(module)
             del module._forward_pre_hooks[k]

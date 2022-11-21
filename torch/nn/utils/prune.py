@@ -103,7 +103,7 @@ class BasePruningMethod(ABC):
             # there should technically be only 1 hook with hook.name == name
             # assert this using `found`
             hooks_to_remove = []
-            for k, hook in module._forward_pre_hooks.items():
+            for k, hook in module._get_forward_pre_hooks().items():
                 # if it exists, take existing thing, remove hook, then
                 # go through normal thing
                 if isinstance(hook, BasePruningMethod) and hook._tensor_name == name:
@@ -1187,7 +1187,7 @@ def remove(module, name):
         >>> m = random_unstructured(nn.Linear(5, 7), name='weight', amount=0.2)
         >>> m = remove(m, name='weight')
     """
-    for k, hook in module._forward_pre_hooks.items():
+    for k, hook in module._get_forward_pre_hooks().items():
         if isinstance(hook, BasePruningMethod) and hook._tensor_name == name:
             hook.remove(module)
             del module._forward_pre_hooks[k]
@@ -1220,7 +1220,7 @@ def is_pruned(module):
         True
     """
     for _, submodule in module.named_modules():
-        for _, hook in submodule._forward_pre_hooks.items():
+        for _, hook in submodule._get_forward_pre_hooks().items():
             if isinstance(hook, BasePruningMethod):
                 return True
     return False

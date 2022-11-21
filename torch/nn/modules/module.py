@@ -1454,8 +1454,8 @@ class Module:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
-    def _get_forward_pre_hooks(self) -> List[Callable[..., None]]:
-        return [w.hook for w in self._forward_pre_hooks.values()]
+    def _get_forward_pre_hooks(self) -> Dict[int, Callable[..., None]]:
+        return OrderedDict([(k, w.hook) for k, w in self._forward_pre_hooks.items()])
 
     def register_forward_hook(
         self,
@@ -1505,8 +1505,8 @@ class Module:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
-    def _get_forward_hooks(self) -> List[Callable[..., None]]:
-        return [w.hook for w in self._forward_hooks.values()]
+    def _get_forward_hooks(self) -> Dict[int, Callable[..., None]]:
+        return OrderedDict([(k, w.hook) for k, w in self._forward_hooks.items()])
 
     def _slow_forward(self, *input, **kwargs):
         tracing_state = torch._C._get_tracing_state()
