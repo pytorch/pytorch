@@ -485,27 +485,34 @@ def run_functionalized_fw_and_collect_metadata(f):
             collect_metadata_mutation_input_info.append(inp_info)
 
         # Next, gather the metadata info on the user's outputs that alias (either inputs or graph outputs)
+        num_non_input_aliased_outputs = 0
         for o in outs:
             maybe_alias_info = aliased_out_to_inp_idx.get(o, None) if isinstance(o, torch.Tensor) else None
             if maybe_alias_info is None:
                 output_type = OutputType.non_alias
-                alias_idx = None
+                # Here, alias_idx will tell us which output from the inner forward this corresponds to.
+                alias_idx = num_non_input_aliased_outputs
                 sizes_idx = None
                 strides_idx = None
                 storage_offset_idx = None
                 tensor_meta = None
             else:
-                alias_idx, is_alias_of_intermediate_not_input, is_exact_input = maybe_alias_info
+                input_alias_idx, is_alias_of_intermediate_not_input, is_exact_input = maybe_alias_info
                 if is_exact_input:
                     assert not is_alias_of_intermediate_not_input
                     output_type = OutputType.alias_of_input
+                    alias_idx = input_alias_idx
                     sizes_idx = None
                     strides_idx = None
                     storage_offset_idx = None
                     tensor_meta = None
                 else:
-                    output_type = OutputType.alias_of_intermediate \
-                        if is_alias_of_intermediate_not_input else OutputType.alias_of_input
+                    if is_alias_of_intermediate_not_input:
+                        output_type = OutputType.alias_of_intermediate
+                        alias_idx = num_non_input_aliased_outputs
+                    else:
+                        output_type = OutputType.alias_of_input
+                        alias_idx = input_alias_idx
                     tensor_meta = o
                     # Figure out where the sizes/strides/storage_offset are in the compiled fw output.
                     sizes_idx = start_idx_for_aliased_output_metadata
@@ -513,6 +520,9 @@ def run_functionalized_fw_and_collect_metadata(f):
                     storage_offset_idx = strides_idx + len(tensor_meta.stride())
                     # update our offset for the next tensor
                     start_idx_for_aliased_output_metadata = storage_offset_idx + 1
+
+            if output_type != OutputType.alias_of_input:
+                num_non_input_aliased_outputs += 1
 
             inp_info = OutputAliasInfo(
                 output_type=output_type,
@@ -1400,11 +1410,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             assert CompiledFunction.num_outputs_aliased_to_inputs + len(fw_outs) == \
                 len(CompiledFunction.fw_metadata.aliased_output_info)
             fw_outs_including_aliases = []
-            curr_fw_out_idx = 0
             for aliased_out_metadata in CompiledFunction.fw_metadata.aliased_output_info:
                 if aliased_out_metadata.output_type == OutputType.non_alias:
-                    fw_outs_including_aliases.append(fw_outs[curr_fw_out_idx])
-                    curr_fw_out_idx += 1
+                    fw_outs_including_aliases.append(fw_outs[aliased_out_metadata.base_idx])
                 else:
                     if aliased_out_metadata.output_type == OutputType.alias_of_input:
                         aliased_base_tensor = args[aliased_out_metadata.base_idx]
@@ -1436,6 +1444,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                         # Create the output alias
                         aliased_out = gen_alias_from_base(aliased_base_tensor, size_, stride_, storage_offset_, fake_meta)
                         fw_outs_including_aliases.append(aliased_out)
+
+            for inner_out, user_out in zip(fw_outs, fw_outs_including_aliases):
+                # Sanity check assert
+                assert type(inner_out) == type(user_out)
             return fw_outs_including_aliases
         else:
             return fw_outs
