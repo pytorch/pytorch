@@ -357,6 +357,10 @@ class CppOverrides(OpOverrides):
         return f"std::exp({x})"
 
     @staticmethod
+    def erf(x):
+        return f"std::erf({x})"
+
+    @staticmethod
     def sqrt(x):
         return f"std::sqrt({x})"
 
