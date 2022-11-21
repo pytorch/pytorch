@@ -461,6 +461,7 @@ class OutputGraph(fx.Tracer):
             from inspect import signature
 
             try: 
+                print("COMPILER FN", self.compiler_fn)
                 if "real_inputs" in signature(self.compiler_fn).parameters:
                     compiled_fn = self.compiler_fn(
                         gm, self.example_inputs(), real_inputs=self.real_inputs()
