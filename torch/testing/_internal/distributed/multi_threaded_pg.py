@@ -10,6 +10,7 @@ import torch.distributed as dist
 from torch._C._distributed_c10d import (
     _create_work_from_future,
     AllgatherOptions,
+    BroadcastOptions,
     Store,
 )
 from torch.futures import Future
@@ -145,7 +146,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll)
         return res
 
-    def broadcast(self, tensor_list, opts):
+    def broadcast(self, tensor_list, opts=BroadcastOptions()):
         coll = ProcessLocalGroup._start_coll(self._world, Broadcast(opts.rootRank))
         res = coll.join(self._rank, tensor_list)
         ProcessLocalGroup._end_coll(coll)

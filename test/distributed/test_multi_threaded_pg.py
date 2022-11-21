@@ -38,6 +38,13 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         for rank, out_tensor in enumerate(output_tensors):
             self.assertEqual(out_tensor, torch.ones(3, 3) * rank)
 
+    def test_broadcast(self):
+        input_tensor = torch.ones(3, 3) * dist.get_rank()
+        for rank in range(self.world_size):
+            cloned_input = input_tensor.clone()
+            dist.broadcast(cloned_input, src=rank)
+            self.assertEqual(cloned_input, torch.ones(3, 3) * rank)
+
     def test_broadcast_object_list(self):
         val = 99 if dist.get_rank() == 0 else None
         object_list = [val] * dist.get_world_size()
