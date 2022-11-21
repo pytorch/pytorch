@@ -2018,7 +2018,7 @@ def run(runner, args, original_dir=None):
             placeholder_batch_size = 0
             try:
                 subprocess.check_call(
-                    [sys.executable] + sys.argv + [f"--only={name}"], timeout=60 * 10
+                    [sys.executable] + sys.argv + [f"--only={name}"], timeout=60 * 20
                 )
             except subprocess.TimeoutExpired:
                 print(f"cuda train {name} FAIL (TIMEOUT)", file=sys.stderr)
