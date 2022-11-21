@@ -105,7 +105,6 @@ class QueryPool final {
       size_t query_index);
   /** Total number of entries in all shader logs */
   size_t shader_logs_entry_count();
-
 };
 
 } // namespace api
