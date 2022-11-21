@@ -1508,5 +1508,5 @@ def _current_graph_task_id() -> _int: ...
 class _OutOfMemoryError:
     pass
 
-class _DistBackendError:
+class _DistBackendError(RuntimeError):
     pass

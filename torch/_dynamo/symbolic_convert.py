@@ -252,6 +252,11 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
                 + if_next
                 + if_jump
             )
+        elif isinstance(value, NNModuleVariable):
+            # Equivant of "self.nn_module is not None"
+            if truth_fn(value):
+                push and self.push(value)
+                self.jump(inst)
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):
@@ -395,11 +400,18 @@ class InstructionTranslatorBase(object):
                 return newvar
             return v
 
+        def skip(v: VariableTracker):
+            return oldvar.mutable_local not in v.recursively_contains
+
         cache = dict()
-        self.output.side_effects.apply(repl, cache)
-        self.stack = [VariableTracker.apply(repl, x, cache) for x in self.stack]
+        self.output.side_effects.apply(repl, cache, skip_fn=skip)
+        self.stack = [
+            VariableTracker.apply(repl, x, cache, skip_fn=skip) for x in self.stack
+        ]
         for k, x in self.symbolic_locals.items():
-            self.symbolic_locals[k] = VariableTracker.apply(repl, x, cache)
+            self.symbolic_locals[k] = VariableTracker.apply(
+                repl, x, cache, skip_fn=skip
+            )
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):

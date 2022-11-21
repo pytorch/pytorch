@@ -65,7 +65,6 @@ except (ImportError, AssertionError) as e:
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
-
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 torch._inductor.config.triton.autotune = False  # too slow
@@ -1618,79 +1617,6 @@ class CommonTemplate:
         x = torch.tensor(123)
         y = torch.tensor(0)
         self.assertEqual(fn(x, y), x + x)
-
-    def test_linear_permute_fusion(self):
-        class TestModule(torch.nn.Module):
-            def __init__(self, k: int, n: int):
-                super().__init__()
-                self.weight = torch.nn.Parameter(torch.randn(n, k))
-                self.bias = torch.nn.Parameter(torch.randn(n))
-
-            def forward(self, input: torch.Tensor):
-                a0 = torch.nn.functional.linear(input, self.weight, self.bias)
-                b0 = a0.permute(0, 2, 1)
-                return b0
-
-        m, k, n = 16, 8, 4
-        trace_func = chain_passes(torch.fx.symbolic_trace, linear_permute_fusion)
-        module = TestModule(k, n).eval()
-        input = torch.randn(6, m, k)
-        traced = trace_func(module, [input])
-        num_linear = count_call_function(traced, torch.nn.functional.linear)
-        num_linear_transpose = count_call_function(traced, linear_transpose)
-        self.assertEqual(num_linear, 0)
-        self.assertEqual(num_linear_transpose, 1)
-
-        self.assertTrue(torch.allclose(module(input), traced(input)))
-
-    def test_permute_linear_fusion(self):
-        class TestModule(torch.nn.Module):
-            def __init__(self, k: int, n: int):
-                super().__init__()
-                self.weight = torch.nn.Parameter(torch.randn(n, k))
-                self.bias = torch.nn.Parameter(torch.randn(n))
-
-            def forward(self, input: torch.Tensor):
-                input1 = input.permute(0, 2, 1)
-                output = torch.nn.functional.linear(input1, self.weight, self.bias)
-                return output
-
-        m, k, n = 16, 8, 4
-
-        trace_func = chain_passes(torch.fx.symbolic_trace, permute_linear_fusion)
-        module = TestModule(k, n).eval()
-        input = torch.randn(6, k, m)
-        traced = trace_func(module, [input])
-        num_linear = count_call_function(traced, torch.nn.functional.linear)
-        num_transpose_linear = count_call_function(traced, transpose_linear)
-        self.assertEqual(num_linear, 0)
-        self.assertEqual(num_transpose_linear, 1)
-
-        self.assertTrue(torch.allclose(module(input), traced(input)))
-
-    def test_permute_bmm_fusion(self):
-        class TestModule(torch.nn.Module):
-            def __init__(self, batch: int, k: int, n: int):
-                super().__init__()
-                self.other = torch.randn(batch, k, n)
-
-            def forward(self, input: torch.Tensor):
-                input1 = input.permute(0, 2, 1)
-                output = torch.bmm(input1, self.other)
-                return output
-
-        batch, m, k, n = 6, 16, 8, 4
-
-        trace_func = chain_passes(torch.fx.symbolic_trace, permute_matmul_fusion)
-        module = TestModule(batch, k, n).eval()
-        input = torch.randn(batch, k, m)
-        traced = trace_func(module, [input])
-        num_bmm = count_call_function(traced, torch.bmm)
-        num_transpose_matmul = count_call_function(traced, transpose_matmul)
-        self.assertEqual(num_bmm, 0)
-        self.assertEqual(num_transpose_matmul, 1)
-
-        self.assertTrue(torch.allclose(module(input), traced(input)))
 
     def test_slice1(self):
         def fn(a):
@@ -3296,7 +3222,7 @@ class CommonTemplate:
             ),
         )
 
-    @unittest.skipIf(not has_torchvision_roi_align(), "requirs torchvision")
+    @unittest.skipIf(not has_torchvision_roi_align(), "requires torchvision")
     def test_roi_align(self):
         def fn(a, b):
             return torch.ops.torchvision.roi_align(a, b, 0.25, 7, 7, 2, False)
@@ -4175,6 +4101,78 @@ class CommonTemplate:
             rtol=0.5,
         )
 
+    def test_conv_backward(self):
+        def fn(rank4_inps, rank3_inps, rank5_inps):
+
+            out1 = aten.convolution_backward(
+                *rank4_inps,
+                [C],
+                [1, 1],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, True],
+            )
+            out2 = aten.convolution_backward(
+                *rank4_inps,
+                [C],
+                [1, 1],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, False, False],
+            )
+            out3 = aten.convolution_backward(
+                *rank3_inps,
+                [C],
+                [1],
+                [0],
+                [1],
+                False,
+                [0],
+                1,
+                [True, True, True],
+            )
+            out4 = aten.convolution_backward(
+                *rank5_inps,
+                [C],
+                [1, 1, 1],
+                [0, 0, 0],
+                [1, 1, 1],
+                False,
+                [0, 0, 0],
+                1,
+                [True, True, True],
+            )
+            return (out1, out2, out3, out4)
+
+        B = 3
+        C = 4
+        H = 5
+        grad_out = torch.randn(B, C, H - 2, H - 2, H - 2)
+        inp = torch.randn(B, C, H, H, H)
+        weight = torch.randn(C, C, 3, 3, 3)
+
+        def shrink_rank(x, rank):
+            res = x
+            while res.dim() > rank:
+                res = torch.select(res, -1, 0)
+            return res.contiguous()
+
+        rank4_inps = [shrink_rank(x, 4) for x in [grad_out, inp, weight]]
+        rank3_inps = [shrink_rank(x, 4) for x in [grad_out, inp, weight]]
+        rank5_inps = [shrink_rank(x, 5) for x in [grad_out, inp, weight]]
+
+        with torch.backends.cudnn.flags(allow_tf32=False):
+            self.common(
+                fn,
+                [rank4_inps, rank3_inps, rank5_inps],
+            )
+
     @unittest.skip(
         """
         FIXME: In the case of having equally max/min elements, our implementation returns
@@ -4708,6 +4706,79 @@ if HAS_CUDA:
                 fn, (torch.randn(2, 3, 10, 5, 6, device="cuda")[:, :, 2::2, :, :],)
             )
 
+        def test_linear_permute_fusion(self):
+            class TestModule(torch.nn.Module):
+                def __init__(self, k: int, n: int):
+                    super().__init__()
+                    self.weight = torch.nn.Parameter(torch.randn(n, k))
+                    self.bias = torch.nn.Parameter(torch.randn(n))
+
+                def forward(self, input: torch.Tensor):
+                    a0 = torch.nn.functional.linear(input, self.weight, self.bias)
+                    b0 = a0.permute(0, 2, 1)
+                    return b0
+
+            m, k, n = 16, 8, 4
+            trace_func = chain_passes(torch.fx.symbolic_trace, linear_permute_fusion)
+            module = TestModule(k, n).eval()
+            input = torch.randn(6, m, k)
+            traced = trace_func(module, [input])
+            num_linear = count_call_function(traced, torch.nn.functional.linear)
+            num_linear_transpose = count_call_function(traced, linear_transpose)
+            self.assertEqual(num_linear, 0)
+            self.assertEqual(num_linear_transpose, 1)
+
+            self.assertTrue(torch.allclose(module(input), traced(input)))
+
+        def test_permute_linear_fusion(self):
+            class TestModule(torch.nn.Module):
+                def __init__(self, k: int, n: int):
+                    super().__init__()
+                    self.weight = torch.nn.Parameter(torch.randn(n, k))
+                    self.bias = torch.nn.Parameter(torch.randn(n))
+
+                def forward(self, input: torch.Tensor):
+                    input1 = input.permute(0, 2, 1)
+                    output = torch.nn.functional.linear(input1, self.weight, self.bias)
+                    return output
+
+            m, k, n = 16, 8, 4
+
+            trace_func = chain_passes(torch.fx.symbolic_trace, permute_linear_fusion)
+            module = TestModule(k, n).eval()
+            input = torch.randn(6, k, m)
+            traced = trace_func(module, [input])
+            num_linear = count_call_function(traced, torch.nn.functional.linear)
+            num_transpose_linear = count_call_function(traced, transpose_linear)
+            self.assertEqual(num_linear, 0)
+            self.assertEqual(num_transpose_linear, 1)
+
+            self.assertTrue(torch.allclose(module(input), traced(input)))
+
+        def test_permute_bmm_fusion(self):
+            class TestModule(torch.nn.Module):
+                def __init__(self, batch: int, k: int, n: int):
+                    super().__init__()
+                    self.other = torch.randn(batch, k, n)
+
+                def forward(self, input: torch.Tensor):
+                    input1 = input.permute(0, 2, 1)
+                    output = torch.bmm(input1, self.other)
+                    return output
+
+            batch, m, k, n = 6, 16, 8, 4
+
+            trace_func = chain_passes(torch.fx.symbolic_trace, permute_matmul_fusion)
+            module = TestModule(batch, k, n).eval()
+            input = torch.randn(batch, k, m)
+            traced = trace_func(module, [input])
+            num_bmm = count_call_function(traced, torch.bmm)
+            num_transpose_matmul = count_call_function(traced, transpose_matmul)
+            self.assertEqual(num_bmm, 0)
+            self.assertEqual(num_transpose_matmul, 1)
+
+            self.assertTrue(torch.allclose(module(input), traced(input)))
+
     CommonTemplate.install(CudaTests, "cuda")
 
     class CudaReproTests(TestCase):
@@ -5085,6 +5156,8 @@ if HAS_CUDA:
             return kernels
 
         def test_divisibile_by_16_covers_numel_args(self):
+            torch._dynamo.reset()
+
             def fn(a: torch.Tensor) -> torch.Tensor:
                 return torch.sum(a)
 
@@ -5104,6 +5177,7 @@ if HAS_CUDA:
                 kernels[1].meta["configs"][0].divisible_by_16
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
+            torch._dynamo.reset()
 
 
 if __name__ == "__main__":
