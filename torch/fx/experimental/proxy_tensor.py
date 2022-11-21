@@ -106,20 +106,33 @@ def get_proxy(obj):
 def has_proxy(obj):
     return get_proxy(obj) is not None
 
+def snapshot_fake(val):
+    return val.detach()
+
+# What invariants do we have for the 'val' set on the FX node?  It has accurate
+# metadata... but only for metadata that exists "below" all other subsystems
+# (most notably autograd, but also vmap, functorch transforms, etc).  This means
+# you can get the dtype, shape, stride, storage, but you CANNOT get requires_grad,
+# grad_fn, _base (_base actually may be set due to recursive call to
+# ADInplaceOrView, but you shouldn't rely on it.)
 def set_meta(proxy, val):
     if isinstance(val, FakeTensor):
-        proxy.node.meta['val'] = val
+        proxy.node.meta['val'] = snapshot_fake(val)
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     elif isinstance(val, py_sym_types):
         proxy.node.meta['val'] = val
     elif isinstance(val, list) or isinstance(val, tuple):
         if all(isinstance(x, FakeTensor) for x in val):
-            proxy.node.meta['val'] = val
+            proxy.node.meta['val'] = [snapshot_fake(x) for x in val]
     elif isinstance(val, torch.Tensor):
         if not val.is_sparse:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
             # NB: Kinda hacky, but we should try to get val as the metadata
             # everywhere
+            # TODO: This doesn't properly track storages.  A more robust
+            # approach would be to maintain a per-trace FakeTensorMode and
+            # from_real_tensor to create fake values (don't forget to
+            # snapshot_fake)
             fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
             with fake_tensor_mode:
                 proxy.node.meta['val'] = torch.empty_strided(val.shape, val.stride(), device=val.device, dtype=val.dtype)
@@ -426,7 +439,9 @@ def wrap_key(f, tensors, tracer):
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
-        track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
+        assert isinstance(_get_current_dispatch_mode(), ProxyTorchDispatchMode)
+        with _pop_mode_temporarily():
+            track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
         out = f(*tensors)
         out = pytree.tree_map_only(
