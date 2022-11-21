@@ -17,17 +17,14 @@ except ImportError:
     from common import timed
     from dist_util import apply_fsdp, cleanup, get_model, model_iter_fn, setup
 
-from torch.distributed.fsdp.flat_param import whc_debug_views
+
 def torchviz_model(args, model, inputs, rank):
     from torchviz import make_dot
 
     outputs = model(*inputs)
     loss = reduce_to_scalar_loss(outputs)
-    x = [whc_debug_views[k] for k in whc_debug_views]
-    tensors = (loss, *x)
     parameter_names = dict(model.named_parameters())
-    parameter_names.update(whc_debug_views)
-    dot = make_dot(tensors, params=parameter_names, show_attrs=True, show_saved=True)
+    dot = make_dot(loss, params=parameter_names, show_attrs=True, show_saved=True)
     if rank == 0:
         dot.render("torchviz.dot")
 
