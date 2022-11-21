@@ -132,6 +132,7 @@ const std::map<c10::string_view, AttrFunction>& fusion_unary_attr_map() {
       {"relu", ATTR_FUNC(relu)},
       {"sigmoid", ATTR_FUNC(sigmoid)},
       {"tanh", ATTR_FUNC(tanh)},
+      {"swish", ATTR_FUNC(swish)},
       {"hardswish", ATTR_FUNC(hardswish)},
       {"leaky_relu", attr_func_leaky_relu},
       {"hardtanh", attr_func_hardtanh},
