@@ -114,6 +114,15 @@ class TestFunctionalization(TestCase):
 
         _functionalize(f, reapply_views=True)(torch.ones(3, 3))
 
+    def test_copy_stride_mismatch(self):
+        def f(x):
+            y = torch.empty_strided((2, 2), (5, 1))
+            y.copy_(x)
+            return y
+
+        r = _functionalize(f, reapply_views=True)(torch.ones(2, 2))
+        self.assertEqual(r.stride(), (5, 1))
+
     def test_view_clone_view_inplace(self):
         def f(input):
             shape = [1, 1024, 128, 128]
