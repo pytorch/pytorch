@@ -210,12 +210,6 @@ uint64_t QueryPool::get_total_op_ns(std::string op_name) {
   return sum;
 }
 
-void QueryPool::shader_log_for_each(
-    std::function<void(const ShaderDuration&)> fn) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  std::for_each(shader_log().begin(), shader_log().end(), fn);
-}
-
 std::tuple<std::string, uint64_t> QueryPool::
     get_shader_name_and_execution_duration_ns(size_t query_index) {
   extract_results();

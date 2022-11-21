@@ -95,7 +95,6 @@ class QueryPool final {
   void print_results();
   uint64_t get_total_op_ns(std::string op_name);
   uint64_t ns_per_tick_;
-  void shader_log_for_each(std::function<void(const ShaderDuration&)> fn);
   /**
    * query_index is what number entry across all of the QueryPool's shader logs
    * is being queried, regardless of resets. This may be different than
