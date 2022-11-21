@@ -331,23 +331,20 @@ def _remove_activation_post_process(module):
     # remove activation_post_proceess pre and post hooks
     def remove_hooks(pre_hook=False):
         hook_map = (
-            module._get_forward_pre_hooks()
-            if pre_hook
-            else module._get_forward_hooks()
+            module._forward_pre_hooks if pre_hook else module._forward_hooks
         )
         observer_hook = (
             _observer_forward_pre_hook if pre_hook else _observer_forward_hook
         )
         handle_ids_to_remove = set()
-        for handle_id, hook_fn in hook_map.items():
-            if hook_fn is observer_hook:
+        for handle_id, wrapper in hook_map.items():
+            if wrapper.hook is observer_hook:
                 handle_ids_to_remove.add(handle_id)
         for handle_id in handle_ids_to_remove:
             hook_map.pop(handle_id)
 
     remove_hooks(pre_hook=True)
     remove_hooks(pre_hook=False)
-
 
 # TODO: rename to something more general
 def _remove_qconfig(module):

@@ -15,6 +15,7 @@ from torch.jit._builtins import _find_builtin
 from torch.jit._check import AttributeTypeIsSupportedChecker
 from torch.jit._state import _python_cu, _add_script_class, _get_script_class
 from torch.nn import Module
+from torch.nn.modules.module import _ForwardHook, _ForwardPreHook
 
 
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -550,9 +551,9 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     # Copy the forward hooks and pre-hooks to the new ScriptModule
     # to allow the hooks to be run from eager as ScriptFunctions
     for idx, fn in enumerate(script_module._c._get_forward_pre_hooks()):
-        script_module._forward_pre_hooks[idx] = fn
+        script_module._forward_pre_hooks[idx] = _ForwardPreHook(fn)
     for idx, fn in enumerate(script_module._c._get_forward_hooks()):
-        script_module._forward_hooks[idx] = fn
+        script_module._forward_hooks[idx] = _ForwardHook(fn)
 
 
     # Special handling so methods like __len__ work in script methods on classes derived from containers
@@ -879,9 +880,9 @@ def wrap_cpp_module(cpp_module):
         script_module._concrete_type = torch._C.ConcreteModuleType.from_jit_type(script_module._c._type())
 
         for idx, fn in enumerate(script_module._c._get_forward_pre_hooks()):
-            script_module._forward_pre_hooks[idx] = fn
+            script_module._forward_pre_hooks[idx] = _ForwardPreHook(fn)
         for idx, fn in enumerate(script_module._c._get_forward_hooks()):
-            script_module._forward_hooks[idx] = fn
+            script_module._forward_hooks[idx] = _ForwardHook(fn)
 
     return torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
 
