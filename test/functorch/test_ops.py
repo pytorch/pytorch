@@ -10,7 +10,7 @@ import itertools
 import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
-    IS_ARM64, parametrize, TEST_WITH_ASAN
+    IS_ARM64, IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
 import torch
 from torch import Tensor
 import functools
@@ -402,15 +402,31 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
         xfail("native_batch_norm"),
 
-        xfail('nn.functional.rrelu')  # in-place test errors out with no formula implemented
+        xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
+
+        # --- Non-Contiguous Failures! ---
+        # This is expected to fail as the operator
+        # expects last dim to have stride=1
+        xfail('view_as_complex'),
+        # BUG
+        # AssertionError: Tensor-likes are not close!
+        xfail('as_strided'),
+        decorate('linalg.det', 'singular',
+                 decorator=unittest.skipIf(IS_MACOS and IS_X86, "Fails on x86 MacOS CI")),
     }))
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-06)}, device_type='cuda'),
+        tol1('linalg.tensorsolve',
+             {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=4e-04, rtol=4e-04)}),
         tol1('nn.functional.batch_norm',
              {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+        tol1('nn.functional.conv2d',
+             {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+        tol1('pca_lowrank',
+             {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
     ))
     def test_jvp(self, device, dtype, op):
         # TODO: get rid of vjp_decomp when we add decomposition support to
@@ -434,27 +450,37 @@ class TestOperators(TestCase):
         inplace_variant = op.inplace_variant if op.supports_inplace_autograd else None
 
         for sample in samples:
-            args = (sample.input,) + sample.args
-            kwargs = sample.kwargs
             if outplace_variant:
-                self.jvp_opinfo_test(outplace_variant, args, kwargs,
+                self.jvp_opinfo_test(outplace_variant, sample,
                                      sample.output_process_fn_grad,
                                      clone_inputs=False,
                                      fixme_ref_jvp_local=fixme_ref_jvp_local)
             if is_valid_inplace_sample_input(sample, op, inplace_variant):
-                self.jvp_opinfo_test(inplace_variant, args, kwargs,
+                self.jvp_opinfo_test(inplace_variant, sample,
                                      sample.output_process_fn_grad,
                                      clone_inputs=True,
                                      fixme_ref_jvp_local=fixme_ref_jvp_local)
 
-    def jvp_opinfo_test(self, fn, args, kwargs, output_process_fn,
+
+    def jvp_opinfo_test(self, fn, sample, output_process_fn,
                         clone_inputs, fixme_ref_jvp_local):
         # NB: we used requires_grad=True to determine where the primals are,
         # but don't need that information otherwise
-        fn, primals = normalize_op_input_output2(
+        args = (sample.input,) + sample.args
+        kwargs = sample.kwargs
+        contig_fn, primals = normalize_op_input_output2(
             fn, args, kwargs, output_process_fn, requires_grad=True)
         orig_primals = tree_map(lambda x: x.detach(), primals)
         orig_tangents = tree_map(lambda x: torch.randn_like(x), primals)
+
+        noncontig_sample = sample.noncontiguous()
+        noncontig_args = (noncontig_sample.input,) + noncontig_sample.args
+        noncontig_kwargs = sample.kwargs
+        noncontig_fn, primals = normalize_op_input_output2(
+            fn, noncontig_args, noncontig_kwargs,
+            output_process_fn, requires_grad=True)
+        noncontig_primals = tree_map(lambda x: x.detach(), primals)
+        noncontig_tangents = tree_map(lambda x: noncontiguous_like(x), orig_tangents)
 
         def maybe_clone_inputs():
             if clone_inputs:
@@ -465,13 +491,20 @@ class TestOperators(TestCase):
 
         primals, tangents = maybe_clone_inputs()
         expected_primal_outs, expected_tangent_outs = \
-            fixme_ref_jvp_local(fn, primals, tangents)
+            fixme_ref_jvp_local(contig_fn, primals, tangents)
 
         primals, tangents = maybe_clone_inputs()
-        primal_outs, tangent_outs = jvp(fn, primals, tangents)
+        primal_outs, tangent_outs = jvp(contig_fn, primals, tangents)
+
+        noncontig_primal_outs, noncontig_tangent_outs = jvp(noncontig_fn,
+                                                            noncontig_primals,
+                                                            noncontig_tangents)
 
         self.assertEqual(primal_outs, expected_primal_outs)
         self.assertEqual(tangent_outs, expected_tangent_outs)
+
+        self.assertEqual(noncontig_primal_outs, expected_primal_outs)
+        self.assertEqual(noncontig_tangent_outs, expected_tangent_outs)
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
@@ -612,6 +645,7 @@ class TestOperators(TestCase):
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
         skip("nn.functional.dropout3d"),  # calls random op
+        skip("nn.functional.alpha_dropout"),  # calls random op
         skip("nn.functional.feature_alpha_dropout", "with_train"),  # calls random op
         skip("nn.functional.fractional_max_pool2d"),  # calls random op
         skip("nn.functional.fractional_max_pool3d"),  # calls random op
@@ -719,6 +753,7 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout'),  # randomness
         skip('nn.functional.dropout2d'),  # randomness
         skip('nn.functional.dropout3d', ''),  # randomness
+        skip('nn.functional.alpha_dropout'),  # randomness
         skip('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
@@ -808,6 +843,7 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout2d', ''),
         skip('nn.functional.dropout3d', ''),
         skip('nn.functional._scaled_dot_product_attention'),  # randomness
+        skip('nn.functional.alpha_dropout'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),
         skip('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('nn.functional.fractional_max_pool2d'),  # Cannot access data pointer of Tensor that doesn't have storage
@@ -1052,6 +1088,7 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
+        xfail("native_dropout_backward"),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1089,6 +1126,7 @@ class TestOperators(TestCase):
         skip('nn.functional.rrelu'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
+        skip('nn.functional.alpha_dropout'),  # randomness
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         skip('to_sparse', ''),  # non-dense output
         skip('ormqr', ''),  # takes too long
@@ -1199,6 +1237,7 @@ class TestOperators(TestCase):
         xfail('logcumsumexp', ''),  # NYI: forward-AD for logcumsumexp
         xfail('nn.functional.embedding_bag', ''),  # NYI: forward-AD for _embedding_bag
         xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
+        xfail('grid_sampler_2d', ''),  # NYI: forward AD for grid_sampler_2d
         xfail('nn.functional.hardsigmoid', ''),  # NYI: forward AD for hardsigmoid_backward
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
         xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
@@ -1216,6 +1255,8 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'offsets'),  # NYI: forward-AD for segment_reduce
         xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
         xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
+        xfail('native_dropout_backward'),  # NYI
+
     }))
     @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
         tol1('masked.prod',
@@ -1330,11 +1371,13 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout'),  # calls random op
         skip('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('nn.functional.embedding_bag'),  # Forward AD not implemented and no decomposition
+        xfail('nn.functional.alpha_dropout'),  # calls randomn op
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # calls random op
         xfail('nn.functional.fractional_max_pool2d'),  # calls random op
         xfail('nn.functional.fractional_max_pool3d'),  # calls random op
         xfail('nn.functional.gaussian_nll_loss'),  # data depenedant flow
         xfail('nn.functional.grid_sample'),  # Forward AD not implemented and no decomposition
+        xfail('grid_sampler_2d'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.hardsigmoid'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.hinge_embedding_loss'),  # vmap: inplace into a regular tensor
         xfail('nn.functional.huber_loss'),  # Forward AD not implemented and no decomposition
@@ -1372,6 +1415,7 @@ class TestOperators(TestCase):
         # input while the running_mean or running_var, which will be updated in
         # place, were not batched.
         xfail("native_batch_norm"),
+        xfail('native_dropout_backward',)
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
