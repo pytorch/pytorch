@@ -697,7 +697,6 @@ class FSDPTest(MultiProcessTestCase):
     def setUp(self):
         super(FSDPTest, self).setUp()
         self._spawn_processes()
-        dist.set_debug_level(dist.DebugLevel.DETAIL)
 
     @property
     def world_size(self):
@@ -787,6 +786,7 @@ class FSDPTest(MultiProcessTestCase):
         # has finished initialization and that the following test
         # immediately exiting due to a skip doesn't cause flakiness.
         dist.barrier()
+        dist.set_debug_level(dist.DebugLevel.DETAIL)
 
         self.run_test(test_name, pipe)
 
