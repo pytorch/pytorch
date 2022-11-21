@@ -227,6 +227,7 @@ def _pre_forward(
             expected by the hook signature.
         input (Any): Unused; expected by the hook signature.
     """
+    print(f"_pre_forward: state is {state.training_state} id(state) is {id(state)}")
     state.training_state = TrainingState.FORWARD_BACKWARD
     state._exec_order_data.record_pre_forward(handles, module.training)
     for handle in handles:
@@ -412,10 +413,12 @@ def _pre_backward_hook(
     *unused: Any,
 ) -> Any:
     """Prepares ``_handles`` 's ``FlatParameter`` s for gradient computation."""
+    print(f"_pre_backward_hook")
     _handles_key = tuple(_handles)  # avoid shadowing `handles_key`
     # Only run the pre-backward hook once per group of handles involved in the
     # same module forward computation
     if _handles_key and state._ran_pre_backward_hook.get(_handles_key, False):
+        print(f"_pre_backward_hook bailing out early")
         return
 
     with torch.autograd.profiler.record_function(
@@ -432,6 +435,7 @@ def _pre_backward_hook(
             if _is_composable(state):
                 allowed_states.append(TrainingState.FORWARD_BACKWARD)
             _assert_in_training_states(state, allowed_states)
+        print(f"_pre_backward_hook: setting state F.._B.., state was {state.training_state} id(state) is {id(state)}")
         state.training_state = TrainingState.FORWARD_BACKWARD
         # Queueing the post-backward callback is the only logic that is not
         # per-handle in the pre-backward hook, so we can return early here if
@@ -481,6 +485,7 @@ def _post_backward_hook(
     with torch.autograd.profiler.record_function(
         "FullyShardedDataParallel._post_backward_hook"
     ):
+        print(f"_post_backward_hook: state is {state.training_state}, id(state) is {id(state)}")
         _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
         p_assert(
             handle._training_state == HandleTrainingState.BACKWARD_PRE,
@@ -683,6 +688,7 @@ def _low_precision_hook_enabled(state: _FSDPState) -> bool:
 def _post_backward_final_callback(
     state: _FSDPState,
 ):
+    print("_post_backward_final_callback")
     """
     This waits for the post-backward to finish and performs some final cleanup.
     This runs at the end of the entire backward pass and should only be called
@@ -980,6 +986,7 @@ def _register_pre_backward_hooks(
 
     def _register_hook(t: torch.Tensor) -> torch.Tensor:
         if t.requires_grad:
+            print(f"_register_pre_backward_hooks._register_hook on tensor id: {id(t)}")
             t.register_hook(functools.partial(_pre_backward_hook, state, handles))
             state._needs_pre_backward_unshard[handles_key] = True
         return t
