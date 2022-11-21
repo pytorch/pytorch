@@ -10,7 +10,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
-#include <ATen/native/cpu/radix_sort.h>
 #include <c10/util/irange.h>
 
 namespace at { namespace native {
@@ -574,6 +573,45 @@ struct cpu_scatter_gather_base_kernel {
   }
 };
 
+template <typename scalar_t, SCATTER_GATHER_OP reduce>
+inline void init(scalar_t* ptr, int64_t size, bool include_self) {
+  if (!include_self) {
+    using acc_t = vec::vec_scalar_t<scalar_t>;
+    using Vec = vec::Vectorized<acc_t>;
+
+    acc_t val;
+    if (reduce == SCATTER_GATHER_OP::REDUCE_ADD ||
+        reduce == SCATTER_GATHER_OP::REDUCE_MEAN) {
+      val = static_cast<acc_t>(0);
+    } else if (reduce == SCATTER_GATHER_OP::REDUCE_MULTIPLY) {
+      val = static_cast<acc_t>(1);
+    } else if (reduce == SCATTER_GATHER_OP::REDUCE_MAXIMUM) {
+      val = std::numeric_limits<acc_t>::lowest();
+    } else {
+      val = std::numeric_limits<acc_t>::max();
+    }
+    vec::map<scalar_t>(
+        [val](Vec x) { return Vec(val); },
+        ptr,
+        ptr,
+        size);
+  }
+}
+
+template <typename vec_t, SCATTER_GATHER_OP reduce>
+inline vec_t update(const vec_t& x, const vec_t& y) {
+  if (reduce == SCATTER_GATHER_OP::REDUCE_ADD ||
+      reduce == SCATTER_GATHER_OP::REDUCE_MEAN) {
+    return x + y;
+  } else if (reduce == SCATTER_GATHER_OP::REDUCE_MULTIPLY) {
+    return x * y;
+  } else if (reduce == SCATTER_GATHER_OP::REDUCE_MAXIMUM) {
+    return vec::maximum(x, y);
+  } else {
+    return vec::minimum(x, y);
+  }
+}
+
 // Note [scatter reduce optimization]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
@@ -597,8 +635,8 @@ struct cpu_scatter_gather_base_kernel {
 //
 //   step 2: spmm reduce, parallel on M and vectorize on K
 //
-template <typename scalar_t>
-void cpu_scatter_add_expanded_index_kernel(const Tensor& self, const Tensor& index, const Tensor& src) {
+template <typename scalar_t, SCATTER_GATHER_OP reduce>
+void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src, bool include_self) {
   int64_t* index_data = index.data_ptr<int64_t>();
   scalar_t* self_data = self.data_ptr<scalar_t>();
   scalar_t* src_data = src.data_ptr<scalar_t>();
@@ -682,15 +720,31 @@ void cpu_scatter_add_expanded_index_kernel(const Tensor& self, const Tensor& ind
       int64_t off_start = row_index_offset[m];
       int64_t off_end = row_index_offset[m + 1];
       scalar_t* self_ptr = self_data + row * K;
+
+      // reinit rows in `self` if needed
+      init<scalar_t, reduce>(self_ptr, K, include_self);
+
       for (const auto n : c10::irange(off_start, off_end)) {
         int64_t col = sorted_col_index_values[n];
         scalar_t* src_ptr = src_data + col * K;
         vec::map2<scalar_t>(
-            [](Vec x, Vec y) { return x + y; },
+            [](Vec x, Vec y) { return update<Vec, reduce>(x, y); },
             self_ptr,
             self_ptr,
             src_ptr,
             K);
+      }
+
+      if (reduce == SCATTER_GATHER_OP::REDUCE_MEAN) {
+        int64_t count = include_self ? 1 : 0;
+        count += off_end - off_start;
+        if (count != 0) {
+          vec::map<scalar_t>(
+              [count](Vec x) { return x / Vec(count); },
+              self_ptr,
+              self_ptr,
+              K);
+        }
       }
     }
   });
@@ -734,62 +788,49 @@ void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index,
   });
 }
 
-void scatter_add_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-    ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, self.scalar_type(),
-    "scatter_add_contig", [&] {
-      cpu_scatter_add_expanded_index_kernel<scalar_t>(self, index, src);
+void scatter_add_expanded_index_kernel(const Tensor& self, const Tensor& index, const Tensor& src) {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+    ScalarType::BFloat16, self.scalar_type(), "scatter_add_expanded_index", [&] {
+      cpu_scatter_reduce_expanded_index<scalar_t, SCATTER_GATHER_OP::REDUCE_ADD>(self, index, src, /*include_self*/true);
   });
 }
 
-void gather_expanded_index(const Tensor& result, const Tensor& index, const Tensor& self) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-    ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, self.scalar_type(),
-    "scatter_add_contig", [&] {
+void scatter_reduce_expanded_index_kernel(
+    const Tensor& self, const Tensor& index, const Tensor& src,
+    const SCATTER_GATHER_OP& reduce, bool include_self) {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+    ScalarType::BFloat16, self.scalar_type(), "scatter_reduce_expanded_index", [&] {
+      switch (reduce) {
+      case SCATTER_GATHER_OP::REDUCE_ADD :
+        cpu_scatter_reduce_expanded_index<scalar_t, SCATTER_GATHER_OP::REDUCE_ADD>(self, index, src, include_self);
+        break;
+      case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
+        cpu_scatter_reduce_expanded_index<scalar_t, SCATTER_GATHER_OP::REDUCE_MULTIPLY>(self, index, src, include_self);
+        break;
+      case SCATTER_GATHER_OP::REDUCE_MAXIMUM :
+        cpu_scatter_reduce_expanded_index<scalar_t, SCATTER_GATHER_OP::REDUCE_MAXIMUM>(self, index, src, include_self);
+        break;
+      case SCATTER_GATHER_OP::REDUCE_MINIMUM :
+        cpu_scatter_reduce_expanded_index<scalar_t, SCATTER_GATHER_OP::REDUCE_MINIMUM>(self, index, src, include_self);
+        break;
+      case SCATTER_GATHER_OP::REDUCE_MEAN :
+        cpu_scatter_reduce_expanded_index<scalar_t, SCATTER_GATHER_OP::REDUCE_MEAN>(self, index, src, include_self);
+        break;
+      }
+  });
+}
+
+void gather_expanded_index_kernel(const Tensor& result, const Tensor& self, const Tensor& index) {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+    ScalarType::BFloat16, self.scalar_type(), "gather_expanded_index", [&] {
       cpu_gather_expanded_index_kernel<scalar_t>(result, index, self);
   });
 }
 
-template <bool is_scatter_like = true>
-inline bool can_use_expanded_index_path(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  if (!is_radix_sort_available()) { return false; }
-
-  // skip when having empty tensor
-  if (self.numel() == 0 || index.numel() == 0 || src.numel() == 0) { return false; }
-
-  // skip when having scalar tensor
-  if (self.ndimension() == 0 || index.ndimension() == 0 || src.ndimension() == 0) { return false; }
-
-  if (is_scatter_like) {
-    // using `spmm` for scatter would require sorting on index,
-    // this is only perf beneficial when the inner dimension, aka, `channels`
-    // is big enough.
-    constexpr int64_t threshold = 16;
-    if (index.numel() / index.size(0) < threshold) { return false; }
-  }
-
-  // usually the expanded index has stride on the first dimension to be 1,
-  // and strides on other dims to be 0 or 1, e.g.
-  //   shape [108365, 16]; strides [1, 0]
-  //   shape [13264, 1, 7]; strides [1, 1, 0]
-  auto index_strides = index.strides().vec();
-  bool is_index_expanded = index_strides[0] == 1;
-  for (const auto dim : c10::irange(1, index_strides.size())) {
-    if (index_strides[dim] > 1) { is_index_expanded = false; }
-  }
-
-  // index is expanded
-  return dim == 0 && is_index_expanded && src.is_contiguous() && self.is_contiguous();
-}
-
 void gather_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
-  if (can_use_expanded_index_path</*is_scatter_like=*/false>(result, dim, index, self)) {
-    gather_expanded_index(result, index, self);
-  } else {
-    cpu_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
-      result, dim, index, self,
-      "gather_out_cpu", tensor_assign);
-  }
+  cpu_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
+    result, dim, index, self,
+    "gather_out_cpu", tensor_assign);
 }
 
 void scatter_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
@@ -803,13 +844,9 @@ void scatter_fill_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& inde
 }
 
 void scatter_add_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  if (can_use_expanded_index_path<>(self, dim, index, src)) {
-    scatter_add_expanded_index(self, index, src);
-  } else {
-    cpu_scatter_gather_base_kernel<>()(
-      self, dim, index, src,
-      "scatter_add_", reduce_add);
-  }
+  cpu_scatter_gather_base_kernel<>()(
+    self, dim, index, src,
+    "scatter_add_", reduce_add);
 }
 
 void scatter_reduce_cpu_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
@@ -879,5 +916,10 @@ REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel);
 REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cpu_kernel);
 REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cpu_kernel);
 REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cpu_kernel);
+
+// fast paths for GNN usage
+REGISTER_DISPATCH(scatter_add_expanded_index_stub, &scatter_add_expanded_index_kernel);
+REGISTER_DISPATCH(scatter_reduce_expanded_index_stub, &scatter_reduce_expanded_index_kernel);
+REGISTER_DISPATCH(gather_expanded_index_stub, &gather_expanded_index_kernel);
 
 }} // namespace at::native
