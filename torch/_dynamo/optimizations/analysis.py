@@ -145,16 +145,17 @@ def has_mutation(gm, example_inputs, fake_mode, inputs_only=False):
         example_inputs = copy.deepcopy(example_inputs)
         ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)
 
-    inp_nodes = [n for n in new_gm.graph.nodes if n.op == 'placeholder']
+    inp_nodes = [n for n in new_gm.graph.nodes if n.op == "placeholder"]
     for node in new_gm.graph.nodes:
         if node.meta["is_mutation"] or node.meta["is_input_mutation"]:
             if inputs_only:
                 if node.meta["is_input_alias"]:
                     # Get the list of inputs that alias with the current node.
-                    inps_that_alias_node = [n for n in inp_nodes if n.meta['alias_groups'] & node.meta['alias_groups']]
-                    if len(inps_that_alias_node) > 1:
-                        import pdb; pdb.set_trace()
-                        return True
+                    inps_that_alias_node = [
+                        n
+                        for n in inp_nodes
+                        if n.meta["alias_groups"] & node.meta["alias_groups"]
+                    ]
             else:
                 return True
     return False

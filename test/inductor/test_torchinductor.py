@@ -5054,6 +5054,23 @@ if HAS_CUDA:
                     for param in model_opt.parameters():
                         param.add_(1.0)
 
+        # https://github.com/pytorch/torchdynamo/issues/1850
+        def test_inductor_output_aliases_intermediate(self):
+            def foo(x):
+                out = x + x
+                return out.t()
+
+            foo_opt = torch._dynamo.optimize("inductor")(foo)
+
+            inpt = torch.randn(10, 10, device="cuda", requires_grad=True)
+            out = foo_opt(inpt)
+            out.add_(2)
+
+            out_ref = foo(inpt)
+            out_ref.add_(2)
+
+            self.assertEqual(out_ref, out)
+
         def test_accuracy_issue1(self):
             class Repro(torch.nn.Module):
                 def __init__(self):

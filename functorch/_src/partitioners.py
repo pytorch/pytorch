@@ -282,6 +282,7 @@ def min_cut_rematerialization_partition(
 
     joint_module.graph.eliminate_dead_code()
     joint_module.recompile()
+
     fx_g = joint_module.graph
 
     #  add the CSE pass
@@ -309,9 +310,24 @@ def min_cut_rematerialization_partition(
                              if node.op != 'output'}
         unclaimed_nodes = {node for node in joint_module.graph.nodes
                            if node not in required_fw_nodes and node not in required_bw_nodes}
-        return required_fw_nodes, required_bw_nodes, unclaimed_nodes
+        return fwd_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes
 
-    required_fw_nodes, required_bw_nodes, unclaimed_nodes = classify_nodes(joint_module)
+    orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes = classify_nodes(joint_module)
+
+    def is_tensor_node(x):
+        # When dynamic shapes are not enabled, fw outputs can be raw ints and not fx nodes
+        if not isinstance(x, fx.Node):
+            return False
+        # It would be nice if we could guarantee that all fx nodes from make_fx get a 'val'
+        # key in their meta dict, but that isn't always true today (see proxy_tensor.py)
+        return 'tensor_meta' in x.meta or ('val' in x.meta and isinstance(x.meta['val'], torch.Tensor))
+
+    # networkx blows up on graphs with no tensor outputs.
+    # Since there's nothing to partition anyway, and the default partitioner can "handle"
+    # this case, send our graph over to the default partitioner.
+    if not any(is_tensor_node(x) for x in orig_fw_outputs):
+        return default_partition(joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs)
+
     for node in reversed(joint_module.graph.nodes):
         if node not in required_fw_nodes:
             node.dist_from_bw = 0
@@ -444,7 +460,8 @@ def min_cut_rematerialization_partition(
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(lambda n: is_sym_node(n), saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
-    fw_module, bw_module = _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
+    fw_module, bw_module = _extract_fwd_bwd_modules(
+        joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
         fw_module_nodes = set([node.name for node in fw_module.graph.nodes if node.op == 'call_function'])
