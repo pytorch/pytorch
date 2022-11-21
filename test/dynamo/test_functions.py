@@ -325,6 +325,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
 
     @make_test
+    def test_tensor_type(a, b):
+        m = a.to(torch.float16)
+        return b.type(m.type())
+
+    @make_test
     def test_ndim(x):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
             return x + 1

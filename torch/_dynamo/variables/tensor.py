@@ -225,6 +225,13 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable(
                 memory_format in self.is_contiguous, **options
             )
+        elif name == "type" and self.dtype is not None and len(args) == 0:
+            tensortype = [k for k, v in tensortype_to_dtype.items() if self.dtype in v][
+                0
+            ]
+            constant_result = ConstantVariable(
+                f"torch.{tensortype.__name__}", **options
+            )
         else:
             constant_result = None
 
