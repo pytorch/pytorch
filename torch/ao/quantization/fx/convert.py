@@ -53,11 +53,14 @@ from .utils import (
     _get_module,
     _is_custom_module_lstm,
     get_custom_module_class_keys,
-    get_quantize_node_info,
     create_getattr_from_value,
     collect_producer_nodes,
     graph_module_from_producer_nodes,
     node_arg_is_weight,
+)
+from torch.ao.quantization.utils import (
+    is_per_channel,
+    to_underlying_dtype,
 )
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
@@ -107,51 +110,103 @@ def _replace_observer_with_quantize_dequantize_node(
     assert modules is not None
     assert isinstance(node.target, str)
     module_path, prefix = get_module_path_and_prefix(node, node_name_to_scope, node_name_to_qconfig)
-    observer_module = modules[node.target]
-    maybe_quantize_node_info = get_quantize_node_info(observer_module, is_decomposed)
+    activation_post_process = modules[node.target]
     # Skip replacing observers to quant/dequant nodes if the qconfigs of all
     # consumers and producers of this observer are None
     skip_replacement = all([
         has_none_qconfig(n, node_name_to_qconfig) for n in
         list(node.args) + list(node.users.keys())])
-    if skip_replacement or maybe_quantize_node_info is None:
-        # didn't find correponding quantize op and info for the observer_module
+    if skip_replacement or not _is_conversion_supported(activation_post_process):
+        # didn't find correponding quantize op and info for the activation_post_process
         # so we just remove the observer
         with graph.inserting_before(node):
             node.replace_all_uses_with(node.args[0])
             graph.erase_node(node)
-    else:
-        # otherwise, we can convert the observer moduel call to quantize/dequantize node
-        node_type, quantize_op, qparams = maybe_quantize_node_info
-        # replace observer node with quant - dequant node
-        with graph.inserting_before(node):
-            input_node = node.args[0]
-            quantize_op_inputs = [input_node]
-            for key, value in qparams.items():
-                # TODO: we can add the information of whether a value needs to
-                # be registered as an attribute in qparams dict itself
-                if key in ['_scale_', '_zero_point_']:
-                    # For scale and zero_point values we register them as buffers in the root module.
-                    # TODO: maybe need more complex attr name here
-                    qparam_node = create_getattr_from_value(model, graph, module_path + prefix + key, value)
-                    quantize_op_inputs.append(qparam_node)
-                else:
-                    # for qparams that are not scale/zero_point (like axis, dtype) we store them as literals in the graph.
-                    quantize_op_inputs.append(value)
+        return
 
-            quantized_node = graph.create_node(node_type, quantize_op, tuple(quantize_op_inputs), {})
+    # otherwise, we can convert the observer module call to quantize/dequantize node
+    # 1. extract the information from activation_post_process module for generating
+    # the quantize and dequantize operator
+    dtype = activation_post_process.dtype  # type: ignore[attr-defined]
+    compute_dtype = None
+    if hasattr(activation_post_process, "compute_dtype"):
+        compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
+    quantize_op : Optional[Union[Callable, str]] = None
+    if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
+            not hasattr(activation_post_process, 'compute_dtype'):
+        node_type = "call_function"
+        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
+        if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
+            ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
+            qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
             if is_decomposed:
-                # use the same qparams from quantize op
-                dq_inputs = [quantized_node] + quantize_op_inputs[1:]
-                dequantized_node = graph.call_function(
-                    torch.ops.quantized_decomposed.dequantize_per_tensor,
-                    tuple(dq_inputs),
-                    {}
-                )
+                raise NotImplementedError("decomposed quantize_per_channel op not implemented yet")
             else:
-                dequantized_node = graph.call_method("dequantize", args=(quantized_node,))
-            node.replace_all_uses_with(dequantized_node)
-            graph.erase_node(node)
+                quantize_op = torch.quantize_per_channel
+        else:
+            scale = float(scale)
+            zero_point = int(zero_point)
+            if is_decomposed:
+                quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
+                quant_max = activation_post_process.quant_max  # type: ignore[attr-defined]
+                dtype = to_underlying_dtype(dtype)
+                qparams = {
+                    "_scale_": scale,
+                    "_zero_point_": zero_point,
+                    "_quant_min": quant_min,
+                    "_quant_max": quant_max,
+                    "_dtype_": dtype
+                }
+                quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor
+            else:
+                qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
+                quantize_op = torch.quantize_per_tensor
+    elif compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
+        # TODO(future PR): switch compute_dtype to is_dynamic
+        # dynamic quantization
+        node_type = "call_function"
+        if is_decomposed:
+            raise NotImplementedError("decomposed quantize_per_tensor_dynamic op not implemented yet")
+        else:
+            quantize_op = torch.quantize_per_tensor_dynamic
+        # TODO: get reduce range from observer
+        # reduce_range = activation_post_process.reduce_range
+        reduce_range = torch.backends.quantized.engine in ("fbgemm", "x86")
+        qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
+    elif dtype == torch.float16:
+        node_type = "call_method"
+        quantize_op = "to"
+        qparams = {"_dtype_": dtype}
+
+    # 2. replace observer node with quant - dequant node
+    with graph.inserting_before(node):
+        input_node = node.args[0]
+        quantize_op_inputs = [input_node]
+        for key, value in qparams.items():
+            # TODO: we can add the information of whether a value needs to
+            # be registered as an attribute in qparams dict itself
+            if key in ['_scale_', '_zero_point_']:
+                # For scale and zero_point values we register them as buffers in the root module.
+                # TODO: maybe need more complex attr name here
+                qparam_node = create_getattr_from_value(model, graph, module_path + prefix + key, value)
+                quantize_op_inputs.append(qparam_node)
+            else:
+                # for qparams that are not scale/zero_point (like axis, dtype) we store them as literals in the graph.
+                quantize_op_inputs.append(value)
+
+        quantized_node = graph.create_node(node_type, quantize_op, tuple(quantize_op_inputs), {})
+        if is_decomposed:
+            # use the same qparams from quantize op
+            dq_inputs = [quantized_node] + quantize_op_inputs[1:]
+            dequantized_node = graph.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor,
+                tuple(dq_inputs),
+                {}
+            )
+        else:
+            dequantized_node = graph.call_method("dequantize", args=(quantized_node,))
+        node.replace_all_uses_with(dequantized_node)
+        graph.erase_node(node)
 
 # this is a temporary hack for custom module, we may want to implement
 # this properly after the custom module class design is finalized
@@ -165,6 +220,15 @@ def _replace_observer_or_dequant_stub_with_dequantize_node(node: Node, graph: Gr
     node.replace_all_uses_with(call_custom_module_node)
     graph.erase_node(node)
     insert_dequantize_node(call_custom_module_node, graph)
+
+def _is_conversion_supported(activation_post_process: torch.nn.Module) -> bool:
+    dtype = activation_post_process.dtype  # type: ignore[attr-defined]
+    compute_dtype = None
+    if hasattr(activation_post_process, "compute_dtype"):
+        compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
+    return (dtype in [torch.quint8, torch.qint8, torch.qint32] and compute_dtype is None) or \
+        compute_dtype in [torch.quint8, torch.qint8, torch.float16] or \
+        dtype == torch.float16
 
 def restore_state(
         observed: torch.nn.Module
