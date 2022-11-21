@@ -11,6 +11,7 @@ from functorch.compile import min_cut_rematerialization_partition
 
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import deepcopy_to_fake_tensor
 
 from . import config, metrics, overrides
@@ -24,7 +25,6 @@ from .utils import (
     has_incompatible_cudagraph_ops,
 )
 from .virtualized import V
-from torch.utils._pytree import tree_flatten
 
 log = logging.getLogger(__name__)
 ALIGNMENT = 16
@@ -357,7 +357,7 @@ def compile_fx(
 
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
-    
+
     fake_mode = None
 
     flat_inputs, _ = tree_flatten(example_inputs_)
@@ -369,11 +369,11 @@ def compile_fx(
                 assert fake_mode == input.fake_mode
 
     # if fake_mode:
-        # NOTE: This *will* create guards - we are missng
-        # the shape env guard supression logic here.
-        # We need to add it once its pushed up.
-        # Don't land this without that logic. 
-        # model_ = deepcopy_to_fake_tensor(model_, fake_mode)
+    # NOTE: This *will* create guards - we are missng
+    # the shape env guard supression logic here.
+    # We need to add it once its pushed up.
+    # Don't land this without that logic.
+    # model_ = deepcopy_to_fake_tensor(model_, fake_mode)
 
     with overrides.patch_functions():
         model_ = normalize_ir(model_, example_inputs_)

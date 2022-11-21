@@ -1,4 +1,5 @@
 import collections
+import copy
 import functools
 import itertools
 import logging
@@ -22,10 +23,12 @@ from .side_effects import SideEffects
 from .source import ConstantSource, LocalSource, Source
 from .utils import (
     CleanupHook,
+    clone_inputs,
     count_calls,
     counters,
     fake_tensors_available,
     format_graph_tabular,
+    same,
 )
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
@@ -460,13 +463,16 @@ class OutputGraph(fx.Tracer):
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             from inspect import signature
 
-            try: 
+            try:
                 print("COMPILER FN", self.compiler_fn)
                 print("FAKE?", config.fake_tensor_propagation)
-                if "real_inputs" in signature(self.compiler_fn).parameters:
-                    compiled_fn = self.compiler_fn(
-                        gm, self.example_inputs(), real_inputs=self.real_inputs()
+                backend_correct = True
+                if config.verify_correctness:
+                    backend_correct = _verify_backend_correct(
+                        self.compiler_fn, gm, self.example_inputs(), self.real_inputs()
                     )
+                if not backend_correct:
+                    compiled_fn = gm.forward(gm, self.example_inputs())
                 else:
                     compiled_fn = self.compiler_fn(gm, self.example_inputs())
             except Exception as e:
@@ -595,3 +601,41 @@ class OutputGraph(fx.Tracer):
         rv.node.stack_trace = nn_module_stack_str + " | ".join(msgs)
 
         return rv
+
+
+def _verify_backend_correct(
+    backend, gm: torch.fx.GraphModule, fake_inputs, real_inputs
+):
+    assert config.verify_correctness
+
+    copy_gm = copy.deepcopy(gm)
+
+    if config.fake_tensor_propagation:
+        fake_inputs = clone_inputs(fake_inputs)
+        # This is a *huge hack* to get around the fact that
+        # AOTAutograd mutation analysis only works with taking real inputs atm
+        # it has its own weird and brittle fakification story that is solved on
+        # the symbolic shapes branch.
+        # this wil be removed ASAP.
+        candidate = backend(copy_gm, fake_inputs)
+    else:
+        real_inputs = clone_inputs(real_inputs)
+        candidate = backend(copy_gm, real_inputs)
+
+    if candidate is None or candidate is gm.forward:
+        return False
+
+    try:
+        correct = gm.forward(*real_inputs)
+        result = candidate(*real_inputs)
+
+        # TODO: replace `same` function with the one in testing
+        if same(correct, result):
+            return True
+
+        raise RuntimeError(f"incorrect results of backend during verify correctness")
+        return False
+
+    except Exception:
+        log.exception("error in verify_correctness")
+        raise

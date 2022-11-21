@@ -320,58 +320,6 @@ def _optimize_catch_errors(compile_fn, backend_ctx_ctor=null_context, dynamic=Fa
     )
 
 
-class WrapperBackend:
-    def __init__(self, backend=None):
-        self.backend = backend
-
-    @property
-    def example_inputs(self):
-        if config.fake_tensor_propagation:
-            return clone_inputs(self.original_example_inputs_fake)
-        return clone_inputs(self.original_example_inputs_real)
-
-    def __call__(self, gm: torch.fx.GraphModule, fake_inputs, real_inputs):
-
-        self.restore = checkpoint_params(gm)
-        self.original_example_inputs_real = clone_inputs(real_inputs)
-        self.original_example_inputs_fake = clone_inputs(fake_inputs)
-        self.gm = gm
-        copy_gm = copy.deepcopy(self.gm)
-        if config.fake_tensor_propagation:
-            # This is a *huge hack* to get around the fact that
-            # AOTAutograd mutation analysis only works with taking real inputs atm
-            # it has its own weird and brittle fakification story that is solved on
-            # the symbolic shapes branch.
-            # this wil be removed ASAP.
-            self.candidate = self.backend(copy_gm, self.original_example_inputs_fake)
-        else:
-            self.candidate = self.backend(copy_gm, self.original_example_inputs_real)
-
-        if self.candidate is None or self.candidate is self.gm.forward:
-            return self.gm.forward
-
-        if not config.verify_correctness:
-            return self.candidate
-
-        # if verify_correctness=True
-        try:
-            correct = self.gm.forward(*self.original_example_inputs_real)
-            result = self.candidate(*self.original_example_inputs_real)
-
-            # TODO: replace `same` function with the one in testing
-            if same(correct, result):
-                return self.candidate
-
-            raise RuntimeError(f"incorrect results of backend {self}")
-            return self.gm.forward
-
-        except Exception:
-            log.exception("error in verify_correctness")
-            raise
-        finally:
-            self.restore()
-
-
 def get_compiler_fn(compiler_fn):
     from .debug_utils import wrap_backend_debug
 

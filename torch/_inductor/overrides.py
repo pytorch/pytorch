@@ -449,11 +449,11 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     gm = fuse_conv_bn(gm)
     # For binary fusion, we need to check inputs info to make sure
     # the binary inputs have same tensor info(device, dtype, and layout).
-    
+
     # Doesn't work with fake tensors, do not land like this
     # ShapeProp(gm).propagate(*example_inputs)
     # Doesn't work with fake tensors, do not land like this
-    
+
     gm = fuse_unary(gm)
     gm = fuse_binary_inplace(gm)
     gm = fuse_binary(gm)
