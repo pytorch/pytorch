@@ -2613,9 +2613,13 @@
   nested_strides: non_differentiable
 
 # Transformers
+- name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False) -> (Tensor, Tensor)
+  output_differentiability: [True, False]
+  query, key, value: _scaled_dot_product_efficient_attention_backward(grad, query, key, value, result0, result1, is_causal)
+
 - name:  _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False) -> (Tensor, Tensor)
   output_differentiability: [True, False]
-  query, key, value: _efficient_attention_backward(grad, query, key, value, result1, result0, causal)
+  query, key, value: _efficient_attention_backward(grad, query, key, value, result0, result1, causal)
 
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
