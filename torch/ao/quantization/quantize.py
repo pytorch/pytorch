@@ -20,17 +20,22 @@ from torch.ao.quantization.quantization_mappings import (
 from .utils import get_qparam_dict, has_no_children_ignoring_parametrizations
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.ao.quantization.qconfig import (
-    add_module_to_qconfig_obs_ctr,
+    _add_module_to_qconfig_obs_ctr,
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
     float_qparams_weight_only_qconfig_4bit,
-    activation_is_memoryless)
+    _activation_is_memoryless)
 from torch.nn.utils.parametrize import type_before_parametrizations
+
+from torch.ao.quantization.observer import (  # noqa: F401
+    _is_activation_post_process,
+    _is_activation_post_process as is_activation_post_process,
+    # TODO remove this once problems from name change are resolved
+)
 
 __all__ = [
     "get_default_custom_config_dict",
-    "is_activation_post_process",
     "propagate_qconfig_",
     "register_activation_post_process_hook",
     "add_observer_",
@@ -62,11 +67,6 @@ def get_default_custom_config_dict():
     """
     return _DEFAULT_CUSTOM_CONFIG_DICT
 
-def is_activation_post_process(module):
-    return (isinstance(module, torch.ao.quantization.ObserverBase) or
-            isinstance(module, torch.ao.quantization.FakeQuantizeBase))
-
-
 def _propagate_qconfig_helper(module, qconfig_dict,
                               qconfig_parent=None, prefix='', prepare_custom_config_dict=None):
     r"""This is a helper function for `propagate_qconfig_`
@@ -91,9 +91,9 @@ def _propagate_qconfig_helper(module, qconfig_dict,
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
 
-    torch.ao.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
+    torch.ao.quantization.qconfig._assert_valid_qconfig(module_qconfig, module)
 
-    qconfig_with_device_check = add_module_to_qconfig_obs_ctr(module_qconfig, module)
+    qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(module_qconfig, module)
     module.qconfig = qconfig_with_device_check
 
     for name, child in module.named_children():
@@ -143,11 +143,13 @@ def register_activation_post_process_hook(module, pre_hook=False):
     assert hasattr(module, 'activation_post_process'), \
         'Expect activation_post_process attribute already attached to the module'
     if pre_hook:
-        handle = module.register_forward_pre_hook(_observer_forward_pre_hook)
-        module._forward_pre_hooks.move_to_end(handle.id, last=False)
+        handle = module.register_forward_pre_hook(
+            _observer_forward_pre_hook, prepend=True
+        )
     else:
-        handle = module.register_forward_hook(_observer_forward_hook)
-        module._forward_hooks.move_to_end(handle.id, last=False)
+        handle = module.register_forward_hook(
+            _observer_forward_hook, prepend=True
+        )
 
 
 def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=None, device=None, custom_module_class_mapping=None):
@@ -201,7 +203,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
                 m.qconfig, device, special_act_post_process))
             # Register observer as the first entry in the hook list
             # All post forward hooks are preserved and will be executed after the observer before convert
-            register_activation_post_process_hook(m, pre_hook=activation_is_memoryless(m.qconfig))
+            register_activation_post_process_hook(m, pre_hook=_activation_is_memoryless(m.qconfig))
 
     for name, child in module.named_children():
         # TODO remove Dropout special after codebase stable
@@ -322,7 +324,7 @@ def _remove_activation_post_process(module):
     # TODO: maybe we should change activation_post_process to _activation_post_process
     # to prevent it from being used by user
     if hasattr(module, 'activation_post_process') and \
-       is_activation_post_process(module.activation_post_process):
+       _is_activation_post_process(module.activation_post_process):
         delattr(module, 'activation_post_process')
 
     # remove activation_post_proceess pre and post hooks

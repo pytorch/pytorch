@@ -9,6 +9,7 @@ import sympy
 
 import torch
 import torch.fx
+import torch.utils._pytree as pytree
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -36,6 +37,7 @@ from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
 lowerings = {}
+layout_constraints = {}
 fallbacks = set()
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -49,6 +51,14 @@ def add_needs_realized_inputs(fn):
     if isinstance(fn, torch._ops.OpOverloadPacket):
         for overload in fn.overloads():
             needs_realized_inputs.add(getattr(fn, overload))
+
+
+def add_layout_constraint(fn, constraint):
+    if isinstance(fn, torch._ops.OpOverloadPacket):
+        for overload in fn.overloads():
+            layout_constraints[getattr(fn, overload)] = constraint
+    else:
+        layout_constraints[fn] = constraint
 
 
 add_needs_realized_inputs(
@@ -934,11 +944,61 @@ def register_onednn_fusion_ops():
             stride,
             dilation,
             groups,
-            attr,
+            binary_attr,
+            binary_alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
         ):
             return TensorBox.create(
                 ir.ConvolutionBinary.create(
-                    x, other, weight, bias, padding, stride, dilation, groups, attr
+                    x,
+                    other,
+                    weight,
+                    bias,
+                    padding,
+                    stride,
+                    dilation,
+                    groups,
+                    binary_attr,
+                    binary_alpha,
+                    unary_attr,
+                    unary_scalars,
+                    unary_algorithm,
+                )
+            )
+
+        @register_lowering(torch.ops.mkldnn._convolution_pointwise_.binary)
+        def convolution_binary_inplace(
+            x: TensorBox,
+            other: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            stride,
+            dilation,
+            groups,
+            binary_attr,
+            binary_alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionBinaryInplace.create(
+                    x,
+                    other,
+                    weight,
+                    bias,
+                    padding,
+                    stride,
+                    dilation,
+                    groups,
+                    binary_attr,
+                    binary_alpha,
+                    unary_attr,
+                    unary_scalars,
+                    unary_algorithm,
                 )
             )
 
@@ -965,16 +1025,14 @@ def fallback_handler(kernel):
     fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
-        result = ir.FallbackKernel.create(kernel, *args, **kwargs)
-        if isinstance(result, (list, tuple)):
-            return list(map(TensorBox.create, result))
-        else:
-            return TensorBox.create(result)
+        return pytree.tree_map(
+            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
+        )
 
     return handler
 
 
-def make_fallback(kernel):
+def make_fallback(kernel, layout_constraint=None):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
@@ -984,6 +1042,8 @@ def make_fallback(kernel):
         )
 
     add_needs_realized_inputs(kernel)
+    if layout_constraint is not None:
+        add_layout_constraint(kernel, layout_constraint)
     return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
 
 
@@ -993,12 +1053,10 @@ def native_dropout(x, p, train):
         config.fallback_random
     ), "this should be handled in decomps unless config.fallback_random"
     if train:
-        return list(
-            map(
-                TensorBox.create,
-                ir.FallbackKernel.create(aten.native_dropout, x, p, train),
-            )
+        return pytree.tree_map(
+            TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
         )
+
     return x, ones_like(x, dtype=torch.bool)
 
 
@@ -1137,29 +1195,59 @@ def philox_rand_like(x, seed, offset):
     )
 
 
+def require_dense(_, *args, **kwargs):
+    args, kwargs = pytree.tree_map_only(
+        ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs)
+    )
+    return args, kwargs
+
+
+def require_contiguous(_, *args, **kwargs):
+    args, kwargs = pytree.tree_map_only(
+        ir.IRNode, lambda t: ir.ExternKernel.require_contiguous(t), (args, kwargs)
+    )
+    return args, kwargs
+
+
 if has_torchvision_roi_align():
     make_fallback(torch.ops.torchvision.roi_align)
 
+
+def constrain_to_fx_strides(fx_node, *args, **kwargs):
+    def apply_constraint(arg, fx_arg):
+        if isinstance(arg, ir.IRNode):
+            stride_order = ir.get_stride_order(fx_arg.meta["val"].stride())
+            return ir.ExternKernel.require_stride_order(arg, stride_order)
+        return arg
+
+    args = [apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)]
+    kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
+    return args, kwargs
+
+
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
-make_fallback(aten._adaptive_avg_pool2d_backward)
-make_fallback(aten.convolution_backward)
-make_fallback(aten._cudnn_rnn)
-make_fallback(aten._cudnn_rnn_backward)
-make_fallback(aten.cumsum)
-make_fallback(aten._embedding_bag)
-make_fallback(aten._embedding_bag_forward_only)
+make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
+make_fallback(aten.convolution_backward, constrain_to_fx_strides)
+make_fallback(aten._cudnn_rnn, require_dense)
+make_fallback(aten._cudnn_rnn_backward, require_contiguous)
+make_fallback(aten.cumsum, require_dense)
+make_fallback(aten._embedding_bag, require_contiguous)
+make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
-make_fallback(aten.grid_sampler_2d_backward)
+make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
-make_fallback(aten._thnn_fused_lstm_cell)
+make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
-make_fallback(aten.upsample_bicubic2d_backward)
-make_fallback(aten.upsample_bilinear2d_backward)
+make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
+make_fallback(aten.upsample_bilinear2d_backward, require_dense)
+
+
+add_layout_constraint(aten.convolution, constrain_to_fx_strides)
 
 
 @register_lowering(aten.convolution)
@@ -1905,14 +1993,37 @@ def scatter(x, dim: int, index, src, **kwargs):
     return scatter_(clone(x), dim, index, src, **kwargs)
 
 
+def scatter_fallback(
+    fn, self, dim: int, index, src, *, reduce: str = None, include_self: bool = True
+):
+
+    if reduce not in {None, "sum"} or (
+        reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
+    ):
+        self.realize()
+        return fallback_handler(fn)(
+            self, dim, index, src, reduce=reduce, include_self=include_self
+        )
+
+    return None
+
+
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: str = None):
+
     if reduce == "add":
         reduce = "sum"
     elif reduce == "multiply":
         reduce = "prod"
     else:
         assert reduce is None
+
+    fallback_result = scatter_fallback(
+        aten.scatter_, self, dim, index, src, reduce=reduce
+    )
+
+    if fallback_result:
+        return fallback_result
     return scatter_reduce_(self, dim, index, src, reduce)
 
 
@@ -1938,15 +2049,18 @@ fallback_scatter_reduce_ = fallback_handler(aten.scatter_reduce_)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
 
-    # TODO: Need to support more reduction type
-    # For reduction of "sum", tl.atomic_add doesn't support bool or int64
-    if reduce not in {None, "sum"} or (
-        reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
-    ):
-        self.realize()
-        return fallback_scatter_reduce_(
-            self, dim, index, src, reduce, include_self=include_self
-        )
+    fallback_result = scatter_fallback(
+        aten.scatter_reduce_,
+        self,
+        dim,
+        index,
+        src,
+        reduce=reduce,
+        include_self=include_self,
+    )
+
+    if fallback_result:
+        return fallback_result
 
     assert isinstance(self, TensorBox)
     assert "int" in str(index.get_dtype())
@@ -3391,6 +3505,13 @@ register_pointwise(aten.bitwise_xor)
 register_pointwise(
     aten.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
+erf = register_pointwise(
+    aten.erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+register_lowering(
+    aten.special_erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)(erf)
+
 register_pointwise(
     aten.log,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,

@@ -400,12 +400,29 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         return torch._dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
 
+    def test_is_tensor2(self):
+        def fn(x):
+            if torch.is_tensor(x):
+                return x + 1
+            else:
+                return torch.ones([2, 3])
+
+        x1 = {"input": torch.rand(2, 3)}
+        x2 = torch.rand(2, 3)
+        ref1 = fn(x1)
+        ref2 = fn(x2)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res1 = opt_fn(x1)
+        res2 = opt_fn(x2)
+        self.assertEqual(ref1, res1)
+        self.assertEqual(ref2, res2)
+
     def test_numel(self):
         def fn(a):
-            return a + a.numel() + torch.numel(a)
+            return (a + a.numel() + torch.numel(a), a + a.nelement())
 
         return torch._dynamo.testing.standard_test(
-            self, fn=fn, nargs=1, expected_ops=2, expected_ops_dynamic=4
+            self, fn=fn, nargs=1, expected_ops=3, expected_ops_dynamic=6
         )
 
     def test_pair(self):
@@ -477,6 +494,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(mytuple(v1, v2, v3))[0], 7)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
+
+    def test_namedtuple3(self):
+        def fn(x, packed):
+            if isinstance(packed, mytuple):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand([2, 3])
+        packed = mytuple(1, 2, 3)
+        ref = fn(x, packed)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, packed)
+        self.assertTrue(same(ref, res))
 
     def test_range_input(self):
         def fn(a, rng):
@@ -579,8 +610,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(cnts.op_count, 0)
 
-    # KeyError: '__name__'
-    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_user_getattr1(self):
         class MyConfig(dict):
             def __getattr__(self, name):
@@ -1146,6 +1175,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.run()(fn2)(torch.randn(4))
         self.assertEqual(cnts2.frame_count, 0)
 
+    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_nested_disable_decorator(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1242,6 +1272,32 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_f = torch._dynamo.optimize(cnts, nopython=True)(f)
         res0 = opt_f(x)
         res1 = opt_f(4)
+        self.assertTrue(same(ref0, res0))
+        self.assertTrue(same(ref1, res1))
+
+    def test_is_tensor_like2(self):
+        class MyTensor(object):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                if func is torch.max:
+                    return torch.tensor(123)
+                return func(*args, **kwargs)
+
+        def fn(x):
+            if torch.overrides.is_tensor_like(x):
+                return torch.max(x)
+            else:
+                return torch.zeros(1)
+
+        x = MyTensor()
+        ref0 = fn(x)
+        ref1 = fn(4)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res0 = opt_fn(x)
+        res1 = opt_fn(4)
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
 
@@ -1346,7 +1402,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
     def test_torch_profiler(self):
-        # wrap torch.profiler.* as ProfilerContextWrapperVariable and do nothing
+        # wrap torch.profiler.* as NullContextVariable and do nothing
         def fn(x):
             y = x**2
             with torch.profiler.profile():
@@ -1366,7 +1422,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
 
     def test_autograd_profiler(self):
-        # wrap torch.autograd.profiler.* as ProfilerContextWrapperVariable and do nothing
+        # wrap torch.autograd.profiler.* as NullContextVariable and do nothing
         def fn(x):
             y = x**2
             with torch.autograd.profiler.profile():
@@ -1408,6 +1464,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
+
+    def test_tensor_is_contiguous(self):
+        def fn(x):
+            input = torch.randn((1, 16, 1, 1))
+            weight = torch.randn((8, 16, 3, 3))
+            weight = weight.to(memory_format=x)
+            output = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
+            return output.is_contiguous(memory_format=x)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        for x in [torch.contiguous_format, torch.channels_last]:
+            self.assertEqual(fn(x), opt_fn(x))
 
     def test_python_slice(self):
         def f1(input):
@@ -1606,6 +1674,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 1)
 
     @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
+    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_unsupported_fake_tensor(self):
         def f(x):
             return torch.quantize_per_tensor(x, 0.1, 10, torch.quint8)
@@ -2723,6 +2792,42 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    def test_user_function_variable_supports_function_argument(self):
+        def add1(x):
+            return x + 1
+
+        def add2(x):
+            return x + 2
+
+        def gn(x, f=add1):
+            if f is add1:
+                return x + 1
+            else:
+                return x + 2
+
+        def fn(x, f):
+            return gn(x, f)
+
+        x = torch.randn(2, 3)
+        ref = fn(x, add2)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x, add2)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_typing_variable_isinstance(self):
+        def fn(x, m):
+            if isinstance(m, typing.Mapping):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.randn(2, 3)
+        m = {"x": torch.randn(3)}
+        ref = fn(x, m)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, m)
+        self.assertTrue(torch.allclose(ref, res))
+
     def test_repro_graph_breaks_in__get_item_by_idx(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -2829,6 +2934,47 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_func(x1, y)
         self.assertTrue(same(ref, res))
         self.assertTrue(same(x, x1))
+
+    def test_if_cond_nn_mod(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self, output_relu=True):
+                super(MockModule, self).__init__()
+                self.relu = torch.nn.ReLU() if output_relu else None
+
+            def forward(self, x):
+                x = torch.sin(x)
+                if self.relu:
+                    x = self.relu(x)
+                return x
+
+        model = MockModule()
+        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+
+        x = torch.rand(4)
+        ref = model(x)
+        res = opt_model(x)
+        self.assertTrue(same(ref, res))
+
+        model = MockModule(output_relu=False)
+        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+
+        x = torch.rand(4)
+        ref = model(x)
+        res = opt_model(x)
+        self.assertTrue(same(ref, res))
+
+    def test_torch_cuda_is_available(self):
+        def fn(x):
+            if torch.cuda.is_available():
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(4)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
 
 
 class CustomFunc(torch.autograd.Function):

@@ -1497,7 +1497,7 @@ TensorDomain::TensorDomain(
                              : std::move(contiguity)) {
   TORCH_CHECK(
       contiguity_.size() == getMaybeRFactorDomain().size(),
-      "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
+      "Invalid contiguity information provided, incorrect size. Received vector of size ",
       contiguity_.size(),
       " but needed one of size ",
       root_domain_.size());
@@ -1521,7 +1521,7 @@ TensorDomain::TensorDomain(
                              : std::move(contiguity)) {
   TORCH_CHECK(
       contiguity_.size() == getMaybeRFactorDomain().size(),
-      "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
+      "Invalid contiguity information provided, incorrect size. Received vector of size ",
       contiguity_.size(),
       " but needed one of size ",
       root_domain_.size());
@@ -1561,7 +1561,7 @@ TensorDomain::TensorDomain(
                              : std::move(contiguity)) {
   TORCH_CHECK(
       contiguity_.size() == getMaybeRFactorDomain().size(),
-      "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
+      "Invalid contiguity information provided, incorrect size. Received vector of size ",
       contiguity_.size(),
       " but needed one of size ",
       getMaybeRFactorDomain().size());
