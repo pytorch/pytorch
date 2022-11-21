@@ -129,7 +129,6 @@ torch._dynamo.config.fake_tensor_propagation = {fake_tensor}
     def _run_full_test(self, run_code, repro_after, repro_level, patch_code, fake_mode):
         test_code = self._gen_test_code(run_code, repro_after, repro_level, patch_code, fake_mode)
         test_proc, repro_dir = self._run_test_code(test_code)
-        print(f"stderr: {test_proc.stderr} \n stdout: {test_proc.stdout}")
         self.assertIsNotNone(repro_dir)
         launch_proc, launch_code = self._run_minifier_launcher(patch_code, repro_dir)
         repro_proc, repro_code = self._run_repro(patch_code, repro_dir)

@@ -942,11 +942,11 @@ class TestAOTModuleSimplified(AOTTestCase):
                 assert 'test_aotdispatch.py' in node.stack_trace
             return gm.forward  # return a python callable
 
-        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
-
         x = torch.randn(128, 20, requires_grad=True)
         y = torch.randn(128, 30, requires_grad=True)
         inputs = [x, y]
+        aot_mod = aot_module_simplified(mod, inputs, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
+
         res = aot_mod(*inputs)
         res[0].sum().backward()
 

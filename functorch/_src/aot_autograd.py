@@ -926,7 +926,7 @@ def aot_module_simplified(
             return [convert(x) for x in flat_args]
         else:
             fake_mode = nullcontext()
-            return flat_args
+            return list(flat_args)
 
     fake_flat_tensor_args = fakify_params_and_buffers(params_flat)
 
@@ -964,8 +964,8 @@ def aot_module_simplified(
         num_params_buffers=params_len,
     )
 
-    joined_args = fake_flat_tensor_args + list(inputs)
-    aot_dispatcher_function = _create_aot_dispatcher_function(functional_call, joined_args, aot_config, fake_mode)
+    fake_flat_tensor_args.extend(inputs)
+    aot_dispatcher_function = _create_aot_dispatcher_function(functional_call, fake_flat_tensor_args, aot_config, fake_mode)
 
     @wraps(functional_call)
     def compiled_function(*args):
