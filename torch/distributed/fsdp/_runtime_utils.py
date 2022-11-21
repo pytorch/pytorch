@@ -438,6 +438,7 @@ def _pre_backward_hook(
         # there are no handles.
         if not _handles_key:
             return
+        state._exec_order_data.record_pre_backward(_handles)
         for handle in _handles:
             handle._training_state = HandleTrainingState.BACKWARD_PRE
 

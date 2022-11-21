@@ -48,6 +48,8 @@ class _ExecOrderData:
         self.handles_post_forward_order: List[_HandlesKey] = []
         # Maps each handles key to its index in `handles_post_forward_order`
         self.handles_to_post_forward_order_index: Dict[_HandlesKey, int] = {}
+        # Tracks the pre-backward order for profiling
+        self.handles_pre_backward_order: List[_HandlesKey] = []
         self.is_first_iter = True
 
         # Gives the max number of backward/forward prefetched all-gathers by a
@@ -56,6 +58,7 @@ class _ExecOrderData:
         self._forward_prefetch_limit = forward_prefetch_limit
 
         # Data structures for execution order validation
+        self._debug_level = debug_level
         self._checking_order: bool = debug_level in [
             dist.DebugLevel.INFO,
             dist.DebugLevel.DETAIL,
@@ -144,6 +147,12 @@ class _ExecOrderData:
             target_handles_keys.append(self.handles_pre_forward_order[target_index])
             target_index += 1
         return target_handles_keys
+
+    def record_pre_backward(self, handles: List[FlatParamHandle]) -> None:
+        if not handles or not self._checking_order:
+            return
+        handles_key = tuple(handles)
+        self.handles_pre_backward_order.append(handles_key)
 
     def record_post_forward(self, handles: List[FlatParamHandle]) -> None:
         """
@@ -376,9 +385,39 @@ class _ExecOrderData:
         an iteration.
         """
         self.is_first_iter = False
-        self.handles_to_post_forward_order_index.clear()
-        self.handles_post_forward_order.clear()
         if self._checking_order:
             self.current_order_index = 0
             if self.warn_status == _ExecOrderWarnStatus.WARNING:
                 self.warn_status = _ExecOrderWarnStatus.WARNED
+            # Check the reverse post-forward order (used for prefetching)
+            # against the true pre-backward order
+            handles_reverse_post_forward_order = list(
+                reversed(self.handles_post_forward_order)
+            )
+            if handles_reverse_post_forward_order != self.handles_pre_backward_order:
+                reverse_post_forward_str = self._handles_order_to_str(
+                    handles_reverse_post_forward_order
+                )
+                pre_backward_str = self._handles_order_to_str(
+                    self.handles_pre_backward_order
+                )
+                warnings.warn(
+                    "Reverse post-forward order differs from the pre-backward "
+                    f"order on rank {self.rank}:\n"
+                    f"Reverse post-forward: {reverse_post_forward_str}\n"
+                    f"Pre-backward: {pre_backward_str}"
+                )
+        self.handles_to_post_forward_order_index.clear()
+        self.handles_post_forward_order.clear()
+        self.handles_pre_backward_order.clear()
+
+    def _handles_order_to_str(self, handles_order: List[_HandlesKey]) -> str:
+        """Returns a string representation of ``handles_order``."""
+        if self._debug_level == dist.DebugLevel.INFO:
+            return f"{handles_order}"  # in terms of `FlatParamHandle` objects
+        elif self._debug_level == dist.DebugLevel.DETAIL:
+            return f"{[[handle.flat_param._fqns for handle in handles_key] for handles_key in handles_order]}"
+        else:
+            raise NotImplementedError(
+                "Expects to be called when debug level is INFO or DETAIL"
+            )
