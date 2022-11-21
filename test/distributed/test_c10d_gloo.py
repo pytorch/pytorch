@@ -44,7 +44,6 @@ from torch.testing._internal.common_distributed import (
     requires_gloo,
     simple_sparse_reduce_tests,
     skip_if_lt_x_gpu,
-    create_device,
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
