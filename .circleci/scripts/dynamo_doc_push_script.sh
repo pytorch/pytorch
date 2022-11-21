@@ -67,7 +67,7 @@ git clone https://github.com/pytorch/pytorch.github.io -b $branch --depth 1
 pushd pytorch.github.io
 
 git rm -rf "$install_path" || true
-mv "$pt_checkout/docs/dynamo/build/html" "$install_path"
+mv "$pt_checkout/docs/torchdynamo/build/html" "$install_path"
 
 # Prevent Google from indexing $install_path/_modules. This folder contains
 # generated source files.
