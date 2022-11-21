@@ -105,10 +105,10 @@ def set_element(
                 CONTAINER_TYPE, cur_container.setdefault(prev_key, def_val)
             )
         else:
-            extend_list(cur_container, prev_key)  # type: ignore
+            extend_list(cur_container, prev_key)
             if cur_container[prev_key] is None:
                 cur_container[prev_key] = def_val
-            cur_container = cur_container[prev_key]  # type: ignore
+            cur_container = cur_container[prev_key]
 
     key = path[-1]
     if type(key) == int:
