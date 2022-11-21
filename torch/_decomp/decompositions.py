@@ -1500,18 +1500,6 @@ def native_batch_norm_legit_functional(
     )
 
 
-# @register_decomposition(aten.native_batch_norm_legit_functional.no_stats)
-# def native_batch_norm_legit_functional_no_stats(
-#     input: Tensor,
-#     weight: Optional[Tensor],
-#     bias: Optional[Tensor],
-#     training: bool,
-#     momentum: float,
-#     eps: float,
-# ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-#     return native_batch_norm_legit_functional(input, weight, bias, None, None, training, momentum, eps)
-
-
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
