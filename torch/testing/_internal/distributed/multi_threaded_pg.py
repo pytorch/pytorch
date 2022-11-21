@@ -7,7 +7,11 @@ from typing import Dict, Optional, Tuple
 
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import _create_work_from_future, Store
+from torch._C._distributed_c10d import (
+    _create_work_from_future,
+    AllgatherOptions,
+    Store,
+)
 from torch.futures import Future
 from torch.utils._pytree import tree_flatten
 
@@ -135,7 +139,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
             if cls._cur_coll == collective:
                 cls._cur_coll = None
 
-    def allgather(self, output_tensors, input_tensor, options):
+    def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
         coll = ProcessLocalGroup._start_coll(self._world, AllGather())
         res = coll.join(self._rank, (output_tensors, input_tensor))
         ProcessLocalGroup._end_coll(coll)
