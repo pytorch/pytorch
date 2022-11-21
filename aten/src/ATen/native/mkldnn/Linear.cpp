@@ -350,6 +350,9 @@ Tensor mkl_linear(
     const Tensor& origin_weight_t,
     const c10::optional<Tensor>& bias_opt,
     const int64_t prepack_batch_size) {
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
   TORCH_CHECK(
       self.options().type_equal(origin_weight_t.options()),
       "Input type (",
@@ -358,11 +361,11 @@ Tensor mkl_linear(
       origin_weight_t.toString(),
       ") should be the same");
   TORCH_CHECK(
-      !bias_opt.defined() || (self.options().type_equal(bias_opt.options())),
+      !bias.defined() || (self.options().type_equal(bias.options())),
       "Input type (",
       self.toString(),
       ") and bias type (",
-      bias_opt.toString(),
+      bias.toString(),
       ") should be the same");
   TORCH_CHECK(
       mkl_weight_t.scalar_type() == origin_weight_t.scalar_type() &&
@@ -383,11 +386,8 @@ Tensor mkl_linear(
     auto in_ptr = self_.data_ptr<float>();
     auto weight_ptr = (float*)(w.get_data_handle());
     auto out_ptr = output.data_ptr<float>();
-    auto bias = bias_opt.has_value()
-        ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-        : c10::MaybeOwned<Tensor>::owned(c10::in_place);
-    if (bias->defined()) {
-      auto bias_ = (*bias).is_contiguous() ? (*bias) : (*bias).contiguous();
+    if (bias.defined()) {
+      auto bias_ = bias.is_contiguous() ? bias : bias.contiguous();
       auto bias_ptr = bias_.data_ptr<float>();
 #ifdef _OPENMP
 #if (_OPENMP >= 201307)
