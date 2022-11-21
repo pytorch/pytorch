@@ -104,7 +104,7 @@ def _add_eltwise_fusion_configs(configs, root_module, root_op, post_module, post
             .set_fused_module(fused_module))
     # base module + functional post op
     configs.append(
-        BackendPatternConfig((root_op, root_module))
+        BackendPatternConfig((post_op, root_module))
             .set_dtype_configs(dtype_configs)  # noqa: E131
             .set_fuser_method(fuser_method)
             .set_fused_module(fused_module))
@@ -117,13 +117,11 @@ def _add_eltwise_fusion_configs(configs, root_module, root_op, post_module, post
             .set_root_module(root_module)
             .set_reference_quantized_module(ref_quant_module))
 
-    # 3 functional linear + leaky_relu configs
-    # linear leaky_relu, functional linear + leaky_relu module
+    # 3 functional base op + post op configs
     configs.append(
         BackendPatternConfig((post_module, root_op))
             .set_observation_type(observation_type)  # noqa: E131
             .set_dtype_configs(dtype_configs))
-    # linear leaky_relu, functional linear + functional leaky_relu
     configs.append(
         BackendPatternConfig((post_op, root_op))
             .set_observation_type(observation_type)  # noqa: E131
@@ -144,7 +142,7 @@ linear_configs.append(
 
 # Configs for linear + tanh fusion
 _add_eltwise_fusion_configs(linear_configs, nn.Linear, F.linear,
-                            nn.Tanh, F.tanh, linear_dtype_configs,
+                            nn.Tanh, torch.tanh, linear_dtype_configs,
                             _reverse_sequential_wrapper2(nni.LinearTanh),
                             nni.LinearTanh, observation_type, nnqr.Linear)
 
