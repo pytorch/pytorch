@@ -986,6 +986,7 @@ unary_modules_map = {
     nn.Hardtanh: UnaryAttr("hardtanh", scalars_attr=["min_val", "max_val"]),
     nn.GELU: UnaryAttr("gelu", algorithm_attr="approximate"),
     nn.ReLU6: UnaryAttr("hardtanh", scalars_attr=["min_val", "max_val"]),
+    nn.SiLU: UnaryAttr("swish"),
 }
 
 
