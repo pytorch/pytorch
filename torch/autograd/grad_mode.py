@@ -21,7 +21,7 @@ class _DecoratorContextManager:
     def __call__(self, func: F) -> F:
         if inspect.isclass(func):
             warnings.warn("Decorating classes is deprecated and will be disabled in "
-                          "future version. You should only decorate function or methods. "
+                          "future versions. You should only decorate functions or methods. "
                           "To preserve the current behavior of class decoration, you can "
                           "directly decorate the `__init__` method and nothing else.")
 
