@@ -232,6 +232,9 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable(
                 f"torch.{tensortype.__name__}", **options
             )
+        elif name == "get_device" and isinstance(self.device, torch.device):
+            index = self.device.index if self.device.type != "cpu" else -1
+            constant_result = ConstantVariable(index, **options)
         else:
             constant_result = None
 
