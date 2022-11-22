@@ -40,6 +40,7 @@ list(APPEND NVFUSER_SRCS
     ${NVFUSER_SRCS_DIR}/contiguity.cpp
     ${NVFUSER_SRCS_DIR}/dispatch.cpp
     ${NVFUSER_SRCS_DIR}/expr_evaluator.cpp
+    ${NVFUSER_SRCS_DIR}/kernel_expr_evaluator.cpp
     ${NVFUSER_SRCS_DIR}/executor.cpp
     ${NVFUSER_SRCS_DIR}/executor_kernel_arg.cpp
     ${NVFUSER_SRCS_DIR}/executor_launch_params.cpp
@@ -85,6 +86,7 @@ list(APPEND NVFUSER_SRCS
     ${NVFUSER_SRCS_DIR}/lower_sync_information.cpp
     ${NVFUSER_SRCS_DIR}/lower_thread_predicate.cpp
     ${NVFUSER_SRCS_DIR}/lower_trivial_broadcast.cpp
+    ${NVFUSER_SRCS_DIR}/lower_trivial_reductions.cpp
     ${NVFUSER_SRCS_DIR}/lower_unroll.cpp
     ${NVFUSER_SRCS_DIR}/lower_utils.cpp
     ${NVFUSER_SRCS_DIR}/lower_validation.cpp
@@ -131,7 +133,7 @@ list(APPEND NVFUSER_SRCS
     ${NVFUSER_SRCS_DIR}/utils.cpp
     ${NVFUSER_SRCS_DIR}/mma_type.cpp
     ${NVFUSER_SRCS_DIR}/scheduler/mma_utils.cpp
-    ${NVFUSER_SRCS_DIR}/interface.cpp
+    #${NVFUSER_SRCS_DIR}/interface.cpp
 )
 
 set(NVFUSER_CODEGEN ${PROJECT_NAME}_codegen)

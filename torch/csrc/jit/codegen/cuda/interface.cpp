@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 
+#include <ATen/DynamicLibrary.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/TensorShape.h>
@@ -24,6 +25,29 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+class LoadingNvfuserLibrary {
+ public:
+  LoadingNvfuserLibrary() {
+    static std::once_flag load_nvfuser_lib_flag;
+    std::call_once(load_nvfuser_lib_flag, [&] {
+      std::string library_name;
+      if (const char *path = std::getenv("TORCH_NVFUSER_LIBRARY_PATH")) {
+        library_name = path;
+      }
+      library_name += "libnvfuser_codegen.so";
+      try {
+        nvfuserLib_ = std::make_shared<at::DynamicLibrary>(library_name.c_str());
+      } catch (const c10::DynamicLibraryError &e) {
+        TORCH_WARN("Loading nvfuser library failed with: ", e.msg());
+      }
+    });
+  }
+
+  std::shared_ptr<at::DynamicLibrary> nvfuserLib_;
+};
+
+static LoadingNvfuserLibrary loading_nvfuser_library_;
 
 static std::atomic<bool> cuda_fusion_guard_mode{true};
 

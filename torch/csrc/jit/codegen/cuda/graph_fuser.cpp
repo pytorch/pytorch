@@ -3,7 +3,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
-#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/partition.h>
 #include <torch/csrc/jit/codegen/cuda/transform_view.h>
