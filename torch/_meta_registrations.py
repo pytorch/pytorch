@@ -15,6 +15,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    make_contiguous_strides_for,
 )
 
 from torch._prims_common.wrappers import out_wrapper
@@ -223,34 +224,6 @@ def meta_linalg_eigh(self, uplo="L"):
     return (values, vectors)
 
 
-# From c10/util/strides.h
-def contiguous_strides(sizes):
-    """Computes the contiguous strides of a tensor, given its sizes."""
-    # With this intialisation we get the case dim == 0 or 1 right
-    dims = len(sizes)
-    strides = [1] * dims
-
-    i = dims - 2
-    while i >= 0:
-        # Strides can't be 0 even if sizes are 0.
-        strides[i] = strides[i + 1] * max(sizes[i + 1], 1)
-        i -= 1
-
-    return strides
-
-
-def batched_matrix_contiguous_strides(sizes, f_contig: bool = False):
-    # f_contig chooses between the strides of a batch of Fortran (F-contiguous)
-    # and C-contiguous matrices
-    strides = contiguous_strides(sizes)
-    dim = len(strides)
-    if f_contig and dim >= 2:
-        # Fix the strides of the last two dimensions, so that we return
-        # C-contiguous batches of F-contiguous matrices.
-        strides[dim - 1] = max(sizes[dim - 2], 1)
-        strides[dim - 2] = 1
-    return strides
-
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 @register_meta(aten.linalg_cholesky_ex.default)
 def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = False):
@@ -261,13 +234,14 @@ def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = Fals
     ndim = len(A_shape)
 
     # L
-    L_strides = batched_matrix_contiguous_strides(A_shape, True)
+    L_strides = make_contiguous_strides_for(A_shape, False)
     L = A.new_empty(A_shape)
     L.as_strided_(A_shape, L_strides)
 
     # infos
     infos = A.new_empty(A_shape[0 : ndim - 2], dtype=torch.int32)
     return L, infos
+
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 @register_meta(aten.linalg_cholesky.default)
