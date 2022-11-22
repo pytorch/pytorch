@@ -13,7 +13,9 @@ import torch
 __all__ = ["assert_allclose"]
 
 
-def warn_deprecated(instructions: Union[str, Callable[[str, Tuple[Any, ...], Dict[str, Any], Any], str]]) -> Callable:
+def warn_deprecated(
+    instructions: Union[str, Callable[[str, Tuple[Any, ...], Dict[str, Any], Any], str]]
+) -> Callable:
     def outer_wrapper(fn: Callable) -> Callable:
         name = fn.__name__
         head = f"torch.testing.{name}() is deprecated since 1.12 and will be removed in 1.14. "
@@ -21,7 +23,11 @@ def warn_deprecated(instructions: Union[str, Callable[[str, Tuple[Any, ...], Dic
         @functools.wraps(fn)
         def inner_wrapper(*args: Any, **kwargs: Any) -> Any:
             return_value = fn(*args, **kwargs)
-            tail = instructions(name, args, kwargs, return_value) if callable(instructions) else instructions
+            tail = (
+                instructions(name, args, kwargs, return_value)
+                if callable(instructions)
+                else instructions
+            )
             msg = (head + tail).strip()
             warnings.warn(msg, FutureWarning)
             return return_value
@@ -38,7 +44,9 @@ _DTYPE_PRECISIONS = {
 }
 
 
-def _get_default_rtol_and_atol(actual: torch.Tensor, expected: torch.Tensor) -> Tuple[float, float]:
+def _get_default_rtol_and_atol(
+    actual: torch.Tensor, expected: torch.Tensor
+) -> Tuple[float, float]:
     actual_rtol, actual_atol = _DTYPE_PRECISIONS.get(actual.dtype, (0.0, 0.0))
     expected_rtol, expected_atol = _DTYPE_PRECISIONS.get(expected.dtype, (0.0, 0.0))
     return max(actual_rtol, expected_rtol), max(actual_atol, expected_atol)
