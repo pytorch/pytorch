@@ -974,6 +974,13 @@ def forward(self, a_1):
         # happened afterwards
         self.assertTrue(meta_inp.meta['val'].shape[0].get_pyobj().expr == 3)
 
+    def test_int_input(self):
+        def f(x, y):
+            return x + y
+
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(3), 2)
+        print(fx_g)
+
     def test_elementwise_meta_with_sym_numbers(self):
         def f(x, offset, as_sym_float=False):
             x0 = x.size()[0]

@@ -1307,11 +1307,18 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             all_args = list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             del contiguous_args
             if CompiledFunction.compiled_bw is None:
-                # TODO - pass in fake tensors ?
+                # Retrace backwards with a new shape environment
                 context = disable_autocast_manager if disable_amp else nullcontext
+
+                if config.use_dynamic_shapes:
+                    with context():
+                        local_bw_module = make_fx(bw_module, tracing_mode="symbolic")(*all_args)
+                else:
+                    local_bw_module = bw_module
+
                 with context(), track_graph_compiling("backward", True):
                     CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                        bw_module, all_args
+                        local_bw_module, all_args
                     )
 
             ctx.maybe_clear_saved_tensors()

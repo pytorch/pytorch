@@ -183,6 +183,10 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
         if isinstance(e, torch.Tensor):
             track_tensor(e, proxy, tracer=tracer, constant=constant)
             set_meta(proxy, e)
+        elif isinstance(e, SymInt):
+            # NB: eagerly set meta here, so that the numbering is in order
+            set_meta(proxy, e)
+            set_proxy_slot(e.node, tracer, lambda: proxy)
         elif isinstance(e, list):
             # example use case: allreduce_ returns ([tensor], work)
             for idx, ee in enumerate(e):
@@ -644,6 +648,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
         fake_tensor_mode: Any = nullcontext()
+        shape_env = None
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
@@ -663,6 +668,8 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         def wrap_fake(x):
             if isinstance(x, torch.Tensor):
                 return fake_tensor_mode.from_tensor(x)  # type: ignore[attr-defined]
+            elif isinstance(x, int) and shape_env is not None:
+                return shape_env.create_symintnode(shape_env.create_symbol(x))
 
             return x
 
