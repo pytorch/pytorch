@@ -301,6 +301,10 @@ class VariableBuilder:
             elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
                 value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
             ):
+                if getattr(value, "_is_fsdp_managed_module", False):
+                    assert getattr(
+                        value, "_fsdp_use_orig_params", False
+                    ), "Dynamo only supports FSDP with use_orig_params=True"
                 return UnspecializedNNModuleVariable(
                     value, guards=make_guards(GuardBuilder.TYPE_MATCH)
                 )
