@@ -418,12 +418,12 @@ class Module:
     _backward_hooks: Dict[int, Callable]
     _is_full_backward_hook: Optional[bool]
     _forward_hooks: Dict[int, Callable]
-    # Marks whether the corresponding _forward_hooks accept kwargs or not. All
+    # Marks whether the corresponding _forward_hooks accept kwargs or not.
     # As JIT does not support Set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_hooks_with_kwargs: Dict[int, bool]
     _forward_pre_hooks: Dict[int, Callable]
-    # Marks whether the corresponding _forward_hooks accept kwargs or not. All
+    # Marks whether the corresponding _forward_hooks accept kwargs or not.
     # As JIT does not support Set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_pre_hooks_with_kwargs: Dict[int, bool]
@@ -1341,20 +1341,22 @@ class Module:
         r"""Registers a forward pre-hook on the module.
 
         The hook will be called every time before :func:`forward` is invoked.
-        It should have the following signature::
 
-            hook(module, args) -> None or modified input
 
         If ``with_kwargs`` is false or not specified, the input contains only
         the positional arguments given to the module. Keyword arguments won't be
         passed to the hooks and only to the ``forward``. The hook can modify the
         input. User can either return a tuple or a single modified value in the
         hook. We will wrap the value into a tuple if a single value is returned
-        (unless that value is already a tuple).
+        (unless that value is already a tuple). The hook should have the
+        following signature::
 
-        If ``with_kwargs`` is true, the forward pre hook will be passed the
-        kwargs given to the forward function and be expected to return them
-        possibly modified:
+            hook(module, args) -> None or modified input
+
+        If ``with_kwargs`` is true, the forward pre-hook will be passed the
+        kwargs given to the forward function. And if the hook modifies the
+        input, both the args and kwargs should be returned. The hook should have
+        the following signature::
 
             hook(module, args, kwargs) -> None or a tuple of modified input and kwargs
 
@@ -1369,7 +1371,7 @@ class Module:
                 :func:`register_module_forward_pre_hook` will fire before all
                 hooks registered by this method.
                 Default: ``False``
-            with_kwargs (bool): If true, the ``hook`` will be passed with kwargs
+            with_kwargs (bool): If true, the ``hook`` will be passed the kwargs
                 given to the forward function.
                 Default: ``False``
 
@@ -1397,26 +1399,26 @@ class Module:
         r"""Registers a forward hook on the module.
 
         The hook will be called every time after :func:`forward` has computed an output.
-        It should have the following signature::
 
-            hook(module, args, output) -> None or modified output
-
-        If ``with_kwargs`` is false or not specified, the input contains only
+        If ``with_kwargs`` is ``False`` or not specified, the input contains only
         the positional arguments given to the module. Keyword arguments won't be
         passed to the hooks and only to the ``forward``. The hook can modify the
         output. It can modify the input inplace but it will not have effect on
-        forward since this is called after :func:`forward` is called.
+        forward since this is called after :func:`forward` is called. The hook
+        should have the following signature::
 
-        If ``with_kwargs`` is true, the forward hook will be passed the
+            hook(module, args, output) -> None or modified output
+
+        If ``with_kwargs`` is ``True``, the forward hook will be passed the
         ``kwargs`` given to the forward function and be expected to return the
-        output possibly modified:
+        output possibly modified. The hook should have the following signature::
 
             hook(module, args, kwargs, output) -> None or modified output
 
         Args:
             hook (Callable): The user defined hook to be registered.
-            prepend (bool): If true, the provided ``hook`` will be fired before
-                all existing ``forward`` hooks on this
+            prepend (bool): If ``True``, the provided ``hook`` will be fired
+                before all existing ``forward`` hooks on this
                 :class:`torch.nn.modules.Module`. Otherwise, the provided
                 ``hook`` will be fired after all existing ``forward`` hooks on
                 this :class:`torch.nn.modules.Module`. Note that global
@@ -1424,8 +1426,8 @@ class Module:
                 :func:`register_module_forward_hook` will fire before all hooks
                 registered by this method.
                 Default: ``False``
-            with_kwargs (bool): If true, the ``hook`` will be passed with kwargs
-                given to the forward function.
+            with_kwargs (bool): If ``True``, the ``hook`` will be passed the
+                kwargs given to the forward function.
                 Default: ``False``
 
         Returns:
@@ -1488,8 +1490,8 @@ class Module:
                     result = hook(self, args, kwargs)  # type: ignore[misc]
                     if result is not None:
                         assert isinstance(result, tuple) and len(result) == 2, (
-                            "forward pre hook must return None or a tuple of "
-                            f"(args, kwargs), but got {result}."
+                            "forward pre-hook must return None or a tuple of "
+                            f"(new_args, new_kwargs), but got {result}."
                         )
                         args, kwargs = result
                 else:

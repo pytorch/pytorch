@@ -2,7 +2,7 @@ import torch
 from collections import OrderedDict
 import weakref
 import warnings
-from typing import Any
+from typing import Any, Dict
 
 __all__ = ["RemovableHandle", "unserializable_hook", "warn_if_has_hooks", "BackwardHook"]
 
@@ -12,8 +12,11 @@ class RemovableHandle(object):
     id: int
     next_id: int = 0
 
-    def __init__(self, hooks_dict: Any) -> None:
+    def __init__(
+        self, hooks_dict: Any, *, kwargs_dict: Dict[int, bool] = None
+    ) -> None:
         self.hooks_dict_ref = weakref.ref(hooks_dict)
+        self.kwargs_dict_ref = weakref.ref(kwargs_dict) if kwargs_dict else None
         self.id = RemovableHandle.next_id
         RemovableHandle.next_id += 1
 
@@ -21,9 +24,17 @@ class RemovableHandle(object):
         hooks_dict = self.hooks_dict_ref()
         if hooks_dict is not None and self.id in hooks_dict:
             del hooks_dict[self.id]
+        if self.kwargs_dict_ref is not None:
+            kwargs_dict = self.kwargs_dict_ref()
+            if kwargs_dict is not None:
+                kwargs_dict.pop(self.id, None)
 
     def __getstate__(self):
-        return (self.hooks_dict_ref(), self.id)
+        return (
+            (self.hooks_dict_ref(), self.id)
+            if self.kwargs_dict_ref is None
+            else (self.hooks_dict_ref(), self.id, self.kwargs_dict_ref())
+        )
 
     def __setstate__(self, state) -> None:
         if state[0] is None:
@@ -34,11 +45,18 @@ class RemovableHandle(object):
         self.id = state[1]
         RemovableHandle.next_id = max(RemovableHandle.next_id, self.id + 1)
 
-    def __enter__(self) -> 'RemovableHandle':
+        self.kwargs_dict_ref = (
+            None
+            if len(state) < 3
+            else weakref.ref(dict() if state[2] is None else state[2])
+        )
+
+    def __enter__(self) -> "RemovableHandle":
         return self
 
     def __exit__(self, type: Any, value: Any, tb: Any) -> None:
         self.remove()
+
 
 
 def unserializable_hook(f):

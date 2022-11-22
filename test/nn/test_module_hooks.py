@@ -320,5 +320,52 @@ class TestModuleHooks(TestCase):
         self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
 
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
+    def test_remove_kwarg_hooks(self):
+        # test forward pre and forward hooks
+        fired_hooks: List[int] = []
+        x: torch.Tensor = torch.ones(10, 10)
+        bias: torch.Tensor = torch.ones(10, 10)
+        model = KwargModel()
+        forward_hook_handle = model.register_forward_hook(
+            partial(kwarg_forward_hook, self, fired_hooks, model, 1),
+            with_kwargs=True,
+        )
+        forward_pre_hook_handle = model.register_forward_pre_hook(
+            partial(kwarg_forward_pre_hook, self, fired_hooks, model, 0),
+            with_kwargs=True,
+        )
+
+        # forward-pre: bias' = bias * 2
+        # forward: out = x + bias'
+        # forward-post: out = out + bias'
+        # So, out = x + bias * 4
+        self.assertEqual(fired_hooks, [])
+        out = model(x, bias=bias)
+        self.assertEqual(fired_hooks, [0, 1])
+        self.assertEqual(out, x + 4 * bias, rtol=0, atol=1e-5)
+
+        # forward-pre: bias' = bias * 2
+        # forward: out = x + bias'
+        # So, out = x + bias * 2
+        forward_hook_handle.remove()
+        out = model(x, bias=bias)
+        self.assertEqual(fired_hooks, [0, 1, 0])
+        self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
+        self.assertFalse(
+            forward_hook_handle.id in model._forward_hooks_with_kwargs
+        )
+
+        # forward: out = x + bias
+        # So, out = x + bias
+        forward_pre_hook_handle.remove()
+        out = model(x, bias=bias)
+        self.assertEqual(fired_hooks, [0, 1, 0])
+        self.assertEqual(out, x + bias, rtol=0, atol=1e-5)
+        self.assertFalse(
+            forward_pre_hook_handle.id in model._forward_pre_hooks_with_kwargs
+        )
+
+
 if __name__ == "__main__":
     run_tests()
