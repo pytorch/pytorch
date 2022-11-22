@@ -58,7 +58,7 @@ def check_cuda():
     if not torch.cuda.is_available():
         return None
 
-    torch_cuda_ver = packaging.version.parse(str(torch.version.cuda))
+    torch_cuda_ver = packaging.version.parse(torch.version.cuda)
 
     # check if torch cuda version matches system cuda version
     cuda_ver = get_cuda_version()
