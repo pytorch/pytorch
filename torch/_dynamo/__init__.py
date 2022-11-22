@@ -15,7 +15,10 @@ from .eval_frame import (
 from .utils import compilation_metrics, guard_failures, orig_code_map
 
 __all__ = [
+    "allow_in_graph",
     "assume_constant_result",
+    "disallow_in_graph",
+    "graph_break",
     "optimize",
     "optimize_assert",
     "export",
