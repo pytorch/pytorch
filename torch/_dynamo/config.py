@@ -105,7 +105,7 @@ replay_record_enabled = False
 rewrite_assert_with_torch_assert = True
 
 # Show a warning on every graph break
-print_graph_breaks = False
+print_graph_breaks = True
 
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.
