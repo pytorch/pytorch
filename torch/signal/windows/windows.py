@@ -85,7 +85,7 @@ The exponential window is defined as follows:
 .. math::
     w_n = \exp{\left(-\frac{|n - c|}{\tau}\right)}
 
-where `c` is the center of the window.
+where `c` is the ``center`` of the window.
     """,
     r"""
 
@@ -154,10 +154,6 @@ def exponential(
 
     constant = 1 / tau
 
-    """
-    Note that non-integer step is subject to floating point rounding errors when comparing against end;
-    thus, to avoid inconsistency, we added an epsilon equal to `step / 2` to `end`.
-    """
     k = torch.linspace(start=-center * constant,
                        end=(-center + (M - 1)) * constant,
                        steps=M,
