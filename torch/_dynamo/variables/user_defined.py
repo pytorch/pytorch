@@ -141,9 +141,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return self.value_type
 
     def as_python_constant(self):
-        if self.value_type is not types.MemberDescriptorType:
-            return self.value
-        return super().as_python_constant()
+        if self.value_type is types.MemberDescriptorType:
+            return super().as_python_constant()
+        return self.value
 
     @staticmethod
     @functools.lru_cache(None)
