@@ -2,9 +2,9 @@
 
 import sys
 from typing import Optional, List, cast
-from torch.distributed._shard.checkpoint.storage import WriteResult
+from torch.distributed.checkpoint.storage import WriteResult
 
-from torch.distributed._shard.checkpoint import (
+from torch.distributed.checkpoint import (
     StorageReader,
     StorageWriter,
     CheckpointException,
@@ -62,6 +62,7 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
 
 class TestModule(torch.nn.Module):
     def __init__(self) -> None:
@@ -121,34 +122,44 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
         )
 
         state_dict = {
-            'sharded': sharded_tensor.rand(spec, (10, 10, )),
-            'replicated': torch.rand(4, device=device),
-            'bytes': [1, 2, 3, 4],
+            "sharded": sharded_tensor.rand(
+                spec,
+                (
+                    10,
+                    10,
+                ),
+            ),
+            "replicated": torch.rand(4, device=device),
+            "bytes": [1, 2, 3, 4],
         }
 
         metadata = _create_default_local_metadata(state_dict)
-        self.assertTrue('bytes' in metadata.state_dict_metadata)
-        self.assertIsInstance(metadata.state_dict_metadata['bytes'], BytesStorageMetadata)
+        self.assertTrue("bytes" in metadata.state_dict_metadata)
+        self.assertIsInstance(
+            metadata.state_dict_metadata["bytes"], BytesStorageMetadata
+        )
 
-        self.assertTrue('replicated' in metadata.state_dict_metadata)
-        self.assertIsInstance(metadata.state_dict_metadata['replicated'], TensorStorageMetadata)
-        md = metadata.state_dict_metadata['replicated']
-        self.assertEqual(md.size, state_dict['replicated'].size())
+        self.assertTrue("replicated" in metadata.state_dict_metadata)
+        self.assertIsInstance(
+            metadata.state_dict_metadata["replicated"], TensorStorageMetadata
+        )
+        md = metadata.state_dict_metadata["replicated"]
+        self.assertEqual(md.size, state_dict["replicated"].size())
         self.assertEqual(md.properties.dtype, torch.float32)
         self.assertEqual(1, len(md.chunks))
 
-        self.assertTrue('sharded' in metadata.state_dict_metadata)
-        self.assertIsInstance(metadata.state_dict_metadata['sharded'], TensorStorageMetadata)
-        md = metadata.state_dict_metadata['sharded']
+        self.assertTrue("sharded" in metadata.state_dict_metadata)
+        self.assertIsInstance(
+            metadata.state_dict_metadata["sharded"], TensorStorageMetadata
+        )
+        md = metadata.state_dict_metadata["sharded"]
         self.assertEqual(md.properties.dtype, torch.float32)
-        self.assertEqual(md.size, state_dict['sharded'].size())
+        self.assertEqual(md.size, state_dict["sharded"].size())
         self.assertEqual(2, len(md.chunks))
 
+
 class TestStorageBase:
-    def __init__(
-        self,
-        fail_conf
-    ):
+    def __init__(self, fail_conf):
         self.fail_conf = fail_conf
         self.rank = 0 if not dist.is_initialized() else dist.get_rank()
 
@@ -164,16 +175,16 @@ class TestStorageBase:
         ranks = self._get_ranks(name)
         fut = Future()
         if ranks is not None and self.rank in ranks:
-            fut.set_exception(ValueError(f"async rank fail {self.rank} for {name}"))
+            fut.set_exception(
+                ValueError(f"async rank fail {self.rank} for {name}")
+            )
         else:
             fut.set_result(result)
         return fut
 
+
 class FaultyStorageWriter(TestStorageBase, StorageWriter):
-    def __init__(
-        self,
-        fail_conf
-    ):
+    def __init__(self, fail_conf):
         super(FaultyStorageWriter, self).__init__(fail_conf)
 
     def init(self, is_coordinator: bool) -> None:
@@ -188,23 +199,19 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
         return plans
 
     def write_data(
-        self,
-        plan: SavePlan,
-        planner: SavePlanner
+        self, plan: SavePlan, planner: SavePlanner
     ) -> Future[List[WriteResult]]:
         self._fail_rank("fail_write_data")
         return self._fail_rank_async("fail_write_data_async", [])
 
-    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
+    def finish(
+        self, metadata: Metadata, results: List[List[WriteResult]]
+    ) -> None:
         self._fail_rank("fail_finish")
 
 
 class FaultyStorageReader(TestStorageBase, StorageReader):
-    def __init__(
-        self,
-        metadata,
-        fail_conf
-    ):
+    def __init__(self, metadata, fail_conf):
         super(FaultyStorageReader, self).__init__(fail_conf)
         self.metadata = metadata
 
@@ -219,11 +226,7 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
         self._fail_rank("fail_prepare_global_plan")
         return plans
 
-    def read_data(
-        self,
-        plan: LoadPlan,
-        planner: LoadPlanner
-    ) -> Future[None]:
+    def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         self._fail_rank("fail_read_data")
         return self._fail_rank_async("fail_read_data_async")
 
@@ -231,13 +234,14 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
         self._fail_rank("fail_read_metadata")
         return self.metadata
 
+
 class TestDistributedFailure(ShardedTensorTestBase):
     def get_spec(self):
         return ChunkShardingSpec(
             dim=0,
             placements=[
                 f"rank:{r}/cuda:{r}" for r in range(dist.get_world_size())
-            ]
+            ],
         )
 
     @with_comms(init_rpc=False)
@@ -245,9 +249,9 @@ class TestDistributedFailure(ShardedTensorTestBase):
     @requires_nccl()
     def test_dummy_writer_works(self) -> None:
         state_dict = {
-            'sharded': sharded_tensor.rand(self.get_spec(), 20, 20),
-            'replicated': torch.rand(10, 10),
-            'bytes': [1, 2, 3, 4]
+            "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
+            "replicated": torch.rand(10, 10),
+            "bytes": [1, 2, 3, 4],
         }
 
         save_state_dict(state_dict, FaultyStorageWriter({}))
@@ -257,9 +261,9 @@ class TestDistributedFailure(ShardedTensorTestBase):
     @requires_nccl()
     def test_dummy_reader_works(self) -> None:
         state_dict = {
-            'sharded': sharded_tensor.rand(self.get_spec(), 20, 20),
-            'replicated': torch.rand(10, 10),
-            'bytes': [1, 2, 3, 4]
+            "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
+            "replicated": torch.rand(10, 10),
+            "bytes": [1, 2, 3, 4],
         }
         metadata = _create_default_local_metadata(state_dict)
 
@@ -283,8 +287,10 @@ class TestDistributedFailure(ShardedTensorTestBase):
 
             failed_ranks = e.failures.keys()
             for rank in bad_ranks:
-                self.assertTrue(rank in failed_ranks, msg=f"{rank} was supposed to fail was fine")
-
+                self.assertTrue(
+                    rank in failed_ranks,
+                    msg=f"{rank} was supposed to fail was fine",
+                )
 
     def _test_save(self, state_dict, coordinator=0, **kwargs):
         no_dist = not dist.is_initialized()
@@ -296,6 +302,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
                 coordinator_rank=coordinator,
                 no_dist=no_dist,
             )
+
         self._test_dist_failure(_save, kwargs)
 
     def _test_load(self, state_dict, coordinator=0, **kwargs):
@@ -317,9 +324,9 @@ class TestDistributedFailure(ShardedTensorTestBase):
     @requires_nccl()
     def test_save_error_handling(self) -> None:
         state_dict = {
-            'sharded': sharded_tensor.rand(self.get_spec(), 20, 20),
-            'replicated': torch.rand(10, 10),
-            'bytes': [1, 2, 3, 4]
+            "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
+            "replicated": torch.rand(10, 10),
+            "bytes": [1, 2, 3, 4],
         }
 
         self._test_save(state_dict, fail_init=[0])
@@ -334,10 +341,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_save(state_dict, coordinator=1, fail_finish=[1])
 
     def test_save_error_handling_no_dist(self) -> None:
-        state_dict = {
-            'replicated': torch.rand(10, 10),
-            'bytes': [1, 2, 3, 4]
-        }
+        state_dict = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
 
         self.assertFalse(dist.is_initialized())
 
@@ -354,9 +358,9 @@ class TestDistributedFailure(ShardedTensorTestBase):
     @requires_nccl()
     def test_load_error_handling(self) -> None:
         state_dict = {
-            'sharded': sharded_tensor.rand(self.get_spec(), 20, 20),
-            'replicated': torch.rand(10, 10),
-            'bytes': [1, 2, 3, 4]
+            "sharded": sharded_tensor.rand(self.get_spec(), 20, 20),
+            "replicated": torch.rand(10, 10),
+            "bytes": [1, 2, 3, 4],
         }
 
         self._test_load(state_dict)
@@ -373,12 +377,8 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_load(state_dict, coordinator=3, fail_read_data_async=[2])
         self._test_load(state_dict, coordinator=1, fail_prepare_global_plan=[1])
 
-
     def test_load_error_handling_no_dist(self) -> None:
-        state_dict = {
-            'replicated': torch.rand(10, 10),
-            'bytes': [1, 2, 3, 4]
-        }
+        state_dict = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
         self._test_load(state_dict)
         self._test_load(state_dict, fail_init=[0])
         self._test_load(state_dict, fail_read_metadata=[0])
@@ -386,6 +386,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_load(state_dict, fail_prepare_global_plan=[0])
         self._test_load(state_dict, fail_read_data=[0])
         self._test_load(state_dict, fail_read_data_async=[0])
+
 
 if __name__ == "__main__":
     run_tests()
