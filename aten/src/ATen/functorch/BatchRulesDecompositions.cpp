@@ -184,7 +184,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(positive);
   OP_DECOMPOSE(qr);
   OP_DECOMPOSE(ravel);
-  OP_DECOMPOSE2(repeat_interleave, self_int);
+  m.impl("repeat_interleave.self_int", native::repeat_interleave_symint);
   OP_DECOMPOSE2(repeat_interleave, self_Tensor);
   m.impl("reshape", native::reshape_symint);
   OP_DECOMPOSE(resolve_conj);
@@ -253,7 +253,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(conv2d, padding);
   OP_DECOMPOSE2(conv3d, padding);
   OP_DECOMPOSE(_convolution_mode);
-  OP_DECOMPOSE(frobenius_norm);
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
   OP_DECOMPOSE(diagonal_copy);
