@@ -32,18 +32,32 @@ def clone_me(x):
     return x.detach().clone().requires_grad_(x.requires_grad)
 
 
+def named_parameters_for_optimized_module(mod):
+    assert isinstance(mod, eval_frame.OptimizedModule)
+    return mod._orig_mod.named_parameters
+
+
+def remove_optimized_module_prefix(name):
+    prefix = "_orig_mod."
+    assert name.startswith(prefix)
+    name = name[len(prefix) :]
+    return torch.distributed.fsdp._common_utils.clean_tensor_name(name)
+
+
 def collect_results(model, prediction, loss, example_inputs):
     results = []
     results.append(prediction)
     results.append(loss)
-    if isinstance(loss, torch.Tensor) and loss.item() > 1:
-        log.warning(
-            f"High loss value alert - {loss:.2f}. Can result in unstable gradients."
-        )
+    # if isinstance(loss, torch.Tensor) and loss.item() > 1:
+    #     log.warning(
+    #         f"High loss value alert - {loss:.2f}. Can result in unstable gradients."
+    #     )
 
     grads = dict()
     params = dict()
     for name, param in model.named_parameters():
+        if isinstance(model, eval_frame.OptimizedModule):
+            name = remove_optimized_module_prefix(name)
         param_copy = param
         grad = param.grad
         # Treat None and zero grad as same
@@ -222,7 +236,7 @@ def rand_strided(size, stride, dtype=torch.float32, device="cpu"):
     if dtype.is_floating_point:
         buffer = torch.randn(needed_size, dtype=dtype, device=device)
     else:
-        buffer = torch.ones(size=[needed_size], dtype=dtype, device=device)
+        buffer = torch.zeros(size=[needed_size], dtype=dtype, device=device)
     return torch.as_strided(buffer, size, stride)
 
 
