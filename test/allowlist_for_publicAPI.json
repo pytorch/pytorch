@@ -12,7 +12,7 @@
     "torch.nn.intrinsic.quantized.modules": "torch.ao.nn.intrinsic.quantized.modules",
     "torch.nn.intrinsic.quantized.modules.bn_relu": "torch.ao.nn.intrinsic.quantized.modules.bn_relu",
     "torch.nn.intrinsic.quantized.modules.conv_relu": "torch.ao.nn.intrinsic.quantized.modules.conv_relu",
-    "torch.nn.intrinsic.quantized.modules.linear_relu": "torch.ao.nn.intrinsic.quantized.modules.linear_relu",
+    "torch.nn.intrinsic.quantized.modules.linear_activation": "torch.ao.nn.intrinsic.quantized.modules.linear_activation",
     "torch.nn.intrinsic.quantized.dynamic": "torch.ao.nn.intrinsic.quantized.dynamic",
     "torch.nn.intrinsic.quantized.dynamic.modules": "torch.ao.nn.intrinsic.quantized.dynamic.modules",
     "torch.nn.intrinsic.quantized.dynamic.modules.linear_relu": "torch.ao.nn.intrinsic.quantized.dynamic.modules.linear_relu",
