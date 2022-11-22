@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple, Union, Iterable
+from typing import Optional, Iterable
 
 import torch
 from math import sqrt
@@ -690,7 +690,7 @@ def general_cosine(M, *,
     if not isinstance(a, Iterable):
         raise TypeError("Coefficients must be a list/tuple")
 
-    if len(a) == 0:
+    if not a:
         raise ValueError("Coefficients cannot be empty")
 
     constant = 2 * torch.pi / (M if not sym else M - 1)
