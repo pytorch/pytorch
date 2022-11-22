@@ -1,4 +1,4 @@
-#include <c10d/ProcessGroupMPI.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
 
 #ifdef USE_C10D_MPI
 
@@ -29,7 +29,7 @@ namespace c10d {
 namespace {
 
 // Op mapping
-std::map<ReduceOp, MPI_Op> mpiOp = {
+std::map<ReduceOp::RedOpType, MPI_Op> mpiOp = {
     {ReduceOp::MIN, MPI_MIN},
     {ReduceOp::MAX, MPI_MAX},
     {ReduceOp::SUM, MPI_SUM},
@@ -122,7 +122,7 @@ ProcessGroupMPI::AsyncWork::AsyncWork(
     std::vector<at::Tensor> outputTensors,
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputTensors)
-    : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
+    : Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
       outputTensors_(std::move(outputTensors)),
       request_(request) {
   memset(&status_, 0, sizeof(status_));
@@ -176,9 +176,9 @@ bool ProcessGroupMPI::AsyncWork::wait(std::chrono::milliseconds /* unused */) {
   if (request_ == MPI_REQUEST_NULL) {
     // AsyncWork needs to manually call profiling end callbacks if they are set,
     // since it does not call ProcessGroup::finish().
-    if (ProcessGroup::Work::recordFunctionEndCallback_) {
-      ProcessGroup::Work::recordFunctionEndCallback_();
-      ProcessGroup::Work::recordFunctionEndCallback_ = nullptr;
+    if (Work::recordFunctionEndCallback_) {
+      Work::recordFunctionEndCallback_();
+      Work::recordFunctionEndCallback_ = nullptr;
     }
     return true;
   }
@@ -189,9 +189,9 @@ bool ProcessGroupMPI::AsyncWork::wait(std::chrono::milliseconds /* unused */) {
 
   // AsyncWork needs to manually call profiling end callbacks if they are set,
   // since it does not call ProcessGroup::finish().
-  if (ProcessGroup::Work::recordFunctionEndCallback_) {
-    ProcessGroup::Work::recordFunctionEndCallback_();
-    ProcessGroup::Work::recordFunctionEndCallback_ = nullptr;
+  if (Work::recordFunctionEndCallback_) {
+    Work::recordFunctionEndCallback_();
+    Work::recordFunctionEndCallback_ = nullptr;
   }
 
   if (!ok) {
@@ -370,7 +370,7 @@ void ProcessGroupMPI::runLoop() {
   }
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::enqueue(
+c10::intrusive_ptr<Work> ProcessGroupMPI::enqueue(
     std::unique_ptr<WorkEntry> entry,
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputTensors) {
@@ -383,7 +383,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::enqueue(
   return work;
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
+c10::intrusive_ptr<Work> ProcessGroupMPI::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
   checkSingleTensor(tensors);
@@ -407,7 +407,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
+c10::intrusive_ptr<Work> ProcessGroupMPI::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   checkSingleTensor(tensors);
@@ -433,13 +433,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupMPI::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   TORCH_CHECK(false, "allreduce_coalesced is currently not supported with MPI");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
+c10::intrusive_ptr<Work> ProcessGroupMPI::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   checkSingleTensor(tensors);
@@ -470,7 +470,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
+c10::intrusive_ptr<Work> ProcessGroupMPI::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
@@ -519,14 +519,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
       c10::optional<std::vector<at::Tensor>>(inputTensors));
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupMPI::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
     const AllgatherOptions& /* unused */) {
   TORCH_CHECK(false, "ProcessGroupMPI does not support allgather_coalesced");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
+c10::intrusive_ptr<Work> ProcessGroupMPI::gather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
@@ -602,7 +602,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
   }
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
+c10::intrusive_ptr<Work> ProcessGroupMPI::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
@@ -679,14 +679,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
   }
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce_scatter(
+c10::intrusive_ptr<Work> ProcessGroupMPI::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
   TORCH_CHECK(false, "ProcessGroupMPI does not support reduce_scatter");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputSplitSizes,
@@ -769,7 +769,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
   }
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
+c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& opts) {
@@ -829,7 +829,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
       c10::optional<std::vector<at::Tensor>>(inputTensors));
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
+c10::intrusive_ptr<Work> ProcessGroupMPI::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
@@ -858,7 +858,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
+c10::intrusive_ptr<Work> ProcessGroupMPI::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
@@ -887,7 +887,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
+c10::intrusive_ptr<Work> ProcessGroupMPI::recvAnysource(
     std::vector<at::Tensor>& tensors,
     int tag) {
   checkSingleTensor(tensors);
@@ -915,8 +915,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
       c10::optional<std::vector<at::Tensor>>(tensors));
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(
-    const BarrierOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupMPI::barrier(const BarrierOptions& opts) {
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [this](std::unique_ptr<WorkEntry>& entry) {
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
@@ -927,7 +926,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(
   return enqueue(std::move(entry), "mpi:barrier", c10::nullopt);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupMPI::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {

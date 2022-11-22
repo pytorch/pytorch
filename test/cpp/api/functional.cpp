@@ -2252,6 +2252,20 @@ TEST_F(FunctionalTest, Interpolate) {
     auto output = F::interpolate(tensor, options);
     ASSERT_TRUE(output.allclose(expected));
   }
+  {
+    auto tensor = torch::rand({2, 3, 32, 32});
+    std::vector<int64_t> osize = {8, 10};
+    auto expected = at::native::_upsample_bicubic2d_aa(
+        tensor, osize, false, torch::nullopt);
+
+    auto options = F::InterpolateFuncOptions()
+                       .size(osize)
+                       .mode(torch::kBicubic)
+                       .align_corners(false)
+                       .antialias(true);
+    auto output = F::interpolate(tensor, options);
+    ASSERT_TRUE(output.allclose(expected));
+  }
 }
 
 TEST_F(FunctionalTest, Pad1) {

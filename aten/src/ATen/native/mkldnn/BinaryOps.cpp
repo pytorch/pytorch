@@ -1,7 +1,15 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/ExpandUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/mul_native.h>
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 

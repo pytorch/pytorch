@@ -205,6 +205,12 @@ struct ExtractVariables : IterArgs<ExtractVariables> {
     is_var_.push_back(true);
     list_.emplace_back(x);
   }
+  void operator()(const at::TensorList& list) {
+    for (const at::Tensor& x : list) {
+      is_var_.push_back(true);
+      list_.emplace_back(x);
+    }
+  }
   template <typename T>
   void operator()(const T& x) {
     is_var_.push_back(false);
@@ -294,7 +300,7 @@ auto Function<T>::apply(Args&&... args)
     TORCH_CHECK(
         false,
         "jvp is not implemented for the c++ API of custom Function yet.",
-        "Please open a feature request on Github if you need this.");
+        "Please open a feature request on GitHub if you need this.");
   };
 
   auto wrapped_outputs = _wrap_outputs(

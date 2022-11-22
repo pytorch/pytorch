@@ -29,13 +29,12 @@ Tensor _empty_affine_quantized(
 }
 
 Tensor empty_memory_format(
-    const SymIntArrayRef sym_sizes,
+    const IntArrayRef sizes,
     const c10::optional<ScalarType> dtype,
     const c10::optional<c10::Layout> layout,
     const c10::optional<Device> device,
     const c10::optional<bool> pin_memory,
     const optional<MemoryFormat> memory_format) {
-  auto sizes = c10::asIntArrayRefSlow(sym_sizes);
   return convert(vTensor{
       api::context(),
       sizes,
@@ -56,12 +55,7 @@ Tensor empty_strided(
     const optional<Device> device,
     const optional<bool> pin_memory) {
   return empty_memory_format(
-      c10::SymIntArrayRef::fromIntArrayRef(sizes),
-      dtype,
-      layout,
-      device,
-      pin_memory,
-      c10::MemoryFormat::Contiguous);
+      sizes, dtype, layout, device, pin_memory, c10::MemoryFormat::Contiguous);
 }
 
 #ifdef USE_VULKAN_API

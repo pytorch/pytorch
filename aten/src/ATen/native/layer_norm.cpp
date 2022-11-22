@@ -1,17 +1,26 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/layer_norm.h>
 
-#include <ATen/AccumulateType.h>
-#include <ATen/ATen.h>
-#include <ATen/Config.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/layer_norm_native.h>
+#include <ATen/ops/native_batch_norm.h>
+#include <ATen/ops/native_layer_norm.h>
+#include <ATen/ops/native_layer_norm_backward_native.h>
+#include <ATen/ops/native_layer_norm_native.h>
+#include <ATen/ops/zeros_like_native.h>
+#endif
 
 #include <array>
-#include <functional>
-#include <numeric>
 #include <tuple>
 #include <vector>
 
@@ -37,8 +46,7 @@ void layer_norm_with_mean_rstd_out(
   for (const auto idx : c10::irange(axis)) {
     stat_shape.emplace_back(input_shape[idx]);
   }
-  for (const auto idx : c10::irange(axis, input.dim())) {
-    (void)idx; // Suppress unused variable warning
+  for (const auto idx C10_UNUSED : c10::irange(axis, input.dim())) {
     stat_shape.emplace_back(1);
   }
 
@@ -239,8 +247,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
   }
-  for (const auto idx : c10::irange(axis, input.dim())) {
-    (void)idx; // Suppress unused variable
+  for (const auto idx C10_UNUSED : c10::irange(axis, input.dim())) {
     stat_shape.push_back(1);
   }
   mean = mean.view(stat_shape);

@@ -25,11 +25,10 @@ from torch.overrides import (
     has_torch_function_unary,
     has_torch_function_variadic,
 )
+from torch.utils.dlpack import DLDeviceType
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
-    # functools.wraps doesn't work well with methods in python 2
-    method_assignments = ("__name__", "__doc__")
     assigned = functools.WRAPPER_ASSIGNMENTS
 
     @functools.wraps(f, assigned=assigned)
@@ -56,9 +55,6 @@ def _rebuild_from_type(func, type, args, dict):
 
 
 def _rebuild_from_type_v2(func, new_type, args, state):
-    if new_type is Tensor:
-        return func(*args)
-
     ret = func(*args)
     if type(ret) is not new_type:
         ret = ret.as_subclass(new_type)
@@ -71,21 +67,7 @@ def _rebuild_from_type_v2(func, new_type, args, state):
     ):
         ret.__setstate__(state)
     else:
-        if isinstance(state, tuple):
-            if not len(state) == 2:
-                raise RuntimeError(f"Invalid serialized state: {state}")
-            dict_state = state[0]
-            slots_state = state[1]
-        else:
-            dict_state = state
-            slots_state = None
-
-        for k, v in dict_state.items():
-            setattr(ret, k, v)
-
-        if slots_state:
-            for k, v in slots_state.items():
-                setattr(ret, k, v)
+        ret = torch._utils._set_obj_state(ret, state)
     return ret
 
 
@@ -113,10 +95,13 @@ class Tensor(torch._C._TensorBase):
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
             # Update the test in test_serialization if you remove 'meta' from here
-
             if (
                 self.is_sparse
                 or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "hpu"]
+                or (
+                    not torch._C._has_storage(self)
+                    and self.device.type == "privateuseone"
+                )
                 or (type(self) is not Tensor and self.data_ptr() == 0)
             ):
                 new_tensor = self.clone()
@@ -130,7 +115,7 @@ class Tensor(torch._C._TensorBase):
                         "different type."
                     )
             else:
-                new_storage = self.storage().__deepcopy__(memo)
+                new_storage = self._typed_storage()._deepcopy(memo)
                 if self.is_quantized:
                     # quantizer_params can be different type based on torch attribute
                     quantizer_params: Union[
@@ -161,7 +146,9 @@ class Tensor(torch._C._TensorBase):
                     # need to wrap with TypedStorage
                     new_tensor = torch._utils._rebuild_qtensor(
                         torch.storage.TypedStorage(
-                            wrap_storage=new_storage.untyped(), dtype=self.dtype
+                            wrap_storage=new_storage._untyped_storage,
+                            dtype=self.dtype,
+                            _internal=True,
                         ),
                         self.storage_offset(),
                         self.size(),
@@ -219,31 +206,13 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
-        if type(self) is Tensor:
+        state = torch._utils._get_obj_state(self)
+        if type(self) is Tensor and not state:
+            # Fast path for regular tensor without Python state.
             return self._reduce_ex_internal(proto)
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
-        # Get the state of the python subclass
-        # This loosely mimicks the function on the object class but since Tensor do not inherit
-        # from it, we cannot call that function directly
-        # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
-        getstate_fn = getattr(self, "__getstate__", None)
-        if getstate_fn:
-            state = getstate_fn()
-        else:
-            slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
-            if slots_to_save:
-                state = (
-                    self.__dict__,
-                    {
-                        name: getattr(self, name)
-                        for name in slots_to_save
-                        if hasattr(self, name)
-                    },
-                )
-            else:
-                state = self.__dict__
         return (_rebuild_from_type_v2, (func, type(self), args, state))
 
     def storage(self):
@@ -255,7 +224,17 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
 
-        return torch.TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
+        torch.storage._warn_typed_storage_removal()
+        return self._typed_storage()
+
+    # For internal use only, to avoid raising deprecation warning
+    def _typed_storage(self):
+        _storage = self._storage()
+        if isinstance(_storage, torch.TypedStorage):
+            _storage = _storage._untyped_storage
+        return torch.TypedStorage(
+            wrap_storage=_storage, dtype=self.dtype, _internal=True
+        )
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
@@ -272,7 +251,9 @@ class Tensor(torch._C._TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "ort", "hpu"]:
+        if self.device.type in ["xla", "ort", "hpu"] or (
+            not torch._C._has_storage(self) and self.device.type == "privateuseone"
+        ):
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
             # this would reconstruct the BFloat16 tensor from numpy.
@@ -327,7 +308,9 @@ class Tensor(torch._C._TensorBase):
             # need to wrap with TypedStorage
             args_qtensor = (
                 torch.storage.TypedStorage(
-                    wrap_storage=self.storage().untyped(), dtype=self.dtype
+                    wrap_storage=self._typed_storage()._untyped_storage,
+                    dtype=self.dtype,
+                    _internal=True,
                 ),
                 self.storage_offset(),
                 tuple(self.size()),
@@ -385,7 +368,9 @@ class Tensor(torch._C._TensorBase):
             # need to wrap with TypedStorage
             args = (
                 torch.storage.TypedStorage(
-                    wrap_storage=self.storage().untyped(), dtype=self.dtype
+                    wrap_storage=self._typed_storage()._untyped_storage,
+                    dtype=self.dtype,
+                    _internal=True,
                 ),
                 self.storage_offset(),
                 tuple(self.size()),
@@ -393,6 +378,10 @@ class Tensor(torch._C._TensorBase):
                 self.requires_grad,
                 backward_hooks,
             )  # previously was self._backward_hooks
+
+            metadata = torch._utils.get_tensor_metadata(self)
+            if metadata:
+                args = args + (metadata,)  # type: ignore[assignment]
             return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
@@ -603,7 +592,7 @@ class Tensor(torch._C._TensorBase):
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.is_shared, (self,), self)
-        return self.storage().is_shared()
+        return self._typed_storage()._is_shared()
 
     def share_memory_(self):
         r"""Moves the underlying storage to shared memory.
@@ -613,7 +602,7 @@ class Tensor(torch._C._TensorBase):
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.share_memory_, (self,), self)
-        self.storage().share_memory_()
+        self._typed_storage()._share_memory_()
         return self
 
     def __reversed__(self):
@@ -637,6 +626,16 @@ class Tensor(torch._C._TensorBase):
         from ._linalg_utils import solve
 
         return solve(self, other)
+
+    def lstsq(self, other):
+        from ._linalg_utils import lstsq
+
+        return lstsq(self, other)
+
+    def eig(self, eigenvectors=False):
+        from ._linalg_utils import eig
+
+        return eig(self, eigenvectors=eigenvectors)
 
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
@@ -1022,7 +1021,7 @@ class Tensor(torch._C._TensorBase):
             torch.int64: "<i8",
         }[self.dtype]
 
-        itemsize = self.storage().element_size()
+        itemsize = self.element_size()
 
         shape = tuple(self.shape)
         if self.is_contiguous():
@@ -1045,7 +1044,9 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage_type, (self,), self)
 
-        return self.storage()._get_legacy_storage_class()
+        torch.storage._warn_typed_storage_removal()
+
+        return self._typed_storage()._get_legacy_storage_class()
 
     def refine_names(self, *names):
         r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
@@ -1311,30 +1312,30 @@ class Tensor(torch._C._TensorBase):
             if self.device.type == "cuda":
                 stream = torch.cuda.ExternalStream(stream)
                 # Only synchronize on different streams
-                if stream != torch.cuda.current_stream:
+                sync_stream = torch.cuda.current_stream()
+                if stream != sync_stream:
                     event = torch.cuda.Event()
-                    event.record(torch.cuda.current_stream())
+                    event.record(sync_stream)
                     stream.wait_event(event)
         return torch.to_dlpack(self)
 
     def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
-        # Avoid circular import
-        from torch.utils.dlpack import DLDeviceType
-
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
-        idx = self.device.index if self.device.index is not None else 0
-        if self.device.type == "cuda" and torch.version.hip is not None:
+        device = self.device
+        idx = device.index if device.index is not None else 0
+        torch_device_type = device.type
+        if torch_device_type == "cuda" and torch.version.hip is not None:
             device_type = DLDeviceType.kDLROCM
-        elif self.device.type == "cpu" and self.is_pinned():
+        elif torch_device_type == "cpu" and self.is_pinned():
             device_type = DLDeviceType.kDLCPUPinned
-        elif self.device.type == "cuda":
+        elif torch_device_type == "cuda":
             device_type = DLDeviceType.kDLGPU
-        elif self.device.type == "cpu":
+        elif torch_device_type == "cpu":
             device_type = DLDeviceType.kDLCPU
         else:
             raise ValueError(
-                "Unknown device type {} for Dlpack".format(self.device.type)
+                "Unknown device type {} for Dlpack".format(torch_device_type)
             )
         return (device_type, idx)
 

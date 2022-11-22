@@ -65,9 +65,11 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
       c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
 
   auto options = TensorOptions().device(at::kCUDA).dtype(at::kLong);
+  seed_extragraph_ = at::empty({1}, options);
   offset_extragraph_ = at::empty({1}, options);
 
-  gen->capture_prologue(offset_extragraph_.data_ptr<int64_t>());
+  seed_extragraph_.fill_(int64_t(gen->current_seed()));
+  gen->capture_prologue(seed_extragraph_.data_ptr<int64_t>(), offset_extragraph_.data_ptr<int64_t>());
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -131,16 +133,42 @@ void CUDAGraph::capture_end() {
   TORCH_CHECK(stream == capture_stream_,
               "Capture must end on the same stream it began on.");
 
-  c10::cuda::CUDACachingAllocator::notifyCaptureEnd(capture_dev_, id_);
+  c10::cuda::CUDACachingAllocator::notifyCaptureAboutToEnd(capture_dev_, id_);
 
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
   TORCH_CHECK(graph_ != NULL, "Invalid capture.");
   has_graph_ = true;
 
-  // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
-  // who prefer not to report error message through these arguments moving forward
-  // (they prefer return value, or errors on api calls internal to the capture)
-  AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
+  c10::cuda::CUDACachingAllocator::notifyCaptureEnded(capture_dev_, id_);
+
+  // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not freed
+  // between replays.
+  // If Pytorch compiles and runs with a CUDA 11.4+ toolkit, there's a chance the allocator backend
+  // is cudaMallocAsync.
+  // cudaMallocAsync is generally graph-safe, but if some tensors are not freed between replays,
+  // the graph's internal bookkeeping requires that we instantiate with
+  // cudaGraphInstantiateFlagAutoFreeOnLaunch. See
+  // cudaGraphLaunch
+  // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
+  // cudaGraphInstantiateWithFlags
+  // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
+#if CUDA_VERSION >= 11040
+  int version;
+  AT_CUDA_CHECK(cudaDriverGetVersion(&version));
+  if (version < 11040) {
+#endif
+    // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
+    // who prefer not to report error message through these arguments moving forward
+    // (they prefer return value, or errors on api calls internal to the capture)
+    AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
+#if CUDA_VERSION >= 11040
+  } else {
+    AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
+                                                graph_,
+                                                cudaGraphInstantiateFlagAutoFreeOnLaunch));
+  }
+#endif
+
   has_graph_exec_ = true;
 
   auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
@@ -175,6 +203,7 @@ void CUDAGraph::replay() {
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(wholegraph_increment_);
   }
+  seed_extragraph_.fill_(int64_t(gen->current_seed()));
   offset_extragraph_.fill_(int64_t(rng_engine_inputs.offset_.val));
 
   // graph_exec_ may be replayed in any stream.

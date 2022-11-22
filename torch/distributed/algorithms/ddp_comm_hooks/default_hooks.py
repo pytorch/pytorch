@@ -3,6 +3,7 @@ from typing import Any, Callable
 import torch
 import torch.distributed as dist
 
+__all__ = ["allreduce_hook", "fp16_compress_hook", "bf16_compress_hook", "fp16_compress_wrapper", "bf16_compress_wrapper"]
 
 def _allreduce_fut(
     process_group: dist.ProcessGroup, tensor: torch.Tensor

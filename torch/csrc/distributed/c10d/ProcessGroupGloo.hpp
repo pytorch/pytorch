@@ -18,10 +18,10 @@
 
 #include <c10/util/hash.h>
 
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Store.hpp>
-#include <c10d/Types.hpp>
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 
 namespace c10d {
 
@@ -68,7 +68,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
   //
   // FIXME: This probably should be called WorkGloo since the work is executed in sync mode
   // by a background thread.
-  class TORCH_API AsyncWork : public ProcessGroup::Work {
+  class TORCH_API AsyncWork : public Work {
    public:
     explicit AsyncWork(
         std::vector<std::vector<at::Tensor>> outputTensors,
@@ -144,7 +144,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
   // recv operation. It keeps a reference to the tensor it is
   // operating on to prevent it from being deallocated while the
   // operation is still in flight.
-  class TORCH_API SendWork : public ProcessGroup::Work {
+  class TORCH_API SendWork : public Work {
    public:
     explicit SendWork(
         at::Tensor& tensor,
@@ -159,7 +159,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
   };
 
-  class TORCH_API RecvWork : public ProcessGroup::Work {
+  class TORCH_API RecvWork : public Work {
    public:
     explicit RecvWork(
         at::Tensor& tensor,
@@ -226,75 +226,75 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
     return options_;
   }
 
-  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
+  c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
+  c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
+  c10::intrusive_ptr<Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> reduce(
+  c10::intrusive_ptr<Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather(
+  c10::intrusive_ptr<Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
+  c10::intrusive_ptr<Work> _allgather_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
+  c10::intrusive_ptr<Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& output_lists,
       std::vector<at::Tensor>& input_list,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> gather(
+  c10::intrusive_ptr<Work> gather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       const GatherOptions& opts = GatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> scatter(
+  c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
       const ScatterOptions& opts = ScatterOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
+  c10::intrusive_ptr<Work> reduce_scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
+  c10::intrusive_ptr<Work> alltoall_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputCounts,
       std::vector<int64_t>& inputCounts,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> send(
+  c10::intrusive_ptr<Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> recv(
+  c10::intrusive_ptr<Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
+  c10::intrusive_ptr<Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> barrier(
+  c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
   const std::unique_ptr<::gloo::rendezvous::Store>& _getStore() const {

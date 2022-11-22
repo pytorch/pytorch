@@ -33,19 +33,11 @@
 #endif
 
 #ifndef STRONG_HAS_STD_FORMAT
-#if __has_include(<format>)
-#define STRONG_HAS_STD_FORMAT 1
-#else
 #define STRONG_HAS_STD_FORMAT 0
-#endif
 #endif
 
 #ifndef STRONG_HAS_FMT_FORMAT
-#if __has_include(<fmt/format.h>)
-#define STRONG_HAS_FMT_FORMAT 1
-#else
 #define STRONG_HAS_FMT_FORMAT 0
-#endif
 #endif
 
 #if STRONG_HAS_STD_FORMAT

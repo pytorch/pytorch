@@ -21,13 +21,44 @@
 #include <c10/util/hash.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/profiler/data_flow.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 
 namespace torch {
 namespace profiler {
 namespace impl {
+using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
+
+RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
+    : data_{t.has_storage() ? t.storage().data() : nullptr},
+      dtype_{t.scalar_type()},
+      layout_{t.layout()},
+      dim_{static_cast<uint32_t>(t.sizes().size())} {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      t.sizes().size() <= std::numeric_limits<uint32_t>::max(),
+      "Cannot profile Tensors of size > uint32 max. Got dim: ",
+      t.sizes().size());
+}
+
+RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
+    : RawTensorMetadataBase(t),
+      weak_self_{WeakTensor(t)},
+      device_type_{t.device().type()},
+      device_index_{t.device().index()} {}
+
+TensorMetadata::TensorMetadata(
+    const RawTensorMetadata& r,
+    const std::vector<int64_t>& sizes,
+    const std::vector<int64_t>& strides)
+    : RawTensorMetadataBase(r),
+      weak_self_{r.weak_self_.value_or(WeakTensor(at::Tensor()))},
+      device_{r.device_type_, r.device_index_},
+      sizes_{sizes},
+      strides_{strides} {
+  SOFT_ASSERT(r.weak_self_.has_value());
+}
 
 // ============================================================================
 // == PyTorch Ops =============================================================
@@ -49,7 +80,9 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
       ivalues_.emplace_back(value);
     } else if (value.isTensorList()) {
       tags_.emplace_back(Tag::TensorListBegin);
-      // TODO: Skip TensorList for now.
+      for (const auto& t : value.toTensorList()) {
+        push(t);
+      }
       tags_.emplace_back(Tag::TERMINATOR);
     } else {
       tags_.emplace_back(Tag::Other);
@@ -61,24 +94,9 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
 void InputOutputEncoder::push(const at::Tensor& t) {
   if (t.defined() && !t.is_nested()) { // TODO fix nested sizes
     tags_.emplace_back(Tag::Tensor);
-    const auto& sizes = t.sizes();
-    const auto dim = sizes.size();
-    const auto layout = t.layout();
-    TORCH_CHECK(
-        dim <= std::numeric_limits<uint32_t>::max(),
-        "Cannot profile Tensors of size > uint32 max. Got dim: ",
-        dim);
-
-    tensor_metadata_.emplace_back(
-        /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
-        /*device_type_*/ t.device().type(),
-        /*device_index_*/ t.device().index(),
-        /*dtype=*/t.scalar_type(),
-        /*dim_=*/(uint32_t)dim,
-        /*layout_=*/layout);
-
-    tensor_sizes_strides_.copy(sizes);
-    if (layout == at::kStrided) {
+    tensor_metadata_.emplace_back(t);
+    tensor_sizes_strides_.copy(t.sizes());
+    if (t.layout() == at::kStrided) {
       // Only Strided layout tensors have strides
       tensor_sizes_strides_.copy(t.strides());
     }
@@ -94,55 +112,49 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
           tensor_metadata_it = tensor_metadata_.begin(),
           tensor_size_strides_it = tensor_sizes_strides_.begin(),
           ivals_it = ivalues_.begin()]() mutable {
-    struct Inputs out;
+    auto decode_tensor = [&]() -> TensorMetadata {
+      const auto& raw_metadata = *tensor_metadata_it++;
+      std::vector<int64_t> sizes;
+      std::vector<int64_t> strides;
+      for (C10_UNUSED const auto _ : c10::irange(raw_metadata.dim_)) {
+        sizes.push_back(*tensor_size_strides_it++);
+      }
+      if (raw_metadata.layout_ == at::kStrided) {
+        for (C10_UNUSED const auto _ : c10::irange(raw_metadata.dim_)) {
+          strides.push_back(*tensor_size_strides_it++);
+        }
+      }
+      return {raw_metadata, sizes, strides};
+    };
+
+    std::vector<op_input_t> out;
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
-      out.shapes_.emplace_back();
-      out.strides_.emplace_back();
       switch (*tag_it) {
-        case Tag::Tensor: {
-          const auto& md = *tensor_metadata_it++;
-          for (const auto _ : c10::irange(md.dim_)) {
-            (void)_; // Suppress unused variable warning
-            out.shapes_.back().push_back(*tensor_size_strides_it++);
-          }
-          if (md.layout_ == at::kStrided) {
-            for (const auto _ : c10::irange(md.dim_)) {
-              (void)_; // Suppress unused variable warning
-              out.strides_.back().push_back(*tensor_size_strides_it++);
-            }
-          }
-          out.tensor_metadata_.emplace_back(md);
-          out.ivalues_.emplace_back();
-          out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
-        } break;
-
-        case Tag::TensorListBegin:
-          while (*(++tag_it) != Tag::TERMINATOR) {
-            // TODO: Skip TensorLists for now.
-          }
-          out.dtypes_.emplace_back("TensorList");
-          out.ivalues_.emplace_back();
-          out.tensor_metadata_.emplace_back();
+        case Tag::Tensor:
+          out.emplace_back(decode_tensor());
           break;
 
+        case Tag::TensorListBegin: {
+          std::vector<TensorMetadata> arg;
+          while (*(++tag_it) != Tag::TERMINATOR) {
+            TORCH_INTERNAL_ASSERT(*tag_it == Tag::Tensor, (int)(*tag_it));
+            arg.emplace_back(decode_tensor());
+          }
+          out.emplace_back(std::move(arg));
+        } break;
+
         case Tag::Scalar:
-          out.dtypes_.emplace_back("Scalar");
-          out.ivalues_.emplace_back(*ivals_it++);
-          out.tensor_metadata_.emplace_back();
+          out.emplace_back(*ivals_it++);
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
-          out.dtypes_.emplace_back();
-          out.ivalues_.emplace_back();
-          out.tensor_metadata_.emplace_back();
+          out.emplace_back(c10::nullopt);
           break;
 
         case Tag::TERMINATOR:
           // This marks the end of this op.
-          out.shapes_.pop_back();
-          out.strides_.pop_back();
           terminate = true;
           break;
 
@@ -247,6 +259,11 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
 
   event->start_time_ = torch::profiler::impl::getApproximateTime();
   event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
+  if (!config_.experimental_config.performance_events.empty()) {
+    const size_t n = config_.experimental_config.performance_events.size();
+    event->counters_ = std::make_unique<perf_counters_t>(n, 0);
+    perf_profiler_->Enable();
+  }
   return out;
 }
 
@@ -297,6 +314,19 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     }
   }
 
+  // `AccumulateGrad` is an important marker for profile analysis; however the
+  // annotation relies on `c10::demangle` which is platform dependent. In
+  // particular, Windows will add a "struct " prefix.
+  const std::string accumulate_grad = "torch::autograd::AccumulateGrad";
+  const std::string windows_pattern = std::string("struct ") + accumulate_grad;
+  for (auto& event : op_events_) {
+    auto& name = event.basic_fields_.name_;
+    auto position = name.find(windows_pattern);
+    if (position != std::string::npos) {
+      name.replace(position, windows_pattern.size(), accumulate_grad);
+    }
+  }
+
   auto input_getter = inputs_outputs_.getNextShapesAndDtypes();
 
   // TODO: CTAD will take care of template args when we move to C++17
@@ -315,7 +345,8 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         jit_module(),
         extra_args(),
         gpu_fallback(),
-        event->allow_tf32_cublas_};
+        event->allow_tf32_cublas_,
+        std::move(event->counters_)};
 
     out.emplace_back(Result::create(
         time_converter(event->start_time_), tid, kineto_info, std::move(e)));
@@ -341,43 +372,7 @@ struct SubQueueThreadCache {
 // `sub_queue_cache_` and fall back to a different mechanism.
 std::atomic<uint32_t> queue_id_{0};
 thread_local SubQueueThreadCache sub_queue_cache_{0, nullptr};
-} // namespace
 
-namespace python_tracer {
-namespace {
-GetFn get_fn;
-
-struct NoOpPythonTracer : public PythonTracerBase {
-  static NoOpPythonTracer& singleton() {
-    static NoOpPythonTracer singleton_;
-    return singleton_;
-  }
-  void start(RecordQueue*) override {}
-  void stop() override {}
-  void clear() override {}
-  std::vector<std::shared_ptr<Result>> getEvents(
-      std::function<time_t(approx_time_t)>,
-      std::vector<CompressedEvent>&,
-      time_t) override {
-    return {};
-  }
-  ~NoOpPythonTracer() = default;
-};
-} // namespace
-
-void registerTracer(GetFn get_tracer) {
-  get_fn = get_tracer;
-}
-
-PythonTracerBase& PythonTracerBase::get() {
-  if (get_fn == nullptr) {
-    return NoOpPythonTracer::singleton();
-  }
-  return get_fn();
-}
-} // namespace python_tracer
-
-namespace {
 std::string toString(const ExtraFields<EventType::PyCall>& e) {
   if (e.module_.has_value()) {
     return fmt::format(
@@ -492,6 +487,11 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
     const ProfilerConfig& config)
     : tid_{tid}, config_{config}, kineto_info_{kineto::kineto_ids()} {
   torch::profiler::impl::kineto::recordThreadInfo();
+  if (config_.experimental_config.performance_events.size()) {
+    perf_profiler_ =
+        std::make_unique<torch::profiler::impl::linux_perf::PerfProfiler>();
+    perf_profiler_->Configure(config_.experimental_config.performance_events);
+  }
 }
 
 RecordQueue::RecordQueue(
@@ -499,7 +499,7 @@ RecordQueue::RecordQueue(
     std::set<ActivityType> activities)
     : id_(++queue_id_), config_{config}, activities_{activities} {
   if (tracePython()) {
-    python_tracer::PythonTracerBase::get().start(this);
+    python_tracer_ = python_tracer::PythonTracerBase::make(this);
   }
 }
 
@@ -534,8 +534,8 @@ ThreadLocalSubqueue* RecordQueue::getSubqueue() {
 }
 
 void RecordQueue::stop() {
-  if (tracePython()) {
-    python_tracer::PythonTracerBase::get().stop();
+  if (python_tracer_) {
+    python_tracer_->stop();
   }
 }
 
@@ -546,7 +546,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
 }
 
-static constexpr const char* indexKey = "Profiler Event Index";
+static constexpr const char* indexKey = "Ev Idx";
 
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
@@ -846,19 +846,13 @@ trace_ptr_t addKinetoEvents(
   return trace;
 }
 
-using result_ptr_t = std::shared_ptr<Result>;
 struct ResultGreater {
   bool operator()(const result_ptr_t& a, const result_ptr_t& b) const {
     return a->endTimeNS() > b->endTimeNS();
   }
 };
 
-void build_tree(std::vector<std::shared_ptr<Result>>& events) {
-  std::stable_sort(
-      events.begin(), events.end(), [](const auto& a, const auto& b) {
-        return a->start_time_ns_ < b->start_time_ns_;
-      });
-
+void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
   using op_fields = ExtraFields<EventType::TorchOp>;
   ska::flat_hash_map<uint64_t, std::shared_ptr<Result>> stacks;
   std::priority_queue<result_ptr_t, std::vector<result_ptr_t>, ResultGreater>
@@ -933,7 +927,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
   };
 
   // Stack replay loop.
-  for (auto& event : events) {
+  for (auto& event : sorted_events) {
     while (!end_events_.empty() &&
            end_events_.top()->endTimeNS() < event->start_time_ns_) {
       pop_event(end_events_.top());
@@ -984,7 +978,13 @@ RecordQueue::getRecords(
     queue.torch_ops_.materialize(
         out, converter, queue.tid(), queue.kineto_info());
     materialize(queue.backend_events_);
-    materialize(queue.allocations_);
+    for (auto& i : queue.allocations_) {
+      out.emplace_back(Result::create(
+          /*start_time_ns_=*/converter(i.start_time_),
+          /*start_tid_=*/queue.tid(),
+          /*kineto_info_=*/queue.kineto_info(),
+          /*extra_fields_=*/ExtraFields<EventType::Allocation>(i)));
+    }
     materialize(queue.ooms_);
 
     for (auto& i : queue.py_calls_) {
@@ -993,16 +993,24 @@ RecordQueue::getRecords(
     }
   }
 
-  if (tracePython()) {
-    auto& tracer = python_tracer::PythonTracerBase::get();
-    for (auto i :
-         tracer.getEvents(converter, python_enters, end_time_us * 1000)) {
+  if (python_tracer_) {
+    for (auto i : python_tracer_->getEvents(
+             converter, python_enters, end_time_us * 1000)) {
       out.push_back(i);
     }
-    tracer.clear();
+    python_tracer_.reset();
   }
 
   auto trace = addKinetoEvents(out, start_time_us, end_time_us, config_);
+
+  std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
+    return a->start_time_ns_ < b->start_time_ns_;
+  });
+
+  if (config_.report_input_shapes && config_.profile_memory) {
+    calculateUniqueTensorIDs(out);
+  }
+
   build_tree(out);
   return {out, std::move(trace)};
 }

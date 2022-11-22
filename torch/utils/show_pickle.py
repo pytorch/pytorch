@@ -7,6 +7,7 @@ import zipfile
 import fnmatch
 from typing import Any, IO, BinaryIO, Union
 
+__all__ = ["FakeObject", "FakeClass", "DumpUnpickler", "main"]
 
 class FakeObject(object):
     def __init__(self, module, name, args):

@@ -46,7 +46,7 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
 
   is_non_overlapping_and_dense_ = false;
   set_storage_access_should_throw();
-  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
+  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
 }
 
   // Destructor doesn't call release_resources because it's
@@ -89,16 +89,16 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   TORCH_CHECK(indices.options().backend() == values.options().backend(), "backend of indices (", indices.options().backend(), ") must match backend of values (", values.options().backend(), ")");
   TORCH_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(), ") must match device of values (", values.get_device(), ")");
 
-  TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes());
-  TORCH_CHECK(indices.size(1) == values.size(0), "indices and values must have same nnz, but got nnz from indices: ", indices.size(1), ", nnz from values: ", values.size(0));
-  TORCH_CHECK(indices.size(0) == sparse_dim_, "indices has incorrect first dimension, expected ", sparse_dim_, ", got ", indices.size(0));
+  TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sym_sizes());
+  TORCH_CHECK(indices.sym_size(1) == values.sym_size(0), "indices and values must have same nnz, but got nnz from indices: ", indices.sym_size(1), ", nnz from values: ", values.sym_size(0));
+  TORCH_CHECK(indices.sym_size(0) == sparse_dim_, "indices has incorrect first dimension, expected ", sparse_dim_, ", got ", indices.sym_size(0));
   TORCH_CHECK(values.dim() == dense_dim_ + 1, "values has incorrect number of dimensions, expected ", dense_dim_ + 1, ", got ", values.dim());
 
-  auto dense_size_original = sizes().slice(sparse_dim_);
-  std::vector<int64_t> expected_values_size_vec = {values.size(0)};
+  auto dense_size_original = sym_sizes().slice(sparse_dim_);
+  std::vector<c10::SymInt> expected_values_size_vec = {values.sym_size(0)};
   expected_values_size_vec.insert(expected_values_size_vec.end(), dense_size_original.begin(), dense_size_original.end());
-  IntArrayRef expected_values_size(expected_values_size_vec);
-  auto new_values_size = values.sizes();
+  SymIntArrayRef expected_values_size(expected_values_size_vec);
+  auto new_values_size = values.sym_sizes();
   TORCH_CHECK(
     std::equal(expected_values_size.begin(), expected_values_size.end(), new_values_size.begin()),
     "values has incorrect size, expected ", expected_values_size, ", got ", new_values_size
@@ -109,7 +109,7 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   AT_ASSERT(device() == values_.device());
   AT_ASSERT(values_.device() == indices_.device());
 
-  coalesced_ = false;
+  coalesced_ = sym_nnz() < 2;
 }
 
 

@@ -35,15 +35,8 @@
   }
 }
 
-- (id<MLFeatureProvider>)forward {
-  NSError *error;
-  MLPredictionOptions *options = [[MLPredictionOptions alloc] init];
-  id<MLFeatureProvider> outputs = [self.model predictionFromFeatures:_inputProvider options:options error:&error];
-  if (error) {
-    NSLog(@"Prediction failed with error %@", error);
-    return nil;
-  }
-  return outputs;
+- (id<MLFeatureProvider>)forward:(NSError **)error {
+  return [self.model predictionFromFeatures:_inputProvider error:error];
 }
 
 @end

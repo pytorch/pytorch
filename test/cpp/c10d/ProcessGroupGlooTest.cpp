@@ -17,8 +17,8 @@
 #include <torch/cuda.h>
 
 #include <c10/util/irange.h>
-#include <c10d/FileStore.hpp>
-#include <c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include "TestUtils.hpp"
 
 using namespace c10d::test;
@@ -47,7 +47,7 @@ class SignalTest {
     });
   }
 
-  c10::intrusive_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
+  c10::intrusive_ptr<::c10d::Work> run(int rank, int size) {
     auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
     auto options = ::c10d::ProcessGroupGloo::Options::create();
@@ -65,7 +65,7 @@ class SignalTest {
     };
 
     // Loop until an exception happens
-    c10::intrusive_ptr<::c10d::ProcessGroup::Work> work;
+    c10::intrusive_ptr<::c10d::Work> work;
     while (true) {
       work = pg.allreduce(tensors);
       try {
@@ -85,7 +85,7 @@ class SignalTest {
   Semaphore sem_;
 };
 
-c10::intrusive_ptr<::c10d::ProcessGroup::Work> testSignal(
+c10::intrusive_ptr<::c10d::Work> testSignal(
     const std::string& path,
     int signal) {
   Fork fork;
@@ -110,7 +110,7 @@ class ProcessGroupGlooDelayed : public ::c10d::ProcessGroupGloo {
       c10::intrusive_ptr<Options> options)
       : ProcessGroupGloo(store, rank, size, options) {}
 
-  c10::intrusive_ptr<::c10d::ProcessGroup::Work> send(
+  c10::intrusive_ptr<::c10d::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override {
@@ -192,7 +192,7 @@ std::vector<std::vector<at::Tensor>> copyTensors(
 }
 
 std::vector<std::vector<at::Tensor>> waitWork(
-    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
+    std::vector<c10::intrusive_ptr<c10d::Work>> works) {
   std::vector<std::vector<at::Tensor>> outputTensors;
   for (auto& work : works) {
     try {
@@ -206,7 +206,7 @@ std::vector<std::vector<at::Tensor>> waitWork(
 }
 
 std::vector<std::vector<at::Tensor>> waitFuture(
-    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
+    std::vector<c10::intrusive_ptr<c10d::Work>> works) {
   std::vector<std::vector<at::Tensor>> outputTensors;
   for (auto& work : works) {
     auto fut = work->getFuture();
@@ -274,7 +274,7 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
   }
 
   // Kick off work
-  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
+  std::vector<c10::intrusive_ptr<::c10d::Work>> work(size);
   const char* GLOO_ALLREDUCE_STR = "gloo:all_reduce";
   enableProfilerLegacy(ProfilerConfig(
       ProfilerState::CPU, /* report_input_shapes */ true, false));
@@ -319,7 +319,7 @@ void testAllreduceUsingWorkAPI(
   }
 
   // Kick off work
-  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
+  std::vector<c10::intrusive_ptr<::c10d::Work>> work(size);
   const char* GLOO_ALLREDUCE_STR = "gloo:all_reduce";
   enableProfilerLegacy(ProfilerConfig(
       ProfilerState::CPU, /* report_input_shapes */ true, false));
@@ -378,7 +378,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
       const char* GLOO_BROADCAST_STR = "gloo:broadcast";
       enableProfilerLegacy(ProfilerConfig(
           ProfilerState::CPU, /* report_input_shapes */ true, false));
-      std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
+      std::vector<c10::intrusive_ptr<::c10d::Work>> work(size);
 
       for (const auto i : c10::irange(size)) {
         work[i] = tests[i].getProcessGroup().broadcast(inputs[i], options);
@@ -446,7 +446,7 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
   };
 
   // Kick off work
-  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
+  std::vector<c10::intrusive_ptr<::c10d::Work>> work(size);
   const char* GLOO_A2A_STR = "gloo:all_to_all";
   std::vector<std::vector<int64_t>> allShapes;
   for (const auto& vec : inputSplits) {
@@ -495,7 +495,7 @@ void testBarrier(const std::string& path) {
   // Kick off work
   enableProfilerLegacy(ProfilerConfig(
       ProfilerState::CPU, /* report_input_shapes */ true, false));
-  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
+  std::vector<c10::intrusive_ptr<::c10d::Work>> work(size);
   for (const auto i : c10::irange(size)) {
     work[i] = tests[i].getProcessGroup().barrier();
   }

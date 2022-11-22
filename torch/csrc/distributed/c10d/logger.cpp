@@ -1,14 +1,14 @@
 #include <c10/util/StringUtil.h>
-#include <c10d/Utils.hpp>
-#include <c10d/debug.h>
-#include <c10d/logger.hpp>
 #include <fmt/format.h>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/debug.h>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <string>
 
 #include <c10/util/CallOnce.h>
 
 #ifdef USE_C10D_GLOO
-#include <c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #endif
 
 namespace c10d {

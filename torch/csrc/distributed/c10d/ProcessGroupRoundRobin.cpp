@@ -1,4 +1,4 @@
-#include <c10d/ProcessGroupRoundRobin.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupRoundRobin.hpp>
 
 namespace c10d {
 
@@ -7,6 +7,9 @@ ProcessGroupRoundRobin::ProcessGroupRoundRobin(
     int size,
     std::vector<c10::intrusive_ptr<ProcessGroup>> processGroups)
     : ProcessGroup(rank, size), processGroups_(std::move(processGroups)) {
+  TORCH_WARN(
+      "ProcessGroupRoundRobin is deprecated and scheduled to be removed after this current release (1.13). ",
+      "Please file an issue on https://github.com/pytorch/pytorch/issues if there are any concerns or issues with this deprecation.");
   TORCH_CHECK(processGroups_.size() >= 1);
   for (const auto& processGroup : processGroups_) {
     TORCH_CHECK(processGroup->getRank() == rank_);
@@ -17,68 +20,66 @@ ProcessGroupRoundRobin::ProcessGroupRoundRobin(
 
 ProcessGroupRoundRobin::~ProcessGroupRoundRobin() {}
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::broadcast(
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
   return next()->broadcast(tensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::allreduce(
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   return next()->allreduce(tensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::
-    allreduce_coalesced(
-        std::vector<at::Tensor>& tensors,
-        const AllreduceCoalescedOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::allreduce_coalesced(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceCoalescedOptions& opts) {
   return next()->allreduce_coalesced(tensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::reduce(
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   return next()->reduce(tensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::allgather(
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::allgather(
     std::vector<std::vector<at::Tensor>>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
   return next()->allgather(outputs, inputs, opts);
 };
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::
-    allgather_coalesced(
-        std::vector<std::vector<at::Tensor>>& outputTensorLists,
-        std::vector<at::Tensor>& inputTensors,
-        const AllgatherOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::allgather_coalesced(
+    std::vector<std::vector<at::Tensor>>& outputTensorLists,
+    std::vector<at::Tensor>& inputTensors,
+    const AllgatherOptions& opts) {
   return next()->allgather(outputTensorLists, inputTensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::gather(
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::gather(
     std::vector<std::vector<at::Tensor>>& outputs,
     std::vector<at::Tensor>& inputs,
     const GatherOptions& opts) {
   return next()->gather(outputs, inputs, opts);
 };
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::scatter(
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::scatter(
     std::vector<at::Tensor>& outputs,
     std::vector<std::vector<at::Tensor>>& inputs,
     const ScatterOptions& opts) {
   return next()->scatter(outputs, inputs, opts);
 };
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::reduce_scatter(
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::reduce_scatter(
     std::vector<at::Tensor>& outputs,
     std::vector<std::vector<at::Tensor>>& inputs,
     const ReduceScatterOptions& opts) {
   return next()->reduce_scatter(outputs, inputs, opts);
 };
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::alltoall_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputSplitSizes,
@@ -88,27 +89,27 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::alltoall_base(
       outputTensor, inputTensor, outputSplitSizes, inputSplitSizes, opts);
 };
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::send(
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::send(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
     int /* unused */) {
   TORCH_CHECK(false, "ProcessGroupRoundRobin does not support send");
 };
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::recv(
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::recv(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
     int /* unused */) {
   TORCH_CHECK(false, "ProcessGroupRoundRobin does not support recv");
 };
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::recvAnysource(
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::recvAnysource(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */) {
   TORCH_CHECK(false, "ProcessGroupRoundRobin does not support recv");
 };
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::barrier(
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::barrier(
     const BarrierOptions& /* unused */) {
   TORCH_CHECK(false, "ProcessGroupRoundRobin does not support barrier");
 };
@@ -122,7 +123,7 @@ const c10::intrusive_ptr<ProcessGroup>& ProcessGroupRoundRobin::next() {
   return processGroup;
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupRoundRobin::_allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {

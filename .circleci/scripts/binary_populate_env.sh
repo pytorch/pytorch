@@ -59,7 +59,7 @@ PIP_UPLOAD_FOLDER='nightly/'
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
 #TODO: We should be pulling semver version from the base version.txt
-BASE_BUILD_VERSION="1.13.0.dev$DATE"
+BASE_BUILD_VERSION="1.14.0.dev$DATE"
 # Change BASE_BUILD_VERSION to git tag when on a git tag
 # Use 'git -C' to make doubly sure we're in the correct directory for checking
 # the git tag
@@ -76,6 +76,11 @@ if [[ "$(uname)" == 'Darwin' ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
 else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
 fi
+
+if [[ -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
+  export PYTORCH_BUILD_VERSION="${PYTORCH_BUILD_VERSION}-with-pypi-cudnn"
+fi
+
 export PYTORCH_BUILD_NUMBER=1
 
 
@@ -124,9 +129,9 @@ if [[ "${OSTYPE}" == "msys" ]]; then
 else
   export DESIRED_DEVTOOLSET="${DESIRED_DEVTOOLSET:-}"
 fi
-
+export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}"
 export DATE="$DATE"
-export NIGHTLIES_DATE_PREAMBLE=1.13.0.dev
+export NIGHTLIES_DATE_PREAMBLE=1.14.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"

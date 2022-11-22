@@ -513,7 +513,7 @@ def verify(
             backend_out = prepared.run(onnx_input)
             if isinstance(torch_out, torch.Tensor):
                 torch_out = (torch_out,)
-            torch_out, _ = torch._C._jit_flatten(torch_out)
+            torch_out, _ = torch.jit._flatten(torch_out)
             # NB: onnx backend NEVER returns bare numpy array
             msg = "ONNX backend returned different results from PyTorch"
             result_hint = (

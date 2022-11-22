@@ -177,7 +177,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
   // Now, wait on all the events in the original stream.
   CUDAGuard dg(ex.stream_gpu_id);
   for (auto& event : events) {
-    CUDA_ENFORCE(cudaStreamWaitEvent(CHECK_NOTNULL(ex.stream), event, 0));
+    CUDA_ENFORCE(cudaStreamWaitEvent(TORCH_CHECK_NOTNULL(ex.stream), event, 0));
   }
 }
 

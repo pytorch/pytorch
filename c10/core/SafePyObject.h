@@ -29,13 +29,38 @@ struct C10_API SafePyObject {
   SafePyObject& operator=(SafePyObject const&) = delete;
 
   ~SafePyObject() {
-    pyinterpreter_->decref(data_, /*is_tensor*/ false);
+    (*pyinterpreter_)->decref(data_, /*is_tensor*/ false);
   }
 
-  c10::impl::PyInterpreter* pyinterpreter() const {
-    return pyinterpreter_;
+  c10::impl::PyInterpreter& pyinterpreter() const {
+    return *pyinterpreter_;
   }
   PyObject* ptr(const c10::impl::PyInterpreter*) const;
+
+ private:
+  PyObject* data_;
+  c10::impl::PyInterpreter* pyinterpreter_;
+};
+
+// Like SafePyObject, but non-owning.  Good for references to global PyObjects
+// that will be leaked on interpreter exit.  You get a copy constructor/assign
+// this way.
+struct C10_API SafePyHandle {
+  SafePyHandle() : data_(nullptr), pyinterpreter_(nullptr) {}
+  SafePyHandle(PyObject* data, c10::impl::PyInterpreter* pyinterpreter)
+      : data_(data), pyinterpreter_(pyinterpreter) {}
+
+  c10::impl::PyInterpreter& pyinterpreter() const {
+    return *pyinterpreter_;
+  }
+  PyObject* ptr(const c10::impl::PyInterpreter*) const;
+  void reset() {
+    data_ = nullptr;
+    pyinterpreter_ = nullptr;
+  }
+  operator bool() {
+    return data_;
+  }
 
  private:
   PyObject* data_;

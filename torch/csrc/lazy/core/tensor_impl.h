@@ -39,26 +39,18 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
 
   at::IntArrayRef sizes_custom() const override;
   at::IntArrayRef strides_custom() const override;
-  int64_t dim_custom() const override;
   int64_t numel_custom() const override;
+  int64_t storage_offset_custom() const override;
+  int64_t dim_custom() const override;
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
+  bool is_strides_like_custom(at::MemoryFormat memory_format) const override;
+  bool is_non_overlapping_and_dense_custom() const override;
 
-  virtual c10::SymIntArrayRef sym_sizes_custom() const override;
-  virtual c10::SymIntArrayRef sym_sizes() const override;
-  virtual c10::SymIntArrayRef sym_strides_custom() const override;
-
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  const at::Storage& storage() const override {
-    return tensor_->Storage();
-  }
-  bool has_storage() const override {
-    return tensor_->Storage();
-  }
-#endif // C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+  c10::SymIntArrayRef sym_sizes_custom() const override;
+  c10::SymIntArrayRef sym_strides_custom() const override;
 
  private:
   void setup_size_properties();
-  void setup_sym_sizes() const;
 
   LazyTensorPtr tensor_;
   mutable c10::optional<std::vector<c10::SymInt>> sym_sizes_;

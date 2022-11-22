@@ -1,31 +1,99 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/TensorFactories.h>
+
+#include <ATen/core/Tensor.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/EmptyTensor.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/MapAllocator.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/TracerMode.h>
-#include <c10/core/ScalarType.h>
-#include <c10/util/Deprecated.h>
-#include <ATen/native/Math.h>
-#include <ATen/native/Resize.h>
-#include <ATen/native/TensorFactories.h>
-#include <c10/core/TensorOptions.h>
-#include <ATen/detail/CUDAHooksInterface.h>
-#include <c10/util/Exception.h>
-#include <c10/util/irange.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/UnaryOps.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/Exception.h>
+#include <c10/util/irange.h>
+#include <c10/util/MathConstants.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_cast_Byte_native.h>
+#include <ATen/ops/_cast_Char_native.h>
+#include <ATen/ops/_cast_Double_native.h>
+#include <ATen/ops/_cast_Float_native.h>
+#include <ATen/ops/_cast_Half_native.h>
+#include <ATen/ops/_cast_Int_native.h>
+#include <ATen/ops/_cast_Long_native.h>
+#include <ATen/ops/_cast_Short_native.h>
+#include <ATen/ops/_dim_arange_native.h>
+#include <ATen/ops/_efficientzerotensor_native.h>
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_empty_per_channel_affine_quantized.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/bartlett_window_native.h>
+#include <ATen/ops/blackman_window_native.h>
+#include <ATen/ops/clone_native.h>
+#include <ATen/ops/complex.h>
+#include <ATen/ops/complex_native.h>
+#include <ATen/ops/cumprod.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/eye.h>
+#include <ATen/ops/eye_native.h>
+#include <ATen/ops/fill_native.h>
+#include <ATen/ops/flip.h>
+#include <ATen/ops/from_file_native.h>
+#include <ATen/ops/full_like_native.h>
+#include <ATen/ops/full_native.h>
+#include <ATen/ops/hamming_window_native.h>
+#include <ATen/ops/hann_window_native.h>
+#include <ATen/ops/kaiser_window_native.h>
+#include <ATen/ops/linspace.h>
+#include <ATen/ops/linspace_native.h>
+#include <ATen/ops/logspace.h>
+#include <ATen/ops/logspace_native.h>
+#include <ATen/ops/new_empty_native.h>
+#include <ATen/ops/new_empty_strided_native.h>
+#include <ATen/ops/new_full_native.h>
+#include <ATen/ops/new_ones_native.h>
+#include <ATen/ops/new_zeros_native.h>
+#include <ATen/ops/normal_native.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/ones_like_native.h>
+#include <ATen/ops/ones_native.h>
+#include <ATen/ops/polar.h>
+#include <ATen/ops/polar_native.h>
+#include <ATen/ops/promote_types.h>
+#include <ATen/ops/rand_like_native.h>
+#include <ATen/ops/rand_native.h>
+#include <ATen/ops/randint_like_native.h>
+#include <ATen/ops/randint_native.h>
+#include <ATen/ops/randn_like_native.h>
+#include <ATen/ops/randn_native.h>
+#include <ATen/ops/randperm.h>
+#include <ATen/ops/randperm_native.h>
+#include <ATen/ops/range.h>
+#include <ATen/ops/range_native.h>
+#include <ATen/ops/scalar_tensor_native.h>
+#include <ATen/ops/tril_indices_native.h>
+#include <ATen/ops/triu_indices_native.h>
+#include <ATen/ops/vander_native.h>
+#include <ATen/ops/zeros_like_native.h>
+#include <ATen/ops/zeros_like_ops.h>
+#include <ATen/ops/zeros_native.h>
 #endif
 
 #include <algorithm>
-#include <cctype>
-#include <cmath>
 #include <cstddef>
 #include <string>
 #include <c10/core/SymIntArrayRef.h>
@@ -214,12 +282,9 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<Sca
   return at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
-Tensor& empty_out(SymIntArrayRef sym_size,
+Tensor& empty_out(IntArrayRef size,
     c10::optional<c10::MemoryFormat> optional_memory_format,
     Tensor& result) {
-  // TODO: support empty_out properly (I was forced to change this immediately
-  // with empty so that empty/empty.out had the same type signature)
-  auto size = c10::asIntArrayRefSlow(sym_size);
   // Preferably, this argument would not be accepted by _out, but the code
   // generator requires the out and non-out overloads to match exactly
   TORCH_CHECK(
@@ -259,12 +324,6 @@ Tensor empty_like(
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-
-  TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
 
   TensorOptions options =
       self.options()
@@ -386,7 +445,7 @@ Tensor empty_like_quantized(
   }
 }
 
-Tensor new_empty(
+Tensor new_empty_symint(
     const Tensor& self,
     SymIntArrayRef size,
     c10::optional<ScalarType> dtype_opt,
@@ -401,10 +460,10 @@ Tensor new_empty(
   return at::empty_symint(size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
-Tensor new_empty_strided(
+Tensor new_empty_strided_symint(
     const Tensor& self,
-    IntArrayRef size,
-    IntArrayRef stride,
+    c10::SymIntArrayRef size,
+    c10::SymIntArrayRef stride,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -413,7 +472,7 @@ Tensor new_empty_strided(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  return at::empty_strided(size, stride, self.options().merge_in(options));
+  return at::empty_strided_symint(size, stride, self.options().merge_in(options));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1077,7 +1136,7 @@ Tensor triu_indices_cpu(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor zeros(SymIntArrayRef size,
+Tensor zeros_symint(SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1107,8 +1166,7 @@ Tensor& zeros_sparse_out(IntArrayRef size, Tensor& result) {
   return result;
 }
 
-Tensor& zeros_out(SymIntArrayRef sym_size, Tensor& result) {
-  auto size = c10::asIntArrayRefSlow(sym_size);
+Tensor& zeros_out(IntArrayRef size, Tensor& result) {
   if (result.is_sparse()) {
     // TODO: I think this branch should be dead, but we don't have an easy
     // way to cover all sparse kernels with zeros_sparse_out, so retain this
@@ -1483,7 +1541,7 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
   if (memory_format == MemoryFormat::Preserve) {
     if (src.is_non_overlapping_and_dense()) {
       // Copy all strides, this is marginally faster than calling empty_like
-      self = at::empty_strided(src.sizes(), src.strides(), src.options());
+      self = at::empty_strided_symint(src.sym_sizes(), src.sym_strides(), src.options());
     } else {
       self = at::empty_like(src);
     }

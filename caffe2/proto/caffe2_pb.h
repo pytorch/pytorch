@@ -108,7 +108,7 @@ inline TORCH_API caffe2::DeviceOption DeviceToOption(const at::Device& device) {
   return option;
 }
 
-inline TORCH_API at::Device OptionToDevice(const caffe2::DeviceOption option) {
+inline TORCH_API at::Device OptionToDevice(const caffe2::DeviceOption& option) {
   auto type = option.device_type();
   c10::DeviceIndex id = -1;
   switch (type) {

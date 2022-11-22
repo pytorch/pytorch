@@ -121,7 +121,7 @@ def _unary_helper(fn, args, kwargs, inplace):
         args, kwargs, lambda x: x._masked_data
     )
 
-    if args[0].layout() == torch.sparse_coo:
+    if args[0].layout == torch.sparse_coo:
         data_args[0] = data_args[0].coalesce()
         s = data_args[0].size()
         i = data_args[0].indices()
@@ -129,7 +129,7 @@ def _unary_helper(fn, args, kwargs, inplace):
         v = fn(*data_args)
         result_data = torch.sparse_coo_tensor(i, v, size=s)
 
-    elif args[0].layout() == torch.sparse_csr:
+    elif args[0].layout == torch.sparse_csr:
         crow = data_args[0].crow_indices()
         col = data_args[0].col_indices()
         data_args[0] = data_args[0].values()

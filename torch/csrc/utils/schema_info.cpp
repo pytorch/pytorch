@@ -100,6 +100,10 @@ bool SchemaInfo::is_mutable(const c10::SchemaArgument& argument) {
       });
 }
 
+bool SchemaInfo::has_argument(c10::string_view name) {
+  return schema_.argumentIndexWithName(name) != c10::nullopt;
+}
+
 bool SchemaInfo::is_mutable(c10::string_view name) {
   c10::optional<int> index = schema_.argumentIndexWithName(name);
   TORCH_INTERNAL_ASSERT(

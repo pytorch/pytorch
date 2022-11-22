@@ -32,7 +32,6 @@
 #include <ATen/ops/linalg_eigh.h>
 #include <ATen/ops/linalg_eigvalsh.h>
 #include <ATen/ops/linalg_solve_triangular.h>
-#include <ATen/ops/lstsq_native.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #endif
@@ -1561,6 +1560,9 @@ static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& piv
     input_array[i] = &input_data[i * input_matrix_stride];
   }
 
+  // needed to run lu tests in parallel, see https://github.com/pytorch/pytorch/issues/82894 for examples
+  // of failures
+  c10::cuda::device_synchronize();
   MAGMAQueue magma_queue(input.get_device());
 
   if (compute_pivots) {
@@ -2036,96 +2038,6 @@ void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, c
 
 REGISTER_CUDA_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-// magmaEig uses a hybrid CPU-GPU algorithm, which takes and return CPU
-// memory. So, we accept a GPU tensor, copy it to CPU memory, and later copy
-// the returned values from CPU to GPU. See also magmaSymeig, which uses a
-// similar approach.
-
-template <typename scalar_t>
-static void apply_eig(const Tensor& self, bool eigenvectors, Tensor& out_eigvals, Tensor& out_eigvecs,
-                      int* info_ptr) {
-#if !AT_MAGMA_ENABLED()
-TORCH_CHECK(false, "Calling torch.eig on a CUDA tensor requires compiling PyTorch with MAGMA. "
-                   "Either transfer the tensor to the CPU before calling torch.eig or recompile with MAGMA.");
-#else
-  TORCH_INTERNAL_ASSERT(self.device() == at::kCPU, "Internal error: apply_eig needs a CPU tensor");
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
-  magma_vec_t jobvr = eigenvectors ? MagmaVec : MagmaNoVec;
-  magma_int_t n = magma_int_cast(self.size(-1), "n");
-  auto self_data = self.data_ptr<scalar_t>();
-
-  auto out_eigvals_data = out_eigvals.data_ptr<scalar_t>();
-  scalar_t *wr = out_eigvals_data;
-
-  scalar_t *vr_data = NULL;
-  magma_int_t ldvr = 1;
-  if (jobvr == MagmaVec)
-  {
-      vr_data = out_eigvecs.data_ptr<scalar_t>();
-      ldvr = n;
-  }
-
-  value_t *rwork_data = nullptr;
-  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
-    ALLOCATE_ARRAY(rwork_data, value_t, n*2);
-  }
-
-  if (n > 0) {
-    // call magmaEig once to get the optimal size of work_data
-    scalar_t wkopt;
-    magma_int_t info;
-    magmaEig<scalar_t, value_t>(MagmaNoVec, jobvr, n, self_data, n, wr, NULL, 1, vr_data, ldvr, &wkopt, -1, rwork_data, &info);
-    magma_int_t lwork = static_cast<magma_int_t>(real_impl<scalar_t, value_t>(wkopt));
-
-    // call it a 2nd time to to the actual work
-    scalar_t *work_data = nullptr;
-    ALLOCATE_ARRAY(work_data, scalar_t, lwork);
-    magmaEig<scalar_t, value_t>(MagmaNoVec, jobvr, n, self_data, n, wr, NULL, 1, vr_data, ldvr, work_data, lwork, rwork_data, &info);
-    *info_ptr = info;
-  }
-#endif
-}
-
-/*
- * Internal helper; like eig_cuda but:
- *   1. assume that self is a square matrix of side "n"
- *   2. return CPU tensors (because this is what magmaEig returns), which will be copied to GPU memory
- *      by the caller
- */
-std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvectors) {
-  int64_t n = self.size(-1);
-  // copy self to pinned CPU memory
-  auto self_working_copy = at::empty_strided(
-      {n, n}, // square matrix
-      {1, n}, // column-ordered, as magmaEig expects
-      at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
-  self_working_copy.copy_(self);
-
-  // tensors holding the results. We use empty_strided to make them column-ordered
-  auto options = self.options().device(at::kCPU).memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor out_eigvals;
-  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
-      out_eigvals = at::empty({n}, options);
-  } else {
-      out_eigvals = at::empty_strided({n, 2}, {1, n}, options);
-  }
-  auto out_eigvecs = eigenvectors
-                     ? at::empty_strided({n, n}, {1, n}, options)
-                     : Tensor();
-
-  auto infos = at::zeros({}, self_working_copy.options().dtype(kInt));
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "eig_cuda", [&]{
-    apply_eig<scalar_t>(self_working_copy, eigenvectors, out_eigvals, out_eigvecs, infos.data_ptr<int>());
-  });
-  at::_linalg_check_errors(infos, "eig", /*is_matrix*/true);
-
-  return std::tuple<Tensor, Tensor>(out_eigvals, out_eigvecs);
-}
-
-REGISTER_CUDA_DISPATCH(eig_stub, &eig_kernel_impl);
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /*
@@ -2561,7 +2473,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
       .add_output(perm)
       .add_input(*pivots_)
       .build();
-    unpack_pivots_stub(pivots_->device().type(), iter, n);
+    unpack_pivots_stub(pivots_->device().type(), iter, n, n);
 
     if (trans == TransposeType::NoTranspose) {
       // Get the inverse permutation
@@ -2881,72 +2793,12 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singul
 
 REGISTER_CUDA_DISPATCH(lstsq_stub, &lstsq_kernel);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ legacy_lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
-  TORCH_WARN_ONCE(
-      "torch.lstsq is deprecated in favor of torch.linalg.lstsq and will be removed in a future PyTorch release.\n",
-      "torch.linalg.lstsq has reversed arguments and does not return the QR decomposition in "
-      "the returned tuple (although it returns other information about the problem).\n",
-      "To get the qr decomposition consider using torch.linalg.qr.\n",
-      "The returned solution in torch.lstsq stored the residuals of the solution in the ",
-      "last m - n columns of the returned value whenever m > n. In torch.linalg.lstsq, the ",
-      "residuals in the field 'residuals' of the returned named tuple.\n",
-      "The unpacking of the solution, as in\n",
-      "X, _ = torch.lstsq(B, A).solution[:A.size(1)]\n",
-      "should be replaced with\n",
-      "X = torch.linalg.lstsq(A, B).solution"
-    );
-
-#if !AT_MAGMA_ENABLED()
-  TORCH_CHECK(false, "solve: MAGMA library not found in "
-              "compilation. Please rebuild with MAGMA.");
-#else
-  const auto dtype = A.scalar_type();
-  TORCH_CHECK(B.scalar_type() == dtype, "exepected A and B dtypes to match but found ",
-              dtype, " and ", B.scalar_type());
-  TORCH_CHECK(A.numel() > 0 && A.dim() == 2, "A should be (non-empty) 2 dimensional");
-  TORCH_CHECK(B.numel() > 0 && B.dim() == 2, "B should be (non-empty) 2 dimensional");
-  auto a_sizes = A.sizes();
-  auto b_sizes = B.sizes();
-  TORCH_CHECK(a_sizes[0] == b_sizes[0], "Expected A and b to have same size "
-      "at dim 0, but A has ", a_sizes[0], " rows and B has ", b_sizes[0], " rows");
-  TORCH_CHECK(a_sizes[0] >= a_sizes[1], "Expected A with shape (m x n) to have "
-      "m >= n. The case for m < n is not implemented yet.");
-
-  Tensor A_working = cloneBatchedColumnMajor(A);
-  Tensor B_working = cloneBatchedColumnMajor(B);
-
-  int64_t m = a_sizes[0];
-  int64_t n = a_sizes[1];
-  int64_t nrhs = b_sizes[1];
-
-  int info;
-  AT_DISPATCH_FLOATING_TYPES(A.scalar_type(), "legacy_lstsq_cuda", [&] {
-    scalar_t *a_data = A_working.data_ptr<scalar_t>();
-    scalar_t *b_data = B_working.data_ptr<scalar_t>();
-    scalar_t wkopt;
-    magmaGels(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, &wkopt, -1, &info);
-
-    const auto hwork_size = static_cast<magma_int_t>(wkopt);
-    scalar_t *hwork = nullptr;
-    ALLOCATE_ARRAY(hwork, scalar_t, hwork_size);
-
-    magmaGels(MagmaNoTrans, m, n, nrhs, a_data, m, b_data, m, hwork, hwork_size, &info);
-  });
-
-  TORCH_CHECK(info == 0, "MAGMA gels : Argument %d : illegal value", -info);
-  return std::tuple<Tensor, Tensor>(B_working, A_working);
-#endif  // AT_MAGMA_ENABLED()
-}
-
 
 #if defined(BUILD_LAZY_CUDA_LINALG)
 struct DispatchInitializer {
   DispatchInitializer() {
     cuda::detail::LinalgDispatch disp{ _symeig_helper_cuda,
-                                       _cholesky_solve_helper_cuda,
-                                       legacy_lstsq_cuda};
+                                       _cholesky_solve_helper_cuda};
     cuda::detail::registerLinalgDispatch(disp);
   };
 } initializer;

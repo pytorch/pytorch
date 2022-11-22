@@ -1,4 +1,4 @@
-#include <c10d/ProcessGroupWrapper.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
 
 #ifdef USE_C10D_GLOO
 
@@ -10,8 +10,8 @@
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include <stdexcept>
 
 namespace c10d {
@@ -271,21 +271,21 @@ const std::string ProcessGroupWrapper::getBackendName() const {
   return pg_->getBackendName();
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::broadcast(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::broadcast(
     std::vector<at::Tensor>& data,
     const BroadcastOptions& opts) {
   runCollectiveChecks(OpType::BROADCAST, data);
   return pg_->broadcast(data, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allreduce(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::allreduce(
     std::vector<at::Tensor>& data,
     const AllreduceOptions& opts) {
   runCollectiveChecks(OpType::ALLREDUCE, data);
   return pg_->allreduce(data, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allreduce_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   // NOTE: We don't enforce shape checking for allreduce_coalesced because
@@ -296,14 +296,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allreduce_coalesced(
   return pg_->allreduce_coalesced(tensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::reduce(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   runCollectiveChecks(OpType::REDUCE, tensors);
   return pg_->reduce(tensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allgather(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
@@ -311,7 +311,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allgather(
   return pg_->allgather(outputTensors, inputTensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::_allgather_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const AllgatherOptions& opts) {
@@ -320,7 +320,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::_allgather_base(
   return pg_->_allgather_base(outputBuffer, inputBuffer, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allgather_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& outputTensorLists,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
@@ -332,7 +332,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::allgather_coalesced(
   return pg_->allgather_coalesced(outputTensorLists, inputTensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::gather(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::gather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
@@ -340,7 +340,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::gather(
   return pg_->gather(outputTensors, inputTensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::scatter(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
@@ -348,7 +348,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::scatter(
   return pg_->scatter(outputTensors, inputTensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::reduce_scatter(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
@@ -356,7 +356,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::reduce_scatter(
   return pg_->reduce_scatter(outputTensors, inputTensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::alltoall_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputSplitSizes,
@@ -368,7 +368,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::alltoall_base(
       outputTensor, inputTensor, outputSplitSizes, inputSplitSizes, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::alltoall(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& opts) {
@@ -395,37 +395,36 @@ uint64_t ProcessGroupWrapper::getSequenceNumberForGroup() {
   return pg_->getSequenceNumberForGroup();
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::send(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
   return pg_->send(tensors, dstRank, tag);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::recv(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
   return pg_->recv(tensors, srcRank, tag);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::recvAnysource(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::recvAnysource(
     std::vector<at::Tensor>& tensors,
     int tag) {
   return pg_->recvAnysource(tensors, tag);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::barrier(
+c10::intrusive_ptr<Work> ProcessGroupWrapper::barrier(
     const BarrierOptions& opts) {
   runCollectiveChecks(OpType::BARRIER, {});
   return pg_->barrier(opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::
-    _reduce_scatter_base(
-        at::Tensor& outputBuffer,
-        at::Tensor& inputBuffer,
-        const ReduceScatterOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupWrapper::_reduce_scatter_base(
+    at::Tensor& outputBuffer,
+    at::Tensor& inputBuffer,
+    const ReduceScatterOptions& opts) {
   runCollectiveChecks(
       OpType::_REDUCE_SCATTER_BASE, {inputBuffer, outputBuffer});
   return pg_->_reduce_scatter_base(outputBuffer, inputBuffer, opts);

@@ -14,6 +14,24 @@
 #import <Foundation/NSProcessInfo.h>
 #endif
 
+// This is a utility macro that can be used to throw an exception when a CoreML
+// API function produces a NSError. The exception will contain a message with
+// useful info extracted from the NSError.
+#define COREML_THROW_IF_ERROR(error, preamble)                                   \
+  do {                                                                           \
+    if C10_LIKELY(error) {                                                       \
+      throw c10::Error(                                                          \
+          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},                 \
+          c10::str(                                                              \
+              preamble,                                                          \
+              " Error details: ",                                                \
+              " Localized_description: ", error.localizedDescription.UTF8String, \
+              " Domain: ", error.domain.UTF8String,                              \
+              " Code: ", error.code,                                             \
+              " User Info: ", error.userInfo.description.UTF8String));           \
+    }                                                                            \
+  } while (false)
+
 namespace torch {
 namespace jit {
 namespace mobile {
@@ -70,9 +88,14 @@ GenericList pack_outputs(const std::vector<TensorSpec>& output_specs, id<MLFeatu
       tensor.data_ptr<float>(),
       (float*)val.multiArrayValue.dataPointer,
       count * sizeof(float));
-    outputs.push_back(tensor);
+    outputs.push_back(std::move(tensor));
   }
-  return c10::impl::toList(outputs);
+  if(output_specs.size() > 1){
+    c10::List<c10::List<torch::Tensor>> output_res;
+    output_res.push_back(std::move(outputs));
+    return c10::impl::toList(std::move(output_res));
+  }
+  return c10::impl::toList(std::move(outputs));
 }
 
 class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
@@ -143,7 +166,12 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
     PTMCoreMLExecutor *executor = model_wrapper->executor;
     [executor setInputs:inputs];
 
-    id<MLFeatureProvider> outputsProvider = [executor forward];
+    NSError *error;
+    id<MLFeatureProvider> outputsProvider = [executor forward:&error];
+    if (!outputsProvider) {
+      COREML_THROW_IF_ERROR(error, "Error running CoreML inference");
+    }
+
     return pack_outputs(model_wrapper->outputs, outputsProvider);
   }
 
@@ -162,7 +190,7 @@ static auto cls = torch::jit::backend<CoreMLBackend>("coreml");
 
 struct PTMCoreMLContext : public ContextInterface {
   void setModelCacheDirectory(std::string dir) override {
-    [PTMCoreMLCompiler setModelCacheDirectory:dir];
+    [PTMCoreMLCompiler setCacheDirectory:dir];
   }
 };
 

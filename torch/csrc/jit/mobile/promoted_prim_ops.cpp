@@ -67,10 +67,20 @@ void sym_size_int(Stack& stack) {
   auto t = pop(stack).toTensor();
   push(stack, t.sym_sizes()[dim]);
 }
+void sym_stride_int(Stack& stack) {
+  auto dim = pop(stack).toInt();
+  auto t = pop(stack).toTensor();
+  push(stack, t.sym_strides()[dim]);
+}
 
 void sym_numel(Stack& stack) {
   auto t = std::move(pop(stack)).toTensor();
   push(stack, t.sym_numel());
+}
+
+void sym_storage_offset(Stack& stack) {
+  auto t = std::move(pop(stack)).toTensor();
+  push(stack, t.sym_storage_offset());
 }
 
 void sym_stride(Stack& stack) {
