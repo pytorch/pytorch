@@ -2237,6 +2237,96 @@ def binary_cross_entropy_with_logits(
 
     return apply_loss_reduction(loss, reduction)
 
+def div_rtn(x, y):
+    q = x // y
+    r = x % y
+    # WARNING: explicit bool conversion here is necessary;
+    # would be fixed by SymBool
+    if r != 0 and (bool(r < 0) != bool(y < 0)):
+        q -= 1
+    return q
+
+def pooling_output_shape_pad_lr(
+    inputSize, kernelSize, pad_l, pad_r, stride, dilation, ceil_mode
+):
+    outputSize = (
+        div_rtn(
+            inputSize
+            + pad_l
+            + pad_r
+            - dilation * (kernelSize - 1)
+            - 1
+            + (stride - 1 if ceil_mode else 0),
+            stride,
+        )
+        + 1
+    )
+    if ceil_mode:
+        if (outputSize - 1) * stride >= inputSize + pad_l:
+            outputSize -= 1
+    return outputSize
+
+# copied from _meta_registrations (TODO: create a common utils file)
+def pooling_output_shape(inputSize, kernelSize, pad, stride, dilation, ceil_mode):
+    utils.check(stride != 0, lambda: "stride should not be zero")
+    utils.check(pad >= 0, lambda: f"pad must be non-negative, but got pad: {pad}")
+    utils.check(
+        pad <= kernelSize // 2,
+        lambda: f"pad should be at most half of kernel size, but got pad={pad} and kernel_size={kernelSize}",
+    )
+    return pooling_output_shape_pad_lr(
+        inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode
+    )
+
+@register_decomposition(aten.max_pool1d)
+def max_pool1d(self: Tensor, kernel_size, stride=(), padding=(0), dilation=(1), ceil_mode=False):
+    ndim = self.dim()
+    utils.check(
+        (ndim == 2 and self.shape[0] != 0 and self.shape[1] != 0) or
+        (ndim == 3 and self.shape[1] != 0 and self.shape[2] != 0),
+        lambda: f"max_pool1d: Expected 2D or 3D (batch mode) tensor with optional 0\
+         dim batch size for input, but got: {self.shape}")
+    if self.is_quantized():
+        return aten.quantized_max_pool1d(self, kernel_size, stride, padding, dilation, ceil_mode)
+    primal, dual = torch.autograd.forward_ad.unpack_dual(self)
+    if ((self.requires_grad and torch.is_grad_enabled())
+        or dual is not None
+        or not self.device.is_cpu()
+        or issubclass(self, torch.Tensor)):
+        return aten.max_pool1d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)[0]
+    utils.check(ndim == 2 or ndim == 3, f"max_pool1d() Expected 2D or 3D input tensor, but got {self.shape}")
+    utils.check(len(kernel_size) == 1, f"max_pool1d() kernel_size must be an int, list of ints or tuple of ints of size 1 but got size {len(kernel_size)}")
+    utils.check(len(stride) == 0 or len(stride) == 1, f"max_pool1d() stride must be None, an int, list of ints, or tuple of ints of size 1 but got size {len(stride)}")
+    utils.check(len(padding) == 1, f"max_pool1d() padding must be an int, list of ints, or tuple of ints of size 1 but got size {len(padding)}")
+    utils.check(len(dilation) == 1, f"max_pool1d() dilation must be an int, list of ints or tuple of ints of size 1 but got size {len(dilation)}")
+    if stride is ():
+        stride = kernel_size
+    NB = self.shape[-3] if self.dim() == 3 else 1
+    NC = self.shape[-2]
+    IW, KW = self.shape[-1], kernel_size[0]
+    SJ, PJ, DJ = stride[0], padding[0], dilation[0]
+
+    utils.check(
+        KW > 0,
+        f"max_pool1d() kernel_size must be greater than zero, but got {KW}")
+    utils.check(
+        SJ > 0, f"max_pool1d() stride must be greater than zero, but got {SJ}")
+    utils.check(
+        PJ >= 0, f"max_pool1d() padding must be non-negative, but got {PJ}")
+    utils.check(
+        PJ <= KW / 2,
+        f"max_pool1d() padding should be at most half of kernel size, but got padding={PJ}\
+        and kernel_size={KW}")
+    utils.check(
+        DJ > 0, f"max_pool1d() dilation must be greater than zero, but got {DJ}")
+
+    OW = pooling_output_shape(IW, KW, PJ, SJ, DJ, ceil_mode);
+    utils.check(OW >= 0, f"max_pool1d() Invalid computed output size: {OW}");
+    output = torch.empty(NB, NC, OW, dtype=self.dtype, device=self.device, memory_format=utils.suggest_memory_format(self))
+    # max_pool1d_stub
+    if self.dim() == 2:
+        output.squeeze_(0)
+    return output
 
 def should_fold(tensor1: torch.Tensor, dim_tensor2: int) -> bool:
     dim_tensor1 = tensor1.ndim
