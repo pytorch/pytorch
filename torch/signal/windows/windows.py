@@ -112,12 +112,12 @@ Returns:
 
 Examples::
 
-    >>> # Generate a symmetric exponential window of size 10 and with a decay value of 1.0.
+    >>> # Generates a symmetric exponential window of size 10 and with a decay value of 1.0.
     >>> # The center will be at (M - 1) / 2, where M is 10.
     >>> torch.signal.windows.exponential(10)
     tensor([0.0111, 0.0302, 0.0821, 0.2231, 0.6065, 0.6065, 0.2231, 0.0821, 0.0302, 0.0111])
 
-    >>> # Generate a periodic exponential window and decay factor equal to .5
+    >>> # Generates a periodic exponential window and decay factor equal to .5
     >>> torch.signal.windows.exponential(10, sym=False,tau=.5)
     tensor([4.5400e-05, 3.3546e-04, 2.4788e-03, 1.8316e-02, 1.3534e-01, 1.0000e+00, 1.3534e-01, 1.8316e-02, 2.4788e-03, 3.3546e-04])
     """.format(
@@ -198,11 +198,11 @@ Returns:
 
 Examples::
 
-    >>> # Generate a symmetric cosine window.
+    >>> # Generates a symmetric cosine window.
     >>> torch.signal.windows.cosine(10)
     tensor([0.1564, 0.4540, 0.7071, 0.8910, 0.9877, 0.9877, 0.8910, 0.7071, 0.4540, 0.1564])
 
-    >>> # Generate a periodic cosine window.
+    >>> # Generates a periodic cosine window.
     >>> torch.signal.windows.cosine(10, sym=False)
     tensor([0.1423, 0.4154, 0.6549, 0.8413, 0.9595, 1.0000, 0.9595, 0.8413, 0.6549, 0.4154])
 """.format(
@@ -270,11 +270,11 @@ Returns:
 
 Examples::
 
-    >>> # Generate a symmetric gaussian window with a standard deviation of 1.0.
+    >>> # Generates a symmetric gaussian window with a standard deviation of 1.0.
     >>> torch.signal.windows.gaussian(10)
     tensor([4.0065e-05, 2.1875e-03, 4.3937e-02, 3.2465e-01, 8.8250e-01, 8.8250e-01, 3.2465e-01, 4.3937e-02, 2.1875e-03, 4.0065e-05])
 
-    >>> # Generate a periodic gaussian window and standard deviation equal to 0.9.
+    >>> # Generates a periodic gaussian window and standard deviation equal to 0.9.
     >>> torch.signal.windows.gaussian(10, sym=False,std=0.9)
     tensor([1.9858e-07, 5.1365e-05, 3.8659e-03, 8.4658e-02, 5.3941e-01, 1.0000e+00, 5.3941e-01, 8.4658e-02, 3.8659e-03, 5.1365e-05])
 """.format(
@@ -346,10 +346,10 @@ Keyword args:
 
 Examples::
 
-    >>> # Generate a symmetric gaussian window with a standard deviation of 1.0.
+    >>> # Generates a symmetric gaussian window with a standard deviation of 1.0.
     >>> torch.signal.windows.kaiser(5)
     tensor([4.0065e-05, 2.1875e-03, 4.3937e-02, 3.2465e-01, 8.8250e-01, 8.8250e-01, 3.2465e-01, 4.3937e-02, 2.1875e-03, 4.0065e-05])
-    >>> # Generate a periodic gaussian window and standard deviation equal to 0.9.
+    >>> # Generates a periodic gaussian window and standard deviation equal to 0.9.
     >>> torch.signal.windows.kaiser(5, sym=False,std=0.9)
     tensor([1.9858e-07, 5.1365e-05, 3.8659e-03, 8.4658e-02, 5.3941e-01, 1.0000e+00, 5.3941e-01, 8.4658e-02, 3.8659e-03, 5.1365e-05])
 """.format(
@@ -424,11 +424,11 @@ Returns:
 
 Examples::
 
-    >>> # Generate a symmetric Hamming window.
+    >>> # Generates a symmetric Hamming window.
     >>> torch.signal.windows.hamming(10)
     tensor([0.0800, 0.1876, 0.4601, 0.7700, 0.9723, 0.9723, 0.7700, 0.4601, 0.1876, 0.0800])
 
-    >>> # Generate a periodic Hamming window.
+    >>> # Generates a periodic Hamming window.
     >>> torch.signal.windows.hamming(10, sym=False)
     tensor([0.0800, 0.1679, 0.3979, 0.6821, 0.9121, 1.0000, 0.9121, 0.6821, 0.3979, 0.1679])
 """.format(
@@ -474,11 +474,11 @@ Returns:
 
 Examples::
 
-    >>> # Generate a symmetric Hann window.
+    >>> # Generates a symmetric Hann window.
     >>> torch.signal.windows.hann(10)
     tensor([0.0000, 0.1170, 0.4132, 0.7500, 0.9698, 0.9698, 0.7500, 0.4132, 0.1170, 0.0000])
 
-    >>> # Generate a periodic Hann window.
+    >>> # Generates a periodic Hann window.
     >>> torch.signal.windows.hann(10, sym=False)
     tensor([0.0000, 0.0955, 0.3455, 0.6545, 0.9045, 1.0000, 0.9045, 0.6545, 0.3455, 0.0955])
 """.format(
@@ -529,11 +529,11 @@ Returns:
 
 Examples::
 
-    >>> # Generate a symmetric Blackman window.
+    >>> # Generates a symmetric Blackman window.
     >>> torch.signal.windows.blackman(5)
     tensor([-1.4901e-08,  3.4000e-01,  1.0000e+00,  3.4000e-01, -1.4901e-08])
 
-    >>> # Generate a periodic Blackman window.
+    >>> # Generates a periodic Blackman window.
     >>> torch.signal.windows.blackman(5, sym=False)
     tensor([-1.4901e-08,  2.0077e-01,  8.4923e-01,  8.4923e-01,  2.0077e-01])
 """.format(
@@ -586,11 +586,11 @@ Returns:
 
 Examples::
 
-    >>> # Generate a symmetric Bartlett window.
+    >>> # Generates a symmetric Bartlett window.
     >>> torch.signal.windows.bartlett(10)
     tensor([0.0000, 0.2222, 0.4444, 0.6667, 0.8889, 0.8889, 0.6667, 0.4444, 0.2222, 0.0000])
 
-    >>> # Generate a periodic Bartlett window.
+    >>> # Generates a periodic Bartlett window.
     >>> torch.signal.windows.bartlett(10, sym=False)
     tensor([0.0000, 0.2000, 0.4000, 0.6000, 0.8000, 1.0000, 0.8000, 0.6000, 0.4000, 0.2000])
 """.format(
@@ -658,11 +658,11 @@ Returns:
 
 Examples::
 
-    >>> # Generate a symmetric general cosine window with 3 coefficients.
+    >>> # Generates a symmetric general cosine window with 3 coefficients.
     >>> torch.signal.windows.general_cosine(10, a=[0.46, 0.23, 0.31], sym=True)
     tensor([0.5400, 0.3376, 0.1288, 0.4200, 0.9136, 0.9136, 0.4200, 0.1288, 0.3376, 0.5400])
 
-    >>> # Generate a periodic general cosine window wit 2 coefficients.
+    >>> # Generates a periodic general cosine window wit 2 coefficients.
     >>> torch.signal.windows.general_cosine(10, a=[0.5, 1 - 0.5], sym=False)
     tensor([0.0000, 0.0955, 0.3455, 0.6545, 0.9045, 1.0000, 0.9045, 0.6545, 0.3455, 0.0955])
 """.format(
@@ -670,7 +670,7 @@ Examples::
     ),
 )
 def general_cosine(M, *,
-                   a: Union[List, Tuple],
+                   a: Iterable,
                    sym: bool = True,
                    dtype: torch.dtype = None,
                    layout: torch.layout = torch.strided,
@@ -737,11 +737,11 @@ Returns:
 
 Examples::
 
-    >>> # Generate a symmetric Hamming window with the general Hamming window.
+    >>> # Generates a symmetric Hamming window with the general Hamming window.
     >>> torch.signal.windows.general_hamming(10, sym=True)
     tensor([0.0800, 0.1876, 0.4601, 0.7700, 0.9723, 0.9723, 0.7700, 0.4601, 0.1876, 0.0800])
 
-    >>> # Generating a periodic Hann window with the general Hamming window.
+    >>> # Generates a periodic Hann window with the general Hamming window.
     >>> torch.signal.windows.general_hamming(10, alpha=0.5, sym=False)
     tensor([0.0000, 0.0955, 0.3455, 0.6545, 0.9045, 1.0000, 0.9045, 0.6545, 0.3455, 0.0955])
 """.format(
