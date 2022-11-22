@@ -133,31 +133,28 @@ def get_element(
 
 def _print_nested(
     value: STATE_DICT_ITEM,
-    padding: str = "",
     prefix: str = "",
     print_fun: Callable[[str], None] = print,
 ) -> None:
     if type(value) is ShardedTensor:
-        print_fun(f"{padding}{prefix} ShardedTensor size {value.size()}")
+        print_fun(f"{prefix} ShardedTensor size: {value.size()}")
         for shard in value.local_shards():
             _print_nested(
                 shard.tensor,
-                f"{padding}\t",
                 f"{shard.metadata.shard_offsets} ",
                 print_fun=print_fun,
             )
     elif type(value) is (DTensor):
-        print_fun(f"{padding}{prefix} DistributedTensor size {value.size()}")
+        print_fun(f"{prefix} DistributedTensor size: {value.size()}")
         # TODO: add local offset for _local_tensor in print_nested.
         _print_nested(
             value._local_tensor,
-            f"{padding}\t",
             print_fun=print_fun,
         )
     elif isinstance(value, torch.Tensor):
-        print_fun(f"{padding}{prefix} Tensor size {value.size()}")
+        print_fun(f"{prefix} Tensor size: {value.size()}")
     else:
-        print_fun(f"{padding}{prefix} Type {type(value)}")
+        print_fun(f"{prefix} Type: {type(value)}")
 
 
 def print_tensor(
