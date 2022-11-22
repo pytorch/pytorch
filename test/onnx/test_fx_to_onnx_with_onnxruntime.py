@@ -15,7 +15,17 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
-        self.run_test_with_positional_args(func, (tensor_x,))
+        self.run_test_with_fx_to_onnx_exporter(func, (tensor_x,))
+
+    def test_func_with_args_and_kwargs(self):
+        def func(x, b=1.0):
+            y = x + b
+            z = y.relu()
+            return (y, z)
+
+        tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
+
+        self.run_test_with_fx_to_onnx_exporter(func, (tensor_x,), {"b": 500.0})
 
     def test_mnist(self):
         class MNISTModel(nn.Module):
@@ -39,7 +49,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        self.run_test_with_positional_args(MNISTModel(), (tensor_x,))
+        self.run_test_with_fx_to_onnx_exporter(MNISTModel(), (tensor_x,))
 
 
 if __name__ == "__main__":

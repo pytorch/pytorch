@@ -3,7 +3,7 @@ import onnx.checker
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.onnx._internal._fx import _export_function, _export_module
+from torch.onnx._internal._fx import export
 from torch.testing._internal import common_utils
 
 
@@ -14,7 +14,7 @@ class TestFxToOnnx(common_utils.TestCase):
             z = y.relu()
             return (y, z)
 
-        onnx_model = _export_function(func, torch.randn(1, 1, 2))
+        onnx_model = export(func, torch.randn(1, 1, 2))
         onnx.checker.check_model(onnx_model)
 
     def test_mnist(self):
@@ -40,7 +40,7 @@ class TestFxToOnnx(common_utils.TestCase):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        onnx_model = _export_module(MNISTModel(), tensor_x)
+        onnx_model = export(MNISTModel(), tensor_x)
         onnx.checker.check_model(onnx_model)
 
 

@@ -42,7 +42,7 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     return verification.verify(*args, **kwargs)
 
 
-def run_model_test_with_positional_args(test_suite: _TestONNXRuntime, *args, **kwargs):
+def run_model_test_with_fx_to_onnx_exporter(test_suite: _TestONNXRuntime, *args, **kwargs):
     kwargs["ort_providers"] = _ORT_PROVIDERS
     kwargs["opset_version"] = test_suite.opset_version
     kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
@@ -50,7 +50,7 @@ def run_model_test_with_positional_args(test_suite: _TestONNXRuntime, *args, **k
         kwargs["check_shape"] = test_suite.check_shape
     if hasattr(test_suite, "check_dtype"):
         kwargs["check_dtype"] = test_suite.check_dtype
-    return verification.verify_model_with_positional_args(*args, **kwargs)
+    return verification.verify_model_with_fx_to_onnx_exporter(*args, **kwargs)
 
 
 def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
@@ -142,7 +142,9 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         if not is_model_script and not self.is_script:
             _run_test(model, tracing_remained_onnx_input_idx)
 
-    def run_test_with_positional_args(self, model, input_args, rtol=1e-3, atol=1e-7):
-        run_model_test_with_positional_args(
-            self, model, input_args, rtol=rtol, atol=atol
+    def run_test_with_fx_to_onnx_exporter(
+        self, model, input_args, input_kwargs=None, rtol=1e-3, atol=1e-7
+    ):
+        run_model_test_with_fx_to_onnx_exporter(
+            self, model, input_args, input_kwargs, rtol=rtol, atol=atol
         )

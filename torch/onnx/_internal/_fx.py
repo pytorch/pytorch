@@ -350,29 +350,21 @@ def _export(
     return model_proto
 
 
-def _export_function(fn: Callable, *args, use_binary_format: bool = True):
+def export(fn: Union[torch.nn.Module, Callable], *args, use_binary_format: bool = True, **kwargs):
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(args)
     # Translate callable to FX graph.
-    graph_module = functorch.make_fx(fn)(*args)
-    # Export FX graph to ONNX ModelProto.
-    return _export(
-        graph_module,
-        *args,
-        decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
-        use_binary_format=use_binary_format,
-    )
-
-
-def _export_module(module: torch.nn.Module, *args, use_binary_format: bool = True):
-    # args will be converted to symbolic tensor. Let's copy to avoid side effects.
-    args = copy.deepcopy(args)
-    # Convert nn.Module to FX graph
+    #
     # TODO(wechi): There are several symbolic tracing mechanisms to convert
     # nn.Module to FX graph. We should choose the right one after they are
     # matured.
-    graph_module, graph_guard = torch._dynamo.export(module, *args, aten_graph=True)
+    graph_module, graph_guard = torch._dynamo.export(
+        fn, *args, aten_graph=True, **kwargs
+    )
     # Export FX graph to ONNX ModelProto.
+    #
+    # Note that ALL kwargs are folded into constants in graph_module, so we don't pass kwargs
+    # to _export.
     return _export(
         graph_module,
         *args,

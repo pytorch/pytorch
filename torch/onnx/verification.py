@@ -735,9 +735,10 @@ def verify(
 
 
 @_beartype.beartype
-def verify_model_with_positional_args(
+def verify_model_with_fx_to_onnx_exporter(
     model: Union[torch.nn.Module, Callable],
     input_args: Union[torch.Tensor, Tuple[Any, ...]],
+    input_kwargs: Optional[Dict[str, Any]] = None,
     check_shape: bool = True,
     check_dtype: bool = True,
     rtol: float = 0.001,
@@ -745,14 +746,25 @@ def verify_model_with_positional_args(
     acceptable_error_percentage: Optional[float] = None,
     **_,
 ):
-    if isinstance(model, torch.nn.Module):
-        onnx_model = _fx._export_module(model, *input_args)
-    elif callable(model):
-        onnx_model = _fx._export_function(model, *input_args)
-    else:
-        raise ValueError(
-            f"model must be a torch.nn.Module or Callable but got {type(model)}"
-        )
+    if input_kwargs is None:
+        input_kwargs = {}
+
+    # Make reference FX model.
+    #
+    # We don't directly compare ONNX model with the original one because
+    # Dynamo's FX exporter (used inside ONNX exporter) folds kwargs into
+    # constants so the input schema is changed.
+    # If we switch to another PyTorch-to-FX exporter in _fx._exporter_module
+    # and _fx._exporter_function, this assumption could be broken. To fix,
+    # please
+    #  1. inspect the result printed by fx_model.print_readable(),
+    #  2. and track how "input_kwargs" are passed into other functions.
+    fx_args, fx_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
+    fx_model, _ = torch._dynamo.export(model, *fx_args, aten_graph=True, **fx_kwargs)
+
+    # Make ONNX model.
+    onnx_args, onnx_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
+    onnx_model = _fx.export(model, *onnx_args, **onnx_kwargs)
 
     with torch.no_grad(), contextlib.ExitStack() as stack:
         tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
@@ -762,17 +774,18 @@ def verify_model_with_positional_args(
             model_file_path, ort_providers=("CPUExecutionProvider",)
         )
 
-    model_copy = _try_clone_model(model)
     _compare_ort_pytorch_model(
-        model=model_copy,
+        fx_model,
         ort_session=ort_session,
         input_args=input_args,
+        # Dynamo exporter folds all kwargs into in-graph constants,
+        # so we can't specify input_kwargs=input_kwargs.
+        input_kwargs=None,
         rtol=rtol,
         atol=atol,
         check_shape=check_shape,
         check_dtype=check_dtype,
         acceptable_error_percentage=acceptable_error_percentage,
-        input_kwargs=None,
         additional_test_inputs=None,
         remained_onnx_input_idx=None,
         flatten=False,
