@@ -57,6 +57,7 @@ def make_test(optim_cls, exp_frame_cnt=1, closure=None, **kwargs):
 def enable_optimizer_tracing():
     try:
         old = set(torch._dynamo.skipfiles.FILENAME_ALLOWLIST)
+
         torch._dynamo.skipfiles.FILENAME_ALLOWLIST.update(optim_filenames)
         yield
     finally:
