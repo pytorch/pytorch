@@ -63,10 +63,10 @@ inline void _vec_log_softmax_lastdim(
       outer_size,
       grain_size,
       [&](int64_t begin, int64_t end) {
-    // MSVC requires such a declaration for dynamic arrays
-    // Source: https://stackoverflow.com/a/33423538
-    std::unique_ptr<scalar_t[]> tmp_sum_scalar(new scalar_t[CHUNK_SIZE]);
-    std::unique_ptr<scalar_t[]> max_input_arr(new scalar_t[CHUNK_SIZE]);
+        // MSVC requires such a declaration for dynamic arrays
+        // Source: https://stackoverflow.com/a/33423538
+        std::unique_ptr<scalar_t[]> tmp_sum_scalar(new scalar_t[CHUNK_SIZE]);
+        std::unique_ptr<scalar_t[]> max_input_arr(new scalar_t[CHUNK_SIZE]);
         for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
           int64_t loop_end = CHUNK_SIZE;
           if (ii + CHUNK_SIZE > end)
