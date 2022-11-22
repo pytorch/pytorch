@@ -128,7 +128,7 @@ class RangeVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         assert "range" not in codegen.tx.f_globals
-        codegen.append_output(codegen.create_load_global("range", add=True))
+        codegen.append_output(codegen.create_load_python_module(range))
         codegen.foreach(self.items)
         return [create_instruction("CALL_FUNCTION", 3)]
 
