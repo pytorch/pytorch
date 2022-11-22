@@ -127,7 +127,7 @@ def main(argv: List[Any]) -> None:
         default=False,
         required=False,
     )
-    options = parser.parse_args()
+    options = parser.parse_args(argv)
 
     if os.path.isfile(options.model_file_list_path):
         print("Processing model file: ", options.model_file_list_path)
@@ -186,4 +186,4 @@ def main(argv: List[Any]) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    main(sys.argv[1:])
