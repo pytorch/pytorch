@@ -495,6 +495,7 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(FuncTorchDynamicLayerFrontMode)
       DEF_ONE(FuncTorchDynamicLayerBackMode)
       DEF_ONE(PythonDispatcher)
+      DEF_ONE(Functionalize)
   // clang-format on
 
 #define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
