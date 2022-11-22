@@ -245,6 +245,12 @@ class TestCppExtensionJIT(common.TestCase):
                     pass
                 else:
                     raise
+            try:
+                torch.cuda.synchronize()
+            except RuntimeError:
+                # Ignore any error, e.g. unsupported PTX code on current device
+                # to avoid errors from here leaking into other tests
+                pass
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
