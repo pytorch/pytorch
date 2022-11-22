@@ -116,7 +116,7 @@ def cpp_compiler_search(search):
                     cxx = install_gcc_via_conda()
             subprocess.check_output([cxx, "--version"])
             return cxx
-        except (subprocess.SubprocessError, FileNotFoundError, ImportError, PermissionError):
+        except (subprocess.SubprocessError, FileNotFoundError, ImportError):
             continue
     raise exc.InvalidCxxCompiler()
 
