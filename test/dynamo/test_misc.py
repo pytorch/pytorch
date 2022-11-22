@@ -3033,6 +3033,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_get_device_index(self):
+        def fn(x):
+            x = x + 1
+            a = torch._utils._get_device_index(x.device)
+            b = torch._utils._get_device_index(1)
+            return a, b
+
+        x = torch.rand(4, device="cuda")
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
 
 class CustomFunc(torch.autograd.Function):
     @staticmethod

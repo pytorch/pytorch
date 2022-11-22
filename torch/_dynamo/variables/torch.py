@@ -165,6 +165,7 @@ class TorchVariable(VariableTracker):
             torch.is_floating_point,
             torch.cuda.is_available,
             torch.nn.functional._Reduction.get_enum,
+            torch._utils._get_device_index,
         ):
             return True
         return getattr(self.value, "__module__", None) == "math"
