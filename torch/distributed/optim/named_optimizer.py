@@ -214,9 +214,9 @@ class NamedOptimizer(optim.Optimizer):
         for new_group in new_param_groups:
             param_keys = []
             for param_key in new_group["params"]:
-                param_keys.append(self.param_keys_order[param_key])
+                param_keys.append(self.param_keys_order[param_key])  # type: ignore[call-overload]
             new_group_map["/".join(sorted(param_keys))] = new_group
-        for group_key, new_group in new_group_map.items():  # type: ignore[call-overload]
+        for group_key, new_group in new_group_map.items():
             if group_key not in src_group_map:
                 raise ValueError(f"Group {group_key} not found")
             src_group = src_group_map[group_key]
