@@ -4848,6 +4848,7 @@ if HAS_CPU:
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
+
 if HAS_CUDA:
     import triton
     import triton.language as tl
