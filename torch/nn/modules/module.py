@@ -1553,9 +1553,9 @@ class Module:
         if '_forward_pre_hooks' not in self.__dict__:
             self._forward_pre_hooks = OrderedDict()
         if '_forward_pre_hooks_with_kwargs' not in self.__dict__:
-            self._forward_pre_hooks_with_kwargs = dict()
+            self._forward_pre_hooks_with_kwargs = OrderedDict()
         if '_forward_hooks_with_kwargs' not in self.__dict__:
-            self._forward_hooks_with_kwargs = dict()
+            self._forward_hooks_with_kwargs = OrderedDict()
         if '_state_dict_hooks' not in self.__dict__:
             self._state_dict_hooks = OrderedDict()
         if '_load_state_dict_pre_hooks' not in self.__dict__:
