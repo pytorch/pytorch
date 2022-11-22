@@ -7,7 +7,7 @@ Responsibilities
 * Triage and fix high priority issues assigned to the module or library
 * Triage, review, and land high priority pull requests assigned to the module or library
 * Answer module or library questions on `discuss.pytorch.org <https://discuss.pytorch.org/>`__
-  and `dev-discuss.pytorch.org <dev-discuss.pytorch.org>`__
+  and `dev-discuss.pytorch.org <https://dev-discuss.pytorch.org/>`__
 * Maintain public user and development documentation
 * Run meetings and share minutes plus roadmap on a half or quarterly basis
 
