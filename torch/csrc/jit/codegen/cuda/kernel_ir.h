@@ -919,6 +919,8 @@ class TORCH_CUDA_CU_API VectorizedWelfordOp final : public WelfordOp {
       Val* reciprocal_of_count,
       Bool* hoisted_predicate);
 
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
   virtual const char* getOpString() const override {
     return "VectorizedWelfordOp";
   }

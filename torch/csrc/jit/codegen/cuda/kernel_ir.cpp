@@ -656,6 +656,8 @@ VectorizedWelfordOp::VectorizedWelfordOp(
   addAttribute(hoisted_predicate);
 }
 
+NVFUSER_DEFINE_CLONE_AND_CREATE(VectorizedWelfordOp)
+
 AllocateFusedReduction::AllocateFusedReduction(
     IrBuilderPasskey passkey,
     Expr* grid_expr)
