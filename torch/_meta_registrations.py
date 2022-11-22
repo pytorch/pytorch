@@ -15,6 +15,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    make_contiguous_strides_for,
 )
 
 from torch._prims_common.wrappers import out_wrapper
@@ -178,13 +179,30 @@ def meta_angle_out(self, out):
     return out.copy_(torch.angle(self))
 
 
-def squareCheckInputs(self, f_name):
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def squareCheckInputs(self: Tensor, f_name: str):
     assert (
         self.dim() >= 2
     ), f"{f_name}: The input tensor must have at least 2 dimensions."
     assert self.size(-1) == self.size(
         -2
     ), f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
+
+
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def checkFloatingOrComplex(
+    t: Tensor, f_name: str, allow_low_precision_dtypes: bool = True
+):
+    dtype = t.dtype
+    check(
+        t.is_floating_point() or t.is_complex(),
+        lambda: f"{f_name}, : Expected a floating point or complex tensor as input. Got , {dtype}",
+    )
+    if allow_low_precision_dtypes:
+        check(
+            dtype in (torch.float, torch.double, torch.cfloat, torch.cdouble),
+            lambda: f"{f_name} : Low precision dtypes not supported. Got {dtype}",
+        )
 
 
 def checkUplo(uplo: str):
@@ -204,6 +222,34 @@ def meta_linalg_eigh(self, uplo="L"):
     values.transpose_(-2, -1)
     vectors = self.new_empty(self.shape[:-1])
     return (values, vectors)
+
+
+# From aten/src/ATen/native/BatchLinearAlgebra.cpp
+@register_meta(aten.linalg_cholesky_ex.default)
+def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = False):
+    squareCheckInputs(A, "linalg.cholesky")
+    checkFloatingOrComplex(A, "linalg.cholesky")
+
+    A_shape = A.shape
+    ndim = len(A_shape)
+
+    # L
+    L_strides = make_contiguous_strides_for(A_shape, False)
+    L = A.new_empty(A_shape)
+    L.as_strided_(A_shape, L_strides)
+
+    # infos
+    infos = A.new_empty(A_shape[0 : ndim - 2], dtype=torch.int32)
+    return L, infos
+
+
+# From aten/src/ATen/native/BatchLinearAlgebra.cpp
+@register_meta(aten.linalg_cholesky.default)
+def meta_linalg_cholesky(A: Tensor, upper=False):
+    # All the checks done on info in the corresponding C++ function
+    # are data dependent, so we skip info computation
+    L, infos = linalg_cholesky_ex(A, upper, False)
+    return L, infos
 
 
 # From aten/src/ATen/native/ReflectionPad.cpp

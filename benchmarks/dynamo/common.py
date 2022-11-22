@@ -269,6 +269,7 @@ def print_summary(filename):
 def tensor_is_on_xla(tensors):
     if not isinstance(tensors, (tuple, list)):
         tensors = [tensors]
+    tensors = [x for x in tensors if isinstance(x, torch.Tensor)]
     return any(map(lambda x: x.device.type == "xla", tensors))
 
 
