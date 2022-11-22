@@ -1469,11 +1469,12 @@ def compute_required_storage_length(
     shape: ShapeType, strides: StrideType, storage_offset: int
 ) -> int:
     # Short-circuits if the shape has no elements
-    if reduce(operator.mul, shape) == 0:
+    if reduce(operator.mul, shape, 1) == 0:
         return 0
 
     max_offset = sum((x - 1) * y for x, y in zip(shape, strides))
-    return storage_offset + max_offset
+    # +1 to account for the first element which offsets are taken from
+    return 1 + storage_offset + max_offset
 
 
 def check_in_bounds_for_storage(
