@@ -15,6 +15,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    make_contiguous_strides_for,
 )
 
 from torch._prims_common.wrappers import out_wrapper
@@ -223,34 +224,6 @@ def meta_linalg_eigh(self, uplo="L"):
     return (values, vectors)
 
 
-# From c10/util/strides.h
-def contiguous_strides(sizes):
-    """Computes the contiguous strides of a tensor, given its sizes."""
-    # With this intialisation we get the case dim == 0 or 1 right
-    dims = len(sizes)
-    strides = [1] * dims
-
-    i = dims - 2
-    while i >= 0:
-        # Strides can't be 0 even if sizes are 0.
-        strides[i] = strides[i + 1] * max(sizes[i + 1], 1)
-        i -= 1
-
-    return strides
-
-
-def batched_matrix_contiguous_strides(sizes, f_contig: bool = False):
-    # f_contig chooses between the strides of a batch of Fortran (F-contiguous)
-    # and C-contiguous matrices
-    strides = contiguous_strides(sizes)
-    dim = len(strides)
-    if f_contig and dim >= 2:
-        # Fix the strides of the last two dimensions, so that we return
-        # C-contiguous batches of F-contiguous matrices.
-        strides[dim - 1] = max(sizes[dim - 2], 1)
-        strides[dim - 2] = 1
-    return strides
-
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 @register_meta(aten.linalg_cholesky_ex.default)
 def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = False):
@@ -261,13 +234,14 @@ def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = Fals
     ndim = len(A_shape)
 
     # L
-    L_strides = batched_matrix_contiguous_strides(A_shape, True)
+    L_strides = make_contiguous_strides_for(A_shape, False)
     L = A.new_empty(A_shape)
     L.as_strided_(A_shape, L_strides)
 
     # infos
     infos = A.new_empty(A_shape[0 : ndim - 2], dtype=torch.int32)
     return L, infos
+
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 @register_meta(aten.linalg_cholesky.default)
@@ -302,7 +276,7 @@ def infer_size(a, b):
 
 
 # From aten/src/ATen/native/LinearAlgebraUtils.h
-def _linalg_broadcast_batch_dims(arg1, arg2):
+def _linalg_broadcast_batch_dims(arg1: Tensor, arg2: Tensor):
     arg1_batch_sizes = arg1.shape[:-2]
     arg2_batch_sizes = arg2.shape[:-2]
     expand_batch_portion = infer_size(arg1_batch_sizes, arg2_batch_sizes)
@@ -313,6 +287,12 @@ def _linalg_broadcast_batch_dims(arg1, arg2):
         arg2 if arg2_expand_size == arg2.shape else arg2.expand(arg2_expand_size),
     )
     return args_broadcasted
+
+
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def cloneBatchedColumnMajor(src: Tensor):
+    result = src.mT.clone(memory_format=torch.contiguous_format)
+    return result.transpose_(-2, -1)
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
@@ -327,7 +307,8 @@ def meta_cholesky_solve(self: Tensor, A: Tensor, upper: bool = False):
         lambda: f"u should have at least 2 dimensions, but has {A.dim()} dimensions instead",
     )
     self_broadcasted, A_broadcasted = _linalg_broadcast_batch_dims(self, A)
-    return self_broadcasted
+
+    return cloneBatchedColumnMajor(self_broadcasted)
 
 
 # From aten/src/ATen/native/ReflectionPad.cpp
