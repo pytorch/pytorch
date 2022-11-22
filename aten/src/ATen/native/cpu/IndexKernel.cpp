@@ -462,12 +462,14 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
 
   auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
 
-    // Here ntensors is defined for output and 1 input. We have defined output, input and restrided_input
-    // aten/src/ATen/native/TensorTransformations.cpp#L64-L66 but we use only output and input.
+    // Here ntensors is defined for output and 1 input. But tensor iterator has defined output, input
+    // and restrided_input (see aten/src/ATen/native/TensorTransformations.cpp#L64-L66) but we use only
+    // output and input.
     static constexpr int ntensors = 2;
+    const int64_t *outer_strides = &strides[3];
+
     std::array<char*, ntensors> data_arr;
     std::copy_n(base, ntensors, data_arr.data());
-    const int64_t *outer_strides = &strides[ntensors];
 
     using Vec = Vectorized<scalar_t>;
 
@@ -515,7 +517,7 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
       }
 
       // advance:
-      for (const auto arg : c10::irange(data_arr.size())) {
+      for (const auto arg : c10::irange(ntensors)) {
         data_arr[arg] += outer_strides[arg];
       }
     }
@@ -526,21 +528,22 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
   iter.cast_outputs();
 }
 
-template <typename scalar_t>
 void cpu_vflip_memcpy(at::TensorIterator& iter) {
   // This is a vertical flip specialization using memcpy to speed-up the runtime
 
   auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
 
-    // Here ntensors is defined for output and 1 input. We have defined output, input and restrided_input
-    // aten/src/ATen/native/TensorTransformations.cpp#L64-L66 but we use only output and input.
+    // Here ntensors is defined for output and 1 input. But tensor iterator has defined output, input
+    // and restrided_input (see aten/src/ATen/native/TensorTransformations.cpp#L64-L66) but we use only
+    // output and input.
     static constexpr int ntensors = 2;
+    const int64_t *outer_strides = &strides[3];
+
     std::array<char*, ntensors> data_arr;
     std::copy_n(base, ntensors, data_arr.data());
-    const int64_t *outer_strides = &strides[ntensors];
 
-    constexpr auto stride = sizeof(scalar_t);
-    TORCH_INTERNAL_ASSERT(stride == strides[0] && stride == strides[1]);
+    TORCH_INTERNAL_ASSERT(strides[0] == strides[1]);
+    const int64_t stride = strides[0];
 
     for (const auto j C10_UNUSED : c10::irange(size1)) {
 
@@ -575,45 +578,25 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
         });
     });
   } else {
-    // Special case: horizontal flip with vectorization and input is contiguous
-    // Context: horizontal flip leads to strides[0] < 0 and
-    // thus is_contiguous condition is not satisfied and non-vectorized code path is taken.
     auto output_strides = iter.strides(0);
     auto input_strides = iter.strides(1);
     if (iter.ndim() > 0 && output_strides[0] < 0 && input_strides[0] == iter.element_size(1)) {
+      // Special case: horizontal flip with vectorization and input is contiguous
+      // Context: horizontal flip leads to strides[0] < 0 and
+      // thus is_contiguous condition is not satisfied and non-vectorized code path is taken.
       auto iter_dtype = iter.dtype();
-      if (iter_dtype == kByte) {
-        return cpu_hflip_vec<uint8_t>(iter);
-      } else if (iter_dtype == kShort) {
-        return cpu_hflip_vec<int16_t>(iter);
-      } else if (iter_dtype == kInt) {
-        return cpu_hflip_vec<int32_t>(iter);
-      } else if (iter_dtype == kLong) {
-        return cpu_hflip_vec<int64_t>(iter);
-      } else if (iter_dtype == kFloat) {
-        return cpu_hflip_vec<float>(iter);
-      } else if (iter_dtype == kDouble) {
-        return cpu_hflip_vec<double>(iter);
+      // Ignoring half and bfloat16 as cpu_hflip_vec is slower than cpu_kernel_vec
+      if (isIntegralType(iter_dtype, true) || iter_dtype == kDouble || iter_dtype == kFloat) {
+        AT_DISPATCH_ALL_TYPES_AND(kBool,
+            iter_dtype, "hflip_cpu", [&iter] {
+              cpu_hflip_vec<scalar_t>(iter);
+        });
+        return;
       }
-      // other dtypes are handled below with cpu_kernel_vec
-    } else if (iter.ndim() > 1 && output_strides[1] < 0 && input_strides[0] == iter.element_size(1) \
-               && output_strides[0] == iter.element_size(0)) {
-      // return AT_DISPATCH_ALL_TYPES();
-      auto iter_dtype = iter.dtype();
-      if (iter_dtype == kByte) {
-        return cpu_vflip_memcpy<uint8_t>(iter);
-      } else if (iter_dtype == kShort) {
-        return cpu_vflip_memcpy<int16_t>(iter);
-      } else if (iter_dtype == kInt) {
-        return cpu_vflip_memcpy<int32_t>(iter);
-      } else if (iter_dtype == kLong) {
-        return cpu_vflip_memcpy<int64_t>(iter);
-      } else if (iter_dtype == kFloat) {
-        return cpu_vflip_memcpy<float>(iter);
-      } else if (iter_dtype == kDouble) {
-        return cpu_vflip_memcpy<double>(iter);
-      }
-      // other dtypes are handled below with cpu_kernel_vec
+      // other dtypes (float16, bfloat16, complex) are handled by cpu_kernel_vec (see below)
+    } else if (iter.has_contiguous_first_dim()) {
+      // Special case: vertical flip using memcpy (faster than generic cpu_kernel_vec)
+      return cpu_vflip_memcpy(iter);
     }
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
