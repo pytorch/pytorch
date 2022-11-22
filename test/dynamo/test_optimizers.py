@@ -14,6 +14,18 @@ model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
 model(input).sum().backward()
 
 
+# Include optimizer code for tracing
+optim_filenames = set(
+    [
+        inspect.getfile(obj)
+        for obj in torch.optim.__dict__.values()
+        if inspect.isclass(obj)
+    ]
+)
+
+optim_filenames |= {torch.optim._functional.__file__}
+
+
 def make_test(optim_cls, exp_frame_cnt=1, closure=None, **kwargs):
     opt = optim_cls(model.parameters(), **kwargs)
 
@@ -52,6 +64,13 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
         cls._exit_stack.enter_context(
             unittest.mock.patch.object(
                 torch._dynamo.config, "fake_tensor_propagation", False
+            )
+        )
+        cls._exit_stack.enter_context(
+            unittest.mock.patch.object(
+                torch._dynamo.skipfiles,
+                "FILENAME_ALLOWLIST",
+                torch._dynamo.skipfiles.FILENAME_ALLOWLIST.union(optim_filenames),
             )
         )
 
