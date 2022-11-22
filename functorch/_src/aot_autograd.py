@@ -927,7 +927,6 @@ def aot_module_simplified(
         else:
             fake_mode = nullcontext()
             return list(flat_args)
-
     fake_flat_tensor_args = fakify_params_and_buffers(params_flat)
 
     def functional_call(*args, **kwargs):

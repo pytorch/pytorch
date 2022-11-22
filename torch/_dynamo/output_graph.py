@@ -482,12 +482,10 @@ class OutputGraph(fx.Tracer):
                 print("COMPILER FN", self.compiler_fn)
                 print("FAKE?", config.fake_tensor_propagation)
                 if not backend_correct:
-                    # breakpoint()
                     compiled_fn = gm.forward
                 else:
                     compiled_fn = self.compiler_fn(gm, self.example_inputs())
             except Exception as e:
-                # breakpoint()
                 # Lowering exceptions can occur. Instead of relying on compiler_fn to not return a callable
                 # let's handle it properly
                 raise BackendCompilerFailed(self.compiler_fn, e) from e

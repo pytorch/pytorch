@@ -138,7 +138,7 @@ class DDPOptimizer:
         to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
         and returns its callable.
         """
-
+        compiling = True
         # 1: compute the partition map according to DDP bucket logic
         buckets = [Bucket()]  # (size, param_names)
         for node in reversed(gm.graph.nodes):
@@ -211,7 +211,7 @@ class DDPOptimizer:
                 super().__init__(module)
                 self.compiler = compiler
 
-            def compile_submod(self, submod, args, kwargs):
+            def compile_submod(self, fake_submod, real_mod, args, kwargs):
                 """
                 Compile the submodule,
                 using a wrapper to make sure its output is always a tuple,
@@ -220,13 +220,24 @@ class DDPOptimizer:
                 assert len(kwargs) == 0, "We assume only args for these modules"
 
                 class WrapperModule(torch.nn.Module):
-                    def __init__(self, compiled_submod, unwrap_singleton_tuple):
+                    def __init__(self, compiled_submod_real, compiled_submod_fake, unwrap_singleton_tuple):
                         super().__init__()
-                        self.compiled_submod = compiled_submod
+                        self.compiled_submod_real = compiled_submod_real
+                        self.compiled_submod_fake = compiled_submod_fake
                         self.unwrap_singleton_tuple = unwrap_singleton_tuple
 
                     def forward(self, *args):
-                        x = self.compiled_submod(*args)
+                        if compiling:
+                            print("Compiling")
+                            x = self.compiled_submod_fake(*args)
+                        else:
+                            print("Not compiling")
+                            from torch.utils._mode_utils import no_dispatch
+                            with no_dispatch():
+                                # x = real_mod(*args)
+                                x = self.compiled_submod_real(*args)
+
+                        # x = self.compiled_submod(*args)
                         # TODO(whc)
                         # for some reason the isinstance check is necessary if I split one node per submod
                         # - even though I supposedly wrapped the output in a tuple in those cases, the real
@@ -236,15 +247,21 @@ class DDPOptimizer:
                         return x
 
                 unwrap_singleton_tuple = False
-                for sn in submod.graph.nodes:
+                for sn in real_mod.graph.nodes:
                     if sn.op == "output":
                         if not isinstance(sn.args[0], tuple):
                             unwrap_singleton_tuple = True
                             sn.args = (sn.args,)
-                submod.recompile()
-
+                for sn in fake_submod.graph.nodes:
+                    if sn.op == "output":
+                        if not isinstance(sn.args[0], tuple):
+                            unwrap_singleton_tuple = True
+                            sn.args = (sn.args,)
+                real_mod.recompile()
+                fake_submod.recompile()
                 wrapper = WrapperModule(
-                    self.compiler(submod, args),
+                    self.compiler(real_mod, args),
+                    self.compiler(fake_submod, args),
                     unwrap_singleton_tuple,
                 )
                 return wrapper
@@ -252,6 +269,21 @@ class DDPOptimizer:
             def run_node(self, n: Node) -> Any:
                 with fx_traceback.append_stack_trace(n.stack_trace):
                     args, kwargs = self.fetch_args_kwargs_from_env(n)
+                    fake_mode = None
+                    for tensor in args:
+                        if isinstance(tensor, torch._subclasses.FakeTensor):
+                            fake_mode = tensor.fake_mode
+                            break
+                    new_args = []
+                    if fake_mode:
+                        for arg in args:
+                            if isinstance(arg, torch.Tensor) and not isinstance(arg, torch._subclasses.FakeTensor):
+                                new_args.append(fake_mode.from_tensor(arg))
+                            else:
+                                new_args.append(arg)
+                    else:
+                        new_args = args
+
                     log.debug(f"run_node {n.op}, {n.target} got args {args_str(args)}")
                     assert isinstance(args, tuple)
                     assert isinstance(kwargs, dict)
@@ -259,19 +291,25 @@ class DDPOptimizer:
                     # modify the currently running FX graph
                     # maybe this isn't sound in general, but only changing the target of a node might be ok?
                     if n.op == "call_module":
-                        submod = self.fetch_attr(n.target)
-                        log.debug(f"\n---{n.target} graph---\n" + str(submod.graph))
-                        compiled_submod = self.compile_submod(submod, args, kwargs)
+                        real_mod = self.fetch_attr(n.target)
+                        if fake_mode:
+                            from ..utils import deepcopy_to_fake_tensor
+                            fake_submod = deepcopy_to_fake_tensor(real_mod, fake_mode)
+                        else:
+                            fake_submod = real_mod
+                            pass
+                        log.debug(f"\n---{n.target} graph---\n" + str(fake_submod.graph))
+                        compiled_submod = self.compile_submod(fake_submod, real_mod, new_args, kwargs)
                         self.module.delete_submodule(n.target)
                         n.target = "compiled_" + n.target
                         self.module.add_submodule(n.target, compiled_submod)
                     # then we execute the modified node using the usual logic
-                    return getattr(self, n.op)(n.target, args, kwargs)
+                    return getattr(self, n.op)(n.target, new_args, kwargs)
 
         submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn)
         submod_compiler.run(*example_inputs)
         split_gm.recompile()
 
         log.debug("\n---final graph---\n" + str(split_gm.graph) + "\n---------------\n")
-
+        compiling = False
         return split_gm
