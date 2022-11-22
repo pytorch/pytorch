@@ -300,7 +300,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
   Tensor grad_bias;
   if (grad_input_mask[0]) {
     grad_input = at::empty_like(input, input.suggest_memory_format());
-    TORCH_WARN("HEY I HAVE SET GRAD_INPUT");
   }
   if (grad_input_mask[1]) {
     grad_weight = at::empty({input.size(1)}, input.options().dtype(dtype));
@@ -321,10 +320,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
     }
     batch_norm_cpu_backward_stub(kCPU, grad_input, grad_weight, grad_bias,
         grad_out_, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
-    TORCH_WARN("grad_input is", grad_input);
-    // TORCH_WARN(grad_input.strides());
-    // TORCH_WARN(grad_weight.strides());
-    // TORCH_WARN(grad_bias.strides());
     return std::make_tuple(grad_input, grad_weight, grad_bias);
   }
 
@@ -742,7 +737,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, con
 
   return std::tuple<Tensor& ,Tensor&, Tensor&>(out, save_mean, save_var);
 }
-
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
                                                   bool train, double momentum, double eps) {
