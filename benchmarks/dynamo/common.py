@@ -105,7 +105,6 @@ CI_SKIP_INDCUTOR_INFERENCE = [
 CI_SKIP_INDUCTOR_TRAINING = [
     *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
-    "mobilenet_v3_large",
     # OOM
     "Background_Matting",
     "fastNLP_Bert",
