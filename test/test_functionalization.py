@@ -852,8 +852,8 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    copy = torch.ops.aten.copy.default(diagonal_copy, a_1);  diagonal_copy = None
-    add = torch.ops.aten.add.Tensor(copy, a_1);  copy = a_1 = None
+    copy = torch.ops.aten.copy.default(diagonal_copy, a_1);  diagonal_copy = a_1 = None
+    add = torch.ops.aten.add.Tensor(copy, copy);  copy = None
     return add
     """)
 
@@ -865,9 +865,9 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    copy = torch.ops.aten.copy_.default(diagonal, a_1)
-    add = torch.ops.aten.add_.Tensor(diagonal, a_1);  a_1 = None
-    return diagonal
+    copy = torch.ops.aten.copy_.default(diagonal, a_1);  a_1 = None
+    add = torch.ops.aten.add.Tensor(diagonal, diagonal);  diagonal = None
+    return add
     """)
 
         # Test 2: copy_() with same dtype, different shape
