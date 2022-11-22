@@ -420,7 +420,9 @@ def sample_inputs_softmax_backward_data(op_info, device, dtype, requires_grad, *
         input_dtypes += [torch.float16]
 
     for (shape, dim), input_dtype in product(cases, input_dtypes):
-        yield SampleInput(make_arg(shape), make_arg(shape), dim, input_dtype)
+        input = make_arg(shape)
+        output = torch.nn.functional.softmax(input, dim=dim, dtype=input_dtype)
+        yield SampleInput(make_arg(shape), output, dim, input_dtype)
 
 def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
@@ -956,11 +958,11 @@ def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **
 
 def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-    return (SampleInput(make_arg(S, M), make_arg(M)),)
+    yield SampleInput(make_arg(S, M), make_arg(M))
 
 def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-    return (SampleInput(make_arg(M, S, M), make_arg(M, M, S)),)
+    yield SampleInput(make_arg(M, S, M), make_arg(M, M, S))
 
 def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -1567,9 +1569,9 @@ def sample_inputs_logcumsumexp(self, device, dtype, requires_grad, **kwargs):
             yield SampleInput(t, dim)
 
 def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
-    return (SampleInput((make_tensor((S, S), dtype=dtype, device=device,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad))),)
+    yield SampleInput((make_tensor((S, S), dtype=dtype, device=device,
+                                   low=None, high=None,
+                                   requires_grad=requires_grad)))
 
 
 def error_inputs_trace(op, device):
@@ -1870,6 +1872,9 @@ def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
 
     for input_shape1, input_shape2, kwargs in cases:
         yield SampleInput([make_arg(input_shape1), make_arg(input_shape2)], kwargs=kwargs)
+
+    # from coat_lite_mini
+    yield SampleInput([make_arg((2, 2, 2, 2), memory_format=torch.channels_last)], args=(1,),)
 
 def error_inputs_cat(op_info, device, **kwargs):
 
@@ -5276,6 +5281,11 @@ def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
                                  out=make_arg(M, S, dtype=torch.complex64)),
                      error_type=RuntimeError, error_regex=error_out)
 
+def sample_inputs_logaddexp(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    shape = (S, S)
+    yield SampleInput(make_arg(shape), make_arg(shape))
+
 def sample_inputs_prod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
         # shrink values to be in the interval [-1, +1] for better precision in gradgradcheck
@@ -5317,7 +5327,7 @@ def error_inputs_neg(op_info, device, **kwargs):
     msg = ("Negation, the `\\-` operator, on a bool tensor is not supported."
            " If you are trying to invert a mask, use the `\\~` or"
            " `logical_not\\(\\)` operator instead.")
-    return (ErrorInput(si, error_regex=msg),)
+    yield ErrorInput(si, error_regex=msg)
 
 def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
@@ -8313,7 +8323,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
 
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -9923,7 +9932,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linspace,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -9951,7 +9959,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_logpace,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -10055,18 +10062,14 @@ op_db: List[OpInfo] = [
            dtypesIfROCM=floating_types_and(torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=lambda op_info, device, dtype, requires_grad=False, **kwargs:
-           (SampleInput(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-                        args=(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),)),)),
+           sample_inputs_func=sample_inputs_logaddexp),
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16),
            dtypesIfROCM=floating_types_and(torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=lambda op_info, device, dtype, requires_grad=False, **kwargs:
-           (SampleInput(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-                        args=(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),)),)),
+           sample_inputs_func=sample_inputs_logaddexp),
     UnaryUfuncInfo('logical_not',
                    ref=np.logical_not,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -10596,6 +10599,9 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-4, rtol=2e-3),
+                                            torch.bfloat16: tol(atol=1e-3, rtol=0.016)}),
+                         'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
         ),
     ),
     # `softmin` supports different dtypes based on whether `dtype` argument,
@@ -12003,16 +12009,21 @@ op_db: List[OpInfo] = [
             # This is only failing on Linux Bionic 3.10 Cuda 11.6
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
                          device_type='cuda', active_if=_get_torch_cuda_version() >= (11, 6)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
+                         device_type='cuda', dtypes=(torch.float32,)),
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # Doesn't support autocasting
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensorNonErroring', 'test_fake_autocast', device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
+            # Forward works for dtype=float64 which is the math path
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
             # No meta function
             DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', device_type='cuda'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),),
     ),
     UnaryUfuncInfo(
@@ -12141,7 +12152,7 @@ op_db: List[OpInfo] = [
         'nn.functional.mish',
         aten_backward_name='mish_backward',
         ref=lambda x: x * np.tanh(reference_softplus(x)),
-        dtypes=floating_types(),
+        dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -12497,7 +12508,7 @@ op_db: List[OpInfo] = [
                    aten_name="hardtanh",
                    aten_backward_name='hardtanh_backward',
                    dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.bfloat16),
-                   backward_dtypes=all_types(),
+                   backward_dtypes=all_types_and(torch.bfloat16),
                    dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.float16,
                                                    torch.bfloat16),
                    backward_dtypesIfCUDA=floating_types_and(torch.float16),
@@ -12530,7 +12541,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('nn.functional.relu6',
                    aten_name="relu6",
                    dtypes=all_types_and(torch.bfloat16),
-                   backward_dtypes=floating_types(),
+                   backward_dtypes=floating_types_and(torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
                    backward_dtypesIfCUDA=floating_types_and(torch.float16),
                    assert_autodiffed=True,
@@ -12635,6 +12646,20 @@ op_db: List[OpInfo] = [
                # Lazy tensor failures: mutating and aliasing ops should all have codegen'd kernels
                DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
                DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
+           )),
+    OpInfo('view_copy',
+           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+           ref=lambda x, newshape: np.reshape(x, newshape).copy(),
+           supports_out=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_view_reshape,
+           error_inputs_func=error_inputs_view_reshape,
+           skips=(
+               # https://github.com/pytorch/pytorch/issues/89068
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
            )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
@@ -12804,7 +12829,12 @@ op_db: List[OpInfo] = [
                                     dtypes=[torch.bfloat16]),
                    ),
                    supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=True),
+                   supports_fwgrad_bwgrad=True,
+                   supports_sparse=True,
+                   supports_sparse_csr=True,
+                   supports_sparse_csc=True,
+                   supports_sparse_bsr=True,
+                   supports_sparse_bsc=True),
     UnaryUfuncInfo('real',
                    ref=np.real,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
@@ -14546,7 +14576,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_ones_zeros,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -14567,7 +14596,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_ones_zeros,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -14588,7 +14616,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_full,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -14987,6 +15014,8 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True,
            skips=(
+               # https://github.com/pytorch/pytorch/issues/89353
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref_mps'),
                # RuntimeError: Arguments for call not valid.
                #               Expected a value of type 'List[Tensor]' for argument
                #               'tensors' but instead found type 'Tensor (inferred)'.
@@ -17395,11 +17424,13 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.celu",
         torch_opinfo_name="nn.functional.celu",
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.threshold",
         torch_opinfo_name="nn.functional.threshold",
         supports_nvfuser=False,
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.nn.functional.dropout",
@@ -17434,11 +17465,13 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.elu",
         torch_opinfo_name="nn.functional.elu",
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.hardtanh",
         torch_opinfo_name="nn.functional.hardtanh",
         supports_nvfuser=False,
+        supports_out=True,
     ),
     PythonRefInfo(  # TODO: Port this to an UnaryOpInfo
         "_refs.nn.functional.gelu",
@@ -17477,6 +17510,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.nn.functional.log_softmax",
@@ -17502,18 +17536,22 @@ python_ref_db = [
         "_refs.nn.functional.relu",
         torch_opinfo_name="nn.functional.relu",
         supports_nvfuser=False,
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu6",
         torch_opinfo_name="nn.functional.relu6",
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.mish",
         torch_opinfo_name="nn.functional.mish",
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.selu",
         torch_opinfo_name="nn.functional.selu",
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.nn.functional.softmax",
