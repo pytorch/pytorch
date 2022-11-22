@@ -518,7 +518,40 @@ const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTens
   return self;
 }
 
-SparseTensor dense_to_sparse(const Tensor& self) {
+SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize) {
+  if (layout.has_value()) {
+    if (blocksize.has_value() && !(*layout == kSparseBsr || *layout == kSparseBsc)) {
+      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion does not use specified blocksize");
+    }
+    if (self.layout() == *layout) {
+      return self;
+    }
+    switch (*layout) {
+    case kStrided:
+      return self;
+    case kSparse:
+      return dense_to_sparse(self, self.dim());
+    case kSparseCsr:
+      return self.to_sparse_csr();
+    case kSparseCsc:
+      return self.to_sparse_csc();
+    case kSparseBsr:
+      if (blocksize.has_value()) {
+        return self.to_sparse_bsr(*blocksize);
+      }
+      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
+      break;
+    case kSparseBsc:
+      if (blocksize.has_value()) {
+        return self.to_sparse_bsc(*blocksize);
+      }
+      break;
+      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
+    default:
+      break;
+    }
+    AT_ERROR("to_sparse not implemented for ", self.layout(), " to ", *layout, " conversion");
+  }
   return dense_to_sparse(self, self.dim());
 }
 

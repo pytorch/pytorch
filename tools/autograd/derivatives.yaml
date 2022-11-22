@@ -1654,7 +1654,7 @@
 - name: _to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_dense_backward(grad, self)
 
-- name: to_sparse(Tensor self) -> Tensor
+- name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None) -> Tensor
   self: grad.to_dense()
 
 - name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
