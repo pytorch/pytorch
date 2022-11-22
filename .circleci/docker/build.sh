@@ -81,7 +81,7 @@ fi
 
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
 _UCX_COMMIT=31e74cac7bee0ef66bef2af72e7d86d9c282e5ab
-_UCC_COMMIT=12944da33f911daf505d9bbc51411233d0ed85e1
+_UCC_COMMIT=1c7a7127186e7836f73aafbd7697bbc274a77eee
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
