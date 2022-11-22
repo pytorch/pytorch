@@ -122,11 +122,11 @@
     }                                                                     \
   }()
 
-#define AT_DISPATCH_SPARSE_VALUE_TYPES(TYPE, NAME, ...)                  \
-  AT_DISPATCH_SWITCH(                                                    \
-      TYPE,                                                              \
-      NAME,                                                              \
-      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND4(                       \
+#define AT_DISPATCH_SPARSE_VALUE_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                   \
+      TYPE,                                             \
+      NAME,                                             \
+      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND4(      \
           kComplexHalf, kHalf, kBool, kBFloat16, __VA_ARGS__))
 
 namespace at {
@@ -297,17 +297,19 @@ inline Layout flip_compressed_layout(Layout layout) {
 inline DimVector getBlockSize(Tensor const& self) {
   int64_t n_batch;
   switch (self.layout()) {
-  case kSparseBsr:
-    n_batch = self.crow_indices().dim() - 1;
-    break;
-  case kSparseBsc:
-    n_batch = self.ccol_indices().dim() - 1;
-    break;
-  default:
-    return {};
+    case kSparseBsr:
+      n_batch = self.crow_indices().dim() - 1;
+      break;
+    case kSparseBsc:
+      n_batch = self.ccol_indices().dim() - 1;
+      break;
+    default:
+      return {};
   }
   Tensor values = self.values();
-  return {std::max<int64_t>(1, values.size(n_batch + 1)), std::max<int64_t>(1, values.size(n_batch + 2))};
+  return {
+      std::max<int64_t>(1, values.size(n_batch + 1)),
+      std::max<int64_t>(1, values.size(n_batch + 2))};
 }
 
 } // namespace sparse_csr
