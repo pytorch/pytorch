@@ -315,6 +315,16 @@ class TestMPS(TestCase):
         self.assertEqual(output_cpu, output_mps)
         self.assertEqual(output_cpu.size(), output_mps.size())
 
+    def test_trace(self):
+        M_cpu = torch.randn(3, 3)
+        M_mps = M_cpu.detach().clone().to("mps")
+
+        output_cpu = torch.trace(M_cpu)
+        output_mps = torch.trace(M_mps)
+
+        self.assertEqual(output_cpu, output_mps)
+        self.assertEqual(output_cpu.size(), output_mps.size())
+
     def test_addbmm(self):
         M_cpu = torch.randn(3, 5)
         batch1_cpu = torch.randn(10, 3, 4)
@@ -5141,10 +5151,14 @@ class TestNNMPS(NNTestCase):
 
     # The test should not crash
     def test_permute(self):
-        X = torch.randn(5, 5).to('mps')
-        torch.log(X)
-        X = X.permute(1, 0)
-        torch.log(X)
+        M_cpu = torch.randn(5, 5)
+        M_mps = M_cpu.to('mps')
+
+        output_cpu = M_cpu.permute(1, 0)
+        output_mps = M_mps.permute(1, 0)
+
+        self.assertEqual(output_cpu, output_mps)
+        self.assertEqual(output_cpu.size(), output_mps.size())
 
     # Printing of non_contiguous should not crash
     def test_print_non_contiguous(self):
@@ -7312,7 +7326,6 @@ class TestConsistency(TestCase):
         'block_diag': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'bmm': ['f32'],
         'broadcast_shapes': ['f32'],
-        'cat': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'ceil': ['f32', 'int32', 'int64', 'f16'],
         'char': ['b8', 'u8'],
         'chunk': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7544,7 +7557,6 @@ class TestConsistency(TestCase):
         'block_diag': ['f16', 'f32'],
         'bmm': ['f32'],
         'broadcast_shapes': ['f32'],
-        'cat': ['f16', 'f32'],
         'ceil': ['f32'],
         'chunk': ['f16', 'f32'],
         'clone': ['f16', 'f32'],
