@@ -2478,9 +2478,6 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_stride_order(cls, x, order):
-        if x.get_numel() == 0:  # Layout doesn't matter
-            return x
-
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
             if isinstance(
