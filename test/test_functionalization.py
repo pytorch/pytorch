@@ -1257,10 +1257,12 @@ def forward(self, a_1):
     view_copy_1 = torch.ops.aten.view_copy.default(getitem_3, [20, 100])
     view_copy_2 = torch.ops.aten.view_copy.default(getitem_3, [20, 100]);  getitem_3 = None
     mean = torch.ops.aten.mean.dim(view_copy_2, [0]);  view_copy_2 = None
+    copy = torch.ops.aten.copy.default(alias_copy, mean);  alias_copy = mean = None
     alias_copy_1 = torch.ops.aten.alias_copy.default(ones);  ones = None
     view_copy_3 = torch.ops.aten.view_copy.default(getitem_4, [20, 100])
     view_copy_4 = torch.ops.aten.view_copy.default(getitem_4, [20, 100]);  getitem_4 = None
     mean_1 = torch.ops.aten.mean.dim(view_copy_4, [0]);  view_copy_4 = None
+    copy_1 = torch.ops.aten.copy.default(alias_copy_1, mean_1);  alias_copy_1 = mean_1 = None
     view_copy_5 = torch.ops.aten.view_copy.default(getitem, [20, 100, 35, 45]);  getitem = None
     return view_copy_5
     """)
@@ -1287,10 +1289,12 @@ def forward(self, a_1):
     view_1 = torch.ops.aten.view.default(getitem_3, [20, 100])
     view_2 = torch.ops.aten.view.default(getitem_3, [20, 100]);  getitem_3 = None
     mean = torch.ops.aten.mean.dim(view_2, [0]);  view_2 = None
+    copy = torch.ops.aten.copy_.default(alias, mean);  alias = mean = None
     alias_1 = torch.ops.aten.alias.default(ones);  ones = None
     view_3 = torch.ops.aten.view.default(getitem_4, [20, 100])
     view_4 = torch.ops.aten.view.default(getitem_4, [20, 100]);  getitem_4 = None
     mean_1 = torch.ops.aten.mean.dim(view_4, [0]);  view_4 = None
+    copy_1 = torch.ops.aten.copy_.default(alias_1, mean_1);  alias_1 = mean_1 = None
     view_5 = torch.ops.aten.view.default(getitem, [20, 100, 35, 45]);  getitem = None
     return view_5
     """)
