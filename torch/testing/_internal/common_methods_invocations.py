@@ -105,6 +105,7 @@ from torch.testing._internal.opinfo.refs import (  # NOQA: F401
 from torch.testing._internal.opinfo.utils import (
     np_unary_ufunc_integer_promotion_wrapper,
     reference_reduction_numpy,
+    prod_numpy
 )
 from torch.testing._internal import opinfo
 from torch.testing._internal.opinfo.definitions.linalg import (
@@ -16468,7 +16469,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_prod,
-        ref=reference_reduction_numpy(np.prod),
+        ref=prod_numpy,
         skips=(
             # FIXME: prod does not support passing keepdim without passing dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
