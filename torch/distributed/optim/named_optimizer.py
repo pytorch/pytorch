@@ -58,14 +58,12 @@ class NamedOptimizer(optim.Optimizer):
         **kwargs,
     ) -> None:
         torch._C._log_api_usage_once("torch.distributed.optim.NamedOptimizer")
-        self.param_groups: Collection[Mapping[str, Any]] = param_groups
+        self.param_groups: Collection[Mapping[str, Any]] = param_groups  # type: ignore[assignment]
         self.named_parameters = dict(named_parameters)
         params_optimizer = (
-            self.named_parameters.values()
-            if param_groups is None
-            else param_groups
+            self.named_parameters.values() if param_groups is None else param_groups
         )
-        self._optimizer = optimizer_class(
+        self._optimizer = optimizer_class(  # type: ignore[operator]
             params_optimizer,
             *args,
             **kwargs,
@@ -77,7 +75,7 @@ class NamedOptimizer(optim.Optimizer):
                 "Since we pass in param_groups, we will use param_groups to "
                 "initialize the optimizer, not all parameters of the module."
             )
-            param_to_key = {param: key for key, param in self.named_parameters}
+            param_to_key = {param: key for key, param in self.named_parameters}  # type: ignore[misc, has-type]
             param_keys_order = []
             for group in param_groups:
                 for param in group["params"]:
@@ -218,7 +216,7 @@ class NamedOptimizer(optim.Optimizer):
             for param_key in new_group["params"]:
                 param_keys.append(self.param_keys_order[param_key])
             new_group_map["/".join(sorted(param_keys))] = new_group
-        for group_key, new_group in new_group_map.items():
+        for group_key, new_group in new_group_map.items():  # type: ignore[call-overload]
             if group_key not in src_group_map:
                 raise ValueError(f"Group {group_key} not found")
             src_group = src_group_map[group_key]
