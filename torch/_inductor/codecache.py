@@ -102,6 +102,10 @@ def cpp_compiler_search(search):
     for cxx in search:
         try:
             if cxx is None:
+                # gxx package is only available for Linux
+                # according to https://anaconda.org/conda-forge/gxx/
+                if sys.platform != "linux":
+                    continue
                 from filelock import FileLock
 
                 lock_dir = get_lock_dir()
@@ -112,7 +116,7 @@ def cpp_compiler_search(search):
                     cxx = install_gcc_via_conda()
             subprocess.check_output([cxx, "--version"])
             return cxx
-        except (subprocess.SubprocessError, FileNotFoundError, ImportError):
+        except (subprocess.SubprocessError, FileNotFoundError, ImportError, PermissionError):
             continue
     raise exc.InvalidCxxCompiler()
 
