@@ -1178,3 +1178,5 @@ caffe2_print_configuration_summary()
 if(BUILD_FUNCTORCH)
   add_subdirectory(functorch)
 endif()
+
+add_subdirectory(torch/csrc/jit/codegen/cuda)
