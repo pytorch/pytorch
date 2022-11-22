@@ -87,10 +87,6 @@ reduction_complex_to_real = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
 )
 
-reduction_complex_to_real_compute_dtype_only = partial(
-    reduction_complex_to_real, compute_dtype_only=True
-)
-
 pw_cast_for_int_to_real = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
