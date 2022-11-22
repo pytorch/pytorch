@@ -6,7 +6,6 @@ import math
 import os
 import warnings
 from itertools import chain
-from collections import OrderedDict
 from types import CodeType, FunctionType, ModuleType
 from typing import (
     Any,
@@ -254,7 +253,7 @@ class Tracer(TracerBase):
         # Maps the containing module's name to the operator name
         self.scope = Scope("", None)
         # Records the module call stack
-        self.module_stack: OrderedDict[str, str] = OrderedDict()
+        self.module_stack: Dict[str, str] = {}
         # Mapping of node name to module scope
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 

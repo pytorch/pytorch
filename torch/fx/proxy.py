@@ -6,7 +6,6 @@ import operator
 import traceback
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from collections import OrderedDict
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
@@ -99,7 +98,7 @@ class TracerBase:
     scope : Scope
 
     # Records the module call stack
-    module_stack: OrderedDict[str, str]
+    module_stack: Dict[str, str]
 
     # Mapping of node name to module scope
     node_name_to_scope: Dict[str, Tuple[str, type]]
@@ -289,7 +288,7 @@ class GraphAppendingTracer(TracerBase):
         super().__init__()
         self.graph = graph
         self.scope = Scope("", None)
-        self.module_stack: OrderedDict[str, str] = OrderedDict()
+        self.module_stack: Dict[str, str] = {}
         self.node_name_to_scope = {}
 
 @compatibility(is_backward_compatible=False)
