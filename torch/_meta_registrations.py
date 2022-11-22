@@ -15,6 +15,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    make_contiguous_strides_for,
 )
 
 from torch._prims_common.wrappers import out_wrapper
@@ -178,13 +179,30 @@ def meta_angle_out(self, out):
     return out.copy_(torch.angle(self))
 
 
-def squareCheckInputs(self, f_name):
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def squareCheckInputs(self: Tensor, f_name: str):
     assert (
         self.dim() >= 2
     ), f"{f_name}: The input tensor must have at least 2 dimensions."
     assert self.size(-1) == self.size(
         -2
     ), f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
+
+
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def checkFloatingOrComplex(
+    t: Tensor, f_name: str, allow_low_precision_dtypes: bool = True
+):
+    dtype = t.dtype
+    check(
+        t.is_floating_point() or t.is_complex(),
+        lambda: f"{f_name}, : Expected a floating point or complex tensor as input. Got , {dtype}",
+    )
+    if allow_low_precision_dtypes:
+        check(
+            dtype in (torch.float, torch.double, torch.cfloat, torch.cdouble),
+            lambda: f"{f_name} : Low precision dtypes not supported. Got {dtype}",
+        )
 
 
 def checkUplo(uplo: str):
@@ -204,6 +222,34 @@ def meta_linalg_eigh(self, uplo="L"):
     values.transpose_(-2, -1)
     vectors = self.new_empty(self.shape[:-1])
     return (values, vectors)
+
+
+# From aten/src/ATen/native/BatchLinearAlgebra.cpp
+@register_meta(aten.linalg_cholesky_ex.default)
+def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = False):
+    squareCheckInputs(A, "linalg.cholesky")
+    checkFloatingOrComplex(A, "linalg.cholesky")
+
+    A_shape = A.shape
+    ndim = len(A_shape)
+
+    # L
+    L_strides = make_contiguous_strides_for(A_shape, False)
+    L = A.new_empty(A_shape)
+    L.as_strided_(A_shape, L_strides)
+
+    # infos
+    infos = A.new_empty(A_shape[0 : ndim - 2], dtype=torch.int32)
+    return L, infos
+
+
+# From aten/src/ATen/native/BatchLinearAlgebra.cpp
+@register_meta(aten.linalg_cholesky.default)
+def meta_linalg_cholesky(A: Tensor, upper=False):
+    # All the checks done on info in the corresponding C++ function
+    # are data dependent, so we skip info computation
+    L, infos = linalg_cholesky_ex(A, upper, False)
+    return L, infos
 
 
 # From aten/src/ATen/native/ReflectionPad.cpp
@@ -1167,51 +1213,8 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     return self
 
 
-@register_meta(
-    [
-        aten.acos_.default,
-        aten.abs_.default,
-        aten.sinc_.default,
-        aten.acosh_.default,
-        aten.sin_.default,
-        aten.sinh_.default,
-        aten.tan_.default,
-        aten.atanh.default,
-        aten.ceil_.default,
-        aten.cos_.default,
-        aten.cosh_.default,
-        aten.neg_.default,
-        aten.round_.default,
-        aten.asin_.default,
-        aten.asinh_.default,
-        aten.atanh_.default,
-        aten.tanh_.default,
-        aten.rsqrt_.default,
-        aten.reciprocal_.default,
-        aten.log10_.default,
-        aten.log1p_.default,
-        aten.log2_.default,
-        aten.log_.default,
-        aten.exp_.default,
-        aten.exp2_.default,
-        aten.expm1_.default,
-        aten.floor_.default,
-        aten.sgn_.default,
-        aten.atan_.default,
-    ]
-)
-def meta_unary_inplace(self, **kwargs):
-    meta_tensor = _elementwise_meta(
-        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
-    )
-    # sanity check
-    assert meta_tensor.stride() == self.stride()
-    assert meta_tensor.dtype == self.dtype
-    return self
-
-
 @register_meta([aten.round.default, aten.round.decimals])
-def meta_unary_impl(self, **kwargs):
+def meta_round(self, **kwargs):
     return _elementwise_meta(
         self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -1556,12 +1559,49 @@ def full(size, fill_value, *args, **kwargs):
         aten.randn_like.default,
         aten.rand_like.default,
         aten.full_like.default,
-        aten.zeros_like.default,
         aten.ones_like.default,
     ]
 )
 def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
+
+
+# zeros_like is special cased to work for sparse
+@register_meta(aten.zeros_like.default)
+def zeros_like(
+    self, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None
+):
+    if layout == torch.sparse_coo:
+        check(
+            memory_format is None,
+            lambda: "memory format option is only supported by strided tensors",
+        )
+
+        res = torch.empty(
+            0,
+            dtype=self.dtype if dtype is None else dtype,
+            layout=layout,
+            device=self.device if device is None else device,
+            pin_memory=pin_memory,
+        )
+
+        if self.is_sparse:
+            res.sparse_resize_and_clear_(
+                self.size(), self.sparse_dim(), self.dense_dim()
+            )
+        else:
+            res.sparse_resize_and_clear_(self.size(), self.dim(), 0)
+
+        res._coalesced_(True)
+        return res
+    return aten.empty_like.default(
+        self,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
+    )
 
 
 # hacky: Please remove after math.ceil works with arange

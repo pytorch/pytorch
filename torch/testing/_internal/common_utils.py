@@ -741,9 +741,15 @@ def run_tests(argv=UNITTEST_ARGS):
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
         print("If in CI, skip info is located in the xml test reports, please either go to s3 or the hud to download them")
-        # exitcode of 5 means no tests were found, which happens since some test configs don't
-        # run tests from certain files
-        exit(0 if exit_code == 5 else exit_code)
+
+        if not RERUN_DISABLED_TESTS:
+            # exitcode of 5 means no tests were found, which happens since some test configs don't
+            # run tests from certain files
+            exit(0 if exit_code == 5 else exit_code)
+        else:
+            # Only record the test report and always return a success code when running under rerun
+            # disabled tests mode
+            exit(0)
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
@@ -770,6 +776,9 @@ def run_tests(argv=UNITTEST_ARGS):
                         # it stands for `verbose_str` captured in the closure
                         c.cell_contents = f"skip: {reason}"
 
+            def printErrors(self) -> None:
+                super().printErrors()
+                self.printErrorList("XPASS", self.unexpectedSuccesses)
         test_report_path = get_report_path()
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
@@ -2156,13 +2165,22 @@ class TestCase(expecttest.TestCase):
                 result.addExpectedFailure(self, err)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red + 1, num_green=num_green)
-        elif (RERUN_DISABLED_TESTS or report_only) and num_retries_left < MAX_NUM_RETRIES:
-            # Always re-run up to MAX_NUM_RETRIES when running under report only or rerun disabled tests modes
+        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and not result.skipped:
+            # Always re-run up to MAX_NUM_RETRIES when running under rerun disabled tests modes if the test successes.
+            # The parameter num_retries_left can be equal to MAX_NUM_RETRIES here because num_runs_left is initially
+            # set to MAX_NUM_RETRIES + 1, i.e. the first run successes
+            #
+            # Also if the result is skipped, this is due to check_if_enable skipping non-disabled tests, thus we
+            # want to ignore them, not retrying and skipping multiple times
             print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
-            if RERUN_DISABLED_TESTS:
-                result.addSuccess(self)
-            else:
-                result.addUnexpectedSuccess(self)
+            result.addSuccess(self)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red, num_green=num_green + 1)
+        elif report_only and num_retries_left < MAX_NUM_RETRIES:
+            # The original logic here is that num_retries_left must be smaller than MAX_NUM_RETRIES indicating
+            # that at least one retry has been spent
+            print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
+            result.addUnexpectedSuccess(self)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red, num_green=num_green + 1)
         elif not report_only and num_retries_left < MAX_NUM_RETRIES:
@@ -3739,6 +3757,15 @@ class TestGradients(TestCase):
             else:
                 all_args = tuple(chain((sample.input,), sample.args, sample.kwargs.values()))
             gradcheck_args = tuple(x for x in all_args if (isinstance(x, torch.Tensor) and x.requires_grad))
+
+            # Verifies sample input tensors should have no grad
+            # This may happen if the same tensor is used in two different SampleInputs
+            for t in gradcheck_args:
+                self.assertIsNone(t.grad,
+                                  "A sampled input has a gradient before running autograd. "
+                                  "This usually means that (at least) one input tensor is reused "
+                                  "across different SampleInputs. "
+                                  "Please create a new tensor for each SampleInput.")
 
             def _input_recomposition_helper(inputs, inp, input_idx):
                 if is_iterable_of_tensors(inp):
