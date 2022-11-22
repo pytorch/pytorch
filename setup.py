@@ -852,7 +852,7 @@ def configure_extension_build():
     pytorch_extra_install_requirements = os.getenv("PYTORCH_EXTRA_INSTALL_REQUIREMENTS", "")
     if pytorch_extra_install_requirements:
         report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}")
-        extra_install_requires += pytorch_extra_install_requirements.split(";")
+        extra_install_requires += pytorch_extra_install_requirements.split("|")
 
 
     # Cross-compile for M1
@@ -1036,6 +1036,7 @@ def main():
         'lib/*.pdb',
         'lib/torch_shm_manager',
         'lib/*.h',
+        'include/*.h',
         'include/ATen/*.h',
         'include/ATen/cpu/*.h',
         'include/ATen/cpu/vec/vec256/*.h',

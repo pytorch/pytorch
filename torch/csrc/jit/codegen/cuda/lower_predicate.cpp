@@ -20,7 +20,7 @@ namespace cuda {
 
 namespace {
 
-class ConditionalFromPredicateModifier : public kir::IrVisitor {
+class ConditionalFromPredicateModifier : public kir::ExprMutator {
  public:
   ConditionalFromPredicateModifier() = delete;
 
@@ -32,47 +32,58 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
  private:
   ConditionalFromPredicateModifier(const std::vector<Expr*>& exprs) {
     FUSER_PERF_SCOPE(
-        "GpuLower::Lower::ConditionalFromPredicateModifier::process");
-    kir::IrVisitor::handle(exprs);
+        "ConditionalFromPredicateModifier::ConditionalFromPredicateModifier");
+    traverseAndInsert(exprs);
   }
 
-  using kir::IrVisitor::handle;
+  using kir::ExprMutator::handle;
 
   void handle(Expr* expr) final {
     if (expr != nullptr && expr->predicate() != nullptr) {
       // Replace expr predicate with bool conditional
       auto conditional = generateConditional(expr->predicate());
       if (expr->predicate()->predicate_type() == PredicateType::Vectorize) {
-        // TODO: This logic doesn't seem to fit well here, for unswitch the
-        // logic is in the unroll loop to set the thread predicate to the expr.
-        // I didn't have a quick way to do that so placing this here for now.
-        TORCH_INTERNAL_ASSERT(
-            expr->isA<kir::IfThenElse>(),
-            "Predicate handling expects ITE statement.");
-        auto ite = expr->as<kir::IfThenElse>();
+        if (expr->isA<kir::IfThenElse>()) {
+          // TODO: This logic doesn't seem to fit well here, for unswitch the
+          // logic is in the unroll loop to set the thread predicate to the
+          // expr. I didn't have a quick way to do that so placing this here for
+          // now.
+          auto ite = expr->as<kir::IfThenElse>();
 
-        TORCH_INTERNAL_ASSERT(
-            ite->thenBody().size() == 1,
-            "Expecting predicated body to only have one vectorized expression.");
-        auto vec_expr = ite->thenBody()[0];
-        TORCH_INTERNAL_ASSERT(
-            vec_expr->isA<UnaryOp>() || vec_expr->isA<LoadStoreOp>(),
-            "Vectorize predicate exprs only supported on set operations.");
-        TORCH_INTERNAL_ASSERT(
-            ir_utils::isTvOp(vec_expr),
-            "Vectorize predicate exprs only supported on tensor view operations.");
-        if (!vec_expr->inputs()[0]->isConstScalar()) {
+          TORCH_INTERNAL_ASSERT(
+              ite->thenBody().size() == 1,
+              "Expecting predicated body to only have one vectorized expression.");
+          auto vec_expr = ite->thenBody()[0];
+          TORCH_INTERNAL_ASSERT(
+              vec_expr->isA<UnaryOp>() || vec_expr->isA<LoadStoreOp>(),
+              "Vectorize predicate exprs only supported on set operations.");
+          TORCH_INTERNAL_ASSERT(
+              ir_utils::isTvOp(vec_expr),
+              "Vectorize predicate exprs only supported on tensor view operations.");
+          if (!vec_expr->inputs()[0]->isConstScalar()) {
+            conditional = SimplifyingIrBuilder::andExpr(
+                              conditional,
+                              GpuLower::current()->threadPredMap().getPredicate(
+                                  ir_utils::getTvOutput(vec_expr)))
+                              ->as<Bool>();
+          }
+        } else {
+          TORCH_INTERNAL_ASSERT(lower_utils::supportInlinePredicate(expr));
+          auto thread_pred = GpuLower::current()->threadPredMap().getPredicate(
+              ir_utils::getTvOutput(expr));
+          TORCH_INTERNAL_ASSERT(
+              thread_pred->isConst() && thread_pred->value().value());
           conditional = SimplifyingIrBuilder::andExpr(
                             conditional,
                             GpuLower::current()->threadPredMap().getPredicate(
-                                ir_utils::getTvOutput(vec_expr)))
+                                ir_utils::getTvOutput(expr)))
                             ->as<Bool>();
         }
       }
       TORCH_INTERNAL_ASSERT(conditional != nullptr);
       expr->predicate()->setValue(conditional);
       TORCH_INTERNAL_ASSERT(expr->predicate()->value() != nullptr);
-      setWritePredicate(expr, conditional);
+      setWritePredicate(expr);
     }
 
     // Note: [Predicate Inversion for CpAsync]
@@ -101,7 +112,7 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
       invertPredicateForGmemToSharedMemInitialize(expr);
     }
 
-    kir::IrVisitor::handle(expr);
+    kir::ExprMutator::handle(expr);
   }
 
   // Invert the predicate of given expr.
@@ -123,7 +134,7 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
         ir_utils::isCpAsyncInit(maybe_init.value());
   }
 
-  void setWritePredicate(Expr* expr, Bool* read_cond) {
+  void setWritePredicate(Expr* expr) {
     if (expr->writePredicate() != nullptr) {
       auto write_cond = generateConditional(expr->writePredicate());
       if (write_cond) {
@@ -131,7 +142,7 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
       } else {
         // If generateConditional returns null, it means no specific
         // predicate needs to be used.
-        expr->setWritePredicate(nullptr);
+        registerReplace(expr, expr->withWritePredicate(nullptr));
       }
     }
   }
@@ -150,7 +161,7 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
       ite->predicate()->setValue(conditional);
       TORCH_INTERNAL_ASSERT(ite->predicate()->value() != nullptr);
     }
-    kir::IrVisitor::handle(ite);
+    kir::ExprMutator::handle(ite);
   }
 
   // Generate conditional according to PredicateType

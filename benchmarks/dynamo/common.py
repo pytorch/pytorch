@@ -4,6 +4,7 @@ import collections
 import copy
 import csv
 import functools
+import importlib
 import io
 import logging
 import os
@@ -13,6 +14,7 @@ import subprocess
 import sys
 import time
 import warnings
+from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
@@ -20,7 +22,8 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.utils
-from microbenchmarks.operator_inp_utils import OperatorInputsMode
+import torch.distributed
+from functorch._src.aot_autograd import set_model_name
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.optimizations import backends
 from torch._dynamo.optimizations.log_args import conv_args_analysis
@@ -30,14 +33,13 @@ from torch._dynamo.utils import clone_inputs
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map
 
 try:
-    from functorch._src.aot_autograd import set_model_name
+    from .microbenchmarks.operator_inp_utils import OperatorInputsMode
 except ImportError:
-
-    def set_model_name(name):
-        pass
+    from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
 
 log = logging.getLogger(__name__)
@@ -108,27 +110,18 @@ CI_SKIP_INDUCTOR_TRAINING = [
     # *CI_SKIP_AOT_EAGER_TRAINING,
     # *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
-    "attention_is_all_you_need_pytorch",
-    "drq",
-    "hf_Albert",
-    "hf_Bart",
-    "hf_GPT2",
-    "hf_Reformer",
+    "DALLE2_pytorch",
+    "detectron2",
+    "functorch_dp_cifar10",
     "mobilenet_v3_large",
     "moco",
-    "pytorch_struct",
-    "vgg16",
-    "speech_transformer",  # from functionalization
-    "vision_maskrcnn",  # from functionalization
-    "timm_efficientnet",  # from functionalization (only fails for inductor)
-    "hf_Bert",
-    "soft_actor_critic",
     "tacotron2",
-    "yolov3",
+    "vision_maskrcnn",  # from functionalization
     # OOM
     "Background_Matting",
     "fastNLP_Bert",
     "hf_BigBird",
+    "hf_T5_base",  # fp64_OOM
     "mobilenet_v2",
     "mobilenet_v2_quantized_qat",
     "resnet50_quantized_qat",
@@ -142,6 +135,8 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "MT5ForConditionalGeneration",  # OOM
     "PegasusForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # fp64_OOM
+    "DebertaV2ForMaskedLM",  # OOM
+    "DebertaV2ForQuestionAnswering",  # OOM
     # OOM
     "BigBird",
     "TrOCRForCausalLM",
@@ -155,11 +150,48 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "hrnet_w18",  # accuracy
     "lcnet_0500",  # accuracy
     "levit_128",  # levit_128
+    "poolformer_m36",
     "rexnet_100",  # accuracy
     "swin_base_patch4_window7_224",
     "twins_pcpvt_base",  # time out
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
+
+
+def model_specified_by_path(path_and_class_str):
+    return ":" in path_and_class_str
+
+
+def load_model_from_path(path_and_class_str):
+    configs = {}
+    for kvstr in path_and_class_str.split(","):
+        k, v = kvstr.split(":")
+        configs[k] = v
+
+    for name in ["path", "class"]:
+        if name not in configs:
+            raise RuntimeError(
+                "Invalid --only arguments. Check help message for the correct format"
+            )
+
+    path = configs["path"]
+    class_name = configs["class"]
+
+    if path[:1] != "/":
+        raise RuntimeError(
+            "Use absolute path since dynamo may change the current working directory which makes using relative path tricky"
+        )
+
+    spec = importlib.util.spec_from_file_location("module_name", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    model_class = getattr(module, class_name)
+    assert issubclass(model_class, torch.nn.Module)
+    model = model_class()
+    assert hasattr(model, "get_example_inputs")
+    inputs = model.get_example_inputs()
+    return model, inputs
 
 
 def output_csv(filename, headers, row):
@@ -410,8 +442,14 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             timings,
         )
 
-    headers = ("dev", "name", "batch_size", "speedup")
-    row = [current_device, current_name, current_batch_size, float(speedup)]
+    headers = ("dev", "name", "batch_size", "speedup", "abs_latency")
+    row = [
+        current_device,
+        current_name,
+        current_batch_size,
+        float(speedup),
+        median[1] * 1000,
+    ]
     if "compilation_latency" in kwargs:
         headers = headers + ("compilation_latency", "compression_ratio")
         row.append(kwargs["compilation_latency"])
@@ -787,6 +825,24 @@ def maybe_fresh_cache(fn, is_cold_start):
     return inner
 
 
+@contextmanager
+def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_size=1):
+    # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
+    # Just manually implement the most important part of the dynamo behavior to reset/clear.
+    try:
+        if should_init_distributed:
+            torch.cuda.set_device(rank)
+            os.environ["MASTER_ADDR"] = "localhost"
+            os.environ["MASTER_PORT"] = port
+            torch.distributed.init_process_group(
+                "nccl", rank=rank, world_size=world_size
+            )
+        yield
+    finally:
+        if should_init_distributed:
+            torch.distributed.destroy_process_group()
+
+
 def xla_wrapper(model_iter_fn):
     """
     Wrap the model_iter_fn to run the model on XLA devices.
@@ -975,7 +1031,7 @@ class BenchmarkRunner:
             out_batch_size = batch_size - 1
         return max(0, int(out_batch_size))
 
-    def batch_size_finder(self, device, model_name, initial_batch_size=128):
+    def batch_size_finder(self, device, model_name, initial_batch_size=1024):
         batch_size = initial_batch_size
         while batch_size >= 1:
             torch.cuda.empty_cache()
@@ -1045,12 +1101,18 @@ class BenchmarkRunner:
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip")
 
+        def deepcopy_and_maybe_ddp(model):
+            model = copy.deepcopy(model)
+            if self.args.ddp:
+                model = DDP(model, find_unused_parameters=True)
+            return model
+
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
         try:
             fp64_outputs = self.run_n_iterations(
                 *cast_to_fp64(
-                    copy.deepcopy(model),
+                    deepcopy_and_maybe_ddp(model),
                     clone_inputs(example_inputs),
                 )
             )
@@ -1062,20 +1124,19 @@ class BenchmarkRunner:
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
-
         accuracy_status = "pass"
 
         with self.pick_grad(name, self.args.training):
             # Get results of native pytorch
             reset_rng_state()
             correct_result = self.run_n_iterations(
-                copy.deepcopy(model), clone_inputs(example_inputs)
+                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
             )
 
             # Rerun native pytorch
             reset_rng_state()
             correct_rerun_result = self.run_n_iterations(
-                copy.deepcopy(model), clone_inputs(example_inputs)
+                deepcopy_and_maybe_ddp(model), clone_inputs(example_inputs)
             )
             if not same(
                 correct_result,
@@ -1092,7 +1153,10 @@ class BenchmarkRunner:
             torch._dynamo.reset()
             try:
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                new_result = optimized_model_iter_fn(model, example_inputs)
+
+                new_result = optimized_model_iter_fn(
+                    deepcopy_and_maybe_ddp(model), example_inputs
+                )
             except Exception as e:
                 accuracy_status = "fail_to_run"
                 print(
@@ -1254,6 +1318,7 @@ class BenchmarkRunner:
         experiment,
         diff=False,
         branch=None,
+        explain=False,
     ):
         if diff:
             self.compare_branches(
@@ -1273,14 +1338,15 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment
             )
             print(status)
+        if explain:
+            print(torch._dynamo.explain(model, *example_inputs)[0])
 
 
 def help(fn):
     return fn.__doc__
 
 
-def parse_args():
-
+def parse_args(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--filter", "-k", action="append", help="filter benchmarks with regexp"
@@ -1301,7 +1367,10 @@ def parse_args():
         default=0,
         help="ID of the benchmark suite partition to be run. Used to divide CI tasks",
     )
-    parser.add_argument("--devices", "-d", action="append", help="cpu or cuda")
+    parser.add_argument(
+        "--devices", "--device", "-d", action="append", help="cpu or cuda"
+    )
+    parser.add_argument("--device-index", help="CUDA device index")
     parser.add_argument(
         "--repeat", "-n", type=int, default=30, help="number of timing runs"
     )
@@ -1357,11 +1426,50 @@ def parse_args():
     parser.add_argument(
         "--fast", "-f", action="store_true", help="skip slow benchmarks"
     )
-    parser.add_argument("--only", help="Run just one model")
+    parser.add_argument(
+        "--only",
+        help="""Run just one model from torchbench. Or
+        specify the path and class name of the model in format like:
+        --only=path:<MODEL_FILE_PATH>,class:<CLASS_NAME>
+
+        Due to the fact that dynamo changes current working directory,
+        the path should be an absolute path.
+
+        The class should have a method get_example_inputs to return the inputs
+        for the model. An example looks like
+        ```
+        class LinearModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+            def get_example_inputs(self):
+                return (torch.randn(2, 10),)
+        ```
+    """,
+    )
     parser.add_argument(
         "--training",
         action="store_true",
         help="Performs training",
+    )
+    parser.add_argument(
+        "--ddp",
+        action="store_true",
+        help="Wraps model in DDP before running it, and uses dynamo DDPOptmizer (graph breaks) by default.",
+    )
+    parser.add_argument(
+        "--no-optimize-ddp",
+        action="store_true",
+        help="Disables dynamo DDPOptimizer (graph breaks). (Applies only when using --ddp benchmark mode).",
+    )
+    parser.add_argument(
+        "--distributed-master-port",
+        default="6789",
+        help="Port to bind for for torch.distributed.  Use the default unless it's conflicting with another user",
     )
     parser.add_argument(
         "--dynamic-shapes",
@@ -1398,6 +1506,15 @@ def parse_args():
         help="Overrides the output filename",
     )
     parser.add_argument(
+        "--output-directory",
+        help="Overrides the directory to place output files.",
+    )
+    parser.add_argument(
+        "--part",
+        default=None,
+        help="Specify the part of the model to run.",
+    )
+    parser.add_argument(
         "--export-profiler-trace",
         action="store_true",
         help="exports trace of kineto profiler",
@@ -1408,6 +1525,12 @@ def parse_args():
         "--diff_main",
         action="store_true",
         help="Delta this branch against main. In the future, we may add support for picking the branch.",
+    )
+
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="run .explain() on the graph at the end of the run.",
     )
 
     parser.add_argument(
@@ -1523,15 +1646,17 @@ def parse_args():
     mode_group.add_argument(
         "--performance", action="store_true", help="Measures performance speedup"
     )
-    args = parser.parse_args()
-    return args
+    return parser.parse_args(args)
 
 
 def main(runner, original_dir=None):
     args = parse_args()
-    return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
-        runner, args, original_dir
-    )
+    with maybe_init_distributed(
+        args.ddp and args.only, port=args.distributed_master_port
+    ):
+        return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
+            runner, args, original_dir
+        )
 
 
 def run(runner, args, original_dir=None):
@@ -1557,7 +1682,24 @@ def run(runner, args, original_dir=None):
                 if args.training
                 else CI_SKIP_INDCUTOR_INFERENCE
             )
-
+    if args.ddp:
+        # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
+        # but just to measure impact on singlenode of performing graph-breaks.
+        # Left it as a follow up to keep this PR isolated.
+        assert (
+            args.accuracy
+        ), "DDP benchmark is currently only hooked up to --accuracy bench"
+        assert args.training, "DDP benchmark requires --training mode"
+        if args.no_optimize_ddp:
+            torch._dynamo.config.optimize_ddp = False
+        else:
+            # TODO(whc) after enabling DDPOptimizer by default this could be removed or assert
+            torch._dynamo.config.optimize_ddp = True
+        if args.only == "dlrm":
+            log.error(
+                "DLRM+DDP is unsupported as it requires sharding the embedding layer separately from DDP"
+            )
+            return sys.exit(-1)
     if args.accuracy:
         # Use small batch size. We use >1 batch size to ensure we test
         # batch_norm type of operators that work on batch dims.
@@ -1576,10 +1718,13 @@ def run(runner, args, original_dir=None):
 
         # Some models e.g. yolov3 assert batch size on n_gpus
         if "CUDA_VISIBLE_DEVICES" not in os.environ:
-            os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+            args.device_index = "0"
 
         # Stricter check to disable fallbacks
         args.suppress_errors = False
+
+    if args.device_index is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.device_index
 
     elif args.performance:
         # Ensure that we test on real scenarios
@@ -1782,7 +1927,12 @@ def run(runner, args, original_dir=None):
         output_filename = args.output
 
     if output_filename:
-        output_filename = os.path.join(torch._dynamo.config.base_dir, output_filename)
+        if args.output_directory:
+            output_filename = os.path.join(args.output_directory, output_filename)
+        else:
+            output_filename = os.path.join(
+                torch._dynamo.config.base_dir, output_filename
+            )
 
     if args.find_batch_sizes and args.only:
         for device in args.devices:
@@ -1812,19 +1962,38 @@ def run(runner, args, original_dir=None):
                 batch_size = read_batch_size_from_file(
                     args, args.batch_size_file, model_name
                 )
-            try:
-                device, name, model, example_inputs, batch_size = runner.load_model(
-                    device,
-                    model_name,
-                    batch_size=batch_size,
-                )
-            except NotImplementedError as e:
-                print(e)
-                import traceback
+            if model_specified_by_path(args.only):
+                model, example_inputs = load_model_from_path(args.only)
+                name = model.__class__.__name__
+                model = model.to(device=device)
+                example_inputs = tree_map(lambda x: x.to(device=device), example_inputs)
+            else:
+                try:
+                    if args.part:
+                        (
+                            device,
+                            name,
+                            model,
+                            example_inputs,
+                            batch_size,
+                        ) = runner.load_model(
+                            device, model_name, batch_size=batch_size, part=args.part
+                        )
+                    else:
+                        (
+                            device,
+                            name,
+                            model,
+                            example_inputs,
+                            batch_size,
+                        ) = runner.load_model(device, model_name, batch_size=batch_size)
+                except NotImplementedError as e:
+                    print(e)
+                    import traceback
 
-                print(traceback.format_exc())
-                logging.warn(f"{args.only} failed to load")
-                continue  # bad benchmark implementation
+                    print(traceback.format_exc())
+                    logging.warn(f"{args.only} failed to load")
+                    continue  # bad benchmark implementation
 
             current_name = name
             current_device = device
@@ -1849,6 +2018,7 @@ def run(runner, args, original_dir=None):
                 optimize_ctx,
                 experiment,
                 diff=args.diff_main,
+                explain=args.explain,
             )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"

@@ -51,7 +51,8 @@ class XNNSerializer {
   // finish and serialize xnngraph returning serialized data
   std::string finishAndSerialize(
       std::vector<uint32_t> input_ids,
-      std::vector<uint32_t> output_ids);
+      std::vector<uint32_t> output_ids,
+      size_t num_extern_ids);
 
  private:
   // xnnpack version we are serializing
@@ -61,10 +62,10 @@ class XNNSerializer {
   flatbuffers_fbsource::FlatBufferBuilder _builder;
 
   // Vector of the serialized xnnpack nodes
-  std::vector<flatbuffers_fbsource::Offset<Node>> _nodes;
+  std::vector<flatbuffers_fbsource::Offset<XNode>> _nodes;
 
   // Vector of the serialized xnnpack values
-  std::vector<flatbuffers_fbsource::Offset<Value>> _values;
+  std::vector<flatbuffers_fbsource::Offset<XValue>> _values;
 
   std::vector<flatbuffers_fbsource::Offset<Buffer>> _constantBuffer;
   std::vector<uint32_t> _bufferSizes;
