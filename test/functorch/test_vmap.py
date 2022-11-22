@@ -3295,6 +3295,8 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail.union({
         xfail('native_batch_norm'),
+        xfail('tril'),  # Exception not raised on error input
+        xfail('triu'),  # Exception not raised on error input
         # The error inputs are vectors, that pass when batched as they are treated as a matrix
         xfail('trace'),
     }))
@@ -3342,6 +3344,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('tensor_split'),
         xfail('to_sparse'),
         xfail('vdot'),
+        xfail('tril'),  # Exception not raised on error input
+        xfail('triu'),  # Exception not raised on error input
         xfail('__getitem__', ''),
         xfail('all'),
         xfail('any'),
