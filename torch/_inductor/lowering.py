@@ -3354,7 +3354,7 @@ def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
 
-@register_lowering(aten.div.Tensor_mode)
+@register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
     both_boolean = is_boolean_type(a) and is_boolean_type(b)
@@ -3370,23 +3370,6 @@ def div_mode(a, b, rounding_mode=None):
     return div(a, b)
 
 
-@register_lowering([aten.div], broadcast=True)
-def div(a, b):
-    def fn(*args):
-        return ops.div(*args)
-
-    dtype = get_promoted_dtype(
-        a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
-    # truediv produces a float tensor even if both operands are integer types
-    if is_integer_type(a) and is_integer_type(b):
-        dtype = torch.get_default_dtype()
-    return make_pointwise(fn, override_return_dtype=dtype)(
-        a if isinstance(a, Number) else to_dtype(a, dtype),
-        b if isinstance(b, Number) else to_dtype(b, dtype),
-    )
-
-
 @register_lowering([aten.mul], broadcast=True)
 def mul(a, b):
     both_bool = is_boolean_type(a) and is_boolean_type(b)
@@ -3397,21 +3380,29 @@ def mul(a, b):
         return make_pointwise(fn)(a, b)
 
 
-# TODO(lezcano) I believe the casting behaviour of prims.div is wrong
-# https://github.com/pytorch/pytorch/issues/84412
-# div prim performs truncation division on integer inputs
-#   and true division for floating and complex inputs
+# NOTE: prims.div maps to a / b in C, so performs truncation division on
+#   integer inputs and true division for floating and complex inputs.
 @register_lowering([prims.div], broadcast=True)
 def div_prim(a, b):
     is_integral = is_boolean_type(a) or is_integer_type(a)
 
     if is_integral:
-        return div_mode(a, b, rounding_mode="floor")
-    else:
-        return div(a, b)
+        return truncdiv(a, b)
+
+    def fn(*args):
+        return ops.div(*args)
+
+    return make_pointwise(fn)(a, b)
 
 
-@register_lowering([aten.fmod, prims.fmod])
+div = register_lowering(
+    [aten.true_divide, aten.div.Tensor],
+    broadcast=True,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)(div_prim)
+
+
+@register_lowering([aten.fmod, prims.fmod], broadcast=True)
 def fmod(a, b):
     is_integral = is_boolean_type(a) or is_integer_type(a)
 
@@ -3505,6 +3496,13 @@ register_pointwise(aten.bitwise_xor)
 register_pointwise(
     aten.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
+erf = register_pointwise(
+    aten.erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+register_lowering(
+    aten.special_erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)(erf)
+
 register_pointwise(
     aten.log,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
@@ -3557,7 +3555,8 @@ def register_inplace(aten_op, outplace_op):
 
 register_inplace(aten.add_, add)
 register_inplace(aten.mul_, mul)
-register_inplace(aten.div_, div)
+register_inplace(aten.div_.Tensor, div)
+register_inplace(aten.div_.Tensor_mode, div_mode)
 register_inplace(aten.sub_, sub)
 register_inplace(aten.relu_, relu)
 register_inplace(aten.sigmoid_, sigmoid)
