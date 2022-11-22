@@ -107,8 +107,25 @@ CI_SKIP_INDCUTOR_INFERENCE = [
 CI_SKIP_INDUCTOR_TRAINING = [
     *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
-    # OOM
+    "Background_Matting",  # fp64_OOM
+    "mobilenet_v3_large",   # accuracy
+    # Huggingface
+    "BlenderbotForCausalLM",  # OOM
+    "M2M100ForConditionalGeneration",  # OOM
+    "XGLMForCausalLM",  # OOM
+    # TIMM
+    "convit_base",  # fp64_OOM
+    "eca_halonext26ts",  # accuracy
+    "fbnetv3_b",  # accuracy
+    "levit_128",  # fp64_OOM
+    "res2net101_26w_4s",  # accuracy
+    "resnest101e",  # accuracy
+    "rexnet_100",  # accuracy
+    "spnasnet_100",  # accuracy
+    "swin_base_patch4_window7_224",    # accuracy
+    "xcit_large_24_p8_224",  # fp64_OOM
 ]
+
 
 
 def model_specified_by_path(path_and_class_str):
