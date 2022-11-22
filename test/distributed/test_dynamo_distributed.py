@@ -324,7 +324,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
                 },
             )
         )
-        cls._exit_stack.enter_context(patch.object(config, "log_level", logging.DEBUG))
+        cls._exit_stack.enter_context(patch.object(config, "log_level", logging.WARNING))
         cls.rank = 0
         cls.device = f"cuda:{cls.rank}"
         cls.device_ids = None if "cuda" in cls.device else [cls.rank]
@@ -502,7 +502,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
 
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
-        self.assertEqual(check_splits_compiler.compiler_called, 4)
+        self.assertEqual(check_splits_compiler.compiler_called, 2)
         for b in ddp_optimizer.buckets:
             for p_id in b.param_ids:
                 self.assertFalse(p_id in parameter_ids_to_ignore)
