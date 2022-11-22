@@ -20,7 +20,7 @@ jobs:
     with:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
-      cuda-arch-list: 8.6
+      cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
           { config: "inductor", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },

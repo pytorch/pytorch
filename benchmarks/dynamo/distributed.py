@@ -18,6 +18,17 @@ except ImportError:
     from dist_util import apply_fsdp, cleanup, get_model, model_iter_fn, setup
 
 
+def torchviz_model(args, model, inputs, rank):
+    from torchviz import make_dot
+
+    outputs = model(*inputs)
+    loss = reduce_to_scalar_loss(outputs)
+    parameter_names = dict(model.named_parameters())
+    dot = make_dot(loss, params=parameter_names, show_attrs=True, show_saved=True)
+    if rank == 0:
+        dot.render("torchviz.dot")
+
+
 def profile_model(args, model, inputs, rank):
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
         for i in range(args.repeat):
@@ -87,7 +98,8 @@ def run_model(args, model, inputs, key):
     t_total = timed(
         model, model_iter_fn, inputs, times=args.repeat, return_result=False
     )
-
+    if args.torchviz:
+        torchviz_model(args, model, inputs, rank)
     if args.profile:
         profile_model(args, model, inputs, rank)
 
@@ -105,6 +117,9 @@ if __name__ == "__main__":
     )
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--batch_size", default=None)
+    parser.add_argument(
+        "--torchviz", action="store_true", help="Dump autograd graph with torchviz"
+    )
     parser.add_argument("--profile", action="store_true", help="Run the profiler")
     parser.add_argument("--trace_file", default="profile.json", help="Run the profiler")
     parser.add_argument("--repeat", default=10, help="Repeats for timing run")
