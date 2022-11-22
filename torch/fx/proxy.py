@@ -6,7 +6,8 @@ import operator
 import traceback
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, OrderedDict, Optional, Iterable, Any, Iterator, Callable
+from collections import OrderedDict
+from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
@@ -288,7 +289,7 @@ class GraphAppendingTracer(TracerBase):
         super().__init__()
         self.graph = graph
         self.scope = Scope("", None)
-        self.module_stack: OrderedDict[str, str] = {}
+        self.module_stack: OrderedDict[str, str] = OrderedDict()
         self.node_name_to_scope = {}
 
 @compatibility(is_backward_compatible=False)
