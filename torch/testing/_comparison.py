@@ -2,10 +2,12 @@ import abc
 import cmath
 import collections.abc
 import contextlib
+import warnings
 from typing import (
     Any,
     Callable,
     Collection,
+    Dict,
     List,
     NoReturn,
     Optional,
@@ -83,7 +85,8 @@ _DTYPE_PRECISIONS.update(
 
 
 def default_tolerances(
-    *inputs: Union[torch.Tensor, torch.dtype]
+    *inputs: Union[torch.Tensor, torch.dtype],
+    dtype_precisions: Optional[Dict[torch.dtype, Tuple[float, float]]] = None,
 ) -> Tuple[float, float]:
     """Returns the default absolute and relative testing tolerances for a set of inputs based on the dtype.
 
@@ -102,7 +105,8 @@ def default_tolerances(
             raise TypeError(
                 f"Expected a torch.Tensor or a torch.dtype, but got {type(input)} instead."
             )
-    rtols, atols = zip(*[_DTYPE_PRECISIONS.get(dtype, (0.0, 0.0)) for dtype in dtypes])
+    dtype_precisions = dtype_precisions or _DTYPE_PRECISIONS
+    rtols, atols = zip(*[dtype_precisions.get(dtype, (0.0, 0.0)) for dtype in dtypes])
     return max(rtols), max(atols)
 
 
@@ -1530,4 +1534,56 @@ def assert_close(
         check_layout=check_layout,
         check_stride=check_stride,
         msg=msg,
+    )
+
+
+def assert_allclose(
+    actual: Any,
+    expected: Any,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
+    equal_nan: bool = True,
+    msg: str = "",
+) -> None:
+    """\
+    .. warning::
+
+       :func:`torch.testing.assert_allclose` is deprecated since ``1.12``. Please use
+       :func:`torch.testing.assert_close` instead. You can find detailed upgrade instructions
+       `here <https://github.com/pytorch/pytorch/issues/61844.>`_.
+    """
+    warnings.warn(
+        "`torch.testing.assert_allclose()` is deprecated since 1.12. "
+        "Use `torch.testing.assert_close()` instead. "
+        "You can find detailed upgrade instructions in https://github.com/pytorch/pytorch/issues/61844.",
+        FutureWarning,
+        stacklevel=2,
+    )
+
+    if not isinstance(actual, torch.Tensor):
+        actual = torch.tensor(actual)
+    if not isinstance(expected, torch.Tensor):
+        expected = torch.tensor(expected, dtype=actual.dtype)
+
+    if rtol is None and atol is None:
+        rtol, atol = default_tolerances(
+            actual,
+            expected,
+            dtype_precisions={
+                torch.float16: (1e-3, 1e-3),
+                torch.float32: (1e-4, 1e-5),
+                torch.float64: (1e-5, 1e-8),
+            },
+        )
+
+    torch.testing.assert_close(
+        actual,
+        expected,
+        rtol=rtol,
+        atol=atol,
+        equal_nan=equal_nan,
+        check_device=True,
+        check_dtype=False,
+        check_stride=False,
+        msg=msg or None,
     )
