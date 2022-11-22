@@ -2100,13 +2100,15 @@ class ReducerTest(TestCase):
         self.file = tempfile.NamedTemporaryFile(delete=False)
         world_size = 1
         self.store = c10d.FileStore(self.file.name, world_size)
+        c10d.init_process_group(backend="gloo", store=self.store, rank=0, world_size=world_size)
+        self.process_group = c10d.distributed_c10d._get_default_group()
+
+    def tearDown(self):
+        c10d.destroy_process_group()
         try:
-            process_group = c10d.distributed_c10d._get_default_group()
-        except RuntimeError:
-            process_group = None
-        if process_group is None:
-            c10d.init_process_group(backend="gloo", store=self.store, rank=0, world_size=world_size)
-        self.process_group = process_group
+            os.remove(self.file_name)
+        except OSError:
+            pass
 
     @requires_gloo()
     def test_single_dtype_single_bucket(self):

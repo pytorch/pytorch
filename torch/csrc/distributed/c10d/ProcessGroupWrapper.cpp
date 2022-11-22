@@ -62,7 +62,7 @@ struct CollectiveFingerPrint {
       const CollectiveFingerPrint& collective_fingerprint);
 
   // Executes and verifies the collective fingerprint.
-  void verify(c10::intrusive_ptr<ProcessGroup> pg) {
+  void verify(c10::intrusive_ptr<Backend> backend) {
     at::Tensor serialized_tensor = serialize_fingerprint();
     std::vector<at::Tensor> inp{serialized_tensor};
     // First verify tensor shapes. This is needed because if e.g. tensor dim
@@ -72,9 +72,9 @@ struct CollectiveFingerPrint {
     // the shape will be a single int k_i and we need to make sure k_i is
     // consistent across the whole world.
     std::vector<at::Tensor> sp = c10d::getTensorShapes(inp);
-    verify_tensors(sp, pg);
+    verify_tensors(sp, backend);
     // Now verify consistency for the actual tensor.
-    verify_tensors(inp, pg);
+    verify_tensors(inp, backend);
   }
 
   // Takes a serialized fingerprint from
@@ -129,7 +129,7 @@ struct CollectiveFingerPrint {
  private:
   void verify_tensors(
       std::vector<at::Tensor>& tensors_to_verify,
-      c10::intrusive_ptr<ProcessGroup>& pg) {
+      c10::intrusive_ptr<Backend>& backend) {
     // Create output tensor data structure to pass into allgather.
     std::vector<std::vector<at::Tensor>> output_tensors;
     // output tensors: [<tensor 0 outputs>, <tensor 1 outputs>, ..., <tensor n
@@ -140,15 +140,15 @@ struct CollectiveFingerPrint {
       // <tensor 0 outputs>: [<rank 0 tensor>, <rank 1 tensor>, ..., <rank n
       // tensor>]
       std::vector<at::Tensor> outputs;
-      outputs.reserve(pg->getSize());
-      for (const auto i : c10::irange(pg->getSize())) {
+      outputs.reserve(backend->getSize());
+      for (const auto i : c10::irange(backend->getSize())) {
         std::ignore = i; // Suppress unused variable warning
         outputs.emplace_back(at::zeros_like(tensor_shape));
       }
       output_tensors.emplace_back(outputs);
     }
     // Allgather tensor shapes.
-    pg->allgather(output_tensors, tensors_to_verify)->wait();
+    backend->allgather(output_tensors, tensors_to_verify)->wait();
     // Verify equivalence
     for (const auto i : c10::irange(output_tensors.size())) {
       const std::vector<at::Tensor> gathered_tensors = output_tensors[i];
@@ -160,7 +160,7 @@ struct CollectiveFingerPrint {
               deserialize_fingerprint(rank_tensor);
           std::stringstream ss;
           ss << "Detected mismatch between collectives on ranks. Rank "
-             << pg->getRank() << " is running collective: " << *this
+             << backend->getRank() << " is running collective: " << *this
              << ", but Rank " << rank
              << " is running collective: " << rank_fingerprint << ".";
           TORCH_CHECK(false, ss.str());
@@ -260,8 +260,8 @@ std::ostream& operator<<(
 } // namespace
 
 ProcessGroupWrapper::ProcessGroupWrapper(
-    c10::intrusive_ptr<ProcessGroup> pg,
-    c10::intrusive_ptr<ProcessGroup> glooPg)
+    c10::intrusive_ptr<Backend> pg,
+    c10::intrusive_ptr<Backend> glooPg)
     : Backend(pg->getRank(), pg->getSize()), pg_(pg), glooPg_(glooPg) {
   // Set the sequence number for the underlying process group.
   pg_->setSequenceNumberForGroup();
@@ -430,7 +430,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::_reduce_scatter_base(
   return pg_->_reduce_scatter_base(outputBuffer, inputBuffer, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup> ProcessGroupWrapper::getWrappedPg() const {
+c10::intrusive_ptr<Backend> ProcessGroupWrapper::getWrappedPg() const {
   return pg_;
 }
 

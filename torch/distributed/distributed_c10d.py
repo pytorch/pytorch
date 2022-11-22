@@ -944,7 +944,7 @@ def _new_process_group_helper(
     the calling process is not part of the newly created group. In that case,
     this function returns GroupMember.NON_GROUP_MEMBER.
 
-    This function is called with ``group_ranks == []`` for the default group.
+    This function is called with ``global_ranks_in_group == []`` for the default group.
     """
     global _world
 
@@ -965,6 +965,7 @@ def _new_process_group_helper(
 
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = len(global_ranks_in_group) == 0
+    print("global_ranks_in_group", global_ranks_in_group)
 
     prefix_store = PrefixStore(f"{group_name}/", store)
     pg: ProcessGroup = ProcessGroup(prefix_store, group_rank, group_size, timeout=timeout)
@@ -973,7 +974,9 @@ def _new_process_group_helper(
     # we check if the current process is a member of the new group.
     if not is_default_group:
         global_rank = _get_default_group().rank()
+        print("global_rank", global_rank, "group_rank", group_rank)
         if global_rank not in global_ranks_in_group:
+            print("I AM EXITING")
             return GroupMember.NON_GROUP_MEMBER
 
     for device, backend in backend_config.get_device_backend_map().items():
@@ -1050,30 +1053,30 @@ def _new_process_group_helper(
             pg = backend_pg
             break
 
+        # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
+        if backend in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
+            # In debug mode and if GLOO is available, wrap in a wrapper PG that
+            # enables enhanced collective checking for debuggability.
+            if get_debug_level() == DebugLevel.DETAIL:
+                if not _GLOO_AVAILABLE:
+                    logger.info(
+                        """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
+                                GLOO is not available. Build with Gloo to
+                                create a wrapper process group in debug mode
+                                to aid collective desynchronization debugging."""
+                    )
+                else:
+                    backend_pg = _create_process_group_wrapper(
+                        wrapped_pg=backend_pg,
+                        store_prefix=group_name,
+                        store=store,
+                        rank=group_rank,
+                        world_size=group_size,
+                        timeout=timeout,
+                    )
+
         print(f"finished creating {backend_pg} for device {device}")
         pg._set_backend(torch.device(device), backend_pg)
-
-    # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
-    if backend in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
-        # In debug mode and if GLOO is available, wrap in a wrapper PG that
-        # enables enhanced collective checking for debuggability.
-        if get_debug_level() == DebugLevel.DETAIL:
-            if not _GLOO_AVAILABLE:
-                logger.info(
-                    """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
-                            GLOO is not available. Build with Gloo to
-                            create a wrapper process group in debug mode
-                            to aid collective desynchronization debugging."""
-                )
-            else:
-                backend_pg = _create_process_group_wrapper(
-                    wrapped_pg=backend_pg,
-                    store_prefix=group_name,
-                    store=store,
-                    rank=group_rank,
-                    world_size=group_size,
-                    timeout=timeout,
-                )
 
     # update global state
     _world.pg_map[pg] = (backend, store)
@@ -3467,6 +3470,9 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         backend = default_backend
 
     # checks the input ranks
+    print("ranks", ranks)
+    print("global_world_size", global_world_size)
+    print("global_rank", global_rank)
     if ranks is not None:
         ranks = sorted(ranks)
         group_world_size = len(ranks)
@@ -3491,6 +3497,8 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         ranks = list(range(global_world_size))
         group_world_size = global_world_size
         group_rank = global_rank
+
+    print(ranks, group_world_size, group_rank)
 
     backend = Backend(backend)
     backend_config = BackendConfig(backend)

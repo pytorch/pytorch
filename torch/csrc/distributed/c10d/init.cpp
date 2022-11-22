@@ -1535,7 +1535,11 @@ Arguments:
 
           .def(
               "recv_anysource",
-              &::c10d::ProcessGroup::recvAnysource,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& tensors,
+                 int64_t tag) {
+                return ::c10d::ops::recv_any_source(self, tensors, tag);
+              },
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -1987,11 +1991,11 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
   // checking the op type and input tensor shapes.
   auto processGroupWrapper =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupWrapper>(
-          module, "_ProcessGroupWrapper", processGroup)
+          module, "_ProcessGroupWrapper", backend)
           .def(
               py::init(
-                  [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
-                     const c10::intrusive_ptr<::c10d::ProcessGroup>& gloo_pg) {
+                  [](const c10::intrusive_ptr<::c10d::Backend>& pg,
+                     const c10::intrusive_ptr<::c10d::Backend>& gloo_pg) {
                     return c10::make_intrusive<::c10d::ProcessGroupWrapper>(
                         pg, gloo_pg);
                   }),
