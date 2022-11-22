@@ -144,59 +144,46 @@ class OutputAliasInfo:
     # Tells us if this output is:
     # (1) a regular (non-aliased) output
     # (2) an alias of a forward input
-    # (2) an alias of an intermediate (aka an alias of an output of the inner traced forward)
+    # (3) an alias of an intermediate (aka an alias of an output of the inner traced forward)
     output_type: OutputType
     # If (1) above, then
+    # - Tells us that this output corresponds directly to traced_fw_outputs[base_idx]
+    # If (2) above, then
     # - Tells us that the base of this alias is user_fwd_input[base_idx]
     #   (This is an index into the inputs *before* we make synthetic bases)
-    # If (2) above, then
+    # If (3) above, then
     # - Tells us that the base of this alias is traced_fwd_outputs[base_idx]
     #   here, this refers to the index of the *direct* traced
     base_idx: int
-    # sizes, strides and storage offset of the aliased output are all returned as actual (sym)ints
-    # in the compiled forward. These indices tell us where in the forward outputs to grab them.
-    sizes_idx: Optional[int]
-    strides_idx: Optional[int]
-    storage_offset_idx: Optional[int]
-    # We store the actual output alias that we traced in the forward (should be a fake tensor)
-    # to grab any other non-symbolic properties on the output alias, like requires_grad.
-    # It's optional here, for cases where the user directly returns an input as an output.
-    # If output_type == non_alias, then these fields are also always None.
-    tensor_meta: Optional[Tensor]
+    # This tells us if the output requires gradients
+    # It will also be set to false if this output aliases an input or graph intermediate,
+    # since we will regenerate the output alias outside of the autograd.Function
+    requires_grad: bool
 
 # This class tells us about how to perform a metadata mutation on forward inputs.
 # it only applies to forward inputs that experience metadata-only mutations
 @dataclass(frozen=True)
 class InputAliasInfo:
-    # This object gives us information about how to perform a metadata-mutation
+    mutation_type: MutationType
     # on original_fwd_inputs[base_idx]
     #   (This is an index into the inputs *before* we make synthetic bases)
     base_idx: int
-    # sizes, strides and storage offset of the aliased output are all returned as actual (sym)ints
-    # in the compiled forward. These indices tell us where in the forward outputs to grab them.
-    sizes_idx: int
-    strides_idx: int
-    storage_offset_idx: int
-    # We store the actual output alias that we traced in the forward (should be a fake tensor)
-    # to grab any other non-symbolic properties on the output alias, like requires_grad.
-    tensor_meta: Tensor
+    # If this is a mutated input, it will show up as an output to the compiled fw.
+    # This tells us if this mutated input requires gradients
+    # It will also be set to false if this output aliases an input or graph intermediate,
+    # since we will regenerate the output alias outside of the autograd.Function
+    requires_grad: bool
 
 # This class encapsulates all aliasing + mutation info we need about the forward graph
 # See a more detailed overview of the edge case handling at
 # https://docs.google.com/document/d/19UoIh_SVrMy_b2Sx5ZaeOJttm6P0Qmyss2rdBuyfoic/edit
 @dataclass(frozen=True)
 class ViewAndMutationMeta:
-    # length: # user forward inputs
-    # For every input, tells us whether the input:
-    # (a) is not mutated
-    # (b) only metadata is mutated
-    # (c) data (and maybe metadta) is mutated
-    mutated_input_info: List[MutationType]
     # length: (# inputs of the user forward)
     # metadata_mutation_input_info[i] is not None <====> mutated_input_info[i] == MutationType.metadata_only
     # We stash the updated FakeTensor that we traced with in the forward in here,
     # that way we can use it to replay the metadata mutation
-    metadata_mutation_input_info: List[Optional[InputAliasInfo]]
+    mutation_input_info: List[InputAliasInfo]
     # length: # outputs in the compiled forward (not including output alias symints). Equal to:
     # length: (# inputs w data mutations) + (# outputs that don't alias inputs)
     # For every output *and* mutated input returned from the forward,
@@ -430,6 +417,7 @@ def run_functionalized_fw_and_collect_metadata(f):
                 else:
                     # Only return outputs that are not aliases of inputs.
                     non_aliased_input_outs.append(o)
+            # TODO:
             # If a function involves creating a tensor, and returning a view of it, such that its _base is the intermediiate,
             # We need to make sure our graph returns the _base as a graph output, and we manually recreate the view
             # to return to the user. Why? The backend compiler is free to (incorrectly) not set requires_grad
@@ -438,7 +426,7 @@ def run_functionalized_fw_and_collect_metadata(f):
             for i, o in enumerate(non_aliased_input_outs):
                 non_aliased_outs.append(o)
 
-            return non_aliased_outs, aliased_out_idx
+            return non_aliased_input_outs, aliased_out_idx
 
         non_aliased_outs, aliased_out_to_inp_idx = filter_and_record_aliased_outs(outs)
 
@@ -459,24 +447,23 @@ def run_functionalized_fw_and_collect_metadata(f):
         start_idx_for_aliased_output_metadata = 0
 
         # First, gather the metadata info on mutated inputs (this only applies to inputs with metadata-only mutations))
-        for i, maybe_aliased_updated_inp in enumerate(maybe_inputs_with_mutated_metadata):
+        for i, (mutation_type, mutation_maybe_aliased_updated_inp) in enumerate(zip(collect_mutated_input_info, maybe_inputs_with_mutated_metadata)):
             if maybe_aliased_updated_inp is None:
                 collect_metadata_mutation_input_info.append(None)
                 continue
-            # Figure out where the sizes/strides/storage_offset are in the compiled fw output.
-            sizes_idx = start_idx_for_aliased_output_metadata
-            strides_idx = sizes_idx + len(maybe_aliased_updated_inp.size())
-            storage_offset_idx = strides_idx + len(maybe_aliased_updated_inp.stride())
-            # update our offset for the next tensor
-            start_idx_for_aliased_output_metadata = storage_offset_idx + 1
+            # For outputs that correspond to metadata mutations, we mark the output as not requiring gradients.
+            # This is because we don't want the view to get send to autograd by our autograd.Function;
+            # we're just using the output's metadata to perform a metadata mutation on the input later
+            requires_grad = mutated_input_info != MutationType.metadata_only and isinstance(o, torch.Tensor) and o.requires_grad
             inp_info = InputAliasInfo(
+                mutation_type=mutated_input_info,
                 base_idx=i,
-                sizes_idx=sizes_idx,
-                strides_idx=strides_idx,
-                storage_offset_idx=storage_offset_idx,
-                tensor_meta=maybe_aliased_updated_inp,
+                alias_idx=start_idx_for_aliased_output_metadata,
+                requires_grad=requires_grad,
             )
             collect_metadata_mutation_input_info.append(inp_info)
+            # This tells us the index into fw_outs that corresponds to our alias
+            start_idx_for_aliased_output_metadata += 1
 
         # Next, gather the metadata info on the user's outputs that alias (either inputs or graph outputs)
         num_non_input_aliased_outputs = 0
@@ -484,22 +471,13 @@ def run_functionalized_fw_and_collect_metadata(f):
             maybe_alias_info = aliased_out_to_inp_idx.get(o, None) if isinstance(o, torch.Tensor) else None
             if maybe_alias_info is None:
                 output_type = OutputType.non_alias
-                # Here, alias_idx will tell us which output from the inner forward this corresponds to.
                 alias_idx = num_non_input_aliased_outputs
-                sizes_idx = None
-                strides_idx = None
-                storage_offset_idx = None
-                tensor_meta = None
             else:
                 input_alias_idx, is_alias_of_intermediate_not_input, is_exact_input = maybe_alias_info
                 if is_exact_input:
                     assert not is_alias_of_intermediate_not_input
                     output_type = OutputType.alias_of_input
                     alias_idx = input_alias_idx
-                    sizes_idx = None
-                    strides_idx = None
-                    storage_offset_idx = None
-                    tensor_meta = None
                 else:
                     if is_alias_of_intermediate_not_input:
                         output_type = OutputType.alias_of_intermediate
@@ -518,13 +496,13 @@ def run_functionalized_fw_and_collect_metadata(f):
             if output_type != OutputType.alias_of_input:
                 num_non_input_aliased_outputs += 1
 
+            # For any outputs that alias inputs, we force it to not require gradients.
+            # This is because we
+            requires_grad = output_type != OutputType.alias_of_input and isinstance(o, torch.Tensor) and o.requires_grad
             inp_info = OutputAliasInfo(
                 output_type=output_type,
                 base_idx=alias_idx,
-                sizes_idx=sizes_idx,
-                strides_idx=strides_idx,
-                storage_offset_idx=storage_offset_idx,
-                tensor_meta=tensor_meta
+                requires_grad=output_type != OutputType.alias_of_input and o.requires_grad
             )
             collect_aliased_output_info.append(inp_info)
 
@@ -1198,10 +1176,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # *and* not including outs that are aliases of inputs
         num_non_aliased_outs = _num_non_aliased_outs
         num_symints_saved_for_bw = _num_symints_saved_for_bw
-        # Corresponds to number of inputs that are mutated (both metadata only, and data)
         num_mutated_inputs = _num_mutated_inputs
-        # Corresponds to number of inputs that only have their metadata mutated
-        num_mutated_data_inputs = _num_mutated_data_inputs
         # Corresponds to number of inputs that get their metadata (but not data) mutated
         # We don't return these in the compiled fw, and instead we stash enough info
         # to replay the metadata mutations later.
@@ -1212,11 +1187,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         num_outputs_aliased_to_inputs = _num_outputs_aliased_to_inputs
         # Corresponds to the number of user outputs that alias intermediates (aka graph outputs).
         num_outputs_aliased_to_intermediates = _num_outputs_aliased_to_intermediates
-        # For every output that aliases and input, and every input that gets only its metadata mutated,
-        # we return that tensor's size/stride/storage_offset directly at the end of the compiled forward,
-        # as a big list of ints.
-        # The number is tracked here.
-        num_aliasing_metadata_outs = _num_aliasing_metadata_outs
+        num_intermediate_bases = _num_intermediate_bases
         synthetic_base_info = _synthetic_base_info
         fw_metadata = _fw_metadata
 
@@ -1226,7 +1197,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
             # There is a pretty complicated calling convention around what the compiled fw returns.
             # The full list of outputs and their relative order is:
-            # (*mutated_data_inputs, *non_aliased_fw_outs, *saved_tensors, *saved_symints)
+            # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
             # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
             #   of the original view, and not the synthetic base
             fw_outs = call_func_with_args(
@@ -1234,12 +1205,15 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             )
 
             num_non_aliased_outs = CompiledFunction.num_non_aliased_outs
-            num_aliasing_metadata_outs = CompiledFunction.num_aliasing_metadata_outs
+            num_outputs_aliased_to_inputs = CompiledFunction.num_outputs_aliased_to_inputs
+            num_outputs_aliased_to_intermediates = CompiledFunction.num_outputs_aliased_to_intermediates
+            num_intermediate_bases = CompiledFunction.num_intermediate_bases
             num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
-            num_mutated_data_inputs = CompiledFunction.num_mutated_data_inputs
-            # Our forward() returns both (mutated_inputs, outputs, output_alias_meta, saved_tensors, saved_symints)
-            num_forward_returns = num_mutated_data_inputs + num_non_aliased_outs + num_aliasing_metadata_outs
-            num_forward_returns_not_including_alias_meta = num_mutated_data_inputs + num_non_aliased_outs
+            num_mutated_inputs = CompiledFunction.num_mutated_inputs
+            # Our forward() returns both (mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
+            num_forward_returns_not_including_intermediate_bases = num_mutated_inputs + num_non_aliased_outs \
+                + num_outputs_aliased_to_inputs + num_intermediate_bases
+            num_forward_returns = num_forward_returns_not_including_intermediate_bases + num_intermediate_bases
 
             # Partitioners must put symint arguments at the end separate from tensor arguments
             if num_symints_saved_for_bw > 0:
@@ -1253,22 +1227,26 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 ctx.save_for_backward(*fw_outs[num_forward_returns:])
                 ctx.symints = []
 
+            # TODO: we need to be careful so that we don't return a tensor's ._base as an output,
+            # if it is *already* an output somewhere else in the forward (either bc there are multiple aliased outs,
+            # or because the ._base itself is also an output for the user)
+            # Should the bases be marked as not requiring gradients? Seems safer not to do that, so I'm not for now.
+            fw_outs_to_return = tuple(fw_outs[0:num_forward_returns])
+            user_mutated_inputs, user_fw_outputs = fw_outs_to_return[0:num_mutated_inputs], fw_outs_to_return[num_mutated_inputs:]
             fw_outs_not_requiring_grad = [
-                x for (i, x) in enumerate(fw_outs[:num_forward_returns_not_including_alias_meta])
-                if isinstance(x, torch.Tensor) and not CompiledFunction.fw_metadata.requires_grad_out_info[i]
+                x for (i, x) in enumerate(user_mutated_inputs)
+                if not CompiledFunction.fw_metadata.mutation_input_info[i].requires_grad
+            ] + [
+                x for (i, x) in enumerate(user_fw_outputs)
+                if not CompiledFunction.fw_metadata.aliased_output_info[i].requires_grad
             ]
-            fw_out_ids_requiring_grad = [
-                id(x) for (i, x) in enumerate(fw_outs[:num_forward_returns_not_including_alias_meta])
-                if isinstance(x, torch.Tensor) and CompiledFunction.fw_metadata.requires_grad_out_info[i]
-            ]
-
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
 
-            return tuple(fw_outs[0:num_forward_returns])
+            return fw_outs_to_return
 
         @staticmethod
         @disable_torchdynamo
-        def backward(ctx, *all_flat_args):
+        def backward(ctx, *flat_args):
             # Calling convention: we expect a grad_out passed to the backward:
             # - for every output of the fw that does *not* alias an input
             # - for every updated_input generated by the fw that does *not* alias an input
@@ -1276,17 +1254,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             #   These are returned by the forward, but we just drop them in the backward.
             #   We need to return them in the forward, but unfortunately there's no way to specify
             #   in autograd.Function that certain non-tensor forward outputs shouldn't show up in the backward.
-            expected_grad_outs = CompiledFunction.num_non_aliased_outs + CompiledFunction.num_mutated_data_inputs
-            if CompiledFunction.num_aliasing_metadata_outs > 0:
-                flat_args = all_flat_args[:-CompiledFunction.num_aliasing_metadata_outs]
-                metadata_args = all_flat_args[-CompiledFunction.num_aliasing_metadata_outs:]
-                # metadata args are all ints/symints, which autograd will send Nones for as grad_outputs in the bw
-                assert all([x is None for x in metadata_args])
-                # delete
-                # for out_idx, (base_sizes, base_strides, base_storage_offset) in CompiledFunctions.fw_out_base_metadata.items():
-
-            else:
-                flat_args = all_flat_args
+            expected_grad_outs = CompiledFunction.num_non_aliased_outs + CompiledFunction.num_mutated_data_inputs \
+                + CompiledFunction.num_intermediate_bases
 
             assert len(flat_args) == expected_grad_outs
             contiguous_args = [t.contiguous() if torch.is_tensor(t) else t for t in flat_args]
@@ -1330,51 +1299,43 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             no_dupe_args_with_synthetic_bases = no_dupe_args
 
         all_outs = CompiledFunction.apply(*no_dupe_args_with_synthetic_bases)
-        if CompiledFunction.num_aliasing_metadata_outs > 0:
-            outs = all_outs[:-CompiledFunction.num_aliasing_metadata_outs]
-            aliasing_metadata_outs = all_outs[-CompiledFunction.num_aliasing_metadata_outs:]
+
+        assert len(all_outs) == CompiledFunction.num_mutated_inputs + CompiledFunction.num_non_aliased_outs \
+            + CompiledFunction.num_outputs_aliased_to_inputs + CompiledFunction.num_outputs_aliased_to_intermediates \
+            + CompiledFunction.num_intermediate_bases
+
+        if CompiledFunction.num_intermediate_bases > 0:
+            outs = all_outs[:-CompiledFunction.num_intermediate_bases]
+            intermediate_bases = all_outs[-CompiledFunction.num_intermediate_bases:]
         else:
             outs = all_outs
-            aliasing_metadata_outs = []
+            intermediate_bases = []
 
-        assert len(all_outs) == CompiledFunction.num_mutated_data_inputs + CompiledFunction.num_non_aliased_outs \
-            + CompiledFunction.num_aliasing_metadata_outs
+            num_non_aliased_outs = CompiledFunction.num_non_aliased_outs
+            num_outputs_aliased_to_inputs = CompiledFunction.num_outputs_aliased_to_inputs
+            num_outputs_aliased_to_intermediates = CompiledFunction.num_outputs_aliased_to_intermediates
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
         if CompiledFunction.num_mutated_inputs > 0:
+            assert len([x for x in CompiledFunction.fw_metadata.mutated_input_info if x.mutation_type != MutationType.none]) \
+                == CompiledFunction.num_mutated_inputs
             # Calling convention: (mutated_inputs, real_outs, aliasing_metadata)
 
-            if CompiledFunction.num_mutated_data_inputs > 0:
-                updated_inputs = outs[:CompiledFunction.num_mutated_data_inputs]
-                fw_outs = outs[CompiledFunction.num_mutated_data_inputs:]
-            else:
-                updated_inputs = []
-                fw_outs = outs
+            updated_inputs = outs[:CompiledFunction.num_mutated_inputs]
+            fw_outs = outs[CompiledFunction.num_mutated_inputs:]
 
             curr_mutated_inpt_idx = 0
-            for inpt_idx, (mutation_type, metadata_mutation_info) in enumerate(zip(
-                # TODO: I should merge these two pieces of state
-                CompiledFunction.fw_metadata.mutated_input_info,
-                CompiledFunction.fw_metadata.metadata_mutation_input_info,
-            )):
-                if mutation_type == MutationType.none:
+            for inpt_idx, meta in enumerate(CompiledFunction.fw_metadata.mutated_input_info):
+                if meta.mutation_type == MutationType.none:
                     continue
                 original_inpt = no_dupe_args[inpt_idx]
+                updated_inpt = updated_inputs[curr_mutated_inpt_idx]
+                curr_mutated_inpt_idx += 1
                 if mutation_type == MutationType.metadata_only:
                     # We need to grab the size/stride/storage_offset from the compiled forward,
                     # and use that to mutate the metadata of the input
-                    expected_meta = CompiledFunction.fw_metadata.metadata_mutation_input_info[inpt_idx]
-                    assert expected_meta is not None
-                    fake_meta = expected_meta.tensor_meta
-                    size_len = len(fake_meta.size())
-                    stride_len = len(fake_meta.stride())
-                    size_ = aliasing_metadata_outs[expected_meta.sizes_idx:expected_meta.sizes_idx + size_len]
-                    stride_ = aliasing_metadata_outs[expected_meta.strides_idx:expected_meta.strides_idx + stride_len]
-                    storage_offset_ = aliasing_metadata_outs[expected_meta.storage_offset_idx]
-                    original_inpt.as_strided_(size_, stride_, storage_offset_)
+                    original_inpt.as_strided_(updated_inpt.sizes(), updated_inpt.strides(), updated_inpt.storage_offset())
                 else:
-                    updated_inpt = updated_inputs[curr_mutated_inpt_idx]
-                    curr_mutated_inpt_idx += 1
                     # TODO: handle resize_() on inputs to a larger size.
                     # This is actually non-trivial to detect, so we should probably just handle it
                     # (or make dynamo detect).
@@ -1394,47 +1355,30 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # Step 4: Manually regenerate any outputs that are aliased to inputs, instead of
         # compiling them.
         if CompiledFunction.num_outputs_aliased_to_inputs > 0 or CompiledFunction.num_outputs_aliased_to_intermediates > 0:
-            assert CompiledFunction.num_outputs_aliased_to_inputs + len(fw_outs) == \
-                len(CompiledFunction.fw_metadata.aliased_output_info)
+            assert len(fw_outs) == len(CompiledFunction.fw_metadata.aliased_output_info)
+            assert CompiledFunction.num_outputs_aliased_to_inputs == len(
+                [x for x in CompiledFunction.fw_metadata.aliased_output_info if x.output_type == OutputType.alias_of_input])
             fw_outs_including_aliases = []
-            for aliased_out_metadata in CompiledFunction.fw_metadata.aliased_output_info:
+            for o, aliased_out_metadata in zip(fw_outs, CompiledFunction.fw_metadata.aliased_output_info):
                 if aliased_out_metadata.output_type == OutputType.non_alias:
-                    fw_outs_including_aliases.append(fw_outs[aliased_out_metadata.base_idx])
-                else:
-                    if aliased_out_metadata.output_type == OutputType.alias_of_input:
-                        aliased_base_tensor = args[aliased_out_metadata.base_idx]
+                    fw_outs_including_aliases.append(o)
+                elif aliased_out_metadata.output_type == OutputType.alias_of_input:
+                    aliased_base_tensor = args[aliased_out_metadata.base_idx]
+                    if o is aliased_base_tensor:
+                        # Special case for when an output *is* an input (just return the input, don't generate a view)
+                        regenerated_out = aliased_base_tensor
                     else:
-                        assert aliased_out_metadata.output_type == OutputType.alias_of_intermediate
-                        aliased_base_tensor = fw_outs[aliased_out_metadata.base_idx]
-                    # Note: here, we manually regenerate the output, using an as_strided() call,
-                    # OR if the aliased output came from a custom autograd.function, we replay it.
-                    # The as_strided() in the normal case is good for perf (this is hot-path code,
-                    # and we're consolidating potential chains of views into a single view op).
-                    # But we might need to figure out view replaying for e.g. XLA.
+                        regenerated_out = gen_alias_from_base(aliased_base_tensor, o.size(), o.stride(), o.storage_offset(), o)
+                    fw_outs_including_aliases.append(regenerated_out)
+                else:
+                    assert aliased_out_metadata.output_type == OutputType.alias_of_intermediate
+                    aliased_base_tensor = intermediate_bases[aliased_out_metadata.base_idx]
+                    assert o._base is not None and o._base is aliased_base_tensor
                     # TODO: handle the custom autograd function case here.
                     # We need a way to check whether a tensor came from a custom autograd fn from python,
                     # AND a way to replay that custom view fn.
-                    fake_meta = aliased_out_metadata.tensor_meta
-                    if fake_meta is None:
-                        # This handles the specific case where the user returns an output that *was* an input. Don't create a view.
-                        fw_outs_including_aliases.append(aliased_base_tensor)
-                    else:
-                        # We need to grab the size/stride/storage_offset from the compiled forward,
-                        # and use that to create a view off of the right input
-                        fake_meta = aliased_out_metadata.tensor_meta
-                        size_len = len(fake_meta.size())
-                        stride_len = len(fake_meta.stride())
-                        size_ = aliasing_metadata_outs[aliased_out_metadata.sizes_idx:aliased_out_metadata.sizes_idx + size_len]
-                        stride_ = aliasing_metadata_outs[
-                            aliased_out_metadata.strides_idx:aliased_out_metadata.strides_idx + stride_len]
-                        storage_offset_ = aliasing_metadata_outs[aliased_out_metadata.storage_offset_idx]
-                        # Create the output alias
-                        aliased_out = gen_alias_from_base(aliased_base_tensor, size_, stride_, storage_offset_, fake_meta)
-                        fw_outs_including_aliases.append(aliased_out)
-
-            for inner_out, user_out in zip(fw_outs, fw_outs_including_aliases):
-                # Sanity check assert
-                assert type(inner_out) == type(user_out)
+                    regenerated_out = gen_alias_from_base(aliased_base_tensor, o.size(), o.stride(), o.storage_offset(), o)
+                    fw_outs_including_aliases.append(regenerated_out)
             return fw_outs_including_aliases
         else:
             return fw_outs

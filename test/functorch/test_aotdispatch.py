@@ -525,6 +525,112 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
     add_2 = torch.ops.aten.add.Tensor(primals_1, add);  primals_1 = None
     return [add, add_1, add_2, 2, 2, 1, 2, 0, 2, 3, 0]""")
 
+    def test_output_aliases_intermediate_single(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            return out.view(-1)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        # In AOTAutograd, we are obligated to make the compiled forward directly return `out`,
+        # and reconstruct `out.view(-1)` as a fresh output.
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    return [mul, 9, 1, 0]""")
+
+    def test_output_aliases_intermediate_multiple(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            # AOTAutograd should manually generate these two output views in the epilogue.
+            return out.view(-1), out.view(-1)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    return [mul, mul, 9, 1, 0, 9, 1, 0]""")
+
+    def test_output_aliases_intermediate_and_returned(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            # AOTAutograd should manually generate the first output (a view of an intermediate)
+            # but not the second (which is itself the intermediate for the first)
+            return out.view(-1), out
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    return [mul, mul, 9, 1, 0]""")
+
+    def test_output_aliases_intermediate_and_returned_flipped(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            # AOTAutograd should manually generate the first output (a view of an intermediate)
+            # but not the second (which is itself the intermediate for the first)
+            return out, out.view(-1)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    return [mul, mul, 9, 1, 0]""")
+
+    def test_output_aliases_intermediate_and_returned_different_grad(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            # AOTAutograd should manually generate the first output (a view of an intermediate)
+            # but not the second (which is itself the intermediate for the first)
+            return out.view(-1), out, out[0].detach()
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    return [mul, mul, 9, 1, 0]""")
+
+    def test_output_aliases_intermediate_multiple_mixed(self):
+        def f(a):
+            out1 = torch.mul(a, 3)
+            out2 = torch.mul(a, 4)
+            # AOTAutograd should manually generate these two output views in the epilogue.
+            return out1.view(-1), out2.transpose(1, 0), out1.transpose(1, 0)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3)
+    mul_1 = torch.ops.aten.mul.Tensor(primals_1, 4);  primals_1 = None
+    return [mul, mul_1, mul, 9, 1, 0, 3, 3, 1, 3, 0, 3, 3, 1, 3, 0]""")
+
+    def test_output_all_alias_types(self):
+        # There are 3 types of aliasing that require us to return metadata in the compiled fw:
+        # (1) outputs that are views of inputs
+        # (2) outputs that are views of intermediates
+        # (3) inputs that get metadata mutations
+        # test all 3 of them here
+        def f(a):
+            a.transpose_(1, 0)
+            tmp = a.mul(2)
+            return tmp.squeeze(), tmp.transpose(1, 0), a.unsqueeze(0)
+        inp = [torch.ones(1, 2, 4, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        # TODO: make this test run with dynamic shapes so it is more meaningful
+        # metadata output order: (a_updated_meta, out1_meta, out2_meta, out3_meta)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    view = torch.ops.aten.view.default(primals_1, [1, 2, 4]);  primals_1 = None
+    transpose = torch.ops.aten.transpose.int(view, 1, 0);  view = None
+    mul = torch.ops.aten.mul.Tensor(transpose, 2);  transpose = None
+    return [mul, mul, 2, 1, 4, 4, 8, 1, 0, 2, 4, 4, 1, 0, 1, 2, 4, 8, 4, 1, 0, 1, 2, 1, 4, 8, 4, 8, 1, 0]""")
+
     def test_input_data_and_metadata_mutation(self):
         def f(a):
             a.t_()
