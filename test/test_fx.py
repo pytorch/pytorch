@@ -1700,13 +1700,13 @@ class TestFX(JitTestCase):
         gm = torch.fx.symbolic_trace(m)
 
         mod_stack = {}
-        expected_stack = [{'sub_mod': str(type(m.sub_mod))},
-                          {'sub_mod.conv_mod': str(type(m.sub_mod.conv_mod))}]
+        expected_stack = [('sub_mod', str(type(m.sub_mod))),
+                          ('sub_mod.conv_mod', str(type(m.sub_mod.conv_mod)))]
         for node in gm.graph.nodes:
             mod_stack = node.meta.get('nn_module_stack', {})
             if mod_stack:
                 break
-        stack_list = [{item: mod_stack[item]} for item in mod_stack]
+        stack_list = list(mod_stack.items())
         self.assertEqual(stack_list, expected_stack)
 
     def test_interpreter(self):

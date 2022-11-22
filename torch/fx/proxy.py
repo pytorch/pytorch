@@ -6,7 +6,7 @@ import operator
 import traceback
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
+from typing import Tuple, Dict, OrderedDict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
@@ -56,18 +56,18 @@ class ScopeContextManager(object):
     """
 
     def __init__(
-        self, scope: Scope,
-        current_module: torch.nn.Module,
-        current_module_path: str
+        self,
+        prev_scope: Scope,
+        current_scope: Scope,
     ):
         super().__init__()
         # Make a copy of scope to restore on context block exit
-        self._prev_scope = copy.copy(scope)
-        # Modify the scope that was passed in by reference
-        scope.module_path = current_module_path
-        scope.module_type = type(current_module)
-        # Save a pointer to the scope
-        self._current_scope = scope
+        self._prev_scope = copy.copy(prev_scope)
+        # Modify the prev_scope that was passed in by reference
+        prev_scope.module_path = current_scope.module_path
+        prev_scope.module_type = current_scope.module_type
+        # Save a pointer to the modified prev_scope
+        self._current_scope = prev_scope
 
     def __enter__(self):
         return self._current_scope
@@ -98,7 +98,7 @@ class TracerBase:
     scope : Scope
 
     # Records the module call stack
-    module_stack: Dict[str, str]
+    module_stack: OrderedDict[str, str]
 
     # Mapping of node name to module scope
     node_name_to_scope: Dict[str, Tuple[str, type]]
@@ -118,6 +118,8 @@ class TracerBase:
             check_for_mutable_operation(target, args, kwargs)
 
         node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
+        # TODO node_name_to_scope will be depricated in favor of
+        # node.meta['nn_module_stack']
         self.node_name_to_scope[node.name] = (
             self.scope.module_path,
             self.scope.module_type,
@@ -286,7 +288,7 @@ class GraphAppendingTracer(TracerBase):
         super().__init__()
         self.graph = graph
         self.scope = Scope("", None)
-        self.module_stack = {}
+        self.module_stack: OrderedDict[str, str] = {}
         self.node_name_to_scope = {}
 
 @compatibility(is_backward_compatible=False)

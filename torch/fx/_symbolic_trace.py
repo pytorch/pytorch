@@ -11,6 +11,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    OrderedDict,
     List,
     NamedTuple,
     Optional,
@@ -253,7 +254,7 @@ class Tracer(TracerBase):
         # Maps the containing module's name to the operator name
         self.scope = Scope("", None)
         # Records the module call stack
-        self.module_stack = {}
+        self.module_stack: OrderedDict[str, str] = {}
         # Mapping of node name to module scope
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
@@ -436,7 +437,7 @@ class Tracer(TracerBase):
             value was returned from the ``Module`` invocation.
         """
         module_qualified_name = self.path_of_module(m)
-        with ScopeContextManager(self.scope, m, module_qualified_name) as _scope:
+        with ScopeContextManager(self.scope, Scope(module_qualified_name, type(m))) as _scope:
             # module_stack is an ordered dict so writing then deleting the
             # entry is equivalent to push/pop on a list
             self.module_stack[_scope.module_path] = str(_scope.module_type)
