@@ -10727,6 +10727,10 @@ op_db: List[OpInfo] = [
                # going through the PyTorch dispatcher.
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance'),
                DecorateInfo(unittest.skip("Clones input tensor"), 'TestBwdGradients'),
+               DecorateInfo(unittest.skip("Clones input tensor"), 'TestFwdGradients',
+                            'test_fn_fwgrad_bwgrad'),
+               DecorateInfo(unittest.skip("Clones input tensor"), 'TestProxyTensor',
+                            'test_make_fx_symbolic_exhaustive_inplace'),
            )),
     OpInfo('as_strided_scatter',
            op=lambda x, src, size, stride, storage_offset=0:
