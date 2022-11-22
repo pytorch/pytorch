@@ -1347,7 +1347,7 @@ def make_contiguous_strides_for(
     shape: ShapeType, row_major: bool = True
 ) -> Tuple[int, ...]:
     """
-    Returns the strides of a contriguous tensor if row_major
+    Returns the strides of a contiguous tensor if row_major
     If row_major=True, it returns the strides of a contiguous batch of Fortran-contiguous matrices
     This is often used when calling external libraries like BLAS/LAPACK/cuSolver...
     """
