@@ -17,6 +17,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test_with_positional_args(func, (tensor_x,))
 
+    def test_func_with_args_and_kwargs(self):
+        def func(x, b=1.0):
+            y = x + b
+            z = y.relu()
+            return (y, z)
+
+        tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
+
+        self.run_test_with_positional_args(func, (tensor_x,), {"b": 500.0})
+
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
