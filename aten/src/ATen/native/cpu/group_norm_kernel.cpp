@@ -792,7 +792,7 @@ inline void DsDbRowwiseMomentsChannelsLast(
   PT* ds_ptr,
   PT* db_ptr,
   int64_t C) {
-  using Vec = vec::Vectorized<vec::vec_scalar_t<T>>;
+  using Vec = vec::Vectorized<T>;
   constexpr int64_t K = vec::Vectorized<T>::size();
   const int64_t inner_size = C / K * K;
   int64_t d = 0;
@@ -1302,11 +1302,11 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
 
   // Finally compute dgamma and dbeta.
   if (dgamma_data != nullptr) {
-    GammaBackward(
+    GammaBackward<PT>(
         N, C, group, mean_data, rstd_data, ds_data, db_data, dgamma_data);
   }
   if (dbeta_data != nullptr) {
-    BetaBackward(N, C, db_data, dbeta_data);
+    BetaBackward<PT>(N, C, db_data, dbeta_data);
   }
 }
 
