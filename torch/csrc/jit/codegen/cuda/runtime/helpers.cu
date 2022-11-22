@@ -57,6 +57,7 @@ __device__ float lerp(float start, float end, float weight) {
   }
 }
 
+#ifndef __NVCC__
 __device__ std::complex<double> lerp(
     std::complex<double> start,
     std::complex<double> end,
@@ -78,6 +79,7 @@ __device__ std::complex<float> lerp(
     return end - (end - start) * (1.0f - weight);
   }
 }
+#endif // __NVCC__
 
 __device__ float lerp(float start, float end, double weight) {
   return lerp(start, end, static_cast<float>(weight));
@@ -195,6 +197,7 @@ __device__ float reciprocal(float x) {
   return 1 / x;
 }
 
+#ifndef __NVCC__
 __device__ std::complex<double> reciprocal(std::complex<double> x) {
   return 1.0 / x;
 }
@@ -202,6 +205,7 @@ __device__ std::complex<double> reciprocal(std::complex<double> x) {
 __device__ std::complex<float> reciprocal(std::complex<float> x) {
   return 1.0f / x;
 }
+#endif // __NVCC__
 
 __device__ double relu(double x) {
   return x <= 0 ? 0 : x;
@@ -241,6 +245,7 @@ __device__ float sigmoid(float x) {
   return 1.0f / (1.0f + exp(-x));
 }
 
+#ifndef __NVCC__
 __device__ std::complex<double> sigmoid(std::complex<double> x) {
   return 1.0 / (1.0 + exp(-x));
 }
@@ -248,6 +253,7 @@ __device__ std::complex<double> sigmoid(std::complex<double> x) {
 __device__ std::complex<float> sigmoid(std::complex<float> x) {
   return 1.0f / (1.0f + exp(-x));
 }
+#endif // __device__
 
 __device__ double silu(double x) {
   return x * sigmoid(x);
