@@ -3297,7 +3297,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # RuntimeError: Batch norm got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
-        xfail('native_batch_norm_legit'),
+        xfail('_native_batch_norm_legit'),
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
         # The error inputs are vectors, that pass when batched as they are treated as a matrix
@@ -3323,7 +3323,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # Batch norm got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
-        xfail('native_batch_norm_legit'),
+        xfail('_native_batch_norm_legit'),
         xfail('histogram'),
         xfail('index_fill'),
         xfail('nansum'),

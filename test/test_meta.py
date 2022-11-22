@@ -519,8 +519,6 @@ def run_meta_crossref(
                     # This should be the same set of kernels
                     # that fake tensor runs in dynamic shapes mode.
                     with enable_python_dispatcher():
-                        print("meta args", meta_args)
-                        print("meta kwargs", meta_kwargs)
                         meta_rs = func(*meta_args, **meta_kwargs)
                 else:
                     meta_rs = func(*meta_args, **meta_kwargs)
@@ -712,7 +710,7 @@ meta_function_device_skips = defaultdict(dict)
 
 meta_function_device_expected_failures['cpu'] = {
     torch.native_batch_norm: {bf16},
-    torch.native_batch_norm_legit: {bf16},
+    torch._native_batch_norm_legit: {bf16},
     torch.native_layer_norm: {bf16},
 }
 
@@ -747,7 +745,7 @@ meta_function_device_expected_failures_only_outplace['cuda'] = {
 
 meta_function_device_skips['cpu'] = {
     torch.native_batch_norm: {f32, f64},
-    torch.native_batch_norm_legit: {f32, f64},
+    torch._native_batch_norm_legit: {f32, f64},
 }
 
 meta_function_device_skips['cuda'] = {
@@ -931,8 +929,8 @@ meta_dispatch_device_skips = defaultdict(dict)
 
 meta_dispatch_device_expected_failures['cpu'] = {
     aten.native_batch_norm.default: {bf16},
-    aten.native_batch_norm_legit.default: {bf16},
-    aten.native_batch_norm_legit.no_stats: {bf16},
+    aten._native_batch_norm_legit.default: {bf16},
+    aten._native_batch_norm_legit.no_stats: {bf16},
     aten.native_layer_norm.default: {bf16},
 }
 
@@ -978,8 +976,8 @@ meta_dispatch_device_expected_failures['cuda'] = {
 meta_dispatch_device_skips['cpu'] = {
     aten._embedding_bag_forward_only.default: {f16, f32, f64},
     aten.native_batch_norm.default: {f32, f64},
-    aten.native_batch_norm_legit.default: {f32, f64},
-    aten.native_batch_norm_legit.no_stats: {f32, f64},
+    aten._native_batch_norm_legit.default: {f32, f64},
+    aten._native_batch_norm_legit.no_stats: {f32, f64},
 }
 
 meta_dispatch_device_skips['cuda'] = {

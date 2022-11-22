@@ -1312,8 +1312,7 @@ def native_layer_norm_backward(
     )
 
 
-@register_decomposition(aten.native_batch_norm)
-def native_batch_norm(
+def native_batch_norm_helper(
     input: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
@@ -1322,16 +1321,22 @@ def native_batch_norm(
     training: bool,
     momentum: float,
     eps: float,
-) -> Tuple[Tensor, Tensor, Tensor]:
+    functional: bool,
+) -> Tuple[Tensor, Tensor, Tensor, Optional[Tensor], Optional[Tensor]]:
     reduction_dims = [0] + list(range(2, input.dim()))
     computation_dtype = utils.get_computation_dtype(input.dtype)
+    new_running_mean = None
+    new_running_var = None
     if training:
         output, mean, rstd = normalize(input, reduction_dims, eps)
 
         save_mean = _squeeze_multiple(mean, reduction_dims)
         save_rstd = _squeeze_multiple(rstd, reduction_dims)
         if running_mean is not None:
-            running_mean.copy_(momentum * save_mean + (1 - momentum) * running_mean)
+            if functional:
+                new_running_mean = momentum * save_mean + (1 - momentum) * running_mean
+            else:
+                running_mean.copy_(momentum * save_mean + (1 - momentum) * running_mean)
         if running_var is not None:
             n = input.numel() / input.shape[1]
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
@@ -1340,7 +1345,12 @@ def native_batch_norm(
             unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (
                 n / (n - 1)
             )
-            running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
+            if functional:
+                new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
+            else:
+                running_var.copy_(
+                    momentum * unbiased_var + (1 - momentum) * running_var
+                )
     else:
         assert running_mean is not None and running_var is not None
         running_mean = running_mean.to(dtype=computation_dtype, copy=True)
@@ -1370,11 +1380,34 @@ def native_batch_norm(
     if input.device.type == "cpu":
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
+    return (
+        output.to(dtype=input.dtype),
+        save_mean,
+        save_rstd,
+        new_running_mean,
+        new_running_var,
+    )
+
+
+@register_decomposition(aten.native_batch_norm)
+def native_batch_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
+        input, weight, bias, running_mean, running_var, training, momentum, eps, False
+    )
     return output.to(dtype=input.dtype), save_mean, save_rstd
 
 
 # TODO: this decomposition is NOT here to stay. We would much prefer replacing native_batch_norm
-# with our new correctly schema'd native_batch_norm_legit and its variants, but
+# with our new correctly schema'd _native_batch_norm_legit and its variants, but
 # we cannot do that immediately in the C++ because it would be forwards incompatible
 # with some mobile use cases.
 #
@@ -1382,7 +1415,7 @@ def native_batch_norm(
 # register this decomposition on the Autograd key for the python dispatcher (which is
 # currently only used by aot autograd/functionalization and no one else, really).
 # In two weeks or so, we should remove this decomposition and phase out the current native_batch_norm
-# to be native_batch_norm_legit and have the right schema (stating that there are input mutations).
+# to be _native_batch_norm_legit and have the right schema (stating that there are input mutations).
 @torch.ops.aten.native_batch_norm.default.py_impl(DispatchKey.Autograd)
 def native_batch_norm_decomposition(
     input: Tensor,
@@ -1394,15 +1427,27 @@ def native_batch_norm_decomposition(
     momentum: float,
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor]:
-    if running_mean is not None and running_var is not None:
-        return aten.native_batch_norm_legit(
-            input, weight, bias, running_mean, running_var, training, momentum, eps
+    if running_mean is None and running_var is None:
+        return aten._native_batch_norm_legit(
+            input, weight, bias, training, momentum, eps
         )
-    return aten.native_batch_norm_legit(input, weight, bias, training, momentum, eps)
+    if running_mean is None:
+        raise RuntimeError(
+            "running_mean is None, but running_var is provided. "
+            "They should both be None or both be provided."
+        )
+    if running_var is None:
+        raise RuntimeError(
+            "running_var is None, but running_mean is provided. "
+            "They should both be None or both be provided."
+        )
+    return aten._native_batch_norm_legit(
+        input, weight, bias, running_mean, running_var, training, momentum, eps
+    )
 
 
-@register_decomposition(aten.native_batch_norm_legit.default)
-def native_batch_norm_legit(
+@register_decomposition(aten._native_batch_norm_legit.default)
+def _native_batch_norm_legit(
     input: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
@@ -1412,13 +1457,14 @@ def native_batch_norm_legit(
     momentum: float,
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor]:
-    return native_batch_norm(
-        input, weight, bias, running_mean, running_var, training, momentum, eps
+    output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
+        input, weight, bias, running_mean, running_var, training, momentum, eps, False
     )
+    return output.to(dtype=input.dtype), save_mean, save_rstd
 
 
-@register_decomposition(aten.native_batch_norm_legit.no_stats)
-def native_batch_norm_legit_no_stats(
+@register_decomposition(aten._native_batch_norm_legit.no_stats)
+def _native_batch_norm_legit_no_stats(
     input: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
@@ -1426,11 +1472,14 @@ def native_batch_norm_legit_no_stats(
     momentum: float,
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor]:
-    return native_batch_norm(input, weight, bias, None, None, training, momentum, eps)
+    output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
+        input, weight, bias, None, None, training, momentum, eps, False
+    )
+    return output.to(dtype=input.dtype), save_mean, save_rstd
 
 
-@register_decomposition(aten.native_batch_norm_legit_functional.default)
-def native_batch_norm_legit_functional(
+@register_decomposition(aten._native_batch_norm_legit_functional.default)
+def _native_batch_norm_legit_functional(
     input: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
@@ -1440,12 +1489,9 @@ def native_batch_norm_legit_functional(
     momentum: float,
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-    new_running_mean = running_mean.clone()
-    new_running_var = running_var.clone()
-    output, save_mean, save_rstd = native_batch_norm(
-        input, weight, bias, new_running_mean, new_running_var, training, momentum, eps
+    return native_batch_norm_helper(
+        input, weight, bias, running_mean, running_var, training, momentum, eps, True
     )
-    return output, save_mean, save_rstd, new_running_mean, new_running_var
 
 
 @register_decomposition(aten._fused_dropout)

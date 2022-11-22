@@ -439,7 +439,7 @@ def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwa
         yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], training, momentum, eps))
 
 
-def sample_inputs_native_batch_norm_legit(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs__native_batch_norm_legit(op_info, device, dtype, requires_grad, **kwargs):
     samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
     for sample in samples:
         # torch.native_batch_norm does not support 0 numel tensors
@@ -10796,14 +10796,14 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
            )
            ),
-    OpInfo('native_batch_norm_legit',
-           aten_name='native_batch_norm_legit',
+    OpInfo('_native_batch_norm_legit',
+           aten_name='_native_batch_norm_legit',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           sample_inputs_func=sample_inputs_native_batch_norm_legit,
+           sample_inputs_func=sample_inputs__native_batch_norm_legit,
            skips=(
                # NotImplementedError: Could not run
                # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
