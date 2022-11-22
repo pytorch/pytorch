@@ -30,6 +30,7 @@ class TensorVariable(VariableTracker):
         "proxy",
         "dtype",
         "device",
+        "layout",
         "ndim",
         "size",
         "stride",
@@ -52,6 +53,7 @@ class TensorVariable(VariableTracker):
         proxy: torch.fx.Proxy,
         dtype=None,
         device=None,
+        layout=None,
         ndim=None,
         size=None,
         stride=None,
@@ -67,6 +69,7 @@ class TensorVariable(VariableTracker):
         self.proxy = proxy
         self.dtype = dtype
         self.device = device
+        self.layout = layout
         self.ndim = ndim
         self.size = size
         self.stride = stride
@@ -101,6 +104,7 @@ class TensorVariable(VariableTracker):
         props = {
             "dtype": value.dtype,
             "device": value.device,
+            "layout": value.layout,
             "ndim": int(value.ndim),
             "requires_grad": value.requires_grad,
             "is_quantized": value.is_quantized,
@@ -130,6 +134,8 @@ class TensorVariable(VariableTracker):
             result = TorchVariable(self.dtype, **options)
         elif name == "device" and self.device is not None:
             result = TorchVariable(self.device, **options)
+        elif name == "layout" and self.layout is not None:
+            result = TorchVariable(self.layout, **options)
         elif name == "is_cuda" and self.device is not None:
             result = ConstantVariable(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:
@@ -145,6 +151,8 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
             result = self.call_method(tx, "dim", [], {})
+        elif name == "data":
+            result = self.call_method(tx, "detach", [], {})
         elif name == "T":
             args = [variables.ConstantVariable(i) for i in range(self.ndim - 1, -1, -1)]
             result = self.call_method(tx, "permute", args, {})
@@ -198,7 +206,7 @@ class TensorVariable(VariableTracker):
                 tx.output.create_proxy(
                     "call_method",
                     name,
-                    *proxy_args_kwargs([self] + args, kwargs),
+                    *proxy_args_kwargs([self] + list(args), kwargs),
                     current_tx=tx,
                 ),
                 **options,
@@ -277,7 +285,7 @@ class TensorVariable(VariableTracker):
             tx.output.create_proxy(
                 "call_function",
                 operator.setitem,
-                *proxy_args_kwargs([self] + args, kwargs),
+                *proxy_args_kwargs([self] + list(args), kwargs),
                 current_tx=tx,
             )
             return ConstantVariable(None, **options)
@@ -309,7 +317,7 @@ class TensorVariable(VariableTracker):
                 tx.output.create_proxy(
                     "call_method",
                     name,
-                    *proxy_args_kwargs([self] + args, kwargs),
+                    *proxy_args_kwargs([self] + list(args), kwargs),
                     current_tx=tx,
                 ),
                 **options,
@@ -329,7 +337,7 @@ class TensorVariable(VariableTracker):
                 tx.output.create_proxy(
                     "call_method",
                     name,
-                    *proxy_args_kwargs([self] + args, kwargs),
+                    *proxy_args_kwargs([self] + list(args), kwargs),
                     current_tx=tx,
                 ),
                 **options,
