@@ -89,6 +89,8 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     "DALLE2_pytorch",
     "detectron2",
     "hf_T5",  # accuracy
+    "hf_BigBird",  # accuracy
+    "hf_GPT2_large",  # OOM
     "maml",  # accuracy
     "moco",  # accuracy
     "pyhpc_equation_of_state",  # Accuracy
@@ -106,45 +108,6 @@ CI_SKIP_INDUCTOR_TRAINING = [
     *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
     # OOM
-    "Background_Matting",
-    "fastNLP_Bert",
-    "hf_BigBird",
-    "hf_T5_base",  # fp64_OOM
-    "mobilenet_v2",
-    "mobilenet_v2_quantized_qat",
-    "resnet50_quantized_qat",
-    "timm_regnet",
-    # Huggingface
-    "AllenaiLongformerBase",
-    "AlbertForMaskedLM",  # OOM
-    "BartForConditionalGeneration",  # OOM
-    "M2M100ForConditionalGeneration",  # OOM
-    "MBartForConditionalGeneration",  # OOM
-    "MT5ForConditionalGeneration",  # OOM
-    "PegasusForConditionalGeneration",  # OOM
-    "XGLMForCausalLM",  # fp64_OOM
-    "DebertaV2ForMaskedLM",  # OOM
-    "DebertaV2ForQuestionAnswering",  # OOM
-    # OOM
-    "TrOCRForCausalLM",
-    "AlbertForQuestionAnswering",
-    # TIMM
-    "cait_m36_384",  # fp64_OOM
-    "coat_lite_mini",  # time out
-    "convit_base",  # fp64_OOM
-    "eca_halonext26ts",  # accuracy
-    "fbnetv3_b",  # accuracy
-    "gernet_l",  # accuracy
-    "gluon_xception65",
-    "hrnet_w18",  # accuracy
-    "lcnet_0500",  # accuracy
-    "levit_128",  # levit_128
-    "res2net101_26w_4s",  # accuracy
-    "resnest101e",  # accuracy
-    "rexnet_100",  # accuracy
-    "spnasnet_100",  # accuracy
-    "twins_pcpvt_base",  # time out
-    "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
 
