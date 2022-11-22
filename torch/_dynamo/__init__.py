@@ -47,7 +47,8 @@ def reset():
 
 def list_backends():
     """
-    Return valid strings that can be passed to:
+    Return valid strings that can be passed to::
+
         @torch._dynamo.optimize(<backend>)
         def foo(...):
            ....
