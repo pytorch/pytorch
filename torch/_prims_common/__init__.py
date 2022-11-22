@@ -1341,15 +1341,17 @@ def reduction_dtypes(
         result_dtype = torch.bool
     return computation_dtype, result_dtype
 
-
+# This function's logic is borrowed from the following functions defined in C++:
+# batched_matrix_contiguous_strides and contiguous_strides
 def make_contiguous_strides_for(
     shape: ShapeType, row_major: bool = True
 ) -> Tuple[int, ...]:
     """
-    Returns the strides of a contriguous tensor if row_major
+    Returns the strides of a contiguous tensor if row_major
     If row_major=True, it returns the strides of a contiguous batch of Fortran-contiguous matrices
     This is often used when calling external libraries like BLAS/LAPACK/cuSolver...
     """
+    # contiguous_strides from c10/util/strides.h
     validate_shape(shape)
     if not shape:
         return ()
@@ -1363,6 +1365,7 @@ def make_contiguous_strides_for(
 
     result = tuple(reversed(strides))
 
+    # batched_matrix_contiguous_strides from aten/src/ATen/native/LinearAlgebraUtils.h
     if row_major:
         return result
     else:
