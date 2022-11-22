@@ -517,27 +517,27 @@ void GroupNormKernelImpl(
   }
 }
 
-template <typename T, typename T_ACC>
+template <typename T, typename PT>
 void ComputeInternalGradients(
     int64_t N,
     int64_t C,
     int64_t HxW,
     const T* dY,
     const T* X,
-    T_ACC* ds,
-    T_ACC* db) {
+    PT* ds,
+    PT* db) {
   at::parallel_for(0, N * C, 1, [=](int64_t start, int64_t end) {
     constexpr int64_t K = vec::Vectorized<T>::size();
     const int64_t inner_size = HxW / K * K;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<T_ACC, K> ds_arr;
+    std::array<PT, K> ds_arr;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<T_ACC, K> db_arr;
+    std::array<PT, K> db_arr;
     for (const auto i : c10::irange(start, end)) {
       const T* dY_ptr = dY + i * HxW;
       const T* X_ptr = X + i * HxW;
-      vec::Vectorized<T_ACC> ds_vec(0);
-      vec::Vectorized<T_ACC> db_vec(0);
+      vec::Vectorized<PT> ds_vec(0);
+      vec::Vectorized<PT> db_vec(0);
       for (int64_t j = 0; j < inner_size; j += K) {
         const vec::Vectorized<T> dy_vec = vec::Vectorized<T>::loadu(dY_ptr + j);
         const vec::Vectorized<T> x_vec = vec::Vectorized<T>::loadu(X_ptr + j);
@@ -546,8 +546,8 @@ void ComputeInternalGradients(
       }
       ds_vec.store(ds_arr.data());
       db_vec.store(db_arr.data());
-      T_ACC ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T_ACC(0));
-      T_ACC db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), T_ACC(0));
+      PT ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), PT(0));
+      PT db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), PT(0));
       for (const auto j : c10::irange(inner_size, HxW)) {
         ds_val += dY_ptr[j] * X_ptr[j];
         db_val += dY_ptr[j];
@@ -605,57 +605,30 @@ void ComputeInternalGradients(
   });
 }
 
-template <typename PT, typename T_ACC>
+template <typename PT>
 inline void CalcDsDb(
-    const T_ACC* ds_ptr,
-    const T_ACC* db_ptr,
+    const PT* ds_ptr,
+    const PT* db_ptr,
     bool gamma_null,
     const PT* gamma_ptr,
     const int64_t d,
     const int64_t K,
     void* ds_arr,
     void* db_arr) {
-    vec::Vectorized<T_ACC> ds_vec(0);
-    vec::Vectorized<T_ACC> db_vec(0);
+    vec::Vectorized<PT> ds_vec(0);
+    vec::Vectorized<PT> db_vec(0);
     for (int64_t j = 0; j < d; j += K) {
       const vec::Vectorized<PT> gamma_vec = gamma_null
           ? vec::Vectorized<PT>(1)
           : vec::Vectorized<PT>::loadu(gamma_ptr + j);
-      ds_vec = ds_vec + vec::Vectorized<T_ACC>::loadu(ds_ptr + j) * gamma_vec;
-      db_vec = db_vec + vec::Vectorized<T_ACC>::loadu(db_ptr + j) * gamma_vec;
+      ds_vec = ds_vec + vec::Vectorized<PT>::loadu(ds_ptr + j) * gamma_vec;
+      db_vec = db_vec + vec::Vectorized<PT>::loadu(db_ptr + j) * gamma_vec;
     }
     ds_vec.store(ds_arr);
     db_vec.store(db_arr);
 }
 
-template <>
-inline void CalcDsDb(
-    const float* ds_ptr,
-    const float* db_ptr,
-    bool gamma_null,
-    const BFloat16* gamma_ptr,
-    const int64_t d,
-    const int64_t K,
-    void* ds_arr,
-    void* db_arr) {
-    vec::Vectorized<float> ds_vec(0);
-    vec::Vectorized<float> db_vec(0);
-    for (int64_t j = 0; j < d; j += K) {
-      const vec::Vectorized<BFloat16> gamma_vec = gamma_null
-          ? vec::Vectorized<BFloat16>(1)
-          : vec::Vectorized<BFloat16>::loadu(gamma_ptr + j);
-      vec::Vectorized<float> gamma_vec0, gamma_vec1;
-      std::tie(gamma_vec0, gamma_vec1) = convert_bfloat16_float(gamma_vec);
-      ds_vec = ds_vec + vec::Vectorized<float>::loadu(ds_ptr + j) * gamma_vec0 +
-        vec::Vectorized<float>::loadu(ds_ptr + j + K / 2) * gamma_vec1;
-      db_vec = db_vec + vec::Vectorized<float>::loadu(db_ptr + j) * gamma_vec0 +
-        vec::Vectorized<float>::loadu(db_ptr + j + K / 2) * gamma_vec1;
-    }
-    ds_vec.store(ds_arr);
-    db_vec.store(db_arr);
-}
-
-template <typename T, typename PT, typename T_ACC>
+template <typename T, typename PT>
 void GroupNormInputBackward(
     int64_t N,
     int64_t C,
@@ -666,174 +639,93 @@ void GroupNormInputBackward(
     const PT* mean,
     const PT* rstd,
     const PT* gamma,
-    const T_ACC* ds,
-    const T_ACC* db,
+    const PT* ds,
+    const PT* db,
     T* dX) {
   const int64_t G = group;
   const int64_t D = C / G;
-  const T_ACC s = T_ACC(1) / static_cast<T_ACC>(D * HxW);
+  const PT s = PT(1) / static_cast<PT>(D * HxW);
   const bool gamma_null = (gamma == nullptr);
   at::parallel_for(0, N * G, 1, [=](int64_t start, int64_t end) {
     constexpr int64_t K = vec::Vectorized<PT>::size();
-    constexpr int64_t scale = sizeof(T_ACC) / sizeof (PT);
     const int64_t d = D / K * K;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<T_ACC, K / scale> ds_arr;
+    std::array<PT, K> ds_arr;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<T_ACC, K / scale> db_arr;
+    std::array<PT, K> db_arr;
     for (const auto i : c10::irange(start, end)) {
       const int64_t g = i % G;
-      const T_ACC* ds_ptr = ds + i * D;
-      const T_ACC* db_ptr = db + i * D;
+      const PT* ds_ptr = ds + i * D;
+      const PT* db_ptr = db + i * D;
       const PT* gamma_ptr = gamma + g * D;
       CalcDsDb(ds_ptr, db_ptr, gamma_null, gamma_ptr, d, K, ds_arr.data(), db_arr.data());
-      T_ACC ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T_ACC(0));
-      T_ACC db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), T_ACC(0));
+      PT ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), PT(0));
+      PT db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), PT(0));
       for (const auto j : c10::irange(d, D)) {
-        const T_ACC gamma_v = gamma_null ? T_ACC(1) : T_ACC(gamma[g * D + j]);
+        const PT gamma_v = gamma_null ? PT(1) : PT(gamma[g * D + j]);
         ds_val += ds_ptr[j] * gamma_v;
         db_val += db_ptr[j] * gamma_v;
       }
-      const T_ACC c2 =
-          (db_val * T_ACC(mean[i]) - ds_val) * T_ACC(rstd[i]) * T_ACC(rstd[i]) * T_ACC(rstd[i]) * s;
-      const T_ACC c3 = -c2 * T_ACC(mean[i]) - db_val * T_ACC(rstd[i]) * s;
+      const PT c2 =
+          (db_val * PT(mean[i]) - ds_val) * PT(rstd[i]) * PT(rstd[i]) * PT(rstd[i]) * s;
+      const PT c3 = -c2 * PT(mean[i]) - db_val * PT(rstd[i]) * s;
 
       for (const auto j : c10::irange(D)) {
         const int64_t c = g * D + j;
         const T* dY_ptr = dY + (i * D + j) * HxW;
         const T* X_ptr = X + (i * D + j) * HxW;
         T* dX_ptr = dX + (i * D + j) * HxW;
-        const T_ACC c1 = T_ACC(rstd[i]) * (gamma_null ? T_ACC(1) : T_ACC(gamma[c]));
+        const PT c1 = PT(rstd[i]) * (gamma_null ? PT(1) : PT(gamma[c]));
         for (const auto k : c10::irange(HxW)) {
-          dX_ptr[k] = c1 * T_ACC(dY_ptr[k]) + c2 * T_ACC(X_ptr[k]) + c3;
+          dX_ptr[k] = c1 * PT(dY_ptr[k]) + c2 * PT(X_ptr[k]) + c3;
         }
       }
     }
   });
 }
 
-template <typename PT, typename T_ACC>
+template <typename T>
 void GammaBackward(
     int64_t N,
     int64_t C,
     int64_t group,
-    const PT* mean,
-    const PT* rstd,
-    const T_ACC* ds,
-    const T_ACC* db,
-    PT* dgamma) {
+    const T* mean,
+    const T* rstd,
+    const T* ds,
+    const T* db,
+    T* dgamma) {
   const int64_t G = group;
   const int64_t D = C / G;
-  constexpr int64_t K = vec::Vectorized<PT>::size();
+  constexpr int64_t K = vec::Vectorized<T>::size();
   at::parallel_for(0, D, K, [=](int64_t start, int64_t end) {
     for (const auto i : c10::irange(G)) {
-      std::memset(dgamma + i * D + start, 0, (end - start) * sizeof(PT));
+      std::memset(dgamma + i * D + start, 0, (end - start) * sizeof(T));
     }
     for (int64_t i = 0; i < N * G; ++i) {
-      const T_ACC* ds_ptr = ds + i * D;
-      const T_ACC* db_ptr = db + i * D;
+      const T* ds_ptr = ds + i * D;
+      const T* db_ptr = db + i * D;
       const int64_t g = i % G;
 
       for (const auto j : c10::irange(start, end)) {
         const int64_t c = g * D + j;
-        dgamma[c] += (ds_ptr[j] - db_ptr[j] * T_ACC(mean[i])) * T_ACC(rstd[i]);
+        dgamma[c] += (ds_ptr[j] - db_ptr[j] * mean[i]) * rstd[i];
       }
     }
   });
 }
 
-template <>
-void GammaBackward(
-    int64_t N,
-    int64_t C,
-    int64_t group,
-    const BFloat16* mean,
-    const BFloat16* rstd,
-    const float* ds,
-    const float* db,
-    BFloat16* dgamma) {
-  using fVec = vec::Vectorized<float>;
-  using bVec = vec::Vectorized<BFloat16>;
-  const int64_t G = group;
-  const int64_t D = C / G;
-  constexpr int64_t K = bVec::size();
-  float* acc_buffer = new float[C];
-  at::parallel_for(0, D, K, [=](int64_t start, int64_t end) {
-    for (const auto i : c10::irange(G)) {
-      std::memset(acc_buffer + i * D + start, 0, (end - start) * sizeof(float));
-    }
-    for (int64_t i = 0; i < N * G; ++i) {
-      const float* ds_ptr = ds + i * D;
-      const float* db_ptr = db + i * D;
-      const int64_t g = i % G;
-      for (const auto j : c10::irange(start, end)) {
-        const int64_t c = g * D + j;
-        acc_buffer[c] += (ds_ptr[j] - db_ptr[j] * float(mean[i])) * float(rstd[i]);
-      }
-    }
-  });
-
-  int64_t d = 0;
-  for (; d < C / K * K; d += K) {
-    fVec data_fvec0 = fVec::loadu(acc_buffer + d);
-    fVec data_fvec1 = fVec::loadu(acc_buffer + d + K / 2);
-    convert_float_bfloat16(data_fvec0, data_fvec1).store(dgamma + d);
-
-  }
-  if (C - d > 0) {
-    fVec data_fvec0 = fVec::loadu(acc_buffer + d, (C - d) > fVec::size() ? fVec::size() : (C - d));
-    fVec data_fvec1 = fVec::loadu(acc_buffer + d + fVec::size(), (C - d) > fVec::size() ? (C - d - fVec::size()) : 0);
-    convert_float_bfloat16(data_fvec0, data_fvec1).store(dgamma + d, C - d);
-  }
-  if (acc_buffer != nullptr) {
-    delete[] acc_buffer;
-  }
-}
-
-template <typename PT, typename T_ACC>
-void BetaBackward(int64_t N, int64_t C, const T_ACC* db, PT* dbeta) {
-  constexpr int64_t K = vec::Vectorized<PT>::size();
+template <typename T>
+void BetaBackward(int64_t N, int64_t C, const T* db, T* dbeta) {
+  constexpr int64_t K = vec::Vectorized<T>::size();
   at::parallel_for(0, C, K, [=](int64_t start, int64_t end) {
-    std::memset(dbeta + start, 0, (end - start) * sizeof(PT));
+    std::memset(dbeta + start, 0, (end - start) * sizeof(T));
     for (const auto i : c10::irange(N)) {
-      const T_ACC* db_ptr = db + i * C;
+      const T* db_ptr = db + i * C;
       for (const auto j : c10::irange(start, end)) {
         dbeta[j] += db_ptr[j];
       }
     }
   });
-}
-
-template <>
-void BetaBackward(int64_t N, int64_t C, const float* db, BFloat16* dbeta) {
-  using fVec = vec::Vectorized<float>;
-  using bVec = vec::Vectorized<BFloat16>;
-  constexpr int64_t K = bVec::size();
-  float* acc_buffer = new float[C];
-  at::parallel_for(0, C, K, [=](int64_t start, int64_t end) {
-    std::memset(acc_buffer + start, 0, (end - start) * sizeof(float));
-    for (const auto i : c10::irange(N)) {
-      const float* db_ptr = db + i * C;
-      for (const auto j : c10::irange(start, end)) {
-        acc_buffer[j] += db_ptr[j];
-      }
-    }
-  });
-  int64_t d = 0;
-  for (; d < C / K * K; d += K) {
-    fVec data_fvec0 = fVec::loadu(acc_buffer + d);
-    fVec data_fvec1 = fVec::loadu(acc_buffer + d + K / 2);
-    convert_float_bfloat16(data_fvec0, data_fvec1).store(dbeta + d);
-
-  }
-  if (C - d > 0) {
-    fVec data_fvec0 = fVec::loadu(acc_buffer + d, (C - d) > fVec::size() ? fVec::size() : (C - d));
-    fVec data_fvec1 = fVec::loadu(acc_buffer + d + fVec::size(), (C - d) > fVec::size() ? (C - d - fVec::size()) : 0);
-    convert_float_bfloat16(data_fvec0, data_fvec1).store(dbeta + d, C - d);
-  }
-  if (acc_buffer != nullptr) {
-    delete[] acc_buffer;
-  }
 }
 
 template <typename T, typename PT>
@@ -855,7 +747,6 @@ void GroupNormBackwardKernelImplInternal(
   TORCH_CHECK(mean.numel() == N * group);
   TORCH_CHECK(rstd.numel() == N * group);
   TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
-  using T_ACC = vec::vec_scalar_t<T>;
   const T* dY_data = dY.data_ptr<T>();
   const T* X_data = X.data_ptr<T>();
   const PT* mean_data = mean.data_ptr<PT>();
@@ -864,14 +755,14 @@ void GroupNormBackwardKernelImplInternal(
   T* dX_data = dX.defined() ? dX.data_ptr<T>() : nullptr;
   PT* dgamma_data = dgamma.defined() ? dgamma.data_ptr<PT>() : nullptr;
   PT* dbeta_data = dbeta.defined() ? dbeta.data_ptr<PT>() : nullptr;
-  Tensor ds = at::empty({N, C}, X.options().dtype(c10::CppTypeToScalarType<T_ACC>::value));
-  Tensor db = at::empty({N, C}, X.options().dtype(c10::CppTypeToScalarType<T_ACC>::value));
-  T_ACC* ds_data = ds.data_ptr<T_ACC>();
-  T_ACC* db_data = db.data_ptr<T_ACC>();
-  ComputeInternalGradients<T, T_ACC>(N, C, HxW, dY_data, X_data, ds_data, db_data);
+  Tensor ds = at::empty({N, C}, X.options().dtype(c10::CppTypeToScalarType<PT>::value));
+  Tensor db = at::empty({N, C}, X.options().dtype(c10::CppTypeToScalarType<PT>::value));
+  PT* ds_data = ds.data_ptr<PT>();
+  PT* db_data = db.data_ptr<PT>();
+  ComputeInternalGradients<T, PT>(N, C, HxW, dY_data, X_data, ds_data, db_data);
 
   if (dX_data != nullptr) {
-    GroupNormInputBackward<T, PT, T_ACC>(
+    GroupNormInputBackward<T, PT>(
         N,
         C,
         HxW,
@@ -886,11 +777,11 @@ void GroupNormBackwardKernelImplInternal(
         dX_data);
   }
   if (dgamma_data != nullptr) {
-    GammaBackward<PT, T_ACC>(
+    GammaBackward(
         N, C, group, mean_data, rstd_data, ds_data, db_data, dgamma_data);
   }
   if (dbeta_data != nullptr) {
-    BetaBackward<PT, T_ACC>(N, C, db_data, dbeta_data);
+    BetaBackward(N, C, db_data, dbeta_data);
   }
 }
 
@@ -910,6 +801,10 @@ void GroupNormBackwardKernelImpl(
   const bool mixed_type = is_mixed_type(dY, gamma);
   AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16, X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
+      // In training, using Amp to enable BFloat16 is recommended.
+      // It will keep module parameters in acc dtype i.e. float
+      // while input/output will be in BFloat16.
+      // Using parameters in BFloat16 will cause high precision loss.
       if(mixed_type) {
         GroupNormBackwardKernelImplInternal<BFloat16, float>(
             dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);

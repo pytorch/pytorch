@@ -120,6 +120,11 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
       at::borrow_from_optional_tensor(gamma_opt);
   const Tensor& gamma = *gamma_maybe_owned;
 
+  bool mixed_type = is_mixed_type(X, mean, rstd);
+  if (mixed_type) {
+    check_mixed_data_type(X, mean, rstd);
+  }
+
   Tensor dX;
   Tensor dgamma;
   Tensor dbeta;
