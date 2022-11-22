@@ -25,6 +25,7 @@
 #endif
 
 #include <c10/cuda/CUDAMathCompat.h>
+#include <c10/util/env.h>
 
 
 namespace at {
@@ -1196,6 +1197,7 @@ void LayerNormBackwardKernelImplInternal(
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 #endif
   }
+
   if (dgamma->defined() || dbeta->defined()) {
     T* dgamma_data =
         dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
@@ -1216,6 +1218,40 @@ void LayerNormBackwardKernelImplInternal(
               dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
+#if defined(USE_ROCM)
+      // For small batch size, do colwise reduce directly.
+      const int part_size = warp_size;
+      const dim3 threads2(warp_size, 4, 1);
+      const dim3 blocks2((N + threads2.x - 1) / threads2.x, part_size, 1);
+      const int nshared2_a = 2 * sizeof(T_ACC) * threads2.y * threads2.y * (threads2.x + 1);
+      const int nshared2_b = threads2.x * threads2.y * sizeof(T_ACC);
+      const int nshared2 = nshared2_a > nshared2_b ? nshared2_a : nshared2_b;
+
+      const auto part_grad_dtype = at::toAccumulateType(X.scalar_type(), true);
+      Tensor part_grad_gamma = at::empty({part_size,N}, gamma.options().dtype(part_grad_dtype));
+      Tensor part_grad_beta = at::native::empty_like(part_grad_gamma);
+      cuComputePartGradGammaBeta<<<blocks2, threads2, nshared2, cuda_stream>>>(
+                      dY_data,
+                      X_data,
+                      M,N,
+                      mean_data,
+                      rstd_data,
+                      part_grad_gamma.template data_ptr<T_ACC>(),
+                      part_grad_beta.template data_ptr<T_ACC>());
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+      const dim3 threads3(warp_size, 8, 1); // Optimization for ROCm
+      const dim3 blocks3((N + threads2.x - 1) / threads2.x, 1, 1);
+      const int nshared3 = threads3.x * threads3.y * sizeof(T);
+      cuComputeGradGammaBeta<<<blocks3, threads3, nshared3, cuda_stream>>>(
+                      part_grad_gamma.template data_ptr<T_ACC>(),
+                      part_grad_beta.template data_ptr<T_ACC>(),
+                      part_size,
+                      M,N,
+                      dgamma_data,
+                      dbeta_data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+#else
       if ((M % kWarpSize == 0) && (N % kWarpSize == 0)) {
         // This implementation relies on warp primitives and requires that M and N divide
         // exactly to warp size.
@@ -1252,6 +1288,7 @@ void LayerNormBackwardKernelImplInternal(
                 dbeta_data);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
+#endif
     }
   }
 }
