@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from typing import Sequence, Tuple
 from torch.distributed._tensor import (
+    distribute_module,
     distribute_tensor,
     DTensor,
     Shard,
@@ -11,6 +12,8 @@ from torch.distributed._tensor import (
     Placement,
 )
 from torch.distributed._tensor.parallel import TensorParallelMultiheadAttention
+from torch.distributed._tensor.parallel.style import ParallelStyle, PairwiseParallel
+from torch.distributed._tensor.parallel.utils import _create_1d_device_mesh
 
 
 def replicate_input(
@@ -84,3 +87,112 @@ def tp_shard_self_attn(
                 )
                 tp_multi_head_attention.copy(m)
                 module.register_module(n, tp_multi_head_attention)
+
+
+def _has_even_num_linears(module: nn.Module) -> bool:
+    """
+    We traverse through all the children of the given module and count the
+    number of Linear module. If the number is even, we return True.
+
+    Args:
+        module (nn.Module):
+            :class:``nn.Module`` object to be traversed and counted.
+
+    Return:
+        A boolean object which specifies whether the module contains
+        event-number of Linears in its children.
+
+    .. warning::
+        The traversal is not recursive for now.
+    """
+    linear_submodules = list(
+        filter(lambda x: isinstance(x, nn.Linear), module.children())
+    )
+    return len(linear_submodules) > 0 and len(linear_submodules) % 2 == 0
+
+
+def _parallelize_mlp(
+    module: nn.Module,
+    device_mesh: DeviceMesh,
+    parallel_style: ParallelStyle = PairwiseParallel(),
+    tp_mesh_dim: int = 0,
+) -> None:
+    """
+    This function assumes the input module is a sequence of nn.Linear
+    and we parallelize the module based on the given parallel style.
+    We don't change the FQN of each sub-module and replace each parameter
+    in place.
+
+    Args:
+        module (nn.Module):
+            :class:``nn.Module`` object to be parallelized.
+        device_mesh (DeviceMesh):
+            :class:``DeviceMesh`` object which describes the mesh topology
+            of devices for the DTensor.
+        parallel_style (ParallelStyle):
+            :class:``ParallelStyle`` object which contains how
+            we prepare input/output for Tensor Parallelism.
+        tp_mesh_dim (int):
+            the dimension of ``device_mesh`` where we perform
+            Tensor Parallelism on.
+
+    Return:
+        None
+
+    .. warning::
+        We only support ``PairwiseParallel`` right now.
+    """
+
+    # Define partition functions needed.
+    def _rowwise_parallelize_fn(name, module, device_mesh):  # pyre-ignore[2, 3]
+        for name, param in module.named_parameters():
+            dist_spec = (
+                [Shard(1)] if name == "weight" else [Replicate()]  # type: ignore[list-item]
+            )
+            dist_param = torch.nn.Parameter(
+                distribute_tensor(param, device_mesh, dist_spec)
+            )
+            module.register_parameter(name, dist_param)
+
+    def _colwise_parallelize_fn(name, module, device_mesh):  # pyre-ignore[2, 3]
+        for name, param in module.named_parameters():
+            dist_param = torch.nn.Parameter(
+                distribute_tensor(param, device_mesh, [Shard(0)])
+            )
+            module.register_parameter(name, dist_param)
+
+    if not isinstance(parallel_style, PairwiseParallel):
+        raise NotImplementedError(
+            "Only support PairwiseParallel for MLP parallelization."
+        )
+
+    if not _has_even_num_linears(module):
+        raise RuntimeError("We only support even number of Linear for MLP.")
+
+    if device_mesh.ndim > 1:
+        device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
+
+    linear_submodules = list(
+        filter(lambda x: isinstance(x, nn.Linear), module.children())
+    )
+    for i, m in enumerate(linear_submodules):
+        if i % 2 == 0:
+            # Col-wise Parallelize the linear layer
+            distribute_module(
+                m,
+                device_mesh,
+                _colwise_parallelize_fn,
+                input_fn=parallel_style._prepare_input  # type: ignore[arg-type, misc] # pyre-ignore[6]
+                if i == 0
+                else None,
+            )
+        else:
+            # Row-wise Parallelize the linear layer
+            distribute_module(
+                m,
+                device_mesh,
+                _rowwise_parallelize_fn,
+                output_fn=parallel_style._prepare_output  # type: ignore[arg-type, misc] # pyre-ignore[6]
+                if i == (len(linear_submodules) - 1)
+                else None,
+            )
