@@ -968,7 +968,10 @@ def _new_process_group_helper(
     print("global_ranks_in_group", global_ranks_in_group)
 
     prefix_store = PrefixStore(f"{group_name}/", store)
-    pg: ProcessGroup = ProcessGroup(prefix_store, group_rank, group_size, timeout=timeout)
+    if pg_options is None:
+        pg_options = ProcessGroup.Options(backend=str(backend))
+    pg_options._timeout = timeout
+    pg: ProcessGroup = ProcessGroup(prefix_store, group_rank, group_size, pg_options=pg_options)
 
     # If this is a subgroup (which means group_ranks is specified),
     # we check if the current process is a member of the new group.

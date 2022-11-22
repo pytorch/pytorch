@@ -54,7 +54,8 @@ c10::intrusive_ptr<Work> recv_any_source_cpu_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t tag) {
   auto tensor_vec = tensors.vec();
-  return process_group->getBackend(c10::DeviceType::CPU)->recvAnysource(tensor_vec, static_cast<int>(tag));
+  return process_group->getBackend(c10::DeviceType::CPU)
+      ->recvAnysource(tensor_vec, static_cast<int>(tag));
 }
 
 c10::intrusive_ptr<Work> recv_any_source_cuda_(
@@ -62,7 +63,8 @@ c10::intrusive_ptr<Work> recv_any_source_cuda_(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t tag) {
   auto tensor_vec = tensors.vec();
-  return process_group->getBackend(c10::DeviceType::CUDA)->recvAnysource(tensor_vec, static_cast<int>(tag));
+  return process_group->getBackend(c10::DeviceType::CUDA)
+      ->recvAnysource(tensor_vec, static_cast<int>(tag));
 }
 
 c10::intrusive_ptr<Work> reduce_cpu_(

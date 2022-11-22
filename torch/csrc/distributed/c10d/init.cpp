@@ -1167,22 +1167,6 @@ Arguments:
                   int,
                   c10::intrusive_ptr<::c10d::ProcessGroup::Options>>(),
               py::call_guard<py::gil_scoped_release>())
-          .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size,
-                          const std::chrono::milliseconds& timeout) {
-                auto options =
-                    c10::make_intrusive<::c10d::ProcessGroup::Options>(
-                        "NOT DEFINED", timeout);
-                return c10::make_intrusive<::c10d::ProcessGroup>(
-                    store, rank, size, options);
-              }),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              py::arg("timeout") = kProcessGroupDefaultTimeout,
-              py::call_guard<py::gil_scoped_release>())
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
           .def("name", &::c10d::ProcessGroup::getBackendName)
@@ -1611,6 +1595,15 @@ Arguments:
 Base class for all processs group options implementations, such as the nccl
 options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 )")
+          .def(
+              py::init([](const std::string& backend,
+                          const std::chrono::milliseconds& timeout) {
+                return c10::make_intrusive<::c10d::ProcessGroup::Options>(
+                    backend, timeout);
+              }),
+              py::arg("backend"),
+              py::arg("timeout") = kProcessGroupDefaultTimeout,
+              py::call_guard<py::gil_scoped_release>())
           .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
           .def_readwrite("_timeout", &::c10d::ProcessGroup::Options::timeout);
 
@@ -1993,12 +1986,11 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupWrapper>(
           module, "_ProcessGroupWrapper", backend)
           .def(
-              py::init(
-                  [](const c10::intrusive_ptr<::c10d::Backend>& pg,
-                     const c10::intrusive_ptr<::c10d::Backend>& gloo_pg) {
-                    return c10::make_intrusive<::c10d::ProcessGroupWrapper>(
-                        pg, gloo_pg);
-                  }),
+              py::init([](const c10::intrusive_ptr<::c10d::Backend>& pg,
+                          const c10::intrusive_ptr<::c10d::Backend>& gloo_pg) {
+                return c10::make_intrusive<::c10d::ProcessGroupWrapper>(
+                    pg, gloo_pg);
+              }),
               py::arg("pg"),
               py::arg("gloo_pg"),
               py::call_guard<py::gil_scoped_release>())
