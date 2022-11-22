@@ -59,7 +59,7 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
-compile_threads = min(32, os.cpu_count()) if sys.platform != "win32" else 1
+compile_threads = 1  # min(32, os.cpu_count()) if sys.platform != "win32" else 1
 
 # If kernel is fused, the name is generated from the origin node op names
 # for larger kernels limit this
@@ -93,12 +93,12 @@ class cpp:
     simdlen = None
     min_chunk_size = 4096
     cxx = (
+        "g++",
         None,  # download gcc12 from conda-forge if conda is installed
         "g++-12",
         "g++-11",
         "g++-10",
         "clang++",
-        "g++",
         "g++.par",
     )
 
@@ -107,7 +107,7 @@ class cpp:
 class triton:
 
     # Use cudagraphs on output code
-    cudagraphs = True
+    cudagraphs = False
 
     # choose conv backend, "aten" or "triton" or "autotune"
     convolution = "aten"

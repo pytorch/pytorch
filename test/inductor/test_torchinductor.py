@@ -4816,6 +4816,24 @@ if HAS_CUDA:
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
 
+        @patch.object(config.triton, "autotune", True)
+        def test_inplace_add_alpha_autotune(self):
+            def fn(x, y):
+                aten.add_.Tensor(x, y, alpha=0.55)
+                return (x,)
+
+            x1 = torch.zeros(2, 3, 4, 10, device="cuda")
+            x2 = torch.zeros(2, 3, 4, 10, device="cuda")
+            x3 = torch.zeros(2, 3, 4, 10, device="cuda")
+            y = torch.randn(2, 3, 4, 10, device="cuda").to(
+                memory_format=torch.channels_last
+            )
+            fn_fx = make_fx(fn)(x1, y)
+            fn_compiled = compile_fx_inner(fn_fx, [x1, y])
+            fn(x2, y)
+            fn_compiled([x3, y])
+            assert same(x2, x3)
+
         def test_permute_linear_fusion(self):
             class TestModule(torch.nn.Module):
                 def __init__(self, k: int, n: int):
