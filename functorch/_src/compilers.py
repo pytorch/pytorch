@@ -8,6 +8,7 @@ from functools import partial
 from typing import Callable, Optional, Tuple, Union
 
 import torch
+from torch import SymInt
 import torch.fx as fx
 import torch.nn as nn
 from torch._decomp import get_decompositions
@@ -117,16 +118,40 @@ def nop(fx_g: fx.GraphModule, _) -> Callable:
     return fx_g
 
 class DebugInterpreter(fx.Interpreter):
+    def __init__(self, *args, **kwargs):
+        self.symbol_mapping = {}
+        super().__init__(*args, **kwargs)
+
     def run_node(self, n):
+        import sympy
+
         # TODO: This will fail once we start caching in AOTAutograd
         # again, because we need to remap SymInts to their new values
         # in the presence of dynamism
+        def subst_symint(ni):
+            if isinstance(ni, SymInt):
+                r = sympy.expand(ni.node.expr.xreplace(self.symbol_mapping))
+                assert len(r.free_symbols) == 0, r
+                return int(r)
+            else:
+                return ni
+
+        def subst_symint_tuple(nis):
+            return tuple(subst_symint(ni) for ni in nis)
+
+        def check_significant_strides(a, b):
+            if subst_symint(a.numel()) > 0:
+                for idx in range(a.ndim):
+                    if subst_symint(a.stride()[idx]) != b.stride()[idx] and subst_symint(a.shape[idx]) > 1:
+                        return False
+            return True
+
         def check(nv, rv, desc):
             assert callable(desc)
-            assert nv.size() == rv.size(), f"{desc()}: {nv.size()} != {rv.size()}"
             assert nv.dtype == rv.dtype, f"{desc()}: {nv.dtype} != {rv.dtype}"
-            same_strides, idx = torch._prims_common.check_significant_strides(nv, rv, only_cuda=False)
-            assert same_strides, f"{desc()}: {nv.stride()} != {rv.stride()} (mismatch at index {idx})"
+            assert subst_symint_tuple(nv.size()) == rv.size(), f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
+            same_strides = check_significant_strides(nv, rv)
+            assert same_strides, f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
 
         # Check that inputs are consistent
         # NB: I don't think this is actually necessary.
@@ -145,6 +170,36 @@ class DebugInterpreter(fx.Interpreter):
         """
 
         r = super().run_node(n)
+
+        # For placeholder nodes, setup bindings
+        if n.op == "placeholder":
+            import sympy
+
+            def bind_symint(ni, ri):
+                if isinstance(ni, SymInt):
+                    if isinstance(ni.node.expr, sympy.Symbol):
+                        prev = self.symbol_mapping.get(ni.node.expr)
+                        if prev is None:
+                            self.symbol_mapping[ni.node.expr] = ri
+                        else:
+                            assert prev == ri, f"{prev} != {ri}"
+                    else:
+                        # TODO: what if the symint hasn't been bound yet?
+                        assert subst_symint(ni) == ri
+                else:
+                    assert ni == ri
+
+            if isinstance(r, int):
+                bind_symint(n.meta['val'], r)
+            else:
+                assert isinstance(r, torch.Tensor)
+
+                for ni, ri in zip(n.meta['val'].size(), r.size()):
+                    bind_symint(ni, ri)
+                for ni, ri in zip(n.meta['val'].stride(), r.stride()):
+                    bind_symint(ni, ri)
+                bind_symint(n.meta['val'].storage_offset(), r.storage_offset())
+
         # Check that outputs are consistent
         if 'val' in n.meta:
             n_vals, n_spec = pytree.tree_flatten(n.meta['val'])
@@ -155,7 +210,7 @@ class DebugInterpreter(fx.Interpreter):
             for i, nv, rv in zip(range(len(n_vals)), n_vals, r_vals):
                 if not isinstance(rv, torch.Tensor):
                     continue
-                check(nv, rv, lambda: f"output {i}")
+                check(nv, rv, lambda: f"output {i} where {self.symbol_mapping}")
         return r
 
 
@@ -166,7 +221,7 @@ def debug_nop(fx_g: fx.GraphModule, _) -> Callable:
     various debugging properties (e.g., that tracing strides matched real
     strides.)
     """
-    return DebugInterpreter(fx_g).run
+    return lambda *args, **kwargs: DebugInterpreter(fx_g).run(*args, **kwargs)
 
 @make_boxed_compiler
 def simple_ts_compile(fx_g, _):
