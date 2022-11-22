@@ -118,10 +118,6 @@ class OutputGraph(fx.Tracer):
         # all current placeholder node names
         self.name_to_input = collections.OrderedDict()
 
-        # Used to avoid iterating over the linked list of graph nodes (slow)
-        # the keys contain the nodes, all values are None
-        self.nodes = collections.OrderedDict()
-
     @property
     def output(self):
         return self
@@ -152,8 +148,8 @@ class OutputGraph(fx.Tracer):
             self.timestamp,
         ) = state
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
-        for node in reversed(list(self.nodes.keys())):
-            if node.timestamp > self.timestamp:
+        for node in reversed(list(self.graph.nodes)):
+            if node.meta["creation_timestamp"] > self.timestamp:
                 # Erasing node alone does not remove the meta information
                 # So, remove the help tensor explicitly
                 if "example_value" in node.meta:
@@ -577,13 +573,11 @@ class OutputGraph(fx.Tracer):
 
     def create_node(self, *args, **kwargs):
         node = super().create_node(*args, **kwargs)
-        node.timestamp = self.timestamp
-        self.nodes[node] = None
+        node.meta["creation_timestamp"] = self.timestamp
         return node
 
     # Note: we did not override erase_node since
     # we call self.graph.erase_node elsewhere
     def remove_node(self, node):
         self.graph.erase_node(node)
-        self.nodes.pop(node, None)
         self.name_to_input.pop(node.name, None)
