@@ -33,6 +33,7 @@ jobs:
       build-environment: linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck
       docker-image: ${{ needs.linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build.outputs.test-matrix }}
+      timeout-minutes: 300
 
   linux-focal-rocm5_2-py3_8-slow-build:
     name: linux-focal-rocm5.2-py3.8-slow
@@ -40,6 +41,10 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.8
       docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
+        ]}
 
   linux-focal-rocm5_2-py3_8-slow-test:
     name: linux-focal-rocm5.2-py3.8-slow
@@ -48,10 +53,7 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.8
       docker-image: ${{ needs.linux-focal-rocm5_2-py3_8-slow-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
-        ]}
+      test-matrix: ${{ needs.linux-focal-rocm5_2-py3_8-slow-build.outputs.test-matrix }}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
@@ -62,6 +64,11 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.8
       docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
+      test-matrix: |
+        { include: [
+          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+        ]}
 
   linux-focal-rocm5_2-py3_8-distributed-test:
     name: linux-focal-rocm5.2-py3.8-distributed
@@ -70,11 +77,7 @@ jobs:
     with:
       build-environment: linux-focal-rocm5.2-py3.8
       docker-image: ${{ needs.linux-focal-rocm5_2-py3_8-distributed-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
-        ]}
+      test-matrix: ${{ needs.linux-focal-rocm5_2-py3_8-distributed-build.outputs.test-matrix }}
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}

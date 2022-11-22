@@ -799,6 +799,21 @@ inline Vectorized<T> operator~(const Vectorized<T>& a) {
   return a ^ ones;
 }
 
+template <class T> Vectorized<T> inline operator<<(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    c[i] = a[i] << b[i];
+  }
+  return c;
+}
+
+template <class T> Vectorized<T> inline operator>>(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    c[i] = a[i] >> b[i];
+  }
+  return c;
+}
 
 template <typename T>
 inline Vectorized<T>& operator += (Vectorized<T>& a, const Vectorized<T>& b) {
@@ -823,6 +838,18 @@ inline Vectorized<T>& operator %= (Vectorized<T>& a, const Vectorized<T>& b) {
 template <typename T>
 inline Vectorized<T>& operator *= (Vectorized<T>& a, const Vectorized<T>& b) {
   a = a * b;
+  return a;
+}
+
+template <typename T>
+inline Vectorized<T>& operator <<= (Vectorized<T>& a, const Vectorized<T>& b) {
+  a = a << b;
+  return a;
+}
+
+template <typename T>
+inline Vectorized<T>& operator >>= (Vectorized<T>& a, const Vectorized<T>& b) {
+  a = a >> b;
   return a;
 }
 
@@ -986,6 +1013,18 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
     src++;
     dst++;
   }
+}
+
+template <typename T>
+inline Vectorized<T> flip(const Vectorized<T> & data) {
+  static constexpr int size = Vectorized<T>::size();
+  T output[size];
+  T buffer[size];
+  data.store(static_cast<void*>(buffer));
+  for (const auto i : c10::irange(size)) {
+    output[i] = buffer[size - i - 1];
+  }
+  return Vectorized<T>::loadu(static_cast<void*>(output));
 }
 
 }}}
