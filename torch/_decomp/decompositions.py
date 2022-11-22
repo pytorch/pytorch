@@ -1489,9 +1489,12 @@ def _native_batch_norm_legit_functional(
     momentum: float,
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-    return native_batch_norm_helper(
+    output, save_mean, save_rstd, new_running_mean, new_running_var = native_batch_norm_helper(
         input, weight, bias, running_mean, running_var, training, momentum, eps, True
     )
+    assert new_running_mean is not None, "new_running_mean should not be None"
+    assert new_running_var is not None, "new_running_var should not be None"
+    return output, save_mean, save_rstd, new_running_mean, new_running_var
 
 
 @register_decomposition(aten._fused_dropout)
