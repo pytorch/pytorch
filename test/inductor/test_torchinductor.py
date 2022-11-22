@@ -1920,6 +1920,7 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn(2, 4, 16, 16),),
+            check_lowp=False,
         )
 
         # lowering to avg_pool2d case
@@ -1933,6 +1934,19 @@ class CommonTemplate:
             fn,
             (torch.randn(2, 4, 6, 6),),
         )
+
+    def test_adaptive_avg_pool2d2(self):
+        # Big kernel size, use fallback
+        def fn(x):
+            return aten._adaptive_avg_pool2d(x, (4, 4))
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn(2, 4, 21, 21),),
+            check_lowp=False,
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_max_pool2d1(self):
         def fn(x):
@@ -1980,6 +1994,18 @@ class CommonTemplate:
             fn,
             (torch.randn([16, 64, 55, 55]),),
         )
+
+    def test_max_pool2d6(self):
+        # Too big kernel size, use fallback
+        def fn(x):
+            return aten.max_pool2d_with_indices(x, [13, 13], [])
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn([16, 64, 55, 55]),),
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_avg_pool2d1(self):
         def fn(x):
@@ -2034,6 +2060,18 @@ class CommonTemplate:
             fn,
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
         )
+
+    def test_avg_pool2d7(self):
+        # Large kernel size, use fallback
+        def fn(x):
+            return aten.avg_pool2d(x, [13, 13], [1, 1], [0, 0])
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (-torch.arange(1 * 24 * 24, dtype=torch.float32).view(1, 1, 24, 24),),
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
@@ -3936,6 +3974,7 @@ class CommonTemplate:
                 a, b, [5, 5], [1, 1], [2, 2], [1, 1], False, c
             )
 
+        torch._inductor.metrics.generated_kernel_count = 0
         x = torch.randn([2, 64, 3, 4])
         result, indices = aten.max_pool2d_with_indices(
             x,
@@ -3953,6 +3992,34 @@ class CommonTemplate:
                 indices,
             ],
         )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_max_pool2d_with_indices_backward5(self):
+        # Window size is too big. Should fallback
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a, b, [13, 13], [1, 1], [2, 2], [1, 1], False, c
+            )
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        x = torch.randn([2, 64, 20, 20])
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            [13, 13],
+            [1, 1],
+            2,
+            1,
+            False,
+        )
+        self.common(
+            fn,
+            [
+                torch.randn_like(result),
+                x,
+                indices,
+            ],
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_avg_pool2d_backward(self):
         def fn(a, b):
@@ -4009,6 +4076,7 @@ class CommonTemplate:
                 None,
             )
 
+        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             [
@@ -4016,6 +4084,31 @@ class CommonTemplate:
                 torch.randn([1, 2016, 21, 21]),
             ],
         )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_avg_pool2d_backward4(self):
+        def fn(a, b):
+            return aten.avg_pool2d_backward(
+                a,
+                b,
+                [13, 13],
+                [1, 1],
+                [0, 0],
+                True,
+                False,
+                None,
+            )
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            [
+                torch.randn([1, 16, 12, 12]),
+                torch.randn([1, 16, 24, 24]),
+            ],
+            check_lowp=False,
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_mm_views(self):
         def fn(a, b):
