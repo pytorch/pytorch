@@ -190,6 +190,8 @@ def main() -> None:
         filtered_test_matrix = test_matrix
 
     if args.event_name == "schedule" and args.schedule == '29 8 * * *':
+        # we don't want to run the mem leack check or disabled tests on normal
+        # periodically scheduled jobs, only the ones at this time
         filtered_test_matrix = set_periodic_modes(filtered_test_matrix)
 
     # Set the filtered test matrix as the output
