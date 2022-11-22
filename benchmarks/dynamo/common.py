@@ -266,13 +266,35 @@ def print_summary(filename):
             pass
 
 
+def tensor_is_on_xla(tensors):
+    if not isinstance(tensors, (tuple, list)):
+        tensors = [tensors]
+    return any(map(lambda x: x.device.type == "xla", tensors))
+
+
 def timed(model, model_iter_fn, example_inputs, times=1, return_result=False):
     synchronize()
+    if tensor_is_on_xla(example_inputs):
+        import torch_xla.core.xla_model as xm
+
+        xm.mark_step()
+
     reset_rng_state()
     t0 = time.perf_counter()
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
         result = model_iter_fn(model, example_inputs, collect_outputs=False)
+        if tensor_is_on_xla(result):
+            # If the model is on XLA device, it's possible that after running
+            # the model, the computation is accumulated but not performed yet.
+            # Flush all the accumulated computations to make the time measurement
+            # accurate.
+            import torch_xla
+
+            result_list = result
+            if not isinstance(result, (tuple, list)):
+                result_list = [result]
+            torch_xla._XLAC._xla_sync_multi(result_list, [])
         synchronize()
     t1 = time.perf_counter()
     return (t1 - t0, result) if return_result else t1 - t0
@@ -384,6 +406,13 @@ def randomize_input(inputs):
         )
 
 
+def maybe_mark_step(args):
+    if args.trace_on_xla:
+        import torch_xla.core.xla_model as xm
+
+        xm.mark_step()
+
+
 def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     """
     Measure speedups over eager.
@@ -397,9 +426,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     # if we randomize the input, we should also check the result is correct
     should_check_result = should_randomize_input = args.randomize_input
     is_correct = True
-
-    baseline_model_iter_fn = get_baseline_model_iter_fn(args, model_iter_fn)
-    baseline_model = get_baseline_model(args, model)
 
     import contextlib
 
@@ -419,16 +445,25 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                 if should_randomize_input
                 else example_inputs
             )
+            # need call mark_step to perform the computation
+            # on randomize_input. Otherwise the first call using the
+            # inputs will incur high penalty then the next one.
+            maybe_mark_step(args)
 
             # interleave the runs to handle frequency scaling and load changes
             timings[rep, 0], expected_output = timed(
-                baseline_model, baseline_model_iter_fn, inputs, return_result=True
+                model, model_iter_fn, inputs, return_result=True
             )
+
+            # call mark_step between the 2 calls to make the comparison fair.
+            maybe_mark_step(args)
+
             timings[rep, 1], actual_output = timed(
                 model, frozen_model_iter_fn, inputs, return_result=True
             )
             if should_check_result:
                 is_correct = is_correct and same(expected_output, actual_output)
+
     if args.export_profiler_trace:
         name = args.profiler_trace_name + "_" + model.name + ".json"
         name = os.path.join(torch._dynamo.config.base_dir, name)
@@ -841,56 +876,6 @@ def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_s
     finally:
         if should_init_distributed:
             torch.distributed.destroy_process_group()
-
-
-def xla_wrapper(model_iter_fn):
-    """
-    Wrap the model_iter_fn to run the model on XLA devices.
-    """
-
-    def wrapper(xla_mod, inputs, collect_outputs=True):
-        import torch_xla.core.xla_model as xm
-
-        # Make sure the model is already moved to the xla device. Moving
-        # the model to xla device can be very expensive since model parameters
-        # need to be copied. We should not do that inside the wrapper since
-        # the wrapper will be calles for each set of inputs.
-        assert (
-            next(xla_mod.parameters()).device.type == "xla"
-        ), "The model should be already on xla device"
-
-        xla_dev = xm.xla_device()
-        eager_dev = inputs[0].device
-        xla_inputs = tree_map(lambda x: x.to(device=xla_dev), inputs)
-        xla_out = model_iter_fn(xla_mod, xla_inputs, collect_outputs)
-        if isinstance(xla_out, torch.Tensor):
-            return xla_out.to(device=eager_dev)
-        elif hasattr(xla_out, "__dict__"):
-            for k in xla_out.__dict__.keys():
-                if xla_out.__dict__[k] is None:
-                    continue
-                xla_out.__dict__[k] = tree_map(
-                    lambda x: x.to(device=eager_dev), xla_out.__dict__[k]
-                )
-            return xla_out
-        else:
-            raise RuntimeError(f"Can not handle type {type(xla_out)}")
-
-    return wrapper
-
-
-def get_baseline_model_iter_fn(args, model_iter_fn):
-    return xla_wrapper(model_iter_fn) if args.use_xla_baseline else model_iter_fn
-
-
-def get_baseline_model(args, model):
-    if args.use_xla_baseline:
-        import torch_xla.core.xla_model as xm
-
-        xla_dev = xm.xla_device()
-        return copy.deepcopy(model).to(device=xla_dev)
-    else:
-        return model
 
 
 class BenchmarkRunner:
@@ -1544,9 +1529,9 @@ def parse_args(args=None):
         help="Disables cudagraphs for Inductor",
     )
     parser.add_argument(
-        "--use-xla-baseline",
+        "--trace-on-xla",
         action="store_true",
-        help="Whether to run baseline on XLA devices or eager devices",
+        help="Whether to trace the model on XLA or on eager device",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -1994,6 +1979,15 @@ def run(runner, args, original_dir=None):
                     print(traceback.format_exc())
                     logging.warn(f"{args.only} failed to load")
                     continue  # bad benchmark implementation
+
+            if args.trace_on_xla:
+                import torch_xla.core.xla_model as xm
+
+                xla_dev = xm.xla_device()
+                model = model.to(device=xla_dev)
+                example_inputs = tree_map(
+                    lambda x: x.to(device=xla_dev), example_inputs
+                )
 
             current_name = name
             current_device = device

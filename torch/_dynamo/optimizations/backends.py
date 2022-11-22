@@ -785,33 +785,9 @@ def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
     return ltc_model
 
 
-@functools.lru_cache(None)
-def _init_torchxla():
-    global xm
-    try:
-        import torch_xla.core.xla_model as xm
-    except ModuleNotFoundError as e:
-        print(f"torchxla backend fails. Can not import {e.name}")
-        raise
-
-
 @create_backend
 def torchxla_trivial(subgraph):
-    _init_torchxla()
-
-    xla_dev = xm.xla_device()
-
-    xla_model = copy.deepcopy(subgraph.model).to(device=xla_dev)
-
-    def xla_model_wrapper(*inputs):
-        orig_device = inputs[0].device if len(inputs) > 0 else "cpu"
-        xla_inputs = tuple(inp.to(device=xla_dev) for inp in inputs)
-
-        xla_out = xla_model(*xla_inputs)
-        result = tuple(out.to(device=orig_device) for out in xla_out)
-        return result
-
-    return xla_model_wrapper
+    return subgraph.model
 
 
 @create_backend

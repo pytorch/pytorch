@@ -399,7 +399,20 @@ def clone_tensor(x):
 
 def clone_input(x):
     """copy while preserving strides"""
+
+    def torch_clone(x):
+        y = torch.clone(x)
+        if x.is_leaf:
+            y.requires_grad_(x.requires_grad)
+        if x.is_leaf and x.grad is not None:
+            y.grad = clone_input(x.grad)
+        return y
+
     with torch.no_grad():
+        if x.device.type == "xla":
+            # Access data_ptr() for a xla tensor will cause crash
+            return torch_clone(x)
+
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
         )
@@ -421,12 +434,7 @@ def clone_input(x):
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
-            y = torch.clone(x)
-            if x.is_leaf:
-                y.requires_grad_(x.requires_grad)
-            if x.is_leaf and x.grad is not None:
-                y.grad = clone_input(x.grad)
-            return y
+            return torch_clone(x)
         return result
 
 
