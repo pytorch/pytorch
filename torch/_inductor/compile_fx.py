@@ -12,7 +12,7 @@ from functorch.compile import min_cut_rematerialization_partition
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._pytree import tree_flatten
-from .._dynamo.utils import deepcopy_to_fake_tensor
+from .._dynamo.utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
 
 from . import config, metrics, overrides
 from .debug import DebugContext
@@ -358,15 +358,9 @@ def compile_fx(
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
-    fake_mode = None
+    fake_mode = fake_mode_from_tensors(example_inputs_)
 
     flat_inputs, _ = tree_flatten(example_inputs_)
-    for input in flat_inputs:
-        if isinstance(input, torch._subclasses.FakeTensor):
-            if fake_mode is None:
-                fake_mode = input.fake_mode
-            else:
-                assert fake_mode == input.fake_mode
 
     # if fake_mode:
     # NOTE: This *will* create guards - we are missng

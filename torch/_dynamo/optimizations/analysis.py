@@ -15,7 +15,7 @@ from ..utils import clone_inputs, fake_tensors_available
 if fake_tensors_available:
     from torch._subclasses import FakeTensorMode  # noqa: F401
 
-    from ..utils import deepcopy_to_fake_tensor
+    from ..utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
 
 
 class ShapeAliasingAndMutationProp(ShapeProp):
@@ -138,14 +138,7 @@ def has_mutation(gm, example_inputs, inputs_only=False):
         # on those shapes though, so just create a fresh ShapeEnv here.
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-        fake_mode = None
-        flat_inputs, _ = tree_flatten(example_inputs)
-        for input in flat_inputs:
-            if isinstance(input, torch._subclasses.FakeTensor):
-                if fake_mode is None:
-                    fake_mode = input.fake_mode
-                else:
-                    assert fake_mode == input.fake_mode
+        fake_mode = fake_mode_from_tensors(example_inputs)
         if fake_mode is None:
             # No fake inputs, just make a mode
             shape_env = ShapeEnv() if config.dynamic_shapes else None
