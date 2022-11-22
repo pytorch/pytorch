@@ -76,13 +76,13 @@ class TestAutograd(TestCase):
             def foo():
                 pass
 
-            class Foo():
+            class Foo2():
                 @torch.no_grad()
-                def __init__():
+                def __init__(self):
                     pass
 
                 @torch.no_grad()
-                def foo():
+                def foo(self):
                     pass
 
         self.assertEqual(len(w), 0)
