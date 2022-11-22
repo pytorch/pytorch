@@ -123,6 +123,10 @@ for opt in optimizers:
 
 
 class End2EndTests(torch._dynamo.test_case.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._exit_stack.enter_context(enable_optimizer_tracing())
 
     # https://github.com/pytorch/torchdynamo/issues/1604
     def test_optimizing_over_tensor_with_requires_grad(self):
