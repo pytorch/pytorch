@@ -1,14 +1,16 @@
 # Owner(s): ["module: nn"]
 
 import contextlib
+from functools import partial
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import unittest
 from unittest.mock import patch
 import math
-from torch.backends.cuda import sdp_kernel
+from torch.backends.cuda import sdp_kernel, SDPBackend
 import torch.optim as optim
+from torch.testing._internal.common_dtype import floating_types_and_half
 
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -936,18 +938,24 @@ class TestTransformers(NNTestCase):
         _test_fastpath(model, aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
         _test_fastpath(model, not_aligned_key_padding_mask, nested_tensor_return_value, nested_tensors=True)
 
+    def rand_nt(self, shape, device, dtype, requires_grad=False, packed=False):
+        batch, seq_len, num_heads, head_dim = shape
+        size = (seq_len, num_heads, head_dim) if not packed else (seq_len, 3 * num_heads * head_dim)
+        return torch.nested.nested_tensor([
+            torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
+            for _ in range(batch)])
+
+    def rand_tensor(self, shape, device, dtype, requires_grad=False, packed=False):
+        batch, seq_len, num_heads, head_dim = shape
+        size = (batch, seq_len, num_heads, head_dim) if not packed else (batch, seq_len, 3 * num_heads * head_dim)
+        return torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
+
     @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM or IS_WINDOWS, "Flash Attention was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_fused_kernels(self, type: str, is_contiguous: bool):
-        def rand_nt(shape):
-            batch, seq_len, num_heads, head_dim = shape
-            return torch.nested.nested_tensor([torch.randn(seq_len, num_heads, head_dim,
-                                                           device="cuda", dtype=torch.float16) for _ in range(batch)])
-
-        def rand_tensor(shape):
-            batch, seq_len, num_heads, head_dim = shape
-            return torch.randn(batch, seq_len, num_heads, head_dim, device="cuda", dtype=torch.float16)
+        rand_nt = partial(self.rand_nt, device="cuda", dtype=torch.float16)
+        rand_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float16)
 
         batch, seq_len, num_heads, head_dim = 32, 64, 16, 64
         shape = (batch, seq_len, num_heads, head_dim)
@@ -985,14 +993,8 @@ class TestTransformers(NNTestCase):
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_fused_kernels_packed(self, type: str, is_contiguous: bool):
-        def rand_nt(shape):
-            batch, seq_len, num_heads, head_dim = shape
-            return torch.nested.nested_tensor([torch.randn(seq_len, 3 * num_heads * head_dim,
-                                                           device="cuda", dtype=torch.float16) for _ in range(batch)])
-
-        def rand_tensor(shape):
-            batch, seq_len, num_heads, head_dim = shape
-            return torch.randn(batch, seq_len, 3 * num_heads * head_dim, device="cuda", dtype=torch.float16)
+        rand_nt = partial(self.rand_nt, device="cuda", dtype=torch.float16, packed=True)
+        rand_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float16, packed=True)
 
         batch_size, seq_len, num_heads, head_dim = 32, 64, 16, 64
         shape = (batch_size, seq_len, num_heads, head_dim)
@@ -1057,6 +1059,11 @@ class TestTransformers(NNTestCase):
 
         if fused_kernel == "flash":
             with sdp_kernel(enable_mem_efficient=False, enable_math=False):
+                # TODO Flash for the nested path is currently not working due to cuda memory issues
+                if type == "nested":
+                    self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                        query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False))
+                    return
                 actual = torch.nn.functional._scaled_dot_product_attention(
                     query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
         elif fused_kernel == "mem_efficient":
@@ -1095,26 +1102,116 @@ class TestTransformers(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM or IS_WINDOWS, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
-    def test_efficient_attention_gradcheck(self, contiguous_inputs: bool):
+    def test_sdp_math_gradcheck(self, contiguous_inputs: bool):
 
-        batch_size, seq_len, num_heads, head_dim = 8, 8, 4, 64
-        query, key, value = torch.rand((batch_size, seq_len, 3 * num_heads * head_dim),
-                                       device="cuda", dtype=torch.float32, requires_grad=True).chunk(3, -1)
-        query = query.view(batch_size, -1, num_heads, head_dim)
-        key = key.view(batch_size, -1, num_heads, head_dim)
-        value = value.view(batch_size, -1, num_heads, head_dim)
+        batch_size, seq_len, num_heads, head_dim = 4, 4, 2, 16
+        rand_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
+
+        qkv = rand_tensor((batch_size, seq_len, num_heads, head_dim))
+        query, key, value = qkv.chunk(3, dim=-1)
+
+        query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
         if contiguous_inputs:
             query = query.contiguous()
             key = key.contiguous()
             value = value.contiguous()
 
-        # Normally we would transpose the inputs but the fused kernels expect
-        # (batch, seq_len, num_heads, head_dim) bump the tolerance since we can only run kernel
-        # in fp32
-        assert gradcheck(lambda *args, **kwargs:
-                         wrapper_set_seed(torch.ops.aten._efficient_attention_forward, *args, **kwargs),
-                         (query, key, value, None, None, None, True, False), fast_mode=True, atol=8e-5, rtol=1e-3)
+        with sdp_kernel(enable_math=True, enable_mem_efficient=False, enable_flash=False):
+            assert gradcheck(lambda *args, **kwargs:
+                             wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, *args, **kwargs),
+                             (query, key, value, None, 0.0, False, False)
+                             )
+
+    @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM or IS_WINDOWS, "Flash Attention was not built for this system")
+    @parametrize("contiguous_inputs", [True, False])
+    def test_sdp_fused_grad_against_math(self, contiguous_inputs: bool):
+        batch_size, seq_len, num_heads, head_dim = 4, 4, 2, 16
+        rand_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
+
+        qkv = rand_tensor((batch_size, seq_len, num_heads, head_dim))
+        qkv_lp = qkv.detach().clone().to(torch.float32).requires_grad_()
+
+        query, key, value = qkv.chunk(3, dim=-1)
+        query_lp, key_lp, value_lp = qkv_lp.chunk(3, dim=-1)
+
+        query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+        query_lp = query_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        key_lp = key_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        value_lp = value_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+        if contiguous_inputs:
+            query = query.contiguous()
+            key = key.contiguous()
+            value = value.contiguous()
+
+            query_lp = query_lp.contiguous()
+            key_lp = key_lp.contiguous()
+            value_lp = value_lp.contiguous()
+
+        with sdp_kernel(enable_math=True, enable_mem_efficient=False, enable_flash=False):
+            out, atten = torch.nn.functional._scaled_dot_product_attention(query, key, value, None, 0.0, False, False)
+
+        with sdp_kernel(enable_math=False, enable_mem_efficient=True, enable_flash=False):
+            out_lp, atten_lp = torch.nn.functional._scaled_dot_product_attention(
+                query_lp, key_lp, value_lp, None, 0.0, False, False)
+
+        rand_upward = torch.rand_like(out)
+        rand_upward_lp = rand_upward.to(torch.float32)
+
+        out.backward(rand_upward)
+        out_lp.backward(rand_upward_lp)
+
+        # Cast up and compare
+        self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=1e-5, rtol=1e-5)
+
+    @parametrize("type", ["dense", "nested"])
+    def test_fused_sdp_choice(self, type: str):
+        device = "cpu"
+        # Test that cpu and nestedtensor cpu return MATH backend
+        for dtype in floating_types_and_half():
+            make_tensor = partial(self.rand_tensor, device=device, dtype=dtype)
+            size = (2, 2, 3, 4)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+            assert torch._fused_sdp_choice(q, k, v) == SDPBackend.MATH
+
+        if TEST_CUDA and not TEST_WITH_ROCM and not IS_WINDOWS:
+            batch_size, seq_len, num_heads, head_dim = 32, 64, 16, 64
+            shape = (batch_size, seq_len, num_heads, head_dim)
+            device = "cuda"
+            make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float16, packed=True)
+            make_nt = partial(self.rand_nt, device=device, dtype=torch.float16, packed=True)
+
+            qkv = make_tensor(shape) if type == "dense" else make_nt(shape)
+            query, key, value = qkv.chunk(3, dim=-1)
+
+            query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+            value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+            key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+            if SM80OrLater and not type == "nested":
+                assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION
+            else:
+                assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
+
+            # Change dtype to float32 so that efficient attention should get chosen
+            make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float32, packed=True)
+            make_nt = partial(self.rand_nt, device=device, dtype=torch.float32, packed=True)
+
+            qkv = make_tensor(shape) if type == "dense" else make_nt(shape)
+            query, key, value = qkv.chunk(3, dim=-1)
+
+            query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+            value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+            key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
+
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_sdp_runtime_dispatch(self):
@@ -1123,12 +1220,15 @@ class TestTransformers(NNTestCase):
         # will fail on CI/CD becuase it is not compiled with the right flags
         device = 'cuda'
         dtype = torch.float16
-
-        def make_tensor(*size, device=device, dtype=dtype):
-            return torch.randn(size, device=device, dtype=dtype)
+        make_tensor = partial(self.rand_tensor, device=device, dtype=dtype)
 
         with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=False):
-            q, k, v = make_tensor(2, 3, 4), make_tensor(2, 3, 4), make_tensor(2, 3, 4)
+            size = (2, 3, 4)
+            q = torch.randn(size, device=device, dtype=dtype)
+            k = torch.randn(size, device=device, dtype=dtype)
+            v = torch.randn(size, device=device, dtype=dtype)
+            self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
+                                   lambda: torch._fused_sdp_choice(q, k, v))
             self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
                                    lambda: torch.nn.functional._scaled_dot_product_attention(q, k, v))
 
@@ -1136,29 +1236,33 @@ class TestTransformers(NNTestCase):
             # Failures for invalid input
 
             # Dim is not 4
-            q, k, v = make_tensor(2, 3, 4), make_tensor(2, 3, 4), make_tensor(2, 3, 4)
+            q = torch.randn(size, device=device, dtype=dtype)
+            k = torch.randn(size, device=device, dtype=dtype)
+            v = torch.randn(size, device=device, dtype=dtype)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
             # Xformers can now cover this case but will add back in next PR
             # Invalid last_dim size
-            q, k, v = make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4)
+            size = (2, 2, 3, 4)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
             # Invalid dtype
-            q, k, v = make_tensor(2, 2, 3, 16, dtype=torch.float64), make_tensor(
-                2, 2, 3, 16, dtype=torch.float64), make_tensor(2, 2, 3, 16, dtype=torch.float64)
+            size = (2, 2, 3, 16)
+            make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float64)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
-            q, k, v = make_tensor(2, 2, 3, 16, dtype=torch.float32), make_tensor(
-                2, 2, 3, 16, dtype=torch.float32), make_tensor(2, 2, 3, 16, dtype=torch.float32)
+            make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float32)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
             # Failures for unsupported SDP args
-            q, k, v = make_tensor(2, 2, 3, 16), make_tensor(2, 2, 3, 16), make_tensor(2, 2, 3, 16)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
 
             # Needs attention weights
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(

@@ -59,7 +59,16 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
-compile_threads = min(32, os.cpu_count()) if sys.platform != "win32" else 1
+compile_threads = (
+    min(
+        32,
+        len(os.sched_getaffinity(0))
+        if hasattr(os, "sched_getaffinity")
+        else os.cpu_count(),
+    )
+    if sys.platform != "win32"
+    else 1
+)
 
 # If kernel is fused, the name is generated from the origin node op names
 # for larger kernels limit this
@@ -74,6 +83,10 @@ dynamo_import = inductor_import.replace("inductor", "dynamo")
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
 alignment_size = 4
+
+# Fx-based linear/matmul/bmm + permute/transpose vertical fusion
+permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
+
 
 # config specific to codegen/cpp.pp
 class cpp:
