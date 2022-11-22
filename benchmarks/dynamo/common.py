@@ -86,23 +86,20 @@ CI_SKIP_AOT_EAGER_TRAINING = [
 CI_SKIP_INDCUTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
+    "DALLE2_pytorch",
     "detectron2",
-    "hf_Reformer",
+    "hf_T5",  # accuracy
+    "maml",  # accuracy
     "moco",  # accuracy
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
     "tacotron2",
     "vision_maskrcnn",  # accuracy
-    "yolov3",  # Accuracy
     # Huggingface
-    "BigBird",
-    "YituTechConvBert",
+    "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
     "ghostnet_100",  # Accuracy
-    "swin_base_patch4_window7_224",  # Accuracy
-    # Trying to get CI working - https://github.com/pytorch/pytorch/pull/87588
-    "visformer_small",  # fails accuracy on CI but passes locally
 ]
 
 CI_SKIP_INDUCTOR_TRAINING = [
@@ -138,21 +135,23 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "DebertaV2ForMaskedLM",  # OOM
     "DebertaV2ForQuestionAnswering",  # OOM
     # OOM
-    "BigBird",
     "TrOCRForCausalLM",
     "AlbertForQuestionAnswering",
     # TIMM
     "cait_m36_384",  # fp64_OOM
     "coat_lite_mini",  # time out
     "convit_base",  # fp64_OOM
+    "eca_halonext26ts",  # accuracy
+    "fbnetv3_b",  # accuracy
     "gernet_l",  # accuracy
     "gluon_xception65",
     "hrnet_w18",  # accuracy
     "lcnet_0500",  # accuracy
     "levit_128",  # levit_128
-    "poolformer_m36",
+    "res2net101_26w_4s",  # accuracy
+    "resnest101e",  # accuracy
     "rexnet_100",  # accuracy
-    "swin_base_patch4_window7_224",
+    "spnasnet_100",  # accuracy
     "twins_pcpvt_base",  # time out
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
