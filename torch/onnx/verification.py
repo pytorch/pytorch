@@ -735,7 +735,7 @@ def verify(
 
 
 @_beartype.beartype
-def verify_model_with_positional_args(
+def verify_model_with_fx_to_onnx_exporter(
     model: Union[torch.nn.Module, Callable],
     input_args: Union[torch.Tensor, Tuple[Any, ...]],
     input_kwargs: Optional[Dict[str, Any]] = None,
