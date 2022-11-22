@@ -1088,12 +1088,10 @@ public:
     return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
   }
   Vectorized<uint8_t> operator>(const Vectorized<uint8_t>& other) const {
-    auto mask = _mm512_cmpgt_epu8_mask(values, other.values);
-    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+    return other < *this;
   }
   Vectorized<uint8_t> operator>=(const Vectorized<uint8_t>& other) const {
-    auto mask = _mm512_cmpge_epu8_mask(values, other.values);
-    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+    return other <= *this;
   }
 
   Vectorized<uint8_t> eq(const Vectorized<uint8_t>& other) const;

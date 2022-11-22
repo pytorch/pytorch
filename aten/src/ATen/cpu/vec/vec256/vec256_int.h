@@ -982,12 +982,10 @@ public:
     return _mm256_cmpeq_epi8(max, other.values);
   }
   Vectorized<uint8_t> operator>(const Vectorized<uint8_t>& other) const {
-    __m256i max = _mm256_max_epu8(values, other.values);
-    return invert(_mm256_cmpeq_epi8(max, other.values));
+    return other < *this;
   }
   Vectorized<uint8_t> operator>=(const Vectorized<uint8_t>& other) const {
-    __m256i max = _mm256_max_epu8(values, other.values);
-    return _mm256_cmpeq_epi8(max, values);
+    return other <= *this;
   }
 
   Vectorized<uint8_t> eq(const Vectorized<uint8_t>& other) const;
@@ -1158,7 +1156,7 @@ Vectorized<int8_t> inline operator*(const Vectorized<int8_t>& a, const Vectorize
 
 template <>
 Vectorized<uint8_t> inline operator*(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
-  // We don't have an instruction for multiplying int8_t
+  // We don't have an instruction for multiplying uint8_t
   return int_elementwise_binary_256(a, b, std::multiplies<uint8_t>());
 }
 
