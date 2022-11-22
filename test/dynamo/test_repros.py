@@ -2029,7 +2029,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
             torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
-            
+
     def test_inline_class_method(self):
         class A(torch.nn.Module):
             def __init__(self):
