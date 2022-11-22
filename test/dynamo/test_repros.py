@@ -19,12 +19,12 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
+
+from test_minifier import requires_cuda
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
 from torch.nn import functional as F
-
-from test_minifier import requires_cuda
 
 try:
     import torch._refs
