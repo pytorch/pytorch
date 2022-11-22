@@ -154,18 +154,18 @@ Tensor _nested_sum_backward_cpu(
 }
 
 
-Tensor _nested_select_backward(
+Tensor _nested_select_backward_symint(
   const Tensor& grad,
   const Tensor& nested_self,
   int64_t dim,
-  int64_t index) {
+  c10::SymInt index) {
   auto nt_self = get_nested_tensor_impl(nested_self);
   const Tensor& self_buffer = nt_self->get_buffer();
   const auto self_sizes = nt_self->get_nested_size_tensor();
   const Tensor& self_grad_buffer = self_buffer.new_zeros(self_buffer.sizes());
 
   auto nt_grad = wrap_buffer(self_grad_buffer, self_sizes);
-  nt_grad.select(dim, index).copy_(grad);
+  nt_grad.select_symint(dim, index).copy_(grad);
 
   return nt_grad;
 }

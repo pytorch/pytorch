@@ -275,14 +275,14 @@ std::tuple<std::vector<Tensor>, optional<int64_t>> chunk_batching_rule(const Ten
   return std::make_tuple(at::chunk(self_, chunks, new_dim), 0);
 }
 
-std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim, int64_t index) {
+std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim, c10::SymInt index) {
   if (!bdim) {
-    return std::make_tuple(self.select(dim, index), nullopt);
+    return std::make_tuple(self.select_symint(dim, index), nullopt);
   }
 
   auto _self = moveBatchDimToFront(self, bdim);
   auto dim_physical = getPhysicalDim(_self, true, dim);
-  auto result = _self.select(dim_physical, index);
+  auto result = _self.select_symint(dim_physical, index);
   return std::make_tuple(result, 0);
 }
 
@@ -402,7 +402,7 @@ std::tuple<Tensor, optional<int64_t>> permute_batching_rule(
 
 std::tuple<Tensor,optional<int64_t>> select_backward_batch_rule(
     const Tensor& grad_input, optional<int64_t> grad_input_bdim,
-    SymIntArrayRef input_sizes, int64_t dim, int64_t index) {
+    c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt index) {
   auto logical_rank = rankWithoutBatchDim(grad_input, grad_input_bdim);
   auto grad_input_ = moveBatchDimToFront(grad_input, grad_input_bdim);
   dim = maybe_wrap_dim(dim, logical_rank + 1) + 1;
