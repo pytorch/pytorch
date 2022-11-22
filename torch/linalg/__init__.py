@@ -1015,7 +1015,7 @@ Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if the inputs are batches of matrices then
 the output has the same batch dimensions.
 
-:attr:`driver` chooses the LAPACK function that will be used.
+:attr:`driver` chooses the backend function that will be used.
 For CPU inputs the valid values are `'gels'`, `'gelsy'`, `'gelsd`, `'gelss'`.
 To choose the best driver on CPU consider:
 
@@ -1028,13 +1028,10 @@ To choose the best driver on CPU consider:
 
   - `'gelsd'` (tridiagonal reduction and SVD)
   - But if you run into memory issues: `'gelss'` (full SVD).
-  
-For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank. If :attr:`A` is not square,
-the following heuristic is used to choose how the system will be solved:
-  - If the linear system to be solved is overdetermined (i.e. :attr:`A` is "tall"), 
-  then `'gels'` will solve the **least squares problem** for the system as described above.
-  - If the linear system to be solved is underdetermined (i.e. :attr:`A` is "wide" and there are infinitely many solutions),
-  then `'gels'` will find the solution which minimizes :math:`\|X\|_F`, the minimum-norm solution.
+
+For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank. If the linear system 
+to be solved is underdetermined (i.e. :attr:`A` is "wide" and there are infinitely many solutions),
+then `'gels'` will find the solution which minimizes :math:`\|X\|_F`, the minimum-norm solution.
 
 See also the `full description of these drivers`_
 
