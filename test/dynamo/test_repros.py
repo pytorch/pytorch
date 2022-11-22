@@ -1467,8 +1467,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
-    # Bug with storage meta - torch.BoolStorage is becoming torch.storage._LegacyStorageMeta
-    @unittest.expectedFailure
     def test_isinstance_storage(self):
         @torch._dynamo.optimize("eager")
         def fn(x):
