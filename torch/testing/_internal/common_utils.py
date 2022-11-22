@@ -12,7 +12,6 @@ import ctypes
 import errno
 import functools
 import gc
-import itertools
 import inspect
 import io
 import json
@@ -2498,36 +2497,13 @@ class TestCase(expecttest.TestCase):
                     assert len(args) == 1
                     yield args[0].reshape(size)
                 elif layout is torch.sparse_coo:
-                    yield torch.sparse_coo_tensor(*args, **kwargs).coalesce()
+                    yield torch.sparse_coo_tensor(*args, **kwargs)
                 elif is_compressed_sparse_layout:
                     kwargs.update(layout=layout)
                     yield torch.sparse_compressed_tensor(*args, **kwargs)
                 else:
                     assert 0  # unreachable
             return
-
-        def expand_values(base, densesize):
-            """
-            Expand values in base to blocks of values with densesize.
-            """
-            if not densesize:
-                return base
-            if isinstance(base, list):
-                return [expand_values(b, densesize) for b in base]
-
-            r = 0
-            for s in reversed(densesize):
-                r = [copy.deepcopy(r) for _ in range(s)]
-            if base == 0:
-                return r
-            for index in itertools.product(*map(range, densesize)):
-                v = base + sum(10**c * i for c, i in enumerate(index))
-                r1 = r
-                for i in range(len(densesize) - 1):
-                    r1 = r1[index[i]]
-                assert r1[index[-1]] == 0, r1[index[-1]]
-                r1[index[-1]] = v
-            return r
 
         def get_shape(pattern):
             if isinstance(pattern, list):
@@ -2604,6 +2580,7 @@ class TestCase(expecttest.TestCase):
                     **nonblock_data}
 
         def get_batch_sparse_data(pattern, blocksize):
+            assert isinstance(pattern, list)
             size = get_shape(pattern)
             if len(size) <= 2:
                 return get_sparse_data_with_block(pattern, blocksize)
@@ -2627,7 +2604,36 @@ class TestCase(expecttest.TestCase):
                                 target[j].append(d[j])
             return batch_data
 
+        def expand_values(base, densesize):
+            """
+            Expand values in base to blocks of values with densesize.
+            """
+            if not densesize:
+                return base
+            if isinstance(base, list):
+                return torch.stack([expand_values(b, densesize) for b in base])
+            if base == 0:
+                return torch.zeros(densesize, dtype=torch.int64)
+            r = torch.tensor(range(densesize[0]))
+            for i, d in enumerate(densesize[1:]):
+                y = torch.arange(d, dtype=torch.int64) * (10 ** (i + 1))
+                r = r[..., None] + y[None, ...]
+            r.add_(base)
+            return r
+
         if patterns is None:
+            # A pattern is a 3-tuple with items:
+            # - a deep list of integers that define the sparsity
+            #   patterns of the generated inputs: zero values
+            #   correspond to unspecified elements/blocks and non-zero
+            #   values the specified elements while elements with the
+            #   same value belong to the same block in some cases.
+            #   The batch inputs are generated if the depth of list is
+            #   larger than two.
+            # - a list of block sizes, only used in the case of
+            #   BSR/BSC layouts
+            # - a list of dense dimensions, used to generate hybrid
+            #   tensors
             patterns = [
                 # a simple 3 x 2 tensor: non-hybrid, hybrid with 1 and 2 dense dimensions
                 ([[1, 2, 0],
@@ -2661,6 +2667,7 @@ class TestCase(expecttest.TestCase):
                   [[1, 0],
                    [0, 0]]], [(1, 1)], ([()] if enable_batched_variable_nse else []))]
 
+        # the main loop of the method:
         for pattern, blocksizes, densesizes in patterns:
             size = get_shape(pattern)
             for blocksize in blocksizes:
@@ -2670,7 +2677,7 @@ class TestCase(expecttest.TestCase):
                     values = torch.tensor(expand_values(data[-1], densesize), device=device, dtype=dtype)
                     yield (*indices, values), dict(device=device, dtype=dtype, size=size + densesize)
 
-        # zero-sized tensor inputs, non-batched
+        # zero-sized tensor inputs, non-batch, non-hybrid/hybrid
         if enable_zero_sized:
             for basesize, blocksizes, densesizes in [
                     ((2, 0), [(1, 2)], [(), (2,), (2, 3)] if enable_hybrid else [()]),
