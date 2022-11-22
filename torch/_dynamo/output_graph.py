@@ -38,6 +38,7 @@ from .variables.tensor import (
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
+from .optimizations.distributed import DDPOptimizer
 
 log = logging.getLogger(__name__)
 
@@ -462,20 +463,31 @@ class OutputGraph(fx.Tracer):
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             from inspect import signature
-
-            try:
-                print("COMPILER FN", self.compiler_fn)
-                print("FAKE?", config.fake_tensor_propagation)
-                backend_correct = True
-                if config.verify_correctness:
+            backend_correct = True
+            if config.verify_correctness:
+                try:
                     backend_correct = _verify_backend_correct(
                         self.compiler_fn, gm, self.example_inputs(), self.real_inputs()
                     )
+                # Annoying legacy preserving behavior
+                # see test/dynamo/test_verify_correctness.py test_incorrect_verify_true
+                except CorrectnessException as e:
+                    raise RuntimeError from e
+                except Exception:
+                    # This exception is either the result of a true error in the candidate, or an error in the forward.
+                    # Either way, we failed to establish correctness of the backend, so best to
+                    # flag the backend as incorrect here. This behavior is also the most on-par with legacy behavior.
+                    backend_correct = False
+            try:
+                print("COMPILER FN", self.compiler_fn)
+                print("FAKE?", config.fake_tensor_propagation)
                 if not backend_correct:
-                    compiled_fn = gm.forward(gm, self.example_inputs())
+                    # breakpoint()
+                    compiled_fn = gm.forward
                 else:
                     compiled_fn = self.compiler_fn(gm, self.example_inputs())
             except Exception as e:
+                # breakpoint()
                 # Lowering exceptions can occur. Instead of relying on compiler_fn to not return a callable
                 # let's handle it properly
                 raise BackendCompilerFailed(self.compiler_fn, e) from e
@@ -483,6 +495,7 @@ class OutputGraph(fx.Tracer):
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
             compiled_fn = gm.forward
+            print(e)
             raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
@@ -603,6 +616,9 @@ class OutputGraph(fx.Tracer):
         return rv
 
 
+class CorrectnessException(Exception):
+    pass
+
 def _verify_backend_correct(
     backend, gm: torch.fx.GraphModule, fake_inputs, real_inputs
 ):
@@ -612,11 +628,7 @@ def _verify_backend_correct(
 
     if config.fake_tensor_propagation:
         fake_inputs = clone_inputs(fake_inputs)
-        # This is a *huge hack* to get around the fact that
-        # AOTAutograd mutation analysis only works with taking real inputs atm
-        # it has its own weird and brittle fakification story that is solved on
-        # the symbolic shapes branch.
-        # this wil be removed ASAP.
+        # TODO(voz): Supress shape guards for dynamic_shapes
         candidate = backend(copy_gm, fake_inputs)
     else:
         real_inputs = clone_inputs(real_inputs)
@@ -633,9 +645,12 @@ def _verify_backend_correct(
         if same(correct, result):
             return True
 
-        raise RuntimeError(f"incorrect results of backend during verify correctness")
+        raise CorrectnessException(f"incorrect results of backend during verify correctness")
         return False
-
+    # Annoying legacy preserving behavior
+    # see test/dynamo/test_verify_correctness.py test_incorrect_verify_true
+    except CorrectnessException:
+        raise
     except Exception:
         log.exception("error in verify_correctness")
-        raise
+        return False

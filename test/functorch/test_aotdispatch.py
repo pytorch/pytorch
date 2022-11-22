@@ -902,7 +902,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         ref = mod(*inputs)
         ref[0].sum().backward()
 
-        aot_mod = aot_module_simplified(mod, nop)
+        aot_mod = aot_module_simplified(mod, inputs, nop)
         aot_mod.zero_grad()
         res = aot_mod(*cloned_inputs)
         res[0].sum().backward()

@@ -89,6 +89,7 @@ def get_custom_model(device):
             self.seq = torch.nn.Sequential(*[x for items in mods for x in items])
 
         def forward(self, x):
+
             return self.seq(x)
 
     m = MyModule().to(device)
@@ -473,6 +474,8 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, 1)
 
     @patch.object(config, "optimize_ddp", False)
+    # Do not land this
+    @unittest.expectedFailure
     def test_ignored_parameters(self):
         """
         Verifies ddp graph-split logic ignores parameters marked to ignore on DDP module.
