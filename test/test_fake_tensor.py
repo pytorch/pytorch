@@ -211,7 +211,7 @@ class FakeTensorTest(TestCase):
             arg0_1 = torch.empty_strided((3, 427, 640), (1, 1920, 3), dtype=torch.float16, device='cuda')
             unsqueeze = torch.ops.aten.unsqueeze.default(arg0_1, 0)
             out.append(torch.ops.aten.upsample_bilinear2d.default(unsqueeze, [800, 1199], False))
-        
+
         self.assertTrue(out[1].is_contiguous())
         self.checkMetaProps(out[0], out[1])
 
