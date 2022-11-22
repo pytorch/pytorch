@@ -335,7 +335,8 @@ class FullyShardedDataParallel(nn.Module):
         # Add module annotations for Dynamo support
         for submodule in module.modules():
             if submodule not in self._ignored_modules:
-                """
+                """[Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
+
                 Dynamo doesn't get to see this instance (FullyShardedDataParallel) during tracing, since
                 it skips tracing all the torch.distributed.fsdp code.
                  - Why? Running the FSDP code eagerly avoids lots of issues trying to trace complex hooks, and also
