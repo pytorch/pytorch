@@ -28,14 +28,9 @@ from torch.ao.quantization.qconfig import (
     _activation_is_memoryless)
 from torch.nn.utils.parametrize import type_before_parametrizations
 
-from torch.ao.quantization.observer import (  # noqa: F401
-    _is_activation_post_process,
-    _is_activation_post_process as is_activation_post_process,
-    # TODO remove this once problems from name change are resolved
-)
-
 __all__ = [
     "get_default_custom_config_dict",
+    "is_activation_post_process",
     "propagate_qconfig_",
     "register_activation_post_process_hook",
     "add_observer_",
@@ -66,6 +61,11 @@ def get_default_custom_config_dict():
     r"""Defines the default custom config dict.
     """
     return _DEFAULT_CUSTOM_CONFIG_DICT
+
+def is_activation_post_process(module):
+    return (isinstance(module, torch.ao.quantization.ObserverBase) or
+            isinstance(module, torch.ao.quantization.FakeQuantizeBase))
+
 
 def _propagate_qconfig_helper(module, qconfig_dict,
                               qconfig_parent=None, prefix='', prepare_custom_config_dict=None):
@@ -143,11 +143,13 @@ def register_activation_post_process_hook(module, pre_hook=False):
     assert hasattr(module, 'activation_post_process'), \
         'Expect activation_post_process attribute already attached to the module'
     if pre_hook:
-        handle = module.register_forward_pre_hook(_observer_forward_pre_hook)
-        module._forward_pre_hooks.move_to_end(handle.id, last=False)
+        handle = module.register_forward_pre_hook(
+            _observer_forward_pre_hook, prepend=True
+        )
     else:
-        handle = module.register_forward_hook(_observer_forward_hook)
-        module._forward_hooks.move_to_end(handle.id, last=False)
+        handle = module.register_forward_hook(
+            _observer_forward_hook, prepend=True
+        )
 
 
 def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=None, device=None, custom_module_class_mapping=None):
@@ -322,7 +324,7 @@ def _remove_activation_post_process(module):
     # TODO: maybe we should change activation_post_process to _activation_post_process
     # to prevent it from being used by user
     if hasattr(module, 'activation_post_process') and \
-       _is_activation_post_process(module.activation_post_process):
+       is_activation_post_process(module.activation_post_process):
         delattr(module, 'activation_post_process')
 
     # remove activation_post_proceess pre and post hooks

@@ -2262,11 +2262,8 @@ class ConcatKernel(NopKernel):
 
         with torch._subclasses.FakeTensorMode():
             x_fake = [ir_node_to_tensor(x, guard_shape=True) for x in inputs]
-            output = torch.ops.aten.cat(
-                x_fake,
-                dim
-            )
-        
+            output = torch.ops.aten.cat(x_fake, dim)
+
         kernel = ConcatKernel(
             name=None,
             layout=FixedLayout(
