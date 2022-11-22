@@ -479,8 +479,6 @@ class OutputGraph(fx.Tracer):
                     # flag the backend as incorrect here. This behavior is also the most on-par with legacy behavior.
                     backend_correct = False
             try:
-                print("COMPILER FN", self.compiler_fn)
-                print("FAKE?", config.fake_tensor_propagation)
                 if not backend_correct:
                     compiled_fn = gm.forward
                 else:
