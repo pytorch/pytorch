@@ -165,7 +165,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
-    "erf": {b8, f64},
     "fft.fft": {f32, f64},
     "fft.fft2": {b8, f32, f64, i32, i64},
     "fft.fftn": {b8, f32, f64, i32, i64},
@@ -196,7 +195,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
     "linalg.pinv.singular": {f32, f64},
-    "logdet": {f32, f64},
     "masked.norm": {f16},
     "masked.normalize": {f16},
     "masked_fill": {f16},
@@ -214,7 +212,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.adaptive_avg_pool2d": {f16, f64},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f32, f64},
-    "nn.functional.gelu": {f64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.one_hot": {i64},
     "nn.functional.pairwise_distance": {f16},
@@ -346,8 +343,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     "view_as_complex": {f16, f32, f64},
     # AssertionError: Tensor-likes are not close!
-    "erf": {b8, f64},
-    "nn.functional.gelu": {f64},
     "nn.functional.triplet_margin_loss": {f16},
 }
 

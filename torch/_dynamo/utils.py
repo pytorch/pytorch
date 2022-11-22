@@ -88,7 +88,9 @@ def dynamo_timed(func):
             compilation_metrics[key] = []
         t0 = time.time()
         r = func(*args, **kwargs)
-        compilation_metrics[key].append(time.time() - t0)
+        latency = time.time() - t0
+        # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
+        compilation_metrics[key].append(latency)
         return r
 
     return time_wrapper
@@ -397,7 +399,20 @@ def clone_tensor(x):
 
 def clone_input(x):
     """copy while preserving strides"""
+
+    def torch_clone(x):
+        y = torch.clone(x)
+        if x.is_leaf:
+            y.requires_grad_(x.requires_grad)
+        if x.is_leaf and x.grad is not None:
+            y.grad = clone_input(x.grad)
+        return y
+
     with torch.no_grad():
+        if x.device.type == "xla":
+            # Access data_ptr() for a xla tensor will cause crash
+            return torch_clone(x)
+
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
         )
@@ -419,12 +434,7 @@ def clone_input(x):
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
-            y = torch.clone(x)
-            if x.is_leaf:
-                y.requires_grad_(x.requires_grad)
-            if x.is_leaf and x.grad is not None:
-                y.grad = clone_input(x.grad)
-            return y
+            return torch_clone(x)
         return result
 
 
@@ -816,7 +826,9 @@ def same(
             res = res.to_dense()
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
-            assert ref.dtype == res.dtype, f"dtype mismatch {ref.dtype}, {res.dtype}"
+            if ref.dtype != res.dtype:
+                log.error(f"dtype mismatch {ref.dtype}, {res.dtype}")
+                return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
                 return torch.allclose(
@@ -1053,13 +1065,20 @@ def get_fake_value(node, tx):
     except Unsupported:
         raise
     except RuntimeError as e:
-        if isinstance(e, torch._subclasses.fake_tensor.DataDependentOutputException):
+        cause = e
+        if e.__cause__ is not None:
+            cause = e.__cause__
+        if isinstance(
+            cause, torch._subclasses.fake_tensor.DataDependentOutputException
+        ):
             if config.capture_scalar_outputs and node.target == "item":
                 return torch.zeros(size=(), dtype=args[0].dtype).item()
             else:
-                unimplemented(f"data dependent operator: {e.func}")
-        elif isinstance(e, torch._subclasses.fake_tensor.DynamicOutputShapeException):
-            unimplemented(f"dynamic shape operator: {e.func}")
+                unimplemented(f"data dependent operator: {cause.func}")
+        elif isinstance(
+            cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
+        ):
+            unimplemented(f"dynamic shape operator: {cause.func}")
         raise TorchRuntimeError() from e
 
 
