@@ -31,6 +31,7 @@ from torch._prims_common import (
 )
 from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import sym_float
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
@@ -149,10 +150,6 @@ __all__ = [
     "squeeze",
     "transpose",
     "view_of",
-    #
-    # Functionalized view mutations
-    #
-    "as_strided_scatter",
     #
     # Shape prims
     #
@@ -394,11 +391,18 @@ def _elementwise_meta(
         return TensorMeta(device=device, shape=shape, strides=strides, dtype=dtype)
 
     # Number case
-    # NOTE: this case is not currently exercised
     # TODO: fix number type promotion (bool, complex->float)
-    assert not isinstance(number, torch.SymInt), "NYI"
-    assert not isinstance(number, torch.SymFloat), "NYI"
-    return TensorMeta(number)
+
+    # For now for symint/float, just implementing the common / simple cases of (int,float,symint,symfloat)
+    seen_float = False
+    if isinstance(number, (torch.SymInt, torch.SymFloat)):
+        for a in args:
+            assert isinstance(a, (int, float, torch.SymInt, torch.SymFloat)), "NYI"
+            seen_float = seen_float or isinstance(a, (float, torch.SymFloat))
+        if seen_float:
+            number = sym_float(number)
+
+    return TensorMeta(number)  # type: ignore[arg-type]
 
 
 def _complex_only_elementwise_meta(*args, **kwargs):
@@ -1146,9 +1150,6 @@ zeta = _make_elementwise_binary_prim(
 
 #
 # View operations
-#
-# TODO: model view relationships
-# TODO: model storage
 def _as_strided_meta(
     a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int
 ) -> TensorLikeType:
@@ -1162,9 +1163,11 @@ def _as_strided_meta(
         # as_strided to shapes with no elements are trivially valid, so it's OK
         pass
     elif isinstance(a, torch.Tensor):
-        utils.check_in_bounds_for_storage(a.storage(), size, stride, storage_offset)
+        utils.check_in_bounds_for_storage(
+            a._typed_storage(), size, stride, storage_offset
+        )
 
-    return TensorMeta(a, shape=size, strides=stride)
+    return torch.as_strided(a, size, stride, storage_offset)
 
 
 def _as_strided_aten(
@@ -1787,52 +1790,6 @@ view_of = _make_prim(
 )
 
 #
-# Functionalized view mutations
-#
-
-
-def _as_strided_scatter_meta(
-    input: TensorLikeType,
-    src: TensorLikeType,
-    size: ShapeType,
-    stride: StrideType,
-    storage_offset: int,
-) -> TensorLikeType:
-    utils.validate_shape(size)
-    utils.validate_strides(stride)
-
-    required_size = utils.compute_required_storage_length(size, stride, storage_offset)
-    utils.check(
-        input.numel() >= required_size,
-        lambda: (
-            f"Can't view tensor of size {input.numel()} with an offset of {storage_offset},"
-            f" shape of {size} and stride of {stride}, "
-            f"which requires a storage of size {required_size}"
-        ),
-    )
-    utils.check(
-        utils.is_same_shape(src.shape, size),
-        lambda: f"expected src to have a size equal to the slice of self. src size = {src.shape}, slice size = {size}",
-    )
-
-    return _clone_meta(input)
-
-
-_as_strided_scatter_doc = """
-    Creates a new tensor equivalent to ``out = input.clone()`` after mutation by
-    ``out.as_strided(size, stride, storage_offset).copy_(src)``.
-"""
-
-as_strided_scatter = _make_prim(
-    schema="as_strided_scatter(Tensor self, Tensor src, SymInt[] size, SymInt[] stride, SymInt storage_offset) -> Tensor",
-    meta=_as_strided_scatter_meta,
-    impl_aten=torch.as_strided_scatter,
-    return_type=RETURN_TYPE.NEW,
-    doc=_as_strided_scatter_doc,
-)
-
-
-#
 # Shape operations
 #
 def collapse(a: Tensor, start: int, end: int) -> Tensor:
@@ -2363,10 +2320,12 @@ def _arange_meta(
         step != 0,
         lambda: "step must be nonzero",
     )
-    utils.check(
-        math.isfinite(start) and math.isfinite(end),
-        lambda: f"unsupported range: {start} -> {end}",
-    )
+    # SymInts can't represent inf
+    if not isinstance(start, torch.SymInt) and not isinstance(end, torch.SymInt):
+        utils.check(
+            math.isfinite(start) and math.isfinite(end),
+            lambda: f"unsupported range: {start} -> {end}",
+        )
     utils.check(
         (step > 0 and end >= start) or (step < 0 and end <= start),
         lambda: "upper bound and lower bound inconsistent with step sign",

@@ -291,6 +291,9 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     its dimensions that is contiguous.
     """
 
+    if a.is_sparse:
+        return False
+
     # Short-circuits if the tensor is already contiguous or channels-last contiguous
     if is_contiguous(a) or is_channels_last_contiguous(a):
         return True
@@ -837,10 +840,11 @@ def type_to_dtype(typ: type) -> torch.dtype:
 
     if typ is bool:
         return torch.bool
-    if typ is int:
+    if typ in [int, torch.SymInt]:
         return torch.long
-    if typ is float:
+    if typ in [float, torch.SymFloat]:
         return torch.get_default_dtype()
+    # TODO: sym_complex_float?
     if typ is complex:
         return corresponding_complex_dtype(torch.get_default_dtype())
 
@@ -1461,17 +1465,6 @@ def set_correction(
     return correction
 
 
-def compute_required_storage_length(
-    shape: ShapeType, strides: StrideType, storage_offset: int
-) -> int:
-    # Short-circuits if the shape has no elements
-    if reduce(operator.mul, shape) == 0:
-        return 0
-
-    max_offset = sum((x - 1) * y for x, y in zip(shape, strides))
-    return storage_offset + max_offset
-
-
 def check_in_bounds_for_storage(
     a: torch.TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
 ):
@@ -1479,8 +1472,17 @@ def check_in_bounds_for_storage(
     Determines if the given shape, strides, and offset are valid for the given storage.
     """
 
-    required_length = compute_required_storage_length(shape, strides, storage_offset)
-    if a.size() < required_length:
+    # Short-circuits if the shape has no elements
+    if reduce(operator.mul, shape) == 0:
+        return
+
+    length = a.size() - storage_offset
+    max_offset = 0
+    for x, y in zip(shape, strides):
+        max_offset = max_offset + (x - 1) * y
+
+    if max_offset >= length:
+        required_length = max_offset + storage_offset
         msg = (
             "Can't view a storage of size {0} with an offset of {1}, shape of {2}, and strides of {3}, "
             "which requires a storage of size {4}".format(
@@ -1576,6 +1578,27 @@ def mask_tensor(mask: TensorLikeType, t: TensorLikeType):
         return mask.logical_and(t)
     else:
         return torch.where(mask, t, 0)
+
+
+def get_aten_op(fn: Callable, name: str):
+    """
+    Given the __module__ of reference and its name, it returns
+    (our best guess of) the ATen name of the associated operation
+
+    Note: In ATen, the __name__ of a function within a module often
+    starts by the module name. E.g. linalg_eigh, or special_zeta
+    """
+    module = fn.__module__
+    prefix = "torch._refs"
+    assert(module.startswith(prefix))
+    module = module[len(prefix):]
+    # We want to go from .special / .nn.functional
+    # to special and special_ / nn_functional_
+    if module:
+        module = module[1:]
+        module = module.replace(".", "_")
+        module = module + "_"
+    return getattr(torch.ops.aten, f"{module}{name}")
 
 
 def dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
