@@ -2817,7 +2817,7 @@ class TestSparseCSR(TestCase):
                 # change of blocksize upon conversion is not yet supported.
                 if b.layout in block_layouts:
                     for block_layout in block_layouts:
-                        with self.assertRaisesRegex(RuntimeError, "blocksize does not match the blocksize"):
+                        with self.assertRaisesRegex(RuntimeError, "conversion from.*to.*is not implemented"):
                             self._convert_to_layout(b, block_layout, blocksize=3)
 
         batch_dims = [(), (2,), (2, 2), (2, 2, 2)]
