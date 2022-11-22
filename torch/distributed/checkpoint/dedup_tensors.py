@@ -23,6 +23,8 @@ def init_logger() -> logging.Logger:
     logger.propagate = False
     return logger
 
+logger = init_logger()
+
 # TODO add docstring for dedup_tensors
 def dedup_tensors(all_plans: List[SavePlan]) -> List[SavePlan]:
     all_plans = list(all_plans)
@@ -39,8 +41,7 @@ def dedup_tensors(all_plans: List[SavePlan]) -> List[SavePlan]:
     for key, plans in replicated_items.items():
         for plan_idx in plans[1:]:
             plan_to_keys.setdefault(plan_idx, []).append(key)
-    dLogger = init_logger()
-    dLogger.info(f"Duplicate keys to remove: {plan_to_keys}")
+    logger.info(f"Duplicate keys to remove: {plan_to_keys}")
 
     for plan_idx, keys in plan_to_keys.items():
         key_set = set(keys)
