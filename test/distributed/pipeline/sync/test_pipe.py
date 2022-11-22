@@ -777,7 +777,7 @@ def test_multiple_inputs(checkpoint, setup_rpc):
     model = Pipe(nn.Sequential(Module1().cuda(0), Module2().cuda(0)), chunks=2, checkpoint=checkpoint)
     t = torch.rand(10)
     res = model(t, t, t).local_value()
-    assert torch.equal(res, (t + t + t) + (t * t * t))
+    torch.testing.assert_close(res, (t + t + t) + (t * t * t), rtol=0, atol=0)
 
 @skip_if_no_cuda
 @pytest.mark.skipif(torch.cuda.device_count() < 2, reason="Need atleast two GPUs")

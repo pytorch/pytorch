@@ -1011,7 +1011,7 @@ class TestQuantizeFx(QuantizationTestCase):
                         module.weight_scale = None
                         model.load_state_dict(state_dict)
                         module = getattr(model, module_name)
-                        self.assertTrue(torch.equal(prev_scale, module.weight_scale))
+                        self.assertEqual(prev_scale, module.weight_scale, rtol=0, atol=0, exact_device=True)
 
 
             checkWeightQParams(qr)
@@ -4550,7 +4550,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m_ref = convert_to_reference_fx(m_copy)
             result = m(*example_inputs)
             result_ref = m_ref(*example_inputs)
-            self.assertTrue(torch.equal(result, result_ref))
+            self.assertEqual(result, result_ref, rtol=0, atol=0, exact_device=True)
 
     def test_ref_conv_module(self):
         """ Make sure the numerics for models with ref conv module
@@ -4588,7 +4588,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m_ref = convert_to_reference_fx(m_copy)
             result = m(data)
             result_ref = m_ref(data)
-            self.assertTrue(torch.equal(result, result_ref))
+            self.assertEqual(result, result_ref, rtol=0, atol=0, exact_device=True)
 
     def test_sub_scalar(self):
         class M(torch.nn.Module):
@@ -4689,7 +4689,7 @@ class TestQuantizeFx(QuantizationTestCase):
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=expected_node_occurrence)
             # checking result match
-            self.assertTrue(torch.equal(out_ref, out))
+            self.assertEqual(out_ref, out, rtol=0, atol=0, exact_device=True)
 
     def test_convert_qconfig_mapping(self):
         class Linear(torch.nn.Module):

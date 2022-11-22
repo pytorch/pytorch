@@ -2875,12 +2875,14 @@ torch.cuda.synchronize()
             # Accounts for ops that return Tensors, iterables, and other non-Tensors.
             # For example, lstm_cell returns a tuple and equal returns bool.
             def compare(first, second):
-                if isinstance(first, torch.Tensor):
-                    return torch.equal(first, second)
-                elif isinstance(first, collections.abc.Iterable):
+                if isinstance(first, collections.abc.Iterable):
                     return all(compare(f, s) for f, s in zip(first, second))
-                else:
-                    return first == second
+
+                result = first == second
+                if isinstance(result, torch.Tensor):
+                    result = result.all().item()
+
+                return result
 
             # If both torch.* and Tensor.* variants were found, check outputs are identical
             if (output is not None) and (output_method is not None):
@@ -4680,13 +4682,13 @@ class TestCudaComm(TestCase):
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))  # x must be a tensor
             cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
-            self.assertTrue(torch.equal(x, cat))
+            self.assertEqual(x, cat, rtol=0, atol=0, exact_device=True)
 
         out = scatter_gather.gather(outputs, 0)  # test on GPU
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))
             cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
-            self.assertTrue(torch.equal(x, cat))
+            self.assertEqual(x, cat, rtol=0, atol=0, exact_device=True)
 
         class TestNamedTupleInput_1(NamedTuple):
             a: torch.tensor
@@ -4706,13 +4708,13 @@ class TestCudaComm(TestCase):
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))
             cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
-            self.assertTrue(torch.equal(x, cat))
+            self.assertEqual(x, cat, rtol=0, atol=0, exact_device=True)
 
         out = scatter_gather.gather(outputs, 'cpu')  # test on CPU
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))
             cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
-            self.assertTrue(torch.equal(x, cat))
+            self.assertEqual(x, cat, rtol=0, atol=0, exact_device=True)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot(self):

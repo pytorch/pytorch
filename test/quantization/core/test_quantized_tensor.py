@@ -1201,7 +1201,7 @@ class TestQuantizedTensor(TestCase):
             self.assertNotEqual(b.int_repr(), c.int_repr())
             # torch.equal is not supported for the cuda backend
             if device == 'cpu':
-                self.assertFalse(torch.equal(b, c))
+                self.assertNotEqual(b, c, rtol=0, atol=0, exact_device=True)
 
             # a case can't view non-contiguos Tensor
             a_int = torch.randint(0, 100, [1, 2, 3, 4], device=device, dtype=dtype)
@@ -1248,7 +1248,7 @@ class TestQuantizedTensor(TestCase):
             self.assertNotEqual(b.int_repr(), c.int_repr())
             # torch.equal is not supported for the cuda backend
             if device == 'cpu':
-                self.assertFalse(torch.equal(b, c))
+                self.assertNotEqual(b, c, rtol=0, atol=0, exact_device=True)
 
             # Throws an error if numel is wrong
             q1_int = torch.randint(0, 100, sizes1, dtype=dtype, device=device)
@@ -1282,7 +1282,7 @@ class TestQuantizedTensor(TestCase):
             self.assertNotEqual(b.int_repr(), c.int_repr())
             # torch.equal is not supported for the cuda backend
             if device == 'cpu':
-                self.assertFalse(torch.equal(b, c))
+                self.assertNotEqual(b, c, rtol=0, atol=0, exact_device=True)
 
             # we can use reshape for non-contiguous Tensor
             a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype, device=device)

@@ -894,7 +894,7 @@ def expand_as(g: jit_utils.GraphContext, self, other):
         self_t = self_t.to(torch.double)
         dims = []
         for d in range(self_t.dim()):
-            if torch.equal(self_t.mean(d).unsqueeze(d).expand_as(self_t), self_t):
+            if (self_t.mean(d).unsqueeze(d).expand_as(self_t) == self_t).all():
                 dims.append(d)
                 self = g.op("Constant", value_t=self_t.mean(dims).to(orig_type))
 

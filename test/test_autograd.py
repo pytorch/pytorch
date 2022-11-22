@@ -3687,8 +3687,8 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         grad = torch.nested.as_nested_tensor([torch.randn(5, 10, requires_grad=True), torch.randn(5, 10, requires_grad=True)])
         out_shape, grad_shape = _calculate_shape(out, grad, False)
 
-        assert torch.equal(out_shape, torch.tensor([[10, 5], [10, 5], [10, 5]]))
-        assert torch.equal(grad_shape, torch.tensor([[5, 10], [5, 10]]))
+        torch.testing.assert_close(out_shape, torch.tensor([[10, 5], [10, 5], [10, 5]]), rtol=0, atol=0)
+        torch.testing.assert_close(grad_shape, torch.tensor([[5, 10], [5, 10]]), rtol=0, atol=0)
 
     def test_nested_anomaly_detect_nan(self):
         size = 10

@@ -5791,10 +5791,10 @@ class TestTorch(TestCase):
         self.assertFalse(t1.equal(t3))
         self.assertFalse(t1.equal(t4))
         self.assertFalse(t1.equal(t5))
-        self.assertTrue(torch.equal(t1, t2))
-        self.assertFalse(torch.equal(t1, t3))
-        self.assertFalse(torch.equal(t1, t4))
-        self.assertFalse(torch.equal(t1, t5))
+        self.assertEqual(t1, t2, rtol=0, atol=0, exact_device=True)
+        self.assertNotEqual(t1, t3, rtol=0, atol=0, exact_device=True)
+        self.assertNotEqual(t1, t4, rtol=0, atol=0, exact_device=True)
+        self.assertNotEqual(t1, t5, rtol=0, atol=0, exact_device=True)
 
         # Non contiguous, 2D
         s = torch.tensor(((1, 2, 3, 4), (5, 6, 7, 8)))
@@ -5807,16 +5807,16 @@ class TestTorch(TestCase):
         self.assertTrue(s1.equal(s2))
         self.assertTrue(s1.equal(s3))
         self.assertFalse(s1.equal(s4))
-        self.assertTrue(torch.equal(s1, s2))
-        self.assertTrue(torch.equal(s1, s3))
-        self.assertFalse(torch.equal(s1, s4))
+        self.assertEqual(s1, s2, rtol=0, atol=0, exact_device=True)
+        self.assertEqual(s1, s3, rtol=0, atol=0, exact_device=True)
+        self.assertNotEqual(s1, s4, rtol=0, atol=0, exact_device=True)
 
         # Different dtypes
         x = torch.tensor((1, 2, 3), dtype=torch.float)
         y = torch.tensor((1, 2, 3), dtype=torch.int)
         z = torch.tensor((1, -1), dtype=torch.int)
-        self.assertTrue(torch.equal(x, y))
-        self.assertFalse(torch.equal(z, x))
+        self.assertEqual(x, y, rtol=0, atol=0, exact_device=True)
+        self.assertNotEqual(z, x, rtol=0, atol=0, exact_device=True)
 
     def test_element_size(self):
         byte = torch.ByteStorage().element_size()

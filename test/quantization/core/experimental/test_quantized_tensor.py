@@ -35,7 +35,7 @@ class TestQuantizedTensor(unittest.TestCase):
         # 0.0215 in tensor2quantize nearest 0.0208 in quantization_levels -> 3 in level_indices
         expected_qtensor_data = torch.tensor([0, 3, 8, 13, 5, 12], dtype=torch.int32)
 
-        self.assertTrue(torch.equal(qtensor_data, expected_qtensor_data))
+        self.assertEqual(qtensor_data, expected_qtensor_data, rtol=0, atol=0, exact_device=True)
 
 if __name__ == '__main__':
     unittest.main()

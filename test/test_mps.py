@@ -1650,7 +1650,7 @@ class TestMPS(TestCase):
     def test_bool_expand(self):
         x = torch.tensor([[1], [0]], dtype=torch.bool, device='mps')
         y = torch.tensor([0, 1], dtype=torch.bool, device='mps')
-        self.assertFalse(torch.equal(x.expand(2, 2), y.expand(2, 2)))
+        self.assertNotEqual(x.expand(2, 2), y.expand(2, 2), rtol=0, atol=0, exact_device=True)
 
     # Empty unary op should return tensor of the same size
     def test_empty_neg(self):
@@ -5013,7 +5013,7 @@ class TestNLLLoss(TestCase):
         # see https://github.com/pytorch/pytorch/issues/79835#issuecomment-1164984534
         x = torch.ones(4, dtype=torch.int32, device='mps')
         self.assertEqual(x + 1, torch.full((4,), 2, dtype=torch.int32, device='mps'))
-        self.assertTrue(torch.equal(x + 1.5, torch.full((4,), 2.5, device='mps')))
+        self.assertEqual(x + 1.5, torch.full((4,), 2.5, device='mps'), rtol=0, atol=0, exact_device=True)
 
     def test_types_binary_op(self):
         # Float * Bool

@@ -58,12 +58,14 @@ class TestAutocastCPU(TestCase):
             # Accounts for ops that return Tensors, iterables, and other non-Tensors.
             # For example, lstm_cell returns a tuple and equal returns bool.
             def compare(first, second):
-                if isinstance(first, torch.Tensor):
-                    return torch.equal(first, second)
-                elif isinstance(first, collections.abc.Iterable):
+                if isinstance(first, collections.abc.Iterable):
                     return all(compare(f, s) for f, s in zip(first, second))
-                else:
-                    return first == second
+
+                result = first == second
+                if isinstance(result, torch.Tensor):
+                    result = result.all().item()
+
+                return result
 
             # If both torch.* and Tensor.* variants were found, check outputs are identical
             if (output is not None) and (output_method is not None):

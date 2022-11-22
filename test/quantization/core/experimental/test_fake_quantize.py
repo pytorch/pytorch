@@ -29,9 +29,9 @@ class TestFakeQuantize(unittest.TestCase):
         qparams_expected = observer.calculate_qparams(signed=False)
 
         self.assertEqual(alpha, qparams_expected[0])
-        self.assertTrue(torch.equal(gamma, qparams_expected[1]))
-        self.assertTrue(torch.equal(quantization_levels, qparams_expected[2]))
-        self.assertTrue(torch.equal(level_indices, qparams_expected[3]))
+        self.assertEqual(gamma, qparams_expected[1], rtol=0, atol=0, exact_device=True)
+        self.assertEqual(quantization_levels, qparams_expected[2], rtol=0, atol=0, exact_device=True)
+        self.assertEqual(level_indices, qparams_expected[3], rtol=0, atol=0, exact_device=True)
 
     r""" Tests fake quantize forward() method
          by comparing result with expected
@@ -58,7 +58,7 @@ class TestFakeQuantize(unittest.TestCase):
         X_to_apot = quantize_APoT(X, alpha, gamma, quantization_levels, level_indices)
         X_expected = dequantize_APoT(X_to_apot)
 
-        self.assertTrue(torch.equal(X_reduced_precision_fp, X_expected))
+        self.assertEqual(X_reduced_precision_fp, X_expected, rtol=0, atol=0, exact_device=True)
 
     r""" Tests fake quantize forward() method
          throws error when qparams are None

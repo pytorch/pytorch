@@ -114,9 +114,10 @@ class Foo:
 
     def __eq__(self, other):
         def eq(value, other):
-            if isinstance(value, torch.Tensor):
-                return torch.equal(value, other)
-            return value == other
+            result = value == other
+            if isinstance(result, torch.Tensor):
+                result = result.all().item()
+            return result
 
         for attr, value in self.__dict__.items():
             other_value = other.__dict__[attr]
@@ -3312,7 +3313,7 @@ class DistributedTest:
 
             for l1, l2 in zip(output_tensor_lists, expected_tensors):
                 for t1, t2 in zip(l1, l2):
-                    if not torch.equal(t1, t2):
+                    if not (t1 == t2).all():
                         return False
             return True
 
