@@ -462,7 +462,9 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
 
   auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
 
-    static constexpr int ntensors = 3;
+    // Here ntensors is defined for output and 1 input. We have defined output, input and restrided_input
+    // aten/src/ATen/native/TensorTransformations.cpp#L64-L66 but we use only output and input.
+    static constexpr int ntensors = 2;
     std::array<char*, ntensors> data_arr;
     std::copy_n(base, ntensors, data_arr.data());
     const int64_t *outer_strides = &strides[ntensors];
@@ -526,13 +528,19 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
 
 template <typename scalar_t>
 void cpu_vflip_memcpy(at::TensorIterator& iter) {
+  // This is a vertical flip specialization using memcpy to speed-up the runtime
 
   auto loop2d = [&](char** base, const int64_t *strides, int64_t size0, int64_t size1) {
 
-    static constexpr int ntensors = 3;
+    // Here ntensors is defined for output and 1 input. We have defined output, input and restrided_input
+    // aten/src/ATen/native/TensorTransformations.cpp#L64-L66 but we use only output and input.
+    static constexpr int ntensors = 2;
     std::array<char*, ntensors> data_arr;
     std::copy_n(base, ntensors, data_arr.data());
     const int64_t *outer_strides = &strides[ntensors];
+
+    constexpr auto stride = sizeof(scalar_t);
+    TORCH_INTERNAL_ASSERT(stride == strides[0] && stride == strides[1]);
 
     for (const auto j C10_UNUSED : c10::irange(size1)) {
 
@@ -544,7 +552,7 @@ void cpu_vflip_memcpy(at::TensorIterator& iter) {
         data[arg] = data_[arg];
       }
 
-      memcpy(data[0], data[1], n * strides[0]);
+      memcpy(data[0], data[1], n * stride);
 
       // advance:
       for (const auto arg : c10::irange(data_arr.size())) {
@@ -590,6 +598,7 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       // other dtypes are handled below with cpu_kernel_vec
     } else if (iter.ndim() > 1 && output_strides[1] < 0 && input_strides[0] == iter.element_size(1) \
                && output_strides[0] == iter.element_size(0)) {
+      // return AT_DISPATCH_ALL_TYPES();
       auto iter_dtype = iter.dtype();
       if (iter_dtype == kByte) {
         return cpu_vflip_memcpy<uint8_t>(iter);
