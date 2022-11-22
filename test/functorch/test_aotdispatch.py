@@ -694,7 +694,7 @@ class TestPartitioning(AOTTestCase):
             #
             # TODO(whc)- are the saved-tensors/saved-symints correct here?
             # i just made the test pass based on what default partition did
-            [False, True, True, False, False] + [False] * 5 + [True] * 3,
+            [False, True, True, False, False] + [False] * 4 + [True] * 4,
             [is_sym_node(n) for n in fw_graph_out_nodes]
         )
 
@@ -996,7 +996,6 @@ symbolic_aot_autograd_failures = {
     xfail('addr', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('as_strided', ''),  # Tensor-likes are not close!
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cartesian_prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
@@ -1011,10 +1010,8 @@ symbolic_aot_autograd_failures = {
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('deg2rad', ''),  # aten.deg2rad.default - couldn't find symbolic meta function/decomposition
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
-    xfail('dist', ''),  # aten.dist.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.fft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.fft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1104,10 +1101,6 @@ symbolic_aot_autograd_failures = {
     xfail('min', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mv', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-
-    # Deleting this in a followup
-    xfail('nn.functional.poisson_nll_loss', ''),
-
     xfail('nn.functional._scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d_backward.default - couldn't ...
     xfail('nn.functional.adaptive_max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1168,7 +1161,6 @@ symbolic_aot_autograd_failures = {
     xfail('prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('put', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('qr', ''),  # aten.linalg_qr.default - couldn't find symbolic meta function/decomposition
-    xfail('rad2deg', ''),  # aten.rad2deg.default - couldn't find symbolic meta function/decomposition
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('reshape_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides

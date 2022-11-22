@@ -1219,6 +1219,8 @@ Vectorized<int8_t> inline shift_512_8(const Vectorized<int8_t>& a, const Vectori
   __m512i c0;
   if (left_shift)
     c0 = _mm512_sllv_epi16(a0, b0);
+  else
+    c0 = _mm512_srav_epi16(a0, b0);
   c0 = _mm512_shuffle_epi8(c0, ctl_1_0);
 
   // Peform shifting the same way for input array elements with
@@ -1228,6 +1230,8 @@ Vectorized<int8_t> inline shift_512_8(const Vectorized<int8_t>& a, const Vectori
   __m512i c1;
   if (left_shift)
     c1 = _mm512_sllv_epi16(a1, b1);
+  else
+    c1 = _mm512_srav_epi16(a1, b1);
   c1 = _mm512_and_si512(c1, keep_1);
 
   // Merge partial results into the final result.
@@ -1254,6 +1258,26 @@ Vectorized<int16_t> inline operator<<(const Vectorized<int16_t>& a, const Vector
 template <>
 Vectorized<int8_t> inline operator<<(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
   return shift_512_8<true>(a, b);
+}
+
+template <>
+Vectorized<int64_t> inline operator>>(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
+  return _mm512_srav_epi64(a, b);
+}
+
+template <>
+Vectorized<int32_t> inline operator>>(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return _mm512_srav_epi32(a, b);
+}
+
+template <>
+Vectorized<int16_t> inline operator>>(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  return _mm512_srav_epi16(a, b);
+}
+
+template <>
+Vectorized<int8_t> inline operator>>(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
+  return shift_512_8<false>(a, b);
 }
 
 #endif
