@@ -452,9 +452,9 @@ class Module:
         super().__setattr__('_backward_hooks', OrderedDict())
         super().__setattr__('_is_full_backward_hook', None)
         super().__setattr__('_forward_hooks', OrderedDict())
-        super().__setattr__('_forward_hooks_with_kwargs', dict())
+        super().__setattr__('_forward_hooks_with_kwargs', OrderedDict())
         super().__setattr__('_forward_pre_hooks', OrderedDict())
-        super().__setattr__('_forward_pre_hooks_with_kwargs', dict())
+        super().__setattr__('_forward_pre_hooks_with_kwargs', OrderedDict())
         super().__setattr__('_state_dict_hooks', OrderedDict())
         super().__setattr__('_load_state_dict_pre_hooks', OrderedDict())
         super().__setattr__('_load_state_dict_post_hooks', OrderedDict())
@@ -1380,7 +1380,10 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
-        handle = hooks.RemovableHandle(self._forward_pre_hooks)
+        handle = hooks.RemovableHandle(
+            self._forward_pre_hooks,
+            extra_dict=self._forward_pre_hooks_with_kwargs
+        )
         self._forward_pre_hooks[handle.id] = hook
         if with_kwargs:
             self._forward_pre_hooks_with_kwargs[handle.id] = True
@@ -1435,7 +1438,10 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
-        handle = hooks.RemovableHandle(self._forward_hooks)
+        handle = hooks.RemovableHandle(
+            self._forward_hooks,
+            extra_dict=self._forward_hooks_with_kwargs
+        )
         self._forward_hooks[handle.id] = hook
         if with_kwargs:
             self._forward_hooks_with_kwargs[handle.id] = True
