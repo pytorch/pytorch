@@ -115,6 +115,14 @@ struct VariadicBdimsBatchRuleHelper<F, Func, typelist<A, T...>> {
 #define VARIADIC_BDIMS2(op, overload) \
   VMAP_SUPPORT2(op, overload, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN2(op, overload)));
 
+#define VMAP_CHECK_ESCAPED(layer, what) \
+  TORCH_CHECK( \
+    layer.has_value(), \
+    "your tensor may have escaped from vmap. This could also be an internal error (from ", \
+    what, \
+    ") See https://pytorch.org/functorch/stable/ux_limitations.html" \
+  )
+
 template<class F, F Func>
 void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
@@ -123,11 +131,7 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
 
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_CHECK(
-    maybe_layer.has_value(),
-    "oops your boxed tensor escaped from vmap ",
-    "See https://pytorch.org/functorch/stable/ux_limitations.html"
-  )
+  VMAP_CHECK_ESCAPED( maybe_layer, "boxed inputs")
 
   int64_t cur_level = maybe_layer->layerId();
 
