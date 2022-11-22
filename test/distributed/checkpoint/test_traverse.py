@@ -42,11 +42,7 @@ class TestTraverse(TestCase):
         state_dict = {
             "key1": [
                 torch.tensor([1]),
-                [
-                    33,
-                    torch.tensor([2]),
-                    [44, 55],
-                ],
+                [33, torch.tensor([2]), [44, 55]],
                 [66, 77],
             ],
         }
@@ -75,17 +71,11 @@ class TestTraverse(TestCase):
         self.assertNotIn(("key1", 1, 2, 0), data)
 
         self.assertIn(("key1", 2), data)
-        self.assertEqual(
-            data[("key1", 2)],
-            [66, 77],
-        )
+        self.assertEqual(data[("key1", 2)], [66, 77])
 
     def test_traverse_nested_dict(self) -> None:
         state_dict = {
-            "key0": {
-                "key1": 99,
-                "key2": torch.tensor([1]),
-            },
+            "key0": {"key1": 99, "key2": torch.tensor([1])},
         }
 
         data = {}
