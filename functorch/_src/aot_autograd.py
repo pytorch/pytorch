@@ -436,13 +436,7 @@ def run_functionalized_fw_and_collect_metadata(f):
             # on the base tensor, but we are obligated to properly set requires-gradness on the real output.
             non_aliased_outs = []
             for i, o in enumerate(non_aliased_input_outs):
-                if isinstance(o, torch.Tensor) and o._base is not None:
-                    non_aliased_outs.append(o._base)
-                    is_exact_input = False
-                    aliases_intermediate_and_not_input = True
-                    aliased_out_idx[o] = (i, aliases_intermediate_and_not_input, is_exact_input)
-                else:
-                    non_aliased_outs.append(o)
+                non_aliased_outs.append(o)
 
             return non_aliased_outs, aliased_out_idx
 
@@ -647,7 +641,9 @@ def create_joint_forward_backward_functionalized(
         # For outputs that are aliases of intermediates, we will have returned the output's _base as an output in the graph instead,
         # which we *should* send to grad()
         outputs_for_grad = [
-            x._base if meta.aliased_output_info[i].output_type == OutputType.alias_of_intermediate else x
+            x
+            # TODO: support ._base
+            # x._base if meta.aliased_output_info[i].output_type == OutputType.alias_of_intermediate else x
             for (i, x) in enumerate(all_outs) if meta.aliased_output_info[i].output_type != OutputType.alias_of_input
         ]
         # Pass any (non-aliased) mutated inputs in as tangents, since they'll be returned as outputs in the fw
@@ -1122,7 +1118,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     _num_outputs_aliased_to_intermediates = len([
         x for x in _fw_metadata.aliased_output_info if x.output_type == OutputType.alias_of_intermediate])
     _num_mutated_data_inputs = len([x for x in _fw_metadata.mutated_input_info if x == MutationType.data])
-    _num_mutated_metadata_only_inputs = len(_fw_metadata.metadata_mutation_input_info)
+    _num_mutated_metadata_only_inputs = len([x for x in _fw_metadata.metadata_mutation_input_info if x is not None])
     _num_mutated_inputs = _num_mutated_data_inputs + _num_mutated_metadata_only_inputs
 
     if isinstance(out, (list, tuple)):

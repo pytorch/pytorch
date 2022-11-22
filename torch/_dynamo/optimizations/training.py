@@ -319,7 +319,10 @@ def nvprims_fw_bw_partition_fn(joint_module, joint_inputs, *, num_fwd_outputs):
     }
 
     fw_gm, bw_gm = min_cut_rematerialization_partition(
-        prim_gm, joint_inputs, recomputable_ops=recomputable_ops, num_fwd_outputs=num_fwd_outputs
+        prim_gm,
+        joint_inputs,
+        recomputable_ops=recomputable_ops,
+        num_fwd_outputs=num_fwd_outputs,
     )
     # AOT Autograd might not use the partitioner, so we need to make sure that
     # the graph is marked as already transformed to use nvFuser-compatible nodes
