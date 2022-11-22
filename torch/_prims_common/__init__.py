@@ -291,6 +291,9 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     its dimensions that is contiguous.
     """
 
+    if a.is_sparse:
+        return False
+
     # Short-circuits if the tensor is already contiguous or channels-last contiguous
     if is_contiguous(a) or is_channels_last_contiguous(a):
         return True
@@ -470,8 +473,9 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
 
 
 # "Wraps" a dim (up to one time) for the given rank, allowing dims to be
-# specified using negative indices. For scalar tensors with rank 0, then idx
-# must be in the range [-1, 0]. Otherwise, idx should be in the range [-rank, rank-1].
+# specified using negative indices. If `wrap_scalar` is true then scalar
+# tensors of rank 0 will allow dimensions in the range [-1, 0]. Otherwise,
+# idx should be in the range [-rank, rank-1].
 def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
     if rank < 0:
         msg = f"Rank cannot be negative but got {rank}"
@@ -1338,15 +1342,17 @@ def reduction_dtypes(
         result_dtype = torch.bool
     return computation_dtype, result_dtype
 
-
+# This function's logic is borrowed from the following functions defined in C++:
+# batched_matrix_contiguous_strides and contiguous_strides
 def make_contiguous_strides_for(
     shape: ShapeType, row_major: bool = True
 ) -> Tuple[int, ...]:
     """
-    Returns the strides of a contriguous tensor if row_major
+    Returns the strides of a contiguous tensor if row_major
     If row_major=True, it returns the strides of a contiguous batch of Fortran-contiguous matrices
     This is often used when calling external libraries like BLAS/LAPACK/cuSolver...
     """
+    # contiguous_strides from c10/util/strides.h
     validate_shape(shape)
     if not shape:
         return ()
@@ -1360,6 +1366,7 @@ def make_contiguous_strides_for(
 
     result = tuple(reversed(strides))
 
+    # batched_matrix_contiguous_strides from aten/src/ATen/native/LinearAlgebraUtils.h
     if row_major:
         return result
     else:
@@ -1575,6 +1582,27 @@ def mask_tensor(mask: TensorLikeType, t: TensorLikeType):
         return mask.logical_and(t)
     else:
         return torch.where(mask, t, 0)
+
+
+def get_aten_op(fn: Callable, name: str):
+    """
+    Given the __module__ of reference and its name, it returns
+    (our best guess of) the ATen name of the associated operation
+
+    Note: In ATen, the __name__ of a function within a module often
+    starts by the module name. E.g. linalg_eigh, or special_zeta
+    """
+    module = fn.__module__
+    prefix = "torch._refs"
+    assert(module.startswith(prefix))
+    module = module[len(prefix):]
+    # We want to go from .special / .nn.functional
+    # to special and special_ / nn_functional_
+    if module:
+        module = module[1:]
+        module = module.replace(".", "_")
+        module = module + "_"
+    return getattr(torch.ops.aten, f"{module}{name}")
 
 
 def dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
