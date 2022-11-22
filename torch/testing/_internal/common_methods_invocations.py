@@ -8539,6 +8539,9 @@ op_db: List[OpInfo] = [
                    'TestConsistency',
                    'test_output_match',
                ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1.5e-05, rtol=1e-05)}),
+                   'TestCommon', 'test_out'),
            ],
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
