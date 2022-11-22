@@ -1513,7 +1513,11 @@ Arguments:
 
           .def(
               "recv_anysource",
-              &::c10d::ProcessGroup::recvAnysource,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& tensors,
+                 int64_t tag) {
+                return ::c10d::ops::recv_any_source(self, tensors, tag);
+              },
               py::call_guard<py::gil_scoped_release>())
 
           .def(
