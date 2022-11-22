@@ -1,5 +1,4 @@
 """
-TODO land this or what?
 Copied from https://github.com/lessw2020/transformer_framework/blob/main/performance/gpu_memory.py
 """
 # Copyright (c) 2022 Meta Platforms, Inc. and its affiliates.
@@ -97,7 +96,7 @@ class Memory_Maximizer:
         self.m_max_allocated = 0
         self.m_max_active = 0
 
-        print(f"memory stats reset, ready to track")
+        print("memory stats reset, ready to track")
 
     def update(
         self,
@@ -152,7 +151,7 @@ class Memory_Maximizer:
         print(f"cuda OOM = {self.m_cuda_ooms}\n")
         if self.m_num_retries > 0:
             print(
-                f"--> Recommend decreasing batch size...cuda retries can greatly degrade perf!"
+                "--> Recommend decreasing batch size...cuda retries can greatly degrade perf!"
             )
 
     def summary(
