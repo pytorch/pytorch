@@ -52,6 +52,7 @@
 #include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/metal_rewrite.h>
+#include <torch/csrc/jit/passes/mobile_optimizer_type.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
@@ -656,7 +657,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_create_autodiff_subgraphs",
           [](const std::shared_ptr<Graph>& graph, py::object threshold) {
-            if (threshold.is(py::none())) {
+            if (threshold.is_none()) {
               CreateAutodiffSubgraphs(graph);
             } else {
               CreateAutodiffSubgraphs(graph, py::cast<int>(threshold));
@@ -1081,8 +1082,10 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_vulkan_optimize_for_mobile",
           [](script::Module& module,
+             std::set<MobileOptimizerType>& optimization_blocklist,
              std::vector<std::string>& preserved_methods) {
-            return vulkanOptimizeForMobile(module, preserved_methods);
+            return vulkanOptimizeForMobile(
+                module, optimization_blocklist, preserved_methods);
           })
       .def(
           "_jit_pass_metal_insert_prepacked_ops",
@@ -1145,38 +1148,65 @@ void initJITBindings(PyObject* module) {
   // NB: This isn't actually used for regular PyTorch symbolic tracing;
   // XLA is what needs this
 #define SYMNODE_UNARY(n) .def(#n, [](c10::SymNode a) { return a->n(); })
-#define SYMNODE_UNARY2(n2, n) .def(#n2, [](c10::SymNode a) { return a->n(); })
 #define SYMNODE_BINARY(n) \
   .def(#n, [](c10::SymNode a, c10::SymNode b) { return a->n(b); })
   auto symnode_class =
       py::class_<c10::SymNodeImpl, c10::SymNode>(m, "_SymNode")
+      // clang-format off
       // These DO NOT install magic methods; the SymInt/SymFloat wrapper in
       // Python is responsible for this
       SYMNODE_UNARY(clone)
-      // Named these for consistency with inner python class, but maybe
-      // should change the python side
-      SYMNODE_UNARY2(__bool__, bool_) SYMNODE_UNARY2(__int__, int_)
-          SYMNODE_UNARY2(__sym_int__, sym_int) SYMNODE_UNARY2(
-              __sym_float__, sym_float) SYMNODE_BINARY(add) SYMNODE_BINARY(sub)
-              SYMNODE_BINARY(mul) SYMNODE_BINARY(truediv) SYMNODE_BINARY(pow)
-                  SYMNODE_BINARY(floordiv) SYMNODE_BINARY(mod) SYMNODE_BINARY(
-                      eq) SYMNODE_BINARY(gt) SYMNODE_BINARY(lt)
-                      SYMNODE_BINARY(le) SYMNODE_BINARY(ge) SYMNODE_BINARY(min)
-                          SYMNODE_BINARY(max) SYMNODE_UNARY(ceil)
-                              SYMNODE_UNARY(floor) SYMNODE_UNARY(neg)
-                                  // Intentionally don't set file line, as the
-                                  // Python backtrace matters more here
-                                  .def(
-                                      "guard_int",
-                                      [](c10::SymNode a) {
-                                        return a->guard_int(nullptr, 0);
-                                      })
-                                  .def(
-                                      "__str__",
-                                      [](c10::SymNode a) { return a->str(); })
-                                  .def("__repr__", [](c10::SymNode a) {
-                                    return a->str();
-                                  });
+      SYMNODE_UNARY(is_int)
+      SYMNODE_UNARY(is_float)
+      SYMNODE_UNARY(bool_)
+      SYMNODE_UNARY(int_)
+      SYMNODE_UNARY(sym_float)
+      SYMNODE_BINARY(add)
+      SYMNODE_BINARY(sub)
+      SYMNODE_BINARY(mul)
+      SYMNODE_BINARY(truediv)
+      SYMNODE_BINARY(pow)
+      SYMNODE_BINARY(floordiv)
+      SYMNODE_BINARY(mod)
+      SYMNODE_BINARY(eq)
+      SYMNODE_BINARY(gt)
+      SYMNODE_BINARY(lt)
+      SYMNODE_BINARY(le)
+      SYMNODE_BINARY(ge)
+      SYMNODE_BINARY(min)
+      SYMNODE_BINARY(max)
+      SYMNODE_UNARY(ceil)
+      SYMNODE_UNARY(floor)
+      SYMNODE_UNARY(neg)
+      // Intentionally don't set file line, as the
+      // Python backtrace matters more here
+      .def(
+          "guard_int",
+          [](c10::SymNode a) {
+            return a->guard_int(nullptr, 0);
+          })
+      .def(
+          "guard_float",
+          [](c10::SymNode a) {
+            return a->guard_float(nullptr, 0);
+          })
+      .def(
+          "wrap_int",
+          [](c10::SymNode a, int64_t b) {
+            return a->wrap_int(b);
+          })
+      .def(
+          "wrap_float",
+          [](c10::SymNode a, double b) {
+            return a->wrap_float(b);
+          })
+      .def(
+          "__str__",
+          [](c10::SymNode a) { return a->str(); })
+      .def("__repr__", [](c10::SymNode a) {
+        return a->str();
+      });
+  // clang-format on
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -1250,7 +1280,7 @@ void initJITBindings(PyObject* module) {
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
         auto writer_func = [=](const void* data, size_t size) {
-          // Writting an empty file is a noop
+          // Writing an empty file is a noop
           if (size == 0) {
             return size;
           }
@@ -1294,6 +1324,9 @@ void initJITBindings(PyObject* module) {
       .value(
           "HOIST_CONV_PACKED_PARAMS",
           MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)
+      .value(
+          "VULKAN_AUTOMATIC_GPU_TRANSFER",
+          MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER)
       .export_values();
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires

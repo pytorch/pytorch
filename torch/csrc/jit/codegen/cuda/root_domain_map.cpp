@@ -186,27 +186,39 @@ auto ensureMapping(
   return it;
 }
 
+TensorView* lookUpTv(const TensorDomain* td) {
+  Fusion* fusion = FusionGuard::getCurFusion();
+  for (auto tv : ir_utils::filterByType<TensorView>(fusion->vals())) {
+    if (tv->domain() == td) {
+      return tv;
+    }
+  }
+  return nullptr;
+}
+
 } // namespace
 
 std::string DomainKey::toString() const {
   std::stringstream ss;
-  ss << "{";
-  if (td()) {
-    ss << td() << " (root: " << td()->getRootDomain()
-       << ", maybe rfactor: " << td()->getMaybeRFactorDomain() << ")";
-  } else {
-    ss << "null";
-  }
-  ss << ", ";
   if (id()) {
     ss << id();
   } else {
     ss << "null";
   }
   if (concreteId()) {
-    ss << " (" << concreteId() << ")";
+    ss << " (concrete: " << concreteId() << ")";
   }
-  ss << "}";
+  ss << " in ";
+  if (td()) {
+    auto tv = lookUpTv(td());
+    TORCH_INTERNAL_ASSERT(tv != nullptr, "No TV found for ", td()->toString());
+    ss << "T" << tv->name() << "[ " << td()->getRootDomain() << " ]";
+    if (td()->hasRFactor()) {
+      ss << " (Rfactor: [ " << td()->getMaybeRFactorDomain() << " ])";
+    }
+  } else {
+    ss << "null";
+  }
   return ss.str();
 }
 
@@ -226,7 +238,7 @@ class FindInputDomains : BackwardVisitor {
   }
 
   DomainKeySet find() {
-    traverseFrom(tv_->fusion(), {tv_});
+    traverseTo(tv_->fusion(), {tv_});
     return input_keys_;
   }
 
@@ -474,7 +486,7 @@ bool ComputeAtRootDomainMap::canMap(
     const IterDomain* id_b) const {
   TORCH_INTERNAL_ASSERT(
       id_b->definition() == nullptr || id_b->isRFactorProduct(),
-      "Non-root domain is not supproted: ",
+      "Non-root domain is not supported: ",
       id_b);
 
   if (!id_b->isBroadcast()) {
@@ -685,7 +697,7 @@ ComputeAtRootDomainMapBuilder::ComputeAtRootDomainMapBuilder(
       map_through_reduction_(map_through_reduction) {
   Fusion* fusion = FusionGuard::getCurFusion();
   TORCH_INTERNAL_ASSERT(fusion != nullptr);
-  traverseFrom(fusion, fusion->outputs(), false);
+  traverseTo(fusion, fusion->outputs(), false);
   if (!pending_map_.empty()) {
     std::stringstream ss;
     ss << "pending map:\n";
@@ -823,10 +835,6 @@ void ComputeAtRootDomainMapBuilder::setMaybeMapped(
       addToPendingList(producer_bcast_key, consumer_bcast_key);
     }
   } else {
-    TORCH_INTERNAL_ASSERT(
-        !consumer_id->isBroadcast(),
-        "No concrete domain found for a broadcast domain: ",
-        consumer_key.toString());
     auto producer_concrete_key = producer_key;
     if (producer_id->isBroadcast()) {
       const auto concrete_id = consumer_id;
@@ -862,7 +870,7 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
   const auto& out_root = out_td->getRootDomain();
 
   // Record equalities from output to all the inputs
-  // ignores un-concretizable broadcasts
+  // ignores non-concretizable broadcasts
   for (auto* in_tv : ir_utils::filterByType<TensorView>(e->inputs())) {
     const TensorDomain* in_td = in_tv->domain();
     std::vector<IterDomain*> in_root =
@@ -878,15 +886,16 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
     for (const auto it : c10::irange(in_root.size())) {
       if (e->outputs().size() > 1) {
         TORCH_INTERNAL_ASSERT(
-            e->isA<WelfordOp>() || e->isA<GroupedReductionOp>(),
-            "Multi-output mapping assumes WelforddOp or GroupedReductionOp but, ",
+            e->isA<WelfordOp>() || e->isA<GroupedReductionOp>() ||
+                e->isA<GroupedWelfordOp>(),
+            "Unknown multi-output Expr type ",
             e->getExprType().value(),
             " is found");
-        for (auto o : e->outputs()) {
-          auto o_tv = o->as<TensorView>();
-          auto o_td = o_tv->domain();
-          auto o_root = o_td->getRootDomain();
-          setMaybeMapped(in_td, in_root[it], o_td, o_root[it]);
+        for (auto out : e->outputs()) {
+          auto out_tv = out->as<TensorView>();
+          auto out_td = out_tv->domain();
+          auto out_root = out_td->getRootDomain();
+          setMaybeMapped(in_td, in_root[it], out_td, out_root[it]);
         }
       } else {
         setMaybeMapped(in_td, in_root[it], out_td, out_root[it]);
@@ -1056,7 +1065,7 @@ void ComputeAtRootDomainMapBuilder::handle(TensorView* tv) {
     mapAllPendingMappings(td, id);
   }
 
-  // When tv has a rfactor domain, propagate the domain mappings from
+  // When tv has an rfactor domain, propagate the domain mappings from
   // each of the rfactor axes to the dependent root axes.
   if (td->hasViewLikeRFactor()) {
     std::unordered_set<Val*> root_set(
@@ -1114,7 +1123,7 @@ class ExactRootDomainMapBuilder : private IterVisitor {
       Fusion* fusion,
       DisjointSets<const IterDomain*>& eq_sets)
       : eq_sets_(eq_sets) {
-    traverseFrom(fusion, fusion->outputs());
+    traverseTo(fusion, fusion->outputs());
   }
 
  private:

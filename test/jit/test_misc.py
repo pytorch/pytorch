@@ -379,4 +379,4 @@ class TestMisc(JitTestCase):
         expected = foo(x, 0)
         scripted = torch.jit.script(foo)
         actual = scripted(x, 0)
-        torch.testing.assert_allclose(expected, actual)
+        torch.testing.assert_close(expected, actual)

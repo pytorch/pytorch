@@ -1,7 +1,7 @@
 import sys
 import copy
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Type
+from typing import Callable, Any, Type
 from enum import Enum, auto
 import inspect
 import itertools
@@ -434,7 +434,7 @@ class DistributedDataParallel(Module, Joinable):
         of ``DistributedDataParallel`` will register the additional gradient
         reduction functions on all the parameters of the model itself at the
         time of construction. If you change the model's parameters afterwards,
-        gradient redunction functions no longer match the correct set of
+        gradient reduction functions no longer match the correct set of
         parameters.
 
     .. warning::
@@ -510,7 +510,7 @@ class DistributedDataParallel(Module, Joinable):
                      3) Activation checkpointing when model has unused parameters.
                      4) There are model parameters that are outside of forward function.
                      5) Potentially improve performance when there are unused parameters,
-                     as DDP will not search graph in each iteraton to detect unused
+                     as DDP will not search graph in each iteration to detect unused
                      parameters when static_graph is set to be ``True``.
                      To check whether you can set static_graph to be ``True``, one way is to
                      check ddp logging data at the end of your previous model training,
@@ -553,11 +553,15 @@ class DistributedDataParallel(Module, Joinable):
         gradient_as_bucket_view=False,
         static_graph=False,
     ):
-
         super(DistributedDataParallel, self).__init__()
         Joinable.__init__(self)
-        self.logger: Optional[dist.Logger] = None
-        if not any((p.requires_grad for p in module.parameters())):
+        self.logger = None
+        if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
+            self.parameters_to_ignore = set(module._ddp_params_and_buffers_to_ignore)
+        else:
+            self.parameters_to_ignore = set()
+        self._module_parameters = [p for n, p in module.named_parameters() if n not in self.parameters_to_ignore]
+        if not any((p.requires_grad for p in self._module_parameters)):
             self._log_and_throw(
                 RuntimeError,
                 "DistributedDataParallel is not needed when a module "
@@ -570,10 +574,8 @@ class DistributedDataParallel(Module, Joinable):
                 "device_ids can only be None or contain a single element.",
             )
 
-        self.is_multi_device_module = (
-            len({p.device for p in module.parameters()}) > 1
-        )
-        distinct_device_types = {p.device.type for p in module.parameters()}
+        self.is_multi_device_module = len({p.device for p in self._module_parameters}) > 1
+        distinct_device_types = {p.device.type for p in self._module_parameters if p.device is not None}
         if len(distinct_device_types) != 1:
             self._log_and_throw(
                 ValueError,
@@ -599,7 +601,7 @@ class DistributedDataParallel(Module, Joinable):
                     "but got device_ids {}, output_device {}, and module parameters {}.".format(
                         device_ids,
                         output_device,
-                        {p.device for p in module.parameters()},
+                        {p.device for p in self._module_parameters},
                     ),
                 )
 
@@ -621,16 +623,12 @@ class DistributedDataParallel(Module, Joinable):
         self.static_graph = False
         self.dim = dim
         self.module = module
-        self.device = list(self.module.parameters())[0].device
+        self.device = list(self._module_parameters)[0].device
         self.broadcast_buffers = broadcast_buffers
         self.find_unused_parameters = find_unused_parameters
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
-        if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
-            self.parameters_to_ignore = module._ddp_params_and_buffers_to_ignore
-        else:
-            self.parameters_to_ignore = []
 
         self._use_replicated_tensor_module = (
             _ddp_with_replicated_tensor_enabled()
@@ -647,7 +645,7 @@ class DistributedDataParallel(Module, Joinable):
             )
 
         # Check that a module does not have Uninitialized parameters
-        for param in module.parameters():
+        for param in self._module_parameters:
             if isinstance(param, torch.nn.parameter.UninitializedParameter):
                 self._log_and_throw(
                     RuntimeError,
@@ -1003,6 +1001,10 @@ class DistributedDataParallel(Module, Joinable):
             >>>   for input in inputs:
             >>>     ddp(input).backward()  # no synchronization, accumulate grads
             >>> ddp(another_input).backward()  # synchronize grads
+
+        .. warning::
+            The forward pass should be included inside the context manager, or
+            else gradients will still be synchronized.
         """
         old_require_backward_grad_sync = self.require_backward_grad_sync
         self.require_backward_grad_sync = False
@@ -1020,7 +1022,7 @@ class DistributedDataParallel(Module, Joinable):
 
     # note, this ctxmgr function is marked 'skip' in torchdynamo, so dynamo only kicks in
     # for the 'module_to_run' underneath
-    # see torchdynamo/eval_frame.py TorchPatcher.patch for more details
+    # see torch._dynamo/eval_frame.py TorchPatcher.patch for more details
     @contextmanager
     def _inside_ddp_forward(self):
         DistributedDataParallel._active_ddp_module = self
@@ -1178,7 +1180,7 @@ class DistributedDataParallel(Module, Joinable):
         return self
 
     # When running in join mode, schedules an allreduce to notify joined ranks
-    # of whether backwards pass synchronization will run this iteraton or not.
+    # of whether backwards pass synchronization will run this iteration or not.
     def _check_global_requires_backward_grad_sync(self, is_joined_rank):
         if not is_joined_rank and self.require_backward_grad_sync:
             requires_sync_tensor = torch.ones(1, device=self.device)
@@ -1802,6 +1804,12 @@ class DistributedDataParallel(Module, Joinable):
         # during synchronization. It will be removed when the API is finalized
         # as part of addressing https://github.com/pytorch/pytorch/issues/43690.
         module._ddp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
+        for name, param in module.named_parameters():
+            if name in params_and_buffers_to_ignore:
+                param._ddp_ignored = True
+        for name, buffer in module.named_buffers():
+            if name in params_and_buffers_to_ignore:
+                buffer._ddp_ignored = True
 
     def _get_ddp_logging_data(self):
         r"""
@@ -1821,7 +1829,7 @@ class DistributedDataParallel(Module, Joinable):
         r"""
         This interface allows users to set sample_rate of collecting
         runtime stats. The runtime stats will be recorded for the
-        first 10 iterations, after 10 iteratons runtime stats will be
+        first 10 iterations, after 10 iterations runtime stats will be
         recorded once every "sample_rate" training iterations. In
         default, runtime stats are recorded for the first 10 iterations,
         after 10 iterations runtime stats are recorded once every

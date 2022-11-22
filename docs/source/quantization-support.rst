@@ -529,7 +529,7 @@ Quantized dtypes and quantization schemes
 Note that operator implementations currently only
 support per channel quantization for weights of the **conv** and **linear**
 operators. Furthermore, the input data is
-mapped linearly to the the quantized data and vice versa
+mapped linearly to the quantized data and vice versa
 as follows:
 
     .. math::

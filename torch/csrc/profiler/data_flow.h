@@ -1,7 +1,10 @@
 #pragma once
 
+#include <memory>
+
 #include <ATen/core/TensorBody.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/strong_type.h>
 #include <c10/util/variant.h>
 
@@ -26,6 +29,14 @@ namespace impl {
 // not run afoul of the ABA problem. This does, however, mean that identities
 // can only be assigned when memory profiling is enabled.
 using TensorID = strong::type<size_t, struct TensorID_, strong::regular>;
+
+// Uniquely identifies an allocation. (Generally a StorageImpl's data ptr.)
+using AllocationID = strong::type<
+    size_t,
+    struct StorageID_,
+    strong::ordered,
+    strong::regular,
+    strong::hashable>;
 
 // We use a Tensor's TensorImpl adress and StorageImpl data start to build the
 // data flow graph. We do not hold an owning reference so we wrap them in strong
@@ -73,6 +84,11 @@ class WeakTensor {
  private:
   c10::weak_intrusive_ptr<c10::TensorImpl> weak_self_;
 };
+
+struct Result;
+
+void calculateUniqueTensorIDs(
+    std::vector<std::shared_ptr<Result>>& sorted_results);
 
 } // namespace impl
 } // namespace profiler

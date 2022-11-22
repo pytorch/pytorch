@@ -158,7 +158,7 @@ class TORCH_API LazyGraphExecutor {
   };
 
   struct PostOrderData {
-    std::vector<Node*> post_order;
+    std::vector<const Node*> post_order;
     Util::EmissionMap emission_map;
     std::vector<BackendDataPtr> parameters_data;
     std::vector<size_t> parameter_sequence;

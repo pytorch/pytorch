@@ -16,6 +16,7 @@ from .. import config, ir, scheduler
 from ..ir import ReductionHint
 from ..utils import (
     free_symbol_startswith,
+    get_fused_kernel_name,
     instance_descriptor,
     sympy_product,
     sympy_subs,
@@ -23,6 +24,7 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from .common import (
+    CSEVariable,
     DeferredLine,
     ExprPrinter,
     IndentedBuffer,
@@ -44,7 +46,10 @@ def signature_of(arg):
         if V.graph.is_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
             new_tye = tye.lstrip("*")
-            return new_tye
+            if new_tye in ["fp16", "bf16"]:
+                return "fp32"
+            else:
+                return new_tye
         else:
             return tye
     if isinstance(arg, SizeArg):
@@ -103,6 +108,17 @@ def triton_constant(value):
     elif math.isnan(value):
         return 'float("nan")'
     return repr(value)
+
+
+class TritonCSEVariable(CSEVariable):
+    def __init__(self, name):
+        super().__init__(name)
+        self.is_scalar = False
+
+    def update_on_args(self, args, kwargs):
+        self.is_scalar = all(
+            not (isinstance(arg, TritonCSEVariable)) or arg.is_scalar for arg in args
+        )
 
 
 class TritonOverrides(OpOverrides):
@@ -203,6 +219,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.lgamma({x})"
 
     @staticmethod
+    def erf(x):
+        return f"tl.libdevice.erf({x})"
+
+    @staticmethod
     def logical_and(a, b):
         return f"{a} & {b}"
 
@@ -233,11 +253,11 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
-        return f"tl.libdevice.signbitf({x}) if ({x}).dtype is tl.float32 else {x} < 0"
+        return f"tl.libdevice.signbit({x}) if ({x}).dtype is tl.float32 else {x} < 0"
 
     @staticmethod
     def fmod(a, b):
-        return f"tl.libdevice.fmod({a}, ({b}).to(tl.float32))"
+        return f"tl.libdevice.fmod({a}, {b})"
 
     @staticmethod
     def pow(a, b):
@@ -253,11 +273,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def isinf(x):
-        return f"tl.libdevice.isinfd({x}) if ({x}).dtype is tl.float64 else tl.libdevice.isinff({x})"
+        return f"tl.libdevice.isinf({x})"
 
     @staticmethod
     def isnan(x):
-        return f"tl.libdevice.isnand({x}) if ({x}).dtype is tl.float64 else tl.libdevice.isnanf({x})"
+        return f"tl.libdevice.isnan({x})"
 
     @staticmethod
     def round(x):
@@ -748,7 +768,13 @@ class TritonKernel(Kernel):
             # https://github.com/openai/triton/issues/633
             mask = ["None"]
 
-        return index_str, " & ".join(mask)
+        if (
+            index_str in self.cse.varname_map
+            and self.cse.varname_map[index_str].is_scalar
+        ):
+            mask = ["None"]
+
+        return index_str, " & ".join(map(str, mask))
 
     def var_ranges(self):
         return dict(
@@ -978,6 +1004,7 @@ class TritonKernel(Kernel):
                     import triton
                     import triton.language as tl
                     from {config.inductor_import}.ir import ReductionHint
+                    from {config.inductor_import}.ir import TileHint
                     from {config.inductor_import}.triton_ops.autotune import {heuristics}
                     from {config.inductor_import}.utils import instance_descriptor
                 """
@@ -1018,8 +1045,14 @@ class TritonKernel(Kernel):
                 @triton.jit
             """
         else:
+            tile_hint = ""
+            if len(size_hints) == 2:
+                if len(signature) == 4:  # input, output and 2 args
+                    tile_hint = "tile_hint=TileHint.SQUARE,"
+                else:
+                    tile_hint = "tile_hint=TileHint.DEFAULT,"
             heuristics_line = f"""
-                @{heuristics}(size_hints={size_hints!r}, filename=__file__, meta={triton_meta!r})
+                @{heuristics}(size_hints={size_hints!r}, {tile_hint}filename=__file__, meta={triton_meta!r})
                 @triton.jit
             """
         code.splice(heuristics_line)
@@ -1094,6 +1127,9 @@ class TritonKernel(Kernel):
         code.writeline(
             f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name})"
         )
+
+    def create_cse_var(self, *args, **kwargs):
+        return TritonCSEVariable(*args, **kwargs)
 
 
 class TritonScheduling:
@@ -1271,7 +1307,11 @@ class TritonScheduling:
         if src_code in wrapper.kernels:
             kernel_name = wrapper.kernels[src_code]
         else:
-            kernel_name = wrapper.next_kernel_name()
+            kernel_name = (
+                "triton_"
+                + get_fused_kernel_name(node_schedule)
+                + wrapper.next_kernel_suffix()
+            )
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
