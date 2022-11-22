@@ -28,7 +28,7 @@ class AutogradMonkeypatch(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if not kwargs:
             kwargs = {}
-        if func is replacements:
+        if func in replacements:
             return replacements[func](*args, **kwargs)
         return func(*args, **kwargs)
 
