@@ -764,14 +764,7 @@ def verify_model_with_positional_args(
 
     # Make ONNX model.
     onnx_args, onnx_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
-    if isinstance(model, torch.nn.Module):
-        onnx_model = _fx._export_module(model, *onnx_args, **onnx_kwargs)
-    elif callable(model):
-        onnx_model = _fx._export_function(model, *onnx_args, **onnx_kwargs)
-    else:
-        raise ValueError(
-            f"model must be a torch.nn.Module or Callable but got {type(model)}"
-        )
+    onnx_model = _fx.export(model, *onnx_args, **onnx_kwargs)
 
     with torch.no_grad(), contextlib.ExitStack() as stack:
         tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
