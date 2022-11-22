@@ -1254,7 +1254,7 @@ std::tuple<Tensor, Tensor> _spmm_reduce_sparse_csr_cpu(
     spmm_reduce_arg_stub(kCPU, out, arg_out, crow, col, val, weight, op);
   }
 
-  return std::make_tuple(out, arg_out);
+  return std::make_tuple(std::move(out), std::move(arg_out));
 }
 
 std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
@@ -1327,7 +1327,7 @@ std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
     }
   }
 
-  return std::make_tuple(grad_input, grad_weight);
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight));
 }
 
 Tensor spmm_reduce(

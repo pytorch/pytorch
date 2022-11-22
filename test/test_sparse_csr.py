@@ -2433,8 +2433,12 @@ class TestSparseCSR(TestCase):
         for train in [False, True]:
             for index_dtype in [torch.int32, torch.int64]:
                 for reduce_type in ["sum", "mean", "max", "min"]:
-                    # we are doing blocking with 4x vector length in the kernel
+                    # by setting nnz < M, create empty rows
+                    run_test(3, 4, 11, 1, reduce_type, index_dtype, train)
                     run_test(3, 4, 11, 6, reduce_type, index_dtype, train)
+                    run_test(3, 4, 11, 12, reduce_type, index_dtype, train)
+                    # we are doing blocking with 4x vector length in the kernel,
+                    # so need to test when K > 4x vector length
                     run_test(4, 7, 33, 13, reduce_type, index_dtype, train)
 
     @skipMeta

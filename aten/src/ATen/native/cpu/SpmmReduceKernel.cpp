@@ -133,7 +133,10 @@ void spmm_reduce_kernel_impl(
       constexpr int64_t CHUNK_SIZE = 16;
 
       // reinit the output row for reduce type 'max' and 'min'
-      Reducer<scalar_t, reduce>::init(out_ptr, K);
+      int64_t count = row_end - row_start;
+      if (count != 0) {
+        Reducer<scalar_t, reduce>::init(out_ptr, K);
+      }
 
       // blocking on rowwise to reduce write memory bandwidth
       for (int64_t e0 = row_start; e0 < row_end; e0 += CHUNK_SIZE) {
@@ -182,18 +185,15 @@ void spmm_reduce_kernel_impl(
         }
       }
 
-      if (reduce == SPMM_MEAN) {
-        int64_t count = row_end - row_start;
-        if (count != 0) {
-          int64_t k = 0;
-          for (; k < K - (K % Vec::size()); k += Vec::size()) {
-            Vec out_vec = Vec::loadu(out_ptr + k);
-            out_vec /= Vec(count);
-            out_vec.store(out_ptr + k);
-          }
-          for (; k < K; k++) {
-            out_ptr[k] /= count;
-          }
+      if (reduce == SPMM_MEAN && count != 0) {
+        int64_t k = 0;
+        for (; k < K - (K % Vec::size()); k += Vec::size()) {
+          Vec out_vec = Vec::loadu(out_ptr + k);
+          out_vec /= Vec(count);
+          out_vec.store(out_ptr + k);
+        }
+        for (; k < K; k++) {
+          out_ptr[k] /= count;
         }
       }
     }
@@ -248,15 +248,18 @@ void spmm_reduce_arg_kernel_impl(
       scalar_t* out_ptr = out_data + m * K;
       index_t* arg_out_ptr = arg_out_data + m * K;
 
-      Reducer<scalar_t, reduce>::init(out_ptr, K);
-      for (const auto e : c10::irange(row_start, row_end)) {
-        c = col_data[e];
-        scalar_t val = val_data[e];
+      int64_t count = row_end - row_start;
+      if (count != 0) {
+        Reducer<scalar_t, reduce>::init(out_ptr, K);
+        for (const auto e : c10::irange(row_start, row_end)) {
+          c = col_data[e];
+          scalar_t val = val_data[e];
 
-        scalar_t* weight_ptr = weight_data + c * K;
-        for (const auto k : c10::irange(K)) {
-          update<scalar_t, index_t, reduce>(
-              &out_ptr[k], val *  weight_ptr[k], &arg_out_ptr[k], index_t(e));
+          scalar_t* weight_ptr = weight_data + c * K;
+          for (const auto k : c10::irange(K)) {
+            update<scalar_t, index_t, reduce>(
+                &out_ptr[k], val *  weight_ptr[k], &arg_out_ptr[k], index_t(e));
+          };
         }
       }
     }
@@ -365,7 +368,9 @@ void spmm_reduce_backward_input_arg_kernel_impl(
   // scatter_add, consider to parallel this with atomic
   for (const auto i : c10::irange(M * K)) {
     index_t ind = arg_out_data[i];
-    grad_values_data[ind] += grad_data[i];
+    if (ind != index_t(nnz)) {
+      grad_values_data[ind] += grad_data[i];
+    }
   }
 }
 
@@ -447,8 +452,11 @@ void spmm_reduce_backward_weight_arg_kernel_impl(
   // scatter_add, consider to parallel this with atomic
   for (const auto m : c10::irange(M)) {
     for (const auto k : c10::irange(K)) {
-      index_t col = col_data[arg_out_data[m * K + k]];
-      grad_weight_data[col * K + k] += grad_data[m * K + k];
+      index_t ind = arg_out_data[m * K + k];
+      if (ind != index_t(nnz)) {
+        index_t col = col_data[ind];
+        grad_weight_data[col * K + k] += grad_data[m * K + k];
+      }
     }
   }
 }
