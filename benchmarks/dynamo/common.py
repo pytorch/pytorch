@@ -1312,6 +1312,8 @@ class BenchmarkRunner:
         elif branch:
             print("RUNNING ON BRANCH:", branch)
         mode = "train" if self.args.training else "eval"
+        start_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
+        start_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
         prefix = f"{current_device:4} {mode:5} {current_name:34}"
         print(
             f"Running {os.path.basename(sys.argv[0])} {current_name}...",
@@ -1325,8 +1327,12 @@ class BenchmarkRunner:
             status = self.run_performance_test(
                 name, model, example_inputs, optimize_ctx, experiment
             )
+        end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
+        end_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
         if explain:
-            print(torch._dynamo.explain(model, *example_inputs)[0])
+            print(
+                f"Dynamo produced {end_unique_graphs-start_unique_graphs} graph(s) which collectively covered {end_calls_captured-start_calls_captured} ops"
+            )
         print(f"{prefix} {status}")
 
 
@@ -1518,7 +1524,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--explain",
         action="store_true",
-        help="run .explain() on the graph at the end of the run.",
+        help="print some graph/op statistics during the run, similar to .explain()",
     )
 
     parser.add_argument(
