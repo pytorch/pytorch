@@ -16,6 +16,10 @@ from torch.distributed._tensor import (
     Shard,
     Replicate,
 )
+from torch.distributed._tensor.parallel import (
+    PairwiseParallel,
+    parallelize_module,
+)
 
 import torch.distributed.distributed_c10d as distributed_c10d
 
@@ -31,17 +35,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 # Tensor-Parallel degree
 TP_DEGREE = 2
 LR = 3e-5
-
-OPS_NOT_SHARD = [
-    "net3.weight",
-    "net3.bias",
-]
-
-SHARD_PARAMS = [
-    "net1.weight",
-    "net1.bias",
-    "net2.weight",
-]
 
 
 class SimpleModel(torch.nn.Module):
@@ -108,10 +101,9 @@ def shard_module(m, pg):
     m.net2 = _aggregate_local_tensor(m.net2)
 
 
-def _shard_wrap_module(module, module_shard, fsdp_wrap, tp_pg, fsdp_pg):
+def _shard_wrap_module(module, module_shard, fsdp_wrap, mesh_2d, fsdp_pg):
     if module_shard:
-        # Fetch the module sharding planner.
-        shard_module(module, tp_pg)
+        parallelize_module(module, mesh_2d, PairwiseParallel(), tp_mesh_dim=1)
 
     if fsdp_wrap and module_shard:
         return FSDP(module, process_group=fsdp_pg)
@@ -134,11 +126,10 @@ def init_model(model_parallel_size=TP_DEGREE):
     )
 
     fsdp_pg = twod_mesh.get_dim_groups()[0]
-    tp_pg = twod_mesh.get_dim_groups()[1]
 
     # Create Input
-    model = _shard_wrap_module(model, True, True, tp_pg, fsdp_pg)
-    return model, tp_pg, fsdp_pg
+    model = _shard_wrap_module(model, True, True, twod_mesh, fsdp_pg)
+    return model, fsdp_pg
 
 
 def is_nested_tensor(val: Any) -> bool:
@@ -200,7 +191,7 @@ class Test2dParallelIntegration(DTensorTestBase):
         model = SimpleModel().cuda(self.rank)
         model = FSDP(model)
         torch.manual_seed(0)
-        model_2d, _, dp_pg = init_model()
+        model_2d, dp_pg = init_model()
 
         optim = torch.optim.Adam(model.parameters(), lr=0.0001)
         optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.0001)

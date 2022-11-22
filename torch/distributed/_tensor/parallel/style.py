@@ -5,8 +5,8 @@ from abc import ABC
 from typing import Union, Optional
 from torch.distributed._tensor import DTensor, Shard, Replicate, DeviceMesh
 from torch.distributed._tensor.parallel.utils import (
-    _Prepare_Input_Func_Type,
-    _Prepare_Output_Func_Type,
+    _PrepareInputType,
+    _PrepareOutputType,
     _prepare_input_validate,
     _prepare_output_validate,
 )
@@ -18,8 +18,8 @@ class ParallelStyle(ABC):
     Users can extend this class to build their own parallel style with customized input/output preparations.
     """
 
-    _prepare_input: _Prepare_Input_Func_Type
-    _prepare_output: _Prepare_Output_Func_Type
+    _prepare_input: _PrepareInputType
+    _prepare_output: _PrepareOutputType
 
     @abstractmethod
     def __init__(self, _prepare_input, _prepare_output) -> None:
