@@ -1031,7 +1031,7 @@ To choose the best driver on CPU consider:
 
 For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank. If the linear system 
 to be solved is underdetermined (i.e. :attr:`A` is "wide" and there are infinitely many solutions),
-then `'gels'` will find the solution which minimizes :math:`\|X\|_F`, the minimum-norm solution.
+then `'gels'` will find the minimum-norm solution.
 
 See also the `full description of these drivers`_
 
