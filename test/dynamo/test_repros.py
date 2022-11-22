@@ -1883,6 +1883,28 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 5)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_norm_dtype(self):
+        def foo(_stack0):
+            getitem = _stack0[(slice(None, None, None), -1)]
+            _stack0 = None
+            normalize = torch.nn.functional.normalize(getitem, p=2, dim=1)
+            getitem = None
+            return (normalize,)
+
+        args = [((2, 50, 256), (1, 256, 1), torch.float16, "cuda", False)]
+        args = [
+            rand_strided(sh, st, dt, dev).requires_grad_(rg)
+            for (sh, st, dt, dev, rg) in args
+        ]
+
+        opt_foo = torch._dynamo.optimize("aot_inductor_debug")(foo)
+        with torch.cuda.amp.autocast(enabled=True):
+            ref = foo(*args)[0]
+            res = foo(*args)[0]
+            self.assertEqual(ref.dtype, res.dtype)
+
+            self.assertTrue(same(res, ref))
+
     def test_for_loop_graph_break(self):
         def inner(x):
             return torch.sin(x)
