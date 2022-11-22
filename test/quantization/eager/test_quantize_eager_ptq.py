@@ -740,19 +740,19 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
         def checkHooksIsPresent(model, before_convert=True):
             num_fwd_hooks = 1
             if before_convert:
-                self.assertEqual(len(model.quant._get_forward_hooks()), 1,
+                self.assertEqual(len(model.quant._forward_hooks.values()), 1,
                                  "Quantization observer hook has disappeared")
                 num_fwd_hooks = 2
 
-            self.assertObjectIn(fw_pre_hook, model.fc._get_forward_pre_hooks().values())
-            self.assertObjectIn(fw_hook, model.fc._get_forward_hooks().values())
-            self.assertEqual(len(model.fc._get_forward_pre_hooks()), 1,
+            self.assertObjectIn(fw_pre_hook, model.fc._forward_pre_hooks.values())
+            self.assertObjectIn(fw_hook, model.fc._forward_hooks.values())
+            self.assertEqual(len(model.fc._forward_pre_hooks.values()), 1,
                              "Extra pre forward hooks have appeared on a layer")
             # During static quantization non stub layers are provided with quantization observer hook too
-            self.assertEqual(len(model.fc._get_forward_hooks()), num_fwd_hooks,
+            self.assertEqual(len(model.fc._forward_hooks.values()), num_fwd_hooks,
                              "Extra post forward hooks have appeared on a layer")
             # Implicitly check that fw_hook goes after _observer_forward_hook
-            self.assertEqual(list(model.fc._get_forward_hooks().values())[-1], fw_hook,
+            self.assertEqual(list(model.fc._forward_hooks.values())[-1], fw_hook,
                              "_observer_forward_hook is not a first entry of the hooks list")
 
         checkHooksIsPresent(model, True)
@@ -1446,11 +1446,11 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
             prepare_dynamic(model, qconfig_dict)
 
             def checkHooksIsPresent(model):
-                self.assertObjectIn(fw_pre_hook, model.fc1._get_forward_pre_hooks().values())
-                self.assertObjectIn(fw_hook, model.fc1._get_forward_hooks().values())
-                self.assertEqual(len(model.fc1._get_forward_pre_hooks()), 1,
+                self.assertObjectIn(fw_pre_hook, model.fc1._forward_pre_hooks.values())
+                self.assertObjectIn(fw_hook, model.fc1._forward_hooks.values())
+                self.assertEqual(len(model.fc1._forward_pre_hooks.values()), 1,
                                  "Extra pre forward hooks have appeared on a layer")
-                self.assertEqual(len(model.fc1._get_forward_hooks()), 1,
+                self.assertEqual(len(model.fc1._forward_hooks.values()), 1,
                                  "Extra post forward hooks have appeared on a layer")
 
             checkHooksIsPresent(model)

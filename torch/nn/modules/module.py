@@ -86,84 +86,6 @@ class _WrappedHook:
             self.module = weakref.ref(state["module"])
 
 
-# N.B.: This class does NOT derive from `_WrappedHook`, because pre- and post-
-# forward hooks take in args and kwargs as Tuple and Dict instead of unpacked
-# positional and keyword arguments.
-class _ForwardPreHook:
-    def __init__(self, hook: Callable, with_kwargs: bool = False):
-        self.hook: Callable = hook
-        self.with_kwargs: bool = with_kwargs
-
-        functools.update_wrapper(self, hook)
-
-    def __getstate__(self) -> Dict[str, Any]:
-        return {"hook": self.hook, "with_kwargs": self.with_kwargs}
-
-    def __setstate__(self, state: Dict[str, Any]):
-        self.hook = state["hook"]
-        self.with_kwargs = state["with_kwargs"]
-
-    def __call__(
-        self, module: "Module", args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Tuple[Any, Any]:
-        results = (
-            self.hook(module, args, kwargs)
-            if self.with_kwargs
-            else self.hook(module, args)
-        )
-
-        if results is None:
-            return args, kwargs
-
-        if self.with_kwargs:
-            assert isinstance(results, tuple) and len(results) == 2, (
-                f"Forward-pre hook {self.hook} was registered as "
-                "`use_kwargs=True`, which must return a two-element tuple, but "
-                f"got {results}"
-            )
-        else:
-            results = (
-                (results, kwargs)
-                if isinstance(results, tuple)
-                else ((results,), kwargs)
-            )
-
-        return results
-
-
-# N.B.: This class does NOT derive from `_WrappedHook`, because pre- and post-
-# forward hooks take in args and kwargs as Tuple and Dict instead of unpacked
-# positional and keyword arguments.
-class _ForwardHook:
-    def __init__(self, hook: Callable, with_kwargs: bool = False):
-        self.hook: Callable = hook
-        self.with_kwargs: bool = with_kwargs
-
-        functools.update_wrapper(self, hook)
-
-    def __getstate__(self) -> Dict[str, Any]:
-        return {"hook": self.hook, "with_kwargs": self.with_kwargs}
-
-    def __setstate__(self, state: Dict[str, Any]):
-        self.hook = state["hook"]
-        self.with_kwargs = state["with_kwargs"]
-
-    def __call__(
-        self,
-        module: "Module",
-        args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
-        out: Any,
-    ) -> Any:
-        results = (
-            self.hook(module, args, kwargs, out)
-            if self.with_kwargs
-            else self.hook(module, args, out)
-        )
-
-        return out if results is None else results
-
-
 r"""This tracks hooks common to all modules that are executed before/after
 calling forward and backward. This is global state used for debugging/profiling
 purposes"""
@@ -495,8 +417,12 @@ class Module:
     _backward_pre_hooks: Dict[int, Callable]
     _backward_hooks: Dict[int, Callable]
     _is_full_backward_hook: Optional[bool]
-    _forward_hooks: Dict[int, _ForwardHook]
-    _forward_pre_hooks: Dict[int, _ForwardPreHook]
+    _forward_hooks: Dict[int, Callable]
+    # marks whether the corresponding _forward_hooks accept kwargs or not
+    _forward_hooks_with_kwargs: Set[int]
+    _forward_pre_hooks: Dict[int, Callable]
+    # marks whether the corresponding _forward_pre_hooks accept kwargs or not
+    _forward_pre_hooks_with_kwargs: Set[int]
     _state_dict_hooks: Dict[int, Callable]
     _load_state_dict_pre_hooks: Dict[int, Callable]
     _load_state_dict_post_hooks: Dict[int, Callable]
@@ -522,7 +448,9 @@ class Module:
         super().__setattr__('_backward_hooks', OrderedDict())
         super().__setattr__('_is_full_backward_hook', None)
         super().__setattr__('_forward_hooks', OrderedDict())
+        super().__setattr__('_forward_hooks_with_kwargs', set())
         super().__setattr__('_forward_pre_hooks', OrderedDict())
+        super().__setattr__('_forward_pre_hooks_with_kwargs', set())
         super().__setattr__('_state_dict_hooks', OrderedDict())
         super().__setattr__('_load_state_dict_pre_hooks', OrderedDict())
         super().__setattr__('_load_state_dict_post_hooks', OrderedDict())
@@ -1447,18 +1375,13 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
-
-        if isinstance(hook, _ForwardPreHook):
-            self._forward_pre_hooks[handle.id] = hook
-        else:
-            self._forward_pre_hooks[handle.id] = _ForwardPreHook(hook, with_kwargs=with_kwargs)
+        self._forward_pre_hooks[handle.id] = hook
+        if with_kwargs:
+            self._forward_pre_hooks_with_kwargs.add(handle.id)
 
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
-
-    def _get_forward_pre_hooks(self) -> Dict[int, Callable[..., None]]:
-        return OrderedDict([(k, w.hook) for k, w in self._forward_pre_hooks.items()])
 
     def register_forward_hook(
         self,
@@ -1507,18 +1430,13 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
-
-        if isinstance(hook, _ForwardHook):
-            self._forward_hooks[handle.id] = hook
-        else:
-            self._forward_hooks[handle.id] = _ForwardHook(hook, with_kwargs=with_kwargs)
+        self._forward_hooks[handle.id] = hook
+        if with_kwargs:
+            self._forward_hooks_with_kwargs.add(handle.id)
 
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
-
-    def _get_forward_hooks(self) -> Dict[int, Callable[..., None]]:
-        return OrderedDict([(k, w.hook) for k, w in self._forward_hooks.items()])
 
     def _slow_forward(self, *input, **kwargs):
         tracing_state = torch._C._get_tracing_state()
@@ -1540,14 +1458,14 @@ class Module:
                 tracing_state.pop_scope()
         return result
 
-    def _call_impl(self, *input, **kwargs):
+    def _call_impl(self, *args, **kwargs):
         forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
         if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
                 or _global_backward_pre_hooks or _global_backward_hooks
                 or _global_forward_hooks or _global_forward_pre_hooks):
-            return forward_call(*input, **kwargs)
+            return forward_call(*args, **kwargs)
         # Do not call functions when jit is used
         full_backward_hooks, non_full_backward_hooks = [], []
         backward_pre_hooks = []
@@ -1557,49 +1475,44 @@ class Module:
         if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
 
-        if _global_forward_pre_hooks:
-            # N.B.: Wrapping OrderedDict values into a list is necessary as
-            # LazyModuleMixin might change OrderedDict content during iteration.
-            for hook in list(_global_forward_pre_hooks.values()):
-                result = hook(self, input)
-                if result is not None:
-                    if not isinstance(result, tuple):
-                        result = (result,)
-                    input = result
-
-        if self._forward_pre_hooks:
-            # N.B.: Wrapping OrderedDict values into a list is necessary as
-            # LazyModuleMixin might change OrderedDict content during iteration.
-            for hook in list(self._forward_pre_hooks.values()):
-                assert isinstance(hook, _ForwardPreHook), (
-                    "forward_pre hooks must be an instance of "
-                    f"`_ForwardPreHook`, but got {type(hook)}. This "
-                    "means the hook was not registered through the "
-                    "``register_forward_pre_hook`` API."
-                )
-                input, kwargs = hook(self, input, kwargs)  # type: ignore[misc]
+        if _global_forward_pre_hooks or self._forward_pre_hooks:
+            for hook_id, hook in (
+                *_global_forward_pre_hooks.items(),
+                *self._forward_pre_hooks.items(),
+            ):
+                if hook_id in self._forward_pre_hooks_with_kwargs:
+                    result = hook(self, args, kwargs)  # type: ignore[misc]
+                    if result is not None:
+                        assert isinstance(result, tuple) and len(result) == 2, (
+                            "forward pre hook must return None or a tuple of "
+                            f"(args, kwargs), but got {result}."
+                        )
+                        args, kwargs = result
+                else:
+                    result = hook(self, args)
+                    if result is not None:
+                        if not isinstance(result, tuple):
+                            result = (result,)
+                        args = result
 
         bw_hook = None
         if full_backward_hooks or backward_pre_hooks:
             bw_hook = hooks.BackwardHook(self, full_backward_hooks, backward_pre_hooks)
-            input = bw_hook.setup_input_hook(input)
+            args = bw_hook.setup_input_hook(args)
 
-        result = forward_call(*input, **kwargs)
-        if _global_forward_hooks:
-            for hook in list(_global_forward_hooks.values()):
-                hook_result = hook(self, input, result)
+        result = forward_call(*args, **kwargs)
+        if _global_forward_hooks or self._forward_hooks:
+            for hook_id, hook in (
+                *_global_forward_hooks.items(),
+                *self._forward_hooks.items(),
+            ):
+                if hook_id in self._forward_hooks_with_kwargs:
+                    hook_result = hook(self, args, kwargs, result)
+                else:
+                    hook_result = hook(self, args, result)
+
                 if hook_result is not None:
                     result = hook_result
-
-        if self._forward_hooks:
-            for hook in list(self._forward_hooks.values()):
-                assert isinstance(hook, _ForwardHook), (
-                    "forward hooks must be an instance of "
-                    f"`_ForwardHook`, but got {type(hook)}. This "
-                    "means the hook was not registered through the "
-                    "``register_forward_hook`` API."
-                )
-                result = hook(self, input, kwargs, result)
 
         if bw_hook:
             result = bw_hook.setup_output_hook(result)
@@ -1616,7 +1529,7 @@ class Module:
             if grad_fn is not None:
                 for hook in non_full_backward_hooks:
                     grad_fn.register_hook(_WrappedHook(hook, self))
-                self._maybe_warn_non_full_backward_hook(input, result, grad_fn)
+                self._maybe_warn_non_full_backward_hook(args, result, grad_fn)
 
         return result
 
@@ -1627,6 +1540,10 @@ class Module:
         # Support loading old checkpoints that don't have the following attrs:
         if '_forward_pre_hooks' not in self.__dict__:
             self._forward_pre_hooks = OrderedDict()
+        if '_forward_pre_hooks_with_kwargs' not in self.__dict__:
+            self._forward_pre_hooks_with_kwargs = set()
+        if '_forward_hooks_with_kwargs' not in self.__dict__:
+            self._forward_hooks_with_kwargs = set()
         if '_state_dict_hooks' not in self.__dict__:
             self._state_dict_hooks = OrderedDict()
         if '_load_state_dict_pre_hooks' not in self.__dict__:
