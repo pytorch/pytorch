@@ -57,13 +57,7 @@ def traverse_state_dict(
             return True
 
         for entry in values:
-            if isinstance(
-                entry,
-                (
-                    Mapping,
-                    list,
-                ),
-            ) and not _is_terminal(entry):
+            if isinstance(entry, (Mapping, list)) and not _is_terminal(entry):
                 return False
             if keep_traversing is not None and keep_traversing(entry):
                 return False
