@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import contextlib
 import inspect
 import unittest
 
@@ -8,6 +9,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
+
 
 input = torch.ones([10, 10])
 model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
@@ -22,6 +24,7 @@ optim_filenames = set(
         if inspect.isclass(obj)
     ]
 )
+
 
 optim_filenames |= {torch.optim._functional.__file__}
 
@@ -50,10 +53,22 @@ def make_test(optim_cls, exp_frame_cnt=1, closure=None, **kwargs):
     return test_fn
 
 
+@contextlib.contextmanager
+def enable_optimizer_tracing():
+    try:
+        old = set(torch._dynamo.skipfiles.FILENAME_ALLOWLIST)
+        torch._dynamo.skipfiles.FILENAME_ALLOWLIST.update(optim_filenames)
+        yield
+    finally:
+        torch._dynamo.skipfiles.FILENAME_ALLOWLIST.clear()
+        torch._dynamo.skipfiles.FILENAME_ALLOWLIST.update(old)
+
+
 class OptimizerTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+
         # needed until pytorch assertion is changed to enable Adam
         # to be called with capturable=True
         cls._exit_stack.enter_context(
@@ -66,13 +81,7 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.config, "fake_tensor_propagation", False
             )
         )
-        cls._exit_stack.enter_context(
-            unittest.mock.patch.object(
-                torch._dynamo.skipfiles,
-                "FILENAME_ALLOWLIST",
-                torch._dynamo.skipfiles.FILENAME_ALLOWLIST.union(optim_filenames),
-            )
-        )
+        cls._exit_stack.enter_context(enable_optimizer_tracing())
 
     test_sgd = make_test(torch.optim.SGD, lr=0.01)
     # lgbfs has data-dependent control and internally iterates
