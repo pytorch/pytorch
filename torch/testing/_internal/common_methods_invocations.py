@@ -263,8 +263,8 @@ def sample_inputs_as_strided(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(input_t, args=(output_shape, stride), kwargs=kwargs)
 
     # as_strided on offset, partial views
-    yield SampleInput(make_arg((20,))[5:15], (2, 2), (1, 2))
-    yield SampleInput(make_arg((20,))[5:15], (2, 2), (1, 2), storage_offset=0)
+    # yield SampleInput(make_arg((20,))[5:15], args=((2, 2), (1, 2)))
+    # yield SampleInput(make_arg((20,))[5:15], args=((2, 2), (1, 2)), kwargs={'storage_offset': 0})
 
 def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
