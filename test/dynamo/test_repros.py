@@ -1891,14 +1891,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             getitem = None
             return (normalize,)
 
-        args = [((2, 50, 256), (1, 256, 1), torch.float16, "cuda", False)]
+        args = [((2, 50, 256), (1, 256, 1), torch.float16, "cpu", False)]
         args = [
             rand_strided(sh, st, dt, dev).requires_grad_(rg)
             for (sh, st, dt, dev, rg) in args
         ]
 
         opt_foo = torch._dynamo.optimize("aot_inductor_debug")(foo)
-        with torch.cuda.amp.autocast(enabled=True):
+        with torch.cpu.amp.autocast(enabled=True):
             ref = foo(*args)[0]
             res = foo(*args)[0]
             self.assertEqual(ref.dtype, res.dtype)
