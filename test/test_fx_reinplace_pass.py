@@ -345,9 +345,8 @@ def forward(self):
     ones = torch.ops.aten.ones.default([4, 2, 4], device = device(type='cpu'), pin_memory = False)
     slice_1 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
     slice_2 = torch.ops.aten.slice.Tensor(slice_1, 1, 2, 9223372036854775807);  slice_1 = None
+    copy = torch.ops.aten.copy_.default(slice_2, ones);  slice_2 = ones = None
     slice_3 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
-    slice_tensor = torch.ops.aten.slice.Tensor(slice_3, 1, 2, 9223372036854775807);  slice_3 = None
-    copy__default = torch.ops.aten.copy_.default(slice_tensor, ones);  slice_tensor = ones = None
     return zeros
     """)
 

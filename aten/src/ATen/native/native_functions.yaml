@@ -1535,6 +1535,8 @@
 
 - func: copy(Tensor self, Tensor src, bool non_blocking=False) -> Tensor
   variants: function
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: copy
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   variants: method
