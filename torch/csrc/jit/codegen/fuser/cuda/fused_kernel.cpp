@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 
-#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
+// #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 
 #include <ATen/ATen.h>
@@ -105,7 +105,7 @@ FusedKernelCUDA::FusedKernelCUDA(
           has_random),
       device_(device) {
   // Initializes driver's API context (if necessary)
-  executor_utils::initializeCudaContext();
+  // executor_utils::initializeCudaContext();
 
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
