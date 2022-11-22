@@ -10703,8 +10703,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Numerous errors"), 'TestFwdGradients'),
                DecorateInfo(unittest.skip("Numerous errors"), 'TestBwdGradients'))),
     OpInfo('as_strided_scatter',
-           op=lambda x, src, size, stride, storage_offset=0:
-               torch.as_strided_scatter(x, src, size, stride, storage_offset=storage_offset),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
            supports_forward_ad=True,
@@ -18243,15 +18241,6 @@ python_ref_db = [
         "_refs.as_strided_scatter",
         torch_opinfo_name="as_strided_scatter",
         supports_nvfuser=False,
-        skips=(
-            # # TODO: fix and/or update to xfails
-            # DecorateInfo(unittest.skip("Errors when storage_offset is included"),
-            #              'TestCommon', 'test_python_ref_meta'),
-            # # cloned_mutable_input.is_same(returned_output) INTERNAL ASSERT FAILED
-            # DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
-            # DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
-            # DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
-        ),
     ),
     PythonRefInfo(
         "_refs.broadcast_shapes",

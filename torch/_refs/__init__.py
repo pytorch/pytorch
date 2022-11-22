@@ -2512,10 +2512,8 @@ def as_strided_scatter(
     stride: StrideType,
     storage_offset: Optional[int] = None,
 ) -> TensorLikeType:
-    output = input.clone()
-    output_view = output.as_strided(size, stride, storage_offset)
-    output_view.copy_(src)
-    return output
+    storage_offset_int = 0 if storage_offset is None else storage_offset
+    return prims.as_strided_scatter(input, src, size, stride, storage_offset_int)
 
 
 def broadcast_shapes(*shapes) -> ShapeType:
