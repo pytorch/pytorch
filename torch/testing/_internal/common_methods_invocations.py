@@ -958,11 +958,11 @@ def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **
 
 def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-    return (SampleInput(make_arg(S, M), make_arg(M)),)
+    yield SampleInput(make_arg(S, M), make_arg(M))
 
 def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-    return (SampleInput(make_arg(M, S, M), make_arg(M, M, S)),)
+    yield SampleInput(make_arg(M, S, M), make_arg(M, M, S))
 
 def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -1569,9 +1569,9 @@ def sample_inputs_logcumsumexp(self, device, dtype, requires_grad, **kwargs):
             yield SampleInput(t, dim)
 
 def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
-    return (SampleInput((make_tensor((S, S), dtype=dtype, device=device,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad))),)
+    yield SampleInput((make_tensor((S, S), dtype=dtype, device=device,
+                                   low=None, high=None,
+                                   requires_grad=requires_grad)))
 
 
 def error_inputs_trace(op, device):
@@ -1872,6 +1872,9 @@ def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
 
     for input_shape1, input_shape2, kwargs in cases:
         yield SampleInput([make_arg(input_shape1), make_arg(input_shape2)], kwargs=kwargs)
+
+    # from coat_lite_mini
+    yield SampleInput([make_arg((2, 2, 2, 2), memory_format=torch.channels_last)], args=(1,),)
 
 def error_inputs_cat(op_info, device, **kwargs):
 
@@ -5278,6 +5281,11 @@ def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
                                  out=make_arg(M, S, dtype=torch.complex64)),
                      error_type=RuntimeError, error_regex=error_out)
 
+def sample_inputs_logaddexp(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    shape = (S, S)
+    yield SampleInput(make_arg(shape), make_arg(shape))
+
 def sample_inputs_prod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
         # shrink values to be in the interval [-1, +1] for better precision in gradgradcheck
@@ -5319,7 +5327,7 @@ def error_inputs_neg(op_info, device, **kwargs):
     msg = ("Negation, the `\\-` operator, on a bool tensor is not supported."
            " If you are trying to invert a mask, use the `\\~` or"
            " `logical_not\\(\\)` operator instead.")
-    return (ErrorInput(si, error_regex=msg),)
+    yield ErrorInput(si, error_regex=msg)
 
 def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
@@ -6078,6 +6086,12 @@ def sample_inputs_tril_triu(op_info, device, dtype, requires_grad, **kwargs):
 
     for shape, args in cases:
         yield SampleInput(make_arg(shape), args=args)
+
+def error_inputs_tril_triu(opinfo, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # error inputs for input.ndim <= 2
+    yield ErrorInput(SampleInput(make_arg((4,))), error_regex="input tensor must have at least 2 dimensions")
 
 def sample_inputs_trilu_indices(op_info, device, dtype, requires_grad, **kwargs):
     # (row, col, offset)
@@ -8315,7 +8329,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
 
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -9925,7 +9938,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linspace,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -9953,7 +9965,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_logpace,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -10057,18 +10068,14 @@ op_db: List[OpInfo] = [
            dtypesIfROCM=floating_types_and(torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=lambda op_info, device, dtype, requires_grad=False, **kwargs:
-           (SampleInput(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-                        args=(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),)),)),
+           sample_inputs_func=sample_inputs_logaddexp),
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16),
            dtypesIfROCM=floating_types_and(torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=lambda op_info, device, dtype, requires_grad=False, **kwargs:
-           (SampleInput(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-                        args=(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),)),)),
+           sample_inputs_func=sample_inputs_logaddexp),
     UnaryUfuncInfo('logical_not',
                    ref=np.logical_not,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -11710,7 +11717,8 @@ op_db: List[OpInfo] = [
                # (see sample_inputs_max_unpool_grad to find out more).
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD',
+                            active_if=(not IS_MACOS)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad',
                             device_type='cpu'),
            )),
@@ -11742,7 +11750,8 @@ op_db: List[OpInfo] = [
                # and if there are several indices pointing to the same memory,
                # gradcheck is oblivious about that and cannot perturb them all at once
                # (see sample_inputs_max_unpool_grad to find out more).
-               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD'),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD',
+                            active_if=(not IS_MACOS)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
@@ -11779,7 +11788,8 @@ op_db: List[OpInfo] = [
                # and if there are several indices pointing to the same memory,
                # gradcheck is oblivious about that and cannot perturb them all at once
                # (see sample_inputs_max_unpool_grad to find out more).
-               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD'),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD',
+                            active_if=(not IS_MACOS)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
@@ -12008,16 +12018,21 @@ op_db: List[OpInfo] = [
             # This is only failing on Linux Bionic 3.10 Cuda 11.6
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
                          device_type='cuda', active_if=_get_torch_cuda_version() >= (11, 6)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
+                         device_type='cuda', dtypes=(torch.float32,)),
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # Doesn't support autocasting
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensorNonErroring', 'test_fake_autocast', device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
+            # Forward works for dtype=float64 which is the math path
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
             # No meta function
             DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', device_type='cuda'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),),
     ),
     UnaryUfuncInfo(
@@ -14570,7 +14585,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_ones_zeros,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -14591,7 +14605,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_ones_zeros,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -14612,7 +14625,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_full,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -15011,6 +15023,8 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True,
            skips=(
+               # https://github.com/pytorch/pytorch/issues/89353
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref_mps'),
                # RuntimeError: Arguments for call not valid.
                #               Expected a value of type 'List[Tensor]' for argument
                #               'tensors' but instead found type 'Tensor (inferred)'.
@@ -15363,12 +15377,14 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           error_inputs_func=error_inputs_tril_triu,
            sample_inputs_func=sample_inputs_tril_triu),
     OpInfo('triu',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           error_inputs_func=error_inputs_tril_triu,
            sample_inputs_func=sample_inputs_tril_triu),
     OpInfo('triu_indices',
            dtypes=_dispatch_dtypes((torch.int32, torch.int64)),
@@ -17419,11 +17435,13 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.celu",
         torch_opinfo_name="nn.functional.celu",
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.threshold",
         torch_opinfo_name="nn.functional.threshold",
         supports_nvfuser=False,
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.nn.functional.dropout",
@@ -17458,11 +17476,13 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.elu",
         torch_opinfo_name="nn.functional.elu",
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.hardtanh",
         torch_opinfo_name="nn.functional.hardtanh",
         supports_nvfuser=False,
+        supports_out=True,
     ),
     PythonRefInfo(  # TODO: Port this to an UnaryOpInfo
         "_refs.nn.functional.gelu",
@@ -17501,6 +17521,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.nn.functional.log_softmax",
@@ -17526,18 +17547,22 @@ python_ref_db = [
         "_refs.nn.functional.relu",
         torch_opinfo_name="nn.functional.relu",
         supports_nvfuser=False,
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu6",
         torch_opinfo_name="nn.functional.relu6",
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.mish",
         torch_opinfo_name="nn.functional.mish",
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.selu",
         torch_opinfo_name="nn.functional.selu",
+        supports_out=True,
     ),
     PythonRefInfo(
         "_refs.nn.functional.softmax",

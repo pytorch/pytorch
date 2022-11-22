@@ -23,8 +23,12 @@ class BaseListVariable(VariableTracker):
             tuple: TupleVariable,
         }[obj]
 
-    def __init__(self, items: List[VariableTracker], **kwargs):
-        super(BaseListVariable, self).__init__(**kwargs)
+    def __init__(
+        self, items: List[VariableTracker], recursively_contains=None, **kwargs
+    ):
+        super(BaseListVariable, self).__init__(
+            recursively_contains=recursively_contains, **kwargs
+        )
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
         self.items: List[VariableTracker] = items
@@ -145,9 +149,13 @@ class ListVariable(BaseListVariable):
         if name == "append" and self.mutable_local:
             assert not kwargs
             (arg,) = args
+            new_rec_contains = self.recursively_contains.union(arg.recursively_contains)
+            new_rec_contains.add(arg.mutable_local)
             tx.replace_all(
                 self,
-                ListVariable(self.items + [arg], **options),
+                ListVariable(
+                    self.items + [arg], recursively_contains=new_rec_contains, **options
+                ),
             )
             return ConstantVariable(None)
         elif (
@@ -454,8 +462,10 @@ class SliceVariable(BaseListVariable):
 
 
 class ListIteratorVariable(VariableTracker):
-    def __init__(self, items, index: int = 0, **kwargs):
-        super(ListIteratorVariable, self).__init__(**kwargs)
+    def __init__(self, items, index: int = 0, recursively_contains=None, **kwargs):
+        super(ListIteratorVariable, self).__init__(
+            recursively_contains=recursively_contains, **kwargs
+        )
         assert isinstance(items, list)
         # Removing this check as it slows things down too much
         # https://github.com/pytorch/pytorch/pull/87533#issuecomment-1287574492
