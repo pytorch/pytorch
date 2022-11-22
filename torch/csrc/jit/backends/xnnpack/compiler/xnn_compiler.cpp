@@ -42,24 +42,23 @@ void XNNCompiler::compileModel(
       case fb_xnnpack::XValueUnion::XNNTensorValue: {
         auto tensor_value = value->xvalue_as_XNNTensorValue();
 
-        const void* data_ptr = nullptr;
-        auto buffer_idx = tensor_value->constant_buffer_idx();
-        if (buffer_idx != 0) {
-          // TODO: @maxren implement data handling
-          TORCH_CHECK(false, "Constant data handling not yet implemented")
-        }
         std::vector<size_t> dims_data;
         for (auto dim : *tensor_value->dims()) {
           dims_data.push_back(static_cast<size_t>(dim));
         }
 
         uint32_t id = XNN_INVALID_VALUE_ID;
+        const auto& constant_buffer = *flatbuffer_graph->constant_buffer();
+        auto buffer_idx = tensor_value->constant_buffer_idx();
+        const auto buffer_ptr = buffer_idx == 0
+            ? nullptr
+            : constant_buffer[buffer_idx]->storage()->data();
         status = xnn_define_tensor_value(
             /*subgraph=*/subgraph_ptr,
             /*datatype=*/xnn_datatype_fp32,
             /*num_dims=*/tensor_value->num_dims(),
             /*dims=*/dims_data.data(),
-            /*data=*/data_ptr,
+            /*data=*/buffer_ptr,
             /*external_id=*/tensor_value->external_id(),
             /*flags=*/tensor_value->flags(),
             /*id_out=*/&id);
