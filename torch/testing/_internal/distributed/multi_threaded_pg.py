@@ -7,7 +7,14 @@ from typing import Dict, Optional, Tuple
 
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import _create_work_from_future, Store
+from torch._C._distributed_c10d import (
+    _create_work_from_future,
+    AllgatherOptions,
+    BroadcastOptions,
+    ReduceScatterOptions,
+    ScatterOptions,
+    Store,
+)
 from torch.futures import Future
 from torch.utils._pytree import tree_flatten
 
@@ -45,6 +52,47 @@ class AllGather:
                 with torch.no_grad():
                     dest_tensor.copy_(src_tensor)
 
+class Scatter:
+    def __init__(self, src):
+        self.src = src
+
+    def work(self, data):
+        src_in_tensor_list = data[self.src][1]
+        # Can't handle scatter with multiple input tensor list
+        assert len(src_in_tensor_list) == 1
+        src_in_tensors = src_in_tensor_list[0]
+
+        for rank, each_rank_data in enumerate(data):
+            out_tensor_list = each_rank_data[0]
+            # Can't handle scatter with multiple output tensor
+            assert len(out_tensor_list) == 1
+            dest_tensor = out_tensor_list[0]
+            with torch.no_grad():
+                dest_tensor.copy_(src_in_tensors[rank])
+
+class ReduceScatter:
+    def __init__(self, op):
+        if op != dist.ReduceOp.SUM:
+            raise NotImplementedError("ReduceScatter only supports SUM on threaded pg for now.")
+        self.op = op
+
+    def work(self, data):
+        start_reduction = [False for _ in range(len(data))]
+        for each_rank_data in data:
+            # Can't handle reduce_scatter with multiple scatter list
+            assert len(each_rank_data[1]) == 1
+            to_scatter = each_rank_data[1][0]
+            for i in range(len(to_scatter)):
+                dest_tensor_on_rank_i = data[i][0]
+                # Can't handle reduce_scatter with multiple output tensor
+                assert len(dest_tensor_on_rank_i) == 1
+                if not start_reduction[i]:
+                    with torch.no_grad():
+                        dest_tensor_on_rank_i[0].copy_(to_scatter[i])
+                    start_reduction[i] = True
+                else:
+                    with torch.no_grad():
+                        dest_tensor_on_rank_i[0].add_(to_scatter[i])
 
 class Broadcast:
     def __init__(self, src):
@@ -135,15 +183,27 @@ class ProcessLocalGroup(dist.ProcessGroup):
             if cls._cur_coll == collective:
                 cls._cur_coll = None
 
-    def allgather(self, output_tensors, input_tensor, options):
+    def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
         coll = ProcessLocalGroup._start_coll(self._world, AllGather())
         res = coll.join(self._rank, (output_tensors, input_tensor))
         ProcessLocalGroup._end_coll(coll)
         return res
 
-    def broadcast(self, tensor_list, opts):
+    def broadcast(self, tensor_list, opts=BroadcastOptions()):
         coll = ProcessLocalGroup._start_coll(self._world, Broadcast(opts.rootRank))
         res = coll.join(self._rank, tensor_list)
+        ProcessLocalGroup._end_coll(coll)
+        return res
+
+    def scatter(self, output_tensors, input_tensors, opts=ScatterOptions()):
+        coll = ProcessLocalGroup._start_coll(self._world, Scatter(opts.rootRank))
+        res = coll.join(self._rank, (output_tensors, input_tensors))
+        ProcessLocalGroup._end_coll(coll)
+        return res
+
+    def reduce_scatter(self, output_tensor, scatter_list, opts=ReduceScatterOptions()):
+        coll = ProcessLocalGroup._start_coll(self._world, ReduceScatter(opts.reduceOp))
+        res = coll.join(self._rank, (output_tensor, scatter_list))
         ProcessLocalGroup._end_coll(coll)
         return res
 

@@ -13,6 +13,8 @@ import weakref
 from typing import Any, Callable
 from unittest.mock import patch
 
+import numpy as np
+
 import torch
 
 import torch._dynamo
@@ -21,6 +23,7 @@ from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -93,6 +96,8 @@ unary_list = [
     torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False),
     torch.nn.GELU(approximate="none"),
     torch.nn.GELU(approximate="tanh"),
+    torch.nn.ReLU6(),
+    torch.nn.SiLU(),
 ]
 
 
@@ -666,6 +671,12 @@ class CommonTemplate:
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
 
+    def test_sgn_extremal(self):
+        def fn(a):
+            return (torch.sgn(a),)
+
+        self.common(fn, [torch.tensor([np.nan, np.inf, -np.inf, 0])])
+
     def test_max_min(self):
         def fn(a, b):
             return (torch.maximum(a, b), torch.minimum(a, b))
@@ -1155,6 +1166,45 @@ class CommonTemplate:
             )
 
         self.common(fn, (1024, 100))
+
+    def test_div_zero_dim(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
+            )
+
+        for dtype in (torch.float32, torch.int64):
+            self.common(
+                fn,
+                (
+                    make_tensor(10, device="cpu", dtype=dtype),
+                    make_tensor((), device="cpu", dtype=dtype, exclude_zero=True),
+                ),
+            )
+            self.common(
+                fn,
+                (
+                    make_tensor((), device="cpu", dtype=dtype),
+                    make_tensor(10, device="cpu", dtype=dtype, exclude_zero=True),
+                ),
+            )
+
+    def test_div_prim(self):
+        def fn(a, b):
+            return (torch.ops.prims.div(a, b),)
+
+        for dtype in (torch.float32, torch.int64):
+            self.common(
+                fn,
+                (
+                    make_tensor(100, device="cpu", dtype=dtype),
+                    make_tensor(100, device="cpu", dtype=dtype, exclude_zero=True),
+                ),
+            )
 
     def test_both_scalars(self):
         def fn(a, b):
@@ -2578,6 +2628,25 @@ class CommonTemplate:
 
         shape = [1, 2, 6, 6]
         self.common(fn, (torch.randn(shape), torch.randn(shape)))
+
+    def test_fmod_zero_dim(self):
+        def fn(a, b):
+            return (torch.fmod(a, b),)
+
+        self.common(
+            fn,
+            (
+                make_tensor(10, device="cpu", dtype=torch.float32),
+                make_tensor((), device="cpu", dtype=torch.float32),
+            ),
+        )
+        self.common(
+            fn,
+            (
+                make_tensor((), device="cpu", dtype=torch.float32),
+                make_tensor(10, device="cpu", dtype=torch.float32),
+            ),
+        )
 
     def test_log2(self):
         def fn(x):
@@ -4525,7 +4594,11 @@ if HAS_CPU:
 
             v = torch.randn(10)
             result = fn(v)
-            assert same(result, mod(v))
+            # TODO: OMP parallel reduction order is not deterministic.
+            # Hence, the accurarcy might vary up and down. For short term,
+            # we increase the tolerance and will fix it later by using
+            # aten parallel.
+            assert same(result, mod(v), tol=5e-1)
 
         def test_inplace_add_alpha(self):
             def fn(x, y):
@@ -4595,7 +4668,79 @@ if HAS_CPU:
             self.assertFalse(complex_memory_overlap(gathered.t()))
 
         @unittest.skipIf(
-            not codecache.get_cpu_proc_info(), "Does not support vectorization"
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch.object(config, "dynamic_shapes", True)
+        @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+        @patch.object(functorch_config, "use_dynamic_shapes", True)
+        def test_vec_dynamic_shapes(self):
+            def fn(x):
+                return torch.softmax(x, -1)
+
+            value = torch.randn((2, 10))
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(value)
+
+                real_out = fn(value)
+                compiled_out = opt_fn(value)
+                assert same(real_out, compiled_out, equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count < 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_auto_simd(self):
+            vec_avx512 = codecache.supported_vec_isa_list[0]
+            vec_avx2 = codecache.supported_vec_isa_list[1]
+            self.assertTrue(vec_avx512.bit_width() == 512)
+            self.assertTrue(vec_avx2.bit_width() == 256)
+            self.assertTrue(vec_avx512.nelements() == 16)
+            self.assertTrue(vec_avx2.nelements() == 8)
+            self.assertTrue(vec_avx512.nelements(torch.bfloat16) == 32)
+            self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
+
+            with patch.object(config.cpp, "simdlen", None):
+                isa = codecache.pick_vec_isa()
+                if vec_avx512 in codecache.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512)
+                else:
+                    self.assertTrue(isa == vec_avx2)
+
+            with patch.object(config.cpp, "simdlen", 0):
+                isa = codecache.pick_vec_isa()
+                self.assertFalse(isa)
+
+            with patch.object(config.cpp, "simdlen", 1):
+                isa = codecache.pick_vec_isa()
+                self.assertFalse(isa)
+
+            with patch.object(config.cpp, "simdlen", 257):
+                isa = codecache.pick_vec_isa()
+                self.assertFalse(isa)
+
+            with patch.object(config.cpp, "simdlen", 513):
+                isa_list = codecache.valid_vec_isa_list()
+                if vec_avx512 in isa_list:
+                    self.assertFalse(isa)
+
+            with patch.object(config.cpp, "simdlen", 512):
+                isa_list = codecache.valid_vec_isa_list()
+                if vec_avx512 in isa_list:
+                    isa = codecache.pick_vec_isa()
+                    self.assertTrue(isa == vec_avx512)
+
+            with patch.object(config.cpp, "simdlen", 256):
+                isa_list = codecache.valid_vec_isa_list()
+                if vec_avx2 in isa_list:
+                    isa = codecache.pick_vec_isa()
+                    self.assertTrue(isa == vec_avx2)
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
         def test_sign_cpu_only(self):
@@ -4606,7 +4751,7 @@ if HAS_CPU:
             x[0, 0] = torch.nan
             x[1, -1] = torch.nan
 
-            with patch.object(config.cpp, "simdlen", 8):
+            with patch.object(config.cpp, "simdlen", None):
                 torch._dynamo.reset()
                 metrics.reset()
                 traced = make_fx(fn)(x)
@@ -4619,7 +4764,7 @@ if HAS_CPU:
         # other platforms support, we just need to add the ISA info to the supported_vector_isa
         # and include proper aten vectorization head file.
         @unittest.skipIf(
-            not codecache.get_cpu_proc_info(), "Does not support vectorization"
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
         def test_vec_kernel_cpu_only(self):
@@ -4658,7 +4803,15 @@ if HAS_CPU:
             x1 = torch.randn((10, 20))
             x2 = torch.randn((10, 20))
 
-            with patch.object(config.cpp, "simdlen", 8):
+            with patch.object(config.cpp, "simdlen", 1):
+                torch._dynamo.reset()
+                metrics.reset()
+                traced = make_fx(fn)(x1, x2)
+                compiled = compile_fx_inner(traced, [x1, x2])
+                assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 0
+
+            with patch.object(config.cpp, "simdlen", None):
                 torch._dynamo.reset()
                 metrics.reset()
                 traced = make_fx(fn)(x1, x2)
