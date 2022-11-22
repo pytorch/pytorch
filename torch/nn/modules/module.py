@@ -1495,11 +1495,13 @@ class Module:
                 if hook_id in self._forward_pre_hooks_with_kwargs:
                     result = hook(self, args, kwargs)  # type: ignore[misc]
                     if result is not None:
-                        assert isinstance(result, tuple) and len(result) == 2, (
-                            "forward pre-hook must return None or a tuple of "
-                            f"(new_args, new_kwargs), but got {result}."
-                        )
-                        args, kwargs = result
+                        if isinstance(result, tuple) and len(result) == 2:
+                            args, kwargs = result
+                        else:
+                            raise RuntimeError(
+                                "forward pre-hook must return None or a tuple "
+                                f"of (new_args, new_kwargs), but got {result}."
+                            )
                 else:
                     result = hook(self, args)
                     if result is not None:

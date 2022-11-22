@@ -37,7 +37,7 @@ class RemovableHandle(object):
 
         if self.extra_dict_ref is not None:
             extra_dict = self.extra_dict_ref()
-            if extra_dict is not None:
+            if extra_dict is not None and self.id in extra_dict:
                 del extra_dict[self.id]
 
     def __getstate__(self):
