@@ -230,6 +230,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "scatter_add": {f16},
+    "scatter_reduce.sum": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
     "segment_reduce.lengths": {f16, f32, f64},
     "sgn": {f16, f32, f64},
