@@ -3,6 +3,7 @@
 import builtins
 import contextlib
 import copy
+import dataclasses
 import functools
 import inspect
 import math
@@ -3791,13 +3792,16 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         for obj in _BACK_COMPAT_OBJECTS:
             if isinstance(obj, type):
-                public_members = [name for name in obj.__dict__ if not name.startswith('_')]
+                if dataclasses.is_dataclass(obj):
+                    public_members = [field.name for field in dataclasses.fields(obj) if not field.name.startswith('_')]
+                else:
+                    public_members = [name for name in obj.__dict__ if not name.startswith('_')]
                 class_method_strs.append(f'{torch.typename(obj)} {sorted(public_members)}')
 
         class_method_strs.sort()
 
         try:
-            self.assertExpected('\n'.join(class_method_strs), 'fx_backcompat_class_members')
+            self.assertExpected('\n'.join(class_method_strs) + '\n', 'fx_backcompat_class_members')
         except AssertionError as e:
             msg = f"{e}\n****** ERROR ******\nAn FX class that has been marked " \
                   f"as backwards-compatible has experienced change in its public members. See the " \

@@ -1,15 +1,18 @@
+from dataclasses import dataclass
+
 import torch
 import torch.fx
 import traceback
 
 from torch.fx.node import Node, map_aggregate
-from typing import Any, Tuple, NamedTuple, Optional, Dict
+from typing import Any, Tuple, Optional, Dict
 from torch.fx._compatibility import compatibility
 
 __all__ = ['TensorMetadata', 'ShapeProp']
 
 @compatibility(is_backward_compatible=True)
-class TensorMetadata(NamedTuple):
+@dataclass
+class TensorMetadata:
     # TensorMetadata is a structure containing pertinent information
     # about a tensor within a PyTorch program.
 
