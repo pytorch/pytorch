@@ -88,7 +88,9 @@ def dynamo_timed(func):
             compilation_metrics[key] = []
         t0 = time.time()
         r = func(*args, **kwargs)
-        compilation_metrics[key].append(time.time() - t0)
+        latency = time.time() - t0
+        # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
+        compilation_metrics[key].append(latency)
         return r
 
     return time_wrapper
