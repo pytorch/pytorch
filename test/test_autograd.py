@@ -63,6 +63,30 @@ def graph_desc(fn):
 
 class TestAutograd(TestCase):
 
+    def test_grad_mode_class_decoration(self):
+        # Decorating class is deprecated and should not be used
+        with self.assertWarnsRegex(UserWarning, "Decorating classes is deprecated"):
+            @torch.no_grad()
+            class Foo():
+                pass
+
+        # Decorating functions or methods is fine though
+        with warnings.catch_warnings(record=True) as w:
+            @torch.no_grad()
+            def foo():
+                pass
+
+            class Foo():
+                @torch.no_grad()
+                def __init__():
+                    pass
+
+                @torch.no_grad()
+                def foo():
+                    pass
+
+        self.assertEqual(len(w), 0)
+
     def test_tensor_grad_warnings(self):
         dummy = torch.empty(1)
 
