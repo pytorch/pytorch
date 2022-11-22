@@ -510,7 +510,6 @@ class OutputGraph(fx.Tracer):
             if example:
                 result.extend(example)
             else:
-                breakpoint()
                 # Fallback, in case fake_tensor was not set
                 # Particularly for graph args that are not tensors
                 result.extend(arg.get_examples())
