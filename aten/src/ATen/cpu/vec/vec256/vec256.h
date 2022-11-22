@@ -266,16 +266,21 @@ inline Vectorized<int8_t> flip(const Vectorized<int8_t> & v) {
   return _mm256_permute2x128_si256(reversed, reversed, 1);
 }
 
-// Wait for https://github.com/pytorch/pytorch/pull/89284 to uncomment
-// template<>
-// inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
-//   const __m256i mask_uint8 = _mm256_set_epi8(
-//     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-//     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
-//   );
-//   auto reversed = _mm256_shuffle_epi8(v, mask_uint8);
-//   return _mm256_permute2x128_si256(reversed, reversed, 1);
-// }
+template<>
+inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
+  // Temporary hack before Vectorized<uint8_t> is properly implemented
+  // in https://github.com/pytorch/pytorch/pull/89284
+  __m256i d = _mm256_loadu_si256((__m256i *) v.as_bytes());
+  const __m256i mask_uint8 = _mm256_set_epi8(
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+  );
+  auto reversed = _mm256_shuffle_epi8(d, mask_uint8);
+  auto o = _mm256_permute2x128_si256(reversed, reversed, 1);
+  Vectorized<uint8_t> output;
+  _mm256_storeu_si256((__m256i *) output.as_bytes(), o);
+  return output;
+}
 
 #endif // (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 

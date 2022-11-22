@@ -240,19 +240,25 @@ inline Vectorized<int8_t> flip(const Vectorized<int8_t> & v) {
   return _mm512_permutexvar_epi64(mask2, reversed_vec);
 }
 
-// Wait for https://github.com/pytorch/pytorch/pull/89284 to uncomment
-// template<>
-// inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
-//   const __m512i mask1 = _mm512_set_epi8(
-//       0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-//       0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-//       0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-//       0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
-//   );
-//   const __m512i mask2 = _mm512_set_epi64(1, 0, 3, 2, 5, 4, 7, 6);
-//   auto reversed_vec = _mm512_shuffle_epi8(v, mask1);
-//   return _mm512_permutexvar_epi64(mask2, reversed_vec);
-// }
+template<>
+inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
+  // Temporary hack before Vectorized<uint8_t> is properly implemented
+  // in https://github.com/pytorch/pytorch/pull/89284
+  __m512i d = _mm512_loadu_si512((__m512i*) v.as_bytes());
+  const __m512i mask1 = _mm512_set_epi8(
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+  );
+  const __m512i mask2 = _mm512_set_epi64(1, 0, 3, 2, 5, 4, 7, 6);
+  auto reversed_vec = _mm512_shuffle_epi8(d, mask1);
+  auto o = _mm512_permutexvar_epi64(mask2, reversed_vec);
+  Vectorized<uint8_t> output;
+  _mm512_storeu_si512((__m512i*) output.as_bytes(), o);
+  return output;
+
+}
 
 #endif // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
