@@ -17,7 +17,7 @@ from torch.distributed.checkpoint.metadata import (
     STATE_DICT_TYPE,
 )
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
-from torch.distributed._tensor import DTensor as DT
+from torch.distributed._tensor import DTensor
 
 PATH_ITEM = Union[str, int]
 OBJ_PATH = Tuple[PATH_ITEM, ...]
@@ -152,12 +152,12 @@ def _print_nested(
                 f"{shard.metadata.shard_offsets} ",
                 print_fun=print_fun,
             )
-    elif type(value) is (DT):
+    elif type(value) is (DTensor):
         print_fun(f"{padding}{prefix} DistributedTensor size {value.size()}")
+        # TODO: add local offset for _local_tensor in print_nested.
         _print_nested(
             value._local_tensor,
             f"{padding}\t",
-            "(offset ???) ",
             print_fun=print_fun,
         )
     elif isinstance(value, torch.Tensor):
