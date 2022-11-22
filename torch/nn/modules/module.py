@@ -418,11 +418,15 @@ class Module:
     _backward_hooks: Dict[int, Callable]
     _is_full_backward_hook: Optional[bool]
     _forward_hooks: Dict[int, Callable]
-    # marks whether the corresponding _forward_hooks accept kwargs or not
-    _forward_hooks_with_kwargs: Set[int]
+    # Marks whether the corresponding _forward_hooks accept kwargs or not. All
+    # As JIT does not support Set[int], this dict is used as a set, where all
+    # hooks represented in this dict accept kwargs.
+    _forward_hooks_with_kwargs: Dict[int, bool]
     _forward_pre_hooks: Dict[int, Callable]
-    # marks whether the corresponding _forward_pre_hooks accept kwargs or not
-    _forward_pre_hooks_with_kwargs: Set[int]
+    # Marks whether the corresponding _forward_hooks accept kwargs or not. All
+    # As JIT does not support Set[int], this dict is used as a set, where all
+    # hooks represented in this dict accept kwargs.
+    _forward_pre_hooks_with_kwargs: Dict[int, bool]
     _state_dict_hooks: Dict[int, Callable]
     _load_state_dict_pre_hooks: Dict[int, Callable]
     _load_state_dict_post_hooks: Dict[int, Callable]
@@ -448,9 +452,9 @@ class Module:
         super().__setattr__('_backward_hooks', OrderedDict())
         super().__setattr__('_is_full_backward_hook', None)
         super().__setattr__('_forward_hooks', OrderedDict())
-        super().__setattr__('_forward_hooks_with_kwargs', set())
+        super().__setattr__('_forward_hooks_with_kwargs', dict())
         super().__setattr__('_forward_pre_hooks', OrderedDict())
-        super().__setattr__('_forward_pre_hooks_with_kwargs', set())
+        super().__setattr__('_forward_pre_hooks_with_kwargs', dict())
         super().__setattr__('_state_dict_hooks', OrderedDict())
         super().__setattr__('_load_state_dict_pre_hooks', OrderedDict())
         super().__setattr__('_load_state_dict_post_hooks', OrderedDict())
@@ -1377,7 +1381,7 @@ class Module:
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
         self._forward_pre_hooks[handle.id] = hook
         if with_kwargs:
-            self._forward_pre_hooks_with_kwargs.add(handle.id)
+            self._forward_pre_hooks_with_kwargs[handle.id] = True
 
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
@@ -1432,7 +1436,7 @@ class Module:
         handle = hooks.RemovableHandle(self._forward_hooks)
         self._forward_hooks[handle.id] = hook
         if with_kwargs:
-            self._forward_hooks_with_kwargs.add(handle.id)
+            self._forward_hooks_with_kwargs[handle.id] = True
 
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
@@ -1541,9 +1545,9 @@ class Module:
         if '_forward_pre_hooks' not in self.__dict__:
             self._forward_pre_hooks = OrderedDict()
         if '_forward_pre_hooks_with_kwargs' not in self.__dict__:
-            self._forward_pre_hooks_with_kwargs = set()
+            self._forward_pre_hooks_with_kwargs = dict()
         if '_forward_hooks_with_kwargs' not in self.__dict__:
-            self._forward_hooks_with_kwargs = set()
+            self._forward_hooks_with_kwargs = dict()
         if '_state_dict_hooks' not in self.__dict__:
             self._state_dict_hooks = OrderedDict()
         if '_load_state_dict_pre_hooks' not in self.__dict__:
