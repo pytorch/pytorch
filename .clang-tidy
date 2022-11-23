@@ -40,6 +40,5 @@ performance-*,
 '
 HeaderFilterRegex: 'torch/csrc/(?!deploy/interpreter/cpython).*'
 AnalyzeTemporaryDtors: false
-WarningsAsErrors: '*'
 CheckOptions:
 ...

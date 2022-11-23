@@ -110,7 +110,9 @@ CI_SKIP_INDUCTOR_TRAINING = [
     # *CI_SKIP_AOT_EAGER_TRAINING,
     # *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
+    "DALLE2_pytorch",
     "detectron2",
+    "functorch_dp_cifar10",
     "mobilenet_v3_large",
     "moco",
     "tacotron2",
@@ -1316,6 +1318,7 @@ class BenchmarkRunner:
         experiment,
         diff=False,
         branch=None,
+        explain=False,
     ):
         if diff:
             self.compare_branches(
@@ -1335,6 +1338,8 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment
             )
             print(status)
+        if explain:
+            print(torch._dynamo.explain(model, *example_inputs)[0])
 
 
 def help(fn):
@@ -1501,6 +1506,15 @@ def parse_args(args=None):
         help="Overrides the output filename",
     )
     parser.add_argument(
+        "--output-directory",
+        help="Overrides the directory to place output files.",
+    )
+    parser.add_argument(
+        "--part",
+        default=None,
+        help="Specify the part of the model to run.",
+    )
+    parser.add_argument(
         "--export-profiler-trace",
         action="store_true",
         help="exports trace of kineto profiler",
@@ -1511,6 +1525,12 @@ def parse_args(args=None):
         "--diff_main",
         action="store_true",
         help="Delta this branch against main. In the future, we may add support for picking the branch.",
+    )
+
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="run .explain() on the graph at the end of the run.",
     )
 
     parser.add_argument(
@@ -1907,7 +1927,12 @@ def run(runner, args, original_dir=None):
         output_filename = args.output
 
     if output_filename:
-        output_filename = os.path.join(torch._dynamo.config.base_dir, output_filename)
+        if args.output_directory:
+            output_filename = os.path.join(args.output_directory, output_filename)
+        else:
+            output_filename = os.path.join(
+                torch._dynamo.config.base_dir, output_filename
+            )
 
     if args.find_batch_sizes and args.only:
         for device in args.devices:
@@ -1944,11 +1969,24 @@ def run(runner, args, original_dir=None):
                 example_inputs = tree_map(lambda x: x.to(device=device), example_inputs)
             else:
                 try:
-                    device, name, model, example_inputs, batch_size = runner.load_model(
-                        device,
-                        model_name,
-                        batch_size=batch_size,
-                    )
+                    if args.part:
+                        (
+                            device,
+                            name,
+                            model,
+                            example_inputs,
+                            batch_size,
+                        ) = runner.load_model(
+                            device, model_name, batch_size=batch_size, part=args.part
+                        )
+                    else:
+                        (
+                            device,
+                            name,
+                            model,
+                            example_inputs,
+                            batch_size,
+                        ) = runner.load_model(device, model_name, batch_size=batch_size)
                 except NotImplementedError as e:
                     print(e)
                     import traceback
@@ -1980,6 +2018,7 @@ def run(runner, args, original_dir=None):
                 optimize_ctx,
                 experiment,
                 diff=args.diff_main,
+                explain=args.explain,
             )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
