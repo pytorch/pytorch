@@ -702,7 +702,6 @@ class TorchPatcher:
         torch.jit.trace = disable(torch.jit.trace)
         torch.jit.trace_module = disable(torch.jit.trace_module)
         torch.jit._get_trace_graph = disable(torch.jit._get_trace_graph)
-
         # symbolic_trace creates new frames. We disable Dynamo on such frames
         torch.fx._symbolic_trace.Tracer.trace = disable(
             torch.fx._symbolic_trace.Tracer.trace
