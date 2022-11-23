@@ -24,7 +24,7 @@ import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
 from functorch._src.aot_autograd import set_model_name
-from scipy.stats import gmean, ttest_ind
+#from scipy.stats import gmean, ttest_ind
 from torch._dynamo.optimizations import backends
 from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
@@ -261,7 +261,7 @@ def print_summary(filename):
                 cdata = data[col].clip(1)
                 print(
                     col.ljust(width),
-                    f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.2f}x",
+#                    f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.2f}x",
                 )
         except Exception:
             pass
