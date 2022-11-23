@@ -133,7 +133,6 @@ list(APPEND NVFUSER_SRCS
     ${NVFUSER_SRCS_DIR}/utils.cpp
     ${NVFUSER_SRCS_DIR}/mma_type.cpp
     ${NVFUSER_SRCS_DIR}/scheduler/mma_utils.cpp
-    #${NVFUSER_SRCS_DIR}/interface.cpp
 )
 
 set(NVFUSER_CODEGEN ${PROJECT_NAME}_codegen)
@@ -143,12 +142,9 @@ find_library(TORCH_PYTHON_LIBRARY torch_python)
 find_package(PythonLibs REQUIRED)
 
 set(TORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
+set(TORCH_INSTALL_LIB_DIR ${TORCH_ROOT}/torch/lib)
 
 add_library(${NVFUSER_CODEGEN} SHARED ${NVFUSER_SRCS})
-# not sure why I needed these
-#target_compile_options(${NVFUSER_CODEGEN} PRIVATE ${OpenMP_CXX_OPTIONS})
-#target_link_libraries(${NVFUSER_CODEGEN} PRIVATE ${OpenMP_CXX_LIBRARIES})
-#target_link_libraries(${NVFUSER_CODEGEN} PRIVATE ${TORCH_LIBRARIES} ${CUDA_NVRTC_LIB} ${PYTHON_LIBRARIES} ${TORCH_PYTHON_LIBRARY})
 target_link_libraries(${NVFUSER_CODEGEN} PRIVATE ${TORCH_LIBRARIES} ${CUDA_NVRTC_LIB} ${PYTHON_LIBRARIES} ${TORCH_PYTHON_LIBRARY})
 target_include_directories(${NVFUSER_CODEGEN}
                            #PUBLIC $<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>
@@ -156,6 +152,7 @@ target_include_directories(${NVFUSER_CODEGEN}
                            PRIVATE ${CUDA_INCLUDE_DIRS}
                            PRIVATE ${PYTHON_INCLUDE_DIRS})
 set_property(TARGET ${NVFUSER_CODEGEN} PROPERTY CXX_STANDARD 14)
+install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 # # --- pybind11
 # 
@@ -236,37 +233,32 @@ endforeach()
 
 target_include_directories(${NVFUSER_CODEGEN} PRIVATE "${CMAKE_BINARY_DIR}/include")
 
-# # -- tests
-# 
-# set(JIT_TEST_SRCS)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_nvfuser_fusion_definition.cpp)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_nvfuser_fusion_cache.cpp)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_nvfuser_fusion_record.cpp)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu1.cpp)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu2.cpp)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu3.cpp)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_swizzle.cpp)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_tensor_factories.cpp)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_fused_reduction.cpp)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_shift.cpp)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_tensorcore.cpp)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_view.cpp)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_transpose.cpp)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_rng.cu)
-# list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_utils.cpp)
-# 
-# add_executable(tests ${NVFUSER_ROOT}/test/main.cpp ${JIT_TEST_SRCS})
-# 
-# target_compile_definitions(tests PRIVATE USE_GTEST)
-# target_compile_definitions(tests PRIVATE USE_CUDA)
-# target_include_directories(tests PRIVATE "${NVFUSER_ROOT}")
-# target_link_libraries(tests PRIVATE ${TORCH_LIBRARIES} ${NVFUSER_CODEGEN} gtest_main gmock_main)
-# 
-# install(TARGETS tests DESTINATION bin)
-# 
-# # --- installation
-# 
-# # exporting library for find_package
-# export(TARGETS
-#        ${NVFUSER_CODEGEN}
-#        FILE "${CMAKE_BINARY_DIR}/${NVFUSER_CODEGEN}Config.cmake")
+# -- tests
+
+set(JIT_TEST_SRCS)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/python_frontend/test/test_nvfuser_fusion_definition.cpp)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/python_frontend/test/test_nvfuser_fusion_cache.cpp)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/python_frontend/test/test_nvfuser_fusion_record.cpp)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu1.cpp)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu2.cpp)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu3.cpp)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_tensor_factories.cpp)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_fused_reduction.cpp)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_shift.cpp)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_tensorcore.cpp)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_view.cpp)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_transpose.cpp)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_rng.cu)
+list(APPEND JIT_TEST_SRCS ${NVFUSER_ROOT}/test/test_gpu_utils.cpp)
+
+add_executable(tests
+	       ${TORCH_ROOT}/test/cpp/common/main.cpp
+	       ${TORCH_ROOT}/test/cpp/jit/test_utils.cpp
+	       ${JIT_TEST_SRCS})
+
+target_compile_definitions(tests PRIVATE USE_GTEST)
+target_compile_definitions(tests PRIVATE USE_CUDA)
+target_include_directories(tests PRIVATE "${NVFUSER_ROOT}")
+target_link_libraries(tests PRIVATE ${TORCH_LIBRARIES} ${NVFUSER_CODEGEN} gtest_main gmock_main)
+
+install(TARGETS tests DESTINATION bin)
