@@ -14,8 +14,8 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.fully_sharded_data_parallel import clean_tensor_name
-from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy
+from torch.distributed.fsdp._common_utils import clean_tensor_name
+from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -117,12 +117,11 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         # combination with the parameter group construction, ensures different
         # hyperparameter settings within one `FlatParameter`
         fsdp_kwargs = {
-            "auto_wrap_policy": functools.partial(
-                transformer_auto_wrap_policy,
-                transformer_layer_cls={
+            "auto_wrap_policy": ModuleWrapPolicy(
+                {
                     TransformerEncoderLayer,
                     TransformerDecoderLayer,
-                },
+                }
             ),
             "use_orig_params": True,
             "sharding_strategy": sharding_strategy,
@@ -236,11 +235,12 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             sharding_strategy=sharding_strategy,
         )
 
+    @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy_str",
         ["no_shard", "shard_grad_op", "full_shard"],
     )
-    def _test_diff_hyperparams_cpu_offload(self, sharding_strategy_str: str):
+    def test_diff_hyperparams_cpu_offload(self, sharding_strategy_str: str):
         """
         Tests FSDP parity with DDP when using multiple parameter groups with
         different hyperparameter settings with CPU offloading enabled. This is
@@ -1005,6 +1005,47 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
         buffer_names = [n for n, _ in model.named_buffers()]
         fsdp_buffer_names = [n for n, _ in fsdp_model.named_buffers()]
         self.assertEqual(buffer_names, fsdp_buffer_names)
+
+    @skip_if_lt_x_gpu(2)
+    def test_named_parameters_in_forward(self):
+        """
+        Tests that calling ``named_parameters()`` during forward returns FQNs
+        and ``Tensor`` s corresponding to the original parameters.
+        """
+        param_shapes = [None, None]
+        assert_equal_fn = self.assertEqual
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = nn.Linear(5, 5)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                nonlocal param_shapes
+                param_names = [tup[0] for tup in self.named_parameters()]
+                params = [tup[1] for tup in self.named_parameters()]
+                assert (
+                    param_shapes[0] is not None and param_shapes[1] is not None
+                ), "`param_sizes` should be set"
+                assert_equal_fn(
+                    param_names,
+                    [
+                        "lin.weight",
+                        "lin.bias",
+                    ],
+                )
+                assert_equal_fn(params[0].shape, param_shapes[0])
+                assert_equal_fn(params[1].shape, param_shapes[1])
+                return self.lin(x)
+
+        model = Model().cuda()
+        # Save the *unsharded* original parameter shapes and check the shapes
+        # match in the forward pass
+        param_shapes[0] = model.lin.weight.shape
+        param_shapes[1] = model.lin.bias.shape
+        fsdp_model = FSDP(model, use_orig_params=True)
+        inp = torch.randn((2, 5), device=torch.device("cuda"))
+        fsdp_model(inp)
 
 
 instantiate_parametrized_tests(TestFSDPUseOrigParamsMultipleParamGroups)

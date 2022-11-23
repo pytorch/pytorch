@@ -14,7 +14,8 @@ T maybe_wrap_dim_slow(T dim, T dim_post_expr, bool wrap_scalar) {
         "Dimension specified as ",
         dim,
         " but tensor has no dimensions");
-    return c10::maybe_wrap_dim(dim, /*dim_post_expr=*/1, /*wrap_scalar=*/false);
+    return c10::maybe_wrap_dim(
+        std::move(dim), /*dim_post_expr=*/1, /*wrap_scalar=*/false);
   }
 
   T min = dim_post_expr * -1;

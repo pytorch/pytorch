@@ -7980,8 +7980,10 @@ returned tensor and :attr:`input` tensor share the same underlying storage.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (Tensor or int): the starting dimension
-    length (int): the distance to the ending dimension
+    start (int or Tensor): index of the element to start the narrowed dimension
+        from. Can be negative, which means indexing from the end of `dim`. If
+        `Tensor`, it must be an 0-dim integral `Tensor` (bools not allowed)
+    length (int): length of the narrowed dimension, must be weakly positive
 
 Example::
 
@@ -7993,6 +7995,10 @@ Example::
     tensor([[ 2,  3],
             [ 5,  6],
             [ 8,  9]])
+    >>> torch.narrow(x, -1, torch.tensor(-1), 1)
+    tensor([[3],
+            [6],
+            [9]])
 """,
 )
 
@@ -8008,8 +8014,9 @@ do not have a shared-storage narrow method.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int): the starting offset
-    length (int): the distance to the ending dimension
+    start (int): index of the element to start the narrowed dimension from. Can
+        be negative, which means indexing from the end of `dim`
+    length (int): length of the narrowed dimension, must be weakly positive
 
 Keyword args:
     {out}
@@ -8027,13 +8034,13 @@ Example::
     >>> s = torch.arange(16).reshape(2, 2, 2, 2).to_sparse(2)
     >>> torch.narrow_copy(s, 0, 0, 1)
     tensor(indices=tensor([[0, 0],
-                        [0, 1]]),
-        values=tensor([[[0, 1],
-                        [2, 3]],
+                           [0, 1]]),
+           values=tensor([[[0, 1],
+                           [2, 3]],
 
-                        [[4, 5],
-                        [6, 7]]]),
-        size=(1, 2, 2, 2), nnz=2, layout=torch.sparse_coo)
+                          [[4, 5],
+                           [6, 7]]]),
+           size=(1, 2, 2, 2), nnz=2, layout=torch.sparse_coo)
 
 .. seealso::
 
@@ -8834,7 +8841,7 @@ Otherwise, if :attr:`some` is ``False``, this function returns the complete QR f
           If you plan to backpropagate through QR, note that the current backward implementation
           is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
           columns of :attr:`input` are linearly independent.
-          This behavior will propably change once QR supports pivoting.
+          This behavior will probably change once QR supports pivoting.
 
 .. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
           and may produce different (valid) decompositions on different device types
@@ -10227,7 +10234,7 @@ Args:
         as values.
     values (array_list): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1+K)-dimensonal tensor where ``K`` is the number
+        represents a (1+K)-dimensional tensor where ``K`` is the number
         of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows, ncols, *densesize)``. If
@@ -10287,7 +10294,7 @@ Args:
         values.
     values (array_list): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1+K)-dimensonal tensor where ``K`` is the number
+        represents a (1+K)-dimensional tensor where ``K`` is the number
         of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows, ncols, *densesize)``. If
@@ -10347,7 +10354,7 @@ Args:
         values.
     values (array_list): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1 + 2 + K)-dimensonal tensor where ``K`` is the
+        represents a (1 + 2 + K)-dimensional tensor where ``K`` is the
         number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
@@ -10412,7 +10419,7 @@ Args:
         as values.
     values (array_list): Initial blocks for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, and other types that
-        represents a (1 + 2 + K)-dimensonal tensor where ``K`` is the
+        represents a (1 + 2 + K)-dimensional tensor where ``K`` is the
         number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
@@ -13119,7 +13126,7 @@ Args:
 
 Keyword args:
     output_size (int, optional): Total output size for the given axis
-        ( e.g. sum of repeats). If given, it will avoid stream syncronization
+        ( e.g. sum of repeats). If given, it will avoid stream synchronization
         needed to calculate output shape of the tensor.
 
 Returns:
@@ -13355,7 +13362,7 @@ Arguments:
     input (Tensor): quantized tensor
     kernel_size (list of int): the size of the sliding window
     stride (``list of int``, optional): the stride of the sliding window
-    padding (``list of int``, opttional): padding to be added on both sides, must be >= 0 and <= kernel_size / 2
+    padding (``list of int``, optional): padding to be added on both sides, must be >= 0 and <= kernel_size / 2
     dilation (``list of int``, optional): The stride between elements within a sliding window, must be > 0. Default 1
     ceil_mode (bool, optional):  If True, will use ceil instead of floor to compute the output shape.
         Defaults to False.

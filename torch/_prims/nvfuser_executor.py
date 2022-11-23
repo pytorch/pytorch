@@ -23,9 +23,18 @@ if torch.cuda.is_available():
         DataType,
         Fusion,
         FusionDefinition,
+        Tensor,
     )
 else:
     DataType = None
+
+import os
+
+
+@lru_cache(None)
+def get_nvprim_dump_nvtx():
+    return os.getenv("PYTORCH_NVFUSER_DUMP_NVTX")
+
 
 DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
     {
@@ -40,8 +49,8 @@ DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
 # https://github.com/pytorch/pytorch/issues/80551
 @dataclass(frozen=True)
 class nvFuserTensorTemplate:
-    size: tuple
-    stride: tuple
+    symbolic_shape: tuple
+    contiguity: tuple
     dtype: DataType
     is_cpu: bool
 
@@ -51,12 +60,29 @@ class nvFuserScalarTemplate:
     dtype: DataType
 
 
+@lru_cache(maxsize=2048)
+def compute_symbolic_shape(shape):
+    """Computes the symbolic shape of a tensor.
+    nvFuser specializes on size-1 dimensions as broadcasted dimensions.
+    -1 is used to represent any size."""
+    return tuple(1 if s == 1 else -1 for s in shape)
+
+
+@lru_cache(maxsize=2048)
+def compute_contiguity(shape, strides):
+    """Computes the contiguity information to simplify internal indexing.
+    Contiguous dimensions are represented by True, strided dimensions
+    are represented by False.
+    """
+    return torch._C._nvfuser.compute_contiguity(shape, strides)
+
+
 def to_nvfuser_template_args(args):
     def to_nvfuser(arg):
         if isinstance(arg, torch.Tensor):
             return nvFuserTensorTemplate(
-                arg.size(),
-                arg.stride(),
+                compute_symbolic_shape(arg.size()),
+                compute_contiguity(arg.size(), arg.stride()),
                 getnvFuserDtype(arg.dtype),
                 arg.is_cpu,  # type: ignore[attr-defined]
             )
@@ -116,6 +142,10 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         call_function_nodes
     ), "Constant tensors that are saved in the graph and used as arguments are not supported yet"
 
+    # Checking output dtypes
+    output_node = next(filter(lambda n: n.op == "output", gm.graph.nodes))
+    orig_flat_out, _ = tree_flatten(output_node.args[0])
+
     fusion = Fusion()
     with FusionDefinition(fusion) as fd:
 
@@ -161,9 +191,23 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 args = (fd,) + args
                 return target(*args, **kwargs)
 
+            def output(self, target, args, kwargs):
+                flat_out, unflatten_spec = tree_flatten(args[0])
+                for o, orig_o in zip(flat_out, orig_flat_out):
+                    # casting outputs to the original data type
+                    # ensures outputs produced by fusion would always agree with original GraphModule
+                    out_dtype = _torch_dtype_to_nvfuser_dtype_map.get(orig_o.meta["tensor_meta"].dtype)  # type: ignore[union-attr]
+                    assert isinstance(
+                        o, Tensor
+                    ), "output from codegen has to be tensor type"
+                    fd.add_output(fd.ops.cast(o, dtype=out_dtype))
+                return args[0]
+
         def templates_to_nvfuser_inputs(arg):
             if isinstance(arg, nvFuserTensorTemplate):
-                x = fd.define_tensor(arg.size, arg.stride, arg.dtype, arg.is_cpu)
+                x = fd.define_tensor(
+                    arg.symbolic_shape, arg.contiguity, arg.dtype, arg.is_cpu
+                )
                 return x
             elif isinstance(arg, nvFuserScalarTemplate):
                 x = fd.define_scalar(arg.dtype)
@@ -175,8 +219,6 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         nv_args = tuple(map(templates_to_nvfuser_inputs, nv_args_templates))
         out = FusionInterpreter(gm).run(*nv_args)
         flat_out, unflatten_spec = tree_flatten(out)
-        for o in flat_out:
-            fd.add_output(o)
 
     return fusion, unflatten_spec
 
@@ -213,10 +255,30 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
             arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number))
         )
 
-        return tree_unflatten(
+        if get_nvprim_dump_nvtx():
+            torch.cuda.nvtx.range_push(
+                "fusion: {0}, graph: {1}".format(
+                    fusion.id(),
+                    str(
+                        [
+                            {
+                                "op": n.op,
+                                "name": n.name,
+                                "args": n.args,
+                                "kwargs": n.kwargs,
+                            }
+                            for n in gm.graph.nodes
+                        ]
+                    ),
+                )
+            )
+        result = tree_unflatten(
             fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
             unflatten_spec,  # type: ignore[has-type]
         )
+        if get_nvprim_dump_nvtx():
+            torch.cuda.nvtx.range_pop()
+        return result
     else:
         warn(
             "nvfuser_executor is executed with non-cuda args, fallback to aten executor"
@@ -349,6 +411,7 @@ def maybe_partition_graph(
             allowed_single_node_partition_ops=_allowed_single_node_partition_ops,
         )
         partitions = partitioner.propose_partitions()
+        partitioner.remove_bookend_non_compute_ops(partitions)
         if len(partitions) == 0:
             warn(
                 "No partition found for the graph. "
@@ -386,6 +449,18 @@ def maybe_partition_graph(
         return gm, any_unsupported
 
 
+class NVTXInterpreter(torch.fx.Interpreter):
+    def run_node(self, n):
+        torch.cuda.nvtx.range_push(
+            "name: {0}, args: {1}, op: {2}, kwargs: {3}".format(
+                n.name, n.args, n.op, n.kwargs
+            )
+        )
+        result = super().run_node(n)
+        torch.cuda.nvtx.range_pop()
+        return result
+
+
 def nvfuser_execute_partitioned(gm: GraphModule, *args, executor_parameters=None):
     executor_parameters = executor_parameters or DEFAULT_NVFUSER_PYTHON_CONFIG
     # maybe_partition_graph function is cached so we can't use non-hashable arguments
@@ -405,6 +480,9 @@ def nvfuser_execute_partitioned(gm: GraphModule, *args, executor_parameters=None
         use_python_fusion_cache=use_python_fusion_cache,
     )
     if is_partitioned:
-        return gm(*args)
+        if get_nvprim_dump_nvtx():
+            return NVTXInterpreter(gm).run(*args)
+        else:
+            return gm(*args)
     else:
         return nvfuser_execute(gm, *args, executor_parameters=executor_parameters)

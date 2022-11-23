@@ -130,7 +130,7 @@ def wrap_convert_context(fn):
 @TorchPatcher.suppress_torch_distributed_warnings
 def has_tensor_in_frame(frame):
     """Check if the frame has torch.* related bits"""
-    # Check if the function was decorated using torchdynamo.optimize
+    # Check if the function was decorated using torch._dynamo.optimize
     if frame.f_code in always_optimize_code_objects:
         return True
 
@@ -156,16 +156,17 @@ def has_tensor_in_frame(frame):
             seen_ids[obj_id] = any([has_tensor(v) for v in obj])
             return seen_ids[obj_id]
         elif istype(obj, dict):
-            seen_ids[obj_id] = any([has_tensor(v) for v in obj.values()])
+            # Some packages like pytest can be updated during runtime. So, make a
+            # copy of values to avoid issues like "RuntimeError: dictionary
+            # changed size during iteration"
+            values = list(obj.values())
+            seen_ids[obj_id] = any([has_tensor(v) for v in values])
             return seen_ids[obj_id]
         elif istype(obj, (str, int, float, type(None), bool)):
             seen_ids[obj_id] = False
             return seen_ids[obj_id]
         elif is_namedtuple(obj):
             seen_ids[obj_id] = any([has_tensor(getattr(obj, v)) for v in obj._fields])
-            return seen_ids[obj_id]
-        elif not is_allowed(obj) and hasattr(obj, "__dict__") and len(obj.__dict__):
-            seen_ids[obj_id] = any([has_tensor(v) for v in obj.__dict__.values()])
             return seen_ids[obj_id]
         else:
             # if config.debug:
@@ -190,17 +191,6 @@ def has_tensor_in_frame(frame):
 def format_error_msg(exc, code, record_filename=None, frame=None):
     msg = os.linesep * 2
 
-    def replay_record_msg():
-        if (
-            config.replay_record_enabled
-            and hasattr(exc, "exec_record")
-            and record_filename is not None
-        ):
-            return f"\nLast frame execution written to {record_filename}. To run only this frame while debugging, run\
- {config.dynamo_import}.replay('{record_filename}').\n"
-        else:
-            return ""
-
     if config.verbose:
         msg = format_bytecode(
             "WON'T CONVERT", code.co_name, code.co_filename, code.co_firstlineno, code
@@ -224,23 +214,51 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
                     stack_above_dynamo + list(reversed(exc.real_stack))
                 )
             )
-
-        msg += replay_record_msg()
+            msg += "\n"
+            msg += "=" * 10
 
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
  line {code.co_firstlineno} \ndue to: \n{traceback.format_exc(limit=-1)}"
 
-        if hasattr(exc, "real_stack") and len(exc.real_stack) > 0:
-            msg += f"\nfrom user code:\n {''.join(traceback.format_list([exc.real_stack[-1]]))}"
+    return msg
 
-        msg += replay_record_msg()
 
+def augment_exc_message(exc, msg="\n"):
+    if (
+        hasattr(exc, "real_stack")
+        and len(exc.real_stack) > 0
+        and not (config.verbose and config.suppress_errors)
+    ):
+        msg += f"\nfrom user code:\n {''.join(traceback.format_list(reversed(exc.real_stack[0:2])))}"
+
+    if config.replay_record_enabled and hasattr(exc, "record_filename"):
+        msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
+ {config.dynamo_import}.replay('{exc.record_filename}').\n"
+
+    if not config.verbose:
         msg += (
             f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
         )
-    msg += "=" * 10
-    return msg
+
+    if hasattr(exc, "inner_exception") and hasattr(
+        exc.inner_exception, "minifier_path"
+    ):
+        msg += (
+            f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
+            "this script to find the smallest traced graph which reproduces this error.\n"
+        )
+
+    if not config.suppress_errors:
+        msg += (
+            "\n\n"
+            "You can suppress this exception and fall back to eager by setting:\n"
+            "    torch._dynamo.config.suppress_errors = True\n"
+        )
+
+    old_msg = "" if len(exc.args) == 0 else exc.args[0]
+    new_msg = old_msg + msg
+    exc.args = (new_msg,) + exc.args[1:]
 
 
 def exception_handler(e, code, frame=None):
@@ -248,8 +266,13 @@ def exception_handler(e, code, frame=None):
     if hasattr(e, "exec_record"):
         record_filename = gen_record_file_name(e, code)
         write_record_to_file(record_filename, e.exec_record)
+        e.record_filename = record_filename
 
-    log.error(format_error_msg(e, code, record_filename, frame))
+    augment_exc_message(e)
+    # Only log the exception if we are going to suppress it
+    # if aren't suppressing it, a higher level except block will handle it
+    if config.suppress_errors:
+        log.error(format_error_msg(e, code, record_filename, frame))
 
 
 def convert_frame_assert(
@@ -280,6 +303,7 @@ def convert_frame_assert(
             # setattr could be tricky to handle generally,
             # but also not likely useful to compile- skip the whole frame
             return None
+
         # Check if the frame is generated by an exec builtin call
         # TODO - Running exec generated frame seems propagates f_globals to the
         # next frames.

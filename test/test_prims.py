@@ -8,14 +8,8 @@ import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import (
-    parametrize,
-    run_tests,
-    TestCase,
-    TEST_SCIPY,
-    skipCUDAMemoryLeakCheckIf,
-    skipIfTorchDynamo,
-)
+from torch.testing._internal.common_utils import (parametrize, run_tests, TestCase, TEST_SCIPY,
+                                                  set_default_dtype, skipCUDAMemoryLeakCheckIf)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -137,11 +131,8 @@ class TestPrims(TestCase):
         batches = [(), (1,), (2,), (0, 1), (1, 1), (2, 2)]
         shapes = [(), (0,), (1,), (5,)]
 
-        try:
-            # Sets the default dtype to NumPy's default dtype of double
-            cur_default = torch.get_default_dtype()
-            torch.set_default_dtype(torch.double)
-
+        # Sets the default dtype to NumPy's default dtype of double
+        with set_default_dtype(torch.double):
             # Tested here, as this OP is not currently exposed or tested in ATen
             for b, s in product(batches, shapes):
                 x = make_arg(b + s)
@@ -151,8 +142,6 @@ class TestPrims(TestCase):
                 y_np = scipy.special.cbrt(x_np)
 
                 self.assertEqual(y, y_np, exact_device=False)
-        finally:
-            torch.set_default_dtype(cur_default)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -375,7 +364,7 @@ class TestPrims(TestCase):
     def test_nvfuser_executor_cached_noncontiguous(self, device):
         # This test is to ensure that nvfuser computes correct results for noncontiguous tensors
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.context import TorchRefsMode
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims.executor import execute
 
         a = torch.randn(3, 3, device=device)
@@ -383,18 +372,19 @@ class TestPrims(TestCase):
         def func(a):
             return torch.sigmoid(a)
 
-        with TorchRefsMode():
+        with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a)
 
         # First run to create the cache
-        execute(gm, a, executor="nvfuser")
+        execute(gm, a, executor="strictly_nvfuser")
 
         # a.mT is noncontiguous, but it shouldn't affect correctness
         expected = execute(gm, a.mT, executor="aten")
-        actual = execute(gm, a.mT, executor="nvfuser")
-        self.assertEqual(expected, actual)
+        for use_python_cache in [True, False]:
+            params = {"use_python_fusion_cache": use_python_cache}
+            actual = execute(gm, a.mT, executor="strictly_nvfuser", executor_parameters=params)
+            self.assertEqual(expected, actual)
 
-    @skipIfTorchDynamo
     def test_nvfuser_capability_context(self, device):
         # This test is to ensure that the torch calls are replaced with refs
         # based on the nvfuser+prims capability
@@ -514,7 +504,7 @@ class TestPrims(TestCase):
         self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
 
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.context import TorchRefsMode
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims.executor import execute
 
         a = torch.randn(3, 4, device=device)
@@ -527,7 +517,7 @@ class TestPrims(TestCase):
             dd = torch.sqrt(d)
             return torch.mul(aa, dd.digamma())
 
-        with TorchRefsMode():
+        with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a, b, c)
 
         expected = execute(gm, a, b, c, executor="aten")
@@ -543,7 +533,7 @@ class TestPrims(TestCase):
         self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
 
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.context import TorchRefsMode
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims.executor import execute
 
         a = torch.randn(3, 4, device=device)
@@ -551,7 +541,7 @@ class TestPrims(TestCase):
         def func(a):
             return torch.digamma(a)  # not supported by nvfuser
 
-        with TorchRefsMode():
+        with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a)
 
         with catch_warnings(record=True) as w:
