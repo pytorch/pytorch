@@ -262,9 +262,14 @@ test_inductor_huggingface() {
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+  # Check inference with --float32
+  python benchmarks/dynamo/huggingface.py --ci --accuracy \
+    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_inference_huggingface.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_huggingface.csv
+  # Check training with --amp
   python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_huggingface.csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_huggingface.csv
+    --device cuda --inductor --amp --output "$TEST_REPORTS_DIR"/inductor_training_huggingface.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_huggingface.csv
 }
 
 test_inductor_timm_shard() {
@@ -277,18 +282,29 @@ test_inductor_timm_shard() {
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
+  # Check inference with --float32
+  python benchmarks/dynamo/timm_models.py --ci --accuracy \
     --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
-    --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
+    --output "$TEST_REPORTS_DIR"/inductor_inference_timm_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_timm_"$1".csv
+  # Check training with --amp
+  python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
+    --device cuda --inductor --amp --total-partitions 2 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_training_timm_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_timm_"$1".csv
 }
 
 test_inductor_torchbench() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+  # Check inference with --float32
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --ci --accuracy \
+    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_inference_torchbench.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_torchbench.csv
+  # Check training with --amp
   PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --output "$TEST_REPORTS_DIR"/inductor_torchbench.csv
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_torchbench.csv
+    --device cuda --inductor --amp --output "$TEST_REPORTS_DIR"/inductor_training_torchbench.csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_torchbench.csv
 }
 
 test_python_gloo_with_tls() {
