@@ -186,7 +186,10 @@ class DebugInterpreter(fx.Interpreter):
                 else:
                     assert ni == ri
 
-            if isinstance(r, int):
+            if r is None:
+                # symint tangents are always None, ignore
+                pass
+            elif isinstance(r, int):
                 bind_symint(n.meta['val'], r)
             else:
                 assert isinstance(r, torch.Tensor), type(r)

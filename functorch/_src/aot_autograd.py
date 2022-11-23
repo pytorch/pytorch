@@ -15,6 +15,7 @@ import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._subclasses import FakeTensorMode, CrossRefFakeMode
+import torch.fx as fx
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -1180,6 +1181,33 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # aot autograd without functionalization is wrong anyway, so we error.
         raise AssertionError("Graph partitioning without functionalization is not sound, we may introduce errors")
 
+    if config.use_dynamic_shapes:
+        # Constant-ify any symbolic args that are actually constant
+        # NB: This optimization is mandatory, because without it we will try
+        # to feed constant integers into backwards compiler, and many
+        # compilers will choke on this.
+        for n in fx_g.graph.nodes:
+            if n.op == "call_function":
+                hit = False
+
+                def constantify(s):
+                    nonlocal hit
+                    if isinstance(s, fx.Node) and 'val' in s.meta and isinstance(s.meta['val'], torch.SymInt):
+                        # TODO: Factor this onto SymInt
+                        node = s.meta['val'].node
+                        r = node.shape_env._maybe_evaluate_static(node.expr)
+                        if r is not None:
+                            hit = True
+                            return int(r)
+                    return s
+
+                args, kwargs = pytree.tree_map(constantify, (n.args, n.kwargs))
+                if hit:
+                    n.args = args
+                    n.kwargs = kwargs
+
+        fx_g.recompile()
+
     if config.debug_joint:
         print("====== Joint graph ======")
         fx_g.print_readable()
@@ -1313,9 +1341,19 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                     with context():
                         # Retrace backwards with a new shape environment
                         local_bw_module = make_fx(bw_module, tracing_mode="symbolic")(*all_args)
+                        """
+                        print("====== Joint graph ======")
+                        fx_g.print_readable()
+                        print("====== Backward graph ======")
+                        bw_module.print_readable()
+                        print("====== Retraced backward graph ======")
+                        local_bw_module.print_readable()
+                        """
                         with track_graph_compiling("backward", True):
                             CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                                local_bw_module, [n.meta['val'] for n in local_bw_module.graph.nodes if n.op == "placeholder"]
+                                # NB: The None case is for when we have SymInt
+                                # tangents, which are always passed with None
+                                local_bw_module, [n.meta['val'] if 'val' in n.meta else None for n in local_bw_module.graph.nodes if n.op == "placeholder"]
                             )
                 else:
                     with context(), track_graph_compiling("backward", True):
