@@ -3295,6 +3295,8 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail.union({
         xfail('native_batch_norm'),
+        xfail('tril'),  # Exception not raised on error input
+        xfail('triu'),  # Exception not raised on error input
         # The error inputs are vectors, that pass when batched as they are treated as a matrix
         xfail('trace'),
     }))
@@ -3342,6 +3344,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('tensor_split'),
         xfail('to_sparse'),
         xfail('vdot'),
+        xfail('tril'),  # Exception not raised on error input
+        xfail('triu'),  # Exception not raised on error input
         xfail('__getitem__', ''),
         xfail('all'),
         xfail('any'),
@@ -3874,6 +3878,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
         xfail('linalg.vander'),
         xfail('linalg.vecdot'),
+        # throws in vmap on CUDA
+        # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)
+        # https://github.com/pytorch/pytorch/runs/8110653462?check_suite_focus=true
+        # but it passes locally
+        skip('linalg.matrix_norm', ''),
         skip('linalg.ldl_solve', ''),
     })
     def test_vmap_linalg_failure_1D_input(self, device, dtype, op):
