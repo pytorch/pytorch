@@ -93,7 +93,7 @@ void Logger::set_env_variables() {
 
 #ifdef USE_C10D_GLOO
     // auto gloo_pg =
-    //     static_cast<c10d::ProcessGroupGloo*>(reducer_->process_group_.get());
+    //     static_cast<c10d::ProcessGroupGloo*>(reducer_->process_group_.getBackend());
     // auto n_threads = gloo_pg->getNumThreads();
     // ddp_logging_data_->ints_map["gloo_num_threads"] = n_threads;
 #endif

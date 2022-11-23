@@ -258,6 +258,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // for GLOO and NCCL backends currently.
   virtual void setSequenceNumberForGroup() {
     auto backendName = getBackendName();
+
+    // TODO: HACK for backend name to get sequence number for that backend.
+
     TORCH_CHECK(
         false,
         c10::str(
@@ -271,6 +274,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // may indicate that there is some sort of collective desynchronization.
   virtual uint64_t getSequenceNumberForGroup() {
     auto backendName = getBackendName();
+
+    // TODO: HACK for backend name to get sequence number for that backend.
+
     TORCH_CHECK(
         false,
         c10::str(
@@ -329,6 +335,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return backends_.at(device_type);
   }
 
+  c10::intrusive_ptr<Backend> getBackend(std::string name) const {
+    TORCH_CHECK(
+        backendNames_.find(name) != backendNames_.end(),
+        "Backend with name ",
+        name,
+        " is not registered");
+    return backendNames_.at(name);
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -346,6 +361,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Backend classes for this ProcessGroup
   std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>> backends_;
+  std::unordered_map<std::string, c10::intrusive_ptr<Backend>> backendNames_;
 };
 
 } // namespace c10d

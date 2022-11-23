@@ -965,21 +965,18 @@ def _new_process_group_helper(
 
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = len(global_ranks_in_group) == 0
-    print("global_ranks_in_group", global_ranks_in_group)
-
-    prefix_store = PrefixStore(f"{group_name}/", store)
-    base_pg_options = ProcessGroup.Options(backend=str(backend))
-    base_pg_options._timeout = timeout
-    pg: ProcessGroup = ProcessGroup(prefix_store, group_rank, group_size, base_pg_options)
 
     # If this is a subgroup (which means group_ranks is specified),
     # we check if the current process is a member of the new group.
     if not is_default_group:
         global_rank = _get_default_group().rank()
-        print("global_rank", global_rank, "group_rank", group_rank)
         if global_rank not in global_ranks_in_group:
-            print("I AM EXITING")
             return GroupMember.NON_GROUP_MEMBER
+
+    prefix_store = PrefixStore(f"{group_name}/", store)
+    base_pg_options = ProcessGroup.Options(backend=str(backend))
+    base_pg_options._timeout = timeout
+    pg: ProcessGroup = ProcessGroup(prefix_store, group_rank, group_size, base_pg_options)
 
     for device, backend in backend_config.get_device_backend_map().items():
         # Use the group name as prefix in the default store, such that
@@ -3472,9 +3469,6 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         backend = default_backend
 
     # checks the input ranks
-    print("ranks", ranks)
-    print("global_world_size", global_world_size)
-    print("global_rank", global_rank)
     if ranks is not None:
         ranks = sorted(ranks)
         group_world_size = len(ranks)
@@ -3499,8 +3493,6 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         ranks = list(range(global_world_size))
         group_world_size = global_world_size
         group_rank = global_rank
-
-    print(ranks, group_world_size, group_rank)
 
     backend = Backend(backend)
     backend_config = BackendConfig(backend)
