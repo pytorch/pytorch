@@ -1,6 +1,6 @@
 # Owner(s): ["module: ProxyTensor"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, xfail_inherited_tests
 import os
 import torch
 import unittest
@@ -22,7 +22,6 @@ from torch.utils._pytree import tree_map
 from torch import nn
 import re
 
-import types
 import functools
 import itertools
 
@@ -70,16 +69,6 @@ def process_failures():
     for failure, reason in failures:
         print(f"    xfail{remap_opinfo[failure]},  # {reason}")
     print("}")
-
-
-def copy_func(f):
-    """Based on http://stackoverflow.com/a/6528148/190597 (Glenn Maynard)"""
-    g = types.FunctionType(f.__code__, f.__globals__, name=f.__name__,
-                           argdefs=f.__defaults__,
-                           closure=f.__closure__)
-    g = functools.update_wrapper(g, f)
-    g.__kwdefaults__ = f.__kwdefaults__
-    return g
 
 
 # Copied from functorch
@@ -717,22 +706,6 @@ class TestGenericProxyTensorFake(TestGenericProxyTensor):
     tracing_mode = "fake"
 
 
-def xfail_inherited_tests(tests):
-    """
-    Given a list of test names which are defined by a superclass of the
-    class this decorates, mark them as expected failure.  This is useful
-    if you are doing poor man's parameterized tests by subclassing a generic
-    test class.
-    """
-    def deco(cls):
-        for t in tests:
-            # NB: expectedFailure operates by mutating the method in question,
-            # which is why you have to copy the function first
-            setattr(cls, t, unittest.expectedFailure(copy_func(getattr(cls, t))))
-        return cls
-    return deco
-
-
 @skipIfNoSympy
 @xfail_inherited_tests([
     "test_make_fx_overloads",
@@ -1287,8 +1260,6 @@ symbolic_tensor_failures = {
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.cholesky', ''),  # aten.linalg_cholesky_ex.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.cholesky_ex', ''),  # aten.linalg_cholesky_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.cond', ''),  # Tensors of type TensorImpl do not have numel
     xfail('linalg.cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.det', ''),  # aten._linalg_det.default - couldn't find symbolic meta function/decomposition

@@ -279,7 +279,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 }
 
 // NB: cribbed from https://github.com/pytorch/pytorch/pull/88198
-static at::Tensor clone_preserve_strides(const at::Tensor& self) {
+at::Tensor clone_preserve_strides(const at::Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.has_storage());
   // In cases where the input tensor has internal memory overlap, we cannot actually
   // preserve the strides/storage_offset of the input tensor, because
