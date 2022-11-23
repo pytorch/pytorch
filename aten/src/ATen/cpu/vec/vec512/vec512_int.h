@@ -553,8 +553,7 @@ public:
 };
 
 template <typename T>
-class Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_
-same<T, uint8_t>::value>> : public Vectorizedi {
+class Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>> : public Vectorizedi {
 private:
   static constexpr __m512i zero_vector {0, 0, 0, 0, 0, 0, 0, 0};
   static const Vectorized<T> ones;
