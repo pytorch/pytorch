@@ -1775,7 +1775,6 @@ def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
 
 @register_decomposition(aten.norm)
 @out_wrapper()
-@reduction_complex_to_real
 def norm(
     self: Tensor,
     p: Optional[float] = None,
@@ -1783,9 +1782,16 @@ def norm(
     keepdim: bool = False,
     dtype: Optional[torch.dtype] = None,
 ):
-    if p is None:
-        p = 2.0
-    return torch.linalg.vector_norm(self, p, dim, keepdim, dtype=dtype)
+    p = p if p is not None else 2.0
+    if dtype:
+        return torch.linalg.vector_norm(self.to(dtype), p, dim, keepdim, dtype=dtype)
+
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        self, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
+    )
+    return torch.linalg.vector_norm(
+        self.to(computation_dtype), p, dim, keepdim, dtype=dtype
+    ).to(result_dtype)
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
@@ -1904,8 +1910,13 @@ def upsample_bilinear2d(
     result = torch.mul(q1, yscale1) + torch.mul(q2, yscale2)
 
     # convert output to correct memory format, if necessary
-    input_memory_format = utils.suggest_memory_format(input)
-    result = result.contiguous(memory_format=input_memory_format)
+    memory_format = utils.suggest_memory_format(input)
+
+    # following "heuristic: only use channels_last path when it's faster than the contiguous path"
+    if input.device.type == "cuda" and n_channels < 16:
+        memory_format = torch.contiguous_format
+
+    result = result.contiguous(memory_format=memory_format)
 
     return result
 

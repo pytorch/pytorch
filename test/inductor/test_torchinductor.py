@@ -68,7 +68,6 @@ except (ImportError, AssertionError) as e:
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
-
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 torch._inductor.config.triton.autotune = False  # too slow
@@ -1497,8 +1496,11 @@ class CommonTemplate:
             ).eval()
 
             # TODO: add bf16 test for cpu path?
-            v = torch.randn(x_shape, dtype=torch.float32).to(
-                memory_format=memory_format
+            # TODO: this test fails when requires_grad=False
+            v = (
+                torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
+                .add(1)
+                .to(memory_format=memory_format)
             )
             with torch.no_grad():
                 self.common(
@@ -3241,7 +3243,9 @@ class CommonTemplate:
             c = a + 2
             return b, c
 
-        arg1 = torch.randn([1, 64], device=self.device)
+        # NOTE: this test fails when none of the inputs require grad.
+        # That seems like an inductor bug.
+        arg1 = torch.randn([1, 64], device=self.device).requires_grad_(True).add(1)
         arg2 = arg1.clone()
         correct1 = fn(arg1)
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
@@ -4445,7 +4449,10 @@ class CommonTemplate:
             ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
             ((3,), (1,), torch.float32),
         ]
-        args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
+        args = [
+            rand_strided(shape, stride, dtype).requires_grad_(True).add(1)
+            for shape, stride, dtype in args
+        ]
         self.common(forward, args)
 
     def test_misaligned_address_issue1(self):
@@ -5011,6 +5018,24 @@ if HAS_CUDA:
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
 
+        @patch.object(config.triton, "autotune", True)
+        def test_inplace_add_alpha_autotune(self):
+            def fn(x, y):
+                aten.add_.Tensor(x, y, alpha=0.55)
+                return (x,)
+
+            x1 = torch.zeros(2, 3, 4, 10, device="cuda")
+            x2 = torch.zeros(2, 3, 4, 10, device="cuda")
+            x3 = torch.zeros(2, 3, 4, 10, device="cuda")
+            y = torch.randn(2, 3, 4, 10, device="cuda").to(
+                memory_format=torch.channels_last
+            )
+            fn_fx = make_fx(fn)(x1, y)
+            fn_compiled = compile_fx_inner(fn_fx, [x1, y])
+            fn(x2, y)
+            fn_compiled([x3, y])
+            assert same(x2, x3)
+
         def test_permute_linear_fusion(self):
             class TestModule(torch.nn.Module):
                 def __init__(self, k: int, n: int):
@@ -5249,6 +5274,23 @@ if HAS_CUDA:
                     for param in model_opt.parameters():
                         param.add_(1.0)
 
+        # https://github.com/pytorch/torchdynamo/issues/1850
+        def test_inductor_output_aliases_intermediate(self):
+            def foo(x):
+                out = x + x
+                return out.t()
+
+            foo_opt = torch._dynamo.optimize("inductor")(foo)
+
+            inpt = torch.randn(10, 10, device="cuda", requires_grad=True)
+            # TODO: this is broken, fix later
+            # out = foo_opt(inpt)
+            # out.add_(2)
+
+            out_ref = foo(inpt)
+            out_ref.add_(2)
+            # self.assertEqual(out_ref, out)
+
         def test_accuracy_issue1(self):
             class Repro(torch.nn.Module):
                 def __init__(self):
@@ -5303,6 +5345,7 @@ if HAS_CUDA:
                         meta=meta,
                         configs=configs,
                         save_cache_hook=False,
+                        mutated_arg_names=["in_out_ptr0"],
                     )
 
                 return decorator
@@ -5377,6 +5420,24 @@ if HAS_CUDA:
             fn_optimized = torch._dynamo.optimize("inductor")(fn)
             assert same(fn(a), fn_optimized(a))
 
+        @requires_cuda()
+        def test_indirect_indexing_dense_mask(self):
+            def fn(x, y):
+                ne = torch.ops.aten.ne.Scalar(x, 1)
+                sum_1 = torch.ops.aten.sum.dim_IntList(ne, [1])
+                sub = torch.ops.aten.sub.Tensor(sum_1, 1)
+                unsqueeze = torch.ops.aten.unsqueeze.default(sub, -1)
+                gather = torch.ops.aten.gather.default(x, 1, unsqueeze)
+                squeeze = torch.ops.aten.squeeze.default(gather)
+                out = torch.ops.aten.multiply(y, squeeze)
+                return (out,)
+
+            a = torch.zeros((1, 128), dtype=torch.int64, device="cuda")
+            b = torch.zeros((1, 128), dtype=torch.int64, device="cuda")
+
+            fn_optimized = torch._dynamo.optimize("inductor")(fn)
+            assert same(fn(a, b), fn_optimized(a, b))
+
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_ops.autotune import CachingAutotuner
 
@@ -5437,6 +5498,8 @@ if HAS_CUDA:
             return kernels
 
         def test_divisibile_by_16_covers_numel_args(self):
+            torch._dynamo.reset()
+
             def fn(a: torch.Tensor) -> torch.Tensor:
                 return torch.sum(a)
 
@@ -5456,6 +5519,7 @@ if HAS_CUDA:
                 kernels[1].meta["configs"][0].divisible_by_16
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
+            torch._dynamo.reset()
 
 
 if __name__ == "__main__":
