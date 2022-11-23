@@ -58,7 +58,8 @@ def _prepare_input_validate(
                 )
         if device_mesh.ndim != 1:
             raise RuntimeError(
-                f"device_mesh has dims {device_mesh.ndim} but expcted to be 1 for input."
+                f"device_mesh has dims {device_mesh.ndim} but expcted to be 1"
+                " for input."
             )
         return _prepare_input_func(*args, **kwargs)
 
@@ -91,18 +92,20 @@ def _prepare_output_validate(
     def wrapper(*args, **kwargs):  # pyre-ignore[2, 3]
         assert len(args) >= 1, "_prepare_output needs at least one arg."
         output = args[0]
-        assert isinstance(
-            output, DTensor
-        ), f"Expect output of Tensor Parallel to be a DTensor, but found {type(output)}."
+        assert isinstance(output, DTensor), (
+            "Expect output of Tensor Parallel to be a DTensor, but found"
+            f" {type(output)}."
+        )
         if len(args) < 2 or args[1] is None:
             device_mesh = output.device_mesh
             args = (*args[:1], device_mesh, *args[2:])  # pyre-ignore[60]
         else:
             device_mesh = args[1]
 
-        assert (
-            device_mesh.ndim == 1
-        ), f"device_mesh has dims {device_mesh.ndim} but expcted to be 1 for output."
+        assert device_mesh.ndim == 1, (
+            f"device_mesh has dims {device_mesh.ndim} but expcted to be 1 for"
+            " output."
+        )
         return _prepare_output_func(*args, **kwargs)
 
     return wrapper
@@ -130,8 +133,8 @@ def _create_1d_device_mesh(
     assert (
         tp_mesh_dim < device_mesh.ndim and tp_mesh_dim >= -device_mesh.ndim
     ), (
-        f"Expect tp_mesh_dim within range [{-device_mesh.ndim}, {device_mesh.ndim})"
-        f", but found {tp_mesh_dim}."
+        f"Expect tp_mesh_dim within range [{-device_mesh.ndim},"
+        f" {device_mesh.ndim}), but found {tp_mesh_dim}."
     )
 
     if device_mesh.ndim == 1:

@@ -44,6 +44,7 @@ class MultiheadAttnWrap(nn.Module):
         return self.attn(query, key, value)
 
 
+# TODO: replace repeated test code with _check_module
 class DistTensorParallelExampleTest(DTensorTestBase):
     @with_comms
     def test_mlp_megatron_e2e(self):

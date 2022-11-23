@@ -5,11 +5,12 @@ from torch.distributed._tensor.parallel.multihead_attention_tp import (
 
 from torch.distributed._tensor.parallel.style import (
     ColwiseParallel,
-    ParallelStyle,
     PairwiseParallel,
+    ParallelStyle,
     RowwiseParallel,
     make_input_replicate_1d,
     make_input_shard_1d,
+    make_input_shard_1d_dim_last,
     make_output_replicate_1d,
     make_output_shard_1d,
     make_output_tensor,
@@ -21,12 +22,13 @@ from torch.distributed._tensor.parallel.api import (
 
 __all__ = [
     "ColwiseParallel",
-    "TensorParallelMultiheadAttention",
-    "ParallelStyle",
     "PairwiseParallel",
+    "ParallelStyle",
     "RowwiseParallel",
+    "TensorParallelMultiheadAttention",
     "make_input_replicate_1d",
     "make_input_shard_1d",
+    "make_input_shard_1d_dim_last",
     "make_output_replicate_1d",
     "make_output_tensor",
     "make_output_shard_1d",
