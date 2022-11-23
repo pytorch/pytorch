@@ -1,11 +1,16 @@
 # Owner(s): ["module: codegen"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO
+from contextlib import nullcontext
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO,
+    xfail_inherited_tests
+)
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
+from torch._dispatch.python import enable_crossref_functionalize
 
 import unittest
 
@@ -21,34 +26,40 @@ def are_aliased(x, y):
 # We can unify testing and use functionalize() here instead
 # if/when functorch moves into core.
 # This is basically a crappy version of `functionalize()` for single-tensor-arg inputs.
-def _functionalize(f, *, reapply_views: bool):
+def _functionalize(f, *, reapply_views: bool, crossref: bool):
     def wrapped(a):
-        input_functional = torch._to_functional_tensor(a)
-        input_functional.requires_grad = a.requires_grad
-        torch._enable_functionalization(reapply_views=reapply_views)
-        try:
-            out = f(input_functional)
-        finally:
-            torch._disable_functionalization()
-        torch._sync(input_functional)
-        inpt_new = torch._from_functional_tensor(input_functional)
-        if inpt_new is not a:
-            # Existing deficiency in functionalize():
-            # we don't correctly mutate input metadata (yet?)
-            if inpt_new.shape == a.shape:
-                a.copy_(inpt_new)
-        tree_map(torch._sync, out)
-        out_unwrapped = tree_map(torch._from_functional_tensor, out)
-        return out_unwrapped
+        ctx = nullcontext()
+        if crossref:
+            ctx = enable_crossref_functionalize()
+        with ctx:
+            input_functional = torch._to_functional_tensor(a)
+            input_functional.requires_grad = a.requires_grad
+            torch._enable_functionalization(reapply_views=reapply_views)
+            try:
+                out = f(input_functional)
+            finally:
+                torch._disable_functionalization()
+            torch._sync(input_functional)
+            inpt_new = torch._from_functional_tensor(input_functional)
+            if inpt_new is not a:
+                # Existing deficiency in functionalize():
+                # we don't correctly mutate input metadata (yet?)
+                if inpt_new.shape == a.shape:
+                    a.copy_(inpt_new)
+            tree_map(torch._sync, out)
+            out_unwrapped = tree_map(torch._from_functional_tensor, out)
+            return out_unwrapped
 
     return wrapped
 
 @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/81457")
 class TestFunctionalization(TestCase):
 
+    crossref = False
+
     def get_logs(self, func, inpt, *, reapply_views=False, run_reinplace=False):
         inpt_clone = inpt.clone()
-        traced_f = make_fx(_functionalize(func, reapply_views=reapply_views))(inpt)
+        traced_f = make_fx(_functionalize(func, reapply_views=reapply_views, crossref=self.crossref))(inpt)
         if run_reinplace:
             traced_f = reinplace(traced_f, inpt_clone)
         return traced_f.code
@@ -60,10 +71,15 @@ class TestFunctionalization(TestCase):
 
         # Compare outputs (and mutated inputs), with and without functionalization.
         out_ref = func(inpt)
-        out_functional = _functionalize(func, reapply_views=reapply_views)(input_clone)
+        out_functional = _functionalize(func, reapply_views=reapply_views, crossref=self.crossref)(input_clone)
         # The reinplacing pass is only valid to run with reapply_views=True.
-        functional_func = make_fx(_functionalize(func, reapply_views=True))(input_clone2)
-        reinplace_func = reinplace(make_fx(_functionalize(func, reapply_views=True))(input_clone2), input_clone2)
+        functional_func = make_fx(_functionalize(func, reapply_views=True, crossref=self.crossref))(input_clone2)
+        reinplace_func = reinplace(
+            make_fx(
+                _functionalize(func, reapply_views=True, crossref=self.crossref)
+            )(input_clone2),
+            input_clone2
+        )
 
         # NOTE: for now, need to pass in fresh inputs here, because make_fx
         # will directly mutate the inputs that you trace with.
@@ -112,7 +128,7 @@ class TestFunctionalization(TestCase):
             self.assertRaises(RuntimeError, lambda: z.add_(1))
             return z
 
-        _functionalize(f, reapply_views=True)(torch.ones(3, 3))
+        _functionalize(f, reapply_views=True, crossref=self.crossref)(torch.ones(3, 3))
 
     def test_copy_stride_mismatch(self):
         def f(x):
@@ -120,7 +136,7 @@ class TestFunctionalization(TestCase):
             y.copy_(x)
             return y
 
-        r = _functionalize(f, reapply_views=True)(torch.ones(2, 2))
+        r = _functionalize(f, reapply_views=True, crossref=self.crossref)(torch.ones(2, 2))
         self.assertEqual(r.stride(), (5, 1))
 
     def test_view_clone_view_inplace(self):
@@ -334,7 +350,7 @@ def forward(self, a_1):
             out = x[functional_tensor, nonfunctional_tensor]
             return out
         out = f(torch.ones(2, 2))
-        out_functional = _functionalize(f, reapply_views=True)(torch.ones(2, 2))
+        out_functional = _functionalize(f, reapply_views=True, crossref=self.crossref)(torch.ones(2, 2))
         self.assertEqual(out, out_functional)
 
     def test_inplace_on_non_view(self):
@@ -1211,6 +1227,20 @@ def forward(self, a_1):
     fill = torch.ops.aten.fill_.Scalar(select, 1);  select = None
     return zeros
     """)
+
+@xfail_inherited_tests([
+    "test_as_strided",
+    "test_copy_",
+    "test_diagonal",
+    "test_diagonal_mutated_input",
+    "test_everything",
+    "test_fill_",
+    "test_split",
+    "test_view_clone_view_inplace",
+    "test_view_inplace",
+])
+class TestCrossRefFunctionalization(TestFunctionalization):
+    crossref = True
 
 if __name__ == '__main__':
     run_tests()
