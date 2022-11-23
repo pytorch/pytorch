@@ -457,7 +457,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
 
         opt_outputs = opt_fn(inputs)
         self.assertTrue(same(correct_outputs, opt_outputs))
-        self.assertEqual(check_splits_compiler.compiler_called, 6)
+        self.assertEqual(check_splits_compiler.compiler_called, 3)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_empty_graph_inductor(self):
