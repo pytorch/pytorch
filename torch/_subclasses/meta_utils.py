@@ -325,24 +325,24 @@ class MetaConverter:
                         # So we may have to do *two* views out of the base to
                         # recreate this situation.
 
-                        sizes, strides, storage_offset = sym_sizes_strides_storage_offset(t)
+                        (
+                            sizes,
+                            strides,
+                            storage_offset,
+                        ) = sym_sizes_strides_storage_offset(t)
 
                         if safe_is_leaf(t):
                             # Leaf views that track view metadata are created by
                             # creating a view inside a no_grad block
                             with torch.no_grad(), maybe_suppress:
-                                r = base.as_strided(
-                                    sizes, strides, storage_offset
-                                )
+                                r = base.as_strided(sizes, strides, storage_offset)
                             # As it's a leaf, we can directly assign requires_grad
                             r.requires_grad = t.requires_grad
                         else:
                             if t._base.requires_grad == t.requires_grad:
                                 # Easy case, just run the view op
                                 with torch.enable_grad(), maybe_suppress:
-                                    r = base.as_strided(
-                                        sizes, strides, storage_offset
-                                    )
+                                    r = base.as_strided(sizes, strides, storage_offset)
                             else:
                                 # Obscure case.  Create a leaf view and give it the
                                 # correct requires_grad, then do the final view.
@@ -352,9 +352,7 @@ class MetaConverter:
                                     mid = base.view(base.shape)
                                 mid.requires_grad = t.requires_grad
                                 with torch.enable_grad(), maybe_suppress:
-                                    r = mid.as_strided(
-                                        sizes, strides, storage_offset
-                                    )
+                                    r = mid.as_strided(sizes, strides, storage_offset)
                     finally:
                         torch._C._dispatch_tls_set_dispatch_key_excluded(
                             torch._C.DispatchKey.ADInplaceOrView, old_exclude
