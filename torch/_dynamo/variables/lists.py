@@ -93,41 +93,50 @@ class BaseListVariable(VariableTracker):
 
 
 class RangeVariable(BaseListVariable):
-    def __init__(self, value, items=None, guards=None, **kwargs):
-        if items is None:
-            items = [variables.ConstantVariable(x, guards=guards) for x in value]
-        super().__init__(items, guards=guards, **kwargs)
-        self.value = value
+    def __init__(self, items, **kwargs):
+        items_to_map = items
+        start = variables.ConstantVariable(0)
+        stop = None
+        step = variables.ConstantVariable(1)
+
+        if len(items_to_map) == 1:
+            (stop,) = items_to_map
+        elif len(items_to_map) == 2:
+            start, stop = items_to_map
+        elif len(items_to_map) == 3:
+            start, stop, step = items_to_map
+        else:
+            raise AssertionError()
+
+        assert stop is not None
+        super().__init__([start, stop, step], **kwargs)
 
     def python_type(self):
         return range
 
     def as_python_constant(self):
-        return self.value
+        return range(*[x.as_python_constant() for x in self.items])
+
+    def as_proxy(self):
+        return self.python_type()(*self._as_proxy())
+
+    def unpack_var_sequence(self, tx):
+        return [
+            variables.ConstantVariable(x).add_options(self)
+            for x in self.as_python_constant()
+        ]
 
     def reconstruct(self, codegen):
         assert "range" not in codegen.tx.f_globals
-        range_fn = codegen.create_load_global("range", add=True)
-        if self.value.step == 1:
-            if self.value.start == 0:
-                return [
-                    range_fn,
-                    codegen.create_load_const(self.value.stop),
-                    create_instruction("CALL_FUNCTION", 1),
-                ]
-            return [
-                range_fn,
-                codegen.create_load_const(self.value.start),
-                codegen.create_load_const(self.value.stop),
-                create_instruction("CALL_FUNCTION", 2),
-            ]
-        return [
-            range_fn,
-            codegen.create_load_const(self.value.start),
-            codegen.create_load_const(self.value.stop),
-            codegen.create_load_const(self.value.step),
-            create_instruction("CALL_FUNCTION", 3),
-        ]
+        codegen.append_output(codegen.create_load_python_module(range))
+        codegen.foreach(self.items)
+        return [create_instruction("CALL_FUNCTION", 3)]
+
+    def var_getattr(self, tx, name):
+        fields = ["start", "stop", "step"]
+        if name not in fields:
+            unimplemented(f"range.{name}")
+        return self.items[fields.index(name)].add_options(self)
 
 
 class ListVariable(BaseListVariable):
