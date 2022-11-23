@@ -14,6 +14,13 @@ jobs:
   lintrunner:
     runs-on: linux.20_04.16x
     steps:
+      - name: echo github context
+        run: |
+          echo "${GITHUB_CONTEXT}"
+        env: 
+          GITHUB_CONTEXT: ${{ toJson(github) }}
+          
+        
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
