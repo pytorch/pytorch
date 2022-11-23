@@ -197,13 +197,24 @@ def _validate_loaded_sparse_tensors():
                 torch._validate_sparse_coo_tensor_args(
                     t._indices(), t._values(), t.size()
                 )
-            elif t.layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+            elif t.layout in {
+                torch.sparse_csr,
+                torch.sparse_csc,
+                torch.sparse_bsr,
+                torch.sparse_bsc,
+            }:
                 # TODO: Validation currently involves an expensive traversal
                 # on CPU, which may include a device transfer.
                 if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
-                    compressed_indices, plain_indices = t.crow_indices(), t.col_indices()
+                    compressed_indices, plain_indices = (
+                        t.crow_indices(),
+                        t.col_indices(),
+                    )
                 else:
-                    compressed_indices, plain_indices = t.ccol_indices(), t.row_indices()
+                    compressed_indices, plain_indices = (
+                        t.ccol_indices(),
+                        t.row_indices(),
+                    )
                 torch._validate_sparse_compressed_tensor_args(
                     compressed_indices, plain_indices, t.values(), t.size(), t.layout
                 )
@@ -230,7 +241,12 @@ def _rebuild_sparse_tensor(layout, data):
         _sparse_tensors_to_validate.append(result)
         return result
 
-    elif layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+    elif layout in {
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+    }:
         compressed_indices, plain_indices, values, size = data
         result = torch._sparse_compressed_tensor_unsafe(
             compressed_indices, plain_indices, values, size, layout=layout

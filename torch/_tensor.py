@@ -331,11 +331,22 @@ class Tensor(torch._C._TensorBase):
                     "sparse tensor __reduce_ex__ for layout `%s`" % (self.layout)
                 )
             return (torch._utils._rebuild_sparse_tensor, args_sparse)
-        elif self.layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+        elif self.layout in {
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        }:
             if self.layout in {torch.sparse_csr, torch.sparse_bsr}:
-                compressed_indices, plain_indices = self.crow_indices(), self.col_indices()
+                compressed_indices, plain_indices = (
+                    self.crow_indices(),
+                    self.col_indices(),
+                )
             else:
-                compressed_indices, plain_indices = self.ccol_indices(), self.row_indices()
+                compressed_indices, plain_indices = (
+                    self.ccol_indices(),
+                    self.row_indices(),
+                )
             args_sparse_compressed = (
                 self.layout,
                 (
