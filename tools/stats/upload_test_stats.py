@@ -136,7 +136,7 @@ def get_pytest_parallel_times() -> Dict[Any, Any]:
         # TODO: Skip test reports from rerun disabled tests, same reason as mentioned
         # above
         if is_rerun_disabled_tests(root):
-            return pytest_parallel_times
+            continue
 
         assert len(list(root.iter("testsuite"))) == 1
         for test_suite in root.iter("testsuite"):
