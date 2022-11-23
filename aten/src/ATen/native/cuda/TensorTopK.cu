@@ -607,11 +607,7 @@ int get_items_per_thread(uint64_t num_slices, uint64_t slice_size) {
   int max_blocks_per_mp = 32;
 #else
   int regs_per_mp = prop->regsPerMultiprocessor;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   int max_blocks_per_mp = prop->maxBlocksPerMultiProcessor;
-#else
-  int max_blocks_per_mp = 32;
-#endif
 #endif
   int blocks_per_mp = std::min(regs_per_mp / REGS_PER_BLOCK, max_blocks_per_mp);
   int64_t items_per_thread = at::ceil_div((int64_t)(slice_size * num_slices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));

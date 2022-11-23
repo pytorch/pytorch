@@ -4,12 +4,6 @@
 #include <cuda.h>  // for CUDA_VERSION
 #endif
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-#include <cub/version.cuh>
-#else
-#define CUB_VERSION 0
-#endif
-
 // cub sort support for __nv_bfloat16 is added to cub 1.13 in:
 // https://github.com/NVIDIA/cub/pull/306
 #if CUB_VERSION >= 101300
