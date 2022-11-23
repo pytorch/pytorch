@@ -580,7 +580,7 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
   } else {
     auto output_strides = iter.strides(0);
     auto input_strides = iter.strides(1);
-    if (iter.ndim() > 0 && output_strides[0] < 0 && input_strides[0] == iter.element_size(1)) {
+    if (iter.ndim() > 0 && output_strides[0] == -iter.element_size(0) && input_strides[0] == iter.element_size(1)) {
       // Special case: horizontal flip with vectorization and input is contiguous
       // Context: horizontal flip leads to strides[0] < 0 and
       // thus is_contiguous condition is not satisfied and non-vectorized code path is taken.
