@@ -94,3 +94,58 @@ def choose_qparams_tensor(input, quant_min, quant_max, dtype):
     observer(input)
     scale, zero_point = observer.calculate_qparams()
     return (scale, zero_point)
+
+# Helper function used to implement per-channel quantization against any axis
+def _permute_to_axis_zero(x, axis):
+    new_axis_list = list(range(x.dim()))
+    new_axis_list[axis] = 0
+    new_axis_list[0] = axis
+    y = x.permute(tuple(new_axis_list))
+    return y, new_axis_list
+
+quantized_decomposed_lib.define(
+    "quantize_per_channel(Tensor input, Tensor scales, Tensor zero_points, int axis, "
+    "int quant_min, int quant_max, ScalarType dtype) -> Tensor")
+
+@impl(quantized_decomposed_lib, "quantize_per_channel", "CompositeExplicitAutograd")
+def quantize_per_channel(input, scales, zero_points, axis, quant_min, quant_max, dtype):
+    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
+    _quant_min_max_bounds_check(quant_min, quant_max, dtype)
+    input, permute_axis_list = _permute_to_axis_zero(input, axis)
+    res = torch.zeros_like(input)
+
+    for i in range(input.size(0)):
+        res[i] = torch.clamp(
+            torch.round(input[i] * (1.0 / scales[i])) + zero_points[i],
+            quant_min,
+            quant_max
+        )
+
+    out = res.permute(tuple(permute_axis_list))
+    return out.to(dtype)
+
+# Note: quant_min/quant_max/dtype are not used in the operator, but for now it's kept in
+# the signature as metadata for the input Tensor, this might be useful for pattern
+# matching in the future
+# We will revisit this later if we found there are no use cases for it
+quantized_decomposed_lib.define(
+    "dequantize_per_channel(Tensor input, Tensor scales, Tensor zero_points, int axis, "
+    "int quant_min, int quant_max, ScalarType dtype) -> Tensor")
+
+@impl(quantized_decomposed_lib, "dequantize_per_channel", "CompositeExplicitAutograd")
+def dequantize_per_channel(input, scales, zero_points, axis, quant_min, quant_max, dtype):
+    assert input.dtype == dtype, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
+    _quant_min_max_bounds_check(quant_min, quant_max, dtype)
+    input, permute_axis_list = _permute_to_axis_zero(input, axis)
+    res = torch.zeros_like(input, dtype=torch.float32)
+
+    for i in range(input.size(0)):
+        # TODO: investigate why
+        # (input[i] - zero_points[i]).to(torch.float32) * scales[i]
+        # failed the test
+        res[i] = (input[i].to(torch.float32) - zero_points[i]) * scales[i]
+
+    out = res.permute(tuple(permute_axis_list))
+    return out
