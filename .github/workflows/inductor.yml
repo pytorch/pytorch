@@ -23,11 +23,11 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-                #          { config: "inductor", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-                #          { config: "inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-                #          { config: "inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-                #          { config: "inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-                #          { config: "inductor_torchbench", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
+          { config: "inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
+          { config: "inductor_timm", shard: 1, num_shards: 2, runner: "linux.gcp.a100" },
+          { config: "inductor_timm", shard: 2, num_shards: 2, runner: "linux.gcp.a100" },
+          { config: "inductor_torchbench", shard: 1, num_shards: 1, runner: "linux.gcp.a100.4x" },
           { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.gcp.a100.4x" },
         ]}
 
