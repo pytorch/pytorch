@@ -1325,18 +1325,17 @@ def native_batch_norm_helper(
 ) -> Tuple[Tensor, Tensor, Tensor, Optional[Tensor], Optional[Tensor]]:
     reduction_dims = [0] + list(range(2, input.dim()))
     computation_dtype = utils.get_computation_dtype(input.dtype)
-    new_running_mean = None
-    new_running_var = None
+    new_running_mean = running_mean
+    new_running_var = running_var
     if training:
         output, mean, rstd = normalize(input, reduction_dims, eps)
 
         save_mean = _squeeze_multiple(mean, reduction_dims)
         save_rstd = _squeeze_multiple(rstd, reduction_dims)
         if running_mean is not None:
-            if functional:
-                new_running_mean = momentum * save_mean + (1 - momentum) * running_mean
-            else:
-                running_mean.copy_(momentum * save_mean + (1 - momentum) * running_mean)
+            new_running_mean = momentum * save_mean + (1 - momentum) * running_mean
+            if not functional:
+                running_mean.copy_(new_running_mean)
         if running_var is not None:
             n = input.numel() / input.shape[1]
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
@@ -1345,16 +1344,15 @@ def native_batch_norm_helper(
             unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (
                 n / (n - 1)
             )
-            if functional:
-                new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
-            else:
-                running_var.copy_(
-                    momentum * unbiased_var + (1 - momentum) * running_var
-                )
+            new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
+            if not functional:
+                running_var.copy_(new_running_var)
     else:
         assert running_mean is not None and running_var is not None
         running_mean = running_mean.to(dtype=computation_dtype, copy=True)
+        new_running_mean = running_mean
         running_var = running_var.to(dtype=computation_dtype, copy=True)
+        new_running_var = running_var
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes
@@ -1403,7 +1401,7 @@ def native_batch_norm(
     output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
         input, weight, bias, running_mean, running_var, training, momentum, eps, False
     )
-    return output.to(dtype=input.dtype), save_mean, save_rstd
+    return output, save_mean, save_rstd
 
 
 # TODO: this decomposition is NOT here to stay. We would much prefer replacing native_batch_norm
@@ -1460,7 +1458,7 @@ def _native_batch_norm_legit(
     output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
         input, weight, bias, running_mean, running_var, training, momentum, eps, False
     )
-    return output.to(dtype=input.dtype), save_mean, save_rstd
+    return output, save_mean, save_rstd
 
 
 @register_decomposition(aten._native_batch_norm_legit.no_stats)
@@ -1475,7 +1473,7 @@ def _native_batch_norm_legit_no_stats(
     output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
         input, weight, bias, None, None, training, momentum, eps, False
     )
-    return output.to(dtype=input.dtype), save_mean, save_rstd
+    return output, save_mean, save_rstd
 
 
 @register_decomposition(aten._native_batch_norm_legit_functional.default)
@@ -1489,7 +1487,13 @@ def _native_batch_norm_legit_functional(
     momentum: float,
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-    output, save_mean, save_rstd, new_running_mean, new_running_var = native_batch_norm_helper(
+    (
+        output,
+        save_mean,
+        save_rstd,
+        new_running_mean,
+        new_running_var,
+    ) = native_batch_norm_helper(
         input, weight, bias, running_mean, running_var, training, momentum, eps, True
     )
     assert new_running_mean is not None, "new_running_mean should not be None"
