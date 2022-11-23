@@ -54,7 +54,6 @@ def create_backend(fn):
         except KeyboardInterrupt:
             raise
         except Exception:
-            log.exception(f"{fn.__name__} error")
             raise
 
     BACKENDS[fn.__name__] = inner

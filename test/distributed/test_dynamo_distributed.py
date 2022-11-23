@@ -502,8 +502,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, 1)
 
     @patch.object(config, "optimize_ddp", False)
-    # Do not land this
-    # @unittest.expectedFailure
     def test_ignored_parameters(self):
         """
         Verifies ddp graph-split logic ignores parameters marked to ignore on DDP module.

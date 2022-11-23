@@ -93,13 +93,13 @@ class cpp:
     simdlen = None
     min_chunk_size = 4096
     cxx = (
-        # None,  # download gcc12 from conda-forge if conda is installed
-        # "g++-12",
-        # "g++-11",
-        # "g++-10",
-        # "clang++",
+        None,  # download gcc12 from conda-forge if conda is installed
+        "g++-12",
+        "g++-11",
+        "g++-10",
+        "clang++",
         "g++",
-        # "g++.par",
+        "g++.par",
     )
 
 

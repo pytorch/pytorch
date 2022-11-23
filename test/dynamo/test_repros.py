@@ -19,6 +19,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
+
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
@@ -1884,6 +1885,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(mod(*args), opt_mod(*args)))
         self.assertEqual(cnt.op_count, 5)
         self.assertEqual(cnt.frame_count, 1)
+
 
     def test_for_loop_graph_break(self):
         def inner(x):

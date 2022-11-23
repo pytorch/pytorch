@@ -9,7 +9,6 @@ import textwrap
 import uuid
 from collections import Counter
 from importlib import import_module
-from inspect import signature
 from tempfile import TemporaryFile
 
 import torch

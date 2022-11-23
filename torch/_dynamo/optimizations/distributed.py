@@ -301,5 +301,4 @@ class DDPOptimizer:
         split_gm.recompile()
 
         log.debug("\n---final graph---\n" + str(split_gm.graph) + "\n---------------\n")
-        compiling = False
         return split_gm
