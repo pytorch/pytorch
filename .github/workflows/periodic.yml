@@ -3,6 +3,7 @@ name: periodic
 on:
   schedule:
     - cron: 45 0,4,8,12,16,20 * * *
+    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
   push:
     tags:
       - ciflow/periodic/*
