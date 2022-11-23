@@ -45,6 +45,7 @@ inline void _vec_log_softmax_lastdim(
   int64_t CHUNK_SIZE = std::max(
       (int64_t)1, (int64_t)(BLOCK_SIZE / (sizeof(scalar_t) * dim_size)));
 
+  // we assume that at::GRAIN_SIZE is an appropriate grain-size.
   // usually, we'd use all the threads in the OpenMP thread pool.
   int64_t grain_size = (outer_size - 1) / (at::get_num_threads() - 1);
   // assign fewer threads if the number of computations is not large enough
@@ -74,7 +75,7 @@ inline void _vec_log_softmax_lastdim(
           for (const auto j : c10::irange(loop_end)) {
             int64_t i = ii + j;
             scalar_t* input_data = input_data_base + i * dim_size;
-            max_input_arr[j] = vec::reduce_all<scalar_t>(
+            max_input_arr.get()[j] = vec::reduce_all<scalar_t>(
                 [](Vec& x, Vec& y) { return vec::maximum(x, y); },
                 input_data,
                 dim_size);
@@ -83,7 +84,7 @@ inline void _vec_log_softmax_lastdim(
             int64_t i = ii + j;
             scalar_t* input_data = input_data_base + i * dim_size;
             scalar_t max_input = max_input_arr[j];
-            tmp_sum_scalar[j] = vec::map_reduce_all<scalar_t>(
+            tmp_sum_scalar.get()[j] = vec::map_reduce_all<scalar_t>(
                 [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
                 [](Vec x, Vec y) { return x + y; },
                 input_data,
@@ -93,8 +94,8 @@ inline void _vec_log_softmax_lastdim(
           // vectorized version (aside from perf improvements).
           vec::map(
               [](Vec x) { return x.log(); },
-              tmp_sum_scalar,
-              tmp_sum_scalar,
+              tmp_sum_scalar.get(),
+              tmp_sum_scalar.get(),
               loop_end);
           for (const auto j : c10::irange(loop_end)) {
             int64_t i = ii + j;
