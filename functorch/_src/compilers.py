@@ -151,22 +151,6 @@ class DebugInterpreter(fx.Interpreter):
             same_strides = check_significant_strides(nv, rv)
             assert same_strides, f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
 
-        # Check that inputs are consistent
-        # NB: I don't think this is actually necessary.
-        """
-        a_vals, _ = pytree.tree_flatten((n.args, n.kwargs))
-        for i, a in enumerate(a_vals):
-            if not isinstance(a, fx.Node):
-                continue
-            if 'val' not in a.meta:
-                continue
-            if not isinstance(a.meta['val'], torch.Tensor):
-                continue
-            r = self.env[a]
-            # TODO: make this more descriptive
-            check(a.meta['val'], r, lambda: f"input {i}")
-        """
-
         r = super().run_node(n)
 
         # For placeholder nodes, setup bindings
@@ -204,7 +188,7 @@ class DebugInterpreter(fx.Interpreter):
             return r
         else:
             for ni, ri in self.deferred_eq:
-                assert subst_symint(ni) == ri, f"{ni} != {ri}"
+                assert subst_symint(ni) == ri, f"{ni} aka {subst_symint(ni)} != {ri} where {self.symbol_mapping}"
             self.deferred_eq.clear()
 
         # Check that outputs are consistent
