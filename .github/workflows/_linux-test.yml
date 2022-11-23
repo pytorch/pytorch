@@ -75,17 +75,24 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
+      - name: Setup Linux GCP A100
+        uses: ./.github/actions/setup-linux-gcp-a100
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.docker-image }}
 
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
-        if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
+          #      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+          #        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+          #        if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
+          #        with:
+          #          timeout_minutes: 10
+          #          max_attempts: 3
+          #          command: |
+          #            set -ex
+          #            bash .github/scripts/install_nvidia_utils_linux.sh
+          #            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
 
       - name: Start monitoring script
         id: monitor-script
@@ -214,50 +221,44 @@ jobs:
         run: |
           kill "$MONITOR_SCRIPT_PID"
 
-      - name: Upload test artifacts
-        uses: ./.github/actions/upload-test-artifacts
-        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
-        with:
-          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
-
-      - name: Collect backtraces from coredumps (if any)
-        if: always()
-        run: |
-          # shellcheck disable=SC2156
-          find . -iname "core.[1-9]*" -exec docker exec "${DOCKER_CONTAINER_ID}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
-
-      - name: Store Core dumps on S3
-        uses: seemethere/upload-artifact-s3@v5
-        if: failure()
-        with:
-          name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
-          retention-days: 14
-          if-no-files-found: ignore
-          path: ./**/core.[1-9]*
-
-      - name: Upload test statistics
-        if: always()
-        env:
-          AWS_DEFAULT_REGION: us-east-1
-          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          TEST_CONFIG: ${{ matrix.config }}
-          SHARD_NUMBER: ${{ matrix.shard }}
-          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PYTORCH_RETRY_TEST_CASES: 1
-          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: ${{ github.run_id }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
-        shell: bash
-        run: |
-          set -x
-          python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.19.12
-          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+          #      - name: Upload test artifacts
+          #        uses: ./.github/actions/upload-test-artifacts
+          #        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
+          #        with:
+          #          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+          #
+          #      - name: Store Core dumps on S3
+          #        uses: seemethere/upload-artifact-s3@v5
+          #        if: failure()
+          #        with:
+          #          name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+          #          retention-days: 14
+          #          if-no-files-found: ignore
+          #          path: ./**/core.[1-9]*
+          #
+          #      - name: Upload test statistics
+          #        if: always()
+          #        env:
+          #          AWS_DEFAULT_REGION: us-east-1
+          #          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          #          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          #          TEST_CONFIG: ${{ matrix.config }}
+          #          SHARD_NUMBER: ${{ matrix.shard }}
+          #          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          #          PR_NUMBER: ${{ github.event.pull_request.number }}
+          #          PYTORCH_RETRY_TEST_CASES: 1
+          #          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
+          #          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          #          TAG: ${{ steps.parse-ref.outputs.tag }}
+          #          WORKFLOW_ID: ${{ github.run_id }}
+          #          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          #          GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          #        shell: bash
+          #        run: |
+          #          set -x
+          #          python3 -m pip install -r requirements.txt
+          #          python3 -m pip install boto3==1.19.12
+          #          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
