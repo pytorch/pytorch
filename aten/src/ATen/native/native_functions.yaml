@@ -1535,6 +1535,8 @@
 
 - func: copy(Tensor self, Tensor src, bool non_blocking=False) -> Tensor
   variants: function
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: copy
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   variants: method
@@ -4565,29 +4567,29 @@
   device_check: NoCheck
   device_guard: False
 
-- func: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
+- func: select.int(Tensor(a) self, int dim, SymInt index) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: select
+    CompositeExplicitAutograd: select_symint
     SparseCsrCPU, SparseCsrCUDA: select_sparse_csr
     NestedTensorCPU, NestedTensorCUDA: select_nested
 
-- func: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, int index) -> Tensor
+- func: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt index) -> Tensor
   variants: function
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutogradNonFunctional: select_backward
+    CompositeExplicitAutogradNonFunctional: select_backward_symint
   autogen: select_backward.out
 
-- func: _nested_select_backward(Tensor grad_output, Tensor self, int dim, int index) -> Tensor
+- func: _nested_select_backward(Tensor grad_output, Tensor self, int dim, SymInt index) -> Tensor
   variants: function
   device_check: NoCheck
   device_guard: False
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: _nested_select_backward
+    NestedTensorCPU, NestedTensorCUDA: _nested_select_backward_symint
 
 - func: selu(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -4826,12 +4828,12 @@
   autogen: slice_scatter.out
   tags: canonical
 
-- func: select_scatter(Tensor self, Tensor src, int dim, int index) -> Tensor
+- func: select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: select_scatter
+    CompositeExplicitAutograd: select_scatter_symint
   autogen: select_scatter.out
 
 - func: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
@@ -10391,23 +10393,27 @@
   python_module: nn
   dispatch:
     CPU, CUDA: hardswish_out
+    MPS: hardswish_out_mps
 
 - func: hardswish(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
     CPU, CUDA: hardswish
+    MPS: hardswish_mps
 
 - func: hardswish_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
     CPU, CUDA: hardswish_
+    MPS: hardswish_mps_
 
 - func: hardswish_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
   dispatch:
     CPU, CUDA: hardswish_backward
+    MPS: hardswish_backward_mps
   autogen: hardswish_backward.out
 
 - func: leaky_relu.out(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
@@ -12879,10 +12885,10 @@
     CompositeExplicitAutogradNonFunctional: _reshape_alias_copy_symint
   tags: view_copy
 
-- func: select_copy.int(Tensor self, int dim, int index) -> Tensor
+- func: select_copy.int(Tensor self, int dim, SymInt index) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutogradNonFunctional: select_copy_int
+    CompositeExplicitAutogradNonFunctional: select_copy_symint
   tags: view_copy
 
 - func: detach_copy(Tensor self) -> Tensor
@@ -13091,10 +13097,10 @@
     CompositeExplicitAutograd: _reshape_alias_copy_out
 
 
-- func: select_copy.int_out(Tensor self, int dim, int index, *, Tensor(a!) out) -> Tensor(a!)
+- func: select_copy.int_out(Tensor self, int dim, SymInt index, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
-    CompositeExplicitAutograd: select_copy_int_out
+    CompositeExplicitAutograd: select_copy_symint_out
 
 
 - func: detach_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
