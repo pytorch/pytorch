@@ -2,7 +2,7 @@ import logging
 import warnings
 
 from copy import deepcopy
-from typing import Any, Collection, Dict, Mapping, Union
+from typing import Any, Collection, Dict, List, Mapping, Union
 
 import torch
 from torch import optim
@@ -80,7 +80,7 @@ class NamedOptimizer(optim.Optimizer):
             for group in param_groups:
                 for param in group["params"]:
                     if param not in param_to_key:
-                        raise ValueError("Param name not found for param group.")
+                        raise ValueError(f"Expect param name {param} found in param group but is missing.")
                     param_keys_order.append(param_to_key[param])
             self.param_keys_order = param_keys_order
 
@@ -108,15 +108,13 @@ class NamedOptimizer(optim.Optimizer):
                     ret_group[k] = deepcopy(v)
             ret_groups.append(ret_group)
 
-        ret: Dict[str, object] = {"state": ret_state}
-        ret["param_groups"] = ret_groups
-        return ret
+        return {"state": ret_state, "param_groups": ret_groups}
 
     def register_state_dict_pre(self):
-        raise NotImplementedError()
+        raise NotImplementedError("register_state_dict_pre not supported yet and might be implemented soon.")
 
     def register_state_dict_post(self):
-        raise NotImplementedError()
+        raise NotImplementedError("register_state_dict_post not supported yet and might be implemented soon.")
 
     def step(self):
         """
@@ -147,13 +145,14 @@ class NamedOptimizer(optim.Optimizer):
                 storage_reader=fs_storage_loader,
             )
 
-            optim_state_dict.load_state_dict(optim_state_dict)
+            optimizer.load_state_dict(optim_state_dict)
             ...
         ```
         Args:
-            state_dict (Dict[str, Any]) : A state_dict to load to. Note that this
-                state dict will updated in places.
+            state_dict (Dict[str, Any]) : A ``state_dict`` to load into the optimizer.
+                Note that this state dict update is performed in places.
         """
+        # TODO: Need to handle the case when self._optimizer has not been initialized.
         new_state_dict = self._optimizer.state_dict()
         state = state_dict["state"]
         new_state = new_state_dict["state"]
@@ -161,20 +160,20 @@ class NamedOptimizer(optim.Optimizer):
         # Load state of state_dict
         if len(new_state) != len(state):
             raise ValueError(
-                f"Different parameter count: {len(new_state)} vs {len(state)}"
+                f"Expects equal length as {len(new_state)} in `state_dict` state length but found {len(state)}."
             )
         for idx, param_key in enumerate(self.param_keys_order):
             if param_key not in state.keys():
-                raise ValueError(f"Parameter {param_key} not found")
+                raise ValueError(f"Expect {param_key} as a parameter in `state_dict` state but not found.")
             if len(state[param_key]) != len(new_state[idx]):
                 raise ValueError(
-                    f"Different state size: {len(state[param_key])} vs {len(new_state[idx])}"
+                    f"Expects equal length as {len(new_state[idx])} for parameter {param_key} but found: {len(state[param_key])}"
                 )
             # Iterate through all optimizer states.
             for state_key, state_val in new_state[idx].items():
                 if state_key not in state[param_key]:
                     raise ValueError(
-                        f"State key {state_key} not found for param {param_key}"
+                        f"Expects state {state_key} for parameter {param_key} but not found."
                     )
 
                 src_state_val = state[param_key][state_key]
@@ -184,7 +183,7 @@ class NamedOptimizer(optim.Optimizer):
                     num_new_shards = len(src_state_val.local_shards())
                     if num_shards != num_new_shards:
                         raise ValueError(
-                            f"Different number of shards {num_shards} vs {num_new_shards} for {param_key}/{state_key}"
+                            f"Expects equal number of shards as {num_new_shards} but found {num_shards} for {param_key}/{state_key}"
                         )
                     for shard, src_shard in zip(
                         state_val.local_shards(), src_state_val.local_shards()
@@ -202,31 +201,31 @@ class NamedOptimizer(optim.Optimizer):
 
         if len(new_param_groups) != len(src_param_groups):
             raise ValueError(
-                f"Different param_groups count: {len(new_param_groups)} vs {len(src_param_groups)}"
+                f"Expects equal param_groups count as {len(new_param_groups)} in `state_dict` but found {len(src_param_groups)}."
             )
         src_group_map = {}
         for group in src_param_groups:
             param_keys = []
             for param_key in group["params"]:
                 param_keys.append(param_key)
-            src_group_map["/".join(sorted(param_keys))] = group
+            src_group_map[_gen_param_group_key(param_keys)] = group
         new_group_map = {}
         for new_group in new_param_groups:
             param_keys = []
             for param_key in new_group["params"]:
                 param_keys.append(self.param_keys_order[param_key])  # type: ignore[call-overload]
-            new_group_map["/".join(sorted(param_keys))] = new_group
+            new_group_map[_gen_param_group_key(param_keys)] = new_group
         for group_key, new_group in new_group_map.items():
             if group_key not in src_group_map:
-                raise ValueError(f"Group {group_key} not found")
+                raise ValueError(f"Expects group {group_key} to be in `state_dict` but is missing")
             src_group = src_group_map[group_key]
             if len(src_group) != len(new_group):
                 raise ValueError(
-                    f"Different param_group size: {len(src_group)} vs {len(new_group)}"
+                    f"Expects equal param_group size as {len(new_group)} for group {group_key} but found {len(src_group)}."
                 )
             for k in src_group:
                 if k not in new_group:
-                    raise ValueError(f"Group key {k} not found for group {group_key}")
+                    raise ValueError(f"Expects group key {k} to be in group {group_key} in `state_dict` but is missing.")
                 if k != "params":
                     new_group[k] = deepcopy(src_group[k])
 
@@ -234,4 +233,12 @@ class NamedOptimizer(optim.Optimizer):
 
     # pyre-ignore [2]
     def add_param_group(self, param_group: Any) -> None:
-        raise NotImplementedError()
+        raise NotImplementedError("add_param_group not supported yet and might be implemented soon.")
+
+
+def _gen_param_group_key(param_keys: List[str]) -> str:
+    """
+    Concatenate all param keys as a unique indentifier for one param group.
+    """
+
+    return "/".join(sorted(param_keys))

@@ -219,6 +219,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.lgamma({x})"
 
     @staticmethod
+    def erf(x):
+        return f"tl.libdevice.erf({x})"
+
+    @staticmethod
     def logical_and(a, b):
         return f"{a} & {b}"
 
@@ -752,6 +756,12 @@ class TritonKernel(Kernel):
             mask = dense_mask
             index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
         elif indirect_indexing:
+            # Use dense mask for indirect_indexing
+            # See https://github.com/pytorch/torchdynamo/issues/1654
+            # TODO - An optimization could be to hoist this load outside of
+            # reduction loop, if it is independent of rmask. Such example can be found in
+            # https://github.com/pytorch/torchdynamo/issues/1654
+            index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
             mask = dense_mask
 
         if self._load_mask:
