@@ -5,7 +5,7 @@ from itertools import chain
 import warnings
 import functools
 
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict
 
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
@@ -74,7 +74,7 @@ class Optimizer(object):
         self._optimizer_step_pre_hooks = OrderedDict()
         self._optimizer_step_post_hooks = OrderedDict()
 
-        self._hook_for_profile()
+        self._step_with_hook()
 
         if isinstance(params, torch.Tensor):
             raise TypeError("params argument given to the optimizer should be "
@@ -112,7 +112,7 @@ class Optimizer(object):
             self._optimizer_step_pre_hooks = OrderedDict()
         if '_optimizer_step_post_hooks' not in self.__dict__:
             self._optimizer_step_post_hooks = OrderedDict()
-        self._hook_for_profile()  # To support multiprocessing pickle/unpickle
+        self._step_with_hook()  # To support multiprocessing pickle/unpickle
         self.defaults.setdefault('differentiable', False)
 
     def __repr__(self):
@@ -159,8 +159,7 @@ class Optimizer(object):
         """
         pass
 
-    def _hook_for_profile(self):
-        self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
+    def _step_with_hook(self):
 
         def profile_hook_step(func):
 
@@ -170,18 +169,21 @@ class Optimizer(object):
                 profile_name = "Optimizer.step#{}.step".format(obj.__class__.__name__)
                 with torch.autograd.profiler.record_function(profile_name):
                     # call optimizer step pre hooks
-                    for hook in self._optimizer_step_pre_hooks.values():
-                        args = hook(*args)
+                    for pre_hook in self._optimizer_step_pre_hooks.values():
+                        pre_hook(*args)
 
                     out = func(*args, **kwargs)
                     obj._optimizer_step_code()
+
                     # call optimizer step post hooks
-                    for hook in self._optimizer_step_post_hooks.values():
-                        hook()
+                    for post_hook in self._optimizer_step_post_hooks.values():
+                        post_hook(*args)
+                   
                     return out
 
             return wrapper
 
+        self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
         hooked = getattr(self.__class__.step, "hooked", None)
         if not hooked:
             self.__class__.step = profile_hook_step(self.__class__.step)
@@ -314,7 +316,7 @@ class Optimizer(object):
         foreach = self.defaults.get('foreach', False)
 
         if not hasattr(self, "_zero_grad_profile_name"):
-            self._hook_for_profile()
+            self._step_with_hook()
         if foreach:
             per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
