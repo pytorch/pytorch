@@ -14,7 +14,6 @@
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
 #include <unordered_map>
-
 namespace torch {
 namespace jit {
 
@@ -326,10 +325,20 @@ void NodeToONNX(
           ONNXShapeTypeInference(const_node, empty_params_dict, opset_version);
           env[old] = const_node->output();
         } else {
-          // ConstantValueMap has been set in shape inference,
-          // set_constant_value_map = false here to avoid redundancy.
+          // An update in ConstantValueMap is also needed here, since
+          // the user setType can be only accessed in this step, and it
+          // should be reliable.
           MergeInferredTypeAndSetMap(
-              outputs[i], old->type(), outputs[i]->type(), false);
+              outputs[i], old->type(), outputs[i]->type());
+          // non ONNX node with no type given will throw out the warnings here.
+          UpdateReliable(
+              outputs[i],
+              AreInputsReliableOrStatic(outputs[i]->node()),
+              /*no_type_warning=*/true);
+          // For the node type that does not have ComputeConstant logic, it may
+          // have reliable shape but its shape is not in ConstantValueMap. So we
+          // need to update ConstantValueMap.
+          UpdateShapeConstantIfReliable(outputs[i]);
 
           // Copy over source location and scope information to all nodes
           // created by the symbolic
@@ -426,8 +435,16 @@ void NodeToONNX(
 
     WithInsertPoint insert_point_guard(new_block);
     WithCurrentScope scope_guard(*g, n->scope());
+
+    // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
+    // Python. Check #87343 for details.
     py::object raw_output = onnx.attr("_run_symbolic_function")(
-        g, new_block, n, py_inputs, env, operator_export_type);
+        g->shared_from_this(),
+        new_block,
+        n,
+        py_inputs,
+        env,
+        operator_export_type);
 
     // Find new nodes that have been created by _run_symbolic_function and
     // propagate metadata
@@ -530,8 +547,11 @@ void NodeToONNX(
               opset_version,
               pyobj.attr("symbolic"),
               /* custom */ true);
+
+      // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
+      // Python. Check #87343 for details.
       py::object raw_output = onnx.attr("_run_symbolic_method")(
-          new_block->owningGraph(),
+          new_block->owningGraph()->shared_from_this(),
           op->name(),
           pyobj.attr("symbolic"),
           py_symbolic_args);
@@ -542,8 +562,10 @@ void NodeToONNX(
       Node* n = static_cast<Node*>(op);
       n->s_(attr::name, op->name());
       // Call symbolic function
+      // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
+      // Python. Check #87343 for details.
       py::object raw_output = onnx.attr("_run_symbolic_function")(
-          new_block->owningGraph(),
+          new_block->owningGraph()->shared_from_this(),
           new_block,
           n,
           py_symbolic_args,

@@ -33,8 +33,6 @@ using trace_ptr_t =
 
 RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
     : data_{t.has_storage() ? t.storage().data() : nullptr},
-      device_type_{t.device().type()},
-      device_index_{t.device().index()},
       dtype_{t.scalar_type()},
       layout_{t.layout()},
       dim_{static_cast<uint32_t>(t.sizes().size())} {
@@ -42,6 +40,24 @@ RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
       t.sizes().size() <= std::numeric_limits<uint32_t>::max(),
       "Cannot profile Tensors of size > uint32 max. Got dim: ",
       t.sizes().size());
+}
+
+RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
+    : RawTensorMetadataBase(t),
+      weak_self_{WeakTensor(t)},
+      device_type_{t.device().type()},
+      device_index_{t.device().index()} {}
+
+TensorMetadata::TensorMetadata(
+    const RawTensorMetadata& r,
+    const std::vector<int64_t>& sizes,
+    const std::vector<int64_t>& strides)
+    : RawTensorMetadataBase(r),
+      weak_self_{r.weak_self_.value_or(WeakTensor(at::Tensor()))},
+      device_{r.device_type_, r.device_index_},
+      sizes_{sizes},
+      strides_{strides} {
+  SOFT_ASSERT(r.weak_self_.has_value());
 }
 
 // ============================================================================
@@ -64,7 +80,9 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
       ivalues_.emplace_back(value);
     } else if (value.isTensorList()) {
       tags_.emplace_back(Tag::TensorListBegin);
-      // TODO: Skip TensorList for now.
+      for (const auto& t : value.toTensorList()) {
+        push(t);
+      }
       tags_.emplace_back(Tag::TERMINATOR);
     } else {
       tags_.emplace_back(Tag::Other);
@@ -94,54 +112,49 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
           tensor_metadata_it = tensor_metadata_.begin(),
           tensor_size_strides_it = tensor_sizes_strides_.begin(),
           ivals_it = ivalues_.begin()]() mutable {
-    struct Inputs out;
+    auto decode_tensor = [&]() -> TensorMetadata {
+      const auto& raw_metadata = *tensor_metadata_it++;
+      std::vector<int64_t> sizes;
+      std::vector<int64_t> strides;
+      for (C10_UNUSED const auto _ : c10::irange(raw_metadata.dim_)) {
+        sizes.push_back(*tensor_size_strides_it++);
+      }
+      if (raw_metadata.layout_ == at::kStrided) {
+        for (C10_UNUSED const auto _ : c10::irange(raw_metadata.dim_)) {
+          strides.push_back(*tensor_size_strides_it++);
+        }
+      }
+      return {raw_metadata, sizes, strides};
+    };
+
+    std::vector<op_input_t> out;
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
-      out.shapes_.emplace_back();
-      out.strides_.emplace_back();
       switch (*tag_it) {
-        case Tag::Tensor: {
-          const TensorMetadata md{*tensor_metadata_it++};
-          for (C10_UNUSED const auto _ : c10::irange(md.dim_)) {
-            out.shapes_.back().push_back(*tensor_size_strides_it++);
-          }
-          if (md.layout_ == at::kStrided) {
-            for (const auto _ : c10::irange(md.dim_)) {
-              (void)_; // Suppress unused variable warning
-              out.strides_.back().push_back(*tensor_size_strides_it++);
-            }
-          }
-          out.tensor_metadata_.emplace_back(TensorMetadata(md));
-          out.ivalues_.emplace_back();
-          out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
-        } break;
-
-        case Tag::TensorListBegin:
-          while (*(++tag_it) != Tag::TERMINATOR) {
-            // TODO: Skip TensorLists for now.
-          }
-          out.dtypes_.emplace_back("TensorList");
-          out.ivalues_.emplace_back();
-          out.tensor_metadata_.emplace_back();
+        case Tag::Tensor:
+          out.emplace_back(decode_tensor());
           break;
 
+        case Tag::TensorListBegin: {
+          std::vector<TensorMetadata> arg;
+          while (*(++tag_it) != Tag::TERMINATOR) {
+            TORCH_INTERNAL_ASSERT(*tag_it == Tag::Tensor, (int)(*tag_it));
+            arg.emplace_back(decode_tensor());
+          }
+          out.emplace_back(std::move(arg));
+        } break;
+
         case Tag::Scalar:
-          out.dtypes_.emplace_back("Scalar");
-          out.ivalues_.emplace_back(*ivals_it++);
-          out.tensor_metadata_.emplace_back();
+          out.emplace_back(*ivals_it++);
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
-          out.dtypes_.emplace_back();
-          out.ivalues_.emplace_back();
-          out.tensor_metadata_.emplace_back();
+          out.emplace_back(c10::nullopt);
           break;
 
         case Tag::TERMINATOR:
           // This marks the end of this op.
-          out.shapes_.pop_back();
-          out.strides_.pop_back();
           terminate = true;
           break;
 
@@ -246,6 +259,11 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
 
   event->start_time_ = torch::profiler::impl::getApproximateTime();
   event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
+  if (!config_.experimental_config.performance_events.empty()) {
+    const size_t n = config_.experimental_config.performance_events.size();
+    event->counters_ = std::make_unique<perf_counters_t>(n, 0);
+    perf_profiler_->Enable();
+  }
   return out;
 }
 
@@ -327,7 +345,8 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         jit_module(),
         extra_args(),
         gpu_fallback(),
-        event->allow_tf32_cublas_};
+        event->allow_tf32_cublas_,
+        std::move(event->counters_)};
 
     out.emplace_back(Result::create(
         time_converter(event->start_time_), tid, kineto_info, std::move(e)));
@@ -468,6 +487,11 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
     const ProfilerConfig& config)
     : tid_{tid}, config_{config}, kineto_info_{kineto::kineto_ids()} {
   torch::profiler::impl::kineto::recordThreadInfo();
+  if (config_.experimental_config.performance_events.size()) {
+    perf_profiler_ =
+        std::make_unique<torch::profiler::impl::linux_perf::PerfProfiler>();
+    perf_profiler_->Configure(config_.experimental_config.performance_events);
+  }
 }
 
 RecordQueue::RecordQueue(

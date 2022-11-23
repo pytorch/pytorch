@@ -1713,8 +1713,10 @@ When the approximate argument is 'none', it applies element-wise the function
 
 where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
-When the approximate argument is 'tanh', Gelu is estimated with:
-    :math::  \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+When the approximate argument is 'tanh', Gelu is estimated with
+
+.. math::
+    \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
 See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
 """)
@@ -1997,7 +1999,7 @@ linear(input, weight, bias=None) -> Tensor
 
 Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
-This opperation supports 2-D :attr:`weight` with :ref:`sparse layout<sparse-docs>`
+This operation supports 2-D :attr:`weight` with :ref:`sparse layout<sparse-docs>`
 
 {sparse_beta_warning}
 
@@ -2524,6 +2526,8 @@ def group_norm(
     """
     if has_torch_function_variadic(input, weight, bias):
         return handle_torch_function(group_norm, (input, weight, bias,), input, num_groups, weight=weight, bias=bias, eps=eps)
+    if input.dim() < 2:
+        raise RuntimeError(f"Expected at least 2 dimensions for input tensor but received {input.dim()}")
     _verify_batch_size([input.size(0) * input.size(1) // num_groups, num_groups] + list(input.size()[2:]))
     return torch.group_norm(input, num_groups, weight, bias, eps, torch.backends.cudnn.enabled)
 
