@@ -20,30 +20,37 @@ void XNNSerializer::serializeAddNode(
   const auto addNode =
       CreateXNNAdd(_builder, input1_id, input2_id, output_id, flags);
   const auto flatbufferNode =
-      CreateNode(_builder, NodeUnion::XNNAdd, addNode.Union());
+      CreateXNode(_builder, XNodeUnion::XNNAdd, addNode.Union());
   _nodes.push_back(flatbufferNode);
+}
+
+size_t XNNSerializer::serializeData(const uint8_t* data_ptr, size_t num_bytes) {
+  size_t constant_buffer_idx = 0;
+  // Handling the tensor _values with data
+  if (data_ptr != nullptr) {
+    // steps:
+    // 1. creating flatbuffer byte-vector for tensor data
+    auto storage = _builder.CreateVector(data_ptr, num_bytes);
+
+    // 2. put it in the common buffer
+    constant_buffer_idx = _constantBuffer.size();
+    _constantBuffer.emplace_back(CreateBuffer(_builder, storage));
+
+    // 3. record size into bufferSizes
+    _bufferSizes.push_back(num_bytes);
+    assert(_bufferSizes.size() == _constantBuffer.size());
+  }
+  return constant_buffer_idx;
 }
 
 void XNNSerializer::serializeTensorValue(
     uint32_t xnn_datatype,
     size_t num_dims,
     std::vector<size_t> dims,
-    void* data,
+    size_t data_buffer_idx,
     uint32_t external_id,
     uint32_t flags,
     uint32_t id_out) {
-  // we will reserve buffers without data to index 0
-  int constant_buffer_idx = 0;
-  // Handling the tensor _values with data
-  // TODO @maxren fill out when handling tensors with data
-  if (data != nullptr) {
-    assert(false); // not supported yet
-    // steps:
-    // 1. creating buffer to store the 16 bit aligned data
-    // 2. increment buffer_idx, to reflect no buffer being added
-    // 3. record size into bufferSizes
-  }
-
   std::vector<uint32_t> serialized_dims;
   serialized_dims.reserve(dims.size());
   for (auto dim : dims) {
@@ -55,24 +62,26 @@ void XNNSerializer::serializeTensorValue(
       XNNDatatype(xnn_datatype),
       num_dims,
       &serialized_dims,
-      constant_buffer_idx,
+      data_buffer_idx,
       external_id,
       flags,
       id_out);
 
   const auto flatbufferValue =
-      CreateValue(_builder, ValueUnion::XNNTensorValue, tensorValue.Union());
+      CreateXValue(_builder, XValueUnion::XNNTensorValue, tensorValue.Union());
   _values.push_back(flatbufferValue);
 }
 
 std::string XNNSerializer::finishAndSerialize(
     std::vector<uint32_t> input_ids,
-    std::vector<uint32_t> output_ids) {
+    std::vector<uint32_t> output_ids,
+    size_t num_extern_ids) {
   auto xnnGraph = CreateXNNGraphDirect(
       _builder,
       _version_sha1,
       &_nodes,
       &_values,
+      num_extern_ids,
       &input_ids,
       &output_ids,
       &_constantBuffer,
