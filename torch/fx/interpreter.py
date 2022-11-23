@@ -359,7 +359,8 @@ class Interpreter:
                 raise RuntimeError(f'Node {n} referenced nonexistent value {n_arg}! Run Graph.lint() '
                                    f'to diagnose such issues')
             return self.env[n_arg]
-        return map_arg(args, load_arg)
+        result = map_arg(args, load_arg)
+        return result
 
 @compatibility(is_backward_compatible=True)
 class Transformer(Interpreter):

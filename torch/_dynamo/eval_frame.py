@@ -1,5 +1,4 @@
 import contextlib
-import copy
 import functools
 import inspect
 import logging
@@ -22,7 +21,7 @@ from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .optimizations.distributed import DDPOptimizer
-from .utils import checkpoint_params, clone_inputs, compile_times, same
+from .utils import compile_times
 
 log = logging.getLogger(__name__)
 
