@@ -39,9 +39,9 @@ if [ ! -d "$ANDROID_NDK" ]; then
   exit 1
 fi
 
-if [ -z "$PYTHON" ]; then
-  PYTHON=python
-  PYTHON_VERSION_MAJOR=$($PYTHON -c 'import sys; print(sys.version_info[0])')
+if [ -z "${CONDA_RUN} python" ]; then
+  PYTHON=${CONDA_RUN} python
+  PYTHON_VERSION_MAJOR=$(${CONDA_RUN} python -c 'import sys; print(sys.version_info[0])')
   if [ "${PYTHON_VERSION_MAJOR}" -le 2 ]; then
     echo "Default python executable is Python-2, trying to use python3 alias"
     PYTHON=python3
@@ -52,7 +52,7 @@ ANDROID_NDK_PROPERTIES="$ANDROID_NDK/source.properties"
 [ -f "$ANDROID_NDK_PROPERTIES" ] && ANDROID_NDK_VERSION=$(sed -n 's/^Pkg.Revision[^=]*= *\([0-9]*\)\..*$/\1/p' "$ANDROID_NDK_PROPERTIES")
 
 echo "Bash: $(/bin/bash --version | head -1)"
-echo "Python: $($PYTHON -c 'import sys; print(sys.version)')"
+echo "Python: $(${CONDA_RUN} python -c 'import sys; print(sys.version)')"
 echo "Caffe2 path: $CAFFE2_ROOT"
 echo "Using Android NDK at $ANDROID_NDK"
 echo "Android NDK version: $ANDROID_NDK_VERSION"
@@ -60,8 +60,8 @@ echo "Android NDK version: $ANDROID_NDK_VERSION"
 CMAKE_ARGS=()
 
 # Build PyTorch mobile
-CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$($PYTHON -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
-CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$($PYTHON -c 'import sys; print(sys.executable)')")
+CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(${CONDA_RUN} python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
+CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(${CONDA_RUN} python -c 'import sys; print(sys.executable)')")
 CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
 
 # custom build with selected ops
