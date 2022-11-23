@@ -771,7 +771,7 @@ class TritonKernel(Kernel):
             # https://github.com/openai/triton/issues/633
             mask_vars = set()
 
-        mask_str = " & ".join(map(str, mask_vars)) if mask_vars else "None"
+        mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
         return index_str, mask_vars, mask_str
 
     def var_ranges(self):
