@@ -90,8 +90,6 @@ DEFAULTS = {
     "training": [
         "eager",
         "aot_eager",
-        "aot_cudagraphs",
-        "nvprims_nvfuser",
         "inductor",
         "inductor_no_cudagraphs",
     ],
@@ -1204,7 +1202,7 @@ class DashboardUpdater:
             "gh_executive_summary.txt",
             "gh_summary_diff.txt",
             "gh_warnings.txt",
-            # "gh_regression.txt",
+            "gh_regression.txt",
             "gh_metric_regression.txt",
             "gh_training.txt",
             "gh_graphs.txt",
