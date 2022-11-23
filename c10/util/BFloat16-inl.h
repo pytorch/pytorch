@@ -24,15 +24,21 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
 
 /// Implicit conversions
 inline C10_HOST_DEVICE BFloat16::operator float() const {
+#if defined(CUDA_VERSION)
   return __bfloat162float(*reinterpret_cast<const __nv_bfloat16*>(&x));
+#else
+  return detail::f32_from_bits(x);
+#endif
 }
 
+#if defined(CUDA_VERSION)
 inline C10_HOST_DEVICE BFloat16::BFloat16(const __nv_bfloat16& value) {
   x = *reinterpret_cast<const unsigned short*>(&value);
 }
 inline C10_HOST_DEVICE BFloat16::operator __nv_bfloat16() const {
   return *reinterpret_cast<const __nv_bfloat16*>(&x);
 }
+#endif
 
 // CUDA intrinsics
 

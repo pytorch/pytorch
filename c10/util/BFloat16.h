@@ -90,8 +90,10 @@ struct alignas(2) BFloat16 {
   inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
 
+#if defined(CUDA_VERSION)
   inline C10_HOST_DEVICE BFloat16(const __nv_bfloat16& value);
   explicit inline C10_HOST_DEVICE operator __nv_bfloat16() const;
+#endif
 };
 
 } // namespace c10
