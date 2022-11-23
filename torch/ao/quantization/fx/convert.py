@@ -146,8 +146,23 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         quantize_op : Optional[Callable] = None
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
-            raise NotImplementedError("decomposed quantize_per_channel op not implemented yet")
+            ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
+            quantize_op = torch.ops.quantized_decomposed.quantize_per_channel
+            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_channel
+            quant_min = activation_post_process.quant_min
+            quant_max = activation_post_process.quant_max
+            dtype_ = to_underlying_dtype(dtype)
+            qparams = {
+                "_scale_": scale,
+                "_zero_point_": zero_point,
+                "_axis_": ch_axis,
+                "_quant_min_": quant_min,
+                "_quant_max_": quant_max,
+                "_dtype_": dtype_
+            }
         else:
+            quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor
+            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor
             scale = float(scale)
             zero_point = int(zero_point)
             quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
@@ -160,7 +175,6 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 "_quant_max_": quant_max,
                 "_dtype_": dtype_
             }
-            quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor
 
         # 2. replace activation_post_process node with quantize and dequantize
         with graph.inserting_before(node):
@@ -182,7 +196,6 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             quantized_node = graph.create_node(node_type, quantize_op, tuple(quantize_op_inputs), {})
             # use the same qparams from quantize op
             dq_inputs = [quantized_node] + quantize_op_inputs[1:]
-            dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor
             dequantized_node = graph.call_function(
                 dequantize_op,
                 tuple(dq_inputs),
