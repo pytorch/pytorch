@@ -5,7 +5,18 @@ import os
 import pathlib
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import yaml
 from typing_extensions import Literal
@@ -1406,6 +1417,9 @@ def get_native_function_declarations(
     *,
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_indices: Dict[DispatchKey, BackendIndex],
+    native_function_decl_gen: Callable[
+        [Union[NativeFunctionsGroup, NativeFunction], BackendIndex], Optional[str]
+    ],
 ) -> List[str]:
     declarations: List[str] = []
     ns_grouped_kernels: Dict[str, List[str]] = defaultdict(list)
@@ -1425,7 +1439,7 @@ def get_native_function_declarations(
                 len(native_function_namespaces) <= 1
             ), f"Codegen only supports one namespace per operator, got {native_function_namespaces} from {dispatch_keys}"
             ns_grouped_kernels[namespace].extend(
-                dest.compute_native_function_declaration(f, backend_idx)
+                native_function_decl_gen(f, backend_idx)
             )
 
     for namespace, kernels in ns_grouped_kernels.items():
@@ -1734,6 +1748,7 @@ def gen_aggregated_headers(
     declarations = get_native_function_declarations(
         grouped_native_functions=grouped_native_functions,
         backend_indices=backend_indices,
+        native_function_decl_gen=dest.compute_native_function_declaration,
     )
     cpu_fm.write(
         "NativeFunctions.h",
@@ -1863,7 +1878,9 @@ def gen_per_operator_headers(
                 },
             )
         declarations = get_native_function_declarations(
-            grouped_native_functions=grouped_functions, backend_indices=backend_indices
+            grouped_native_functions=grouped_functions,
+            backend_indices=backend_indices,
+            native_function_decl_gen=dest.compute_native_function_declaration,
         )
         ops_fm.write_with_template(
             f"{name}_native.h",
