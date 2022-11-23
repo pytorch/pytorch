@@ -1359,13 +1359,7 @@ class TestPartitioning(AOTTestCase):
             #
             # TODO(whc)- are the saved-tensors/saved-symints correct here?
             # i just made the test pass based on what default partition did
-<<<<<<< HEAD
-            [False, True, True, False, False] + [False] * 4 + [True] * 4,
-=======
-            # Of the 5 original forward outputs, the 4th (c) is an input,
-            # which won't show up in the compiled forward graph
-            [False, True, True, False] + [False] * 5 + [True] * 3,
->>>>>>> first draft of input mutation handling for aot autograd
+            [False, True, True, False] + [False] * 4 + [True] * 4,
             [is_sym_node(n) for n in fw_graph_out_nodes]
         )
 

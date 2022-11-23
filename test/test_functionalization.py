@@ -11,6 +11,7 @@ from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch._dispatch.python import enable_crossref_functionalize
+from torch._dispatch.python import enable_python_dispatcher
 
 import unittest
 
@@ -1228,6 +1229,118 @@ def forward(self, a_1):
     return zeros
     """)
 
+    def test_instance_norm(self):
+        def f(x):
+            with enable_python_dispatcher():
+                return torch.instance_norm(x, None, None, running_mean=torch.zeros(100), running_var=torch.ones(100),
+                                           use_input_stats=True, momentum=0.1, eps=1e-5, cudnn_enabled=False)
+        self.assert_functionalization(f, torch.randn(20, 100, 35, 45))
+        logs = self.get_logs(f, torch.randn(20, 100, 35, 45))
+        self.assertExpectedInline(logs, """\
+
+
+
+def forward(self, a_1):
+    zeros = torch.ops.aten.zeros.default([100], device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([100], device = device(type='cpu'), pin_memory = False)
+    repeat = torch.ops.aten.repeat.default(zeros, [20])
+    repeat_1 = torch.ops.aten.repeat.default(ones, [20])
+    view_copy = torch.ops.aten.view_copy.default(a_1, [1, 2000, 35, 45]);  a_1 = None
+    empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
+    native_batch_norm_legit_functional = torch.ops.aten.native_batch_norm_legit_functional.default(view_copy, None, None, repeat, repeat_1, True, 0.1, 1e-05);  view_copy = repeat = repeat_1 = None
+    getitem = native_batch_norm_legit_functional[0]
+    getitem_1 = native_batch_norm_legit_functional[1]
+    getitem_2 = native_batch_norm_legit_functional[2]
+    getitem_3 = native_batch_norm_legit_functional[3]
+    getitem_4 = native_batch_norm_legit_functional[4];  native_batch_norm_legit_functional = None
+    alias_copy = torch.ops.aten.alias_copy.default(zeros);  zeros = None
+    view_copy_1 = torch.ops.aten.view_copy.default(getitem_3, [20, 100])
+    view_copy_2 = torch.ops.aten.view_copy.default(getitem_3, [20, 100]);  getitem_3 = None
+    mean = torch.ops.aten.mean.dim(view_copy_2, [0]);  view_copy_2 = None
+    copy = torch.ops.aten.copy.default(alias_copy, mean);  alias_copy = mean = None
+    alias_copy_1 = torch.ops.aten.alias_copy.default(ones);  ones = None
+    view_copy_3 = torch.ops.aten.view_copy.default(getitem_4, [20, 100])
+    view_copy_4 = torch.ops.aten.view_copy.default(getitem_4, [20, 100]);  getitem_4 = None
+    mean_1 = torch.ops.aten.mean.dim(view_copy_4, [0]);  view_copy_4 = None
+    copy_1 = torch.ops.aten.copy.default(alias_copy_1, mean_1);  alias_copy_1 = mean_1 = None
+    view_copy_5 = torch.ops.aten.view_copy.default(getitem, [20, 100, 35, 45]);  getitem = None
+    return view_copy_5
+    """)
+
+        reinplaced_logs = self.get_logs(f, torch.randn(20, 100, 35, 45), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    zeros = torch.ops.aten.zeros.default([100], device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([100], device = device(type='cpu'), pin_memory = False)
+    repeat = torch.ops.aten.repeat.default(zeros, [20])
+    repeat_1 = torch.ops.aten.repeat.default(ones, [20])
+    view = torch.ops.aten.view.default(a_1, [1, 2000, 35, 45]);  a_1 = None
+    empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
+    native_batch_norm_legit_functional = torch.ops.aten.native_batch_norm_legit_functional.default(view, None, None, repeat, repeat_1, True, 0.1, 1e-05);  view = repeat = repeat_1 = None
+    getitem = native_batch_norm_legit_functional[0]
+    getitem_1 = native_batch_norm_legit_functional[1]
+    getitem_2 = native_batch_norm_legit_functional[2]
+    getitem_3 = native_batch_norm_legit_functional[3]
+    getitem_4 = native_batch_norm_legit_functional[4];  native_batch_norm_legit_functional = None
+    alias = torch.ops.aten.alias.default(zeros);  zeros = None
+    view_1 = torch.ops.aten.view.default(getitem_3, [20, 100])
+    view_2 = torch.ops.aten.view.default(getitem_3, [20, 100]);  getitem_3 = None
+    mean = torch.ops.aten.mean.dim(view_2, [0]);  view_2 = None
+    copy = torch.ops.aten.copy_.default(alias, mean);  alias = mean = None
+    alias_1 = torch.ops.aten.alias.default(ones);  ones = None
+    view_3 = torch.ops.aten.view.default(getitem_4, [20, 100])
+    view_4 = torch.ops.aten.view.default(getitem_4, [20, 100]);  getitem_4 = None
+    mean_1 = torch.ops.aten.mean.dim(view_4, [0]);  view_4 = None
+    copy_1 = torch.ops.aten.copy_.default(alias_1, mean_1);  alias_1 = mean_1 = None
+    view_5 = torch.ops.aten.view.default(getitem, [20, 100, 35, 45]);  getitem = None
+    return view_5
+    """)
+
+    def test_batch_norm(self):
+        def f(x):
+            with enable_python_dispatcher():
+                return torch.batch_norm(x, None, None, torch.zeros(100), torch.ones(100), False, 0.1, 1e-5, False)
+
+        self.assert_functionalization(f, torch.randn(20, 100, 35, 45))
+        logs = self.get_logs(f, torch.randn(20, 100, 35, 45))
+        self.assertExpectedInline(logs, """\
+
+
+
+def forward(self, a_1):
+    zeros = torch.ops.aten.zeros.default([100], device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([100], device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
+    native_batch_norm_legit_functional = torch.ops.aten.native_batch_norm_legit_functional.default(a_1, None, None, zeros, ones, False, 0.1, 1e-05);  a_1 = zeros = ones = None
+    getitem = native_batch_norm_legit_functional[0]
+    getitem_1 = native_batch_norm_legit_functional[1]
+    getitem_2 = native_batch_norm_legit_functional[2]
+    getitem_3 = native_batch_norm_legit_functional[3]
+    getitem_4 = native_batch_norm_legit_functional[4];  native_batch_norm_legit_functional = None
+    return getitem
+    """)
+
+        reinplaced_logs = self.get_logs(f, torch.randn(20, 100, 35, 45), reapply_views=True, run_reinplace=True)
+        self.assertExpectedInline(reinplaced_logs, """\
+
+
+
+def forward(self, a_1):
+    zeros = torch.ops.aten.zeros.default([100], device = device(type='cpu'), pin_memory = False)
+    ones = torch.ops.aten.ones.default([100], device = device(type='cpu'), pin_memory = False)
+    empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
+    native_batch_norm_legit_functional = torch.ops.aten.native_batch_norm_legit_functional.default(a_1, None, None, zeros, ones, False, 0.1, 1e-05);  a_1 = zeros = ones = None
+    getitem = native_batch_norm_legit_functional[0]
+    getitem_1 = native_batch_norm_legit_functional[1]
+    getitem_2 = native_batch_norm_legit_functional[2]
+    getitem_3 = native_batch_norm_legit_functional[3]
+    getitem_4 = native_batch_norm_legit_functional[4];  native_batch_norm_legit_functional = None
+    return getitem
+    """)
+
 @xfail_inherited_tests([
     "test_as_strided",
     "test_copy_",
@@ -1241,6 +1354,7 @@ def forward(self, a_1):
 ])
 class TestCrossRefFunctionalization(TestFunctionalization):
     crossref = True
+
 
 if __name__ == '__main__':
     run_tests()

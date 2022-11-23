@@ -1373,6 +1373,121 @@ def native_batch_norm(
     return output.to(dtype=input.dtype), save_mean, save_rstd
 
 
+# TODO: this decomposition is NOT here to stay. We would much prefer replacing native_batch_norm
+# with our new correctly schema'd native_batch_norm_legit and its variants, but
+# we cannot do that immediately in the C++ because it would be forwards incompatible
+# with some mobile use cases.
+#
+# Since this change is most impactful for aot autograd/functionalization, we simply
+# register this decomposition on the Autograd key for the python dispatcher (which is
+# currently only used by aot autograd/functionalization and no one else, really).
+# In two weeks or so, we should remove this decomposition and phase out the current native_batch_norm
+# to be native_batch_norm_legit and have the right schema (stating that there are input mutations).
+@torch.ops.aten.native_batch_norm.default.py_impl(DispatchKey.Autograd)
+def native_batch_norm_decomposition(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    if running_mean is not None and running_var is not None:
+        return aten.native_batch_norm_legit(
+            input, weight, bias, running_mean, running_var, training, momentum, eps
+        )
+    return aten.native_batch_norm_legit(input, weight, bias, training, momentum, eps)
+
+
+@register_decomposition(aten.native_batch_norm_legit.default)
+def native_batch_norm_legit(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    return native_batch_norm(
+        input, weight, bias, running_mean, running_var, training, momentum, eps
+    )
+
+
+@register_decomposition(aten.native_batch_norm_legit.no_stats)
+def native_batch_norm_legit_no_stats(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    return native_batch_norm(input, weight, bias, None, None, training, momentum, eps)
+
+
+@register_decomposition(aten.native_batch_norm_legit_functional.default)
+def native_batch_norm_legit_functional(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    reduction_dims = [0] + list(range(2, input.dim()))
+    computation_dtype = utils.get_computation_dtype(input.dtype)
+    if training:
+        output, mean, rstd = normalize(input, reduction_dims, eps)
+
+        save_mean = _squeeze_multiple(mean, reduction_dims)
+        save_rstd = _squeeze_multiple(rstd, reduction_dims)
+        new_running_mean = momentum * save_mean + (1 - momentum) * running_mean
+        n = input.numel() / input.shape[1]
+        # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
+        # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
+        # numerics probably don't matter.
+        unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (
+            n / (n - 1)
+        )
+        new_running_var = momentum * unbiased_var + (1 - momentum) * running_var
+    else:
+        assert running_mean is not None and running_var is not None
+        new_running_mean = running_mean.to(dtype=computation_dtype, copy=True)
+        new_running_var = running_var.to(dtype=computation_dtype, copy=True)
+        mean = new_running_mean
+        invstd = 1 / (torch.sqrt(new_running_var + eps))
+        # Very annoying inconsistency where CPU and CUDA give different shapes
+        if input.device.type != "cpu":
+            save_mean = new_running_mean
+            save_rstd = invstd
+        else:
+            save_mean = input.new_zeros((0,))
+            save_rstd = input.new_zeros((0,))
+        mean = _unsqueeze_to_dim(mean, input.dim() - 1)
+        invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
+        output = (input - mean) * invstd
+
+    if weight is None:
+        weight = input.new_ones(())
+
+    if bias is None:
+        bias = input.new_zeros(())
+
+    weight = _unsqueeze_to_dim(weight, input.dim() - 1)
+    bias = _unsqueeze_to_dim(bias, input.dim() - 1)
+    output = output * weight + bias
+    if input.device.type == "cpu":
+        save_mean = save_mean.to(dtype=input.dtype)
+        save_rstd = save_rstd.to(dtype=input.dtype)
+    return output.to(dtype=input.dtype), save_mean, save_rstd, new_running_mean, new_running_var
+
+
 @register_decomposition(aten._fused_dropout)
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):

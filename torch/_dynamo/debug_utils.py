@@ -407,6 +407,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
             # Avoid re-compiling when we call the compiled function twice. This happens
             # when we run the model inference or training in a for loop like here
             # https://github.com/pytorch/torchdynamo/issues/1687#issuecomment-1280040633
+            import pdb; pdb.set_trace()
             nonlocal inner_compiled_fn
             # Copy the tensor attrs like shape, stride etc by converting to Fake Tensor
             # because inductor clears the tensor list in its codegen. And example_inputs
@@ -426,7 +427,10 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                     )
                 if inner_compiled_fn is None:
                     inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
-                if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
+                import pdb; pdb.set_trace()
+                tmp = backend_aot_accuracy_fails(gm, real_inputs, compiler_fn)
+                if tmp:
+#                if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
                     log.warning("Accuracy failed for the AOT Autograd graph")
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),

@@ -1107,9 +1107,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
-    _fw_metadata, out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
-        lambda *args: flat_fn(*(add_dupe_args(args))),
-    )(*deduped_flat_args)
+    with enable_python_dispatcher():
+        _fw_metadata, out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
+            lambda *args: flat_fn(*(add_dupe_args(args))),
+        )(*deduped_flat_args)
 
     # pre-compute, so we can bail out quickly in the hotpath
     _num_outputs_aliased_to_inputs = len([
@@ -1117,7 +1118,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     _num_outputs_aliased_to_intermediates = len([
         x for x in _fw_metadata.aliased_output_info if x.output_type == OutputType.alias_of_intermediate])
     _num_mutated_data_inputs = len([x for x in _fw_metadata.mutated_input_info if x == MutationType.data])
-    _num_mutated_metadata_only_inputs = len(_fw_metadata.metadata_mutation_input_info)
+    _num_mutated_metadata_only_inputs = len([x for x in _fw_metadata.metadata_mutation_input_info if x is not None])
     _num_mutated_inputs = _num_mutated_data_inputs + _num_mutated_metadata_only_inputs
 
     if isinstance(out, (list, tuple)):
@@ -1152,6 +1153,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     disable_amp = torch._C._is_any_autocast_enabled()
 
     if config.use_functionalize:
+#        aot_config.decompositions[torch.ops.aten.native_batch_norm_legit_functional.default] \
+#          = torch._decomp.decomposition_table[torch.ops.aten.native_batch_norm_legit_functional.default]
         with enable_python_dispatcher():
             flattened_joints, _ = pytree.tree_flatten(joint_inputs)
             fx_g = make_fx(
