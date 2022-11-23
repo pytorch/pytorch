@@ -1075,7 +1075,8 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   auto scalar_type = observer_module.attr("dtype");
   if (isPlaceholderObserver(n->input(0))) {
     // get compute_dtype for dynamic quantization
-    if (observer_module.hasattr("is_dynamic") && observer_module.attr("is_dynamic").toBool()) {
+    if (observer_module.hasattr("is_dynamic") &&
+        observer_module.attr("is_dynamic").toBool()) {
       qparams.push_back(
           std::make_pair(kScalarType, observer_module.attr("dtype")));
     }
