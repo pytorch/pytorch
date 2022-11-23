@@ -114,8 +114,8 @@ inline void _vec_log_softmax_lastdim(
             dim_size);
       }
     }
-    delete max_input_arr;
-    delete tmp_sum_scalar;
+    delete[] max_input_arr;
+    delete[] tmp_sum_scalar;
   });
 }
 
