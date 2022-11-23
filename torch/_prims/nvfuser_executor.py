@@ -325,6 +325,11 @@ def _remove_empty_like_fill(gm: GraphModule):
     # https://github.com/pytorch/pytorch/issues/86612
 
     def pattern(scalar, tensor):
+        # pattern for C++ trace of `scalar - tensor`. We are looking for the
+        # pattern of aten and nvprims.sub specifically because we want to remove
+        # the empty_like + fill nodes after lowering of AOT Autograd trace to
+        # nvprims In the future, nvFuser might support fill, and empty_like and
+        # this workaround can be removed.
         empty_like = torch.ops.aten.empty_like.default(
             tensor, memory_format=torch.preserve_format
         )
