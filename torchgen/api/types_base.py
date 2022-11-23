@@ -1,13 +1,22 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+"""
+`types_base.py` vs `types.py`
+
+This file defines data model classes for torchgen typing system, as well as some base types such as int32_t.
+
+`types.py` defines ATen Tensor type and some c10 types, along with signatures that use these types.
+
+The difference between these two files, is `types_base.py` should be implementation-agnostic, meaning it shouldn't
+contain any type definition that is tight to a specific C++ library (e.g., ATen), so that it cacn be easily reused
+if we want to generate code for another C++ library.
+
+For all ATen related types, please refer to or modify `types.py`.
+"""
 from abc import ABC
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Union
-from torchgen.model import (
-    Argument,
-    SelfArgument,
-    TensorOptionsArguments,
-)
+
+from torchgen.model import Argument, SelfArgument, TensorOptionsArguments
 
 # An ArgName is just the str name of the argument in schema;
 # but in some special circumstances, we may add a little extra
@@ -28,6 +37,23 @@ class BaseCppType:
             return self.name
         return f"{self.ns}::{self.name}"
 
+
+# The set of all non-templated, valid, fully-qualified names of C++ types that are used in the codegen.
+# Templated types get their own dataclass, mainly to make namespace parsing easier.
+byteT = BaseCppType("", "uint8_t")
+charT = BaseCppType("", "int8_t")
+shortT = BaseCppType("", "int16_t")
+# It would be more symmetric for this to be called intT, but it easy to mix
+# this up with JIT int (which is int64_t in C++), so we intentionally don't
+# define intT to make it obvious when you've stuffed it up
+int32T = BaseCppType("", "int32_t")
+longT = BaseCppType("", "int64_t")
+doubleT = BaseCppType("", "double")
+floatT = BaseCppType("", "float")
+boolT = BaseCppType("", "bool")
+voidT = BaseCppType("", "void")
+
+
 class CType(ABC):
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         raise NotImplementedError
@@ -37,6 +63,7 @@ class CType(ABC):
 
     def remove_const_ref(self) -> "CType":
         return self
+
 
 @dataclass(frozen=True)
 class BaseCType:
@@ -85,12 +112,14 @@ class MutRefCType(CType):
     def remove_const_ref(self) -> "CType":
         return self.elem.remove_const_ref()
 
+
 # A NamedCType is short for Named C++ semantic type.  A NamedCType represents a C++ type, plus
 # semantic information about what it represents.  For example, consider the
 # argument "bool pin_memory"; its normal C++ type is "bool", but its C++
 # semantic type also keeps track that this represents a "pin_memory"; you can't
 # just use a random other boolean in a context where you need a "pin_memory"!
 #
+
 
 @dataclass(frozen=True)
 class NamedCType:
@@ -110,7 +139,6 @@ class NamedCType:
 
     def with_name(self, name: str) -> "NamedCType":
         return NamedCType(name, self.type)
-
 
 
 # A binding represents any C++ binding site for a formal parameter.

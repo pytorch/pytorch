@@ -1,36 +1,30 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 
-from torchgen.api.types_base import    (
+from torchgen.api.types_base import (
     ArgName,
     BaseCppType,
     BaseCType,
     Binding,
+    boolT,
+    byteT,
+    charT,
     ConstRefCType,
     CType,
+    doubleT,
     Expr,
+    floatT,
+    int32T,
+    longT,
     MutRefCType,
     NamedCType,
+    shortT,
     SpecialArgName,
 )
 from torchgen.model import BaseTy, FunctionSchema, NativeFunction
 
-# The set of all non-templated, valid, fully-qualified names of C++ types that are used in the codegen.
-# Templated types get their own dataclass, mainly to make namespace parsing easier.
-byteT = BaseCppType("", "uint8_t")
-charT = BaseCppType("", "int8_t")
-shortT = BaseCppType("", "int16_t")
-# It would be more symmetric for this to be called intT, but it easy to mix
-# this up with JIT int (which is int64_t in C++), so we intentionally don't
-# define intT to make it obvious when you've stuffed it up
-int32T = BaseCppType("", "int32_t")
-longT = BaseCppType("", "int64_t")
 halfT = BaseCppType("torch::executor", "Half")
-doubleT = BaseCppType("", "double")
-floatT = BaseCppType("", "float")
-boolT = BaseCppType("", "bool")
 bfloat16T = BaseCppType("torch::executor", "BFloat16")
-voidT = BaseCppType("", "void")
 stringT = BaseCppType("torch::executor", "string_view")
 scalarTypeT = BaseCppType("torch::executor", "ScalarType")
 tensorT = BaseCppType("torch::executor", "Tensor")
@@ -212,7 +206,6 @@ class NativeSignature:
 
     def arguments(self) -> List[Binding]:
         return native.arguments(self.func, symint=self.symint)
-
 
 
 from torchgen.executorch.api import cpp, native

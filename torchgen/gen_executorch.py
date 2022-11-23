@@ -8,6 +8,7 @@ from typing import Dict, List, Literal, Optional, Sequence, Set, Tuple, Union
 import yaml
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
+from torchgen import dest
 from torchgen.api import cpp as aten_cpp
 from torchgen.api.translate import translate
 from torchgen.api.types import CppSignatureGroup
@@ -230,12 +231,6 @@ def gen_unboxing(
     def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
         return fn.root_name
 
-    include_unboxing_functions = [
-        # see comments in codegen.bzl
-        '#include "aten_UnboxingFunctions.h"'
-        if use_aten_lib
-        else '#include "UnboxingFunctions.h"'
-    ]
     cpu_fm.write_sharded(
         "UnboxingFunctions.cpp",
         native_functions,
@@ -243,13 +238,10 @@ def gen_unboxing(
         env_callable=lambda fn: {
             # pyre-fixme[19]: Expected 0 positional arguments.
             # pyre-fixme[16]: `Enum` has no attribute `DEFINITION`.
-            "definitions": [
-                ComputeUnboxingFunctions(Target.DEFINITION, selector, use_aten_lib)(fn)
-            ],
-            "header_include": include_unboxing_functions,
+            "definitions": [ComputeUnboxingFunctions(Target.DEFINITION, selector, use_aten_lib)(fn)],
         },
         num_shards=1,
-        sharded_keys={"definitions", "header_include"},
+        sharded_keys={"definitions"},
     )
     cpu_fm.write_sharded(
         "RegisterCodegenUnboxedKernels.cpp",
@@ -257,10 +249,9 @@ def gen_unboxing(
         key_fn=key_func,
         env_callable=lambda fn: {
             "unboxed_ops": [ComputeCodegenUnboxedKernels(selector)(fn)],
-            "header_include": include_unboxing_functions,
         },
         num_shards=1,
-        sharded_keys={"unboxed_ops", "header_include"},
+        sharded_keys={"unboxed_ops"},
     )
 
 
@@ -291,14 +282,9 @@ def gen_aggregated_headers(
     use_aten_lib: bool,
 ) -> None:
 
-    cpu_fm.write_with_template(
-        "aten_Functions.h" if use_aten_lib else "Functions.h",
+    cpu_fm.write(
         "Functions.h",
         lambda: {
-            "static_dispatch_extra_headers": "#include <ATen/Functions.h>"
-            if use_aten_lib
-            else '#include "NativeFunctions.h"',
-            "Functions_includes": [],
             "Functions_declarations": list(
                 mapMaybe(
                     ComputeFunction(
@@ -312,21 +298,19 @@ def gen_aggregated_headers(
         },
     )
 
-    cpu_fm.write_with_template(
-        "aten_NativeFunctions.h" if use_aten_lib else "NativeFunctions.h",
+    cpu_fm.write(
         "NativeFunctions.h",
         lambda: {
             "nativeFunctions_declarations": get_native_function_declarations(
                 grouped_native_functions=native_functions,
                 backend_indices=backend_indices,
-                native_function_decl_gen=(lambda g, idx: list())
+                native_function_decl_gen=dest.compute_native_function_declaration
                 if use_aten_lib
                 else compute_native_function_declaration,
             ),
         },
     )
-    cpu_fm.write_with_template(
-        "aten_UnboxingFunctions.h" if use_aten_lib else "UnboxingFunctions.h",
+    cpu_fm.write(
         "UnboxingFunctions.h",
         lambda: {
             "declarations": list(
@@ -339,12 +323,6 @@ def gen_aggregated_headers(
                     native_functions,
                 )
             ),
-            "function_header_include": [
-                # see comments in codegen.bzl
-                '#include "aten_Functions.h"'
-                if use_aten_lib
-                else '#include "Functions.h"'
-            ],
         },
     )
 
@@ -526,7 +504,7 @@ def parse_yaml_files(
              present. If not present, None.
     """
     import tempfile
-
+    gen_native_fns = use_aten_lib and native_yaml_path
     with tempfile.TemporaryDirectory() as tmpdirname:
         # If native_yaml_path doesn't exist, point to an empty file.
         if not native_yaml_path or not os.path.exists(native_yaml_path):
@@ -564,7 +542,7 @@ def parse_yaml_files(
             translated_yaml_path,
             tags_yaml_path,
             None,
-            skip_native_fns_gen=(not use_aten_lib),
+            skip_native_fns_gen=(not gen_native_fns),
         )
 
     return parsed_yaml, custom_ops_parsed_yaml
