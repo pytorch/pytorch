@@ -1108,9 +1108,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
-    _fw_metadata, out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
-        lambda *args: flat_fn(*(add_dupe_args(args))),
-    )(*deduped_flat_args)
+    with enable_python_dispatcher():
+        _fw_metadata, out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
+            lambda *args: flat_fn(*(add_dupe_args(args))),
+        )(*deduped_flat_args)
 
     # pre-compute, so we can bail out quickly in the hotpath
     _num_outputs_aliased_to_inputs = len([
