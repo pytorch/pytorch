@@ -7,7 +7,9 @@
 #include <cmath>
 #include <cstring>
 
+#if defined(CUDA_VERSION)
 #include <cuda_bf16.h>
+#endif
 
 namespace c10 {
 
