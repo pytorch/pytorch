@@ -769,10 +769,7 @@ size_t SchedulerRuntimeInfo::ptrOf(TensorView* tv) {
 
 void SchedulerRuntimeInfo::initializeExpressionEvaluator(
     const KernelArgumentHolder& args) {
-  // TODO: refactor bindFusionInputs to better support this
-  //  use case, i.e. support construct and bind input.
-  *expression_evaluator_ =
-      executor_utils::bindFusionInputs(args, complete_fusion_);
+  *expression_evaluator_ = executor_utils::bindInputs(args, complete_fusion_);
 }
 
 size_t SchedulerRuntimeInfo::computeAlignmentSize(size_t ptr_address) {
@@ -864,7 +861,7 @@ size_t SchedulerRuntimeInfo::getMaxVectorizableWidth(TensorView* tv) {
     return 1;
   }
 
-  auto numel = 1;
+  size_t numel = 1;
   for (auto i : c10::irange(tv_root_size)) {
     auto root_i = tv_root_size - i - 1;
     auto root_id = tv_root[root_i];
@@ -2015,6 +2012,7 @@ void HeuristicSummary::validate() const {
             entry_type_map_.count(EntryType::REFERENCE_TENSORS));
         TORCH_INTERNAL_ASSERT(
             entry_type_map_.count(EntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS));
+        TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::VECTORIZE_MAPS));
         TORCH_INTERNAL_ASSERT(
             entry_type_map_.count(EntryType::BROADCAST_BYTE_MULTIPLES));
         TORCH_INTERNAL_ASSERT(
@@ -2042,6 +2040,7 @@ void HeuristicSummary::validate() const {
       TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::REDUCTION_TVS));
       TORCH_INTERNAL_ASSERT(
           entry_type_map_.count(EntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS));
+      TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::VECTORIZE_MAPS));
       TORCH_INTERNAL_ASSERT(
           entry_type_map_.count(EntryType::UNROLLABLE_INPUTS_AND_OUTPUTS));
       break;
@@ -2050,6 +2049,7 @@ void HeuristicSummary::validate() const {
       TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::REDUCTION_TVS));
       TORCH_INTERNAL_ASSERT(
           entry_type_map_.count(EntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS));
+      TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::VECTORIZE_MAPS));
       TORCH_INTERNAL_ASSERT(
           entry_type_map_.count(EntryType::UNROLLABLE_INPUTS_AND_OUTPUTS));
       TORCH_INTERNAL_ASSERT(
@@ -2107,6 +2107,7 @@ template class HeuristicSummaryEntry<
     HeuristicCompileTime::ReferenceTensorsForGroups>;
 template class HeuristicSummaryEntry<
     HeuristicCompileTime::VectorizableInputsAndOutputs>;
+template class HeuristicSummaryEntry<HeuristicCompileTime::VectorizeMaps>;
 template class HeuristicSummaryEntry<
     HeuristicCompileTime::InputsOutputsInnerDimGroups>;
 template class HeuristicSummaryEntry<

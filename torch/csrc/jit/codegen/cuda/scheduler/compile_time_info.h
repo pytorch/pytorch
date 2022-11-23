@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/pointwise_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/vectorize_helper.h>
 
 namespace torch {
 namespace jit {
@@ -31,6 +32,7 @@ enum class CompileTimeEntryType {
   REFERENCE_TENSORS_FOR_GROUPS,
   VECTORIZABLE_INPUTS_AND_OUTPUTS,
   INPUTS_AND_OUTPUTS_INNER_DIM_GROUPS,
+  VECTORIZE_MAPS,
   UNROLLABLE_INPUTS_AND_OUTPUTS,
   REDUCTION_TVS,
   PERSISTENT_BUFFER_INFO,
@@ -84,6 +86,16 @@ class VectorizableInputsAndOutputs {
   using DataType = std::vector<TensorView*>;
   static const CompileTimeEntryType EntryType =
       CompileTimeEntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS;
+};
+
+//! Entry type definition class for `VECTORIZE_MAPS`,
+//!  stores the vectorizable TensorViews on a fusion's inputs and outputs.
+class VectorizeMaps {
+ public:
+  using DataType =
+      std::vector<vectorize_helper::ContiguousInnerDimensionsMapper>;
+  static const CompileTimeEntryType EntryType =
+      CompileTimeEntryType::VECTORIZE_MAPS;
 };
 
 //! Entry type definition class for `INPUTS_AND_OUTPUTS_INNER_DIM_GROUPS`,

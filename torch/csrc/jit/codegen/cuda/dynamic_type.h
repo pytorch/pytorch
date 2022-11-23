@@ -300,6 +300,16 @@ inline EvaluatorValue min(const EvaluatorValue& a, const EvaluatorValue& b) {
   return EvaluatorValue((a < b).as<bool>() ? a : b);
 }
 
+inline EvaluatorValue notExpr(const EvaluatorValue& a) {
+  if (a.isInt()) {
+    return EvaluatorValue(~a.as<int64_t>());
+  }
+  if (a.isBool()) {
+    return EvaluatorValue(!a.as<bool>());
+  }
+  TORCH_INTERNAL_ASSERT(false);
+}
+
 inline EvaluatorValue abs(const EvaluatorValue& a) {
   if (a.isInt()) {
     return EvaluatorValue(std::abs(a.as<int64_t>()));

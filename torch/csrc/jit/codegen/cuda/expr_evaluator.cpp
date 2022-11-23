@@ -191,6 +191,9 @@ void ExpressionEvaluator::handle(const UnaryOp* uop) {
       case UnaryOpType::Abs:
         known_values_[uop->out()] = abs(*in);
         break;
+      case UnaryOpType::Not:
+        known_values_[uop->out()] = notExpr(*in);
+        break;
       default:
         TORCH_CHECK(
             false,

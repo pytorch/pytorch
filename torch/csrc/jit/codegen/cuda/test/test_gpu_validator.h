@@ -266,7 +266,7 @@ ExpressionEvaluator bindInputsAndLaunchParams(
   KernelArgumentHolder argument_holder(KernelIndexMode::INT64);
   argument_holder.push(aten_inputs);
 
-  auto expr_eval = executor_utils::bindFusionInputs(argument_holder, fusion);
+  auto expr_eval = executor_utils::bindInputs(argument_holder, fusion);
   for (auto val : fusion->vals()) {
     if (!val->isA<TensorView>()) {
       continue;

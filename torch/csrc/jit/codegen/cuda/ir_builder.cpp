@@ -287,6 +287,27 @@ Val* SimplifyingIrBuilder::mulExpr(Val* lhs, Val* rhs) {
   }
 }
 
+Val* SimplifyingIrBuilder::divExpr(Val* lhs, Val* rhs) {
+  if (rhs->isOneInt()) {
+    return lhs;
+  }
+  return IrBuilder::divExpr(lhs, rhs);
+}
+
+Val* SimplifyingIrBuilder::ceilDivExpr(Val* lhs, Val* rhs) {
+  if (rhs->isOneInt()) {
+    return lhs;
+  }
+  return IrBuilder::ceilDivExpr(lhs, rhs);
+}
+
+Val* SimplifyingIrBuilder::modExpr(Val* lhs, Val* rhs) {
+  if (rhs->isOneInt()) {
+    return FusionGuard::getCurFusion()->zeroVal();
+  }
+  return IrBuilder::modExpr(lhs, rhs);
+}
+
 Val* SimplifyingIrBuilder::andExpr(Val* lhs, Val* rhs) {
   TORCH_INTERNAL_ASSERT(!(lhs == nullptr && rhs == nullptr));
 
@@ -381,6 +402,22 @@ Val* SimplifyingIrBuilder::minExpr(Val* lhs, Val* rhs) {
       rhs,
       [](Val* lhs, Val* rhs) { return IrBuilder::minExpr(lhs, rhs); },
       [](int64_t lhs, int64_t rhs) { return std::min(lhs, rhs); });
+}
+
+Val* SimplifyingIrBuilder::whereExpr(Val* pred, Val* lhs, Val* rhs) {
+  TORCH_INTERNAL_ASSERT(
+      pred->dtype() == DataType::Bool,
+      "Where requires a predicate as an input, but received");
+
+  if (pred->isConstScalar() && pred->isABool() && pred->isA<Bool>()) {
+    if (pred->evaluateBool()) {
+      return lhs;
+    } else {
+      return rhs;
+    }
+  }
+
+  return IrBuilder::whereExpr(pred, lhs, rhs);
 }
 
 } // namespace cuda

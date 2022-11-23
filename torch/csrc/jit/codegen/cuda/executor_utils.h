@@ -38,15 +38,11 @@ void validateKernelOutputs(
     const std::vector<at::Tensor>& outputs,
     const c10::Device& device);
 
-//! Bind kernel input values to runtime values
-ExpressionEvaluator bindKernelInputs(
+//! Bind input values to runtime values
+TORCH_CUDA_CU_API ExpressionEvaluator bindInputs(
     const KernelArgumentHolder& args,
-    kir::Kernel* kernel,
+    Fusion* fusion,
     bool check_consistency = true);
-
-//! Bind fusion input values to runtime values
-TORCH_CUDA_CU_API ExpressionEvaluator
-bindFusionInputs(const KernelArgumentHolder& args, Fusion* fusion);
 
 struct NvrtcFunction {
   CUmodule module = CUmodule();

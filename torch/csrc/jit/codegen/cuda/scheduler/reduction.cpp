@@ -941,6 +941,17 @@ TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getReductionHeuristics(
 
   auto& unrollable_inputs_outputs = unrollable_inputs_outputs_entry.get();
 
+  // Create maps to all inputs and outputs based on largest_out (starting at all
+  // positions of largest_out) to see how much of those dimensions map to inputs
+  // and outputs in a way that could be vectorized.
+  auto vectorize_maps_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::VectorizeMaps>(
+          data_cache, [&reduction_tv]() {
+            return std::make_unique<
+                std::vector<vectorize_helper::ContiguousInnerDimensionsMapper>>(
+                vectorize_helper::getAllVectorizedMapsOf(reduction_tv));
+          });
+
   // Vectorize as much as we can
   size_t vectorize_factor = std::numeric_limits<size_t>::max();
 
@@ -955,8 +966,8 @@ TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getReductionHeuristics(
   }
 
   // Try expanding vectorization to contig merged domains
-  vectorize_factor = vectorize_helper::expandVectorizationToContigMergedDomains(
-      fusion,
+  vectorize_factor = vectorize_helper::getExpandedVectorization(
+      vectorize_maps_entry.get(),
       runtime_info,
       vectorizable_inputs_outputs,
       reduction_tv,
