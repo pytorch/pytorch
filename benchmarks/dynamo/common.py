@@ -92,7 +92,9 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     "hf_BigBird",  # accuracy
     "hf_GPT2_large",  # OOM
     "maml",  # accuracy
+    "mobilenet_v2_quantized_qat",  # The eval test only supports CPU
     "moco",  # accuracy
+    "pytorch_struct",  # Test eval is not implemented
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
     "tacotron2",
@@ -108,9 +110,11 @@ CI_SKIP_INDUCTOR_TRAINING = [
     *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
     "Background_Matting",  # fp64_OOM
-    "mobilenet_v3_large",   # accuracy
+    "mobilenet_v3_large",  # accuracy
+    "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
     "BlenderbotForCausalLM",  # OOM
+    "GoogleFnet",  # Eager model failed to run
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     # TIMM
@@ -122,10 +126,9 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "resnest101e",  # accuracy
     "rexnet_100",  # accuracy
     "spnasnet_100",  # accuracy
-    "swin_base_patch4_window7_224",    # accuracy
+    "swin_base_patch4_window7_224",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
-
 
 
 def model_specified_by_path(path_and_class_str):
