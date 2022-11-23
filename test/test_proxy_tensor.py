@@ -808,9 +808,13 @@ class TestSymbolicTracing(TestCase):
         shape_env = self._test_dynamic(f, [(3, 4)], test_inputs)
         self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(4, 5)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(25, 5)))
-        # TODO: There should eventually be guards for contiguity, but they're
-        # not currently being done yet
-        assert len(shape_env.guards) == 1, "\n" + shape_env.format_guards()
+        self.assertExpectedInline(shape_env.format_guards(), """\
+ - Eq(t0.size(0), s0)
+ - Eq(t0.size(1), s1)
+ - Eq(t0.storage_offset(), 0)
+ - Eq(t0.stride(0), s1)
+ - Eq(t0.stride(1), 1)
+ - s0 < 20""")
 
     def test_binary_broadcast(self):
         def f(a, b):
@@ -821,7 +825,17 @@ class TestSymbolicTracing(TestCase):
         test_inputs.append([(1, 5), (3, 1)])
         test_inputs.append([(1, 4), (4, 1)])
         shape_env = self._test_dynamic(f, [(1, 2), (3, 1)], test_inputs)
-        assert len(shape_env.guards) == 0
+        self.assertExpectedInline(shape_env.format_guards(), """\
+ - Eq(t0.size(0), 1)
+ - Eq(t0.size(1), s0)
+ - Eq(t0.storage_offset(), 0)
+ - Eq(t0.stride(0), s0)
+ - Eq(t0.stride(1), 1)
+ - Eq(t1.size(0), s1)
+ - Eq(t1.size(1), 1)
+ - Eq(t1.storage_offset(), 0)
+ - Eq(t1.stride(0), 1)
+ - Eq(t1.stride(1), 1)""")
 
     def test_multiply_shape(self):
         def f(a):
@@ -895,7 +909,7 @@ def forward(self, a_1):
         shape_env = self._test_dynamic(f, [(1, 6), (8, 1)], test_inputs)
         self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(1, 10), torch.randn(6, 1)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(1, 2), torch.randn(4, 1)))
-        assert len(shape_env.guards) == 1
+        self.assertExpectedInline(shape_env.format_guards(exclude_ivar=True), """ - 2*s0*s1 > 20""")
 
     def test_new_empty(self):
         def f(a, b):
@@ -987,7 +1001,15 @@ def forward(self, a_1):
             assert b.shape[0] == 8
             return a.cos()
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
-        self.assertExpectedInline(str(fx_g.shape_env.get_guard_expr()), "Eq(s1, 8) & Eq(s0, 2*s1)")
+        self.assertExpectedInline(str(fx_g.shape_env.get_guard_expr()).replace(" & ", "\n"), """\
+Eq(s1, 8)
+Eq(t0.size(0), s0)
+Eq(t0.storage_offset(), 0)
+Eq(t0.stride(0), 1)
+Eq(t1.size(0), s1)
+Eq(t1.storage_offset(), 0)
+Eq(t1.stride(0), 1)
+Eq(s0, 2*s1)""")
 
     def test_sym_storage_offset(self):
         def f(x, y):
@@ -998,10 +1020,6 @@ def forward(self, a_1):
         inp = (torch.randn(8)[3:], torch.randn(5))
         self.assertEqual(fx_g(*inp), f(*inp))
 
-    def _assert_no_guards(self, fx_g, free_symbols):
-        assert _get_free_symbols(fx_g.shape_env) == free_symbols, fx_g.shape_env.var_to_val
-        assert len(fx_g.shape_env.get_nontrivial_guards()) == 0, fx_g.shape_env.format_guards()
-
     def test_guards_equal(self):
         def f(a, b):
             return a * b
@@ -1009,13 +1027,13 @@ def forward(self, a_1):
         # NB: Numbers are carefully chosen to avoid duck shaping from applying
 
         fx_g = _trace(f, (5, 6), (5, 6))
-        self._assert_no_guards(fx_g, 2)
+        self.assertExpectedInline(fx_g.shape_env.format_guards(exclude_ivar=True), """""")
 
         fx_g = _trace(f, (5, 6, 7), (5, 6, 7))
-        self._assert_no_guards(fx_g, 3)
+        self.assertExpectedInline(fx_g.shape_env.format_guards(exclude_ivar=True), """""")
 
         fx_g = _trace(f, (5, 1), (1, 6))
-        self._assert_no_guards(fx_g, 2)
+        self.assertExpectedInline(fx_g.shape_env.format_guards(exclude_ivar=True), """""")
 
         def f(a, b, c, d):
             a = a + b
@@ -1023,7 +1041,7 @@ def forward(self, a_1):
             return a + cat
 
         fx_g = _trace(f, 7, 7, 4, 3)
-        self._assert_no_guards(fx_g, 2)
+        self.assertExpectedInline(fx_g.shape_env.format_guards(exclude_ivar=True), """ - Eq(s0, s1 + s2)""")
 
         def f(a, b, c, d, e):
             vals = [a, b, c, d, e]
@@ -1033,20 +1051,24 @@ def forward(self, a_1):
             return x
 
         fx_g = _trace(f, 2, 4, 8, 16, 32)
-        self._assert_no_guards(fx_g, 1)
+        self.assertExpectedInline(fx_g.shape_env.format_guards(exclude_ivar=True), """\
+ - Eq(2*s0, s1)
+ - Eq(4*s0, s2)
+ - Eq(8*s0, s3)
+ - Eq(16*s0, s4)""")
 
         def f(a, b):
             a = a.view(b.shape[0])
             return a + b.sum()
 
         fx_g = _trace(f, (4, 2), 8)
-        self._assert_no_guards(fx_g, 2)
+        self.assertExpectedInline(fx_g.shape_env.format_guards(exclude_ivar=True), """ - Eq(s0*s1, s2)""")
 
         fx_g = _trace(f, (4, 2), (8, 5))
-        self._assert_no_guards(fx_g, 3)
+        self.assertExpectedInline(fx_g.shape_env.format_guards(exclude_ivar=True), """ - Eq(s0*s1, s2)""")
 
         fx_g = _trace(f, (2, 3, 4), 24)
-        self._assert_no_guards(fx_g, 3)
+        self.assertExpectedInline(fx_g.shape_env.format_guards(exclude_ivar=True), """ - Eq(s0*s1*s2, s3)""")
 
     def test_nonidentity_transitive_guards(self):
         def f(a, b, c, d, e):
@@ -1060,7 +1082,11 @@ def forward(self, a_1):
             return final_vals
 
         fx_g = _trace(f, 2, 4, 8, 16, 32)
-        self._assert_no_guards(fx_g, 1)
+        self.assertExpectedInline(fx_g.shape_env.format_guards(exclude_ivar=True), """\
+ - Eq(2*s3, s4)
+ - Eq(2*s2, s3)
+ - Eq(2*s1, s2)
+ - Eq(2*s0, s1)""")
 
 
 

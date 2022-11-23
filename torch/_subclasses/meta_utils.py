@@ -226,16 +226,10 @@ class MetaConverter:
 
         make_symbolic = shape_env is not None
 
-        def sym(x):
+        def sym_sizes_strides_storage_offset(t):
             if make_symbolic:
-                return shape_env.create_symint(x)
-            else:
-                return x
-
-        def sym_sizes_strides(t):
-            if make_symbolic:
-                return shape_env.create_symbolic_sizes_strides(t)
-            return (t.size(), t.stride())
+                return shape_env.create_symbolic_sizes_strides_storage_offset(t)
+            return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages
         self.check_expired_count += 1
@@ -331,14 +325,14 @@ class MetaConverter:
                         # So we may have to do *two* views out of the base to
                         # recreate this situation.
 
-                        sizes, strides = sym_sizes_strides(t)
+                        sizes, strides, storage_offset = sym_sizes_strides_storage_offset(t)
 
                         if safe_is_leaf(t):
                             # Leaf views that track view metadata are created by
                             # creating a view inside a no_grad block
                             with torch.no_grad(), maybe_suppress:
                                 r = base.as_strided(
-                                    sizes, strides, sym(t.storage_offset())
+                                    sizes, strides, storage_offset
                                 )
                             # As it's a leaf, we can directly assign requires_grad
                             r.requires_grad = t.requires_grad
@@ -347,7 +341,7 @@ class MetaConverter:
                                 # Easy case, just run the view op
                                 with torch.enable_grad(), maybe_suppress:
                                     r = base.as_strided(
-                                        sizes, strides, sym(t.storage_offset())
+                                        sizes, strides, storage_offset
                                     )
                             else:
                                 # Obscure case.  Create a leaf view and give it the
@@ -359,7 +353,7 @@ class MetaConverter:
                                 mid.requires_grad = t.requires_grad
                                 with torch.enable_grad(), maybe_suppress:
                                     r = mid.as_strided(
-                                        sizes, strides, sym(t.storage_offset())
+                                        sizes, strides, storage_offset
                                     )
                     finally:
                         torch._C._dispatch_tls_set_dispatch_key_excluded(
@@ -368,8 +362,7 @@ class MetaConverter:
 
                 else:
                     is_leaf = safe_is_leaf(t)
-                    sizes, strides = sym_sizes_strides(t)
-                    storage_offset = sym(t.storage_offset())
+                    sizes, strides, storage_offset = sym_sizes_strides_storage_offset(t)
                     r = callback(
                         lambda: torch.empty_strided(
                             sizes, strides, dtype=t.dtype, device="meta"
