@@ -1880,6 +1880,11 @@ class RelaxedTensorLikePair(TensorLikePair):
             self._check_supported(tensor, id=id)
         return actual, expected
 
+    def _to_tensor(self, tensor_like: Any) -> torch.Tensor:
+        if isinstance(tensor_like, torch.storage.TypedStorage):
+            tensor_like = [tensor_like._getitem(idx) for idx in range(tensor_like._size())]
+        return super()._to_tensor(tensor_like)
+
 
 class UnittestPair(Pair):
     """Fallback ABC pair that handles non-numeric inputs.
