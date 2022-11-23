@@ -2,6 +2,7 @@ import sys
 import torch
 import functools
 import inspect
+import warnings
 from typing import Any, Callable, TypeVar, cast
 
 __all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
@@ -18,6 +19,12 @@ class _DecoratorContextManager:
     """Allow a context manager to be used as a decorator"""
 
     def __call__(self, func: F) -> F:
+        if inspect.isclass(func):
+            warnings.warn("Decorating classes is deprecated and will be disabled in "
+                          "future versions. You should only decorate functions or methods. "
+                          "To preserve the current behavior of class decoration, you can "
+                          "directly decorate the `__init__` method and nothing else.")
+
         if inspect.isgeneratorfunction(func):
             return self._wrap_generator(func)
 
