@@ -16,7 +16,6 @@ from ..quantize import (
 )
 from ..observer import (
     ObserverBase,
-    _is_activation_post_process
 )
 from ..qconfig import (
     _is_reuse_input_qconfig,
@@ -79,6 +78,7 @@ from .utils import (
 )
 
 from torch.ao.quantization.quantize import (
+    is_activation_post_process,
     convert
 )
 
@@ -148,7 +148,7 @@ DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
-        _is_activation_post_process(modules[str(node.target)])
+        is_activation_post_process(modules[str(node.target)])
 
 def is_input_arg_dtype_supported_by_backend(
     arg: Argument,
