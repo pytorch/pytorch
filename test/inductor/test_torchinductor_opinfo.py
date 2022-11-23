@@ -195,7 +195,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
     "linalg.pinv.singular": {f32, f64},
-    "logdet": {f32, f64},
     "masked.norm": {f16},
     "masked.normalize": {f16},
     "masked_fill": {f16},
