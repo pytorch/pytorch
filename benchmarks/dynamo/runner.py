@@ -39,7 +39,7 @@ import subprocess
 import sys
 import tempfile
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from os.path import abspath, exists
 from random import randint
 
@@ -90,8 +90,6 @@ DEFAULTS = {
     "training": [
         "eager",
         "aot_eager",
-        "aot_cudagraphs",
-        "nvprims_nvfuser",
         "inductor",
         "inductor_no_cudagraphs",
     ],
@@ -345,7 +343,9 @@ def build_summary(args):
         if exists(path):
             repo = git.Repo(path, search_parent_directories=True)
             sha = repo.head.object.hexsha
+            date = repo.head.object.committed_datetime
             out_io.write(f"{name} commit: {sha}\n")
+            out_io.write(f"{name} commit date: {date}\n")
         else:
             out_io.write(f"{name} Absent\n")
 
@@ -409,8 +409,9 @@ def archive_data(archive_name):
         else:
             day = "000"
     else:
-        day = datetime.today().strftime("%j")
-        prefix = datetime.today().strftime(f"day_{day}_%d_%m_%y")
+        now = datetime.now(tz=timezone(timedelta(hours=-8)))
+        day = now.strftime("%j")
+        prefix = now.strftime(f"day_{day}_%d_%m_%y")
     return day, prefix
 
 
@@ -1201,7 +1202,7 @@ class DashboardUpdater:
             "gh_executive_summary.txt",
             "gh_summary_diff.txt",
             "gh_warnings.txt",
-            # "gh_regression.txt",
+            "gh_regression.txt",
             "gh_metric_regression.txt",
             "gh_training.txt",
             "gh_graphs.txt",
@@ -1297,6 +1298,9 @@ if __name__ == "__main__":
         parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir)
     elif args.run:
         generate_commands(args, dtypes, suites, devices, compilers, output_dir)
+        # generate memoized archive name now so that the date is reflective
+        # of when the run started
+        get_archive_name(args, dtypes[0])
         # TODO - Do we need to worry about segfaults
         try:
             os.system("bash run.sh")
