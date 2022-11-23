@@ -163,6 +163,7 @@ class TorchVariable(VariableTracker):
             torch.finfo,
             torch.iinfo,
             torch.is_floating_point,
+            torch.cuda.is_available,
         ):
             return True
         return getattr(self.value, "__module__", None) == "math"
@@ -292,7 +293,7 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_type,
             )
         elif self.value is torch.amp.autocast_mode.autocast:
-            return AutocastModeVariable.create(tx, target_values=args, kwargs=kwargs)
+            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
         elif self.value in (
             torch.profiler.profile,
             torch.profiler.record_function,
