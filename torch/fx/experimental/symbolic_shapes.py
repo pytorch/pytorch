@@ -464,14 +464,28 @@ class ShapeEnv(object):
     def create_symbolic_sizes_strides(self, ex: torch.Tensor):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
-        We try our best to express stride in terms of the sizes, so as to not
-        introduce new symbolic variables.
+        We try our best to express stride in terms of the sizes, so that
+        we can immediately eliminate fresh symbolic variables.
         """
         size = [self.create_symbol(i) for i in ex.size()]
+
+        # Our strategy is we allocate symbols for all the strides,
+        # but we will then try to immediate generate equalities
+        # with size that will allow us to immediately simplify away
+        # these symbols
+        sym_stride = [self.create_symbol(i) for i in ex.stride()]
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
+
+        def guard_stride_at(i):
+            self.evaluate_expr(sympy.Eq(sym_stride[i], stride[i]))
+
+        # TODO: create_symbol probably did this already so this is
+        # technically unnecessary
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
                 stride[i] = sympy.Integer(val)
+                guard_stride_at(i)
+
         while any(x is None for x in stride):
             candidates = {
                 ex.size(i) * ex.stride()[i]: size[i] * stride[i]
@@ -485,6 +499,7 @@ class ShapeEnv(object):
             for _, i in val_list:
                 if stride[i] is None and ex.stride()[i] in candidates:
                     stride[i] = candidates[ex.stride()[i]]
+                    guard_stride_at(i)
                     candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
             if any(x is None for x in stride):
                 # bind the smallest unbound stride to a new variable
@@ -495,9 +510,9 @@ class ShapeEnv(object):
                         if stride[i] is None
                     ]
                 )
-                stride[i] = self.create_symbol(val)
+                stride[i] = sym_stride[i]
         assert all(x is not None for x in stride)
-        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
+        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in sym_stride]  # type: ignore[arg-type]
 
     def create_symintnode(self, expr: Union["sympy.Expr", int]):
         return SymInt(SymNode(expr, self, int))
