@@ -561,7 +561,8 @@ class DynamoGuardPrinter(StrPrinter):
             return "1"
         if expr in self.shape_env.var_to_ivar:
             return self._print(self.shape_env.var_to_ivar[expr])
-        assert expr in self.expr_to_tensor_ref or expr in self.intermediary_symbols, str(expr)
+        import traceback
+        assert expr in self.expr_to_tensor_ref or expr in self.intermediary_symbols, f"{expr}\n\n{''.join(traceback.format_list(expr.tb))}"
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)

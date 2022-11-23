@@ -432,6 +432,9 @@ def _lru_cache(fn, maxsize=None):
     return wrapper
 
 
+class IVarSymbol(sympy.Symbol):
+    pass
+
 
 class ShapeEnv(object):
     def __init__(self):
@@ -586,7 +589,9 @@ class ShapeEnv(object):
 
     def create_ivar(self, ivar_name: str, val: int) -> "sympy.Symbol":
         # NB: not guaranteed to be positive, could be zero
-        r = sympy.Symbol(ivar_name, integer=True)
+        r = IVarSymbol(ivar_name, integer=True)
+        import traceback
+        r.tb = traceback.extract_stack()
         self.ivar_to_val[r] = val
         return r
 

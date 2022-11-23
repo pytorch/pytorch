@@ -273,7 +273,8 @@ class MetaConverter:
                     # version counters to get shared.
                     assert t._is_view()
 
-                    base = self.meta_tensor(t._base, shape_env, callback)
+                    with maybe_suppress:
+                        base = self.meta_tensor(t._base, shape_env, callback)
 
                     def is_c_of_r(complex_dtype, real_dtype):
                         return (
@@ -427,7 +428,10 @@ class MetaConverter:
                             r.set_(r_s, storage_offset, sizes, strides)
 
                 if safe_grad(t) is not None:
-                    r.grad = self.meta_tensor(safe_grad(t), shape_env, callback)
+                    # TODO: This is definitely wrong; fortunately dynamo
+                    # cannot access this yet
+                    with maybe_suppress:
+                        r.grad = self.meta_tensor(safe_grad(t), shape_env, callback)
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
             # This can be skipped if necessary for performance reasons
