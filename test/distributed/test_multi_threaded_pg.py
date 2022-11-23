@@ -3,6 +3,7 @@
 import sys
 import torch
 import torch.distributed as dist
+from torch._C._distributed_c10d import ReduceOp
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -70,6 +71,16 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
 
         dist.broadcast_object_list(object_list=object_list)
         self.assertEqual(99, object_list[0])
+
+    def test_all_reduce(self):
+        output = torch.ones(3, 3) * dist.get_rank()
+        dist.all_reduce(output)
+        res_num = ((0 + self.world_size - 1) * self.world_size) / 2
+        self.assertEqual(output, torch.ones(3, 3) * res_num)
+
+        # Test unimplemented error
+        with self.assertRaisesRegex(NotImplementedError, "only supports SUM on threaded pg for now"):
+            dist.all_reduce(output, op=ReduceOp.MAX)
 
 
 if __name__ == "__main__":
