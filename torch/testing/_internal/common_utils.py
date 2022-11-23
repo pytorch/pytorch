@@ -2567,6 +2567,10 @@ class TestCase(expecttest.TestCase):
         if isinstance(y, torch.Tensor) and y.is_nested:
             y = y.unbind()
 
+        # TODO: explain why this is needed
+        if isinstance(x, torch.TypedStorage) and isinstance(y, torch.TypedStorage):
+            x, y = [[storage._getitem(idx) for idx in storage._size()] for storage in [x, y]]
+
         assert_equal(
             x,
             y,
@@ -2582,7 +2586,6 @@ class TestCase(expecttest.TestCase):
             ),
             sequence_types=(
                 Sequence,
-                torch.storage.TypedStorage,
                 Sequential,
                 ModuleList,
                 ParameterList,
