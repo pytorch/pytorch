@@ -10,6 +10,7 @@ from typing import List, Any, ClassVar, Optional, Sequence, Tuple, Union, Dict, 
 import unittest
 import os
 import torch
+import torch.backends.mps
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, \
@@ -18,9 +19,6 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
     TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
-
-# The implementation should be moved here as soon as the deprecation period is over.
-from torch.testing._legacy import get_all_device_types  # noqa: F401
 
 try:
     import psutil  # type: ignore[import]
@@ -198,6 +196,8 @@ except ImportError:
 #         Skips the test if the device is not a CPU device
 #     - @onlyCUDA
 #         Skips the test if the device is not a CUDA device
+#     - @onlyMPS
+#         Skips the test if the device is not a MPS device
 #     - @skipCPUIfNoLapack
 #         Skips the test if the device is a CPU device and LAPACK is not installed
 #     - @skipCPUIfNoMkl
@@ -590,7 +590,7 @@ PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False, allow_mps=False):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -609,9 +609,13 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     generic_members = set(generic_test_class.__dict__.keys()) - set(empty_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
+    # MPS backend support is disabled in `get_device_type_test_bases` while support is being ramped
+    # up, so allow callers to specifically opt tests into being tested on MPS, similar to `include_lazy`
+    test_bases = device_type_test_bases.copy()
+    if allow_mps and torch.backends.mps.is_available() and MPSTestBase not in test_bases:
+        test_bases.append(MPSTestBase)
     # Filter out the device types based on user inputs
-    desired_device_type_test_bases = filter_desired_device_types(device_type_test_bases,
-                                                                 except_for, only_for)
+    desired_device_type_test_bases = filter_desired_device_types(test_bases, except_for, only_for)
     if include_lazy:
         # Note [Lazy Tensor tests in device agnostic testing]
         # Right now, test_view_ops.py runs with LazyTensor.
@@ -1143,6 +1147,10 @@ def onlyCUDA(fn):
     return onlyOn('cuda')(fn)
 
 
+def onlyMPS(fn):
+    return onlyOn('mps')(fn)
+
+
 def disablecuDNN(fn):
 
     @wraps(fn)
@@ -1314,3 +1322,8 @@ def skipMeta(fn):
 
 def skipXLA(fn):
     return skipXLAIf(True, "Marked as skipped for XLA")(fn)
+
+# TODO: the "all" in the name isn't true anymore for quite some time as we have also have for example XLA and MPS now.
+#  This should probably enumerate all available device type test base classes.
+def get_all_device_types() -> List[str]:
+    return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']

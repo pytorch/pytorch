@@ -166,13 +166,6 @@ struct SnapshotInfo {
   std::vector<std::vector<TraceEntry>> device_traces;
 };
 
-// Allocator config options.
-enum struct AllocatorBackend : uint8_t {
-  NATIVE = 0,
-  CUDAMALLOCASYNC = 1,
-};
-
-C10_CUDA_API AllocatorBackend allocatorBackend();
 C10_CUDA_API void setAllocatorSettings(const std::string& env);
 
 // Size pretty-printer
@@ -184,109 +177,101 @@ using OutOfMemoryObserver = std::function<void(
     int64_t device_total,
     int64_t device_free)>;
 
-#define FORALL_ALLOCATOR_INTERFACE(_)                                          \
-  _(C10_CUDA_API void*, raw_alloc, (size_t nbytes))                            \
-  _(C10_CUDA_API void*,                                                        \
-    raw_alloc_with_stream,                                                     \
-    (size_t nbytes, cudaStream_t stream))                                      \
-  _(C10_CUDA_API void, raw_delete, (void* ptr))                                \
-  _(C10_CUDA_API Allocator*, get, ())                                          \
-  _(C10_CUDA_API void, init, (int device_count))                               \
-  _(C10_CUDA_API void, setMemoryFraction, (double fraction, int device))       \
-  _(C10_CUDA_API void, emptyCache, ())                                         \
-  _(C10_CUDA_API void, cacheInfo, (int dev_id, size_t* largestBlock))          \
-  _(C10_CUDA_API void*, getBaseAllocation, (void* ptr, size_t* size))          \
-  _(C10_CUDA_API void, recordStream, (const DataPtr&, CUDAStream stream))      \
-  _(C10_CUDA_API DeviceStats, getDeviceStats, (int device))                    \
-  _(C10_CUDA_API void, resetAccumulatedStats, (int device))                    \
-  _(C10_CUDA_API void, resetPeakStats, (int device))                           \
-  _(C10_CUDA_API SnapshotInfo, snapshot, ())                                   \
-  _(C10_CUDA_API void,                                                         \
-    notifyCaptureBegin,                                                        \
-    (int device, CaptureId_t graph_id, MempoolId_t mempool_id))                \
-  _(C10_CUDA_API void,                                                         \
-    notifyCaptureAboutToEnd,                                                   \
-    (int device, CaptureId_t graph_id))                                        \
-  _(C10_CUDA_API void, notifyCaptureEnded, (int device, CaptureId_t graph_id)) \
-  _(C10_CUDA_API void,                                                         \
-    notifyCaptureDestroy,                                                      \
-    (int device, MempoolId_t mempool_id))                                      \
-  _(C10_CUDA_API std::mutex*, getFreeMutex, ())                                \
-  _(C10_CUDA_API std::shared_ptr<void>, getIpcDevPtr, (std::string handle))    \
-  _(C10_CUDA_API void,                                                         \
-    recordHistory,                                                             \
-    (bool enabled,                                                             \
-     CreateContextFn context_recorder,                                         \
-     size_t alloc_trace_max_entries,                                           \
-     bool alloc_trace_record_context))                                         \
-  _(C10_CUDA_API void,                                                         \
-    attachOutOfMemoryObserver,                                                 \
-    (OutOfMemoryObserver observer))
+class CUDAAllocator : public Allocator {
+ public:
+  virtual void* raw_alloc(size_t nbytes) = 0;
+  virtual void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) = 0;
+  virtual void raw_delete(void* ptr) = 0;
+  virtual void init(int device_count) = 0;
+  virtual void setMemoryFraction(double fraction, int device) = 0;
+  virtual void emptyCache() = 0;
+  virtual void cacheInfo(int dev_id, size_t* largestBlock) = 0;
+  virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
+  virtual void recordStream(const DataPtr&, CUDAStream stream) = 0;
+  virtual DeviceStats getDeviceStats(int device) = 0;
+  virtual void resetAccumulatedStats(int device) = 0;
+  virtual void resetPeakStats(int device) = 0;
+  virtual SnapshotInfo snapshot() = 0;
+  virtual void notifyCaptureBegin(
+      int device,
+      CaptureId_t graph_id,
+      MempoolId_t mempool_id) = 0;
+  virtual void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) = 0;
+  virtual void notifyCaptureEnded(int device, CaptureId_t graph_id) = 0;
+  virtual void notifyCaptureDestroy(int device, MempoolId_t mempool_id) = 0;
+  virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
+  virtual void recordHistory(
+      bool enabled,
+      CreateContextFn context_recorder,
+      size_t alloc_trace_max_entries,
+      bool alloc_trace_record_context) = 0;
+  virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
+  virtual bool needsPoolSpecificPeerAccess() = 0;
+  virtual std::string name() = 0;
+};
 
-// Allocator backend function pointers, statically initialized
-// according to PYTORCH_CUDA_ALLOC_CONF.
+// Allocator object, statically initialized
 // See BackendInitializer in CUDACachingAllocator.cpp.
-namespace Chosen {
-#define DECLARE_CHOSEN(RET, FUNC, ARGS) extern RET(*FUNC) ARGS;
-FORALL_ALLOCATOR_INTERFACE(DECLARE_CHOSEN)
-#undef DECLARE_CHOSEN
-} // namespace Chosen
+// Atomic loads on x86 are just normal loads,
+// (atomic stores are different), so reading this value
+// is no different than loading a pointer.
+C10_CUDA_API extern std::atomic<CUDAAllocator*> allocator;
+
+inline CUDAAllocator* get() {
+  return allocator.load();
+}
 
 // Called directly by clients.
 inline void* raw_alloc(size_t nbytes) {
-  return Chosen::raw_alloc(nbytes);
+  return get()->raw_alloc(nbytes);
 }
 
 inline void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
-  return Chosen::raw_alloc_with_stream(nbytes, stream);
+  return get()->raw_alloc_with_stream(nbytes, stream);
 }
 
 inline void raw_delete(void* ptr) {
-  return Chosen::raw_delete(ptr);
-}
-
-inline Allocator* get() {
-  return Chosen::get();
+  return get()->raw_delete(ptr);
 }
 
 inline void init(int device_count) {
-  return Chosen::init(device_count);
+  return get()->init(device_count);
 }
 
 inline void setMemoryFraction(double fraction, int device) {
-  return Chosen::setMemoryFraction(fraction, device);
+  return get()->setMemoryFraction(fraction, device);
 }
 
 inline void emptyCache() {
-  return Chosen::emptyCache();
+  return get()->emptyCache();
 }
 
 inline void cacheInfo(int dev_id, size_t* largestBlock) {
-  return Chosen::cacheInfo(dev_id, largestBlock);
+  return get()->cacheInfo(dev_id, largestBlock);
 }
 
 inline void* getBaseAllocation(void* ptr, size_t* size) {
-  return Chosen::getBaseAllocation(ptr, size);
+  return get()->getBaseAllocation(ptr, size);
 }
 
 inline void recordStream(const DataPtr& dataPtr, CUDAStream stream) {
-  return Chosen::recordStream(dataPtr, stream);
+  return get()->recordStream(dataPtr, stream);
 }
 
 inline DeviceStats getDeviceStats(int device) {
-  return Chosen::getDeviceStats(device);
+  return get()->getDeviceStats(device);
 }
 
 inline void resetAccumulatedStats(int device) {
-  return Chosen::resetAccumulatedStats(device);
+  return get()->resetAccumulatedStats(device);
 }
 
 inline void resetPeakStats(int device) {
-  return Chosen::resetPeakStats(device);
+  return get()->resetPeakStats(device);
 }
 
 inline SnapshotInfo snapshot() {
-  return Chosen::snapshot();
+  return get()->snapshot();
 }
 
 // CUDAGraph interactions
@@ -294,11 +279,11 @@ inline void notifyCaptureBegin(
     int device,
     CaptureId_t graph_id,
     MempoolId_t mempool_id) {
-  return Chosen::notifyCaptureBegin(device, graph_id, mempool_id);
+  return get()->notifyCaptureBegin(device, graph_id, mempool_id);
 }
 
 inline void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) {
-  return Chosen::notifyCaptureAboutToEnd(device, graph_id);
+  return get()->notifyCaptureAboutToEnd(device, graph_id);
 }
 
 inline void recordHistory(
@@ -306,7 +291,7 @@ inline void recordHistory(
     CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
     bool alloc_trace_record_context) {
-  return Chosen::recordHistory(
+  return get()->recordHistory(
       enabled,
       context_recorder,
       alloc_trace_max_entries,
@@ -314,24 +299,23 @@ inline void recordHistory(
 }
 
 inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
-  return Chosen::attachOutOfMemoryObserver(observer);
+  return get()->attachOutOfMemoryObserver(observer);
 }
 
 inline void notifyCaptureEnded(int device, CaptureId_t graph_id) {
-  return Chosen::notifyCaptureEnded(device, graph_id);
+  return get()->notifyCaptureEnded(device, graph_id);
 }
 
 inline void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
-  return Chosen::notifyCaptureDestroy(device, mempool_id);
+  return get()->notifyCaptureDestroy(device, mempool_id);
 }
-
-inline std::mutex* getFreeMutex() {
-  return Chosen::getFreeMutex();
-}
-
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
 inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {
-  return Chosen::getIpcDevPtr(handle);
+  return get()->getIpcDevPtr(handle);
+}
+
+inline std::string name() {
+  return get()->name();
 }
 
 } // namespace CUDACachingAllocator

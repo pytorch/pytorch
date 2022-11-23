@@ -252,12 +252,7 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
 
   MPSStream* stream = getCurrentMPSStream();
 
-  struct CachedGraph : public MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
+  using CachedGraph = mps::MPSUnaryCachedGraph;
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -265,9 +260,9 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
     NSString* ns_dims_key = [[ns_dims valueForKey:@"description"] componentsJoinedByString:@","];
     // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types etc match the earlier created MPSGraph
     string key = "flip_mps:" + getTensorsStringKey({self}) + ":" + string([ns_dims_key UTF8String]);
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    auto cachedGraph = cache_->LookUpAs<CachedGraph>(key);
     if(!cachedGraph) {
-      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
 
         CachedGraph *newCachedGraph = nil;
 
@@ -284,7 +279,6 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
     // Create placeholders which use the keys of the CachedGraph to create inputs and outputs of the operation
@@ -341,10 +335,10 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
   @autoreleasepool {
 
     string key = "index_add_mps_out" + getTensorsStringKey({self, index, source}) + ":" + std::to_string(dim);
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if(!cachedGraph) {
-      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
         CachedGraph *newCachedGraph = nil;
 
         @autoreleasepool {
@@ -372,7 +366,6 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
@@ -460,10 +453,10 @@ Tensor& index_select_out_mps(const Tensor & self,
   @autoreleasepool {
 
     string key = "index_select_out_mps" + getTensorsStringKey({self, index}) + ":" + std::to_string(dim);
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if(!cachedGraph) {
-      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
         CachedGraph *newCachedGraph = nil;
 
         @autoreleasepool {
@@ -485,7 +478,6 @@ Tensor& index_select_out_mps(const Tensor & self,
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
@@ -530,9 +522,9 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Scalar& value
   MPSStream* stream = getCurrentMPSStream();
   @autoreleasepool {
     string key = "masked_fill" + getTensorsStringKey({self, mask}) + ":" + std::to_string(value.toDouble());
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
     if(!cachedGraph) {
-      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
 
         CachedGraph *newCachedGraph = nil;
 
@@ -566,7 +558,6 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Scalar& value
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
     Placeholder selfPlaceholder   = Placeholder(cachedGraph->inputTensor_, self);
@@ -615,7 +606,7 @@ Tensor embedding_dense_backward_mps(
     int64_t D = incoming_gradient_shape[num_incoming_gradient_dims - 1];
     c10::SmallVector<int64_t, 2> outgoing_gradient_shape{num_weights, D};
     Tensor outgoing_gradient = at::native::empty_mps(
-                                IntArrayRef(outgoing_gradient_shape.data(), outgoing_gradient_shape.size()),
+                                IntArrayRef(outgoing_gradient_shape),
                                 grad_.scalar_type(),
                                 c10::nullopt,
                                 kMPS,
@@ -630,10 +621,10 @@ Tensor embedding_dense_backward_mps(
 
     @autoreleasepool {
         string key = "edb_mps:" + native_mps::getMPSTypeString(grad_.scalar_type()) + ":indices" + std::to_string(num_indices_dims) + ":num_weights" + std::to_string(num_weights) + ":padding_idx" + std::to_string(padding_idx) + ":scaled" + std::to_string(scale_grad_by_freq);
-      CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+      CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
       // Initialize once if configuration not found in cache
       if(!cachedGraph) {
-        native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+        cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ native_mps::MPSCachedGraph * () {
 
           CachedGraph *newCachedGraph = nil;
 
@@ -645,17 +636,20 @@ Tensor embedding_dense_backward_mps(
 
             MPSGraphTensor* indicesTensor = native_mps::mpsGraphUnrankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(indices.scalar_type()));
 
-            MPSGraphTensor *reshapedIndicesTensor = [mpsGraph  expandDimsOfTensor:indicesTensor
-                             axes:@[@-1]
-                             name:nil];
+            MPSGraphTensor* reshapedIndicesTensor = indicesTensor;
 
-            MPSGraphTensor *outgoingGradTensor;
-            outgoingGradTensor = [mpsGraph scatterNDWithUpdatesTensor:incomingGradTensor
-                            indicesTensor:reshapedIndicesTensor
-                                    shape:native_mps::getMPSShape(IntArrayRef(outgoing_gradient_shape.data(), outgoing_gradient_shape.size()))
-                          batchDimensions:0
-                                     mode:MPSGraphScatterModeAdd
-                                     name:@"edb"];
+            if (num_indices_dims != 0) {
+              reshapedIndicesTensor = [mpsGraph  expandDimsOfTensor: indicesTensor
+                                                               axes: @[@-1]
+                                                               name: nil];
+            }
+
+            auto outgoingGradTensor = [mpsGraph scatterNDWithUpdatesTensor: incomingGradTensor
+                                                             indicesTensor: reshapedIndicesTensor
+                                                                     shape: native_mps::getMPSShape(IntArrayRef(outgoing_gradient_shape))
+                                                           batchDimensions: 0
+                                                                      mode: MPSGraphScatterModeAdd
+                                                                      name: @"edb"];
 
             newCachedGraph->incomingGradTensor_ = incomingGradTensor;
             newCachedGraph->indicesTensor_ = indicesTensor;
@@ -664,7 +658,6 @@ Tensor embedding_dense_backward_mps(
           }
           return newCachedGraph;
         });
-        cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
       }
       auto incomingGradPlaceholder = native_mps::Placeholder(cachedGraph->incomingGradTensor_, grad_);
       auto indicesPlaceholder = native_mps::Placeholder(cachedGraph->indicesTensor_, indices);

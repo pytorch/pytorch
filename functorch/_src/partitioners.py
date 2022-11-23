@@ -1,4 +1,4 @@
-from torch.fx.experimental.proxy_tensor import is_sym_node
+from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 import torch
 import torch.fx as fx
 import operator
@@ -187,8 +187,7 @@ def _prod(x):
         s *= i
     return s
 
-
-def _size_of(metadata):
+def _tensor_nbytes(numel, dtype):
     sizes = {
         torch.float: 4,
         torch.float16: 2,
@@ -203,21 +202,39 @@ def _size_of(metadata):
         torch.uint8: 1,
         torch.bool: 1,
     }
+    if dtype not in sizes:
+        raise NotImplementedError("Don't know the size of dtype ", dtype)
 
+    return numel * sizes[dtype]
+
+def _size_of(node: fx.Node) -> int:
     def to_size_hint(s):
-        if isinstance(s, torch.SymIntNode):
+        if isinstance(s, torch.SymInt):
             py_s = s.get_pyobj()
             return py_s.shape_env.size_hint(py_s.expr)
         assert isinstance(s, int)
         return s
 
-    numel = _prod(map(to_size_hint, metadata.shape))
-    dtype = metadata.dtype
+    if 'val' in node.meta:
+        val = node.meta['val']
+        if isinstance(val, py_sym_types):
+            return 1
+        elif isinstance(val, (list, tuple)):
+            return sum(_tensor_nbytes(to_size_hint(n.numel()), n.dtype) for n in val if isinstance(n, torch.Tensor))
+        elif isinstance(val, torch.Tensor):
+            return _tensor_nbytes(to_size_hint(val.numel()), val.dtype)
 
-    if dtype not in sizes:
-        raise NotImplementedError("Don't know the size of dtype ", dtype)
+        raise RuntimeError(f"Unknown metadata type {type(val)}")
 
-    return numel * sizes[dtype]
+    # Only needed since we don't always trace with fake tensors.
+    if 'tensor_meta' in node.meta:
+        metadata = node.meta['tensor_meta']
+        numel = _prod(map(to_size_hint, metadata.shape))
+        dtype = metadata.dtype
+    else:
+        return 0
+
+    return _tensor_nbytes(numel, dtype)
 
 
 # Used for some investigative purposes
@@ -231,7 +248,7 @@ def _count_ops(graph):
 
 
 def min_cut_rematerialization_partition(
-    joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser"
+    joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser", recomputable_ops=None,
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -247,6 +264,12 @@ def min_cut_rematerialization_partition(
     Args:
         joint_module(fx.GraphModule): The joint forward and backward graph. This
             is the result of AOT Autograd tracing.
+        _joint_inputs: The inputs to the joint graph. This is unused.
+        compiler: This option determines the default set of recomputable ops.
+            Currently, there are two options: ``nvfuser`` and ``inductor``.
+        recomputable_ops: This is an optional set of recomputable ops. If this
+            is not None, then this set of ops will be used instead of the
+            default set of ops.
 
     Returns:
         Returns the generated forward and backward Fx graph modules.
@@ -299,13 +322,14 @@ def min_cut_rematerialization_partition(
     aten = torch.ops.aten
     prims = torch.ops.prims
 
-    recomputable_ops = [aten.add, aten.sub, aten.div, aten.atan2, aten.mul, aten.max, aten.min, aten.pow, aten.remainder, aten.fmod, aten.__and__, aten.__or__, aten.__xor__, aten.__lshift__, aten.__rshift__, aten.eq, aten.ne, aten.ge, aten.gt, aten.le, aten.lt, aten.abs, aten.bitwise_not, aten.ceil, aten.floor, aten.frac, aten.neg, aten.relu, aten.round, aten.silu, aten.trunc, aten.log, aten.log10, aten.log1p, aten.log2, aten.lgamma, aten.exp, aten.expm1, aten.erf, aten.erfc, aten.cos, aten.acos, aten.cosh, aten.sin, aten.asin, aten.sinh, aten.tan, aten.atan, aten.tanh, aten.atanh, aten.sqrt, aten.rsqrt, aten.reciprocal, aten.sigmoid, aten.softplus, aten.threshold, aten.threshold_backward, aten.clamp, aten.where, aten.lerp, aten.addcmul, aten.gelu, aten.gelu_backward, aten.alias, aten.sum, aten.mean, aten._grad_sum_to_size, aten.sum_to_size, aten.amax, aten.to, aten.type_as, operator.getitem, aten.squeeze, aten.unsqueeze, aten.rsub, aten._to_copy]  # noqa: E501
+    # compiler == "nvfuser" is the default set of recomputable ops
+    default_recomputable_ops = [aten.add, aten.sub, aten.div, aten.atan2, aten.mul, aten.max, aten.min, aten.pow, aten.remainder, aten.fmod, aten.__and__, aten.__or__, aten.__xor__, aten.__lshift__, aten.__rshift__, aten.eq, aten.ne, aten.ge, aten.gt, aten.le, aten.lt, aten.abs, aten.bitwise_not, aten.ceil, aten.floor, aten.frac, aten.neg, aten.relu, aten.round, aten.silu, aten.trunc, aten.log, aten.log10, aten.log1p, aten.log2, aten.lgamma, aten.exp, aten.expm1, aten.erf, aten.erfc, aten.cos, aten.acos, aten.cosh, aten.sin, aten.asin, aten.sinh, aten.tan, aten.atan, aten.tanh, aten.atanh, aten.sqrt, aten.rsqrt, aten.reciprocal, aten.sigmoid, aten.softplus, aten.threshold, aten.threshold_backward, aten.clamp, aten.where, aten.lerp, aten.addcmul, aten.gelu, aten.gelu_backward, aten.alias, aten.sum, aten.mean, aten._grad_sum_to_size, aten.sum_to_size, aten.amax, aten.to, aten.type_as, operator.getitem, aten.squeeze, aten.unsqueeze, aten.rsub, aten._to_copy]  # noqa: E501
     if compiler == "inductor":
-        recomputable_ops += [prims.div, prims.convert_element_type, aten.sign, aten.clone, aten._to_copy, aten.full_like, prims.var, prims.sum, aten.var, aten.std, prims.broadcast_in_dim, aten.select, aten.permute, aten._unsafe_view, aten.view, aten.expand, aten.slice, aten.reshape, aten.broadcast_tensors, aten.scalar_tensor, aten.ones, aten.new_zeros, aten.lift_fresh_copy, aten.minimum, aten.arange, aten.bitwise_and, aten.triu, aten.var_mean, aten.isinf, aten.any, aten.isnan, aten.full, aten.as_strided, aten.zeros, aten.argmax, aten.maximum, aten.bitwise_or, aten.logical_and, aten.logical_or]  # noqa: E501
+        default_recomputable_ops += [prims.div, prims.convert_element_type, aten.sign, aten.clone, aten._to_copy, aten.full_like, prims.var, prims.sum, aten.var, aten.std, prims.broadcast_in_dim, aten.select, aten.permute, aten._unsafe_view, aten.view, aten.expand, aten.slice, aten.reshape, aten.broadcast_tensors, aten.scalar_tensor, aten.ones, aten.new_zeros, aten.lift_fresh_copy, aten.minimum, aten.arange, aten.bitwise_and, aten.triu, aten.var_mean, aten.isinf, aten.any, aten.isnan, aten.full, aten.as_strided, aten.zeros, aten.argmax, aten.maximum, aten.bitwise_or, aten.logical_and, aten.logical_or]  # noqa: E501
         # Natalia said that we should allow recomputing indexing :)
-        recomputable_ops += [aten.index]
+        default_recomputable_ops += [aten.index]
 
-    recomputable_ops = set(recomputable_ops)
+    recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
     compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.upsample_bilinear2d, aten._softmax, aten._softmax_backward_data, aten.native_layer_norm, aten.native_layer_norm_backward, aten.native_batch_norm, aten.native_batch_norm_backward]  # noqa: E501
@@ -325,11 +349,6 @@ def min_cut_rematerialization_partition(
 
     AGGRESSIVE_RECOMPUTATION = False
 
-    def _maybe_size_of(node):
-        if 'tensor_meta' in node.meta:
-            return _size_of(node.meta['tensor_meta'])
-        return 0
-
     def ban_recomputation(node):
         if AGGRESSIVE_RECOMPUTATION:
             return (node.op == 'call_function' and get_aten_target(node) in unrecomputable_ops)
@@ -340,14 +359,14 @@ def min_cut_rematerialization_partition(
                 return True
             if node.target == operator.getitem:
                 return False
-            if compiler == "inductor" and node.dist_from_bw > 4:
+            if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
+                return False
+            if compiler == "inductor" and node.dist_from_bw > 3:
                 return True
             # If the output of an op is 4x smaller (arbitrary choice),
             # then we don't allow recomputation.
-            if 'tensor_meta' not in node.meta:
-                return False
-            input_tensors_size = sum(_maybe_size_of(i) for i in node.args if isinstance(i, fx.Node))
-            output_size = _size_of(node.meta['tensor_meta'])
+            input_tensors_size = sum(_size_of(i) for i in node.args if isinstance(i, fx.Node))
+            output_size = _size_of(node)
             return (output_size * 4 < input_tensors_size)
 
     def is_fusible(a, b):
@@ -359,8 +378,8 @@ def min_cut_rematerialization_partition(
 
         return not all(is_fusible(node, user) for user in node.users)
 
-    def get_node_weight(node):
-        mem_sz = _size_of(node.meta['tensor_meta'])
+    def get_node_weight(node) -> int:
+        mem_sz = _size_of(node)
 
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
@@ -390,10 +409,12 @@ def min_cut_rematerialization_partition(
         if ban_recomputation(node) and node in required_fw_nodes:
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
+        # Checks if a node is actually a tuple. Can be simplified to just an isisinstance check if we always use faketensors.
+        is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
+                              ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
         if is_sym_node(node):
             weight = 1
-        # TODO(whc) try changing this to isTensor(node.meta['val'])?
-        elif 'tensor_meta' not in node.meta:
+        elif is_non_tensor_node:
             weight = math.inf
         else:
             weight = get_node_weight(node)
@@ -424,13 +445,7 @@ def min_cut_rematerialization_partition(
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
     fw_module, bw_module = _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes)
     if AOT_PARTITIONER_DEBUG:
-        def node_size(node):
-            if 'tensor_meta' in node.meta:
-                return _size_of(node.meta['tensor_meta'])
-            else:
-                assert is_sym_node(node)
-                return 1
-        print("Theoretical Activations Stored: ", sum([node_size(i) for i in saved_values]) / 1e9)
+        print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
         fw_module_nodes = set([node.name for node in fw_module.graph.nodes if node.op == 'call_function'])
         bw_module_nodes = set([node.name for node in bw_module.graph.nodes if node.op == 'call_function'])
         remat_nodes = fw_module_nodes & bw_module_nodes
@@ -439,7 +454,7 @@ def min_cut_rematerialization_partition(
         for node in fw_module.graph.nodes:
             if node.name in remat_nodes and hasattr(node.target, '_overloadpacket'):
                 counts[str(node.target._overloadpacket)] += 1
-        print("# nodes rematerialized: ", len(remat_nodes))
+        print(f"# remat/fw/bw: {len(remat_nodes)}/{len(fw_module_nodes)}/{len(bw_module_nodes)}")
         print("Count of Ops Rematerialized: ", sorted(counts.items(), key=lambda x: x[1], reverse=True))
     return fw_module, bw_module
 

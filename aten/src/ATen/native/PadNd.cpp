@@ -1,7 +1,28 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/PadNd.h>
+#include <ATen/core/Tensor.h>
 
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_pad_circular.h>
+#include <ATen/ops/_pad_circular_native.h>
+#include <ATen/ops/_pad_enum_native.h>
+#include <ATen/ops/constant_pad_nd.h>
+#include <ATen/ops/constant_pad_nd_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/pad_native.h>
+#include <ATen/ops/reflection_pad1d.h>
+#include <ATen/ops/reflection_pad2d.h>
+#include <ATen/ops/reflection_pad3d.h>
+#include <ATen/ops/replication_pad1d.h>
+#include <ATen/ops/replication_pad2d.h>
+#include <ATen/ops/replication_pad3d.h>
+#endif
 
 namespace at { namespace native {
 
@@ -85,13 +106,13 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
     return output;
 }
 
-Tensor _pad_circular(const Tensor &self, IntArrayRef padding) {
-  const auto in_shape = self.sizes();
+Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
+  const auto in_shape = self.sym_sizes();
   const auto ndim = static_cast<int64_t>(in_shape.size()) - 2;
   TORCH_CHECK(padding.size() + 4 == in_shape.size() * 2,
               "Invalid padding size, expected ", ndim * 2, " but got ", padding.size());
 
-  DimVector out_shape(in_shape.size());
+  c10::SymDimVector out_shape(in_shape.size());
   out_shape[0] = in_shape[0];
   out_shape[1] = in_shape[1];
 
@@ -110,18 +131,18 @@ Tensor _pad_circular(const Tensor &self, IntArrayRef padding) {
         "Negative padding value is resulting in an empty dimension");
   }
 
-  auto out = self.new_empty(out_shape, self.options());
+  auto out = self.new_empty_symint(out_shape, self.options());
 
   // Put original array into the padded array
   Tensor out_slice = out;
   Tensor in_slice = self;
-  constexpr int64_t zero = 0;
+  const SymInt zero = 0;
   for (const auto i : c10::irange(ndim)) {
     const auto dim = ndim - i + 1;
     const auto pad_l = padding[2*i + 0];
     const auto pad_r = padding[2*i + 1];
-    out_slice = out_slice.slice(dim, std::max(pad_l, zero), out_shape[dim] - std::max(pad_r, zero));
-    in_slice = in_slice.slice(dim, std::max(-pad_l, zero), in_shape[dim] - std::max(-pad_r, zero));
+    out_slice = out_slice.slice_symint(dim, std::max(pad_l, zero), out_shape[dim] - std::max(pad_r, zero));
+    in_slice = in_slice.slice_symint(dim, std::max(-pad_l, zero), in_shape[dim] - std::max(-pad_r, zero));
   }
   out_slice.copy_(in_slice);
 
@@ -137,16 +158,16 @@ Tensor _pad_circular(const Tensor &self, IntArrayRef padding) {
     const auto pad_r = padding[2*i + 1];
 
     if (pad_l > 0) {
-      out_slice = out.slice(dim, 0, pad_l);
-      in_slice = out.slice(dim,
+      out_slice = out.slice_symint(dim, 0, pad_l);
+      in_slice = out.slice_symint(dim,
                            out_shape[dim] - pad_l - std::max(pad_r, zero),
                            out_shape[dim] - std::max(pad_r, zero));
       out_slice.copy_(in_slice);
     }
 
     if (pad_r > 0) {
-      out_slice = out.slice(dim, out_shape[dim] - pad_r, out_shape[dim]);
-      in_slice = out.slice(dim, std::max(pad_l, zero), std::max(pad_l, zero) + pad_r);
+      out_slice = out.slice_symint(dim, out_shape[dim] - pad_r, out_shape[dim]);
+      in_slice = out.slice_symint(dim, std::max(pad_l, zero), std::max(pad_l, zero) + pad_r);
       out_slice.copy_(in_slice);
     }
   }
@@ -154,14 +175,14 @@ Tensor _pad_circular(const Tensor &self, IntArrayRef padding) {
   return out;
 }
 
-Tensor _pad_enum(const Tensor &self, IntArrayRef pad, int64_t mode_int, c10::optional<double> value) {
+Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mode_int, c10::optional<double> value) {
   const auto input_dim = self.dim();
   TORCH_CHECK(pad.size() % 2 == 0, "Padding length must be divisible by 2");
   TORCH_CHECK(static_cast<int64_t>(pad.size()) <= input_dim * 2, "Padding length too large");
   auto mode = static_cast<at::padding_mode>(mode_int);
 
   if (mode == at::padding_mode::constant) {
-    return at::constant_pad_nd(self, pad, value.value_or(0.0));
+    return at::constant_pad_nd_symint(self, pad, value.value_or(0.0));
   }
   TORCH_CHECK(!value.has_value() || *value == 0,
               "Padding mode \"", padding_mode_string(mode),
@@ -169,23 +190,23 @@ Tensor _pad_enum(const Tensor &self, IntArrayRef pad, int64_t mode_int, c10::opt
 
   if (pad.size() == 2 && (input_dim == 2 || input_dim == 3)) {
     switch (mode) {
-      case at::padding_mode::reflect: return at::reflection_pad1d(self, pad);
-      case at::padding_mode::replicate: return at::replication_pad1d(self, pad);
-      case at::padding_mode::circular: return at::_pad_circular(self, pad);
+      case at::padding_mode::reflect: return at::reflection_pad1d_symint(self, pad);
+      case at::padding_mode::replicate: return at::replication_pad1d_symint(self, pad);
+      case at::padding_mode::circular: return at::_pad_circular_symint(self, pad);
       default: {}
     }
   } else if(pad.size() == 4 && (input_dim == 3 || input_dim == 4)) {
     switch (mode) {
-      case at::padding_mode::reflect: return at::reflection_pad2d(self, pad);
-      case at::padding_mode::replicate: return at::replication_pad2d(self, pad);
-      case at::padding_mode::circular: return at::_pad_circular(self, pad);
+      case at::padding_mode::reflect: return at::reflection_pad2d_symint(self, pad);
+      case at::padding_mode::replicate: return at::replication_pad2d_symint(self, pad);
+      case at::padding_mode::circular: return at::_pad_circular_symint(self, pad);
       default: {}
     }
   } else if (pad.size() == 6 && (input_dim == 4 || input_dim == 5)) {
     switch (mode) {
-      case at::padding_mode::reflect: return at::reflection_pad3d(self, pad);
-      case at::padding_mode::replicate: return at::replication_pad3d(self, pad);
-      case at::padding_mode::circular: return at::_pad_circular(self, pad);
+      case at::padding_mode::reflect: return at::reflection_pad3d_symint(self, pad);
+      case at::padding_mode::replicate: return at::replication_pad3d_symint(self, pad);
+      case at::padding_mode::circular: return at::_pad_circular_symint(self, pad);
       default: {}
     }
   }
@@ -193,7 +214,7 @@ Tensor _pad_enum(const Tensor &self, IntArrayRef pad, int64_t mode_int, c10::opt
       "Only 2D, 3D, 4D, 5D padding with non-constant padding are supported for now");
 }
 
-Tensor pad(const Tensor &self, IntArrayRef pad, c10::string_view mode, c10::optional<double> value) {
+Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, c10::string_view mode, c10::optional<double> value) {
   const auto mode_enum = [&] {
     if (mode == "reflect") {
       return at::padding_mode::reflect;
@@ -207,7 +228,7 @@ Tensor pad(const Tensor &self, IntArrayRef pad, c10::string_view mode, c10::opti
     C10_THROW_ERROR(NotImplementedError,
                     c10::str("Unrecognised padding mode ", mode));
   }();
-  return at::native::_pad_enum(self, pad, static_cast<int64_t>(mode_enum), value);
+  return at::native::_pad_enum_symint(self, pad, static_cast<int64_t>(mode_enum), value);
 }
 
 }}  // namespace at::native

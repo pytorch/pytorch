@@ -1767,6 +1767,9 @@ static PyObject* order(PyObject *_,
                       PyObject *kwnames) {
     Arena A;
     PY_BEGIN
+    if (kwnames) {
+        py::raise_error(PyExc_TypeError, "unexpected keyword arguments %S", kwnames);
+    }
     AT_ASSERT(nargs-- > 0);
     Slice<DimEntry> orig_levels;
     Slice<DimEntry> levels;

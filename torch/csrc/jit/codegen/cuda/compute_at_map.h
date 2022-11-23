@@ -54,7 +54,7 @@ namespace cuda {
 //   Do not forward through any broadcast IDs
 class TORCH_CUDA_CU_API IterDomainGraph {
  public:
-  IterDomainGraph(Fusion* fusion);
+  IterDomainGraph(Fusion* fusion, bool allow_self_mapping = false);
 
   const DisjointSets<IterDomain*>& permissiveNodes() const {
     return permissive_nodes_;
@@ -88,14 +88,24 @@ class TORCH_CUDA_CU_API IterDomainGraph {
     return view_rfactor_ids_;
   }
 
+  // Returns if first and second are expressions through which the provided
+  // id_map have matching inputs (if forward), or outputs (if not forward).
+  // Returning true means the expressions are "the same", in terms they modify
+  // matching original extents, by the same amount.
+  static bool exprsMap(
+      Expr* first,
+      Expr* second,
+      bool forward,
+      const DisjointSets<IterDomain*>& id_map);
+
+  bool hasSelfMapping() const {
+    return self_mapping_info_.has_value();
+  }
+
  private:
   void build(Fusion* fusion);
 
   void initializeId(IterDomain* id, bool is_view_rfactor_id, bool is_leaf_id);
-
-  // Returns if first and second are expressions with inputs match through exact
-  // map (if forward), or outputs match (if not forward).
-  bool exprsMap(Expr* first, Expr* second, bool forward);
 
   // Checks if exprsMap then if forward will map outputs else inputs in exact
   // and permissive map.
@@ -116,6 +126,9 @@ class TORCH_CUDA_CU_API IterDomainGraph {
   VectorOfUniqueEntries<IterDomain*> all_ids_;
 
   std::unordered_set<IterDomain*> view_rfactor_ids_;
+
+  c10::optional<std::tuple<TensorView*, IterDomain*, IterDomain*, std::string>>
+      self_mapping_info_ = c10::nullopt;
 };
 
 class TrivialReductionInfo;

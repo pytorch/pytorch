@@ -23,7 +23,7 @@ def deprecated(since: str, removed_in: str, instructions: str):
             warnings.warn(
                 f"'{function.__module__}.{function.__name__}' "
                 f"is deprecated in version {since} and will be "
-                f"removed in version {removed_in}. Please {instructions}.",
+                f"removed in {removed_in}. Please {instructions}.",
                 category=FutureWarning,
                 stacklevel=2,
             )
@@ -42,7 +42,7 @@ def deprecated(since: str, removed_in: str, instructions: str):
         )
 
         # Split docstring at first occurrence of newline
-        summary_and_body = docstring.split("\n", 1)
+        summary_and_body = docstring.split("\n\n", 1)
 
         if len(summary_and_body) > 1:
             summary, body = summary_and_body

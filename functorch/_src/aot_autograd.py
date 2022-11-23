@@ -18,7 +18,6 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
 
 from functorch import make_fx
-from functorch.experimental import functionalize
 from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
@@ -133,7 +132,99 @@ def setup_stacktrace_preservation_hooks(roots: List):
         node.register_hook(get_posthook(special_stack))
 
 
-def create_joint_forward_backward(fn):
+# This is a version of functionalization that is specifically designed
+# for the AOTAutograd use case.  It might be generally applicable though
+# (if so, move it out of this file), so I've tried to give it a name that
+# describes what it does.
+#
+# Given a function f, it produces a new function g that:
+#
+#   - Detaches all inputs before running f; the inner function
+#     does not directly participate in any pre-existing autograd.
+#     preserve_requires_grad is provided as a convenience to set the
+#     requires_grad on the new detached leaves in sync with the originals.
+#     (NB: In principle, you could backward through the pure operations
+#     produced by functionalization; this is not used for AOTAutograd
+#     and we have not tested it.)
+#
+#   - Functionalizes all operations on f, under the assumption that the passed
+#     in function f must be "observationally pure"; that is, it cannot perform any
+#     mutations (inplace data or view operations) on the passed in inputs, nor is
+#     it allowed to directly close over tensors that aren't passed via its
+#     arguments.  See
+#     https://docs.google.com/document/d/19UoIh_SVrMy_b2Sx5ZaeOJttm6P0Qmyss2rdBuyfoic/edit
+#     for discussion how how to implement the more complicated case.
+#
+# Unlike functorch's variant, this doesn't use the functorch level system,
+# instead it directly uses PyTorch's conventional dispatcher to hit the
+# functionalization key.  In particular, this means that FunctionalTensorWrapper
+# can have autograd data stored directly on it.
+#
+# In typical AOTAutograd usage, the dispatch key order will look like:
+#
+#   Autograd - Functionalization ~~~~> Proxy Mode - Fake Tensor
+#       outer tensor                        inner tensor
+#
+# TODO: Provide a faster version of this that assumes flat arguments
+# (so no pytree necessary)
+def detach_and_functionalize_pure(f, preserve_requires_grad=True):
+    @wraps(f)
+    def inner(*args, **kwargs):
+        def to_fun(t):
+            if isinstance(t, Tensor):
+                r = torch._to_functional_tensor(t)
+                # NB: r is a leaf; it has no grad_fn relating
+                # it to t.  If t has autograd metadata, that
+                # metadata was preserved *inside* the r wrapper
+                if preserve_requires_grad:
+                    r.requires_grad = t.requires_grad
+                return r
+            else:
+                return t
+
+        f_args, f_kwargs = pytree.tree_map(to_fun, (args, kwargs))
+
+        torch._enable_functionalization(reapply_views=True)
+        try:
+            outs = f(*f_args, **f_kwargs)
+        finally:
+            torch._disable_functionalization()
+
+        # Detect input mutation and error if found
+        flat_args, _ = pytree.tree_flatten((args, kwargs))
+        flat_f_args, _ = pytree.tree_flatten((f_args, f_kwargs))
+
+        # This is just for sanity checking, can be skipped
+        for arg, f_arg in zip(flat_args, flat_f_args):
+            if not isinstance(arg, Tensor):
+                continue
+            torch._sync(f_arg)
+            new_arg = torch._from_functional_tensor(f_arg)
+            # I want to do this assert, but it is annoying because
+            # we have operator tests that have mutating inputs.  So
+            # I do something unsound instead
+            # assert arg is new_arg, "input argument was mutated, this is not valid"
+            if arg is not new_arg:
+                assert arg.shape == new_arg.shape
+                arg.copy_(new_arg)
+
+        def from_fun(t):
+            if not isinstance(t, Tensor) or not torch._is_functional_tensor(t):
+                return t
+            torch._sync(t)
+            return torch._from_functional_tensor(t)
+
+        return pytree.tree_map(from_fun, outs)
+    return inner
+
+
+# This creates a joint forwards-backwards function given both
+# the primals (to run forwards) and tangents (to run backwards).
+#
+# It has a precondition which is that the passed in function
+# must be observationally pure; it is not permitted to mutate
+# the primals or tangents.
+def create_joint_forward_backward_pure(fn):
     def joint_forward_backward(
         primals: List[Any], tangents: List[Any]
     ) -> Tuple[List[Any], List[Any]]:
@@ -278,6 +369,7 @@ class AOTConfig:
     bw_compiler: Callable
     partition_fn: Callable
     decompositions: Dict[Callable, Callable]
+    num_params_buffers: int
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
@@ -365,9 +457,16 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
-    joint_forward_backward = create_joint_forward_backward(lambda *args: flat_fn(*add_dupe_args(args)))
+    joint_forward_backward = create_joint_forward_backward_pure(lambda *args: flat_fn(*add_dupe_args(args)))
 
     out = flat_fn(*flat_args)
+    # Collect info on which output tensors require gradients,
+    # so we can mark them properly in the returned autograd.Function
+    _flat_outs_not_requiring_grad, _ = pytree.tree_flatten(
+        pytree.tree_map(
+            lambda x: isinstance(x, Tensor) and not x.requires_grad, out
+        )
+    )
     out = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
         out,
@@ -383,27 +482,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     disable_amp = torch._C._is_any_autocast_enabled()
 
     if config.use_functionalize:
-        # Trace once without decompositions, into a graph of ATen ops.
-        # NB: tracing_mode is real, as it's assumed the calling context setup
-        # fake tensor mode / symbolic shapes if that is needed
-        fx_g = make_fx(joint_forward_backward)(*joint_inputs)
-
-        context = disable_autocast_manager if disable_amp else nullcontext
-
-        def fake_fn(primals, tangents):
-            with torch.fx.traceback.override_stack_trace():
-                return torch.fx.Interpreter(fx_g).run(primals, tangents)
-
-        # Trace a second time, running functionalization, and THEN running decompositions.
-        # functionalization only acts on ATen today, and doesn't currently handle
-        # view and inplace ops that come from primtorch.
-        # Eventually, functionalization should support primtorch view/inplace ops,
-        # which will make it ok to run decompositions before functionalization.
-        with context():
-            fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
+        with enable_python_dispatcher():
+            fx_g = make_fx(
+                detach_and_functionalize_pure(joint_forward_backward), aot_config.decompositions
+            )(*joint_inputs)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
+        warnings.warn("graph partitioning without functionalization is not sound, we may introduce errors")
         fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
     if config.debug_joint:
@@ -434,6 +520,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         compiled_bw = None
         num_outs = _num_outs
         num_symints = _num_symints
+        flat_outs_not_requiring_grad = _flat_outs_not_requiring_grad
 
         @staticmethod
         @disable_torchdynamo
@@ -450,6 +537,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             else:
                 ctx.save_for_backward(*fw_outs[num_outs:])
                 ctx.symints = []
+
+            fw_outs_not_requiring_grad = [
+                x for (i, x) in enumerate(fw_outs[0:num_outs]) if CompiledFunction.flat_outs_not_requiring_grad[i]
+            ]
+            ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+
             return tuple(fw_outs[0:num_outs])
 
         @staticmethod
@@ -457,12 +550,15 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         def backward(ctx, *flat_args):
             contiguous_args = [t.contiguous() if torch.is_tensor(t) else t for t in flat_args]
             all_args = list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
+            del contiguous_args
             if CompiledFunction.compiled_bw is None:
+                # TODO - pass in fake tensors ?
                 context = disable_autocast_manager if disable_amp else nullcontext
                 with context(), track_graph_compiling("backward", True):
                     CompiledFunction.compiled_bw = aot_config.bw_compiler(
                         bw_module, all_args
                     )
+
             ctx.maybe_clear_saved_tensors()
             out = call_func_with_args(
                 CompiledFunction.compiled_bw, all_args, steal_args=True, disable_amp=disable_amp
@@ -491,6 +587,11 @@ def create_aot_dispatcher_function(
 
     The resulting compiled forward and backward graphs are then wrapped up in a
     ``torch.autograd.Function`` object.
+
+    The calling convention here is that the first aot_config.num_params_buffers
+    inputs in flat_args are parameters and buffers, and the rest are inputs.
+
+    We use this to assume that parameters/buffer's shapes don't change.
     """
 
     # This is the main entry point.
@@ -514,19 +615,26 @@ def create_aot_dispatcher_function(
         # coordinate flags
         config.use_fake_tensor = False
 
-    fake_mode = FakeTensorMode() if config.use_fake_tensor else nullcontext()
+    if config.use_dynamic_shapes:
+        assert config.use_fake_tensor, "Dynamic shapes only works with fake tensor"
+
+    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
+    fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
-    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
 
     with torch.autograd.set_multithreading_enabled(False), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
             if config.use_fake_tensor:
-                def convert(x):
-                    return fake_mode.from_tensor(x, shape_env=shape_env)
+                def convert(idx, x):
+                    if not isinstance(x, torch.Tensor):
+                        return x
+                    if idx < aot_config.num_params_buffers and config.static_weight_shapes:
+                        return fake_mode.from_tensor(x, static_shapes=True)
+                    return fake_mode.from_tensor(x, static_shapes=False)
 
-                return pytree.tree_map_only(Tensor, convert, flat_args)
+                return [convert(idx, x) for idx, x in enumerate(flat_args)]
             else:
                 return flat_args
 
@@ -578,7 +686,7 @@ class PytreeThunk:
             return x
         return pytree.tree_unflatten(x, self.spec)
 
-KNOWN_TYPES = [torch.Tensor, int, str, float, bool, torch.SymIntNode, torch.SymFloatNode]
+KNOWN_TYPES = [torch.Tensor, int, str, float, bool, torch.SymInt, torch.SymFloat]
 
 
 def aot_function(
@@ -587,6 +695,7 @@ def aot_function(
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
+    num_params_buffers: int = 0,
     hasher_type=None,  # deprecated
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
 ) -> Callable:
@@ -650,6 +759,7 @@ def aot_function(
         bw_compiler=bw_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
+        num_params_buffers=num_params_buffers,
     )
     cached_res = None
 
@@ -734,7 +844,10 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
         params_and_buffers = {**named_params, **named_buffers}
         return stateless.functional_call(mod, params_and_buffers, args, kwargs)
 
-    compiled_f = aot_function(functional_call, *args, **kwargs)
+    named_params = dict(_named_parameters(mod, remove_duplicate=False))
+    named_buffers = dict(_named_buffers(mod, remove_duplicate=False))
+    num_params_buffers = len(named_params) + len(named_buffers)
+    compiled_f = aot_function(functional_call, num_params_buffers=num_params_buffers, *args, **kwargs)
 
     class AOTModule(nn.Module):
         def __init__(self):
@@ -743,8 +856,8 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
         def forward(self, *args, **kwargs):
             return compiled_f(
-                dict(_named_parameters(mod, remove_duplicate=False)),
-                dict(_named_buffers(mod, remove_duplicate=False)),
+                named_params,
+                named_buffers,
                 *args,
                 **kwargs,
             )
@@ -812,6 +925,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             bw_compiler=bw_compiler,
             partition_fn=partition_fn,
             decompositions=decompositions,
+            num_params_buffers=params_len,
         )
 
         compiled_fn = None

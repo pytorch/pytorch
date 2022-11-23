@@ -3,7 +3,8 @@ from typing import Any, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
-
+from torch.distributed._shard.sharded_tensor.api import ShardedTensor
+from torch.distributed._shard.sharded_tensor.shard import Shard
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 
 
@@ -47,7 +48,7 @@ class FSDPExtensions(ABC):
     def pre_load_state_dict_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, List[Shard]]:
         """
         This is to be called before loading a *sharded* model state dict and
         should return the tensor and list of shards from which to load data.
@@ -105,8 +106,10 @@ def _ext_chunk_tensor(
 
 def _ext_pre_load_state_dict_transform(
     tensor: torch.Tensor,
-) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+) -> Tuple[torch.Tensor, List[Shard]]:
     if _extensions is not None:
         return _extensions.pre_load_state_dict_transform(tensor)
-    shards = tensor.local_shards()  # type: ignore[attr-defined]
+
+    assert type(tensor) is ShardedTensor
+    shards = tensor.local_shards()
     return (tensor, shards)

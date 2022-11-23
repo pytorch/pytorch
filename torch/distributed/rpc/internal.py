@@ -205,6 +205,8 @@ def _run_function(python_udf):
         if isinstance(python_udf, AttributeError):
             raise python_udf
         result = python_udf.func(*python_udf.args, **python_udf.kwargs)
+    # TODO (rohan-varma): This should probably be BaseException, but change can
+    # cause BC issues.
     except Exception as e:
         # except str = exception info + traceback string
         except_str = (
@@ -218,7 +220,20 @@ def _run_function(python_udf):
 
 def _handle_exception(result):
     if isinstance(result, RemoteException):
-        raise result.exception_type(result.msg.encode("utf-8").decode("unicode_escape"))
+        exception_msg = result.msg.encode("utf-8").decode("unicode_escape")
+        # We wrap exception re-creation here in case some exception classes
+        # cannot be constructed directly from a string.
+        exc = None
+        try:
+            exc = result.exception_type(exception_msg)
+        except BaseException as e:
+            raise RuntimeError(  # noqa: B904
+                f"Failed to create original exception type. Error msg was {str(e)}"
+                f" Original exception on remote side was {exception_msg}"
+            )
+
+        if exc is not None:
+            raise exc
 
 
 def _build_rpc_profiling_key(
