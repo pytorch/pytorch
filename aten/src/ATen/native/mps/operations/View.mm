@@ -2,19 +2,9 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/Resize.h>
+#include <ATen/mps/MPSAllocator.h>
 
 namespace at {
-
-// these are from MPSAllocator
-namespace mps {
-  // to check the requested non-aligned size of an MTL buffer
-  ssize_t get_requested_buffer_size(void* ptr);
-  // to retrieve the shape of a base tensor from a view tensor
-  IntArrayRef get_buffer_shape(void* ptr);
-  // to set the shape of a base tensor from a view tensor
-  void set_buffer_shape(void* ptr, const IntArrayRef& shape);
-}
-
 namespace native {
 namespace mps {
 
@@ -62,9 +52,13 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
                                                                                    shape: getMPSShape(src.numel())
                                                                                 dataType: inputType] autorelease];
     }
-    feeds[cachedGraph->storageOffsetTensor] = getMPSGraphTensorFromScalar(stream, Scalar(storage_offset), MPSDataTypeInt32);
+    MPSScalar storageOffsetScalar = getMPSScalar(storage_offset, ScalarType::Int);
+    feeds[cachedGraph->storageOffsetTensor] = getMPSGraphTensorFromScalar(stream, storageOffsetScalar);
+
+    std::vector<MPSScalar> strideScalars(sizes.size());
     for (int i = 0; i < sizes.size(); i++) {
-      feeds[cachedGraph->strideTensors[i]] = getMPSGraphTensorFromScalar(stream, Scalar(strides[i]), MPSDataTypeInt32);
+      strideScalars[i] = getMPSScalar(strides[i], ScalarType::Int);
+      feeds[cachedGraph->strideTensors[i]] = getMPSGraphTensorFromScalar(stream, strideScalars[i]);
     }
     // Workaround for MPSShaderLibrary bug
     // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
@@ -79,7 +73,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
       cachedGraph->outputTensor : outputTensorData
     };
     stream->executeMPSGraph(cachedGraph->graph(), feeds, results,
-                            requires_sync ? SyncType::COMMIT : SyncType::NONE);
+                            requires_sync ? SyncType::COMMIT : SyncType::COMMIT_ADAPTIVE);
   }
   return output;
 }
@@ -144,7 +138,7 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const In
                                                           withShape: @[@-1]
                                                                name: nil];
     if (needsScatter) {
-      MPSGraphTensor* scatteredTensor = [mpsGraph scatterAlongAxis: 0
+      MPSGraphTensor* scatteredTensor = [mpsGraph scatterAlongAxis: (NSInteger) 0
                                                     withDataTensor: reshapedInputTensor
                                                      updatesTensor: cachedGraph->updatesTensor
                                                      indicesTensor: reshapedIndicesTensor
@@ -201,7 +195,9 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, In
     // IntArrayRef wouldn't own the data, so we use a static storage
     static const int64_t shape_1d = 1;
     // self.sizes().size() could be zero
-    base_shape = self.sizes().size() ? self.sizes() : IntArrayRef(&shape_1d, 1);
+    base_shape = self.sizes().size() ? self.sizes() :
+                      self.is_view() ? self._base().sizes() : IntArrayRef(&shape_1d, 1);
+
     // base_shape will be retained in MPSAllocator until buffer gets recycled
     if (self.storage().data())
       set_buffer_shape(self.storage().data(), base_shape);
@@ -232,7 +228,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, In
               newCachedGraph->strideTensors.push_back(mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[@1]));
             }
             if (needsScatter) {
-              newCachedGraph->updatesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()));
+              newCachedGraph->updatesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, inputType);
             }
             newCachedGraph->outputTensor = chainViewOperation(newCachedGraph, size, stride, storage_offset, base_shape, needsScatter, needsBoolCast);
         }

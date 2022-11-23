@@ -64,7 +64,7 @@ using VmapDimVector = SmallVector<int64_t, kVmapStaticDimVecSize>;
 // and returns a VmapPhysicalView on the tensor(s).
 struct TORCH_API MultiBatchVmapTransform {
   static VmapPhysicalView logicalToPhysical(const Tensor& logical_tensor);
-  static VmapPhysicalViewVec logicalToPhysical(TensorList logical_tensors);
+  static VmapPhysicalViewVec logicalToPhysical(ITensorListRef logical_tensors);
 };
 
 // VmapTransform for operators that broadcast all inputs.

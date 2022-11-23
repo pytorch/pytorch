@@ -5,6 +5,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
 #include <c10/util/variant.h>
+#include <bitset>
 
 namespace at { namespace functorch {
 
@@ -139,7 +140,7 @@ struct Interpreter {
   const InterpreterMeta& meta() const { return meta_; }
 
   void process(const c10::OperatorHandle& op, torch::jit::Stack* stack);
-  void sendToNextInterpreter(const c10::OperatorHandle& op, torch::jit::Stack* stack);
+  void sendToNextInterpreter(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case);
 
   void saveLocalDispatchKeySet(c10::impl::LocalDispatchKeySet keyset) {
     TORCH_INTERNAL_ASSERT(!savedLocalDispatchKeySet_.has_value());
@@ -173,6 +174,16 @@ struct Interpreter {
 //   args[i] = func(args[i])
 void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
     std::function<Tensor(const Tensor&)> func);
+
+// Applies the following for-loop:
+// for i in range(begin, end):
+//   if use_flag_relative[i] == 1: <-- treats use_flag_relative as a bitset
+//     args[i] = func(args[i], i - begin, true)
+//   args[i] = func(args[i], i - begin)
+void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int64_t end,
+    const std::bitset<64> use_flag_relative, std::function<Tensor(const Tensor&, bool)> func);
+
+std::vector<int64_t> findUnwrappedInputs(std::vector<IValue>& args, int64_t begin, int64_t end);
 
 DispatchKeySet keysToExcludeWhenEnteringDynamicLayer(TransformType key);
 

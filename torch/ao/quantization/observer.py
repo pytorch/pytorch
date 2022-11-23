@@ -1019,7 +1019,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         This follows the implementation of NormMinimization::NonlinearQuantizationParamsSearch in
         caffe2/quantization/server/norm_minimization.cc
         """
-        assert self.histogram.size()[0] == self.bins, "bins mistmatch"
+        assert self.histogram.size()[0] == self.bins, "bins mismatch"
         bin_width = (self.max_val - self.min_val) / self.bins
 
         # cumulative sum
@@ -1083,21 +1083,21 @@ class HistogramObserver(UniformQuantizationObserverBase):
         # the input histogram
         # start_idx maps min_val to the histogram bin index.
 
-        hist_bin_width = (self.max_val - self.min_val) / (self.bins * upsample_rate)
+        # Compute the width of histogram bins is a straightforward solution, where
+        # hist_bin_width = (self.max_val - self.min_val) / (self.bins * upsample_rate)
+        # Underflow happens if the numerator is close to the smallest positive subnormal number of FP32
+        # Therefore, we avoid such division operation.
         downsample_rate = int(
             torch.ceil(
-                (combined_max - combined_min) / (self.bins * hist_bin_width)
+                (combined_max - combined_min) * upsample_rate / (self.max_val - self.min_val)
             ).item()
         )
-        e = downsample_rate * (self.bins * hist_bin_width) - (
-            combined_max - combined_min
+        e = downsample_rate * (self.max_val - self.min_val) / upsample_rate - (combined_max - combined_min)
+        start_idx = int(
+            torch.round((self.min_val - combined_min) * self.bins * upsample_rate / (self.max_val - self.min_val)).item()
         )
-        # Relax only the max, not the min, so that for one sided distributions, min stays at zero
         combined_max = combined_max + e
         combined_min = combined_min
-        start_idx = int(
-            torch.round((self.min_val - combined_min) / hist_bin_width).item()
-        )
         return combined_min, combined_max, downsample_rate, start_idx
 
     def _combine_histograms(
@@ -1316,6 +1316,8 @@ class PlaceholderObserver(ObserverBase):
     Args:
         dtype: dtype argument to the `quantize` node needed to implement the
                reference model spec.
+        quant_min: minimum value in quantized domain (TODO: align behavior with other observers)
+        quant_min: maximum value in quantized domain
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
         compute_dtype: if set, marks the future quantize function to use
@@ -1325,12 +1327,15 @@ class PlaceholderObserver(ObserverBase):
     """
 
     def __init__(
-        self, dtype=torch.float32, custom_op_name="", compute_dtype=None
+        self, dtype=torch.float32, custom_op_name="", compute_dtype=None,
+        quant_min=None, quant_max=None,
     ) -> None:
-        super(PlaceholderObserver, self).__init__(dtype=dtype)
+        super().__init__(dtype=dtype)
         # dtype of input of the target operator, e.g. for dynamic quantization
         # ops, the dtype will be float32
         self.dtype = dtype
+        self.quant_min = quant_min
+        self.quant_max = quant_max
         self.custom_op = custom_op_name
         # used for configuration of computation type for dynamic quantization
         # TODO(future PR): replace this with `is_dynamic`
@@ -1543,7 +1548,7 @@ Default per-channel weight observer, usually used on backends where per-channel
 weight quantization is supported, such as `fbgemm`.
 """
 
-per_channel_weight_observer_range_neg_127_to_127 = MinMaxObserver.with_args(
+per_channel_weight_observer_range_neg_127_to_127 = PerChannelMinMaxObserver.with_args(
     dtype=torch.qint8, qscheme=torch.per_channel_symmetric,
     quant_min=-127, quant_max=127, eps=2 ** -12)
 """
@@ -1551,7 +1556,7 @@ Per-channel, symmetric weight observer with the 8-bit values restricted to [-127
 """
 
 default_dynamic_quant_observer = PlaceholderObserver.with_args(
-    dtype=torch.quint8, compute_dtype=torch.quint8
+    dtype=torch.quint8, compute_dtype=torch.quint8, quant_min=0, quant_max=255
 )
 """
 Default observer for dynamic quantization.

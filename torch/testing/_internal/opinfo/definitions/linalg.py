@@ -35,7 +35,9 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
+    IS_MACOS,
     make_fullrank_matrices_with_distinct_singular_values,
+    skipIfSlowGradcheckEnv,
     slowTest,
     TEST_WITH_ROCM,
 )
@@ -155,183 +157,30 @@ def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **k
     The first argument should be a square matrix or batch of square matrices, the second argument is a vector or batch of vectors.
     Empty, square, rectangular, batched square and batched rectangular input is generated.
     """
+    make_arg = partial(
+        make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+        low=-2,
+        high=2,
+    )
     # Each column of the matrix is getting multiplied many times leading to very large values for
     # the Jacobian matrix entries and making the finite-difference result of grad check less accurate.
     # That's why gradcheck with the default range [-9, 9] fails and [-2, 2] is used here.
-    samples = (
-        SampleInput(
-            make_tensor(
-                (S, S),
-                dtype=dtype,
-                device=device,
-                low=-2,
-                high=2,
-                requires_grad=requires_grad,
-            ),
-            args=(
-                make_tensor(
-                    (S,),
-                    dtype=dtype,
-                    device=device,
-                    low=-2,
-                    high=2,
-                    requires_grad=requires_grad,
-                ),
-            ),
-        ),
-        SampleInput(
-            make_tensor(
-                (S + 1, S),
-                dtype=dtype,
-                device=device,
-                low=-2,
-                high=2,
-                requires_grad=requires_grad,
-            ),
-            args=(
-                make_tensor(
-                    (S,),
-                    dtype=dtype,
-                    device=device,
-                    low=-2,
-                    high=2,
-                    requires_grad=requires_grad,
-                ),
-            ),
-        ),
-        SampleInput(
-            make_tensor(
-                (2, 1, S, S),
-                dtype=dtype,
-                device=device,
-                low=-2,
-                high=2,
-                requires_grad=requires_grad,
-            ),
-            args=(
-                make_tensor(
-                    (
-                        2,
-                        1,
-                        S,
-                    ),
-                    dtype=dtype,
-                    device=device,
-                    low=-2,
-                    high=2,
-                    requires_grad=requires_grad,
-                ),
-            ),
-        ),
-        SampleInput(
-            make_tensor(
-                (2, 1, S + 1, S),
-                dtype=dtype,
-                device=device,
-                low=-2,
-                high=2,
-                requires_grad=requires_grad,
-            ),
-            args=(
-                make_tensor(
-                    (
-                        2,
-                        1,
-                        S,
-                    ),
-                    dtype=dtype,
-                    device=device,
-                    low=-2,
-                    high=2,
-                    requires_grad=requires_grad,
-                ),
-            ),
-        ),
-        SampleInput(
-            make_tensor(
-                (0, 0),
-                dtype=dtype,
-                device=device,
-                low=None,
-                high=None,
-                requires_grad=requires_grad,
-            ),
-            args=(
-                make_tensor(
-                    (0,),
-                    dtype=dtype,
-                    device=device,
-                    low=None,
-                    high=None,
-                    requires_grad=requires_grad,
-                ),
-            ),
-        ),
-        SampleInput(
-            make_tensor(
-                (S, S),
-                dtype=dtype,
-                device=device,
-                low=-2,
-                high=2,
-                requires_grad=requires_grad,
-            ),
-            args=(
-                make_tensor(
-                    (0,),
-                    dtype=dtype,
-                    device=device,
-                    low=None,
-                    high=None,
-                    requires_grad=requires_grad,
-                ),
-            ),
-        ),
-        # m = n = S, k = S - 2
-        SampleInput(
-            make_tensor(
-                (S, S),
-                dtype=dtype,
-                device=device,
-                low=-2,
-                high=2,
-                requires_grad=requires_grad,
-            ),
-            args=(
-                make_tensor(
-                    (S - 2,),
-                    dtype=dtype,
-                    device=device,
-                    low=None,
-                    high=None,
-                    requires_grad=requires_grad,
-                ),
-            ),
-        ),
-        # m = S, n = S -1, k = S - 2
-        SampleInput(
-            make_tensor(
-                (S, S - 1),
-                dtype=dtype,
-                device=device,
-                low=-2,
-                high=2,
-                requires_grad=requires_grad,
-            ),
-            args=(
-                make_tensor(
-                    (S - 2,),
-                    dtype=dtype,
-                    device=device,
-                    low=None,
-                    high=None,
-                    requires_grad=requires_grad,
-                ),
-            ),
-        ),
+    yield SampleInput(make_arg((S, S)), make_arg((S,)))
+    yield SampleInput(make_arg((S + 1, S)), make_arg((S,)))
+    yield SampleInput(make_arg((2, 1, S, S)), make_arg((2, 1, S)))
+    yield SampleInput(make_arg((2, 1, S + 1, S)), make_arg((2, 1, S)))
+    yield SampleInput(
+        make_arg((0, 0), low=None, high=None),
+        make_arg((0,), low=None, high=None),
     )
-
-    return samples
+    yield SampleInput(make_arg((S, S)), make_arg((0,), low=None, high=None))
+    # m = n = S, k = S - 2
+    yield SampleInput(make_arg((S, S)), make_arg((S - 2,), low=None, high=None))
+    # m = S, n = S -1, k = S - 2
+    yield SampleInput(make_arg((S, S - 1)), make_arg((S - 2,), low=None, high=None))
 
 
 def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **kwargs):
@@ -359,13 +208,10 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **k
         matrix.requires_grad_(requires_grad)
         return matrix
 
-    def sample_generator():
-        for batch, size in product(((), (2,), (2, 2)), range(6)):
-            shape = batch + (size, size)
-            for rank in range(1, size):
-                yield make_singular_matrix_batch_base(shape, rank)
-
-    return [SampleInput(t) for t in sample_generator()]
+    for batch, size in product(((), (2,), (2, 2)), range(6)):
+        shape = batch + (size, size)
+        for rank in range(1, size):
+            yield SampleInput(make_singular_matrix_batch_base(shape, rank))
 
 
 def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad, **kwargs):
@@ -472,7 +318,6 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad, **kwar
         [2, 4, 3, 5, 3, 2],
     ]
 
-    result = []
     for sizes in test_cases:
         tensors = []
         for size in zip(sizes[:-1], sizes[1:]):
@@ -480,9 +325,7 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad, **kwar
                 size, dtype=dtype, device=device, requires_grad=requires_grad
             )
             tensors.append(t)
-        result.append(SampleInput(tensors))
-
-    return result
+        yield SampleInput(tensors)
 
 
 def sample_inputs_linalg_matrix_norm(op_info, device, dtype, requires_grad, **kwargs):
@@ -531,7 +374,14 @@ def sample_inputs_linalg_norm(
     else:
         matrix_ords = (None, "fro", "nuc", inf, -inf, 1, -1, 2, -2)
 
-    inputs = []
+    make_arg = partial(
+        make_tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+        low=None,
+        high=None,
+    )
 
     for test_size in test_sizes:
         is_vector_norm = len(test_size) == 1
@@ -542,19 +392,7 @@ def sample_inputs_linalg_norm(
 
         for keepdim in [False, True]:
             if variant != "subgradient_at_zero" and is_valid_for_p2:
-                inputs.append(
-                    SampleInput(
-                        make_tensor(
-                            test_size,
-                            dtype=dtype,
-                            device=device,
-                            low=None,
-                            high=None,
-                            requires_grad=requires_grad,
-                        ),
-                        kwargs=dict(keepdim=keepdim),
-                    )
-                )
+                yield SampleInput(make_arg(test_size), keepdim=keepdim)
 
             if not (is_vector_norm or is_matrix_norm):
                 continue
@@ -585,50 +423,23 @@ def sample_inputs_linalg_norm(
                         continue
 
                 if variant == "subgradient_at_zero":
-                    inputs.append(
-                        SampleInput(
-                            torch.zeros(
-                                test_size,
-                                dtype=dtype,
-                                device=device,
-                                requires_grad=requires_grad,
-                            ),
-                            args=(ord,),
-                            kwargs=dict(keepdim=keepdim),
-                        )
+                    yield SampleInput(
+                        torch.zeros(
+                            test_size,
+                            dtype=dtype,
+                            device=device,
+                            requires_grad=requires_grad,
+                        ),
+                        ord,
+                        keepdim=keepdim,
                     )
                 else:
-                    inputs.append(
-                        SampleInput(
-                            make_tensor(
-                                test_size,
-                                dtype=dtype,
-                                device=device,
-                                low=None,
-                                high=None,
-                                requires_grad=requires_grad,
-                            ),
-                            args=(ord,),
-                            kwargs=dict(keepdim=keepdim),
-                        )
-                    )
+                    yield SampleInput(make_arg(test_size), ord, keepdim=keepdim)
 
                     if ord in ["nuc", "fro"]:
-                        inputs.append(
-                            SampleInput(
-                                make_tensor(
-                                    test_size,
-                                    dtype=dtype,
-                                    device=device,
-                                    low=None,
-                                    high=None,
-                                    requires_grad=requires_grad,
-                                ),
-                                kwargs=dict(ord=ord, keepdim=keepdim, dim=(0, 1)),
-                            )
+                        yield SampleInput(
+                            make_arg(test_size), ord=ord, keepdim=keepdim, dim=(0, 1)
                         )
-
-    return inputs
 
 
 def sample_inputs_linalg_vecdot(op_info, device, dtype, requires_grad, **kwargs):
@@ -901,16 +712,14 @@ def sample_inputs_linalg_ldl_solve(
     )
 
     # Symmetric case
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
     for test_case in test_cases1:
         factors, pivots, _ = test_case
         factors.requires_grad = requires_grad
         for B_batch_shape in ((), factors.shape[:-2]):
-            B = make_tensor(
-                (*B_batch_shape, factors.shape[-1], S),
-                device=device,
-                dtype=dtype,
-                requires_grad=requires_grad,
-            )
+            B = make_arg((*B_batch_shape, factors.shape[-1], S))
             yield SampleInput(factors, args=(pivots, B), kwargs=dict(hermitian=False))
             clone_factors = factors.detach().clone().requires_grad_(requires_grad)
             yield SampleInput(
@@ -922,12 +731,7 @@ def sample_inputs_linalg_ldl_solve(
         factors, pivots, _ = test_case
         factors.requires_grad = requires_grad
         for B_batch_shape in ((), factors.shape[:-2]):
-            B = make_tensor(
-                (*B_batch_shape, factors.shape[-1], S),
-                device=device,
-                dtype=dtype,
-                requires_grad=requires_grad,
-            )
+            B = make_arg((*B_batch_shape, factors.shape[-1], S))
             yield SampleInput(factors, args=(pivots, B), kwargs=dict(hermitian=True))
             clone_factors = factors.detach().clone().requires_grad_(requires_grad)
             yield SampleInput(
@@ -955,7 +759,6 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     else:
         deltas = (0,)
 
-    out = []
     for batch, driver, delta in product(((), (3,), (3, 3)), drivers, deltas):
         shape = batch + (3 + delta, 3)
         a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
@@ -968,8 +771,7 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
             high=None,
             requires_grad=requires_grad,
         )
-        out.append(SampleInput(a, args=(b,), kwargs=dict(driver=driver)))
-    return out
+        yield SampleInput(a, b, driver=driver)
 
 
 def error_inputs_lstsq(op_info, device, **kwargs):
@@ -1010,12 +812,10 @@ def sample_inputs_linalg_cholesky(
 
     batches = [(), (0,), (2,), (1, 1)]
     ns = [5, 0]
-    out = []
     for batch, n, upper in product(batches, ns, [True, False]):
         a = random_hermitian_pd_matrix(n, *batch, dtype=dtype, device=device)
         a.requires_grad = requires_grad
-        out.append(SampleInput(a, kwargs={"upper": upper}))
-    return out
+        yield SampleInput(a, upper=upper)
 
 
 def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -1253,14 +1053,13 @@ def sample_inputs_tensorsolve(op_info, device, dtype, requires_grad, **kwargs):
     # a_shapes += [(0, 0, 1, 2, 3, 0)]
     dimss = [None, (0, 2)]
 
+    make_arg = partial(
+        make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
+    )
     for a_shape, dims in itertools.product(a_shapes, dimss):
-        a = make_tensor(
-            a_shape, dtype=dtype, device=device, requires_grad=requires_grad
-        )
-        b = make_tensor(
-            a_shape[:2], dtype=dtype, device=device, requires_grad=requires_grad
-        )
-        yield SampleInput(a, args=(b,), kwargs=dict(dims=dims))
+        a = make_arg(a_shape)
+        b = make_arg(a_shape[:2])
+        yield SampleInput(a, b, dims=dims)
 
 
 def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
@@ -1275,13 +1074,10 @@ def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
         ((4, 3), (6, 1, 2)),
     ]
 
-    samples = []
     for shape_lhs, shape_rhs in shapes:
         inp = make_input().reshape(*shape_lhs, *shape_rhs).detach()
         inp.requires_grad_(requires_grad)
-        samples.append(SampleInput(inp, kwargs=dict(ind=len(shape_lhs))))
-
-    return samples
+        yield SampleInput(inp, ind=len(shape_lhs))
 
 
 op_db: List[OpInfo] = [
@@ -1297,6 +1093,13 @@ op_db: List[OpInfo] = [
         supports_out=True,
         supports_fwgrad_bwgrad=True,
         supports_forward_ad=True,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Unsupported on MPS for now"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
     ),
     OpInfo(
         "linalg.det",
@@ -1328,28 +1131,44 @@ op_db: List[OpInfo] = [
                 "TestCommon",
                 "test_noncontiguous_samples",
             ),
+            DecorateInfo(
+                unittest.skip("Gradients are incorrect on macos"),
+                "TestBwdGradients",
+                "test_fn_grad",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=IS_MACOS,
+            ),
+            DecorateInfo(
+                unittest.skip("Gradients are incorrect on macos"),
+                "TestFwdGradients",
+                "test_forward_mode_AD",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=IS_MACOS,
+            ),
             # Both Hessians are incorrect on complex inputs??
             DecorateInfo(
                 unittest.expectedFailure,
-                "TestGradients",
+                "TestBwdGradients",
                 "test_fn_gradgrad",
                 dtypes=(torch.complex128,),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
-                "TestGradients",
+                "TestFwdGradients",
                 "test_fn_fwgrad_bwgrad",
                 dtypes=(torch.complex128,),
             ),
             DecorateInfo(
                 unittest.skip("Skipped, see https://github.com//issues/84192"),
-                "TestGradients",
+                "TestBwdGradients",
                 "test_fn_gradgrad",
                 device_type="cuda",
             ),
             DecorateInfo(
                 unittest.skip("Skipped, see https://github.com//issues/84192"),
-                "TestGradients",
+                "TestFwdGradients",
                 "test_fn_fwgrad_bwgrad",
                 device_type="cuda",
             ),
@@ -1398,6 +1217,11 @@ op_db: List[OpInfo] = [
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
                 dtypes=(torch.complex64, torch.complex128),
+            ),
+            DecorateInfo(
+                unittest.skip("Unsupported on MPS for now"),
+                "TestCommon",
+                "test_numpy_ref_mps",
             ),
         ),
     ),
@@ -1589,6 +1413,13 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})
             ),
+            DecorateInfo(
+                unittest.skip("Skipped! Flaky"),
+                "TestFwdGradients",
+                "test_fn_fwgrad_bwgrad",
+                device_type="cpu",
+                dtypes=(torch.complex128,),
+            ),
         ],
     ),
     OpInfo(
@@ -1633,7 +1464,8 @@ op_db: List[OpInfo] = [
         skips=(
             # we skip gradient checks for this suite as they are tested in
             # variant_test_name='grad_oriented'
-            DecorateInfo(unittest.skip("Skipped!"), "TestGradients"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestFwdGradients"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestBwdGradients"),
             # The values for attribute 'shape' do not match
             DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
             DecorateInfo(
@@ -1754,7 +1586,9 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         skips=(
-            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_gradgrad"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestBwdGradients", "test_fn_gradgrad"
+            ),
         ),
     ),
     OpInfo(
@@ -1775,14 +1609,16 @@ op_db: List[OpInfo] = [
         skips=(
             # [NEW] Skips specifically for sample inputs at zero
             # norm's vjp/jvp are not well-conditioned near zero
-            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_gradgrad"),
             DecorateInfo(
-                unittest.expectedFailure, "TestGradients", "test_fn_fwgrad_bwgrad"
+                unittest.expectedFailure, "TestBwdGradients", "test_fn_gradgrad"
             ),
             DecorateInfo(
-                unittest.expectedFailure, "TestGradients", "test_forward_mode_AD"
+                unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"
             ),
-            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_grad"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"
+            ),
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_grad"),
         ),
     ),
     OpInfo(
@@ -1827,13 +1663,14 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
+        sample_inputs_func=sample_inputs_linalg_vander,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
             DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_backward"
+                unittest.skip("Unsupported on MPS for now"),
+                "TestCommon",
+                "test_numpy_ref_mps",
             ),
         ),
-        sample_inputs_func=sample_inputs_linalg_vander,
     ),
     ReductionOpInfo(
         "linalg.vector_norm",
@@ -1870,6 +1707,10 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_lu,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            # linalg.lu_factor: LU without pivoting is not implemented on the CPU
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+        ),
     ),
     OpInfo(
         "linalg.lu_factor_ex",
@@ -1882,6 +1723,10 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_lu,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            # linalg.lu_factor: LU without pivoting is not implemented on the CPU
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+        ),
     ),
     OpInfo(
         "linalg.lu",
@@ -1895,6 +1740,10 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_lu,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            # linalg.lu_factor: LU without pivoting is not implemented on the CPU
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+        ),
     ),
     OpInfo(
         "linalg.lu_solve",
@@ -2168,7 +2017,7 @@ op_db: List[OpInfo] = [
             # CUDA runs out of memory
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestGradients",
+                "TestFwdGradients",
                 "test_fn_fwgrad_bwgrad",
                 device_type="cuda",
                 dtypes=[torch.cdouble],
@@ -2176,7 +2025,7 @@ op_db: List[OpInfo] = [
             # This test takes almost 2 hours to run!
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestGradients",
+                "TestBwdGradients",
                 "test_fn_gradgrad",
                 device_type="cuda",
                 dtypes=[torch.cdouble],
@@ -2218,6 +2067,19 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="mps",
                 dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cuda",
+            ),
+            # This test is flaky under slow gradcheck, likely due to rounding issues
+            DecorateInfo(
+                skipIfSlowGradcheckEnv,
+                "TestFwdGradients",
+                "test_fn_fwgrad_bwgrad",
+                device_type="cuda",
             ),
         ),
     ),
@@ -2285,6 +2147,13 @@ op_db: List[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
+        skips=(
+            DecorateInfo(
+                unittest.skip("Unsupported on MPS for now"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
     ),
     OpInfo(
         "linalg.tensorsolve",
@@ -2303,6 +2172,13 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
         ],
+        skips=(
+            DecorateInfo(
+                unittest.skip("Unsupported on MPS for now"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
     ),
 ]
 

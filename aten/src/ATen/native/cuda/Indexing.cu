@@ -43,7 +43,6 @@
 #include <c10/macros/Macros.h>
 
 namespace {
-
 template <typename scalar_t, int SZ>
 __global__ void indexing_backward_kernel(
   int64_t* sorted_indices, int64_t* indices, scalar_t* grad_output, scalar_t* grad_weight,
@@ -111,6 +110,65 @@ __global__ void indexing_backward_kernel(
             int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
                 grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight[ii]);
+            }
+          }
+          start_feature += gridDim.y * blockDim.x * SZ;
+        }
+
+        idx++;
+      } while (idx < numel && sorted_indices[idx] == sorted_indices[idx - 1]);
+    }
+  }
+}
+
+template <typename scalar_t, int SZ>
+__global__ void indexing_backward_kernel_quantized(
+  int64_t* sorted_indices, int64_t* indices, float* grad_output, scalar_t* grad_weight,
+  int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim,
+  float inv_scale, int zero_point, int64_t qmin, int64_t qmax) {
+
+  // This implementation is adopted from indexing_backward_kernel above.
+  using opmath_t = at::opmath_type<float>;
+  for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z){
+    int64_t idx = blockIdx.x * blockDim.y + threadIdx.y;
+    if (idx < numel
+        && (idx == 0 || sorted_indices[idx] != sorted_indices[idx - 1])){
+      do {
+        int64_t start_feature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
+        // we only keep the last duplicate index so skip those before it
+        if ((idx < numel - 1) && sorted_indices[idx] == sorted_indices[idx + 1]) {
+          idx++;
+          continue;
+        }
+        const int64_t weight_row = ((int64_t) sorted_indices[idx]) * stride + z * stride_before;
+        const int64_t grad_row = ((int64_t) indices[idx]) * stride + z * numel * stride;
+        const opmath_t scale = (opmath_t)1.0;
+
+        opmath_t gradient[SZ];
+        opmath_t weight[SZ];
+
+        while (start_feature < stride) {
+          #pragma unroll
+          for (int ii = 0; ii < SZ; ii++) {
+            int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
+            if (feature_dim < stride) {
+              gradient[ii] = static_cast<opmath_t>(grad_output[grad_row + feature_dim]);
+            }
+          }
+
+          #pragma unroll
+          for (int ii = 0; ii < SZ; ii++) {
+            weight[ii] = gradient[ii] * scale;
+          }
+
+          #pragma unroll
+          for (int ii = 0; ii < SZ; ii++) {
+            int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
+            if (feature_dim < stride) {
+                // we do quantization here
+                int64_t qvalue = static_cast<int64_t>(zero_point + nearbyintf(weight[ii]* inv_scale));
+                qvalue = min(max(qvalue, qmin), qmax);
+                grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(qvalue);
             }
           }
           start_feature += gridDim.y * blockDim.x * SZ;
@@ -233,9 +291,14 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
 
 
 static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
-  checkIndexTensorTypes(orig);
+  checkIndexTensorTypes(orig, /*allow_int*/true);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
+  for (auto & i : indices) {
+    if (i.defined() && i.dtype() == at::kInt) {
+      i = i.to(at::kLong);
+    }
+  }
   // next broadcast all index tensors together
   indices = expand_outplace(indices);
   // add missing null Tensors so that it matches self.dim()
@@ -359,6 +422,106 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
 }
 
 REGISTER_CUDA_DISPATCH(index_put_with_sort_stub, &index_put_with_sort_kernel);
+
+void index_put_with_sort_quantized(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, double scale, int zero_point, bool unsafe) {
+  if (indices.size() > (size_t)self.dim()) {
+    TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  }
+  bool self_contiguous = self.is_contiguous();
+  auto self_ = self_contiguous ? self : self.contiguous();
+  Tensor linearIndex, src, expandedValue = value;
+  int64_t nElemBefore, strideBefore, sliceSize;
+  std::vector<int64_t> inversePerm;
+  std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self_, indices, !unsafe);
+  int64_t num_indices = linearIndex.numel();
+
+  if (expandedValue.numel() < num_indices * nElemBefore * sliceSize) {
+    auto expanded_size = at::DimVector(expandedValue.sizes());
+    auto size1 = expandedValue.sizes();
+    auto size2 = linearIndex.sizes();
+    if (are_expandable(size1, size2)) {
+      expanded_size = infer_size_dimvector(size1, size2);
+    }
+    if (nElemBefore > 1) {
+      expanded_size.insert(expanded_size.begin(), nElemBefore);
+    }
+    expandedValue = expandedValue.expand(expanded_size);
+  }
+  expandedValue = expandedValue.contiguous();
+
+  if (num_indices > 0 && sliceSize > 0) {
+      const bool permuted = !src.is_contiguous();
+      auto src_ = permuted ? src.contiguous() : src;
+      linearIndex = linearIndex.reshape(-1);
+      auto sorted_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      auto orig_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+      linearIndex.divide_(sliceSize, "trunc");
+
+      // cub on CUDA <= 11.2 have a bug that for small sizes
+      // cub's sort can be much slower than thrust's merge sort
+      // this bug is fixed in CUDA 11.3
+#if (defined(CUDA_VERSION) && CUDA_VERSION < 11030) || defined(USE_ROCM)
+      if (num_indices < 50000) {
+        index_put_with_sort_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
+      } else
+#endif
+      {
+      // Sort the inputs into sorted with the corresponding indices
+      auto range = at::arange(num_indices, linearIndex.options());
+      // linearIndex can not be negative, and we take advantage of this
+      // fact to sort on less bits for better performance.
+      int64_t nbits = cuda::cub::get_num_bits(largestIndex(self_) / sliceSize);
+      cuda::cub::radix_sort_pairs(
+        linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
+        range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
+        num_indices, false, 0, nbits);
+      }
+
+      TORCH_INTERNAL_ASSERT(
+          linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel(),
+          "number of flattened indices did not match number of elements in the value tensor: ",
+          linearIndex.numel()*sliceSize*nElemBefore, " vs ", expandedValue.numel());
+      const int UNROLL = 4;
+      const int indices_per_block = 4;
+      const int warp_size = at::cuda::warp_size();
+      dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
+           std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size*UNROLL))),
+           std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
+      dim3 block(warp_size, indices_per_block);
+
+      AT_DISPATCH_QINT_TYPES(
+        src.scalar_type(), "indexing_backward_quantized", [&] {
+        constexpr int64_t qmin = std::numeric_limits<typename scalar_t::underlying>::min();
+        constexpr int64_t qmax = std::numeric_limits<typename scalar_t::underlying>::max();
+        float inv_scale = 1.0f / static_cast<float>(scale);
+
+        indexing_backward_kernel_quantized<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
+          sorted_indices.data_ptr<int64_t>(),
+          orig_indices.data_ptr<int64_t>(),
+          expandedValue.data_ptr<float>(),
+          src_.data_ptr<scalar_t>(),
+          num_indices,
+          sliceSize,
+          strideBefore,
+          nElemBefore,
+          inv_scale,
+          zero_point,
+          qmin,
+          qmax);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      });
+
+      if (permuted) {
+        self.copy_(src_.permute(inversePerm));
+      } else if (!self_contiguous) {
+        self.copy_(self_);
+      }
+  }
+}
+
+REGISTER_CUDA_DISPATCH(index_put_with_sort_quantized_stub, &index_put_with_sort_quantized);
 } //anonymous
 
 

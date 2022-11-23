@@ -782,7 +782,7 @@ terrible spacing
 
         x = torch.randn(5, 3)
         foo = torch.randn(5, 3)
-        torch.testing.assert_allclose(split(x, foo=foo), traced(x, foo=foo))
+        torch.testing.assert_close(split(x, foo=foo), traced(x, foo=foo))
 
     @skipIfNoTorchVision
     def test_subgraph_trivial_resnet(self):
@@ -814,7 +814,7 @@ terrible spacing
         split = split_module(traced, mtt, lambda node: 0)
 
         x = torch.randn(50, 512)
-        torch.testing.assert_allclose(split(x), traced(x))
+        torch.testing.assert_close(split(x), traced(x))
 
     def test_normalize_binary_operators(self):
         ops_to_test = {
@@ -1013,6 +1013,19 @@ class {test_classname}(torch.nn.Module):
                 break
         else:
             self.fail("Didn't find call_function torch.add")
+
+    def test_normalize_args_perserve_type(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, a: List[torch.Tensor]):
+                return torch.add(a[0], a[1])
+
+        m = MyModule()
+        traced = symbolic_trace(m)
+        traced = NormalizeArgs(traced).transform()
+
+        for node in traced.graph.nodes:
+            if node.op == "placeholder":
+                self.assertEqual(node.type, List[torch.Tensor])
 
     @skipIfNoTorchVision
     def test_annotate_returns_with_schema(self):
@@ -1468,6 +1481,8 @@ class TestNormalizeOperators(JitTestCase):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+        if isinstance(op.op, torch._ops.OpOverload):
+            self.skipTest("normalize operator doesn't work on torch.ops")
         for sample_input in sample_inputs_itr:
             unsupported_arg_type = False
             arg_values = [sample_input.input] + list(sample_input.args)

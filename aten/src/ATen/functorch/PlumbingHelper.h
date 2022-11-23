@@ -39,7 +39,7 @@ TORCH_API std::tuple<Tensor, optional<int64_t>> unwrapTensorAtLevel(const Tensor
 TORCH_API std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, optional<int64_t> bdim, int64_t level);
 
 // Returns True if ANY tensor in tensors is batched at level
-TORCH_API bool isBatchedAtLevel(TensorList tensors, int64_t level);
+TORCH_API bool isBatchedAtLevel(ITensorListRef tensors, int64_t level);
 TORCH_API bool isBatchedAtLevel(const c10::List<c10::optional<Tensor>> maybe_tensors, int64_t level);
 TORCH_API bool isBatchedAtLevel(const Tensor& tensor, int64_t level);
 TORCH_API bool isBatchedAtLevel(const c10::optional<Tensor>& maybe_tensor, int64_t level);
