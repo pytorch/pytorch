@@ -148,8 +148,13 @@ class SymNode:
     This is a type erased SymInt/SymFloat which we use to do actual operations.
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
-    def __init__(self, expr, shape_env, pytype, constant=None):
+    def __init__(self, expr, symbol, shape_env, pytype, constant=None):
         self._expr = expr
+        # Unlike expr, sympy.Symbol is guaranteed to be a symbol,
+        # and it never gets simplified into a constant or another symbol.
+        # This only exists for fresh create_symint; intermediate values
+        # don't have this set
+        self.symbol: sympy.Symbol = symbol
         self.shape_env = shape_env
         self.pytype = pytype
         self.constant = constant
@@ -170,11 +175,11 @@ class SymNode:
 
     def wrap_int(self, num):
         assert isinstance(num, int)
-        return SymNode(sympy.Integer(num), self.shape_env, int, constant=num)
+        return SymNode(sympy.Integer(num), None, self.shape_env, int, constant=num)
 
     def wrap_float(self, num):
         assert isinstance(num, float)
-        return SymNode(sympy.Float(num), self.shape_env, float, constant=num)
+        return SymNode(sympy.Float(num), None, self.shape_env, float, constant=num)
 
     def clone(self):
         return self
@@ -333,7 +338,7 @@ def _make_node_magic(method, func):
 
         # TODO: relational operators actually technically return a
         # PySymBool, this is a type error
-        return SymNode(out, self.shape_env, pytype)
+        return SymNode(out, None, self.shape_env, pytype)
 
     def unary_magic_impl(self):
         if SYM_FUNCTION_MODE:
@@ -358,7 +363,7 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        return SymNode(out, self.shape_env, pytype)
+        return SymNode(out, None, self.shape_env, pytype)
 
     if method in unary_magic_methods:
         setattr(SymNode, method, unary_magic_impl)
@@ -467,23 +472,24 @@ class ShapeEnv(object):
         We try our best to express stride in terms of the sizes, so that
         we can immediately eliminate fresh symbolic variables.
         """
-        size = [self.create_symbol(i) for i in ex.size()]
+        size = [self.create_symint(i) for i in ex.size()]
 
         # Our strategy is we allocate symbols for all the strides,
         # but we will then try to immediate generate equalities
         # with size that will allow us to immediately simplify away
         # these symbols
-        sym_stride = [self.create_symbol(i) for i in ex.stride()]
-        stride: List[Optional[sympy.Expr]] = [None] * len(size)
+        sym_stride = [self.create_symint(i) for i in ex.stride()]
+        stride: List[Optional[SymInt]] = [None] * len(size)
 
         def guard_stride_at(i):
-            self.evaluate_expr(sympy.Eq(sym_stride[i], stride[i]))
+            b = sym_stride[i] == stride[i]
+            assert b
 
         # TODO: create_symbol probably did this already so this is
         # technically unnecessary
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
-                stride[i] = sympy.Integer(val)
+                stride[i] = val
                 guard_stride_at(i)
 
         while any(x is None for x in stride):
@@ -512,17 +518,20 @@ class ShapeEnv(object):
                 )
                 stride[i] = sym_stride[i]
         assert all(x is not None for x in stride)
-        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in sym_stride]  # type: ignore[arg-type]
+        return size, sym_stride
 
-    def create_symintnode(self, expr: Union["sympy.Expr", int]):
-        return SymInt(SymNode(expr, self, int))
+    def create_symint(self, val: int) -> SymInt:
+        symbol = self._create_symbol(val)
+        return SymInt(SymNode(symbol, symbol, self, int))
 
-    def create_symbol(self, val: int) -> "sympy.Expr":
+    def _create_symbol(self, val: int) -> "sympy.Symbol":
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
-        if val < 0:
-            # all sympy base variables must be positive and > 1
-            return -self.create_symbol(-val)
+        # Handling negative base variables may be necessary (if a user
+        # has a bare SymInt input) but it is annoying to do as you need
+        # to know how to map it to the negated base variable.  Disallow
+        # for now.
+        assert val >= 0
         # This implements duck-shaping: input sizes that match are assigned
         # the same symint
         # TODO: Create a guard whenever this happens

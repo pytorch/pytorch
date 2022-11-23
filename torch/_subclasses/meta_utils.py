@@ -228,7 +228,7 @@ class MetaConverter:
 
         def sym(x):
             if make_symbolic:
-                return shape_env.create_symintnode(shape_env.create_symbol(x))
+                return shape_env.create_symint(x)
             else:
                 return x
 
