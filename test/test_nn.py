@@ -11525,13 +11525,26 @@ class TestNNDeviceType(NNTestCase):
         helper(self, (1, 8, 4, 3), 2, torch.channels_last)
         helper(self, (1, 8, 3, 4), 4, torch.contiguous_format)
         helper(self, (1, 8, 3, 4), 4, torch.channels_last)
-        helper(self, (4, 8, 40, 40), 4, torch.channels_last)
+        helper(self, (4, 8, 40, 40), 4, torch.contiguous_format),
+        helper(self, (4, 8, 40, 40), 4, torch.channels_last),
+        helper(self, (4, 40, 40, 40), 2, torch.contiguous_format)
+        helper(self, (4, 40, 40, 40), 2, torch.channels_last)
         helper(self, (1, 8, 40, 40), 4, torch.contiguous_format)
         helper(self, (1, 8, 40, 40), 2, torch.channels_last)
         helper(self, (1, 8, 40, 40), 2, torch.contiguous_format)
         helper(self, (1, 8, 50, 50), 2, torch.channels_last)
+        helper(self, (1, 8, 50, 50), 4, torch.contiguous_format)
         helper(self, (1, 8, 50, 50), 4, torch.channels_last)
+        helper(self, (1, 40, 50, 50), 2, torch.contiguous_format)
+        helper(self, (1, 40, 50, 50), 2, torch.channels_last)
+        helper(self, (1, 9, 3, 4, 5), 3, torch.contiguous_format)
         helper(self, (1, 9, 3, 4, 5), 3, torch.channels_last_3d)
+        helper(self, (1, 60, 10, 10, 10), 3, torch.contiguous_format)
+        helper(self, (1, 60, 10, 10, 10), 3, torch.channels_last_3d)
+        helper(self, (1, 9, 10, 50, 50), 3, torch.contiguous_format)
+        helper(self, (1, 9, 10, 50, 50), 3, torch.channels_last_3d)
+        helper(self, (1, 60, 10, 50, 50), 3, torch.contiguous_format)
+        helper(self, (1, 60, 10, 50, 50), 3, torch.channels_last_3d)
 
     def _test_module_empty_inputs(self, module, inputs):
         for _inp in inputs:
