@@ -1,11 +1,16 @@
 # Owner(s): ["module: codegen"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO
+from contextlib import nullcontext
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO,
+    xfail_inherited_tests
+)
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
+from torch._dispatch.python import enable_crossref_functionalize
 
 import unittest
 
@@ -21,34 +26,40 @@ def are_aliased(x, y):
 # We can unify testing and use functionalize() here instead
 # if/when functorch moves into core.
 # This is basically a crappy version of `functionalize()` for single-tensor-arg inputs.
-def _functionalize(f, *, reapply_views: bool):
+def _functionalize(f, *, reapply_views: bool, crossref: bool):
     def wrapped(a):
-        input_functional = torch._to_functional_tensor(a)
-        input_functional.requires_grad = a.requires_grad
-        torch._enable_functionalization(reapply_views=reapply_views)
-        try:
-            out = f(input_functional)
-        finally:
-            torch._disable_functionalization()
-        torch._sync(input_functional)
-        inpt_new = torch._from_functional_tensor(input_functional)
-        if inpt_new is not a:
-            # Existing deficiency in functionalize():
-            # we don't correctly mutate input metadata (yet?)
-            if inpt_new.shape == a.shape:
-                a.copy_(inpt_new)
-        tree_map(torch._sync, out)
-        out_unwrapped = tree_map(torch._from_functional_tensor, out)
-        return out_unwrapped
+        ctx = nullcontext()
+        if crossref:
+            ctx = enable_crossref_functionalize()
+        with ctx:
+            input_functional = torch._to_functional_tensor(a)
+            input_functional.requires_grad = a.requires_grad
+            torch._enable_functionalization(reapply_views=reapply_views)
+            try:
+                out = f(input_functional)
+            finally:
+                torch._disable_functionalization()
+            torch._sync(input_functional)
+            inpt_new = torch._from_functional_tensor(input_functional)
+            if inpt_new is not a:
+                # Existing deficiency in functionalize():
+                # we don't correctly mutate input metadata (yet?)
+                if inpt_new.shape == a.shape:
+                    a.copy_(inpt_new)
+            tree_map(torch._sync, out)
+            out_unwrapped = tree_map(torch._from_functional_tensor, out)
+            return out_unwrapped
 
     return wrapped
 
 @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "https://github.com/pytorch/pytorch/issues/81457")
 class TestFunctionalization(TestCase):
 
+    crossref = False
+
     def get_logs(self, func, inpt, *, reapply_views=False, run_reinplace=False):
         inpt_clone = inpt.clone()
-        traced_f = make_fx(_functionalize(func, reapply_views=reapply_views))(inpt)
+        traced_f = make_fx(_functionalize(func, reapply_views=reapply_views, crossref=self.crossref))(inpt)
         if run_reinplace:
             traced_f = reinplace(traced_f, inpt_clone)
         return traced_f.code
@@ -60,10 +71,15 @@ class TestFunctionalization(TestCase):
 
         # Compare outputs (and mutated inputs), with and without functionalization.
         out_ref = func(inpt)
-        out_functional = _functionalize(func, reapply_views=reapply_views)(input_clone)
+        out_functional = _functionalize(func, reapply_views=reapply_views, crossref=self.crossref)(input_clone)
         # The reinplacing pass is only valid to run with reapply_views=True.
-        functional_func = make_fx(_functionalize(func, reapply_views=True))(input_clone2)
-        reinplace_func = reinplace(make_fx(_functionalize(func, reapply_views=True))(input_clone2), input_clone2)
+        functional_func = make_fx(_functionalize(func, reapply_views=True, crossref=self.crossref))(input_clone2)
+        reinplace_func = reinplace(
+            make_fx(
+                _functionalize(func, reapply_views=True, crossref=self.crossref)
+            )(input_clone2),
+            input_clone2
+        )
 
         # NOTE: for now, need to pass in fresh inputs here, because make_fx
         # will directly mutate the inputs that you trace with.
@@ -112,7 +128,16 @@ class TestFunctionalization(TestCase):
             self.assertRaises(RuntimeError, lambda: z.add_(1))
             return z
 
-        _functionalize(f, reapply_views=True)(torch.ones(3, 3))
+        _functionalize(f, reapply_views=True, crossref=self.crossref)(torch.ones(3, 3))
+
+    def test_copy_stride_mismatch(self):
+        def f(x):
+            y = torch.empty_strided((2, 2), (5, 1))
+            y.copy_(x)
+            return y
+
+        r = _functionalize(f, reapply_views=True, crossref=self.crossref)(torch.ones(2, 2))
+        self.assertEqual(r.stride(), (5, 1))
 
     def test_view_clone_view_inplace(self):
         def f(input):
@@ -149,13 +174,15 @@ def forward(self, a_1):
     expand_copy = torch.ops.aten.expand_copy.default(ones_like, [16, 64, 128, 128]);  ones_like = None
     view_copy_3 = torch.ops.aten.view_copy.default(expand_copy, [1, 1024, 128, 128]);  expand_copy = None
     new_empty_strided = torch.ops.aten.new_empty_strided.default(view_copy_3, [1, 1024, 128, 128], [16777216, 16384, 128, 1])
-    view_copy_4 = torch.ops.aten.view_copy.default(view_copy_3, [16, 64, 128, 128])
-    view_copy_5 = torch.ops.aten.view_copy.default(view_copy_3, [16, 64, 128, 128])
-    clone_1 = torch.ops.aten.clone.default(view_copy_5, memory_format = torch.contiguous_format);  view_copy_5 = None
+    copy = torch.ops.aten.copy.default(new_empty_strided, view_copy_3);  new_empty_strided = view_copy_3 = None
+    view_copy_4 = torch.ops.aten.view_copy.default(copy, [16, 64, 128, 128])
+    view_copy_5 = torch.ops.aten.view_copy.default(copy, [16, 64, 128, 128])
+    clone_1 = torch.ops.aten.clone.default(view_copy_5, memory_format = torch.contiguous_format)
     threshold_backward = torch.ops.aten.threshold_backward.default(clone_1, relu, 0);  clone_1 = relu = None
-    view_copy_6 = torch.ops.aten.view_copy.default(view_copy_3, [16, 64, 128, 128]);  view_copy_3 = None
+    copy_1 = torch.ops.aten.copy.default(view_copy_5, threshold_backward);  view_copy_5 = threshold_backward = None
+    view_copy_6 = torch.ops.aten.view_copy.default(copy, [16, 64, 128, 128]);  copy = None
     detach_copy = torch.ops.aten.detach_copy.default(view_copy_6);  view_copy_6 = None
-    view_copy_7 = torch.ops.aten.view_copy.default(threshold_backward, [1, 1024, 128, 128]);  threshold_backward = None
+    view_copy_7 = torch.ops.aten.view_copy.default(copy_1, [1, 1024, 128, 128]);  copy_1 = None
     view_copy_8 = torch.ops.aten.view_copy.default(view_copy_7, [16, 64, 128, 128]);  view_copy_7 = None
     detach_copy_1 = torch.ops.aten.detach_copy.default(view_copy_8);  view_copy_8 = None
     return detach_copy_1
@@ -323,7 +350,7 @@ def forward(self, a_1):
             out = x[functional_tensor, nonfunctional_tensor]
             return out
         out = f(torch.ones(2, 2))
-        out_functional = _functionalize(f, reapply_views=True)(torch.ones(2, 2))
+        out_functional = _functionalize(f, reapply_views=True, crossref=self.crossref)(torch.ones(2, 2))
         self.assertEqual(out, out_functional)
 
     def test_inplace_on_non_view(self):
@@ -829,8 +856,8 @@ def forward(self, a_1):
         _z = torch._from_functional_tensor(z)
         self.assertTrue(are_aliased(_y, _z))
 
-    # copy_() gets its own test, because it is special cased in functionalization.
-    # self.copy_(src) decomposes into src.to(self).expand_as(self).
+    # copy_() gets its own test, because it used to be special cased in functionalization.
+    # However, now it works pretty similar to other functional ops
     def test_copy_(self):
         def f(x):
             tmp = torch.zeros(2, 2)
@@ -850,7 +877,8 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    add = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
+    copy = torch.ops.aten.copy.default(diagonal_copy, a_1);  diagonal_copy = None
+    add = torch.ops.aten.add.Tensor(copy, a_1);  copy = a_1 = None
     return add
     """)
 
@@ -862,8 +890,9 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    add = torch.ops.aten.add.Tensor(a_1, a_1);  a_1 = None
-    return add
+    copy = torch.ops.aten.copy_.default(diagonal, a_1)
+    add = torch.ops.aten.add_.Tensor(diagonal, a_1);  a_1 = None
+    return diagonal
     """)
 
         # Test 2: copy_() with same dtype, different shape
@@ -876,8 +905,8 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    expand_copy = torch.ops.aten.expand_copy.default(a_1, [2])
-    add = torch.ops.aten.add.Tensor(expand_copy, a_1);  expand_copy = a_1 = None
+    copy = torch.ops.aten.copy.default(diagonal_copy, a_1);  diagonal_copy = None
+    add = torch.ops.aten.add.Tensor(copy, a_1);  copy = a_1 = None
     return add
     """)
 
@@ -889,9 +918,9 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    expand_copy = torch.ops.aten.expand_copy.default(a_1, [2])
-    add = torch.ops.aten.add_.Tensor(expand_copy, a_1);  a_1 = None
-    return expand_copy
+    copy = torch.ops.aten.copy_.default(diagonal, a_1)
+    add = torch.ops.aten.add_.Tensor(diagonal, a_1);  a_1 = None
+    return diagonal
     """)
 
         # Test 3: copy_() with different dtype, same shape
@@ -904,8 +933,8 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    _to_copy = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    add = torch.ops.aten.add.Tensor(_to_copy, a_1);  _to_copy = a_1 = None
+    copy = torch.ops.aten.copy.default(diagonal_copy, a_1);  diagonal_copy = None
+    add = torch.ops.aten.add.Tensor(copy, a_1);  copy = a_1 = None
     return add
     """)  # noqa: B950
 
@@ -917,9 +946,9 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    _to_copy = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    add = torch.ops.aten.add_.Tensor(_to_copy, a_1);  a_1 = None
-    return _to_copy
+    copy = torch.ops.aten.copy_.default(diagonal, a_1)
+    add = torch.ops.aten.add_.Tensor(diagonal, a_1);  a_1 = None
+    return diagonal
     """)  # noqa: B950
 
         # Test 4: copy_() with different dtype, different shape
@@ -932,9 +961,8 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
-    _to_copy = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    expand_copy = torch.ops.aten.expand_copy.default(_to_copy, [2]);  _to_copy = None
-    add = torch.ops.aten.add.Tensor(expand_copy, a_1);  expand_copy = a_1 = None
+    copy = torch.ops.aten.copy.default(diagonal_copy, a_1);  diagonal_copy = None
+    add = torch.ops.aten.add.Tensor(copy, a_1);  copy = a_1 = None
     return add
     """)  # noqa: B950
 
@@ -946,10 +974,9 @@ def forward(self, a_1):
 def forward(self, a_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
     diagonal = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    _to_copy = torch.ops.aten._to_copy.default(a_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-    expand_copy = torch.ops.aten.expand_copy.default(_to_copy, [2]);  _to_copy = None
-    add = torch.ops.aten.add_.Tensor(expand_copy, a_1);  a_1 = None
-    return expand_copy
+    copy = torch.ops.aten.copy_.default(diagonal, a_1)
+    add = torch.ops.aten.add_.Tensor(diagonal, a_1);  a_1 = None
+    return diagonal
     """)  # noqa: B950
 
     def test_expand_symint(self):
@@ -1200,6 +1227,20 @@ def forward(self, a_1):
     fill = torch.ops.aten.fill_.Scalar(select, 1);  select = None
     return zeros
     """)
+
+@xfail_inherited_tests([
+    "test_as_strided",
+    "test_copy_",
+    "test_diagonal",
+    "test_diagonal_mutated_input",
+    "test_everything",
+    "test_fill_",
+    "test_split",
+    "test_view_clone_view_inplace",
+    "test_view_inplace",
+])
+class TestCrossRefFunctionalization(TestFunctionalization):
+    crossref = True
 
 if __name__ == '__main__':
     run_tests()
