@@ -3,7 +3,7 @@
 import torch
 from contextlib import nullcontext
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO,
+    TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO, IS_WINDOWS,
     xfail_inherited_tests
 )
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
@@ -1229,14 +1229,18 @@ def forward(self, a_1):
     """)
 
 
- def test_instance_norm(self):
+    def test_instance_norm(self):
         def f(x):
             with enable_python_dispatcher():
                 return torch.instance_norm(x, None, None, running_mean=torch.zeros(100), running_var=torch.ones(100),
                                            use_input_stats=True, momentum=0.1, eps=1e-5, cudnn_enabled=False)
         self.assert_functionalization(f, torch.randn(20, 100, 35, 45))
-        logs = self.get_logs(f, torch.randn(20, 100, 35, 45))
-        self.assertExpectedInline(logs, """\
+        # On Windows, for instance_norm, the alias_copy's are reordered to come right before they need to be used
+        # whereas on other platforms, the alias_copy's are before the view_copy's.
+        # e.g., the alias_copy after the getitem_4 assignment would be moved to be right before the copy assignment.
+        if not IS_WINDOWS:
+            logs = self.get_logs(f, torch.randn(20, 100, 35, 45))
+            self.assertExpectedInline(logs, """\
 
 
 
@@ -1265,10 +1269,10 @@ def forward(self, a_1):
     copy_1 = torch.ops.aten.copy.default(alias_copy_1, mean_1);  alias_copy_1 = mean_1 = None
     view_copy_5 = torch.ops.aten.view_copy.default(getitem, [20, 100, 35, 45]);  getitem = None
     return view_copy_5
-    """)
+    """)  # noqa: B950
 
-        reinplaced_logs = self.get_logs(f, torch.randn(20, 100, 35, 45), reapply_views=True, run_reinplace=True)
-        self.assertExpectedInline(reinplaced_logs, """\
+            reinplaced_logs = self.get_logs(f, torch.randn(20, 100, 35, 45), reapply_views=True, run_reinplace=True)
+            self.assertExpectedInline(reinplaced_logs, """\
 
 
 
@@ -1297,7 +1301,7 @@ def forward(self, a_1):
     copy_1 = torch.ops.aten.copy_.default(alias_1, mean_1);  alias_1 = mean_1 = None
     view_5 = torch.ops.aten.view.default(getitem, [20, 100, 35, 45]);  getitem = None
     return view_5
-    """)
+    """)  # noqa: B950
 
 
     def test_instance_norm_running_mean_is_x(self):
@@ -1308,7 +1312,11 @@ def forward(self, a_1):
         # TODO: uncomment following line after functionalization can handle input mutations
         # self.assert_functionalization(f, torch.zeros(100))
         logs = self.get_logs(f, torch.zeros(100))
-        self.assertExpectedInline(logs, """\
+        # On Windows, for instance_norm, the alias_copy's are reordered to come right before they need to be used
+        # whereas on other platforms, the alias_copy's are before the view_copy's.
+        # e.g., the alias_copy after the getitem_4 assignment would be moved to be right before the copy assignment.
+        if not IS_WINDOWS:
+            self.assertExpectedInline(logs, """\
 
 
 
@@ -1339,10 +1347,10 @@ def forward(self, a_1):
     alias_copy_2 = torch.ops.aten.alias_copy.default(copy);  copy = None
     copy_ = torch.ops.aten.copy_.default(a_1, alias_copy_2);  a_1 = alias_copy_2 = None
     return view_copy_5
-    """)
+    """)  # noqa: B950
 
-        reinplaced_logs = self.get_logs(f, torch.zeros(100), reapply_views=True, run_reinplace=True)
-        self.assertExpectedInline(reinplaced_logs, """\
+            reinplaced_logs = self.get_logs(f, torch.zeros(100), reapply_views=True, run_reinplace=True)
+            self.assertExpectedInline(reinplaced_logs, """\
 
 
 
@@ -1373,7 +1381,7 @@ def forward(self, a_1):
     alias_2 = torch.ops.aten.alias.default(copy);  copy = None
     copy_ = torch.ops.aten.copy_.default(a_1, alias_2);  a_1 = alias_2 = None
     return view_5
-    """)
+    """)  # noqa: B950
 
 
     def test_batch_norm(self):
@@ -1398,7 +1406,7 @@ def forward(self, a_1):
     getitem_3 = _native_batch_norm_legit_functional[3]
     getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
     return getitem
-    """)
+    """)  # noqa: B950
 
         reinplaced_logs = self.get_logs(f, torch.randn(20, 100, 35, 45), reapply_views=True, run_reinplace=True)
         self.assertExpectedInline(reinplaced_logs, """\
@@ -1416,7 +1424,7 @@ def forward(self, a_1):
     getitem_3 = _native_batch_norm_legit_functional[3]
     getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
     return getitem
-    """)
+    """)  # noqa: B950
 
 
 @xfail_inherited_tests([
