@@ -205,8 +205,6 @@ def _run_function(python_udf):
         if isinstance(python_udf, AttributeError):
             raise python_udf
         result = python_udf.func(*python_udf.args, **python_udf.kwargs)
-    # TODO (rohan-varma): This should probably be BaseException, but change can
-    # cause BC issues.
     except Exception as e:
         # except str = exception info + traceback string
         except_str = (
