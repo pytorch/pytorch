@@ -51,7 +51,7 @@ def test_post_hook():
 
     # check if post hooks were registered
     assert len(post_hook_data) == 3
-#    assert post_hook_data == [2, 2]
+    assert post_hook_data == [5, 7, 9]
 
     # remove handles, take step and verify that hook is no longer registered
     while len(handles) > 0:
