@@ -11994,21 +11994,29 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out, ref_out)
             # parameters in bfloat16 is not recommended
             if dtype != torch.bfloat16 or is_mixed:
-                self.assertEqual(gn.weight.grad, ref_gn.weight.grad, atol=5e-5, rtol=5e-5)
-                self.assertEqual(gn.bias.grad, ref_gn.bias.grad, atol=5e-5, rtol=5e-5)
-                self.assertEqual(input.grad, ref_input.grad, atol=5e-4, rtol=5e-3)
+                self.assertEqual(gn.weight.grad, ref_gn.weight.grad, atol=5e-4, rtol=5e-4)
+                self.assertEqual(gn.bias.grad, ref_gn.bias.grad, atol=5e-4, rtol=5e-4)
+                self.assertEqual(input.grad, ref_input.grad, atol=5e-4, rtol=8e-3)
 
         helper(self, (4, 8, 10, 10), 4, torch.channels_last, False)
         helper(self, (2, 30, 9, 9), 3, torch.channels_last, False)
         helper(self, (4, 8, 40, 40), 4, torch.channels_last, False)
+        helper(self, (4, 40, 40, 40), 2, torch.channels_last, False)
         helper(self, (2, 30, 50, 50), 3, torch.channels_last, False)
+        helper(self, (2, 60, 50, 50), 3, torch.channels_last, False)
         helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d, False)
+        helper(self, (2, 9, 7, 200, 15), 3, torch.channels_last_3d, False)
+        helper(self, (2, 60, 7, 200, 15), 3, torch.channels_last_3d, False)
 
-        helper(self, (4, 8, 40, 40), 2, torch.channels_last, True)
         helper(self, (4, 8, 10, 10), 4, torch.channels_last, True)
         helper(self, (2, 30, 9, 9), 3, torch.channels_last, True)
+        helper(self, (4, 8, 40, 40), 4, torch.channels_last, True)
+        helper(self, (4, 40, 40, 40), 2, torch.channels_last, True)
         helper(self, (2, 30, 50, 50), 3, torch.channels_last, True)
+        helper(self, (2, 60, 50, 50), 3, torch.channels_last, True)
         helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d, True)
+        helper(self, (2, 9, 7, 200, 15), 3, torch.channels_last_3d, True)
+        helper(self, (2, 60, 7, 200, 15), 3, torch.channels_last_3d, True)
 
     @onlyNativeDeviceTypes
     def test_GroupNorm_numeric(self, device):
