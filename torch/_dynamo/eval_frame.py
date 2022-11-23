@@ -423,7 +423,7 @@ def optimize(
         disable: If True, turn this decorator into a no-op
         dynamic: If True, turn on dynamic shapes support
 
-    Example Usage:
+    Example Usage::
 
         @torch._dynamo.optimize()
         def toy_example(a, b):
