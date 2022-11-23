@@ -1154,7 +1154,7 @@ TEST(CustomAutogradTest, BackwardWithNonLeafInputs) {
 }
 
 TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
-  c10::Warning::WarnAlways guard(true);
+  c10::WarningUtils::WarnAlways guard(true);
 
   torch::Tensor x = torch::randn({5, 5}).set_requires_grad(true);
   auto z = x * x;

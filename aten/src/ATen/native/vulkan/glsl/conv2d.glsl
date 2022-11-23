@@ -2,6 +2,12 @@
 #define PRECISION $precision
 #define FORMAT $format
 
+/*
+ * TILE_SIZE = (1, 1, 1)
+ * WEIGHT_STORAGE = TEXTURE_2D
+ * BIAS_STORAGE = TEXTURE_2D
+ */
+
 layout(std430) buffer;
 
 /*
@@ -13,8 +19,8 @@ layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3
  * Input Textures
  */
 layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION sampler3D uKernel;
-layout(set = 0, binding = 3) uniform PRECISION sampler3D uBias;
+layout(set = 0, binding = 2) uniform PRECISION sampler2D uKernel;
+layout(set = 0, binding = 3) uniform PRECISION sampler2D uBias;
 
 /*
  * Params Buffer
@@ -75,7 +81,7 @@ void main() {
   kstart.y += pos.z * uBlock.kernel_size.y;
 
   // Perform the convolution by iterating over the overlay region
-  vec4 sum = texelFetch(uBias, ivec3(pos.z, 0, 0), 0);
+  vec4 sum = texelFetch(uBias, ivec2(pos.z, 0), 0);
   const int dil_y = uBlock.dilate.y;
   const int dil_x = uBlock.dilate.x;
   const int ic4 = uBlock.overlay_region.z / 4;
@@ -116,16 +122,16 @@ void main() {
         //
         //  which is what is expressed in the following calculations.
 
-        const vec4 ktex_0 = texelFetch(uKernel, ivec3(kx + 0, ky, 0), 0);
+        const vec4 ktex_0 = texelFetch(uKernel, ivec2(kx + 0, ky), 0);
         sum = fma(in_tex.xxxx, ktex_0, sum);
 
-        const vec4 ktex_1 = texelFetch(uKernel, ivec3(kx + 1, ky, 0), 0);
+        const vec4 ktex_1 = texelFetch(uKernel, ivec2(kx + 1, ky), 0);
         sum = fma(in_tex.yyyy, ktex_1, sum);
 
-        const vec4 ktex_2 = texelFetch(uKernel, ivec3(kx + 2, ky, 0), 0);
+        const vec4 ktex_2 = texelFetch(uKernel, ivec2(kx + 2, ky), 0);
         sum = fma(in_tex.zzzz, ktex_2, sum);
 
-        const vec4 ktex_3 = texelFetch(uKernel, ivec3(kx + 3, ky, 0), 0);
+        const vec4 ktex_3 = texelFetch(uKernel, ivec2(kx + 3, ky), 0);
         sum = fma(in_tex.wwww, ktex_3, sum);
       }
     }

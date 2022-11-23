@@ -109,6 +109,7 @@ void printTensorNDArray(const Tensor& t);
 MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType, MPSShape* mpsShape);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tensor);
+MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType);
 MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, const Scalar& scalar);
 
 string get_mem_format_string(c10::MemoryFormat memory_format);
@@ -262,6 +263,7 @@ struct MPSGraphCache
   dispatch_queue_t serialQueue_ = nullptr;
 
 };
+
 
 } // namespace mps
 } // namespace native
