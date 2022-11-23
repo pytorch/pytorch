@@ -192,6 +192,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
+          echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
           docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
       - name: Get workflow job id
@@ -215,6 +216,12 @@ jobs:
         if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Collect backtraces from coredumps (if any)
+        if: always()
+        run: |
+          # shellcheck disable=SC2156
+          find . -iname "core.[1-9]*" -exec docker exec "${DOCKER_CONTAINER_ID}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
 
       - name: Store Core dumps on S3
         uses: seemethere/upload-artifact-s3@v5
