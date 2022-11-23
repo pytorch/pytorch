@@ -39,7 +39,7 @@ import subprocess
 import sys
 import tempfile
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from os.path import abspath, exists
 from random import randint
 
@@ -90,8 +90,6 @@ DEFAULTS = {
     "training": [
         "eager",
         "aot_eager",
-        "aot_cudagraphs",
-        "nvprims_nvfuser",
         "inductor",
         "inductor_no_cudagraphs",
     ],
@@ -336,7 +334,7 @@ def generate_dropdown_comment(title, body):
     return str_io.getvalue()
 
 
-def build_summary():
+def build_summary(args):
     import git
 
     out_io = io.StringIO()
@@ -345,38 +343,45 @@ def build_summary():
         if exists(path):
             repo = git.Repo(path, search_parent_directories=True)
             sha = repo.head.object.hexsha
+            date = repo.head.object.committed_datetime
             out_io.write(f"{name} commit: {sha}\n")
+            out_io.write(f"{name} commit date: {date}\n")
         else:
             out_io.write(f"{name} Absent\n")
 
     def env_var(name):
         out_io.write(f"{name} = {os.environ[name]}\n")
 
-    out_io.write("## Commit hashes ##\n")
-    print_commit_hash(".", "torch._dynamo")
+    out_io.write("\n")
+    out_io.write("### Run name ###\n")
+    out_io.write(get_archive_name(args, args.dtypes[0]))
+    out_io.write("\n")
+
+    out_io.write("\n")
+    out_io.write("### Commit hashes ###\n")
     print_commit_hash("../pytorch", "pytorch")
     print_commit_hash("../functorch", "functorch")
     print_commit_hash("../torchbenchmark", "torchbench")
 
     out_io.write("\n")
-    out_io.write("## TorchDynamo config flags ##\n")
+    out_io.write("### TorchDynamo config flags ###\n")
     for key in dir(torch._dynamo.config):
         val = getattr(torch._dynamo.config, key)
         if not key.startswith("__") and isinstance(val, bool):
             out_io.write(f"torch._dynamo.config.{key} = {val}\n")
 
     out_io.write("\n")
-    out_io.write("## Torch version ##\n")
+    out_io.write("### Torch version ###\n")
     out_io.write(f"torch: {torch.__version__}\n")
 
     out_io.write("\n")
-    out_io.write("## Environment variables ##\n")
+    out_io.write("### Environment variables ###\n")
     env_var("TORCH_CUDA_ARCH_LIST")
     env_var("CUDA_HOME")
     env_var("USE_LLVM")
 
     out_io.write("\n")
-    out_io.write("## GPU details ##\n")
+    out_io.write("### GPU details ###\n")
     out_io.write(f"CUDNN VERSION: {torch.backends.cudnn.version()}\n")
     out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
     out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
@@ -404,8 +409,9 @@ def archive_data(archive_name):
         else:
             day = "000"
     else:
-        day = datetime.today().strftime("%j")
-        prefix = datetime.today().strftime(f"day_{day}_%d_%m_%y")
+        now = datetime.now(tz=timezone(timedelta(hours=-8)))
+        day = now.strftime("%j")
+        prefix = now.strftime(f"day_{day}_%d_%m_%y")
     return day, prefix
 
 
@@ -413,6 +419,12 @@ def archive_data(archive_name):
 def default_archive_name(dtype):
     _, prefix = archive_data(None)
     return f"{prefix}_performance_{dtype}_{randint(100, 999)}"
+
+
+def get_archive_name(args, dtype):
+    return (
+        default_archive_name(dtype) if args.archive_name is None else args.archive_name
+    )
 
 
 def archive(src_dir, dest_dir_prefix, archive_name, dtype):
@@ -810,7 +822,7 @@ class ParsePerformanceLogs(Parser):
 
 def parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir):
     mode = get_mode(args)
-    build_summary()
+    build_summary(args)
 
     parser_class = ParsePerformanceLogs
     parser = parser_class(
@@ -965,13 +977,13 @@ class RegressionDetector:
                             f"suite: {suite}): {path}\n\n"
                         )
 
+            regressions_present = False
             for metric in [
                 "accuracy",
                 "speedup",
                 "compilation_latency",
                 "compression_ratio",
             ]:
-                regressions_present = False
                 dfs = []
                 for compiler in self.args.flag_compilers:
                     if last2[compiler] is None:
@@ -1148,11 +1160,7 @@ class DashboardUpdater:
     def update_lookup_file(self):
         dtype = self.args.dtypes[0]
         day, _ = archive_data(self.args.archive_name)
-        target_dir = (
-            default_archive_name(dtype)
-            if self.args.archive_name is None
-            else self.args.archive_name
-        )
+        target_dir = get_archive_name(self.args, dtype)
         # Update lookup csv the folder to arhived logs
         subprocess.check_call(
             f'echo "{day},performance,{dtype},{target_dir}" >> {self.lookup_file}',
@@ -1194,10 +1202,11 @@ class DashboardUpdater:
             "gh_executive_summary.txt",
             "gh_summary_diff.txt",
             "gh_warnings.txt",
-            # "gh_regression.txt",
+            "gh_regression.txt",
             "gh_metric_regression.txt",
             "gh_training.txt",
             "gh_graphs.txt",
+            "gh_build_summary.txt",
         ]
         all_lines = []
         for f in files:
@@ -1289,6 +1298,9 @@ if __name__ == "__main__":
         parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir)
     elif args.run:
         generate_commands(args, dtypes, suites, devices, compilers, output_dir)
+        # generate memoized archive name now so that the date is reflective
+        # of when the run started
+        get_archive_name(args, dtypes[0])
         # TODO - Do we need to worry about segfaults
         try:
             os.system("bash run.sh")
