@@ -24,16 +24,10 @@
 // by counting simple computations (*, +, -) as 1 and exp or log as 4.
 //
 // We use a chunk size such that it'd fit in L1D.
-// Prior to https://github.com/pytorch/pytorch/issues/80252, the chunk-size was
-// a multiple of vector-length, which made chunk-size 256 for FP32, FP16, BF16
-// when AVX2 was used, but 512 when AVX512 was used.
-// That led to fewer threads being used in case of AVX512 in some cases.
-// Also, due to the way grain_size was being computed, it was usually 0.
-// The CPUs were underutilized in both cases.
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 namespace {
-
 template <typename scalar_t>
 inline void _vec_log_softmax_lastdim(
     scalar_t* input_data_base,
@@ -47,76 +41,99 @@ inline void _vec_log_softmax_lastdim(
 
   // we assume that at::GRAIN_SIZE is an appropriate grain-size.
   // usually, we'd use all the threads in the OpenMP thread pool.
-  int64_t grain_size = (outer_size - 1) / (at::get_num_threads() - 1);
+  int64_t grain_size = (outer_size - 1) /
+      std::max((int64_t)1, (int64_t)(at::get_num_threads() - 1));
   // assign fewer threads if the number of computations is not large enough
   int64_t num_computations = 16 * outer_size * dim_size;
   if ((num_computations < at::get_num_threads() * at::internal::GRAIN_SIZE) &&
       (num_computations > at::internal::GRAIN_SIZE)) {
-    int64_t fewer_threads = num_computations / at::internal::GRAIN_SIZE + 1;
-    grain_size = outer_size / (fewer_threads - 1);
+    int64_t fewer_threads = num_computations / at::internal::GRAIN_SIZE;
+    grain_size = (outer_size - 1) / fewer_threads;
   } else if (num_computations <= at::internal::GRAIN_SIZE) {
     // only 1 thread will be used
     grain_size = outer_size;
   }
 
-  parallel_for(
-      0,
-      outer_size,
-      grain_size,
-      [&](int64_t begin, int64_t end) {
-        // MSVC requires such a declaration for dynamic arrays
-        // Source: https://stackoverflow.com/a/33423538
-        std::unique_ptr<scalar_t[]> tmp_sum_scalar(new scalar_t[CHUNK_SIZE]);
-        std::unique_ptr<scalar_t[]> max_input_arr(new scalar_t[CHUNK_SIZE]);
-        for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
-          int64_t loop_end = CHUNK_SIZE;
-          if (ii + CHUNK_SIZE > end)
-            loop_end = end - ii;
-          for (const auto j : c10::irange(loop_end)) {
-            int64_t i = ii + j;
-            scalar_t* input_data = input_data_base + i * dim_size;
-            max_input_arr.get()[j] = vec::reduce_all<scalar_t>(
-                [](Vec& x, Vec& y) { return vec::maximum(x, y); },
-                input_data,
-                dim_size);
-          }
-          for (const auto j : c10::irange(loop_end)) {
-            int64_t i = ii + j;
-            scalar_t* input_data = input_data_base + i * dim_size;
-            scalar_t max_input = max_input_arr[j];
-            tmp_sum_scalar.get()[j] = vec::map_reduce_all<scalar_t>(
-                [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
-                [](Vec x, Vec y) { return x + y; },
-                input_data,
-                dim_size);
-          }
-          // See [Note AVX-SSE transitions] for why this should call the
-          // vectorized version (aside from perf improvements).
-          vec::map(
-              [](Vec x) { return x.log(); },
-              tmp_sum_scalar.get(),
-              tmp_sum_scalar.get(),
-              loop_end);
-          for (const auto j : c10::irange(loop_end)) {
-            int64_t i = ii + j;
-            scalar_t* input_data = input_data_base + i * dim_size;
-            scalar_t* output_data = output_data_base + i * dim_size;
-            scalar_t tmp_sum = tmp_sum_scalar[j];
-            scalar_t max_input = max_input_arr[j];
+  parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
+#ifndef _MSC_VER
+    // This snippet is not used with MSVC, because it leads to the build error
+    // 'expression did not evaluate to a constant'
+    std::unique_ptr<scalar_t[]> tmp_sum_scalar(new scalar_t[CHUNK_SIZE]);
+    std::unique_ptr<scalar_t[]> max_input_arr(new scalar_t[CHUNK_SIZE]);
+#else
+    // MSVC requires such a declaration of dynamic arrays
+    // Source: https://stackoverflow.com/a/33423538
+    scalar_t* tmp_sum_scalar = new scalar_t[CHUNK_SIZE];
+    scalar_t* max_input_arr = new scalar_t[CHUNK_SIZE];
+#endif
+    for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
+      int64_t loop_end = CHUNK_SIZE;
+      if (ii + CHUNK_SIZE > end)
+        loop_end = end - ii;
+      for (const auto j : c10::irange(loop_end)) {
+        int64_t i = ii + j;
+        scalar_t* input_data = input_data_base + i * dim_size;
+#ifndef _MSC_VER
+        max_input_arr.get()[j] = vec::reduce_all<scalar_t>(
+#else
+        max_input_arr[j] = vec::reduce_all<scalar_t>(
+#endif
+            [](Vec& x, Vec& y) { return vec::maximum(x, y); },
+            input_data,
+            dim_size);
+      }
+      for (const auto j : c10::irange(loop_end)) {
+        int64_t i = ii + j;
+        scalar_t* input_data = input_data_base + i * dim_size;
+        scalar_t max_input = max_input_arr[j];
+#ifndef _MSC_VER
+        tmp_sum_scalar.get()[j] = vec::map_reduce_all<scalar_t>(
+#else
+        tmp_sum_scalar[j] = vec::map_reduce_all<scalar_t>(
+#endif
+            [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
+            [](Vec x, Vec y) { return x + y; },
+            input_data,
+            dim_size);
+      }
+      // See [Note AVX-SSE transitions] for why this should call the
+      // vectorized version (aside from perf improvements).
+      vec::map(
+          [](Vec x) { return x.log(); },
+#ifndef _MSC_VER
+          tmp_sum_scalar.get(),
+          tmp_sum_scalar.get(),
+#else
+          tmp_sum_scalar,
+          tmp_sum_scalar,
+#endif
+          loop_end);
+      for (const auto j : c10::irange(loop_end)) {
+        int64_t i = ii + j;
+        scalar_t* input_data = input_data_base + i * dim_size;
+        scalar_t* output_data = output_data_base + i * dim_size;
+        scalar_t tmp_sum = tmp_sum_scalar[j];
+        scalar_t max_input = max_input_arr[j];
 
-            // It's necessary to keep the order of the operations below.
-            // In some cases that input is large digits and the difference
-            // is small, if we compute `max_input` plus `tmp_sum` before,
-            // there would be a numerical problem. See an example in
-            // https://github.com/pytorch/pytorch/issues/11752#issuecomment-422883379
-            vec::map(
-                [tmp_sum, max_input](Vec x) { return x - Vec(max_input) - Vec(tmp_sum); },
-                output_data,
-                input_data,
-                dim_size);
-          }
-        }
-      });
+        // It's necessary to keep the order of the operations below.
+        // In some cases that input is large digits and the difference
+        // is small, if we compute `max_input` plus `tmp_sum` before,
+        // there would be a numerical problem. See an example in
+        // https://github.com/pytorch/pytorch/issues/11752#issuecomment-422883379
+        vec::map(
+            [tmp_sum, max_input](Vec x) {
+              return x - Vec(max_input) - Vec(tmp_sum);
+            },
+            output_data,
+            input_data,
+            dim_size);
+      }
+    }
+#ifdef _MSC_VER
+    delete max_input_arr;
+    delete tmp_sum_scalar;
+#endif
+  });
 }
 
 template <typename scalar_t>
