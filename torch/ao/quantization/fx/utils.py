@@ -27,8 +27,6 @@ from torch.ao.quantization.stubs import DeQuantStub
 from torch.ao.quantization.utils import (
     activation_is_statically_quantized,
     is_per_tensor,
-    is_per_channel,
-    to_underlying_dtype,
 )
 from torch.ao.quantization.quantize import is_activation_post_process
 
@@ -64,7 +62,6 @@ __all__ = [
     "get_per_tensor_qparams",
     "get_qconv_op",
     "get_qconv_prepack_op",
-    "get_quantize_node_info",
     "get_skipped_module_name_and_classes",
     "graph_module_from_producer_nodes",
     "graph_pretty_str",
@@ -172,77 +169,6 @@ def get_per_tensor_qparams(activation_post_process):
     zero_point = int(zero_point)
     dtype = activation_post_process.dtype
     return scale, zero_point, dtype
-
-def get_quantize_node_info(
-    activation_post_process: Callable,
-    is_decomposed: bool
-) -> Optional[Tuple[str, Union[Callable[..., Any], str], Dict[str, Any]]]:
-    """ Extract information about quantize op from activation_post_process module
-    Args:
-      * `activation_post_process`: observer module instance or fake quant module instance
-        after calibration/QAT
-      * `is_decomposed`: a boolean flag to indicate whether we want to use the
-        quantize operator for decomposed quantized tensor (torch.ops.quantized_decomposed.quantize_per_tensor) or default/standalone
-        quantized tensor (torch.quantize_per_tensor)
-
-    Returns
-        node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
-        of extracted qparams from the module
-    """
-    dtype = activation_post_process.dtype  # type: ignore[attr-defined]
-    compute_dtype = None
-    if hasattr(activation_post_process, "compute_dtype"):
-        compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
-    quantize_op : Optional[Union[Callable, str]] = None
-    if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
-            not hasattr(activation_post_process, 'compute_dtype'):
-        node_type = "call_function"
-        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
-        if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
-            ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
-            qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
-            if is_decomposed:
-                raise NotImplementedError("decomposed quantize_per_channel op not implemented yet")
-            else:
-                quantize_op = torch.quantize_per_channel
-        else:
-            scale = float(scale)
-            zero_point = int(zero_point)
-            if is_decomposed:
-                quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
-                quant_max = activation_post_process.quant_max  # type: ignore[attr-defined]
-                dtype = to_underlying_dtype(dtype)
-                qparams = {
-                    "_scale_": scale,
-                    "_zero_point_": zero_point,
-                    "_quant_min": quant_min,
-                    "_quant_max": quant_max,
-                    "_dtype_": dtype
-                }
-                quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor
-            else:
-                qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
-                quantize_op = torch.quantize_per_tensor
-    elif compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
-        # TODO(future PR): switch compute_dtype to is_dynamic
-        # dynamic quantization
-        node_type = "call_function"
-        if is_decomposed:
-            raise NotImplementedError("decomposed quantize_per_tensor_dynamic op not implemented yet")
-        else:
-            quantize_op = torch.quantize_per_tensor_dynamic
-        # TODO: get reduce range from observer
-        # reduce_range = activation_post_process.reduce_range
-        reduce_range = torch.backends.quantized.engine in ("fbgemm", "x86")
-        qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
-    elif dtype == torch.float16:
-        node_type = "call_method"
-        quantize_op = "to"
-        qparams = {"_dtype_": dtype}
-    else:
-        warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
-        return None
-    return node_type, quantize_op, qparams  # type: ignore[return-value]
 
 # Keep it here for BC in torch.quantization namespace, we can remove it after
 # we deprecate the torch.quantization namespace
