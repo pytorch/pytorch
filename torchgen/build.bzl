@@ -14,9 +14,3 @@ def define_targets(rules):
         srcs = [":torchgen"],
         visibility = ["//visibility:public"],
     )
-
-    rules.py_binary(
-        name = "gen_executorch",
-        srcs = [":torchgen"],
-        visibility = ["//visibility:public"],
-    )
