@@ -1784,7 +1784,7 @@ def norm(
 ):
     p = p if p is not None else 2.0
     if dtype:
-        return torch.linalg.vector_norm(self, p, dim, keepdim, dtype=dtype)
+        return torch.linalg.vector_norm(self.to(dtype), p, dim, keepdim, dtype=dtype)
 
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         self, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
