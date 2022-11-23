@@ -459,6 +459,16 @@ class SizeVarAllocator(object):
         added = set()
 
         for name, value in graph_inputs.items():
+            if not isinstance(value, Expr):
+                continue
+            if value in needed:
+                needed.remove(value)
+                added.add(value)
+                code.writeline(f"{value} = {name}")
+            #elif isinstance(value, sympy.Symbol):
+            #    assert value in added, f"{value} is needed but not added"
+
+        for name, value in graph_inputs.items():
             if isinstance(value, Expr):
                 continue
             shapes = value.get_size()

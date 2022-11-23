@@ -1747,7 +1747,7 @@ def new_constant(fill_value):
         assert not layout or layout == torch.strided
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
-        size = [sympy.Integer(s) for s in size]
+        size = [sympy.Integer(s) if isinstance(s, int) else s for s in size]
         return _full(fill_value, device, dtype, size)
 
     return _new_constant
