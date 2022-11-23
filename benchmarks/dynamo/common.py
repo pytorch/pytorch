@@ -1318,9 +1318,15 @@ class BenchmarkRunner:
         elif branch:
             print("RUNNING ON BRANCH:", branch)
         mode = "train" if self.args.training else "eval"
-        print(f"{current_device:4} {mode:5} {current_name:34} ", end="", flush=True)
         start_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
         start_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
+        # BEGIN DO NOT DELETE THESE LINES IF MERGE CONFLICT
+        prefix = f"{current_device:4} {mode:5} {current_name:34}"
+        print(
+            f"Running {os.path.basename(sys.argv[0])} {current_name}...",
+            file=sys.stderr,
+        )
+        # END DO NOT DELETE THESE LINES
         if self.args.accuracy:
             status = self.check_accuracy(
                 name, model, example_inputs, optimize_ctx, experiment
@@ -1329,7 +1335,6 @@ class BenchmarkRunner:
             status = self.run_performance_test(
                 name, model, example_inputs, optimize_ctx, experiment
             )
-            print(status)
         end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
         end_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
         if explain:
@@ -1337,6 +1342,7 @@ class BenchmarkRunner:
                 f"Dynamo produced {end_unique_graphs-start_unique_graphs} graph(s) "
                 f"covering {end_calls_captured-start_calls_captured} ops"
             )
+        print(f"{prefix} {status}")  # DO NOT DELETE THIS LINE IF MERGE CONFLICT
 
 
 def help(fn):
