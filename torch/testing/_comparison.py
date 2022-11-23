@@ -1545,7 +1545,7 @@ def assert_allclose(
     equal_nan: bool = True,
     msg: str = "",
 ) -> None:
-    """\
+    """
     .. warning::
 
        :func:`torch.testing.assert_allclose` is deprecated since ``1.12``. Please use
