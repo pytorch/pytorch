@@ -35,37 +35,35 @@ inline void _vec_log_softmax_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
-  static constexpr int64_t BLOCK_SIZE = 1024 * 128;
+  // Coincidentally, at::internal::GRAIN_SIZE is 32768, which is equal to the
+  // size of L1D cache on many processors. Some processors have 48 KB L1D cache
+  // nowadays, so maybe in the future, we can leverage the knowledge of a
+  // machine's L1D cache size.
   int64_t CHUNK_SIZE = std::max(
-      (int64_t)1, (int64_t)(BLOCK_SIZE / (sizeof(scalar_t) * dim_size)));
+      (int64_t)1,
+      (int64_t)(at::internal::GRAIN_SIZE / (sizeof(scalar_t) * dim_size)));
 
   // we assume that at::GRAIN_SIZE is an appropriate grain-size.
   // usually, we'd use all the threads in the OpenMP thread pool.
   int64_t grain_size = (outer_size - 1) /
       std::max((int64_t)1, (int64_t)(at::get_num_threads() - 1));
   // assign fewer threads if the number of computations is not large enough
-  int64_t num_computations = 16 * outer_size * dim_size;
+  // rough estimate for the number of computations
+  int64_t num_computations = (16 * outer_size * dim_size) / Vec::size();
   if ((num_computations < at::get_num_threads() * at::internal::GRAIN_SIZE) &&
       (num_computations > at::internal::GRAIN_SIZE)) {
     int64_t fewer_threads = num_computations / at::internal::GRAIN_SIZE;
-    grain_size = (outer_size - 1) / fewer_threads;
+    grain_size = (outer_size - 1) / (fewer_threads);
   } else if (num_computations <= at::internal::GRAIN_SIZE) {
     // only 1 thread will be used
     grain_size = outer_size;
   }
 
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
-#ifndef _MSC_VER
-    // This snippet is not used with MSVC, because it leads to the build error
-    // 'expression did not evaluate to a constant'
-    std::unique_ptr<scalar_t[]> tmp_sum_scalar(new scalar_t[CHUNK_SIZE]);
-    std::unique_ptr<scalar_t[]> max_input_arr(new scalar_t[CHUNK_SIZE]);
-#else
     // MSVC requires such a declaration of dynamic arrays
     // Source: https://stackoverflow.com/a/33423538
     scalar_t* tmp_sum_scalar = new scalar_t[CHUNK_SIZE];
     scalar_t* max_input_arr = new scalar_t[CHUNK_SIZE];
-#endif
     for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
       int64_t loop_end = CHUNK_SIZE;
       if (ii + CHUNK_SIZE > end)
@@ -73,11 +71,7 @@ inline void _vec_log_softmax_lastdim(
       for (const auto j : c10::irange(loop_end)) {
         int64_t i = ii + j;
         scalar_t* input_data = input_data_base + i * dim_size;
-#ifndef _MSC_VER
-        max_input_arr.get()[j] = vec::reduce_all<scalar_t>(
-#else
         max_input_arr[j] = vec::reduce_all<scalar_t>(
-#endif
             [](Vec& x, Vec& y) { return vec::maximum(x, y); },
             input_data,
             dim_size);
@@ -86,11 +80,7 @@ inline void _vec_log_softmax_lastdim(
         int64_t i = ii + j;
         scalar_t* input_data = input_data_base + i * dim_size;
         scalar_t max_input = max_input_arr[j];
-#ifndef _MSC_VER
-        tmp_sum_scalar.get()[j] = vec::map_reduce_all<scalar_t>(
-#else
         tmp_sum_scalar[j] = vec::map_reduce_all<scalar_t>(
-#endif
             [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
             [](Vec x, Vec y) { return x + y; },
             input_data,
@@ -100,13 +90,8 @@ inline void _vec_log_softmax_lastdim(
       // vectorized version (aside from perf improvements).
       vec::map(
           [](Vec x) { return x.log(); },
-#ifndef _MSC_VER
-          tmp_sum_scalar.get(),
-          tmp_sum_scalar.get(),
-#else
           tmp_sum_scalar,
           tmp_sum_scalar,
-#endif
           loop_end);
       for (const auto j : c10::irange(loop_end)) {
         int64_t i = ii + j;
@@ -129,10 +114,8 @@ inline void _vec_log_softmax_lastdim(
             dim_size);
       }
     }
-#ifdef _MSC_VER
     delete max_input_arr;
     delete tmp_sum_scalar;
-#endif
   });
 }
 
