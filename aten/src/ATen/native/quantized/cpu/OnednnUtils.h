@@ -5,6 +5,9 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ideep.hpp>
+#include <cpuinfo.h>
+
+#include <c10/util/CallOnce.h>
 
 using PrimitiveCacheKey = std::tuple<
     double, // input_scale
@@ -349,6 +352,50 @@ static void try_reorder(
     t.set_scale(scales);
   }
 }
+
+// ONEDNN requires symmetric quantization of weight
+// Use this util function to check.
+static bool is_weight_symmetric_quant(
+      const at::Tensor& weight,
+      bool is_transposed_conv) {
+  bool is_symmetric = true;
+  const auto qtype = weight.qscheme();
+  if (qtype == c10::kPerTensorAffine) {
+    is_symmetric &= (weight.q_zero_point() == 0);
+  } else if (qtype == c10::kPerChannelAffine) {
+    if (is_transposed_conv) {
+      // This case is currently not supported in PyTorch
+      // but we do not want to raise an error in this util function.
+      is_symmetric = false;
+    } else {
+      auto output_channels = weight.size(0);
+      for (int i = 0; i < output_channels; ++i) {
+        auto zp = weight.q_per_channel_zero_points()[i].item<int32_t>();
+        is_symmetric &= (zp == 0);
+      }
+    }
+  } else {
+    // This case is currently not supported in PyTorch
+      // but we do not want to raise an error in this util function.
+    is_symmetric = false;
+  }
+  return is_symmetric;
 }
+
+// Check if onednn should be used w.r.t fbgemm
+static bool should_use_onednn_quant(
+    const at::Tensor& weight,
+    bool is_transposed_conv,
+    int groups,
+    torch::List<int64_t> output_padding) {
+  bool vnni_available = cpuinfo_has_x86_avx512vnni();
+  bool w_sym_quant =
+      is_weight_symmetric_quant(weight, is_transposed_conv);
+  bool opad_all_zero =
+      std::all_of(output_padding.begin(), output_padding.end(), [](int i) { return i==0; });
+  return vnni_available && (groups <= 100) && w_sym_quant && opad_all_zero;
+}
+
+} // onednn_utils
 
 #endif // #if AT_MKLDNN_ENABLED()

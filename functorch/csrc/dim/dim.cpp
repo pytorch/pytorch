@@ -12,6 +12,7 @@
 #include <iostream>
 #include <vector>
 //#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/Export.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/functorch/DynamicLayer.h>
@@ -1440,10 +1441,18 @@ py::object getname(PyCodeObject* code, _Py_CODEUNIT c) {
           names = code->co_names;
           break;
         case STORE_FAST:
+#if PY_VERSION_HEX < 0x030b0000
           names = code->co_varnames;
+#else
+          names = PyCode_GetVarnames(code);
+#endif
           break;
         case STORE_DEREF:
+#if PY_VERSION_HEX < 0x030b0000
           names = code->co_cellvars;
+#else
+          names = PyCode_GetCellvars(code);
+#endif
           break;
         default:
             return py::object();
@@ -1475,6 +1484,13 @@ py::object create_dimlist(py::object name, py::handle size) {
     return std::move(d);
 }
 
+
+
+// Python wrappers that make new reflection primitives available for older runtimes
+#if PY_VERSION_HEX < 0x030b0000
+#define _PyCode_CODE(CO) ((_Py_CODEUNIT*)PyBytes_AS_STRING((CO)->co_code))
+#endif
+
 template<py::object (*create_object)(py::object, py::handle)>
 static PyObject* _dims(PyObject *self,
                       PyObject *const *args,
@@ -1500,12 +1516,13 @@ static PyObject* _dims(PyObject *self,
     }
 
     PyThreadState* state = PyThreadState_GET();
-    PyFrameObject* f = state->frame;
-    auto code = (_Py_CODEUNIT*)PyBytes_AS_STRING(f->f_code->co_code);
+    auto f = py::obj<PyFrameObject>::steal(PyThreadState_GetFrame(state));
+    auto c = py::obj<PyCodeObject>::steal(PyFrame_GetCode(f.ptr()));
+    auto code = _PyCode_CODE(c.ptr());
 #if PY_VERSION_HEX >= 0x030a00f0
-    int first = f->f_lasti + 1;
+    int first = PyFrame_GetLasti(f.ptr()) + 1;
 #else
-    int first = f->f_lasti /  2 + 1;
+    int first = PyFrame_GetLasti(f.ptr()) /  2 + 1;
 #endif
     auto unpack = code[first];
     int names_start = first;
@@ -1529,7 +1546,7 @@ static PyObject* _dims(PyObject *self,
     auto genobject = [&](int i) -> py::object {
         py::object name;
         if (i < found_ndims) {
-            name = getname(f->f_code, code[names_start + i]);
+            name = getname(c.ptr(), code[names_start + i]);
         }
         if (!name.ptr()) {
             name = py::unicode_from_format("d%d", i);
@@ -1750,6 +1767,9 @@ static PyObject* order(PyObject *_,
                       PyObject *kwnames) {
     Arena A;
     PY_BEGIN
+    if (kwnames) {
+        py::raise_error(PyExc_TypeError, "unexpected keyword arguments %S", kwnames);
+    }
     AT_ASSERT(nargs-- > 0);
     Slice<DimEntry> orig_levels;
     Slice<DimEntry> levels;

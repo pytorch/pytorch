@@ -332,7 +332,7 @@ __device__ inline T operator()(T const & x, T const & y) { return x + y; }
 
 template<int THREADS>
 struct Allreduce {
-    static_assert(THREADS == 32 || THREADS == 16 || THREADS == 8 || THREADS == 4);
+    static_assert(THREADS == 32 || THREADS == 16 || THREADS == 8 || THREADS == 4, "");
     template<typename T, typename Operator>
     static __device__ inline T run(T x, Operator &op) {
         constexpr int OFFSET = THREADS / 2;

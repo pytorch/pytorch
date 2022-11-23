@@ -130,6 +130,9 @@ class TestAvgPool(TestCase):
 
 
 class TestPoolingNN(NNTestCase):
+    _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
+
     def test_adaptive_pooling_input_size(self):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
@@ -708,17 +711,11 @@ torch.cuda.synchronize()
             self.assertEqual(model(x), expected)
 
         # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
-        check([[]], (1, None, 0, 1, False, False), [[]])
-        check([[[]]], (1, None, 0, 1, False, False), [[[]]])
-        check([[[]]], (2, 1, 1, 2, False, True), [[[]]])
         check([[1]], (1, None, 0, 1, False, False), [[1]])
         check([[1]], (2, None, 1, 2, False, False), [[float('-inf')]])
         check([[1], [1]], (2, None, 1, 2, False, False), [[float('-inf')], [float('-inf')]])
         check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
         check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
-
-        empty_tensor = torch.empty((2, 0, 1), device=device, dtype=dtype)
-        check(empty_tensor, (1, None, 0, 1, False, False), empty_tensor)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)

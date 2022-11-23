@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
+#include <ATen/native/cuda/Pow.cuh>
 
 
 namespace at { namespace native {
@@ -60,8 +61,8 @@ C10_DEVICE __forceinline__ void adam_math(
             max_exp_avg_sq = std::max(max_exp_avg_sq, exp_avg_sq);
         }
 
-        const opmath_t bias_correction1 = 1 - std::pow(beta1, *step_count);
-        const opmath_t bias_correction2 = 1 - std::pow(beta2, *step_count);
+        const opmath_t bias_correction1 = 1 - at::native::pow_(beta1, *step_count);
+        const opmath_t bias_correction2 = 1 - at::native::pow_(beta2, *step_count);
 
         const opmath_t step_size = lr / bias_correction1;
 
