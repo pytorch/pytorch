@@ -2985,6 +2985,7 @@ class FallbackKernel(ExternKernelAlloc):
             aten._fft_c2c.out,
             aten._linalg_svd.default,
             aten._linalg_svd.U,
+            aten.upsample_bilinear2d.default,
         )
         context = (
             FakeTensorMode if kernel not in fake_incorrect_kernels else nullcontext
