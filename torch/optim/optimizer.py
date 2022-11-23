@@ -170,15 +170,22 @@ class Optimizer(object):
                 with torch.autograd.profiler.record_function(profile_name):
                     # call optimizer step pre hooks
                     for pre_hook in self._optimizer_step_pre_hooks.values():
-                        pre_hook(*args)
+                        result = pre_hook(self, args, kwargs)
+                        if result is not None:
+                            if isinstance(result, tuple) and len(result) == 2:
+                                args, kwargs = result
+                            else:
+                                raise RuntimeError("{func} must return None or a tuple "
+                                f"of (new_args, new_kwargs), but got {result}."
+                            )
 
                     out = func(*args, **kwargs)
                     obj._optimizer_step_code()
 
                     # call optimizer step post hooks
                     for post_hook in self._optimizer_step_post_hooks.values():
-                        post_hook(*args)
-                   
+                        post_hook(self, args, kwargs)
+
                     return out
 
             return wrapper
