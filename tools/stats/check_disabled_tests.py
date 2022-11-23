@@ -9,27 +9,14 @@ from typing import Any, Dict, Generator, Tuple
 from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
     download_s3_artifacts,
+    is_rerun_disabled_tests,
     unzip,
     upload_to_s3,
 )
 from tools.stats.upload_test_stats import process_xml_element
 
 TESTCASE_TAG = "testcase"
-TARGET_WORKFLOW = "--rerun-disabled-tests"
 SEPARATOR = ";"
-
-
-def is_rerun_disabled_tests(root: ET.ElementTree) -> bool:
-    """
-    Check if the test report is coming from rerun_disabled_tests workflow
-    """
-    skipped = root.find(".//*skipped")
-    # Need to check against None here, if not skipped doesn't work as expected
-    if skipped is None:
-        return False
-
-    message = skipped.attrib.get("message", "")
-    return TARGET_WORKFLOW in message or "num_red" in message
 
 
 def process_report(
