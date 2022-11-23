@@ -62,8 +62,8 @@ inline void _vec_log_softmax_lastdim(
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     // MSVC requires such a declaration of dynamic arrays
     // Source: https://stackoverflow.com/a/33423538
-    scalar_t* tmp_sum_scalar = new scalar_t[CHUNK_SIZE];
-    scalar_t* max_input_arr = new scalar_t[CHUNK_SIZE];
+    std::unique_ptr<scalar_t[]> tmp_sum_scalar(new scalar_t[CHUNK_SIZE]);
+    std::unique_ptr<scalar_t[]> max_input_arr(new scalar_t[CHUNK_SIZE]);
     for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
       int64_t loop_end = CHUNK_SIZE;
       if (ii + CHUNK_SIZE > end)
@@ -71,7 +71,7 @@ inline void _vec_log_softmax_lastdim(
       for (const auto j : c10::irange(loop_end)) {
         int64_t i = ii + j;
         scalar_t* input_data = input_data_base + i * dim_size;
-        max_input_arr[j] = vec::reduce_all<scalar_t>(
+        max_input_arr.get()[j] = vec::reduce_all<scalar_t>(
             [](Vec& x, Vec& y) { return vec::maximum(x, y); },
             input_data,
             dim_size);
@@ -80,7 +80,7 @@ inline void _vec_log_softmax_lastdim(
         int64_t i = ii + j;
         scalar_t* input_data = input_data_base + i * dim_size;
         scalar_t max_input = max_input_arr[j];
-        tmp_sum_scalar[j] = vec::map_reduce_all<scalar_t>(
+        tmp_sum_scalar.get()[j] = vec::map_reduce_all<scalar_t>(
             [max_input](Vec x) { return (x - Vec(max_input)).exp(); },
             [](Vec x, Vec y) { return x + y; },
             input_data,
@@ -90,8 +90,8 @@ inline void _vec_log_softmax_lastdim(
       // vectorized version (aside from perf improvements).
       vec::map(
           [](Vec x) { return x.log(); },
-          tmp_sum_scalar,
-          tmp_sum_scalar,
+          tmp_sum_scalar.get(),
+          tmp_sum_scalar.get(),
           loop_end);
       for (const auto j : c10::irange(loop_end)) {
         int64_t i = ii + j;
@@ -114,8 +114,6 @@ inline void _vec_log_softmax_lastdim(
             dim_size);
       }
     }
-    delete[] max_input_arr;
-    delete[] tmp_sum_scalar;
   });
 }
 
