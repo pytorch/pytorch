@@ -3793,7 +3793,7 @@ std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tenso
 // operators that it calls must preserve the striding behavior of their inputs.
 // Specifically, the output of *_scatter(base, mutated_view, ...)
 // should have identical size/stride/storage_offset to "base".
-at::Tensor clone_preserve_strides(const at::Tensor& self) {
+static at::Tensor clone_preserve_strides(const at::Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.has_storage());
   // In cases where the input tensor has internal memory overlap, we cannot actually
   // preserve the strides/storage_offset of the input tensor, because

@@ -509,6 +509,7 @@ class ShapeEnv(object):
             raise RuntimeError("Need sympy installed to create symbolic shapes")
         if val < 0:
             # all sympy base variables must be positive and > 1
+            assert False
             return -self.create_symbol(-val)
         # This implements duck-shaping: input sizes that match are assigned
         # the same symint
