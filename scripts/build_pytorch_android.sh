@@ -22,9 +22,6 @@ set -eux
 # 3. Runs pyotrch_android gradle build:
 # gradle assembleRelease
 
-echo "Activating conda environment ${CONDA_ENV}"
-conda activate $CONDA_ENV
-
 PYTORCH_DIR="$(cd $(dirname $0)/..; pwd -P)"
 PYTORCH_ANDROID_DIR=$PYTORCH_DIR/android
 
