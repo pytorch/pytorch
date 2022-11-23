@@ -33,7 +33,7 @@ class TestFlattening(TestCase):
         self.assertIn(("k2", 0), mapping.values())
         self.assertIn(("k2", 1), mapping.values())
         self.assertIn(("k2", 2, 0, "k3"), mapping.values())
-        self.assertIn(("k3"), mapping.values())
+        self.assertIn(("k3",), mapping.values())
 
 
 if __name__ == "__main__":
