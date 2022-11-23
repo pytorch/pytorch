@@ -217,7 +217,7 @@ def make_output_tensor(
     Args:
         output (:class:`DTensor`):
             Output of module to be converted.
-        device_mesh (DeviceMesh, optional):
+        device_mesh (:class:`DeviceMesh`, optional):
             Object which is needed to replicate the output and it needs to be
             a 1D ``device_mesh`` and we will throw exceptions if a non-1D
             ``device_mesh`` is passed in. If no ``device_mesh`` is passed in,
