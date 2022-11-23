@@ -247,9 +247,9 @@ class TestNamedTensor(TestCase):
             tensor = torch.randn(2, 3, device=device)
             other = tensor.clone()
 
-            self.assertEqual(tensor.rename('N', 'C'), other.rename('N', 'C'), rtol=0, atol=0, exact_device=True)
-            self.assertNotEqual(tensor.rename('M', 'C'), other.rename('N', 'C'), rtol=0, atol=0, exact_device=True)
-            self.assertNotEqual(tensor.rename(None, 'C'), other.rename('N', 'C'), rtol=0, atol=0, exact_device=True)
+            self.assertTrue(torch.equal(tensor.rename('N', 'C'), other.rename('N', 'C')))
+            self.assertFalse(torch.equal(tensor.rename('M', 'C'), other.rename('N', 'C')))
+            self.assertFalse(torch.equal(tensor.rename(None, 'C'), other.rename('N', 'C')))
 
     def test_squeeze(self):
         x = create('N:3,C:1,H:1,W:1')
