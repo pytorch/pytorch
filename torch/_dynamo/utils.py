@@ -712,9 +712,8 @@ try:
             def _extract(symbol):
                 if isinstance(symbol, int):
                     return None
-                sym_expr = symbol.get_pyobj().expr
-                if not isinstance(sym_expr, sympy.Symbol):
-                    return None
+                sym_expr = symbol.get_pyobj().symbol
+                assert sym_expr is not None
                 return sym_expr
 
             def _record_ref(e, index, symbol, kind):

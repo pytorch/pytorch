@@ -507,6 +507,11 @@ class ShapeEnv(object):
     def _build_symint(self, ivar, expr):
         if not self._suppress_guards_tls():
             stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+            if isinstance(expr, sympy.Symbol):
+                self.var_to_ivar[expr] = ivar
+            # This works because sympy will simplify double negative
+            elif isinstance(-expr, sympy.Symbol):
+                self.var_to_ivar[expr] = -ivar
             self._add_guard(
                 sympy.Eq(ivar, expr),
                 stack
