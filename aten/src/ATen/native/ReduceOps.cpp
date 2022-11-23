@@ -2076,6 +2076,7 @@ Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
 }
 
 bool cpu_equal(const Tensor& self, const Tensor& other) {
+  TORCH_WARN_ONCE("`torch.equal` is deprecated since 1.15 and will be removed in 1.17.")
   if (!at::namedinference::are_names_equal(
         self.unsafeGetTensorImpl(), other.unsafeGetTensorImpl())) {
     return false;

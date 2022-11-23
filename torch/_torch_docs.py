@@ -4060,6 +4060,43 @@ add_docstr(
     r"""
 equal(input, other) -> bool
 
+.. warning::
+
+   :func:`torch.equal` is deprecated since ``1.15`` and will be removed in ``1.17``. Depending on your use case you 
+   have several options:
+   
+   - For testing purposes, e.g. ``assert torch.equal(...)``, use :func:`torch.testing.assert_close` with 
+     ``rtol=0, atol=0`` instead.
+   - If you don't need a shape or dtype check, use ``torch.eq(input, other).all().item()`` instead.
+   - If you need an exact replica of the behavior, you can use this thin wrapper:
+   
+     .. code:: python
+
+        def equal(input, other) -> bool:
+            if not (
+                isinstance(input, torch.Tensor)
+                and isinstance(other, torch.Tensor)
+            ):
+                raise TypeError(
+                    f"Expected two tensors, "
+                    f"but got {type(input)} and {type(other)} instead."
+                )
+        
+            msg_fmtstr = "The values for attribute '{}' do not match: {} != {}."
+            if input.device != other.device:
+                raise RuntimeError(
+                    msg_fmtstr.format("device", input.device, other.device)
+                )
+            if input.dtype != other.dtype:
+                raise RuntimeError(
+                    msg_fmtstr.format("dtype", input.dtype, other.dtype)
+                )
+        
+            if input.shape != other.shape:
+                return False
+        
+            return torch.eq(input, other).all().item()
+
 ``True`` if two tensors have the same size and elements, ``False`` otherwise.
 
 Example::

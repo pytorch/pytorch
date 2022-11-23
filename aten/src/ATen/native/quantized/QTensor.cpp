@@ -226,6 +226,7 @@ Tensor quantized_clone(
 }
 
 bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
+  TORCH_WARN_ONCE("`torch.equal` is deprecated since 1.15 and will be removed in 1.17.")
   TORCH_CHECK(
       self.device().type() == kCPU && other.device().type() == kCPU,
       "quantized_equal is implemented only for the QuantizedCPU backend");
