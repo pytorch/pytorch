@@ -86,7 +86,7 @@ class TensorParallelAPITests(DTensorTestBase):
         device_mesh = DeviceMesh(
             self.device_type, torch.arange(self.world_size)
         )
-        _parallelize_mlp(model_tp, device_mesh, PairwiseParallel())
+        model_tp = _parallelize_mlp(model_tp, device_mesh, PairwiseParallel())
 
         # Ensure the parameter is properly distributed.
         self.assertEqual(
@@ -125,7 +125,7 @@ class TensorParallelAPITests(DTensorTestBase):
             _parallelize_mlp(model_tp, device_mesh, DummyParallel())
 
         with self.assertRaisesRegex(
-            RuntimeError, "We only support even number of Linear for MLP."
+            RuntimeError, "More than one nn.Linear needed for a MLP."
         ):
             _parallelize_mlp(
                 torch.nn.Linear(10, 5), device_mesh, PairwiseParallel()
