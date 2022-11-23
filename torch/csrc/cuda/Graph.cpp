@@ -49,17 +49,17 @@ void THCPGraph_init(PyObject* module) {
           "pool",
           torch::wrap_pybind_function(&at::cuda::CUDAGraph::pool),
           py::call_guard<py::gil_scoped_release>());
-  .def(
-      "debug_dump",
-      torch::wrap_pybind_function(&::at::cuda::CUDAGraph::debug_dump),
-      py::call_guard<py::gil_scoped_release>());
-  .def(
-      "enable_debug_mode",
-      torch::wrap_pybind_function(&::at::cuda::CUDAGraph::enable_debug_mode),
-      py::call_guard<py::gil_scoped_release>());
-  .def(
-      "debug_dump",
-      torch::wrap_pybind_function(&::at::cuda::CUDAGraph::debug_dump),
-      py::call_guard<py::gil_scoped_release>(),
-      py::arg("debug_path"));
+      .def(
+          "debug_dump",
+          torch::wrap_pybind_function(&::at::cuda::CUDAGraph::debug_dump),
+          py::call_guard<py::gil_scoped_release>());
+      .def(
+          "enable_debug_mode",
+          torch::wrap_pybind_function(&::at::cuda::CUDAGraph::enable_debug_mode),
+          py::call_guard<py::gil_scoped_release>());
+      .def(
+          "debug_dump",
+          torch::wrap_pybind_function(&::at::cuda::CUDAGraph::debug_dump),
+          py::call_guard<py::gil_scoped_release>(),
+          py::arg("debug_path"));
 }
