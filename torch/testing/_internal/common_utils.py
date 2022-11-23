@@ -2569,7 +2569,7 @@ class TestCase(expecttest.TestCase):
 
         # TODO: explain why this is needed
         if isinstance(x, torch.TypedStorage) and isinstance(y, torch.TypedStorage):
-            x, y = [[storage._getitem(idx) for idx in storage._size()] for storage in [x, y]]
+            x, y = [[storage._getitem(idx) for idx in range(storage._size())] for storage in [x, y]]
 
         assert_equal(
             x,
