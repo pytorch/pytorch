@@ -72,10 +72,10 @@ def make_input_shard_1d(
     Shard input tensor on ``dim`` over an 1-D device mesh. This function will be used in ParallelStyle.
 
     Args:
-        input (Union[Tensor, DTensor]):
-            This single tensor will be sharded on dimension ``dim``
+        input (Union[:class:`torch.Tensor`, :class:`DTensor`]):
+            Single tensor will be sharded on dimension ``dim``
             over the 1-D :class:`DeviceMesh`.
-        device_mesh (DeviceMesh, optional):
+        device_mesh (:class:`DeviceMesh`, optional):
             The 1-D device mesh where ``input`` will be sharded.
             If no :class:`DeviceMesh` is passed and ``input`` is a :class:`DTensor`,
             `input.device_mesh` will be used.
@@ -109,10 +109,10 @@ def make_input_shard_1d_dim_last(
     Wrapper func of ``make_input_shard_1d`` with ``dim`` = -1.
 
     Args:
-        input (Union[Tensor, DTensor]):
+        input (Union[:class:`torch.Tensor`, :class:`DTensor`]):
             This single tensor will be sharded on dimension ``dim``
             over the 1-D :class:`DeviceMesh`.
-        device_mesh (DeviceMesh, optional):
+        device_mesh (:class:`DeviceMesh`, optional):
             The 1-D device mesh where ``input`` will be sharded.
             If no :class:`DeviceMesh` is passed and ``input`` is a :class:`DTensor`,
             `input.device_mesh` will be used.
@@ -134,9 +134,9 @@ def make_input_replicate_1d(
     Replicate input tensor over an 1-D device mesh. This function will be used in ParallelStyle.
 
     Args:
-        input (Union[Tensor, DTensor]):
-            This single tensor will be replicated over the 1-D :class:`DeviceMesh`.
-        device_mesh (DeviceMesh, optional):
+        input (Union[:class:`torch.Tensor`, :class:`DTensor`]):
+            This input tensor will be replicated over the 1-D :class:`DeviceMesh`.
+        device_mesh (:class:`DeviceMesh`, optional):
             The 1-D device mesh where ``input`` will be replicated.
             If no :class:`DeviceMesh` is passed and ``input`` is a :class:`DTensor`,
             ``input.device_mesh`` will be used.
@@ -166,14 +166,17 @@ def make_output_shard_1d(
 ) -> DTensor:
     """
     Convert Output DTensor to a sharded DTensor. This will be used in ParallelStyle.
+
     Args:
-        output (DTensor): output of module to be converted.
-        device_mesh (Optional[DeviceMesh]): :class:`DeviceMesh` object needed to
-            shard the output and it needs to be a 1D ``device_mesh`` and we will throw
-            exceptions if a non-1D ``device_mesh`` is passed in. If no ``device_mesh``
-            is passed in, we will reuse the one from output.
+        output (:class:`DTensor`):
+            Output of module to be converted.
+        device_mesh (:class:`DeviceMesh`, optional):
+            Object needed to shard the output and it needs to be a 1D ``device_mesh``
+            and we will throw exceptions if a non-1D ``device_mesh`` is passed in.
+            If no ``device_mesh`` is passed in, we will reuse the one from output.
             Default: ``None``
         dim (int): Sharding dim for output. Default: 0
+
     Return:
         A :class:`DTensor` object sharded on the given dim.
     """
@@ -187,13 +190,16 @@ def make_output_replicate_1d(
 ) -> DTensor:
     """
     Convert Output DTensor to a replicated DTensor. This will be used in ParallelStyle.
+
     Args:
-        output (DTensor): output of module to be converted.
-        device_mesh (Optional[DeviceMesh]): :class:`DeviceMesh` object needed to
-            replicate the output and it needs to be a 1D ``device_mesh`` and we will
-            throw exceptions if a non-1D ``device_mesh`` is passed in. If no
-            ``device_mesh`` is passed in, we will reuse the one from output.
+        output (:class:`DTensor`):
+            Output of module to be converted.
+        device_mesh (:class:`DeviceMesh`, optional):
+            Object needed to replicate the output and it needs to be a 1D ``device_mesh``
+            and we will throw exceptions if a non-1D ``device_mesh`` is passed in.
+            If no ``device_mesh`` is passed in, we will reuse the one from output.
             Default: ``None``
+
     Return:
         A :class:`DTensor` object made replicate.
     """
@@ -207,13 +213,17 @@ def make_output_tensor(
 ) -> torch.Tensor:
     """
     Convert Output DTensor to a replicated DTensor first and then convert it to Tensor.
+
     Args:
-        output (DTensor): output of module to be converted.
-        device_mesh (Optional[DeviceMesh]): :class:`DeviceMesh` object needed to
-            replicate the output and it needs to be a 1D ``device_mesh`` and we will
-            throw exceptions if a non-1D ``device_mesh`` is passed in. If no
-            ``device_mesh`` is passed in, we will reuse the one from output.
+        output (:class:`DTensor`):
+            Output of module to be converted.
+        device_mesh (DeviceMesh, optional):
+            Object which is needed to replicate the output and it needs to be
+            a 1D ``device_mesh`` and we will throw exceptions if a non-1D
+            ``device_mesh`` is passed in. If no ``device_mesh`` is passed in,
+            we will reuse the one from output.
             Default: ``None``
+
     Return:
         A :class:`torch.Tensor` object converted from output DTensor.
     """

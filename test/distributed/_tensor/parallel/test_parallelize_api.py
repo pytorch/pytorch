@@ -91,9 +91,9 @@ class TensorParallelAPITests(DTensorTestBase):
             dist_param = dist_module.get_parameter(name)
             param = param.grad if compare_grad else param
             dist_param = dist_param.grad if compare_grad else dist_param
-            if (
-                self.rank == 0
-                or not skip_rowwise_bias
+            if self.rank == 0 or (
+                name not in ["net2.bias"]
+                and not skip_rowwise_bias
                 or name not in ["bias", "net2.bias"]
             ):
                 self.assertEqual(
@@ -132,7 +132,7 @@ class TensorParallelAPITests(DTensorTestBase):
 
         local_optim.step()
         dist_optim.step()
-        self._compare_params(local_module, dist_module, rowwise, True)
+        self._compare_params(local_module, dist_module, rowwise)
 
     @with_comms
     def test_parallelize_mlp(self):

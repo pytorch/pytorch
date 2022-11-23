@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Any, Optional, Sequence, Callable, cast
+from typing import Optional, Sequence, Callable, cast
 
 import torch
 import torch.nn as nn
