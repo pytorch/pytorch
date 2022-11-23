@@ -200,6 +200,100 @@ C10_DEFINE_TEST(TestLog1p, Small) {
   }
 }
 
+C10_DEFINE_TEST(TestLog1p, Extreme) {
+  // log(1 + x) ~ x for |x| << 1 and in the brink of overflow / underflow
+  {
+    c10::complex<float> x(-1, 1e-30);
+    c10::complex<float> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), -69.07755278982137, tol);
+    C10_ASSERT_NEAR(l.imag(), 1.5707963267948966, tol);
+  }
+  {
+    c10::complex<float> x(-1, 1e30);
+    c10::complex<float> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), 69.07755278982137, tol);
+    C10_ASSERT_NEAR(l.imag(), 1.5707963267948966, tol);
+  }
+  {
+    c10::complex<float> x(1e30, 1);
+    c10::complex<float> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), 69.07755278982137, tol);
+    C10_ASSERT_NEAR(l.imag(), 1e-30, tol);
+  }
+  {
+    c10::complex<float> x(1e-30, 1);
+    c10::complex<float> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), 0.34657359027997264, tol);
+    C10_ASSERT_NEAR(l.imag(), 0.7853981633974483, tol);
+  }
+  {
+    c10::complex<float> x(1e30, 1e30);
+    c10::complex<float> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), 69.42412638010134, tol);
+    C10_ASSERT_NEAR(l.imag(), 0.7853981633974483, tol);
+  }
+  {
+    c10::complex<float> x(1e-38, 1e-38);
+    c10::complex<float> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), 1e-38, tol);
+    C10_ASSERT_NEAR(l.imag(), 1e-38, tol);
+  }
+  {
+    c10::complex<float> x(1e-38, 2e-30);
+    c10::complex<float> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), 1e-30, tol);
+    C10_ASSERT_NEAR(l.imag(), 2e-30, tol);
+  }
+  {
+    c10::complex<double> x(-1, 1e-250);
+    c10::complex<double> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), -575.6462732485114, tol);
+    C10_ASSERT_NEAR(l.imag(), 1.5707963267948966, tol);
+  }
+  {
+    c10::complex<double> x(-1, 1e250);
+    c10::complex<double> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), 575.6462732485114, tol);
+    C10_ASSERT_NEAR(l.imag(), 1.5707963267948966, tol);
+  }
+  {
+    c10::complex<double> x(1e250, 1);
+    c10::complex<double> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), 575.6462732485114, tol);
+    C10_ASSERT_NEAR(l.imag(), 1e-250, tol);
+  }
+  {
+    c10::complex<double> x(1e-250, 1);
+    c10::complex<double> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), 0.34657359027997264, tol);
+    C10_ASSERT_NEAR(l.imag(), 0.7853981633974483, tol);
+  }
+  {
+    c10::complex<double> x(1e250, 1e250);
+    c10::complex<double> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), 575.9928468387914, tol);
+    C10_ASSERT_NEAR(l.imag(), 0.7853981633974483, tol);
+  }
+  {
+    c10::complex<double> x(1e-250, 1e-250);
+    c10::complex<double> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), 1e-250, tol);
+    C10_ASSERT_NEAR(l.imag(), 1e-250, tol);
+  }
+  {
+    c10::complex<double> x(1e-250, 2e-250);
+    c10::complex<double> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), 1e-250, tol);
+    C10_ASSERT_NEAR(l.imag(), 2e-250, tol);
+  }
+  {
+    c10::complex<double> x(2e-308, 1.5e-250);
+    c10::complex<double> l = std::log1p(x);
+    C10_ASSERT_NEAR(l.real(), 2e-308, tol);
+    C10_ASSERT_NEAR(l.imag(), 1.5e-308, tol);
+  }
+}
+
 // Power functions
 
 C10_DEFINE_TEST(TestPowSqrt, Equal) {
