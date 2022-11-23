@@ -298,23 +298,23 @@ C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T>& z) {
   // log(r * e ^ (i * a)) = log(r) + i * a
   // With z = x + iy, the term r can be written as
   // r = ((1 + x) ^ 2 + y ^ 2) ^ 0.5
-  //   = (1 + x) * (1 + (y / (1 + x)) ^ 2) ^ 0.5
+  //   = (1 + x ^ 2 + 2 * x + y ^ 2) ^ 0.5
   // So, log(r) is
-  // log(r) = log(1 + x) + 0.5 * log(1 + (y / (1 + x)) ^ 2)
-  //        = log1p(x) + 0.5 * log1p((y / (1 + x)) ^ 2)
+  // log(r) = 0.5 * log(1 + x ^ 2 + 2 * x + y ^ 2)
+  //        = 0.5 * log1p(x * (x + 2) + y ^ 2)
   // we need to use the expression only on certain condition to avoid overflow
-  // from (y / (1 + x)) ^ 2
-  // Thanks to @WarrenWeckesser for the reformulation and the code
-  // https://github.com/numpy/numpy/pull/22611#issuecomment-1320949986
+  // and underflow from `(x * (x + 2) + y ^ 2)`
   T x = z.real();
   T y = z.imag();
+  T zabs = std::abs(z);
   T theta = std::atan2(y, x + T(1));
-
-  if (std::abs(x) < T(0.5) && std::abs(y) < x + 1) {
-    T yx = y / (x + 1);
-    return {std::log1p(x) + T(0.5) * std::log1p(yx * yx), theta};
-  }
-  else {
+  if (zabs < 0.5) {
+    T r = x * (T(2) + x) + y * y;
+    if (r == 0) { // handle underflow
+      return {x, theta};
+    }
+    return {T(0.5) * std::log1p(r), theta};
+  } else {
     T z0 = std::hypot(x + 1, y);
     return {std::log(z0), theta};
   }
