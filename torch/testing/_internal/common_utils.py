@@ -1830,13 +1830,14 @@ class RelaxedNumberPair(NumberPair):
             return super()._to_number(number_like, id=id)
 
 
-class TensorOrArrayPair(TensorLikePair):
+class RelaxedTensorLikePair(TensorLikePair):
     """Pair for tensor-like inputs.
 
     On the one hand this class is stricter than the builtin :class:`TensorLikePair` since it only allows instances of
-    :class:`torch.Tensor` and :class:`numpy.ndarray` rather than allowing any tensor-like than can be converted into a
-    tensor. On the other hand this class is looser since it converts all inputs into tensors with no regard of their
-    relationship, e.g. comparing a :class:`torch.Tensor` to :class:`numpy.ndarray` is fine.
+    :class:`torch.Tensor`, :class:`numpy.ndarray`, and :class:`torch.storage.TypedStorage` rather than allowing any
+    tensor-like than can be converted into a tensor. On the other hand this class is looser since it converts all inputs
+    into tensors with no regard of their relationship, e.g. comparing a :class:`torch.Tensor` to :class:`numpy.ndarray`
+    is fine.
 
     In addition, this class supports overriding the absolute and relative tolerance through the ``@precisionOverride``
     and ``@toleranceOverride`` decorators.
@@ -1872,7 +1873,7 @@ class TensorOrArrayPair(TensorLikePair):
         return [to_dense(input) for input in [actual, expected]]
 
     def _process_inputs(self, actual, expected, *, id, allow_subclasses):
-        self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
+        self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray, torch.storage.TypedStorage))
 
         actual, expected = [self._to_tensor(input) for input in (actual, expected)]
         for tensor in (actual, expected):
@@ -2567,10 +2568,6 @@ class TestCase(expecttest.TestCase):
         if isinstance(y, torch.Tensor) and y.is_nested:
             y = y.unbind()
 
-        # TODO: explain why this is needed
-        if isinstance(x, torch.TypedStorage) and isinstance(y, torch.TypedStorage):
-            x, y = [[storage._getitem(idx) for idx in range(storage._size())] for storage in [x, y]]
-
         assert_equal(
             x,
             y,
@@ -2578,7 +2575,7 @@ class TestCase(expecttest.TestCase):
                 NonePair,
                 RelaxedBooleanPair,
                 RelaxedNumberPair,
-                TensorOrArrayPair,
+                RelaxedTensorLikePair,
                 StringPair,
                 SetPair,
                 TypePair,
