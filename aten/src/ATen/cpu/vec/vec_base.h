@@ -92,7 +92,7 @@ using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 #if defined(__s390x__)
 template <class T, class TEMP=void>
 #else
-template <class T>
+template <class T, class=void>
 #endif
 struct Vectorized {
 private:
