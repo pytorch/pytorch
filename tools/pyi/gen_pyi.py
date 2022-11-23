@@ -74,7 +74,7 @@ def get_py_torch_functions(
 # TODO: Consider defining some aliases for our Union[...] types, to make
 # the stubs to read on the human eye.
 
-DEVICE_PARAM = "device: Union[_device, str, None]=None"
+DEVICE_PARAM = "device: Device=None"
 FACTORY_PARAMS = (
     f"dtype: Optional[_dtype]=None, {DEVICE_PARAM}, requires_grad: _bool=False"
 )
@@ -392,7 +392,7 @@ def gen_pyi(
             ],
             "numel": ["def numel(self: Tensor) -> _int: ..."],
             "as_tensor": [
-                "def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."
+                f"def as_tensor(data: Any, dtype: Optional[_dtype]=None, {DEVICE_PARAM}) -> Tensor: ..."
             ],
             "get_num_threads": ["def get_num_threads() -> _int: ..."],
             "set_num_threads": ["def set_num_threads(num: _int) -> None: ..."],
@@ -432,6 +432,7 @@ def gen_pyi(
                 " device: Optional[_device] = None,"
                 " requires_grad: bool = False) -> Tensor: ..."
             ],
+            "_sync": ["def _sync(t: Tensor) -> None: ..."],
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
             ],
@@ -441,6 +442,10 @@ def gen_pyi(
             "_to_functional_tensor": [
                 "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
+            "_enable_functionalization": [
+                "def _enable_functionalization(*, reapply_views: _bool = False): ..."
+            ],
+            "_disable_functionalization": ["def _disable_functionalization(): ..."],
             "range": [
                 "def range(start: Number, end: Number,"
                 " step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
@@ -595,7 +600,7 @@ def gen_pyi(
                 "def size(self, dim: _int) -> _int: ...",
             ],
             "stride": [
-                "def stride(self) -> Tuple[_int]: ...",
+                "def stride(self) -> Tuple[_int, ...]: ...",
                 "def stride(self, _int) -> _int: ...",
             ],
             "new_ones": [
@@ -624,7 +629,7 @@ def gen_pyi(
                     DEVICE_PARAM
                 ),
             ],
-            "as_subclass": ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
+            "as_subclass": ["def as_subclass(self, cls: Type[S]) -> S: ..."],
             "_make_subclass": [
                 "def _make_subclass(cls, data: Tensor, require_grad: _bool = False, dispatch_strides: _bool=False,"
                 " dispatch_device: _bool=False, device_for_backend_keys: Optional[_device] = None) -> Tensor: ..."
@@ -720,7 +725,7 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number, torch.SymIntNode, torch.SymFloatNode]{})"
+                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{})"
                 " -> Tensor: ...".format(binop, out_suffix)
             )
     for binop in ["add", "sub"]:
@@ -730,7 +735,7 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number, torch.SymIntNode, torch.SymFloatNode], "
+                "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
                 "*, alpha: Optional[Number]=1{})"
                 " -> Tensor: ...".format(binop, out_suffix)
             )

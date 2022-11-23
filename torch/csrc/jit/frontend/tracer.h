@@ -279,7 +279,21 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
+    const at::OptionalSymIntArrayRef& opt_value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
     ArrayRef<at::Tensor> value,
+    bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    std::vector<at::Tensor> value,
+    bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    at::ITensorListRef value,
     bool allow_undefined = false);
 TORCH_API void addInputs(
     Node* n,

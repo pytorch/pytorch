@@ -266,15 +266,9 @@ class FusionTransformer {
         fusion_->removeExpr(welford);
 
         fused_expr = IrBuilder::create<WelfordOp>(
-            out_avg,
-            out_var,
-            out_n,
-            init_avg,
-            init_var,
-            init_n,
-            in_avg,
-            in_var,
-            in_n,
+            WelfordTriplet{out_avg, out_var, out_n},
+            WelfordTriplet{in_avg, in_var, in_n},
+            WelfordTriplet{init_avg, init_var, init_n},
             true);
       } else if (auto grouped_rop = dynamic_cast<GroupedReductionOp*>(expr)) {
         TORCH_INTERNAL_ASSERT(!grouped_rop->isAllreduce());

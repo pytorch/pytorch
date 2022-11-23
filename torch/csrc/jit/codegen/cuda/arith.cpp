@@ -63,7 +63,11 @@ Val* promoteSize(Val* v1, Val* v2) {
   } else if (v1->isConstInt() && v2->isConstInt()) {
     TORCH_INTERNAL_ASSERT(
         v1->evaluateInt() == v2->evaluateInt(),
-        "Expected sizes to match but found ",
+        "Expected sizes of, ",
+        v1->toString(),
+        " and ",
+        v2->toString(),
+        " to match but found ",
         v1->evaluateInt(),
         " and ",
         v2->evaluateInt(),
@@ -404,17 +408,6 @@ Val* unaryOp(UnaryOpType type, Val* v1) {
   TORCH_INTERNAL_ASSERT(
       type != UnaryOpType::Address,
       "The reference operator & is not accessible in the Fusion IR");
-
-  // TODO: We should add the following, but we need to go through schedulers
-  // and make sure all calls to "fusion->inputs" includes the output of RandLike
-  //
-  //  If rand like, there isn't a real dependency on the input value, so map it
-  //  to a dummy scalar. if
-  //
-  // (type == UnaryOpType::RandLike) {
-  //   v1 = new NamedScalar("__rnd", v1->getDataType().value());
-  // }
-
   Val* out = newValLike(v1, v1->getDataType().value());
   IrBuilder::create<UnaryOp>(type, out, v1);
   return out;
@@ -447,6 +440,156 @@ TensorView* unaryOp(
   return unaryOp(type, cast_v1)->as<TensorView>();
 }
 
+// TENSOR FACTORIES
+TensorView* rand(const std::vector<Val*>& shape, DataType dtype) {
+  auto n = shape.size();
+  auto out = TensorViewBuilder()
+                 .ndims(n)
+                 .dtype(dtype)
+                 .contiguity(std::vector<bool>(n, true))
+                 .shape(shape)
+                 .build();
+  IrBuilder::create<RNGOp>(RNGOpType::Uniform, out, dtype);
+  return out;
+}
+
+// TENSOR FACTORIES
+TensorView* uniform(
+    const std::vector<Val*>& shape,
+    Val* low,
+    Val* high,
+    DataType dtype) {
+  auto n = shape.size();
+  auto out = TensorViewBuilder()
+                 .ndims(n)
+                 .dtype(dtype)
+                 .contiguity(std::vector<bool>(n, true))
+                 .shape(shape)
+                 .build();
+  IrBuilder::create<RNGOp>(
+      RNGOpType::UniformRange, out, dtype, std::vector<Val*>{low, high});
+  return out;
+}
+
+TensorView* rand_like(TensorView* tv) {
+  TORCH_CHECK(
+      isFloatingPointType(tv->dtype()),
+      "input must have floating point type, but got ",
+      tv->dtype());
+  std::vector<Val*> shape;
+  auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
+  shape.reserve(dom.size());
+  for (auto id : dom) {
+    shape.emplace_back(id->getMaybeExpandedExtent());
+  }
+  return rand(shape, tv->dtype());
+}
+
+Val* rand_like(Val* v) {
+  return rand_like(v->as<TensorView>());
+}
+
+TensorView* full(
+    const std::vector<Val*>& shape,
+    Val* fill_value,
+    DataType dtype) {
+  auto n = shape.size();
+  auto out = TensorViewBuilder()
+                 .ndims(n)
+                 .dtype(dtype)
+                 .contiguity(std::vector<bool>(n, true))
+                 .shape(shape)
+                 .build();
+  IrBuilder::create<FullOp>(out, fill_value, dtype);
+  return out;
+}
+
+TensorView* full_like(TensorView* tv, Val* fill_value) {
+  std::vector<Val*> shape;
+  auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
+  shape.reserve(dom.size());
+  for (auto id : dom) {
+    shape.emplace_back(id->getMaybeExpandedExtent());
+  }
+  return full(shape, fill_value, tv->dtype());
+}
+
+Val* full_like(Val* v, Val* fill_value) {
+  return full_like(v->as<TensorView>(), fill_value);
+}
+
+TensorView* zeros(const std::vector<Val*>& shape, DataType dtype) {
+  return full(shape, FusionGuard::getCurFusion()->zeroVal(), dtype);
+}
+
+TensorView* zeros_like(TensorView* tv) {
+  return full_like(tv, FusionGuard::getCurFusion()->zeroVal());
+}
+
+Val* zeros_like(Val* v) {
+  return zeros_like(v->as<TensorView>());
+}
+
+TensorView* ones(const std::vector<Val*>& shape, DataType dtype) {
+  return full(shape, FusionGuard::getCurFusion()->oneVal(), dtype);
+}
+
+TensorView* ones_like(TensorView* tv) {
+  return full_like(tv, FusionGuard::getCurFusion()->oneVal());
+}
+
+Val* ones_like(Val* v) {
+  return ones_like(v->as<TensorView>());
+}
+
+TensorView* arange(Val* end, DataType dtype) {
+  return arange(FusionGuard::getCurFusion()->zeroVal(), end, dtype);
+}
+
+TensorView* arange(Val* start, Val* end, DataType dtype) {
+  return arange(start, end, FusionGuard::getCurFusion()->oneVal(), dtype);
+}
+
+TensorView* arange(Val* start, Val* end, Val* step, DataType dtype) {
+  if (isIntegralType(dtype)) {
+    start = castOp(DataType::Int, start);
+    end = castOp(DataType::Int, end);
+    step = castOp(DataType::Int, step);
+  } else if (isFloatingPointType(dtype)) {
+    start = castOp(DataType::Double, start);
+    end = castOp(DataType::Double, end);
+    step = castOp(DataType::Double, step);
+  }
+  // Make sure no negative value is passed to ceilDiv as the device
+  // implementation of ceilDiv assumes positive inputs
+  auto size = castOp(DataType::Int, ceilDiv(abs(sub(end, start)), abs(step)));
+  auto out = TensorViewBuilder()
+                 .ndims(1)
+                 .dtype(dtype)
+                 .contiguity({true})
+                 .shape({size})
+                 .build();
+  IrBuilder::create<ARangeOp>(out, start, end, step, dtype);
+  return out;
+}
+
+TensorView* eye(Val* rows, Val* cols, DataType dtype) {
+  TORCH_CHECK(rows->getDataType() == DataType::Int, "rows must have type Int");
+  TORCH_CHECK(cols->getDataType() == DataType::Int, "cols must have type Int");
+  auto out = TensorViewBuilder()
+                 .ndims(2)
+                 .dtype(dtype)
+                 .contiguity({true, true})
+                 .shape(std::vector<Val*>{rows, cols})
+                 .build();
+  IrBuilder::create<EyeOp>(out, dtype);
+  return out;
+}
+
+TensorView* eye(Val* size, DataType dtype) {
+  return eye(size, size, dtype);
+}
+
 // UNARY OPERATIONS
 
 #define NVFUSER_DEFINE_UNARY_OP(op_name, op_type) \
@@ -468,30 +611,6 @@ NVFUSER_DEFINE_UNARY_OP(silu, Silu)
 NVFUSER_DEFINE_UNARY_OP(trunc, Trunc)
 NVFUSER_DEFINE_UNARY_OP(print, Print)
 #undef NVFUSER_DEFINE_UNARY_OP
-
-Val* randlike(Val* v) {
-  TORCH_CHECK(
-      isFloatingPointType(v->dtype()),
-      "input must have floating point type, but got ",
-      v->dtype());
-  auto rand_vals = unaryOp(UnaryOpType::RandLike, v);
-  return where(
-      eq(rand_vals, IrBuilder::create<Double>(1.0)),
-      IrBuilder::create<Double>(0.0),
-      rand_vals);
-}
-
-TensorView* randlike(TensorView* v) {
-  TORCH_CHECK(
-      isFloatingPointType(v->dtype()),
-      "input must have floating point type, but got ",
-      v->dtype());
-  auto rand_vals = unaryOp(UnaryOpType::RandLike, v);
-  return where(
-      eq(rand_vals, IrBuilder::create<Double>(1.0)),
-      IrBuilder::create<Double>(0.0),
-      rand_vals);
-}
 
 Val* bitwise_not(Val* v) {
   TORCH_CHECK(
@@ -975,7 +1094,7 @@ static TensorView* newForReduction(
 
   TORCH_INTERNAL_ASSERT(
       !axes_set.empty(),
-      "Asked for ouput of reduction, but no reduction axis provided.");
+      "Asked for output of reduction, but no reduction axis provided.");
 
   TORCH_INTERNAL_ASSERT(
       (*(axes_set.rbegin())) < orig_domain.size(),
@@ -1064,7 +1183,7 @@ TensorView* reductionOp(
 
     TORCH_CHECK(
         axis >= 0 && axis < ndims,
-        "Reduction on invalid axis, recieved: ",
+        "Reduction on invalid axis, received: ",
         axis,
         " however tensor view only has ",
         ndims,
@@ -1399,7 +1518,7 @@ WelfordResult Welford(
 
     TORCH_CHECK(
         axis >= 0 && axis < ndims,
-        "Reduction on invalid axis, recieved: ",
+        "Reduction on invalid axis, received: ",
         axis,
         " however tensor view only has ",
         ndims,
@@ -1417,12 +1536,12 @@ WelfordResult Welford(
       out_avg,
       out_var,
       out_N, /*out var/avg/count */
+      tv, /*in var/avg/count */
+      FusionGuard::getCurFusion()->zeroVal(),
+      FusionGuard::getCurFusion()->oneVal(),
       init_avg_val,
       init_var_val,
-      init_N, /*init var/avg/count */
-      tv,
-      FusionGuard::getCurFusion()->zeroVal(),
-      FusionGuard::getCurFusion()->oneVal()); /*in var/avg/count */
+      init_N); /*init var/avg/count */
 
   return WelfordResult(out_avg, out_var, out_N);
 }
@@ -2109,7 +2228,7 @@ static TensorView* newForMma(
 
   TORCH_INTERNAL_ASSERT(
       !axes_set.empty(),
-      "Asked for ouput of reduction, but no reduction axis provided.");
+      "Asked for output of reduction, but no reduction axis provided.");
 
   TORCH_INTERNAL_ASSERT(
       (*(axes_set.rbegin())) < orig_domain_a.size(),
@@ -2200,7 +2319,7 @@ TensorView* fusedMultiplySum(
 
     TORCH_CHECK(
         axis >= 0 && axis < ndims,
-        "Reduction on invalid axis, recieved: ",
+        "Reduction on invalid axis, received: ",
         axis,
         " however tensor view only has ",
         ndims,

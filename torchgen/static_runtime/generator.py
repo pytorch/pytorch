@@ -42,6 +42,7 @@ BLOCKED_OPS = frozenset(
         # non cpu ops
         "sparse_sampled_addmm",
         "hspmm",
+        "linalg_svdvals",
         # sparse ops
         "sspaddmm",
         "coalesce",
@@ -220,6 +221,7 @@ BLOCKED_OPS = frozenset(
         "special_shifted_chebyshev_polynomial_w",
         "special_spherical_bessel_j0",
         "_foobar",
+        "_nested_tensor_strides",
     )
 )
 

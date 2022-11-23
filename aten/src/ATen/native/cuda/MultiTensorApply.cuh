@@ -24,6 +24,7 @@ __device__ __forceinline__ void load_store(T* dst, T* src, int dst_offset, int s
   ((LT*)dst)[dst_offset] = ((LT*)src)[src_offset];
 }
 
+// TODO(crcrpar): Add `n>5` for `low prec params & their higher prec copy`
 // TensorListMetadata has to be < 4KB - the limit for kernel launch argument
 static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
 static constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
@@ -33,6 +34,18 @@ template<int n> struct TensorListMetadata
 {
   void* addresses[n][depth_to_max_tensors[n-1]];
   int numel_for_tensor[depth_to_max_tensors[n-1]];
+  unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
+  int block_to_chunk[depth_to_max_blocks[n-1]];
+  int start_tensor_this_launch;
+};
+
+// NOTE(crcrpar): This is a conservative resolution to handle `state_steps`
+// whose each element is `at::Tensor` of 1 element representing the number of `step`s called so far.
+template<int n> struct FusedOptimizerTensorListMetadata
+{
+  void* addresses[n][depth_to_max_tensors[n-1]];
+  int numel_for_tensor[depth_to_max_tensors[n-1]];
+  void* state_steps_addresses[depth_to_max_tensors_scalarlist[n-1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
   int block_to_chunk[depth_to_max_blocks[n-1]];
   int start_tensor_this_launch;
@@ -184,6 +197,61 @@ void multi_tensor_apply(
                 }
             }
         }
+}
+
+template<int depth, typename T, typename... ArgTypes>
+void multi_tensor_apply_for_fused_optimizer(
+    std::vector<std::vector<at::Tensor>>& tensor_lists,
+    at::TensorList state_steps,
+    T callable,
+    ArgTypes... args) {
+  TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists has to match the depth");
+  const auto num_tensors = tensor_lists[0].size();
+  FusedOptimizerTensorListMetadata<depth> tensorListMeta;
+
+  int loc_block_info = 0;
+  int loc_tensor_info = 0;
+  for (const auto & tensor_index : c10::irange(num_tensors)) {
+    tensorListMeta.state_steps_addresses[loc_tensor_info] = state_steps[tensor_index].data_ptr();
+    tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][tensor_index].numel();
+    for (const auto & d : c10::irange(depth)) {
+      tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][tensor_index].data_ptr();
     }
+    loc_tensor_info++;
+
+    const auto chunks = (tensor_lists[0][tensor_index].numel() + kChunkSize - 1) / kChunkSize;
+    for (const auto & chunk : c10::irange(chunks)) {
+      tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
+      tensorListMeta.block_to_chunk[loc_block_info] = chunk;
+      loc_block_info++;
+
+      const auto tensor_full = (loc_tensor_info == depth_to_max_tensors[depth - 1] && chunk == chunks - 1);
+      const auto blocks_full = loc_block_info == depth_to_max_blocks[depth - 1];
+      const auto last_chunk = (tensor_index == num_tensors - 1 && chunk == chunks - 1);
+
+      if (tensor_full || blocks_full || last_chunk) {
+        multi_tensor_apply_kernel<<<loc_block_info, kBlockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
+            tensorListMeta,
+            callable,
+            args...);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+        // Reset.
+        loc_block_info = 0;
+        if (chunk == chunks - 1) {
+          loc_tensor_info = 0;
+        } else {
+          tensorListMeta.numel_for_tensor[0] = tensorListMeta.numel_for_tensor[loc_tensor_info - 1];
+          tensorListMeta.state_steps_addresses[0] = tensorListMeta.state_steps_addresses[loc_tensor_info - 1];
+          for (const auto & d : c10::irange(depth)) {
+            tensorListMeta.addresses[d][0] = tensorListMeta.addresses[d][loc_tensor_info - 1];
+          }
+          loc_tensor_info = 1;
+        }
+      }
+    }
+  }
+}
+
 } // namespace
 }} // at::native
