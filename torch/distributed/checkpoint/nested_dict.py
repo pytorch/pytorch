@@ -13,7 +13,7 @@ from .traverse import (
 )
 
 """
-TODO: 
+TODO:
 Need to add ability to handle tuple, OrderedDict, NamedTuple.
 Update mappings from dict to a class.
 Change set_element to recreate the right type for tuple, OrderedDict, and NamedTuple.
