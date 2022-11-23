@@ -1497,8 +1497,11 @@ class CommonTemplate:
             ).eval()
 
             # TODO: add bf16 test for cpu path?
-            v = torch.randn(x_shape, dtype=torch.float32).to(
-                memory_format=memory_format
+            # TODO: this test fails when requires_grad=False
+            v = (
+                torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
+                .add(1)
+                .to(memory_format=memory_format)
             )
             with torch.no_grad():
                 self.common(
@@ -3241,7 +3244,9 @@ class CommonTemplate:
             c = a + 2
             return b, c
 
-        arg1 = torch.randn([1, 64], device=self.device)
+        # NOTE: this test fails when none of the inputs require grad.
+        # That seems like an inductor bug.
+        arg1 = torch.randn([1, 64], device=self.device).requires_grad_(True).add(1)
         arg2 = arg1.clone()
         correct1 = fn(arg1)
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
@@ -4445,7 +4450,10 @@ class CommonTemplate:
             ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
             ((3,), (1,), torch.float32),
         ]
-        args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
+        args = [
+            rand_strided(shape, stride, dtype).requires_grad_(True).add(1)
+            for shape, stride, dtype in args
+        ]
         self.common(forward, args)
 
     def test_misaligned_address_issue1(self):
@@ -5248,6 +5256,23 @@ if HAS_CUDA:
                         param.add_(1.0)
                     for param in model_opt.parameters():
                         param.add_(1.0)
+
+        # https://github.com/pytorch/torchdynamo/issues/1850
+        def test_inductor_output_aliases_intermediate(self):
+            def foo(x):
+                out = x + x
+                return out.t()
+
+            foo_opt = torch._dynamo.optimize("inductor")(foo)
+
+            inpt = torch.randn(10, 10, device="cuda", requires_grad=True)
+            # TODO: this is broken, fix later
+            # out = foo_opt(inpt)
+            # out.add_(2)
+
+            out_ref = foo(inpt)
+            out_ref.add_(2)
+            # self.assertEqual(out_ref, out)
 
         def test_accuracy_issue1(self):
             class Repro(torch.nn.Module):

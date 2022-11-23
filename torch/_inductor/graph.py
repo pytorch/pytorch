@@ -271,7 +271,15 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
             isinstance(
-                x, (TensorBox, ir.Constant, type(None), ir.ConstantBuffer, sympy.Expr)
+                x,
+                (
+                    TensorBox,
+                    ir.Constant,
+                    type(None),
+                    ir.ConstantBuffer,
+                    sympy.Expr,
+                    int,
+                ),
             )
             for x in result
         ), result
