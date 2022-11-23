@@ -97,7 +97,7 @@ void spmm_reduce_kernel_impl(
   int num_threads = at::get_num_threads();
   std::vector<int64_t> thread_splits(num_threads + 1, M);
 
-  int64_t thread_averge_payload = std::min((int64_t)1, nnz / num_threads);
+  int64_t thread_averge_payload = std::max((int64_t)1, divup(nnz, num_threads));
 
   thread_splits[0] = 0;
   int64_t sum = 0;
