@@ -771,7 +771,7 @@ class TestJit(JitTestCase):
     def test_conj_transpose(self):
         @torch.jit.script
         def check(x):
-            return torch.equal(x.H, x.t().conj())
+            return bool((x.H == x.t().conj()).all())
 
         x = torch.rand(3, 4)
         self.assertTrue(check(x))

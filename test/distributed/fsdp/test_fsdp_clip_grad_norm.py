@@ -193,7 +193,10 @@ class TestClipGradNorm(FSDPTest):
         for param, orig_grad in zip(ddp_model.parameters(), orig_ddp_grads):
             self.assertNotEqual(param.grad, orig_grad, rtol=0, atol=0, exact_device=True)
         for param, orig_grad in zip(fsdp_model.parameters(), orig_fsdp_grads):
-            self.assertEqual(param.grad, orig_grad, rtol=0, atol=0, exact_device=True)
+            if param.grad is None:
+                self.assertIsNone(orig_grad)
+            else:
+                self.assertNotEqual(param.grad, orig_grad, rtol=0, atol=0, exact_device=True)
 
         # Run an optimizer step to ensure gradients matched after clipping
         ddp_optim.step()

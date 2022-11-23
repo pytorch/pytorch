@@ -353,7 +353,7 @@ class ControlFlowToyModel(nn.Module):
 
     def forward(self, x):
         # Second layer is used dependent on input x.
-        use_second_layer = torch.equal(x, torch.ones(20, 10, device=x.device))
+        use_second_layer = (x == torch.ones(20, 10, device=x.device)).all()
         if use_second_layer:
             return self.lin2(F.relu(self.lin1(x)))
         else:
@@ -7453,7 +7453,7 @@ class DistributedTest:
                     # Control-flow that is rank and input dependent for the
                     # model.
                     use_second_layer = (
-                        torch.equal(x, torch.ones(batch, dim, device=x.device))
+                        (x == torch.ones(batch, dim, device=x.device)).all()
                         and self.rank == 1
                     )
 
