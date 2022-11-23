@@ -16,7 +16,7 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import gradcheck
 
 
-class TestNN(NNTestCase):
+class TestNNParametrization(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -1519,7 +1519,7 @@ class TestNN(NNTestCase):
         torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
 
 
-instantiate_parametrized_tests(TestNN)
+instantiate_parametrized_tests(TestNNParametrization)
 
 if __name__ == '__main__':
     run_tests()
