@@ -44,6 +44,10 @@ class RAdam(Optimizer):
 
     For further details regarding the algorithm we refer to `On the variance of the adaptive learning rate and beyond`_.
 
+    This implementation uses the same weight_decay implementation as Adam (were the weight_decay is applied
+    to the gradient) and not the one from AdamW (were weight_decay is applied to the update). Note that, for
+    historical reasons, this is different from the `original author implementation`_.
+
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -58,6 +62,8 @@ class RAdam(Optimizer):
 
     .. _On the variance of the adaptive learning rate and beyond:
         https://arxiv.org/abs/1908.03265
+    .. _original author implementation:
+        https://github.com/LiyuanLucasLiu/RAdam
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
