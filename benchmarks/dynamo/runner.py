@@ -221,10 +221,28 @@ def parse_args():
         help="Updates to dashboard",
     )
     parser.add_argument(
+        "--no-graphs",
+        action="store_true",
+        default=False,
+        help="Do not genenerate and upload metric graphs",
+    )
+    parser.add_argument(
+        "--no-update-archive",
+        action="store_true",
+        default=False,
+        help="Do not update lookup.csv or the log archive",
+    )
+    parser.add_argument(
+        "--no-gh-comment",
+        action="store_true",
+        default=False,
+        help="Do not write a comment to github",
+    )
+    parser.add_argument(
         "--update-dashboard-test",
         action="store_true",
         default=False,
-        help="Do not udpate lookup file or upload images/comments when --update-dashboard is specified",
+        help="does all of --no-graphs, --no-update-lookup, and --no-gh-comment",
     )
     parser.add_argument(
         "--dashboard-image-uploader",
@@ -1074,7 +1092,7 @@ class RegressionTracker:
     def generate_comment(self):
         title = "## Metrics over time ##\n"
         str_io = io.StringIO()
-        if not self.args.update_dashboard_test:
+        if not self.args.update_dashboard_test and not self.args.no_graphs:
             for name in glob.glob(self.args.output_dir + "/*over_time.png"):
                 output = (
                     subprocess.check_output([self.args.dashboard_image_uploader, name])
@@ -1090,7 +1108,7 @@ class RegressionTracker:
     def diff(self):
         log_infos = self.find_last_k()
 
-        for metric in ["geomean", "passrate"]:
+        for metric in ["geomean", "passrate", "comp_time", "memory"]:
             fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 5))
             for idx, suite in enumerate(self.suites):
                 dfs = []
@@ -1105,7 +1123,7 @@ class RegressionTracker:
                     df = pd.read_csv(gmean_filename)
                     if suite not in df:
                         continue
-                    if metric == "geomean":
+                    if metric == "geomean" or metric == "memory":
                         df[suite] = df[suite].str.replace("x", "").astype(float)
                     elif metric == "passrate":
                         df[suite] = df[suite].str.split("%").str[0].astype(float)
@@ -1152,7 +1170,7 @@ class DashboardUpdater:
         self.lookup_file = os.path.join(self.args.dashboard_archive_path, "lookup.csv")
         assert os.path.exists(self.lookup_file)
         try:
-            if not self.args.update_dashboard_test:
+            if not self.args.update_dashboard_test and not self.args.no_update_archive:
                 self.update_lookup_file()
         except subprocess.CalledProcessError:
             sys.stderr.write("failed to update lookup file\n")
@@ -1180,7 +1198,7 @@ class DashboardUpdater:
     def upload_graphs(self):
         title = "## Performance graphs ##\n"
         str_io = io.StringIO()
-        if not self.args.update_dashboard_test:
+        if not self.args.update_dashboard_test and not self.args.no_graphs:
             for name in glob.glob(self.output_dir + "/*png"):
                 if "over_time" not in name:
                     output = (
@@ -1255,8 +1273,10 @@ class DashboardUpdater:
         print(comment)
 
         if not self.args.update_dashboard_test:
-            self.comment_on_gh(comment)
-            self.archive()
+            if not self.args.no_gh_comment:
+                self.comment_on_gh(comment)
+            if not self.args.no_update_archive:
+                self.archive()
 
 
 if __name__ == "__main__":
@@ -1310,9 +1330,13 @@ if __name__ == "__main__":
             )
             raise e
         if not args.log_operator_inputs:
-            archive(
-                output_dir, args.dashboard_archive_path, args.archive_name, dtypes[0]
-            )
+            if not args.no_update_archive:
+                archive(
+                    output_dir,
+                    args.dashboard_archive_path,
+                    args.archive_name,
+                    dtypes[0],
+                )
             parse_logs(
                 args, dtypes, suites, devices, compilers, flag_compilers, output_dir
             )
