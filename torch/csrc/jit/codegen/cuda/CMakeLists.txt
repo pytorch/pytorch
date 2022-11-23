@@ -154,19 +154,35 @@ target_include_directories(${NVFUSER_CODEGEN}
 set_property(TARGET ${NVFUSER_CODEGEN} PROPERTY CXX_STANDARD 14)
 install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
-# # --- pybind11
-# 
-# set(NVFUSER_PYTHON ${PROJECT_NAME})
-# 
-# set(NVFUSER_PYTHON_SRCS)
-# list(APPEND NVFUSER_PYTHON_SRCS
-#     ${NVFUSER_SRCS_DIR}/python_frontend/python_bindings.cpp
-#     ${NVFUSER_SRCS_DIR}/python_frontend/python_bindings_register.cpp
-# )
-# 
-# pybind11_add_module(${NVFUSER_PYTHON} ${NVFUSER_PYTHON_SRCS})
-# target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${TORCH_LIBRARIES} ${NVFUSER_CODEGEN} ${TORCH_PYTHON_LIBRARY})
-# 
+# --- pybind11
+
+set(NVFUSER_PYTHON ${PROJECT_NAME})
+find_package(pybind11 REQUIRED)
+
+set(NVFUSER_PYTHON_SRCS)
+list(APPEND NVFUSER_PYTHON_SRCS
+    ${NVFUSER_SRCS_DIR}/python_frontend/python_bindings.cpp
+    ${NVFUSER_SRCS_DIR}/python_frontend/python_bindings_register.cpp
+)
+
+#pybind11_add_module(${NVFUSER_PYTHON} ${NVFUSER_PYTHON_SRCS})
+add_library(${NVFUSER_PYTHON} MODULE ${NVFUSER_PYTHON_SRCS})
+message(STATUS "compile options: " ${TORCH_PYTHON_COMPILE_OPTIONS})
+message(STATUS "link options: " ${TORCH_PYTHON_LINK_FLAGS})
+message(STATUS "python module prefix: " ${PYTHON_MODULE_PREFIX})
+message(STATUS "python module extention: " ${PYTHON_MODULE_EXTENSION})
+target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${TORCH_LIBRARIES} ${NVFUSER_CODEGEN} ${TORCH_PYTHON_LIBRARY})
+target_include_directories(${NVFUSER_PYTHON}
+	                   PRIVATE ${TORCH_ROOT}
+	                   PRIVATE ${pybind11_INCLUDE_DIRS}
+                           PRIVATE ${PYTHON_INCLUDE_DIRS})
+target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
+if(TORCH_PYTHON_LINK_FLAGS AND NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
+    message(STATUS "somehow this is happening")
+    set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
+endif()
+install(TARGETS ${NVFUSER_PYTHON} DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+
 # --- generate runtime files
 
 # The list of NVFUSER runtime files

@@ -21,11 +21,11 @@
 namespace torch {
 namespace jit {
 
-void initNvFuserPythonBindings(PyObject* module) {
-  auto m = py::handle(module).cast<py::module>();
+void initNvFuserPythonBindings(PyObject* nvfuser) {
+  // auto m = py::handle(module).cast<py::module>();
 
   //! Top Level nvFuser Python submodule
-  auto nvfuser = m.def_submodule("_nvfuser");
+  // auto nvfuser = m.def_submodule("_nvfuser");
 
   //! DataTypes supported by nvFuser in the FusionDefinition
   py::enum_<Nvf::DataType>(nvfuser, "DataType")
