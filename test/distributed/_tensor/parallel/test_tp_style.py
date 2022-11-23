@@ -64,7 +64,9 @@ class TensorParallelStyleTest(DTensorTestBase):
     def _test_prepare_output(
         self, func, spec, dim=None, device_mesh_input_none=False
     ):
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        device_mesh = DeviceMesh(
+            self.device_type, torch.arange(self.world_size)
+        )
         tensor = torch.rand(8, 16, device=self.device_type)
         dtensor = distribute_tensor(tensor, device_mesh, spec)
         device_mesh_input = None if device_mesh_input_none else device_mesh
@@ -135,7 +137,9 @@ class TensorParallelStyleTest(DTensorTestBase):
     # Common logic for testing prepare output funcs errors.
     def _test_prepare_output_error(self, func):
         tensor = torch.rand(8, 16, device=self.device_type)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        device_mesh = DeviceMesh(
+            self.device_type, torch.arange(self.world_size)
+        )
         dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
         output = [dtensor]
         with self.assertRaisesRegex(
