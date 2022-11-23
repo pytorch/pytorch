@@ -1,5 +1,4 @@
 # Owner(s): ["module: optimizer"]
-
 import warnings
 import math
 import unittest
@@ -1151,6 +1150,67 @@ class TestOptim(TestCase):
                 # assert that the parameters have not changed
                 self.assertEqual(original_param, param)
 
+    def test_pre_hook(self):
+
+        def pre_hook(optimizer, empty_args, empty_dict):
+            data.append(1)
+
+        data = []
+        empty_args = ()
+        empty_dict = {}
+        params = [torch.Tensor([1, 1])]
+
+        self.assertEqual(len(data), 0)
+        optimizer = SGD(params, lr=0.001)
+        handles = []
+        pre_hook_handle = optimizer.register_step_pre_hook(pre_hook)
+        handles.append(pre_hook_handle)
+
+        optimizer.step()
+        self.assertEqual(len(data), 1)
+
+        optimizer.step()
+        # check if pre hooks were registered
+        self.assertEqual(len(data), 2)
+        self.assertListEqual(data, [1, 1])
+
+        # remove handles, take step and verify that hook is no longer registered
+        while len(handles) > 0:
+            elt = handles.pop()
+            elt.remove()
+
+        optimizer.step()
+        self.assertEqual(len(data), 2)
+
+    def test_post_hook(self):
+
+        def post_hook(optimizer2, empty_args2, empty_dict2):
+            _ = post_hook_data.pop(0)
+
+        post_hook_data = [1, 3, 5, 7, 9]
+        empty_args2 = ()
+        empty_dict2 = {}
+        params2 = [torch.Tensor([2, 2])]
+
+        optimizer2 = SGD(params2, lr=0.01)
+        post_hook_handle = optimizer2.register_step_post_hook(post_hook)
+        post_handles = []
+        post_handles.append(post_hook_handle)
+
+        optimizer2.step()
+        optimizer2.step()
+
+        # check if post hooks were registered
+        assert len(post_hook_data) == 3
+        assert post_hook_data == [5, 7, 9]
+
+        # remove handles, take step and verify that hook is no longer registered
+        while len(post_handles) > 0:
+            elt = post_handles.pop()
+            elt.remove()
+
+        optimizer2.step()
+        assert len(post_hook_data) == 3
 
 
 class SchedulerTestNet(torch.nn.Module):

@@ -36,19 +36,16 @@ def _use_grad_for_differentiable(func):
 
 def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
     r"""Register a pre hook common to all optimizers.
+    Currently, just a placeholder for the implementation.
     """
-    handle = hooks.RemovableHandle(_global_optimizer_pre_hooks)
-    _global_optimizer_pre_hooks[handle.id] = hook
-    return handle
+    raise NotImplementedError
 
 
 def register_optimizer_step_post_hook(hook: Callable[..., None]) -> RemovableHandle:
     r"""Register a post hook common to all optimizers.
+    Currently, just a placeholder for the implementation.
     """
-    handle = hooks.RemovableHandle(_global_optimizer_post_hooks)
-    _global_optimizer_post_hooks[handle.id] = hook
-    return handle
-
+    raise NotImplementedError
 
 class Optimizer(object):
     r"""Base class for all optimizers.
@@ -175,9 +172,8 @@ class Optimizer(object):
                             if isinstance(result, tuple) and len(result) == 2:
                                 args, kwargs = result
                             else:
-                                raise RuntimeError("{func} must return None or a tuple "
-                                f"of (new_args, new_kwargs), but got {result}."
-                            )
+                                raise RuntimeError(f"{func} must return None or a tuple of (new_args, new_kwargs),"
+                                                   f"but got {result}.")
 
                     out = func(*args, **kwargs)
                     obj._optimizer_step_code()
@@ -198,6 +194,17 @@ class Optimizer(object):
 
     def register_step_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
         r"""Register an optimizer step pre hook which will be called before optimizer step.
+        It should have the following signature::
+            hook(optimizer, args, kwargs) -> Optional[Tuple[2]]
+
+        The ``optimizer`` argument is the optimizer instance being used. If args and kwargs
+        are modified by the pre-hook, then the transformed values are returned as a tuple
+        containing the new_args and new_kwargs.
+
+        Returns:
+            :class:`torch.utils.hooks.RemoveableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._optimizer_step_pre_hooks)
         self._optimizer_step_pre_hooks[handle.id] = hook
@@ -205,6 +212,15 @@ class Optimizer(object):
 
     def register_step_post_hook(self, hook: Callable[..., None]) -> RemovableHandle:
         r"""Register an optimizer step post hook which will be called after optimizer step.
+        It should have the following signature::
+            hook(optimizer, args, kwargs) -> None
+
+        The ``optimizer`` argument is the optimizer instance being used.
+
+        Returns:
+            :class:`torch.utils.hooks.RemoveableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._optimizer_step_post_hooks)
         self._optimizer_step_post_hooks[handle.id] = hook
