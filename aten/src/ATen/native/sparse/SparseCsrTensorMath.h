@@ -61,7 +61,7 @@ inline void _check_dim(const Tensor& self, int64_t target_dim, c10::string_view 
       " instead.");
 }
 
-SPMM_REDUCE_OP get_operator_enum(const c10::string_view reduce) {
+inline SPMM_REDUCE_OP get_operator_enum(const c10::string_view reduce) {
   if (reduce == "sum") {
     return SPMM_SUM;
   } else if (reduce == "mean") {
@@ -76,7 +76,7 @@ SPMM_REDUCE_OP get_operator_enum(const c10::string_view reduce) {
 }
 
 template <bool train>
-void check_spmm_reduce_inputs(
+inline void check_spmm_reduce_inputs(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
