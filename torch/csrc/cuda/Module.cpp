@@ -11,6 +11,7 @@
 #include <ATen/cuda/Sleep.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/cuda/jiterator.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #ifdef USE_NCCL
@@ -21,6 +22,7 @@
 
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
+#include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/python_headers.h>
@@ -851,6 +853,123 @@ static void registerCudaDeviceProperties(PyObject* module) {
       });
 }
 
+static void registerCudaPluggableAllocator(PyObject* module) {
+  auto m = py::handle(module).cast<py::module>();
+
+  py::class_<
+      c10::cuda::CUDACachingAllocator::CUDAAllocator,
+      std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>>(
+      m, "_cuda_CUDAAllocator");
+  m.def("_cuda_getAllocator", []() {
+    return py::cast(torch::cuda::CUDAPluggableAllocator::getCurrentAllocator());
+  });
+
+  m.def(
+      "_cuda_changeCurrentAllocator",
+      [](std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+             allocator) {
+        torch::cuda::CUDAPluggableAllocator::changeCurrentAllocator(allocator);
+      });
+  py::class_<
+      torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator,
+      c10::cuda::CUDACachingAllocator::CUDAAllocator,
+      std::shared_ptr<
+          torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator>>(
+      m, "_CUDAPluggableAllocator")
+      .def(
+          "set_init_fn",
+          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
+             uint64_t func_ptr) {
+            using FuncType = void(int);
+            std::function<FuncType> func =
+                reinterpret_cast<FuncType*>(func_ptr);
+            self.set_init_fn(func);
+          })
+      .def(
+          "set_reset_fn",
+          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
+             uint64_t func_ptr) {
+            using FuncType = void();
+            std::function<FuncType> func =
+                reinterpret_cast<FuncType*>(func_ptr);
+            self.set_reset_fn(func);
+          })
+      .def(
+          "set_memory_fraction_fn",
+          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
+             uint64_t func_ptr) {
+            using FuncType = void(double, int);
+            std::function<FuncType> func =
+                reinterpret_cast<FuncType*>(func_ptr);
+            self.set_memory_fraction_fn(func);
+          })
+      .def(
+          "set_base_alloc_fn",
+          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
+             uint64_t func_ptr) {
+            using FuncType = void*(void*, size_t*);
+            std::function<FuncType> func =
+                reinterpret_cast<FuncType*>(func_ptr);
+            self.set_base_alloc_fn(func);
+          })
+      .def(
+          "set_record_stream_fn",
+          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
+             uint64_t func_ptr) {
+            using FuncType = void(void*, cudaStream_t);
+            std::function<FuncType> func =
+                reinterpret_cast<FuncType*>(func_ptr);
+            self.set_record_stream_fn(func);
+          })
+      .def(
+          "set_capture_begin_fn",
+          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
+             uint64_t func_ptr) {
+            using FuncType =
+                void(int, c10::cuda::CaptureId_t, c10::cuda::MempoolId_t);
+            std::function<FuncType> func =
+                reinterpret_cast<FuncType*>(func_ptr);
+            self.set_capture_begin_fn(func);
+          })
+      .def(
+          "set_capture_about_to_end_fn",
+          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
+             uint64_t func_ptr) {
+            using FuncType = void(int, c10::cuda::CaptureId_t);
+            std::function<FuncType> func =
+                reinterpret_cast<FuncType*>(func_ptr);
+            self.set_capture_about_to_end_fn(func);
+          })
+      .def(
+          "set_capture_ended_fn",
+          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
+             uint64_t func_ptr) {
+            using FuncType = void(int, c10::cuda::CaptureId_t);
+            std::function<FuncType> func =
+                reinterpret_cast<FuncType*>(func_ptr);
+            self.set_capture_ended_fn(func);
+          })
+      .def(
+          "set_capture_destroy_fn",
+          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
+             uint64_t func_ptr) {
+            using FuncType = void(int, c10::cuda::MempoolId_t);
+            std::function<FuncType> func =
+                reinterpret_cast<FuncType*>(func_ptr);
+            self.set_capture_destroy_fn(func);
+          });
+  m.def("_cuda_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
+    using MallocFuncType = void*(size_t, int, cudaStream_t);
+    using FreeFuncType = void(void*, size_t, cudaStream_t);
+    std::function<MallocFuncType> malloc_fn =
+        reinterpret_cast<MallocFuncType*>(malloc_ptr);
+    std::function<FreeFuncType> free_fn =
+        reinterpret_cast<FreeFuncType*>(free_ptr);
+    return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
+        malloc_fn, free_fn);
+  });
+}
+
 static void bindGetDeviceProperties(PyObject* module) {
   // Add method to torch.cuda
   auto m = py::handle(module).cast<py::module>();
@@ -1141,6 +1260,7 @@ void initModule(PyObject* module) {
   shared::initCudnnBindings(module);
 #endif
   registerCudaDeviceProperties(module);
+  registerCudaPluggableAllocator(module);
 }
 
 } // namespace cuda
