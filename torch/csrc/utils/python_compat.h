@@ -82,6 +82,11 @@ static inline PyFrameObject* PyFrame_GetBack(PyFrameObject* frame) {
   Py_XINCREF(frame->f_back);
   return frame->f_back;
 }
+
+static inline PyFrameObject* PyThreadState_GetFrame(PyThreadState* state) {
+  Py_XINCREF(state->frame);
+  return state->frame;
+}
 #endif
 
 #if PY_VERSION_HEX < 0x030900A4 && !defined(Py_SET_TYPE)

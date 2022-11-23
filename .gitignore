@@ -78,10 +78,6 @@ torch/testing/_internal/generated/annotated_fn_args.py
 torch/testing/_internal/data/*.pt
 torch/csrc/api/include/torch/version.h
 torch/csrc/cudnn/cuDNN.cpp
-torch/csrc/deploy/example/generated
-torch/csrc/deploy/interpreter/cpython
-torch/csrc/deploy/interpreter/frozen
-torch/csrc/deploy/interpreter/third_party/typing_extensions.py
 torch/csrc/generated
 torch/csrc/generic/TensorMethods.cpp
 torch/csrc/jit/generated/*
@@ -117,6 +113,7 @@ torch/test/
 torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
 torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
+minifier_launcher.py
 # Root level file used in CI to specify certain env configs.
 # E.g., see .circleci/config.yaml
 env
@@ -338,3 +335,9 @@ buck-out/
 # Downloaded libraries
 third_party/ruy/
 third_party/glog/
+
+# Virtualenv
+venv/
+
+# Log files
+*.log

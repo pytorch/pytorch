@@ -47,15 +47,6 @@ LazyTensorPtr LazyTensor::Create(Value ir_value, const BackendDevice& device) {
   return lazy_tensor;
 }
 
-LazyTensorPtr LazyTensor::Create(
-    std::shared_ptr<LazyView> view,
-    const BackendDevice& device) {
-  LazyTensorPtr lazy_tensor =
-      c10::make_intrusive<LazyTensor>(LazyTensor(std::move(view), device));
-  LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data_ptr());
-  return lazy_tensor;
-}
-
 LazyTensorPtr LazyTensor::Create(BackendDataPtr handle) {
   LazyTensorPtr lazy_tensor =
       c10::make_intrusive<LazyTensor>(LazyTensor(std::move(handle)));
@@ -78,17 +69,7 @@ LazyTensor::LazyTensor(Value ir_value, const BackendDevice& device)
   TryLimitGraphSize();
 }
 
-LazyTensor::LazyTensor(
-    std::shared_ptr<LazyView> view,
-    const BackendDevice& device)
-    : LazyTensor(std::make_shared<Data>(std::move(view), device)) {}
-
-LazyTensor::LazyTensor(std::shared_ptr<Data> data)
-    : data_(std::move(data)),
-      storage_(c10::Storage(
-          {},
-          0,
-          c10::DataPtr(nullptr, backendDeviceToAtenDevice(data_->device)))) {}
+LazyTensor::LazyTensor(std::shared_ptr<Data> data) : data_(std::move(data)) {}
 
 LazyTensor::Data* LazyTensor::data() const {
   TORCH_CHECK(data_ != nullptr, "Trying to access a null cursor");
@@ -107,9 +88,6 @@ at::ScalarType LazyTensor::dtype() const {
 }
 
 MaybeRef<Shape> LazyTensor::shape() const {
-  if (data()->view != nullptr) {
-    return data()->view->shape();
-  }
   if (data()->handle != nullptr) {
     return Shape(data()->handle->shape());
   }
@@ -131,45 +109,23 @@ int64_t LazyTensor::GetUniqueId() const {
   return data()->unique_id;
 }
 
-std::ptrdiff_t LazyTensor::GetViewAliasId() const {
-  return data()->view != nullptr
-      ? reinterpret_cast<std::ptrdiff_t>(data()->view->alias().get())
-      : 0;
-}
-
 BackendDataPtr LazyTensor::GetDataHandle() {
-  // Data can coexist with a view, but we need to check that the view did
-  // not receive any updates before calling the current IR valid.
-  bool up_to_date = true;
-  Value ir_value;
-  if (data()->view != nullptr) {
-    bool updated = false;
-    std::tie(ir_value, updated) = GetViewUpdate(data()->view);
-    up_to_date = !updated;
+  BackendDataPtr handle = CurrentDataHandle();
+  if (handle != nullptr) {
+    TORCH_CHECK(
+        handle->HasValue(),
+        "Trying to access data while an async operation is in flight: ",
+        handle->shape().to_string());
+    return handle;
   }
-  if (up_to_date) {
-    BackendDataPtr handle = CurrentDataHandle();
-    if (handle != nullptr) {
-      TORCH_CHECK(
-          handle->HasValue(),
-          "Trying to access data while an async operation is in flight: ",
-          handle->shape().to_string());
-      return handle;
-    }
-  }
-  if (ir_value) {
-    // The view gave us an updated IR value. We usually do not have a valid IR
-    // value field together with a view, but to allow code reuse in
-    // ApplyPendingGraph() we temporarily set it here. The following call to
-    // ApplyPendingGraph() will clear it.
-    AssignIrValue(std::move(ir_value));
-  }
+
   if (data()->ir_value) {
     ApplyPendingGraph();
   } else {
     TORCH_CHECK(data()->tensor_data);
     data()->handle = TensorToDataHandle(*data()->tensor_data, GetDevice());
   }
+
   return data()->handle;
 }
 
@@ -184,10 +140,9 @@ void LazyTensor::SetDataHandle(BackendDataPtr handle) {
 void LazyTensor::SetDataHandle(BackendDataPtr handle, bool sync) {
   data()->handle = std::move(handle);
   // Assigning a device data should always clear the IR node, to allow graph
-  // trimming. A view cannot be reset though, unless we are at a step-end sync.
+  // trimming.
   AssignIrValue(Value());
   if (sync) {
-    data()->view = nullptr;
     data()->tensor_data = c10::nullopt;
   }
 }
@@ -195,16 +150,8 @@ void LazyTensor::SetDataHandle(BackendDataPtr handle, bool sync) {
 void LazyTensor::SetIrValue(Value ir_value) {
   data()->handle = nullptr;
   data()->tensor_data = c10::nullopt;
-  if (data()->view != nullptr) {
-    // If we have an active view, and a SetIrValue() happens, it means we are
-    // within an in-place execution context, and we need to update the view's
-    // alias as well.
-    data()->view = UpdateView(data()->view, std::move(ir_value));
-    data()->generation += 1;
-  } else {
-    AssignIrValue(std::move(ir_value));
-    TryLimitGraphSize();
-  }
+  AssignIrValue(std::move(ir_value));
+  TryLimitGraphSize();
 }
 
 void LazyTensor::SetInPlaceIrValue(Value ir_value) {
@@ -257,9 +204,6 @@ Value LazyTensor::GetIrValue() const {
 }
 
 Value LazyTensor::CurrentIrValue() const {
-  if (data()->view != nullptr) {
-    return std::get<0>(GetViewUpdate(data()->view));
-  }
   return data()->ir_value;
 }
 
@@ -268,9 +212,6 @@ void LazyTensor::SetTensorData(at::Tensor tensor_data) {
 }
 
 c10::optional<at::Tensor> LazyTensor::CurrentTensorData() const {
-  if (data()->view != nullptr && !data()->view->IsUpToDate()) {
-    return c10::nullopt;
-  }
   return data()->tensor_data;
 }
 
@@ -293,71 +234,6 @@ Value LazyTensor::GetIrValueForTensor(
   return CreateTensorNode(std::move(data), read_only);
 }
 
-std::tuple<Value, bool> LazyTensor::GetViewUpdate(
-    const std::shared_ptr<LazyView>& view) const {
-  auto value_with_update = view->GetViewIrNode();
-  if (std::get<1>(value_with_update)) {
-    data()->handle = nullptr;
-    data()->tensor_data = c10::nullopt;
-  }
-  return value_with_update;
-}
-
-std::shared_ptr<LazyView> LazyTensor::UpdateView(
-    std::shared_ptr<LazyView> view,
-    Value ir_value) const {
-  if (ir_value.shape().sizes() != view->shape().sizes()) {
-    TORCH_CHECK(ir_value.shape().numel() == view->shape().numel());
-
-    ViewInfo view_info(
-        ViewInfo::Type::kReshape, ir_value.shape(), view->shape());
-    view = view->CreateSubView(view_info.shape, view_info);
-  }
-  view->Update(std::move(ir_value));
-  return view;
-}
-
-void LazyTensor::SetSubView(ViewInfo view_info) const {
-  data()->view = data()->view->CreateSubView(view_info.shape, view_info);
-  data()->generation += 1;
-}
-
-void LazyTensor::ModifyCurrentView(ViewInfo view_info) const {
-  if (data()->view != nullptr) {
-    SetSubView(view_info);
-    return;
-  }
-  // This node is not a view. Since this function is meant to modify a view
-  // in place, we need to turn this existing tensor into a view.
-  Value ir_value = GetIrValue();
-  std::shared_ptr<Alias> alias = std::make_shared<Alias>(ir_value);
-  data()->view = std::make_shared<LazyView>(view_info.shape, alias, view_info);
-  AssignIrValue(Value());
-}
-
-std::shared_ptr<LazyView> LazyTensor::CreateView(ViewInfo view_info) const {
-  if (data()->view != nullptr) {
-    return data()->view->CreateSubView(view_info.shape, view_info);
-  }
-  // This node is not a view, and creating a view forks the current node into
-  // becoming one itself. This means creating an alias with the current IR
-  // Node, and using the same alias for the created IR Node.
-  Value ir_value = GetIrValue();
-  std::shared_ptr<Alias> alias = std::make_shared<Alias>(ir_value);
-  ViewInfo this_view_info(
-      ViewInfo::Type::kNoOp, ir_value.shape(), ir_value.shape());
-  data()->view = std::make_shared<LazyView>(
-      ir_value.shape(), alias, std::move(this_view_info));
-  AssignIrValue(Value());
-  return std::make_shared<LazyView>(view_info.shape, alias, view_info);
-}
-
-LazyTensorPtr LazyTensor::CreateViewTensor(ViewInfo view_info) const {
-  auto new_tensor = Create(CreateView(std::move(view_info)), GetDevice());
-  new_tensor->storage_ = Storage();
-  return new_tensor;
-}
-
 at::Tensor LazyTensor::ToTensor(bool detached) {
   at::Tensor tensor;
   c10::optional<at::Tensor> tensor_data = CurrentTensorData();
@@ -374,8 +250,7 @@ at::Tensor LazyTensor::ToTensor(bool detached) {
   } else {
     tensor = *tensor_data;
     if (detached) {
-      if (data()->ir_value || data()->handle != nullptr ||
-          data()->view != nullptr) {
+      if (data()->ir_value || data()->handle != nullptr) {
         // If we have other authoritive sources, just drop our reference and
         // transfer it to the caller.
         data()->tensor_data = c10::nullopt;
@@ -395,7 +270,6 @@ void LazyTensor::ShallowCopyTo(LazyTensorPtr dest) const {
 
 void LazyTensor::SetTensor(at::Tensor tensor) {
   SetTensorData(tensor);
-  data()->view = nullptr;
   data()->handle = nullptr;
   AssignIrValue(Value());
 }
@@ -408,25 +282,14 @@ void LazyTensor::UpdateFromTensor(at::Tensor tensor, bool sync) {
     SetTensorData(tensor);
     data()->handle = nullptr;
     AssignIrValue(Value());
-    if (data()->view != nullptr) {
-      Value ir_value = GetIrValueForTensor(tensor, GetDevice());
-      data()->view = UpdateView(data()->view, std::move(ir_value));
-    }
   }
 }
 
 void LazyTensor::UpdateFromTensorOut(at::Tensor tensor) {
-  if (data()->view != nullptr && shape().Get().numel() != tensor.numel()) {
-    data()->view = nullptr;
-  }
   UpdateFromTensor(std::move(tensor), /*sync=*/false);
 }
 
 void LazyTensor::UpdateFromTensorOut(const LazyTensorPtr& tensor) {
-  if (data()->view != nullptr &&
-      shape().Get().numel() != tensor->shape().Get().numel()) {
-    data()->view = nullptr;
-  }
   SetIrValue(tensor->GetIrValue());
 }
 
@@ -470,7 +333,7 @@ int64_t LazyTensor::GetNextTensorId() {
   return id_generator->fetch_add(1);
 }
 
-torch::lazy::Value GetTensorList(c10::ArrayRef<at::Tensor> tensors) {
+torch::lazy::Value GetTensorList(at::ITensorListRef tensors) {
   std::vector<Value> values;
   for (const auto& t : tensors) {
     auto* impl = dynamic_cast<LTCTensorImpl*>(t.unsafeGetTensorImpl());

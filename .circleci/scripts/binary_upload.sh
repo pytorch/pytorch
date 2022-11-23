@@ -14,6 +14,12 @@ UPLOAD_CHANNEL=${UPLOAD_CHANNEL:-nightly}
 UPLOAD_SUBFOLDER=${UPLOAD_SUBFOLDER:-cpu}
 UPLOAD_BUCKET="s3://pytorch"
 BACKUP_BUCKET="s3://pytorch-backup"
+BUILD_NAME=${BUILD_NAME:-}
+
+# this is temporary change to upload pypi-cudnn builds to separate folder
+if [[ ${BUILD_NAME} == *with-pypi-cudnn* ]]; then
+  UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_pypi_cudnn"
+fi
 
 DRY_RUN=${DRY_RUN:-enabled}
 # Don't actually do work unless explicit
@@ -24,8 +30,9 @@ if [[ "${DRY_RUN}" = "disabled" ]]; then
   AWS_S3_CP="aws s3 cp"
 fi
 
+# Sleep 2 minutes between retries for conda upload
 retry () {
-  "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+  "$@"  || (sleep 5m && "$@") || (sleep 5m && "$@") || (sleep 5m && "$@") || (sleep 5m && "$@")
 }
 
 do_backup() {

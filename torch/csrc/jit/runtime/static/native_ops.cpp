@@ -7,6 +7,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/intrusive_ptr.h>
@@ -869,9 +870,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::tensor_split, aten_tensor_split, [](Node*
           "aten::tensor_split.sections(Tensor(a -> *) self, int sections, int dim=0) -> Tensor(a)[]"))) {
     return [](ProcessedNode* pnode) {
       const auto& a = pnode->Input(0).toTensor();
-      const auto b = pnode->Input(1).toInt();
+      const auto b = pnode->Input(1).toSymInt();
       const auto c = pnode->Input(2).toInt();
-      pnode->Output(0) = at::native::tensor_split(a, b, c);
+      pnode->Output(0) = at::native::tensor_split_sections_symint(a, b, c);
     };
   }
 
@@ -975,7 +976,11 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
             auto& runner = block_runners[!condition];
 
             auto output = runner({});
-            if (!output.isTuple()) {
+            // If we are returning a tuple, we are either returning
+            // multiple unpacked values or all of the values wrapped
+            // in a single tuple. The second condition handles the
+            // the latter case.
+            if (!output.isTuple() || p_node->num_outputs() == 1) {
               p_node->Output(0) = std::move(output);
               return;
             }

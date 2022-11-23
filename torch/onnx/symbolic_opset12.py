@@ -11,7 +11,7 @@ from torch.onnx import (
     symbolic_opset9 as opset9,
     utils,
 )
-from torch.onnx._internal import _beartype, registration
+from torch.onnx._internal import _beartype, jit_utils, registration
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -43,7 +43,7 @@ _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=12)
 
 
 @_beartype.beartype
-def _einsum_helper(g, equation, tensors):
+def _einsum_helper(g: jit_utils.GraphContext, equation, tensors):
     if not tensors:
         raise RuntimeError("Einsum inputs are empty.")
     # ONNX does not support bool for Einsum inputs.
@@ -62,9 +62,9 @@ def _einsum_helper(g, equation, tensors):
 
 
 @_onnx_symbolic("aten::einsum")
-@symbolic_helper.parse_args("s", "v")
+@symbolic_helper.parse_args("s", "v", "is")
 @_beartype.beartype
-def einsum(g, equation, tensor_list):
+def einsum(g: jit_utils.GraphContext, equation, tensor_list, path=None):
     tensors = symbolic_helper._unpack_list(tensor_list)
     return _einsum_helper(g, equation, tensors)
 
@@ -72,22 +72,22 @@ def einsum(g, equation, tensor_list):
 @_onnx_symbolic("aten::outer")
 @symbolic_helper.parse_args("v", "v")
 @_beartype.beartype
-def outer(g, input, other):
+def outer(g: jit_utils.GraphContext, input, other):
     # make sure to cast other to self's type
-    if other.type().scalarType() != input.type().scalarType():
+    if _type_utils.JitScalarType.from_value(
+        other, _type_utils.JitScalarType.UNDEFINED
+    ) != _type_utils.JitScalarType.from_value(input):
         other = g.op(
             "Cast",
             other,
-            to_i=_type_utils.JitScalarType.from_name(
-                input.type().scalarType()
-            ).onnx_type(),
+            to_i=_type_utils.JitScalarType.from_value(input).onnx_type(),
         )
     return _einsum_helper(g, "i,j->ij", [input, other])
 
 
 @_beartype.beartype
 def _dropout_returns_masked_input_and_mask(
-    g, input: torch._C.Value, p: float, train: bool
+    g: jit_utils.GraphContext, input: torch._C.Value, p: float, train: bool
 ) -> Tuple[torch._C.Value, Optional[torch._C.Value]]:
     symbolic_helper.check_training_mode(train, "dropout")
     # In eval mode, dropout is non-op. That is, if the node's
@@ -103,7 +103,7 @@ def _dropout_returns_masked_input_and_mask(
 @_onnx_symbolic("aten::dropout")
 @symbolic_helper.parse_args("v", "f", "b")
 @_beartype.beartype
-def dropout(g, input, p, train):
+def dropout(g: jit_utils.GraphContext, input, p, train):
     masked, _ = _dropout_returns_masked_input_and_mask(g, input, p, train)
     return masked
 
@@ -111,13 +111,13 @@ def dropout(g, input, p, train):
 @_onnx_symbolic("aten::native_dropout")
 @symbolic_helper.parse_args("v", "f", "b")
 @_beartype.beartype
-def native_dropout(g, input, p, train):
+def native_dropout(g: jit_utils.GraphContext, input, p, train):
     return _dropout_returns_masked_input_and_mask(g, input, p, train)
 
 
 @_onnx_symbolic("aten::nll_loss")
 @_beartype.beartype
-def nll_loss(g, self, target, weight, reduction, ignore_index):
+def nll_loss(g: jit_utils.GraphContext, self, target, weight, reduction, ignore_index):
     # none reduction : onnx::Constant[value={0}]
     # mean reduction : onnx::Constant[value={1}]
     # sum reduction : onnx::Constant[value={2}]
@@ -151,20 +151,30 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
 
 @_onnx_symbolic("aten::nll_loss2d")
 @_beartype.beartype
-def nll_loss2d(g, self, target, weight, reduction, ignore_index):
+def nll_loss2d(
+    g: jit_utils.GraphContext, self, target, weight, reduction, ignore_index
+):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
 
 
 @_onnx_symbolic("aten::nll_loss_nd")
 @_beartype.beartype
-def nll_loss_nd(g, self, target, weight, reduction, ignore_index):
+def nll_loss_nd(
+    g: jit_utils.GraphContext, self, target, weight, reduction, ignore_index
+):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
 
 
 @_onnx_symbolic("aten::cross_entropy_loss")
 @_beartype.beartype
 def cross_entropy_loss(
-    g, self, target, weight, reduction, ignore_index, label_smoothing
+    g: jit_utils.GraphContext,
+    self,
+    target,
+    weight,
+    reduction,
+    ignore_index,
+    label_smoothing,
 ):
     # none reduction : onnx::Constant[value={0}]
     # mean reduction : onnx::Constant[value={1}]
@@ -206,7 +216,9 @@ def cross_entropy_loss(
 @_onnx_symbolic("aten::binary_cross_entropy_with_logits")
 @symbolic_helper.parse_args("v", "v", "v", "v", "i")
 @_beartype.beartype
-def binary_cross_entropy_with_logits(g, input, target, weight, pos_weight, reduction):
+def binary_cross_entropy_with_logits(
+    g: jit_utils.GraphContext, input, target, weight, pos_weight, reduction
+):
     p = g.op("Constant", value_t=torch.tensor([1]))
     sig_x = opset9.sigmoid(g, input)
     log_sig_x = opset9.log(g, sig_x)
@@ -249,10 +261,13 @@ def binary_cross_entropy_with_logits(g, input, target, weight, pos_weight, reduc
 
 @_onnx_symbolic("aten::celu")
 @_beartype.beartype
-def celu(g, self, alpha):
+def celu(g: jit_utils.GraphContext, self, alpha):
     alpha = symbolic_helper._maybe_get_const(alpha, "f")
     # if the input is of type double cast it to float
-    if self.type().scalarType() == "Double":
+    if (
+        _type_utils.JitScalarType.from_value(self, _type_utils.JitScalarType.UNDEFINED)
+        == _type_utils.JitScalarType.DOUBLE
+    ):
         self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.FLOAT)
         out = g.op("Celu", self, alpha_f=alpha)
         return g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.DOUBLE)
@@ -263,39 +278,49 @@ def celu(g, self, alpha):
 @_onnx_symbolic("aten::argmax")
 @symbolic_helper.parse_args("v", "v", "b")
 @_beartype.beartype
-def argmax(g, input: torch._C.Value, dim: torch._C.Value, keepdim: bool):
+def argmax(
+    g: jit_utils.GraphContext,
+    input: torch._C.Value,
+    dim: torch._C.Value,
+    keepdim: bool,
+):
     return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMax")
 
 
 @_onnx_symbolic("aten::argmin")
 @symbolic_helper.parse_args("v", "v", "b")
 @_beartype.beartype
-def argmin(g, input: torch._C.Value, dim: torch._C.Value, keepdim: bool):
+def argmin(
+    g: jit_utils.GraphContext,
+    input: torch._C.Value,
+    dim: torch._C.Value,
+    keepdim: bool,
+):
     return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMin")
 
 
 @_onnx_symbolic("aten::pow")
 @_beartype.beartype
-def pow(g, self, exponent):
+def pow(g: jit_utils.GraphContext, self, exponent):
     return g.op("Pow", self, exponent)
 
 
 @_onnx_symbolic("aten::ge")
 @_beartype.beartype
-def ge(g, input, other):
+def ge(g: jit_utils.GraphContext, input, other):
     return g.op("GreaterOrEqual", input, other)
 
 
 @_onnx_symbolic("aten::le")
 @_beartype.beartype
-def le(g, input, other):
+def le(g: jit_utils.GraphContext, input, other):
     return g.op("LessOrEqual", input, other)
 
 
 @_onnx_symbolic("aten::unfold")
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
-def unfold(g, input, dimension, size, step):
+def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
     const_size = symbolic_helper._maybe_get_const(size, "i")
     const_step = symbolic_helper._maybe_get_const(step, "i")
     if not symbolic_helper._is_value(const_size) and not symbolic_helper._is_value(
@@ -327,28 +352,36 @@ def unfold(g, input, dimension, size, step):
 
         unsqueeze_list = []
         loop_condition = g.op("Constant", value_t=torch.tensor(1))
-        loop_condition = g.op("Cast", loop_condition, to_i=9)
+        loop_condition = g.op(
+            "Cast", loop_condition, to_i=_C_onnx.TensorProtoDataType.BOOL
+        )
         loop_len = g.op("Min", low_size, hi_size)
-        loop = g.op("Loop", loop_len, loop_condition)
 
-        loop_block = utils._add_block(loop.node())
+        loop, (loop_context,), _ = jit_utils.add_op_with_blocks(
+            g, "Loop", loop_len, loop_condition, n_blocks=1
+        )
+
+        loop_block = loop_context.block
         block_input_iter = utils._add_input_to_block(loop_block)
+        # FIXME(justinchuby): cond is unused?
         cond = utils._add_input_to_block(loop_block)
 
-        starts = loop_block.op("Gather", low_indices, block_input_iter)
-        ends = loop_block.op("Gather", hi_indices, block_input_iter)
-        axes = loop_block.op("Constant", value_t=torch.tensor([2]))
-        starts = symbolic_helper._unsqueeze_helper(loop_block, starts, [0])
-        ends = symbolic_helper._unsqueeze_helper(loop_block, ends, [0])
-        stack = loop_block.op("Slice", input, starts, ends, axes)
+        starts = loop_context.op("Gather", low_indices, block_input_iter)
+        ends = loop_context.op("Gather", hi_indices, block_input_iter)
+        axes = loop_context.op("Constant", value_t=torch.tensor([2]))
+        starts = symbolic_helper._unsqueeze_helper(loop_context, starts, [0])
+        ends = symbolic_helper._unsqueeze_helper(loop_context, ends, [0])
+        stack = loop_context.op("Slice", input, starts, ends, axes)
 
         unsqueeze = symbolic_helper._unsqueeze_helper(
-            loop_block, loop_block.op("Transpose", stack, perm_i=perm), [dimension]
+            loop_context, loop_context.op("Transpose", stack, perm_i=perm), [dimension]
         )
         unsqueeze_list.append(unsqueeze)
-        concat = loop_block.op("Concat", *unsqueeze_list, axis_i=0)
+        concat = loop_context.op("Concat", *unsqueeze_list, axis_i=0)
 
-        cond_out = loop_block.op("Cast", loop_condition, to_i=9)
+        cond_out = loop_context.op(
+            "Cast", loop_condition, _C_onnx.TensorProtoDataType.BOOL
+        )
         utils._add_output_to_block(loop_block, cond_out)
         utils._add_output_to_block(loop_block, concat)
 
@@ -359,14 +392,14 @@ def unfold(g, input, dimension, size, step):
         squeeze = symbolic_helper._squeeze_helper(g, transpose, [0])
 
         return squeeze
-    else:
-        return symbolic_helper._unimplemented("Unfold", "input size not accessible")
+
+    return symbolic_helper._unimplemented("Unfold", "input size not accessible")
 
 
 @_onnx_symbolic("aten::tensordot")
 @symbolic_helper.parse_args("v", "v", "is", "is", "v")
 @_beartype.beartype
-def tensordot(g, input_a, input_b, dims_a, dims_b, out=None):
+def tensordot(g: jit_utils.GraphContext, input_a, input_b, dims_a, dims_b, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
             "Tensordot", "Out parameter is not supported for tensordot."

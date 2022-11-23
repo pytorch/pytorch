@@ -510,7 +510,8 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
 
 Tensor computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
-    const std::vector<ExprHandle>& outputShape) {
+    const std::vector<ExprHandle>& outputShape,
+    const std::vector<ExprHandle>& outputStrides) {
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto input_list = c10::get<BufList>(inputs[0]);
   auto arg_dim = inputs[1];
@@ -534,8 +535,13 @@ Tensor computeCatWoConditionals(
   //       output[i,j+l2,k] = inp3[i,j,k]
 
   auto output_sizes_expr = ExprHandleVectorToExprVector(outputShape);
-  auto output_buf =
-      alloc<Buf>("aten_cat", output_sizes_expr, ToDtype(high_type));
+  auto output_strides_expr = ExprHandleVectorToExprVector(outputStrides);
+  auto output_buf = alloc<Buf>(
+      "aten_cat",
+      output_sizes_expr,
+      ToDtype(high_type),
+      nullptr,
+      output_strides_expr);
   if (non_empty_inputs.size() == 0) {
     return Tensor(
         output_buf, alloc<tensorexpr::Block>(std::vector<StmtPtr>({})));
@@ -543,6 +549,23 @@ Tensor computeCatWoConditionals(
 
   int64_t concat_dim = c10::get<int64_t>(arg_dim);
   auto norm_concat_dim = normalizeAndCheckIndex(concat_dim, outputShape.size());
+
+  auto loop_order_fn = [&](const BufPtr& buf_) {
+    std::vector<int32_t> loop_order;
+    if (buf_->is_contiguous()) {
+      for (int32_t i = buf_->ndim() - 1; i >= 0; i--) {
+        loop_order.push_back(i);
+      }
+    } else if (buf_->is_contiguous(c10::MemoryFormat::ChannelsLast)) {
+      loop_order = {1, 3, 2, 0};
+    } else if (buf_->is_contiguous(c10::MemoryFormat::ChannelsLast3d)) {
+      loop_order = {1, 4, 3, 2, 0};
+    } else {
+      loop_order = {1, 2, 0};
+    }
+
+    return loop_order;
+  };
 
   auto gen_code_for_input = [&](const BufHandle& inp,
                                 size_t inp_pos,
@@ -566,10 +589,16 @@ Tensor computeCatWoConditionals(
     auto load_expr = alloc<Load>(inp_buf, load_indices);
     auto load_promoted = promoteToDtype(ExprHandle(load_expr), high_type);
     StmtPtr st = alloc<Store>(output_buf, store_indices, load_promoted.node());
-    for (size_t i = dims.size(); i > 0; --i) {
+
+    auto loop_order = loop_order_fn(inp.node());
+    for (auto dim_index : loop_order) {
       st = alloc<For>(
-          for_vars[i - 1], immLike(dims[i - 1], 0), dims[i - 1].node(), st);
+          for_vars[dim_index],
+          immLike(dims[dim_index], 0),
+          dims[dim_index].node(),
+          st);
     }
+
     return st;
   };
 
@@ -596,7 +625,7 @@ Tensor computeCat(
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   if (device == at::kCPU && getCatWoConditionals()) {
-    return computeCatWoConditionals(inputs, outputShape);
+    return computeCatWoConditionals(inputs, outputShape, outputStrides);
   }
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto inputList = c10::get<BufList>(inputs[0]);

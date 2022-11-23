@@ -78,7 +78,7 @@ struct Smem_tile_reduce {
 
     static constexpr int ROWS = WARPS_M * MMAS_M * 16;
     static constexpr int COLS = WARPS_N;
-    static_assert(COLS == 4 || COLS == 8);
+    static_assert(COLS == 4 || COLS == 8, "");
     static constexpr int ROWS_PER_XOR_PATTERN = (COLS == 8) ? 4 : 8;
     static constexpr int BYTES_PER_TILE = ROWS * COLS * sizeof(float);
     static constexpr int ELTS_PER_TILE = ROWS * COLS;
@@ -263,7 +263,7 @@ struct Softmax_base {
         };
         #pragma unroll
         for( int mi = 0; mi < MMAS_M; mi++ ) {
-            static_assert(MMAS_N % 2 == 0);
+            static_assert(MMAS_N % 2 == 0, "");
             #pragma unroll
             for( int ni = 0; ni < MMAS_N; ni += 2 ) {
                 uint4 random_uint4 = ph0();
@@ -319,7 +319,7 @@ struct Softmax : public Softmax_base<Cta_tile, Kernel_traits> {
     static constexpr int MMAS_N = Base::MMAS_N;
 
     using Smem_tile_red = Smem_tile_reduce<Cta_tile, Kernel_traits>;
-    static_assert(Smem_tile_red::ELTS_PER_TILE == Cta_tile::M * WARPS_N);
+    static_assert(Smem_tile_red::ELTS_PER_TILE == Cta_tile::M * WARPS_N, "");
     // Ctor.
     template<typename Params>
     inline __device__ Softmax(const Params &params, void *smem, int tidx)
