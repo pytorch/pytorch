@@ -713,9 +713,6 @@ class TritonKernel(Kernel):
     def indexing(
         self,
         index: sympy.Expr,
-        *,
-        copy_shape=None,
-        dense_indexing=False,
     ):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
@@ -735,41 +732,11 @@ class TritonKernel(Kernel):
                 assert var.name[0] in "xyr", var.name
                 mask_vars.add(f"{var.name[0]}mask")
 
-        need_dense = (
-            config.triton.dense_indexing
-            or dense_indexing
-            or self._load_mask is not None
-        ) and index != 0
-
-        have_dense = True
-        have_loop_vars = False
-        dense_mask = set()
-
-        for tree in self.range_trees:
-            if tree.prefix == "r" and not self.inside_reduction:
-                continue
-            if index_vars.intersection(tree.var_list):
-                have_loop_vars = True
-                have_dense = False
-            dense_mask.add(f"{tree.prefix}mask")
-
-        if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
+        if isinstance(index, sympy.Integer):
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
-            if isinstance(index, sympy.Integer):
-                return index_str, set(), "None"
-            else:
-                mask_vars = dense_mask
-        elif not have_loop_vars and copy_shape:
-            mask_vars = dense_mask
-            index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
 
         if self._load_mask:
             mask_vars.add(self._load_mask)
-
-        if mask_vars == {"xmask"} and index == 0 and self.range_trees[0].numel == 1:
-            # This causes a triton error:
-            # https://github.com/openai/triton/issues/633
-            mask_vars = set()
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
         return index_str, mask_vars, mask_str
@@ -849,7 +816,7 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask_vars, mask = self.indexing(index, dense_indexing=True)
+        index, mask_vars, mask = self.indexing(index)
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":

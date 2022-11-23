@@ -75,11 +75,9 @@ class TritonTemplateKernel(TritonKernel):
 
         return code
 
-    def indexing(self, index: sympy.Expr, copy_shape=None, dense_indexing=True):
+    def indexing(self, index: sympy.Expr):
         # use dense_indexing for TritonTemplateKernel to avoid map::at error
-        return super().indexing(
-            index, copy_shape=copy_shape, dense_indexing=dense_indexing
-        )
+        return super().indexing(index)
 
     def codegen_body(
         self, name, fuse, could_remove_kernel_buf, kernel_buf_replace_name
