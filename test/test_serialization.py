@@ -658,7 +658,7 @@ class SerializationMixin(object):
                 torch.save([a, b], f)
                 f.seek(0)
                 a_loaded, b_loaded = torch.load(f)
-            # self.assertEqual(a, a_loaded)
+            self.assertEqual(a, a_loaded)
             self.assertEqual(b, b_loaded)
 
         for device, dtype in product(devices, all_types_and_complex_and(torch.half,
@@ -752,9 +752,6 @@ class TestBothSerialization(TestCase):
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
-    def test_save_different_dtype_unallocated(self):
-        super().test_save_different_dtype_unallocated()
-
     # unique_key is necessary because on Python 2.7, if a warning passed to
     # the warning module is the same, it is not raised again.
     def _test_serialization_container(self, unique_key, filecontext_lambda):
