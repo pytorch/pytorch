@@ -1984,6 +1984,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
             exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
+    def test_wrong_order_guard(self):
+        @torch._dynamo.optimize("aot_eager")
+        def f(a, b):
+            assert a.size(0) == b.size(0) * 2
+            return a + a, b * b
+
+        f(torch.randn(4, requires_grad=True), torch.randn(2, requires_grad=True))
+        f(torch.randn(6, requires_grad=True), torch.randn(3, requires_grad=True))
+
     @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_without_msg(self):
         def f(x):

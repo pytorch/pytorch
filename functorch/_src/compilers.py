@@ -120,14 +120,12 @@ def nop(fx_g: fx.GraphModule, _) -> Callable:
 class DebugInterpreter(fx.Interpreter):
     def __init__(self, *args, **kwargs):
         self.symbol_mapping = {}
+        self.deferred_eq = []
         super().__init__(*args, **kwargs)
 
     def run_node(self, n):
         import sympy
 
-        # TODO: This will fail once we start caching in AOTAutograd
-        # again, because we need to remap SymInts to their new values
-        # in the presence of dynamism
         def subst_symint(ni):
             if isinstance(ni, SymInt):
                 r = sympy.expand(ni.node.expr.xreplace(self.symbol_mapping))
@@ -184,21 +182,27 @@ class DebugInterpreter(fx.Interpreter):
                         else:
                             assert prev == ri, f"{prev} != {ri}"
                     else:
-                        # TODO: what if the symint hasn't been bound yet?
-                        assert subst_symint(ni) == ri
+                        self.deferred_eq.append((ni, ri))
                 else:
                     assert ni == ri
 
             if isinstance(r, int):
                 bind_symint(n.meta['val'], r)
             else:
-                assert isinstance(r, torch.Tensor)
+                assert isinstance(r, torch.Tensor), type(r)
 
                 for ni, ri in zip(n.meta['val'].size(), r.size()):
                     bind_symint(ni, ri)
                 for ni, ri in zip(n.meta['val'].stride(), r.stride()):
                     bind_symint(ni, ri)
                 bind_symint(n.meta['val'].storage_offset(), r.storage_offset())
+
+            # Don't test after, defeats the point of deferring!
+            return r
+        else:
+            for ni, ri in self.deferred_eq:
+                assert subst_symint(ni) == ri, f"{ni} != {ri}"
+            self.deferred_eq.clear()
 
         # Check that outputs are consistent
         if 'val' in n.meta:
