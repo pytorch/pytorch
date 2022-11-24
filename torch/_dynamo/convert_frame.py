@@ -90,10 +90,7 @@ def wrap_compiler_fn(compiler_fn):
     """WrapperBackend if config.verify_correctness is True"""
     if config.verify_correctness:
         # wrap backend if verify_correctness is True
-        wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
-
-        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn
-        return wrapper_backend_compiler_fn
+        return WrapperBackend(compiler_fn)
 
     return compiler_fn
 
