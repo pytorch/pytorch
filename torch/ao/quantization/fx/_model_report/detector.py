@@ -23,7 +23,7 @@ from torch.ao.quantization.fx._equalize import (
     default_equalization_qconfig,
     EqualizationQConfig,
 )
-from torch.ao.quantization.observer import _is_activation_post_process
+from torch.ao.quantization.quantize import is_activation_post_process
 
 # Names for observer insert keys
 DETECTOR_TARGET_NODE_KEY = "target_node"
@@ -1273,7 +1273,7 @@ class OutlierDetector(DetectorBase):
         # case for insertion of module
         # check if the module has any children and isn't observer
         num_children = len(list(module.children()))
-        return num_children == 0 and not _is_activation_post_process(module)
+        return num_children == 0 and not is_activation_post_process(module)
 
     def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
         r""" Returns the DetectorQConfigInfo for each module_fqn relavent
