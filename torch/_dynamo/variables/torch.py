@@ -715,9 +715,6 @@ class TorchPyOperator(VariableTracker):
             # ops - see torch/dispatch/_dispatcher.py
             from .. import config
 
-            if config.fake_tensor_propagation:
-                unimplemented("Fake tensor mode not yet supported for cond")
-
             assert len(p_args) == 4
             assert type(args[0]) is TensorVariable  # predicate
             assert type(p_args[1]) is UserFunctionVariable  # true_fn
