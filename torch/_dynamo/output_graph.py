@@ -20,12 +20,7 @@ from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import ConstantSource, LocalSource, Source
-from .utils import (
-    CleanupHook,
-    count_calls,
-    counters,
-    format_graph_tabular,
-)
+from .utils import CleanupHook, count_calls, counters, format_graph_tabular
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (

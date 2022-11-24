@@ -4,17 +4,16 @@ import itertools
 import operator
 
 import torch
+
+from torch._subclasses import FakeTensorMode  # noqa: F401
 from torch.fx.node import map_aggregate
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._pytree import tree_map
 
 from .. import config
-from ..utils import clone_inputs
 
-from torch._subclasses import FakeTensorMode  # noqa: F401
-
-from ..utils import deepcopy_to_fake_tensor
+from ..utils import clone_inputs, deepcopy_to_fake_tensor
 
 
 class ShapeAliasingAndMutationProp(ShapeProp):

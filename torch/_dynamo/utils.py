@@ -694,6 +694,7 @@ from torch._subclasses import (  # noqa: F401
     UnsupportedFakeTensorException,
 )
 
+
 def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
     fake_tensor = fake_mode.from_tensor(e, static_shapes=static_shapes)
     if tx is not None:
@@ -729,6 +730,7 @@ def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
 
     return fake_tensor
 
+
 def wrap_fake_exception(fn):
     try:
         return fn()
@@ -739,6 +741,7 @@ def wrap_fake_exception(fn):
         log.warning(msg)
         raise unimplemented(msg)
 
+
 def wrap_to_fake_tensor(e, fake_mode):
     if type(e) in (torch.Tensor, torch.nn.Parameter):
         return wrap_fake_exception(
@@ -748,6 +751,7 @@ def wrap_to_fake_tensor(e, fake_mode):
         )
     else:
         return e
+
 
 def wrap_to_fake_tensor_and_record(e, tx):
     if type(e) in (torch.Tensor, torch.nn.Parameter):
@@ -761,9 +765,11 @@ def wrap_to_fake_tensor_and_record(e, tx):
     else:
         return e
 
+
 def deepcopy_to_fake_tensor(obj, fake_mode):
     with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
         return wrap_fake_exception(lambda: copy.deepcopy(obj))
+
 
 def rmse(ref, res):
     """
