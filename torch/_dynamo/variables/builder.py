@@ -241,9 +241,19 @@ class VariableBuilder:
             return ListIteratorVariable(
                 output, mutable_local=MutableLocal(), guards=guards
             )
-        elif istype(value, range):
-            guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
-            return RangeVariable(value=value, guards=guards)
+        elif istype(value, (slice, range)):
+            items = [
+                VariableBuilder(self.tx, AttrSource(self.get_source(), k))(
+                    getattr(value, k)
+                )
+                for k in ("start", "stop", "step")
+            ]
+            if isinstance(value, slice):
+                return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
+            else:
+                return RangeVariable(
+                    items, guards=make_guards(GuardBuilder.EQUALS_MATCH)
+                )
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
@@ -448,14 +458,6 @@ class VariableBuilder:
             return HFPretrainedConfigVariable(
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
-        elif isinstance(value, slice):
-            items = [
-                VariableBuilder(self.tx, AttrSource(self.get_source(), k))(
-                    getattr(value, k)
-                )
-                for k in ("start", "stop", "step")
-            ]
-            return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
         elif isinstance(value, PyOperator):
             return TorchPyOperator(
                 value,
