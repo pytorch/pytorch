@@ -1601,6 +1601,20 @@ class CommonTemplate:
                     (v,),
                 )
 
+    def test_linear_packed(self):
+        options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
+        for input_shape, bias in options:
+            mod = torch.nn.Sequential(
+                torch.nn.Linear(input_shape[-1], 30, bias=bias)
+            ).eval()
+
+            v = torch.randn(input_shape)
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
+
     def test_linear_unary(self):
         options = itertools.product(unary_list, [[2, 3, 10], [2, 10]], [True, False])
         dtype = torch.bfloat16
