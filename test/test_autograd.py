@@ -7236,6 +7236,28 @@ get_out().sum().backward()
             err_msg = "RuntimeError: one of the variables needed for gradient computation"
             self.assertTrue(err_msg in e.output.decode("utf-8"))
 
+    def test_view_func_replay(self):
+        def _assert_match_metadata(a, b):
+            self.assertEqual(a.size(), b.size())
+            self.assertEqual(a.stride(), b.stride())
+            self.assertEqual(a.storage_offset(), b.storage_offset())
+
+        def _test_op(fn, inp, args):
+            out = fn(inp, *args)
+            self.assertTrue(out._is_view)
+            self.assertTrue(out._base is inp)
+
+            new_inp = inp.clone()
+            _assert_match_metadata(new_inp, inp)
+            new_out = out._view_func(new_inp)
+            _assert_match_metadata(new_out, out)
+
+        _test_op(torch.select, torch.rand(2, 2), (0, 0))
+        _test_op(torch.as_strided, torch.rand(2, 2), ((4,), (1,)))
+        _test_op(torch.view_as_complex, torch.rand(2, 2), ())
+        _test_op(torch.view_as_real, torch.rand(2, 2, dtype=torch.cfloat), ())
+
+
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
