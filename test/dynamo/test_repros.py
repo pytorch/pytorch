@@ -1886,7 +1886,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 5)
         self.assertEqual(cnt.frame_count, 1)
 
-
     def test_for_loop_graph_break(self):
         def inner(x):
             return torch.sin(x)

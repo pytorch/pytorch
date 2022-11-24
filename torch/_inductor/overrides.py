@@ -8,6 +8,7 @@ import weakref
 import torch
 import torch.nn as nn
 from torch import _prims
+from torch._dynamo.utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -18,7 +19,6 @@ from torch.nn import functional as F
 from torch.nn.modules.utils import _pair
 from torch.nn.utils.fusion import fuse_conv_bn_eval
 from torch.overrides import TorchFunctionMode
-
 from . import config
 
 log = logging.getLogger(__name__)
@@ -450,9 +450,12 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # For binary fusion, we need to check inputs info to make sure
     # the binary inputs have same tensor info(device, dtype, and layout).
 
-    # Doesn't work with fake tensors, do not land like this
-    # ShapeProp(gm).propagate(*example_inputs)
-    # Doesn't work with fake tensors, do not land like this
+    gm_for_shape_prop = gm
+    fake_mode = fake_mode_from_tensors(example_inputs)
+    if fake_mode:
+        gm_for_shape_prop = deepcopy_to_fake_tensor(gm_for_shape_prop, fake_mode)
+
+    ShapeProp(gm_for_shape_prop).propagate(*example_inputs)
 
     gm = fuse_unary(gm)
     gm = fuse_binary_inplace(gm)

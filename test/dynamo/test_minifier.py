@@ -147,7 +147,9 @@ class MinifierTests(MinifierTestBase):
         """
         )
 
-        test_code = self._gen_test_code(run_code, "dynamo", repro_level, backend_code, False)
+        test_code = self._gen_test_code(
+            run_code, "dynamo", repro_level, backend_code, False
+        )
         proc, repro_dir = self._run_test_code(test_code)
         self.assertEqual(proc.returncode, 0)
         self.assertIsNone(repro_dir)
