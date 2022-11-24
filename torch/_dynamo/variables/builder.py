@@ -37,7 +37,6 @@ from ..source import (
 from ..utils import (
     clone_input,
     get_fake_value,
-    get_real_value,
     getfile,
     global_key_name,
     is_namedtuple,
@@ -581,10 +580,7 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
         else:
-            if (
-                config.dynamic_shapes
-                and isinstance(value, int)
-            ):
+            if config.dynamic_shapes and isinstance(value, int):
                 shape_env = self.tx.output.shape_env
                 wrapped_value = shape_env.create_symintnode(
                     shape_env.create_symbol(value)
@@ -675,9 +671,7 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not isinstance(
-                value, torch._subclasses.fake_tensor.FakeTensor
-            ):
+            if not isinstance(value, torch._subclasses.fake_tensor.FakeTensor):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
 
@@ -703,9 +697,7 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
         example_value = _clone_input(example_value)
         proxy.node.meta["example_value"] = example_value
         specialized_props = target_cls.specialize(example_value)
-        if isinstance(
-            example_value, torch._subclasses.fake_tensor.FakeTensor
-        ):
+        if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
             specialized_props["class_type"] = (
                 torch.nn.Parameter if is_parameter else torch.Tensor
             )

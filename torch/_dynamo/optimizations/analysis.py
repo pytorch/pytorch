@@ -1,4 +1,3 @@
-import copy
 import functools
 import itertools
 import operator
@@ -13,7 +12,7 @@ from torch.utils._pytree import tree_map
 
 from .. import config
 
-from ..utils import clone_inputs, deepcopy_to_fake_tensor
+from ..utils import deepcopy_to_fake_tensor
 
 
 class ShapeAliasingAndMutationProp(ShapeProp):
@@ -134,9 +133,7 @@ def has_mutation(gm, example_inputs, inputs_only=False):
     # on those shapes though, so just create a fresh ShapeEnv here.
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-    fake_mode = FakeTensorMode(
-        shape_env=ShapeEnv() if config.dynamic_shapes else None
-    )
+    fake_mode = FakeTensorMode(shape_env=ShapeEnv() if config.dynamic_shapes else None)
     fake_wrapper = functools.partial(_wrap_to_fake_tensor, f_mode=fake_mode)
     example_inputs = tree_map(fake_wrapper, example_inputs)
     new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
