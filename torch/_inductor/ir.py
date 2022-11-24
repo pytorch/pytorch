@@ -2439,7 +2439,7 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
-        if isinstance(x, sympy.Expr):
+        if isinstance(x, (sympy.Expr, int)):
             return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
@@ -2478,6 +2478,9 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def require_stride_order(cls, x, order):
+        if x.get_numel() == 0:  # Layout doesn't matter
+            return x
+
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
             if isinstance(
@@ -2982,6 +2985,7 @@ class FallbackKernel(ExternKernelAlloc):
             aten._fft_c2c.out,
             aten._linalg_svd.default,
             aten._linalg_svd.U,
+            aten.upsample_bilinear2d.default,
         )
         context = (
             FakeTensorMode if kernel not in fake_incorrect_kernels else nullcontext
