@@ -9,7 +9,10 @@ using lstm_fn = void(*)(Tensor&, Tensor&, Tensor&, const Tensor&, TensorList, Te
 using rnn_fn = void(*)(Tensor&, Tensor&, const Tensor&, const Tensor&, TensorList, bool, int64_t, double, bool, bool, bool);
 using lstm_packed_fn = void(*)(Tensor&, Tensor&, Tensor&, const Tensor&, const Tensor&, TensorList, TensorList, bool, int64_t, double, bool, bool);
 using rnn_packed_fn = void(*)(Tensor&, Tensor&, const Tensor&, const Tensor&, const Tensor&, TensorList, bool, int64_t, double, bool, bool);
-
+using fused_lstm_cell_forward_fn = std::tuple<Tensor, Tensor, Tensor> (*)(const Tensor&, const Tensor&, const Tensor&, const c10::optional<Tensor>&, const c10::optional<Tensor>&);
+using fused_lstm_cell_backward_fn = std::tuple<Tensor, Tensor, Tensor> (*)(const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, bool);
+DECLARE_DISPATCH(fused_lstm_cell_forward_fn, fused_lstm_cell_forward_stub);
+DECLARE_DISPATCH(fused_lstm_cell_backward_fn, fused_lstm_cell_backward_stub);
 DECLARE_DISPATCH(lstm_fn, lstm_cudnn_stub);
 DECLARE_DISPATCH(lstm_fn, lstm_miopen_stub);
 DECLARE_DISPATCH(rnn_fn, gru_cudnn_stub);

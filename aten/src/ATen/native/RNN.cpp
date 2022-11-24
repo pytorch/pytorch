@@ -21,6 +21,7 @@
 #include <ATen/ops/_thnn_differentiable_lstm_cell_backward_native.h>
 #include <ATen/ops/_thnn_fused_gru_cell.h>
 #include <ATen/ops/_thnn_fused_lstm_cell.h>
+#include <ATen/ops/_thnn_fused_lstm_cell_native.h>
 #include <ATen/ops/_thnn_fused_lstm_cell_backward_impl.h>
 #include <ATen/ops/_use_cudnn_rnn_flatten_weight_native.h>
 #include <ATen/ops/cat.h>
@@ -51,7 +52,7 @@
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/zeros_like_ops.h>
 #endif
-
+#include <iostream>
 int register_linear_params();
 
 namespace at { namespace native {
@@ -161,6 +162,9 @@ struct CellParams : public CellParamsBase {
     return at::linear(input, w_ih, b_ih_);
   }
   Tensor linear_hh(const Tensor& h) const override {
+    // std::cout << "b_hh_ size " << b_hh_.sizes() << " b_hh_ strides " << b_hh_.strides() << "\n";
+    // std::cout << "w_hh size " << w_hh.sizes() << " w_hh strides " << w_hh.strides() << "\n";
+    
     return at::linear(h, w_hh, b_hh_);
   }
   const Tensor& b_ih() const override {
@@ -735,17 +739,39 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
     }
 
-    const auto gates = params.linear_hh(hx).add_(
-        pre_compute_input ? input : params.linear_ih(input));
-    auto chunked_gates = gates.unsafe_chunk(4, 1);
-    auto ingate = chunked_gates[0].sigmoid_();
-    auto forgetgate = chunked_gates[1].sigmoid_();
-    auto cellgate = chunked_gates[2].tanh_();
-    auto outgate = chunked_gates[3].sigmoid_();
-    auto cy = (forgetgate * cx).add_(ingate * cellgate);
-    auto hy = outgate * cy.tanh();
-    hy = params.matmul_hr(hy);
-    return std::make_tuple(std::move(hy), std::move(cy));
+    auto igates = pre_compute_input ? input : params.linear_ih(input);;
+    auto hgates = params.linear_hh(hx);
+    auto result = at::_thnn_fused_lstm_cell(
+        igates, hgates, cx);
+    // applying projections if w_hr is defined
+    auto hy = params.matmul_hr(std::get<0>(result));
+    // Slice off the workspace argument (it's needed only for AD).
+    return std::make_tuple(std::move(hy), std::move(std::get<1>(result)));
+
+    // const auto h_gates = params.linear_hh(hx);
+    // const auto in_gates = pre_compute_input ? input : params.linear_ih(input);
+    // std::cout << "pre_compute_input ?  " << pre_compute_input << "\n";
+    // std::cout << "in_gates sizes " << in_gates.sizes() << " in_gates strides " << in_gates.strides() << "\n";
+    // std::cout << " h_gates sizes " << h_gates.sizes() << " h_gates strides " << h_gates.strides() << "\n";
+    // const auto gates = in_gates.add_(h_gates);
+    // auto chunked_gates = gates.unsafe_chunk(4, 1);
+    // // auto cy = at::empty_like(chunked_gates[0]);
+    // // auto hy = at::empty_like(chunked_gates[0]);
+    // std::cout << "gates sizes " << gates.sizes() << " gates strides " << gates.strides() << "\n";
+    // std::cout << "chunked_gates0 sizes " << chunked_gates[0].sizes() << " gates0 strides " << chunked_gates[0].strides() << "\n";
+    // std::cout << "hx sizes " << hx.sizes() << " hx strides " << hx.strides() << "\n";
+    // std::cout << "cx sizes " << cx.sizes() << " cx strides " << cx.strides() << "\n";
+
+    // const auto gates = params.linear_hh(hx).add_(input);
+    // auto chunked_gates = gates.unsafe_chunk(4, 1);
+    // auto ingate = chunked_gates[0].sigmoid_();
+    // auto forgetgate = chunked_gates[1].sigmoid_();
+    // auto cellgate = chunked_gates[2].tanh_();
+    // auto outgate = chunked_gates[3].sigmoid_();
+    // auto cy = (forgetgate * cx).add_(ingate * cellgate);
+    // auto hy = outgate * cy.tanh();
+    // hy = params.matmul_hr(hy);
+    // return std::make_tuple(std::move(hy), std::move(cy));
   }
 
 };
@@ -1154,6 +1180,32 @@ std::tuple<io_type, Tensor, Tensor> _lstm_impl(
 }
 
 } // anonymous namespace
+
+
+std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_cpu(
+      const Tensor& input_gates, const Tensor& hidden_gates,
+      const Tensor& cx, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt) {
+  return fused_lstm_cell_forward_stub(input_gates.device().type(), input_gates, hidden_gates, cx, input_bias_opt, hidden_bias_opt);
+}
+
+std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward_impl_cpu(
+  const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
+  const Tensor& cx, const Tensor& cy,
+  const Tensor& workspace, bool has_bias) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> grad_hy_maybe_owned = at::borrow_from_optional_tensor(grad_hy_opt);
+  const Tensor& grad_hy = *grad_hy_maybe_owned;
+  const Tensor& grad_cy = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
+  if (!grad_hy.defined() && !grad_cy.defined()) {
+    return std::tuple<Tensor, Tensor, Tensor>();
+  }
+  // TODO check
+
+  return fused_lstm_cell_backward_stub(cx.device().type(), grad_hy, grad_cy, cx, cy, workspace, has_bias);
+}
+
+DEFINE_DISPATCH(fused_lstm_cell_forward_stub);
+DEFINE_DISPATCH(fused_lstm_cell_backward_stub);
 
 bool _use_cudnn_rnn_flatten_weight() {
   return detail::getCUDAHooks().compiledWithCuDNN();
