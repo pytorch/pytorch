@@ -11,6 +11,7 @@
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+#include <ATen/Config.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -50,8 +51,8 @@
 #include <ATen/ops/tanh_backward.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/zeros_like_ops.h>
-
 #include <utility>
+#include <ATen/ops/lstm_mkldnn_stub.h>
 #endif
 
 int register_linear_params();
@@ -67,6 +68,17 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
                                 (input.is_cuda()) &&
                                 (at::globalContext().userEnabledCuDNN());
     return is_miopen_acceptable;
+}
+
+bool use_mkldnn(const Tensor& input, const double dropout_p) {
+#if AT_MKLDNN_ENABLED()
+  if (!at::globalContext().userEnabledMkldnn()) {
+    return false;
+  }
+  return input.options().backend() == at::Backend::CPU &&
+      input.scalar_type() == kFloat;
+#endif
+  return false;
 }
 
 template<typename T>
@@ -1445,6 +1457,12 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TORCH_WARN_ONCE(
           "LSTM with projections is not supported with MIOpen. Using default implementation.");
     }
+  }
+
+  if (use_mkldnn(_input, dropout_p)) {
+    std::cout<<"in use_mkldnn\n";
+    return at::lstm_mkldnn_stub(_input, hx, _params, has_biases,
+        num_layers, dropout_p, train, bidirectional, batch_first);
   }
 
   check_attributes(_input, _params, hx);
