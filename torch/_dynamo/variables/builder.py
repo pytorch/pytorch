@@ -36,7 +36,6 @@ from ..source import (
 )
 from ..utils import (
     clone_input,
-    fake_tensors_available,
     get_fake_value,
     get_real_value,
     getfile,
@@ -658,13 +657,13 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
             options.update(target_cls.specialize(example_value))
         return target_cls(proxy, **options)
 
-    use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
+    use_fake_tensors = config.fake_tensor_propagation
 
     initial_example_value = example_value
 
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
-            use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
+            use_fake_tensors = config.fake_tensor_propagation
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
             if not use_fake_tensors or not isinstance(
                 value, torch._subclasses.fake_tensor.FakeTensor
