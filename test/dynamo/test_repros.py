@@ -4,7 +4,6 @@ import copy
 import inspect
 import itertools
 import random
-import sys
 import unittest
 from abc import ABC
 from collections import namedtuple
@@ -30,7 +29,6 @@ from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import expectedFailureIf
 
 try:
     import torch._refs
@@ -1965,8 +1963,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
-    # https://github.com/pytorch/torchdynamo/issues/1922
-    @expectedFailureIf((3, 9, 0) <= sys.version_info < (3, 10, 0))
     @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_msg(self):
         def f(x):
@@ -2013,8 +2009,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
             exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
-    # https://github.com/pytorch/torchdynamo/issues/1922
-    @expectedFailureIf((3, 9, 0) <= sys.version_info < (3, 10, 0))
     @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_without_msg(self):
         def f(x):
