@@ -1076,6 +1076,15 @@ def get_fake_value(node, tx):
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             unimplemented(f"dynamic shape operator: {cause.func}")
+        elif node.target is torch.tensor:
+            # torch.tensor doesn't work very well with fake tensors, so
+            # if it raises an error, we guess that a graph break is better
+            # here.  Possibly we should error out earlier if we detect
+            # we are feeding fake tensors into torch.tensor instead of
+            # attempting and failing; we may also incorrectly suppress
+            # real user errors (but fallback to eager will report the
+            # true error)
+            unimplemented(f"torch.tensor: {cause}")
         raise TorchRuntimeError() from e
 
 
