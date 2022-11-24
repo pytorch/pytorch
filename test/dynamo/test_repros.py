@@ -816,6 +816,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.utils.counters["frames"]["ok"] + 1,
         )
 
+    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
             Boxes(torch.arange(0, 8).reshape((2, 4))),
@@ -951,6 +952,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 4)
 
     # see: https://github.com/pytorch/pytorch/issues/80067
+    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_maml_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
