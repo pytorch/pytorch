@@ -85,6 +85,7 @@ from .misc import (
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import (
     DynamicShapeVariable,
+    FakeItemVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedNumpyVariable,
