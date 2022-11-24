@@ -829,6 +829,280 @@ public:
 };
 
 template <>
+class Vectorized<uint8_t> : public Vectorizedi {
+private:
+  static constexpr __m512i zero_vector {0, 0, 0, 0, 0, 0, 0, 0};
+  static const Vectorized<uint8_t> ones;
+public:
+  using value_type = uint8_t;
+  static constexpr int size() {
+    return 64;
+  }
+  using Vectorizedi::Vectorizedi;
+  Vectorized() {}
+  Vectorized(uint8_t v) { values = _mm512_set1_epi8(v); }
+  Vectorized(uint8_t val1, uint8_t val2, uint8_t val3, uint8_t val4,
+         uint8_t val5, uint8_t val6, uint8_t val7, uint8_t val8,
+         uint8_t val9, uint8_t val10, uint8_t val11, uint8_t val12,
+         uint8_t val13, uint8_t val14, uint8_t val15, uint8_t val16,
+         uint8_t val17, uint8_t val18, uint8_t val19, uint8_t val20,
+         uint8_t val21, uint8_t val22, uint8_t val23, uint8_t val24,
+         uint8_t val25, uint8_t val26, uint8_t val27, uint8_t val28,
+         uint8_t val29, uint8_t val30, uint8_t val31, uint8_t val32,
+         uint8_t val33, uint8_t val34, uint8_t val35, uint8_t val36,
+         uint8_t val37, uint8_t val38, uint8_t val39, uint8_t val40,
+         uint8_t val41, uint8_t val42, uint8_t val43, uint8_t val44,
+         uint8_t val45, uint8_t val46, uint8_t val47, uint8_t val48,
+         uint8_t val49, uint8_t val50, uint8_t val51, uint8_t val52,
+         uint8_t val53, uint8_t val54, uint8_t val55, uint8_t val56,
+         uint8_t val57, uint8_t val58, uint8_t val59, uint8_t val60,
+         uint8_t val61, uint8_t val62, uint8_t val63, uint8_t val64){
+    values = _mm512_set_epi8(val64, val63, val62, val61, val60, val59, val58, val57,
+                              val56, val55, val54, val53,val52, val51, val50, val49,
+                              val48, val47, val46, val45, val44, val43, val42, val41,
+                              val40, val39, val38, val37, val36, val35, val34, val33,
+                              val32, val31, val30, val29, val28, val27, val26, val25,
+                              val24, val23, val22, val21, val20, val19, val18, val17,
+                              val16, val15, val14, val13, val12, val11, val10, val9,
+                              val8, val7, val6, val5, val4, val3, val2, val1);
+  }
+  template <int64_t mask>
+  static Vectorized<uint8_t> blend(Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
+    return _mm512_mask_blend_epi8(mask, a.values, b.values);
+  }
+  static Vectorized<uint8_t> blendv(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b,
+                               const Vectorized<uint8_t>& mask) {
+    auto msb_one = _mm512_set1_epi8(0xFF);
+    auto mask_ = _mm512_cmp_epu8_mask(mask, msb_one, _MM_CMPINT_EQ);
+    return _mm512_mask_blend_epi8(mask_, a.values, b.values);
+  }
+  template <typename step_t>
+  static Vectorized<uint8_t> arange(uint8_t base = 0, step_t step = static_cast<step_t>(1)) {
+    return Vectorized<uint8_t>(
+      base,             base +      step, base +  2 * step, base +  3 * step,
+      base +  4 * step, base +  5 * step, base +  6 * step, base +  7 * step,
+      base +  8 * step, base +  9 * step, base + 10 * step, base + 11 * step,
+      base + 12 * step, base + 13 * step, base + 14 * step, base + 15 * step,
+      base + 16 * step, base + 17 * step, base + 18 * step, base + 19 * step,
+      base + 20 * step, base + 21 * step, base + 22 * step, base + 23 * step,
+      base + 24 * step, base + 25 * step, base + 26 * step, base + 27 * step,
+      base + 28 * step, base + 29 * step, base + 30 * step, base + 31 * step,
+      base + 32 * step, base + 33 * step, base + 34 * step, base + 35 * step,
+      base + 36 * step, base + 37 * step, base + 38 * step, base + 39 * step,
+      base + 40 * step, base + 41 * step, base + 42 * step, base + 43 * step,
+      base + 44 * step, base + 45 * step, base + 46 * step, base + 47 * step,
+      base + 48 * step, base + 49 * step, base + 50 * step, base + 51 * step,
+      base + 52 * step, base + 53 * step, base + 54 * step, base + 55 * step,
+      base + 56 * step, base + 57 * step, base + 58 * step, base + 59 * step,
+      base + 60 * step, base + 61 * step, base + 62 * step, base + 63 * step);
+  }
+  static Vectorized<uint8_t>
+  set(Vectorized<uint8_t> a, Vectorized<uint8_t> b, uint8_t count = size()) {
+    switch (count) {
+      case 0:
+        return a;
+      case 1:
+        return blend<0x1>(a, b);
+      case 2:
+        return blend<0x3>(a, b);
+      case 3:
+        return blend<0x7>(a, b);
+      case 4:
+        return blend<0xF>(a, b);
+      case 5:
+        return blend<0x1F>(a, b);
+      case 6:
+        return blend<0x3F>(a, b);
+      case 7:
+        return blend<0x7F>(a, b);
+      case 8:
+        return blend<0xFF>(a, b);
+      case 9:
+        return blend<0x1FF>(a, b);
+      case 10:
+        return blend<0x3FF>(a, b);
+      case 11:
+        return blend<0x7FF>(a, b);
+      case 12:
+        return blend<0xFFF>(a, b);
+      case 13:
+        return blend<0x1FFF>(a, b);
+      case 14:
+        return blend<0x3FFF>(a, b);
+      case 15:
+        return blend<0x7FFF>(a, b);
+      case 16:
+        return blend<0xFFFF>(a, b);
+      case 17:
+        return blend<0x1FFFF>(a, b);
+      case 18:
+        return blend<0x3FFFF>(a, b);
+      case 19:
+        return blend<0x7FFFF>(a, b);
+      case 20:
+        return blend<0xFFFFF>(a, b);
+      case 21:
+        return blend<0x1FFFFF>(a, b);
+      case 22:
+        return blend<0x3FFFFF>(a, b);
+      case 23:
+        return blend<0x7FFFFF>(a, b);
+      case 24:
+        return blend<0xFFFFFF>(a, b);
+      case 25:
+        return blend<0x1FFFFFF>(a, b);
+      case 26:
+        return blend<0x3FFFFFF>(a, b);
+      case 27:
+        return blend<0x7FFFFFF>(a, b);
+      case 28:
+        return blend<0xFFFFFFF>(a, b);
+      case 29:
+        return blend<0x1FFFFFFF>(a, b);
+      case 30:
+        return blend<0x3FFFFFFF>(a, b);
+      case 31:
+        return blend<0x7FFFFFFF>(a, b);
+      case 32:
+        return blend<0xFFFFFFFF>(a, b);
+      case 33:
+        return blend<0x1FFFFFFFF>(a, b);
+      case 34:
+        return blend<0x3FFFFFFFF>(a, b);
+      case 35:
+        return blend<0x7FFFFFFFF>(a, b);
+      case 36:
+        return blend<0xFFFFFFFFF>(a, b);
+      case 37:
+        return blend<0x1FFFFFFFFF>(a, b);
+      case 38:
+        return blend<0x3FFFFFFFFF>(a, b);
+      case 39:
+        return blend<0x7FFFFFFFFF>(a, b);
+      case 40:
+        return blend<0xFFFFFFFFFF>(a, b);
+      case 41:
+        return blend<0x1FFFFFFFFFF>(a, b);
+      case 42:
+        return blend<0x3FFFFFFFFFF>(a, b);
+      case 43:
+        return blend<0x7FFFFFFFFFF>(a, b);
+      case 44:
+        return blend<0xFFFFFFFFFFF>(a, b);
+      case 45:
+        return blend<0x1FFFFFFFFFFF>(a, b);
+      case 46:
+        return blend<0x3FFFFFFFFFFF>(a, b);
+      case 47:
+        return blend<0x7FFFFFFFFFFF>(a, b);
+      case 48:
+        return blend<0xFFFFFFFFFFFF>(a, b);
+      case 49:
+        return blend<0x1FFFFFFFFFFFF>(a, b);
+      case 50:
+        return blend<0x3FFFFFFFFFFFF>(a, b);
+      case 51:
+        return blend<0x7FFFFFFFFFFFF>(a, b);
+      case 52:
+        return blend<0xFFFFFFFFFFFFF>(a, b);
+      case 53:
+        return blend<0x1FFFFFFFFFFFFF>(a, b);
+      case 54:
+        return blend<0x3FFFFFFFFFFFFF>(a, b);
+      case 55:
+        return blend<0x7FFFFFFFFFFFFF>(a, b);
+      case 56:
+        return blend<0xFFFFFFFFFFFFFF>(a, b);
+      case 57:
+        return blend<0x1FFFFFFFFFFFFFF>(a, b);
+      case 58:
+        return blend<0x3FFFFFFFFFFFFFF>(a, b);
+      case 59:
+        return blend<0x7FFFFFFFFFFFFFF>(a, b);
+      case 60:
+        return blend<0xFFFFFFFFFFFFFFF>(a, b);
+      case 61:
+        return blend<0x1FFFFFFFFFFFFFFF>(a, b);
+      case 62:
+        return blend<0x3FFFFFFFFFFFFFFF>(a, b);
+      case 63:
+        return blend<0x7FFFFFFFFFFFFFFF>(a, b);
+    }
+    return b;
+  }
+  static Vectorized<uint8_t> loadu(const void* ptr) {
+    return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
+  }
+  static Vectorized<uint8_t> loadu(const void* ptr, uint8_t count) {
+    __at_align__ uint8_t tmp_values[size()];
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 0;
+    }
+    std::memcpy(tmp_values, ptr, count * sizeof(uint8_t));
+    return loadu(tmp_values);
+  }
+  void store(void* ptr, int count = size()) const {
+    if (count == size()) {
+      // ptr need not to be aligned here. See
+      // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm512-storeu-si512.html
+      _mm512_storeu_si512(reinterpret_cast<__m512i*>(ptr), values);
+    } else if (count > 0) {
+      __at_align__ uint8_t tmp_values[size()];
+      _mm512_storeu_si512(reinterpret_cast<__m512i*>(tmp_values), values);
+      std::memcpy(ptr, tmp_values, count * sizeof(uint8_t));
+    }
+  }
+  const uint8_t& operator[](int idx) const  = delete;
+  uint8_t& operator[](int idx)  = delete;
+  Vectorized<uint8_t> abs() const {
+    return values;
+  }
+  Vectorized<uint8_t> real() const {
+    return *this;
+  }
+  Vectorized<uint8_t> imag() const {
+    return _mm512_set1_epi8(0);
+  }
+  Vectorized<uint8_t> conj() const {
+    return *this;
+  }
+  Vectorized<uint8_t> frac() const;
+  Vectorized<uint8_t> neg() const;
+  Vectorized<uint8_t> operator==(const Vectorized<uint8_t>& other) const {
+    auto mask = _mm512_cmpeq_epu8_mask(values, other.values);
+    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+  }
+  Vectorized<uint8_t> operator!=(const Vectorized<uint8_t>& other) const {
+    auto mask = _mm512_cmpneq_epu8_mask(values, other.values);
+    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+  }
+  Vectorized<uint8_t> operator<(const Vectorized<uint8_t>& other) const {
+    auto mask = _mm512_cmplt_epu8_mask(values, other.values);
+    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+  }
+  Vectorized<uint8_t> operator<=(const Vectorized<uint8_t>& other) const {
+    auto mask = _mm512_cmple_epu8_mask(values, other.values);
+    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+  }
+  Vectorized<uint8_t> operator>(const Vectorized<uint8_t>& other) const {
+    return other < *this;
+  }
+  Vectorized<uint8_t> operator>=(const Vectorized<uint8_t>& other) const {
+    return other <= *this;
+  }
+
+  Vectorized<uint8_t> eq(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> ne(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> gt(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> ge(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> lt(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> le(const Vectorized<uint8_t>& other) const;
+};
+
+template <>
 Vectorized<int64_t> inline operator+(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
   return _mm512_add_epi64(a, b);
 }
@@ -845,6 +1119,11 @@ Vectorized<int16_t> inline operator+(const Vectorized<int16_t>& a, const Vectori
 
 template <>
 Vectorized<int8_t> inline operator+(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
+  return _mm512_add_epi8(a, b);
+}
+
+template <>
+Vectorized<uint8_t> inline operator+(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
   return _mm512_add_epi8(a, b);
 }
 
@@ -868,6 +1147,11 @@ Vectorized<int8_t> inline operator-(const Vectorized<int8_t>& a, const Vectorize
   return _mm512_sub_epi8(a, b);
 }
 
+template <>
+Vectorized<uint8_t> inline operator-(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
+  return _mm512_sub_epi8(a, b);
+}
+
 // Negation. Defined here so we can utilize operator-
 inline Vectorized<int64_t> Vectorized<int64_t>::neg() const {
   return Vectorized<int64_t>(0) - *this;
@@ -883,6 +1167,10 @@ inline Vectorized<int16_t> Vectorized<int16_t>::neg() const {
 
 inline Vectorized<int8_t> Vectorized<int8_t>::neg() const {
   return Vectorized<int8_t>(0) - *this;
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::neg() const {
+  return Vectorized<uint8_t>(0) - *this;
 }
 
 template <>
@@ -919,6 +1207,12 @@ Vectorized<int8_t> inline operator*(const Vectorized<int8_t>& a, const Vectorize
 }
 
 template <>
+Vectorized<uint8_t> inline operator*(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
+  // We don't have an instruction for multiplying uint8_t
+  return int_elementwise_binary_512(a, b, std::multiplies<uint8_t>());
+}
+
+template <>
 Vectorized<int64_t> inline minimum(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
   return _mm512_min_epi64(a, b);
 }
@@ -939,6 +1233,11 @@ Vectorized<int8_t> inline minimum(const Vectorized<int8_t>& a, const Vectorized<
 }
 
 template <>
+Vectorized<uint8_t> inline minimum(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
+  return _mm512_min_epu8(a, b);
+}
+
+template <>
 Vectorized<int64_t> inline maximum(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
   return _mm512_max_epi64(a, b);
 }
@@ -955,6 +1254,11 @@ Vectorized<int16_t> inline maximum(const Vectorized<int16_t>& a, const Vectorize
 
 template <>
 Vectorized<int8_t> inline maximum(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
+  return _mm512_max_epi8(a, b);
+}
+
+template <>
+Vectorized<uint8_t> inline maximum(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
   return _mm512_max_epi8(a, b);
 }
 
@@ -979,6 +1283,11 @@ Vectorized<int8_t> inline clamp(const Vectorized<int8_t>& a, const Vectorized<in
 }
 
 template <>
+Vectorized<uint8_t> inline clamp(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& min_val, const Vectorized<uint8_t>& max_val) {
+  return _mm512_min_epu8(max_val, _mm512_max_epu8(a, min_val));
+}
+
+template <>
 Vectorized<int64_t> inline clamp_max(const Vectorized<int64_t>& a, const Vectorized<int64_t>& max_val) {
   return _mm512_min_epi64(max_val, a);
 }
@@ -999,6 +1308,11 @@ Vectorized<int8_t> inline clamp_max(const Vectorized<int8_t>& a, const Vectorize
 }
 
 template <>
+Vectorized<uint8_t> inline clamp_max(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& max_val) {
+  return _mm512_min_epu8(max_val, a);
+}
+
+template <>
 Vectorized<int64_t> inline clamp_min(const Vectorized<int64_t>& a, const Vectorized<int64_t>& min_val) {
   return _mm512_max_epi64(min_val, a);
 }
@@ -1016,6 +1330,11 @@ Vectorized<int16_t> inline clamp_min(const Vectorized<int16_t>& a, const Vectori
 template <>
 Vectorized<int8_t> inline clamp_min(const Vectorized<int8_t>& a, const Vectorized<int8_t>& min_val) {
   return _mm512_max_epi8(min_val, a);
+}
+
+template <>
+Vectorized<uint8_t> inline clamp_min(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& min_val) {
+  return _mm512_max_epu8(min_val, a);
 }
 
 template<typename T>
@@ -1048,6 +1367,10 @@ Vectorized<int16_t> inline operator/(const Vectorized<int16_t>& a, const Vectori
 template <>
 Vectorized<int8_t> inline operator/(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
   return int_elementwise_binary_512(a, b, std::divides<int8_t>());
+}
+template <>
+Vectorized<uint8_t> inline operator/(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
+  return int_elementwise_binary_512(a, b, std::divides<uint8_t>());
 }
 
 template<class T, typename std::enable_if_t<std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
@@ -1163,9 +1486,34 @@ inline Vectorized<int8_t> Vectorized<int8_t>::le(const Vectorized<int8_t>& other
   return (*this <= other) & Vectorized<int8_t>(1);
 }
 
-template <bool left_shift>
-Vectorized<int8_t> inline shift_512_8(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
-  // No vector instruction for shifting int8_t, so emulating it instead.
+inline Vectorized<uint8_t> Vectorized<uint8_t>::eq(const Vectorized<uint8_t>& other) const {
+  return (*this == other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::ne(const Vectorized<uint8_t>& other) const {
+  return (*this != other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::gt(const Vectorized<uint8_t>& other) const {
+  return (*this > other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::ge(const Vectorized<uint8_t>& other) const {
+  return (*this >= other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::lt(const Vectorized<uint8_t>& other) const {
+  return (*this < other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::le(const Vectorized<uint8_t>& other) const {
+  return (*this <= other) & Vectorized<uint8_t>(1);
+}
+
+template <bool left_shift, typename T, typename std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value, int> = 0>
+Vectorized<T> inline shift_512_8(const Vectorized<T>& a, const Vectorized<T>& b) {
+  // No vector instruction for shifting int8_t/uint8_t, so emulating
+  // it instead.
 
   // Control masks for shuffle operation, treating 512 bits as an
   // array of 8-bit elements, and considering pairs of neighboring
@@ -1220,7 +1568,10 @@ Vectorized<int8_t> inline shift_512_8(const Vectorized<int8_t>& a, const Vectori
   if (left_shift)
     c0 = _mm512_sllv_epi16(a0, b0);
   else
-    c0 = _mm512_srav_epi16(a0, b0);
+    if (std::is_same<T, int8_t>::value)
+      c0 = _mm512_srav_epi16(a0, b0);
+    else
+      c0 = _mm512_srlv_epi16(a0, b0);
   c0 = _mm512_shuffle_epi8(c0, ctl_1_0);
 
   // Peform shifting the same way for input array elements with
@@ -1231,7 +1582,10 @@ Vectorized<int8_t> inline shift_512_8(const Vectorized<int8_t>& a, const Vectori
   if (left_shift)
     c1 = _mm512_sllv_epi16(a1, b1);
   else
-    c1 = _mm512_srav_epi16(a1, b1);
+    if (std::is_same<T, int8_t>::value)
+      c1 = _mm512_srav_epi16(a1, b1);
+    else
+      c1 = _mm512_srlv_epi16(a1, b1);
   c1 = _mm512_and_si512(c1, keep_1);
 
   // Merge partial results into the final result.
@@ -1261,6 +1615,11 @@ Vectorized<int8_t> inline operator<<(const Vectorized<int8_t>& a, const Vectoriz
 }
 
 template <>
+Vectorized<uint8_t> inline operator<<(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
+  return shift_512_8<true>(a, b);
+}
+
+template <>
 Vectorized<int64_t> inline operator>>(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
   return _mm512_srav_epi64(a, b);
 }
@@ -1277,6 +1636,11 @@ Vectorized<int16_t> inline operator>>(const Vectorized<int16_t>& a, const Vector
 
 template <>
 Vectorized<int8_t> inline operator>>(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
+  return shift_512_8<false>(a, b);
+}
+
+template <>
+Vectorized<uint8_t> inline operator>>(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
   return shift_512_8<false>(a, b);
 }
 
