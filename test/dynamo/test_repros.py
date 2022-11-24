@@ -816,7 +816,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.utils.counters["frames"]["ok"] + 1,
         )
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
             Boxes(torch.arange(0, 8).reshape((2, 4))),
@@ -1035,7 +1034,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 8)
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
     def test_rng_state(self):
         def fn():
             state = torch.get_rng_state()
@@ -1110,7 +1108,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
     def test_nn_parameter(self):
         def test_fn():
             a = torch.nn.Parameter(torch.randn(5, 5))
@@ -1699,8 +1696,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    # This doesn't work without fake tensors but I don't care
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
     def test_issue1466_size_aot_autograd(self):
         def fn(x):
             # do a tensor op and a size compute

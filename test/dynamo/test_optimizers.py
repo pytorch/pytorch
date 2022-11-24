@@ -77,11 +77,6 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.config, "capture_scalar_outputs", True
             )
         )
-        cls._exit_stack.enter_context(
-            unittest.mock.patch.object(
-                torch._dynamo.config, "fake_tensor_propagation", True
-            )
-        )
         cls._exit_stack.enter_context(enable_optimizer_tracing())
 
     test_sgd = make_test(torch.optim.SGD, lr=0.01)

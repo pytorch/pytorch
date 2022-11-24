@@ -260,11 +260,7 @@ class TensorVariable(VariableTracker):
             unimplemented(f"Tensor.{name}")
         elif name == "item":
             if config.capture_scalar_outputs:
-                use_fake_tensors = config.fake_tensor_propagation
-                if use_fake_tensors:
-                    example_value = get_fake_value(self.proxy.node, tx)
-                else:
-                    example_value = get_real_value(self.proxy.node, tx.output).item()
+                example_value = get_fake_value(self.proxy.node, tx)
                 return wrap_fx_proxy(
                     tx,
                     tx.output.create_proxy(

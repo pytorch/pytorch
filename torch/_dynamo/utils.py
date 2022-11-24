@@ -737,7 +737,7 @@ def wrap_fake_exception(fn):
     except UnsupportedFakeTensorException as e:
         from .exc import unimplemented
 
-        msg = f"Unsupported: {e.reason} with fake tensor propagation. Run with config.fake_tensor_propagation=False"
+        msg = f"Unsupported: {e.reason} with fake tensor propagation."
         log.warning(msg)
         raise unimplemented(msg)
 
