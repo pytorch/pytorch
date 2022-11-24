@@ -9,7 +9,7 @@ import operator
 import re
 import types
 from abc import ABCMeta
-from typing import Any, List, Union
+from typing import Any, Union
 
 import numpy as np
 from functorch.experimental.ops import PyOperator
@@ -43,6 +43,7 @@ from ..utils import (
     global_key_name,
     is_namedtuple,
     is_numpy_int_type,
+    is_typing,
     istensor,
     istype,
     odict_values,
@@ -240,9 +241,19 @@ class VariableBuilder:
             return ListIteratorVariable(
                 output, mutable_local=MutableLocal(), guards=guards
             )
-        elif istype(value, range):
-            guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
-            return RangeVariable(value=value, guards=guards)
+        elif istype(value, (slice, range)):
+            items = [
+                VariableBuilder(self.tx, AttrSource(self.get_source(), k))(
+                    getattr(value, k)
+                )
+                for k in ("start", "stop", "step")
+            ]
+            if isinstance(value, slice):
+                return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
+            else:
+                return RangeVariable(
+                    items, guards=make_guards(GuardBuilder.EQUALS_MATCH)
+                )
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
@@ -360,7 +371,8 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif value is List:
+        elif is_typing(value):
+            # typing.List, typing.Mapping, etc.
             return TypingVariable(
                 value,
                 guards=make_guards(GuardBuilder.ID_MATCH),
@@ -446,14 +458,6 @@ class VariableBuilder:
             return HFPretrainedConfigVariable(
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
-        elif isinstance(value, slice):
-            items = [
-                VariableBuilder(self.tx, AttrSource(self.get_source(), k))(
-                    getattr(value, k)
-                )
-                for k in ("start", "stop", "step")
-            ]
-            return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
         elif isinstance(value, PyOperator):
             return TorchPyOperator(
                 value,

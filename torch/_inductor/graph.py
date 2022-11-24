@@ -20,9 +20,14 @@ from .exc import (
     MissingOperatorWithoutDecomp,
 )
 from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
-from .lowering import lowerings, make_fallback, needs_realized_inputs
+from .lowering import (
+    layout_constraints,
+    lowerings,
+    make_fallback,
+    needs_realized_inputs,
+)
 from .sizevars import SizeVarAllocator
-from .utils import dynamo_utils, gather_origins
+from .utils import dynamo_utils, gather_origins, get_dtype_size, sympy_product
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -271,7 +276,15 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
             isinstance(
-                x, (TensorBox, ir.Constant, type(None), ir.ConstantBuffer, sympy.Expr)
+                x,
+                (
+                    TensorBox,
+                    ir.Constant,
+                    type(None),
+                    ir.ConstantBuffer,
+                    sympy.Expr,
+                    int,
+                ),
             )
             for x in result
         ), result
@@ -301,7 +314,12 @@ class GraphLowering(torch.fx.Interpreter):
 
     def run_node(self, n: torch.fx.Node):
         with ir.IRNode.current_origins({n}):
-            result = super().run_node(n)
+            if n.op == "call_function" and n.target in layout_constraints:
+                args, kwargs = self.fetch_args_kwargs_from_env(n)
+                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
+                result = self.call_function(n.target, args, kwargs)
+            else:
+                result = super().run_node(n)
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
@@ -310,7 +328,25 @@ class GraphLowering(torch.fx.Interpreter):
                 for user in n.users:
                     if user.target in needs_realized_inputs:
                         result.realize_hint()
-                    elif user.op == "output":
+                        # This inclusion is somewhat controversial (from
+                        # discussion between Horace, Natalia, and Elias).
+                        # Currently, it's not very clear why this is helpful.
+                        # The general idea here is that even though a node may
+                        # have FlexibleLayout, we still often *treat* it as if
+                        # it was contiguous. This appears to sometime result in
+                        # suboptimal behavior.
+                        #
+                        # When we do a better job selecting layout, we should
+                        # revisit this.
+                        if user.target in (
+                            torch.ops.aten.convolution.default,
+                            torch.ops.aten.convolution_backward.default,
+                            torch.ops.aten.mm.default,
+                        ):
+                            result = ir.ExternKernel.require_stride_order(
+                                result, ir.get_stride_order(n.meta["val"].stride())
+                            )
+                    if user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):
                             result.realize()
 
@@ -332,6 +368,47 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler = Scheduler(self.buffers)
         self.scheduler.codegen()
         return self.wrapper_code.generate()
+
+    def count_bytes(self):
+        from .scheduler import FusedSchedulerNode, NopKernelSchedulerNode, Scheduler
+
+        scheduler = Scheduler(self.buffers)
+
+        def get_read_write_buffers_sizes(node):
+            if isinstance(node, NopKernelSchedulerNode):
+                return 0
+            reads = set(dep.name for dep in node.read_writes.reads)
+            writes = set(dep.name for dep in node.read_writes.writes)
+
+            def is_materialized(buf):
+                buf_uses = set(
+                    [user.node for user in scheduler.name_to_node[buf].users]
+                )
+                return len(buf_uses - set(node.snodes)) > 0
+
+            if isinstance(node, FusedSchedulerNode):
+                writes = set([dep for dep in writes if is_materialized(dep)])
+            node_bytes = 0
+            for buf in reads | writes:
+                if buf in self.name_to_buffer:
+                    buf = self.name_to_buffer[buf]
+                elif buf in self.graph_inputs:
+                    buf = self.graph_inputs[buf]
+                else:
+                    continue
+
+                node_bytes += V.graph.sizevars.size_hint(
+                    sympy_product(buf.get_size())
+                ) * get_dtype_size(buf.get_dtype())
+            return node_bytes
+
+        total_bytes = 0
+        node_counts = []
+        for node in scheduler.nodes:
+            num_bytes = get_read_write_buffers_sizes(node)
+            node_counts.append((node, num_bytes // 4))
+            total_bytes += num_bytes
+        return total_bytes, node_counts
 
     @dynamo_utils.dynamo_timed
     def compile_to_module(self):

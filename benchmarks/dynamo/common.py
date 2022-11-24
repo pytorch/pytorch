@@ -4,6 +4,7 @@ import collections
 import copy
 import csv
 import functools
+import importlib
 import io
 import logging
 import os
@@ -32,6 +33,7 @@ from torch._dynamo.utils import clone_inputs
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map
 
@@ -85,83 +87,85 @@ CI_SKIP_AOT_EAGER_TRAINING = [
 CI_SKIP_INDCUTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
+    "DALLE2_pytorch",
     "detectron2",
-    "hf_Reformer",
+    "hf_T5",  # accuracy
+    "hf_BigBird",  # accuracy
+    "hf_GPT2_large",  # OOM
+    "maml",  # accuracy
+    "mobilenet_v2_quantized_qat",  # The eval test only supports CPU
     "moco",  # accuracy
+    "pytorch_struct",  # Test eval is not implemented
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
     "tacotron2",
     "vision_maskrcnn",  # accuracy
-    "yolov3",  # Accuracy
     # Huggingface
-    "BigBird",
-    "YituTechConvBert",
+    "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
     "ghostnet_100",  # Accuracy
-    "swin_base_patch4_window7_224",  # Accuracy
-    # Trying to get CI working - https://github.com/pytorch/pytorch/pull/87588
-    "visformer_small",  # fails accuracy on CI but passes locally
 ]
 
 CI_SKIP_INDUCTOR_TRAINING = [
-    # CI does not check accuracy for inductor training yet
-    # *CI_SKIP_AOT_EAGER_TRAINING,
-    # *CI_SKIP_INDCUTOR_INFERENCE,
+    *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
-    "attention_is_all_you_need_pytorch",
-    "drq",
-    "hf_Albert",
-    "hf_Bart",
-    "hf_GPT2",
-    "hf_Reformer",
-    "mobilenet_v3_large",
-    "moco",
-    "pytorch_struct",
-    "vgg16",
-    "speech_transformer",  # from functionalization
-    "vision_maskrcnn",  # from functionalization
-    "timm_efficientnet",  # from functionalization (only fails for inductor)
-    "hf_Bert",
-    "soft_actor_critic",
-    "tacotron2",
-    "yolov3",
-    # OOM
-    "Background_Matting",
-    "fastNLP_Bert",
-    "hf_BigBird",
-    "mobilenet_v2",
-    "mobilenet_v2_quantized_qat",
-    "resnet50_quantized_qat",
-    "timm_regnet",
+    "Background_Matting",  # fp64_OOM
+    "mobilenet_v3_large",  # accuracy
+    "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
-    "AllenaiLongformerBase",
-    "AlbertForMaskedLM",  # OOM
-    "BartForConditionalGeneration",  # OOM
+    "BlenderbotForCausalLM",  # OOM
+    "GoogleFnet",  # Eager model failed to run
     "M2M100ForConditionalGeneration",  # OOM
-    "MBartForConditionalGeneration",  # OOM
-    "MT5ForConditionalGeneration",  # OOM
-    "PegasusForConditionalGeneration",  # OOM
-    "XGLMForCausalLM",  # fp64_OOM
-    # OOM
-    "BigBird",
-    "TrOCRForCausalLM",
-    "AlbertForQuestionAnswering",
+    "XGLMForCausalLM",  # OOM
     # TIMM
-    "cait_m36_384",  # fp64_OOM
-    "coat_lite_mini",  # time out
     "convit_base",  # fp64_OOM
-    "gernet_l",  # accuracy
-    "gluon_xception65",
-    "hrnet_w18",  # accuracy
-    "lcnet_0500",  # accuracy
-    "levit_128",  # levit_128
-    "poolformer_m36",
+    "eca_halonext26ts",  # accuracy
+    "fbnetv3_b",  # accuracy
+    "levit_128",  # fp64_OOM
+    "res2net101_26w_4s",  # accuracy
+    "resnest101e",  # accuracy
     "rexnet_100",  # accuracy
-    "swin_base_patch4_window7_224",
-    "twins_pcpvt_base",  # time out
+    "spnasnet_100",  # accuracy
+    "swin_base_patch4_window7_224",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
+
+
+def model_specified_by_path(path_and_class_str):
+    return ":" in path_and_class_str
+
+
+def load_model_from_path(path_and_class_str):
+    configs = {}
+    for kvstr in path_and_class_str.split(","):
+        k, v = kvstr.split(":")
+        configs[k] = v
+
+    for name in ["path", "class"]:
+        if name not in configs:
+            raise RuntimeError(
+                "Invalid --only arguments. Check help message for the correct format"
+            )
+
+    path = configs["path"]
+    class_name = configs["class"]
+
+    if path[:1] != "/":
+        raise RuntimeError(
+            "Use absolute path since dynamo may change the current working directory which makes using relative path tricky"
+        )
+
+    spec = importlib.util.spec_from_file_location("module_name", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    model_class = getattr(module, class_name)
+    assert issubclass(model_class, torch.nn.Module)
+    model = model_class()
+    assert hasattr(model, "get_example_inputs")
+    inputs = model.get_example_inputs()
+    return model, inputs
 
 
 def output_csv(filename, headers, row):
@@ -236,13 +240,36 @@ def print_summary(filename):
             pass
 
 
+def tensor_is_on_xla(tensors):
+    if not isinstance(tensors, (tuple, list)):
+        tensors = [tensors]
+    tensors = [x for x in tensors if isinstance(x, torch.Tensor)]
+    return any(map(lambda x: x.device.type == "xla", tensors))
+
+
 def timed(model, model_iter_fn, example_inputs, times=1, return_result=False):
     synchronize()
+    if tensor_is_on_xla(example_inputs):
+        import torch_xla.core.xla_model as xm
+
+        xm.mark_step()
+
     reset_rng_state()
     t0 = time.perf_counter()
     # Dont collect outputs to correctly measure timing
     for _ in range(times):
         result = model_iter_fn(model, example_inputs, collect_outputs=False)
+        if tensor_is_on_xla(result):
+            # If the model is on XLA device, it's possible that after running
+            # the model, the computation is accumulated but not performed yet.
+            # Flush all the accumulated computations to make the time measurement
+            # accurate.
+            import torch_xla
+
+            result_list = result
+            if not isinstance(result, (tuple, list)):
+                result_list = [result]
+            torch_xla._XLAC._xla_sync_multi(result_list, [])
         synchronize()
     t1 = time.perf_counter()
     return (t1 - t0, result) if return_result else t1 - t0
@@ -354,6 +381,13 @@ def randomize_input(inputs):
         )
 
 
+def maybe_mark_step(args):
+    if args.trace_on_xla:
+        import torch_xla.core.xla_model as xm
+
+        xm.mark_step()
+
+
 def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     """
     Measure speedups over eager.
@@ -367,9 +401,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     # if we randomize the input, we should also check the result is correct
     should_check_result = should_randomize_input = args.randomize_input
     is_correct = True
-
-    baseline_model_iter_fn = get_baseline_model_iter_fn(args, model_iter_fn)
-    baseline_model = get_baseline_model(args, model)
 
     import contextlib
 
@@ -389,16 +420,25 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                 if should_randomize_input
                 else example_inputs
             )
+            # need call mark_step to perform the computation
+            # on randomize_input. Otherwise the first call using the
+            # inputs will incur high penalty then the next one.
+            maybe_mark_step(args)
 
             # interleave the runs to handle frequency scaling and load changes
             timings[rep, 0], expected_output = timed(
-                baseline_model, baseline_model_iter_fn, inputs, return_result=True
+                model, model_iter_fn, inputs, return_result=True
             )
+
+            # call mark_step between the 2 calls to make the comparison fair.
+            maybe_mark_step(args)
+
             timings[rep, 1], actual_output = timed(
                 model, frozen_model_iter_fn, inputs, return_result=True
             )
             if should_check_result:
                 is_correct = is_correct and same(expected_output, actual_output)
+
     if args.export_profiler_trace:
         name = args.profiler_trace_name + "_" + model.name + ".json"
         name = os.path.join(torch._dynamo.config.base_dir, name)
@@ -813,56 +853,6 @@ def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_s
             torch.distributed.destroy_process_group()
 
 
-def xla_wrapper(model_iter_fn):
-    """
-    Wrap the model_iter_fn to run the model on XLA devices.
-    """
-
-    def wrapper(xla_mod, inputs, collect_outputs=True):
-        import torch_xla.core.xla_model as xm
-
-        # Make sure the model is already moved to the xla device. Moving
-        # the model to xla device can be very expensive since model parameters
-        # need to be copied. We should not do that inside the wrapper since
-        # the wrapper will be calles for each set of inputs.
-        assert (
-            next(xla_mod.parameters()).device.type == "xla"
-        ), "The model should be already on xla device"
-
-        xla_dev = xm.xla_device()
-        eager_dev = inputs[0].device
-        xla_inputs = tree_map(lambda x: x.to(device=xla_dev), inputs)
-        xla_out = model_iter_fn(xla_mod, xla_inputs, collect_outputs)
-        if isinstance(xla_out, torch.Tensor):
-            return xla_out.to(device=eager_dev)
-        elif hasattr(xla_out, "__dict__"):
-            for k in xla_out.__dict__.keys():
-                if xla_out.__dict__[k] is None:
-                    continue
-                xla_out.__dict__[k] = tree_map(
-                    lambda x: x.to(device=eager_dev), xla_out.__dict__[k]
-                )
-            return xla_out
-        else:
-            raise RuntimeError(f"Can not handle type {type(xla_out)}")
-
-    return wrapper
-
-
-def get_baseline_model_iter_fn(args, model_iter_fn):
-    return xla_wrapper(model_iter_fn) if args.use_xla_baseline else model_iter_fn
-
-
-def get_baseline_model(args, model):
-    if args.use_xla_baseline:
-        import torch_xla.core.xla_model as xm
-
-        xla_dev = xm.xla_device()
-        return copy.deepcopy(model).to(device=xla_dev)
-    else:
-        return model
-
-
 class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
@@ -1001,7 +991,7 @@ class BenchmarkRunner:
             out_batch_size = batch_size - 1
         return max(0, int(out_batch_size))
 
-    def batch_size_finder(self, device, model_name, initial_batch_size=128):
+    def batch_size_finder(self, device, model_name, initial_batch_size=1024):
         batch_size = initial_batch_size
         while batch_size >= 1:
             torch.cuda.empty_cache()
@@ -1075,6 +1065,10 @@ class BenchmarkRunner:
             model = copy.deepcopy(model)
             if self.args.ddp:
                 model = DDP(model, find_unused_parameters=True)
+            elif self.args.fsdp:
+                model = FSDP(model)
+                torch._inductor.config.triton.cudagraphs = False
+                log.warn("Disabling cudagraphs for FSDP compatibility")
             return model
 
         # Collect the fp64 reference outputs to be used later for accuracy checking.
@@ -1288,6 +1282,7 @@ class BenchmarkRunner:
         experiment,
         diff=False,
         branch=None,
+        explain=False,
     ):
         if diff:
             self.compare_branches(
@@ -1297,6 +1292,8 @@ class BenchmarkRunner:
             print("RUNNING ON BRANCH:", branch)
         mode = "train" if self.args.training else "eval"
         print(f"{current_device:4} {mode:5} {current_name:34} ", end="", flush=True)
+        start_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
+        start_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
         if self.args.accuracy:
             status = self.check_accuracy(
                 name, model, example_inputs, optimize_ctx, experiment
@@ -1307,6 +1304,13 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment
             )
             print(status)
+        end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
+        end_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
+        if explain:
+            print(
+                f"Dynamo produced {end_unique_graphs-start_unique_graphs} graph(s) "
+                f"covering {end_calls_captured-start_calls_captured} ops"
+            )
 
 
 def help(fn):
@@ -1393,7 +1397,31 @@ def parse_args(args=None):
     parser.add_argument(
         "--fast", "-f", action="store_true", help="skip slow benchmarks"
     )
-    parser.add_argument("--only", help="Run just one model")
+    parser.add_argument(
+        "--only",
+        help="""Run just one model from torchbench. Or
+        specify the path and class name of the model in format like:
+        --only=path:<MODEL_FILE_PATH>,class:<CLASS_NAME>
+
+        Due to the fact that dynamo changes current working directory,
+        the path should be an absolute path.
+
+        The class should have a method get_example_inputs to return the inputs
+        for the model. An example looks like
+        ```
+        class LinearModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+            def get_example_inputs(self):
+                return (torch.randn(2, 10),)
+        ```
+    """,
+    )
     parser.add_argument(
         "--training",
         action="store_true",
@@ -1403,6 +1431,13 @@ def parse_args(args=None):
         "--ddp",
         action="store_true",
         help="Wraps model in DDP before running it, and uses dynamo DDPOptmizer (graph breaks) by default.",
+    )
+    parser.add_argument(
+        "--fsdp",
+        action="store_true",
+        help="""Wraps model in FSDP before running it. Disables cudagraphs by default.
+        Doesn't recursively wrap, mainly useful for checking dynamo UnspecNNModule compatibility
+    """,
     )
     parser.add_argument(
         "--no-optimize-ddp",
@@ -1449,6 +1484,15 @@ def parse_args(args=None):
         help="Overrides the output filename",
     )
     parser.add_argument(
+        "--output-directory",
+        help="Overrides the directory to place output files.",
+    )
+    parser.add_argument(
+        "--part",
+        default=None,
+        help="Specify the part of the model to run.",
+    )
+    parser.add_argument(
         "--export-profiler-trace",
         action="store_true",
         help="exports trace of kineto profiler",
@@ -1462,6 +1506,12 @@ def parse_args(args=None):
     )
 
     parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="print some graph/op statistics during the run, similar to .explain()",
+    )
+
+    parser.add_argument(
         "--cold_start_latency",
         action="store_true",
         help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
@@ -1472,9 +1522,9 @@ def parse_args(args=None):
         help="Disables cudagraphs for Inductor",
     )
     parser.add_argument(
-        "--use-xla-baseline",
+        "--trace-on-xla",
         action="store_true",
-        help="Whether to run baseline on XLA devices or eager devices",
+        help="Whether to trace the model on XLA or on eager device",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -1580,7 +1630,7 @@ def parse_args(args=None):
 def main(runner, original_dir=None):
     args = parse_args()
     with maybe_init_distributed(
-        args.ddp and args.only, port=args.distributed_master_port
+        (args.ddp or args.fsdp) and args.only, port=args.distributed_master_port
     ):
         return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
             runner, args, original_dir
@@ -1855,7 +1905,12 @@ def run(runner, args, original_dir=None):
         output_filename = args.output
 
     if output_filename:
-        output_filename = os.path.join(torch._dynamo.config.base_dir, output_filename)
+        if args.output_directory:
+            output_filename = os.path.join(args.output_directory, output_filename)
+        else:
+            output_filename = os.path.join(
+                torch._dynamo.config.base_dir, output_filename
+            )
 
     if args.find_batch_sizes and args.only:
         for device in args.devices:
@@ -1885,19 +1940,47 @@ def run(runner, args, original_dir=None):
                 batch_size = read_batch_size_from_file(
                     args, args.batch_size_file, model_name
                 )
-            try:
-                device, name, model, example_inputs, batch_size = runner.load_model(
-                    device,
-                    model_name,
-                    batch_size=batch_size,
-                )
-            except NotImplementedError as e:
-                print(e)
-                import traceback
+            if model_specified_by_path(args.only):
+                model, example_inputs = load_model_from_path(args.only)
+                name = model.__class__.__name__
+                model = model.to(device=device)
+                example_inputs = tree_map(lambda x: x.to(device=device), example_inputs)
+            else:
+                try:
+                    if args.part:
+                        (
+                            device,
+                            name,
+                            model,
+                            example_inputs,
+                            batch_size,
+                        ) = runner.load_model(
+                            device, model_name, batch_size=batch_size, part=args.part
+                        )
+                    else:
+                        (
+                            device,
+                            name,
+                            model,
+                            example_inputs,
+                            batch_size,
+                        ) = runner.load_model(device, model_name, batch_size=batch_size)
+                except NotImplementedError as e:
+                    print(e)
+                    import traceback
 
-                print(traceback.format_exc())
-                logging.warn(f"{args.only} failed to load")
-                continue  # bad benchmark implementation
+                    print(traceback.format_exc())
+                    logging.warn(f"{args.only} failed to load")
+                    continue  # bad benchmark implementation
+
+            if args.trace_on_xla:
+                import torch_xla.core.xla_model as xm
+
+                xla_dev = xm.xla_device()
+                model = model.to(device=xla_dev)
+                example_inputs = tree_map(
+                    lambda x: x.to(device=xla_dev), example_inputs
+                )
 
             current_name = name
             current_device = device
@@ -1922,6 +2005,7 @@ def run(runner, args, original_dir=None):
                 optimize_ctx,
                 experiment,
                 diff=args.diff_main,
+                explain=args.explain,
             )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
