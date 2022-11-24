@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import copy
 import functools
-import logging
 import os
 import random
 import unittest
