@@ -678,20 +678,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 //     L: Target sequence length
 //     E: Embedding dimension
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
-        const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
-        if (query_.requires_grad() || key.requires_grad() || value.requires_grad()){
-          return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
-        }
-        return at::_scaled_dot_product_attention_forward(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
-}
-
-int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal){
-  return static_cast<int64_t>(sdp::SDPBackend::math);
-}
-
-std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_math(
     const Tensor& query_,
     const Tensor& key,
     const Tensor& value,
@@ -699,14 +685,49 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_math(
     double dropout_p,
     bool need_attn_weights,
     bool is_causal) {
-  return at::_scaled_dot_product_attention_math(
-      query_,
-      key,
-      value,
-      attn_mask_,
-      dropout_p,
-      need_attn_weights,
-      is_causal);
+  // TODO: The second return is the attention weights if the math kernel is
+  // used. The fused kernels do not return this Tensor so for the fused kernels
+  // The second return SHOULD always be an empty Tensor, unless need_attn_weights
+  // is true (in which case the fused kernels would not be called). This blows up
+  // op_info tests.
+  int64_t choice_int = at::_fused_sdp_choice(
+      query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+  sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
+  switch (backend) {
+    case sdp::SDPBackend::flash_attention: {
+      auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
+          query_, key, value, dropout_p, need_attn_weights, is_causal);
+      return std::make_tuple(
+          std::move(std::get<0>(out_lse_softmax)),
+          std::move(std::get<2>(out_lse_softmax)));
+    }
+    case sdp::SDPBackend::efficient_attention: {
+      bool compute_logsumexp =
+          (query_.requires_grad() || key.requires_grad() ||
+           value.requires_grad());
+      return at::_scaled_dot_product_efficient_attention(
+          query_, key, value, compute_logsumexp, is_causal);
+    }
+    case sdp::SDPBackend::math:
+      return at::_scaled_dot_product_attention_math(
+          query_,
+          key,
+          value,
+          attn_mask_,
+          dropout_p,
+          need_attn_weights,
+          is_causal);
+    default:
+      TORCH_CHECK(
+          false,
+          "No viable backend for scaled_dot_product_attention was found.");
+      return std::make_tuple(Tensor(), Tensor());
+  }
+}
+
+int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal){
+  return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
