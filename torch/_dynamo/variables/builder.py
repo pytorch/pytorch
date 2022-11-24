@@ -123,7 +123,6 @@ class GraphArg:
         return [self.example]
 
     def get_fake_examples(self):
-        assert config.fake_tensor_propagation
         if self.fake_tensor is not None:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
@@ -575,12 +574,11 @@ class VariableBuilder:
                 )
 
             fake_tensor_value = None
-            if config.fake_tensor_propagation:
-                example_value = tensor_variable.proxy.node.meta["example_value"]
-                if isinstance(
-                    example_value, torch._subclasses.fake_tensor.FakeTensor
-                ):
-                    fake_tensor_value = example_value
+            example_value = tensor_variable.proxy.node.meta["example_value"]
+            if isinstance(
+                example_value, torch._subclasses.fake_tensor.FakeTensor
+            ):
+                fake_tensor_value = example_value
 
             graph_arg = GraphArg(self.get_source(), value, False, fake_tensor_value)
             self.tx.output.graphargs.append(graph_arg)
@@ -641,12 +639,11 @@ class VariableBuilder:
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             if not is_constant_source(self.get_source()):
                 fake_tensor_value = None
-                if config.fake_tensor_propagation:
-                    example_value = unspec_var.proxy.node.meta["example_value"]
-                    if isinstance(
-                        example_value, torch._subclasses.fake_tensor.FakeTensor
-                    ):
-                        fake_tensor_value = example_value
+                example_value = unspec_var.proxy.node.meta["example_value"]
+                if isinstance(
+                    example_value, torch._subclasses.fake_tensor.FakeTensor
+                ):
+                    fake_tensor_value = example_value
                 self.tx.output.graphargs.append(
                     GraphArg(self.get_source(), wrapped_value, True, fake_tensor_value)
                 )

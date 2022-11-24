@@ -954,7 +954,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     # NB: When you remove the expectedFailure, don't forget to
     # uncomment/adjust the assertEqual below
     @unittest.expectedFailure
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_maml_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
@@ -1682,7 +1681,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
     @patch.object(functorch._src.config, "use_dynamic_shapes", True)
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
     def test_bigbird_unsqueeze_inplace(self):
         def fn(reshape_2):
             view_2 = reshape_2.clone()
@@ -1740,7 +1738,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(mod(*args), opt_mod(*args)))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
     def test_reinplacing(self):
         class MockModule(torch.nn.Module):
             def __init__(self):

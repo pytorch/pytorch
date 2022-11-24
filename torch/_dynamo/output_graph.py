@@ -501,8 +501,6 @@ class OutputGraph(fx.Tracer):
         return result
 
     def example_inputs(self):
-        if not config.fake_tensor_propagation:
-            return self.real_inputs()
         result = []
         for arg in self.graphargs:
             example = arg.get_fake_examples()
@@ -620,13 +618,9 @@ def _verify_backend_correct(
 
     copy_gm = copy.deepcopy(gm)
 
-    if config.fake_tensor_propagation:
-        fake_inputs = clone_inputs(fake_inputs)
-        # TODO(voz): Supress shape guards for dynamic_shapes
-        candidate = backend(copy_gm, fake_inputs)
-    else:
-        real_inputs = clone_inputs(real_inputs)
-        candidate = backend(copy_gm, real_inputs)
+    fake_inputs = clone_inputs(fake_inputs)
+    # TODO(voz): Supress shape guards for dynamic_shapes
+    candidate = backend(copy_gm, fake_inputs)
 
     if candidate is None or candidate is gm.forward:
         return False

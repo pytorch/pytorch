@@ -66,7 +66,6 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
     def _inject_code(self, patch_code, filename):
         patch_code = f"""\
 {patch_code}
-torch._dynamo.config.fake_tensor_propagation = False
 torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
 """
         with open(filename, "r") as f:
@@ -115,9 +114,6 @@ import torch._dynamo
 torch._dynamo.config.repro_after = "{repro_after}"
 torch._dynamo.config.repro_level = {repro_level}
 torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
-# Currently, when called with fake tensors, test_relu_accuracy_error raises a DataDependentOutputException
-# instead of the desired BadAccuracyDetected
-torch._dynamo.config.fake_tensor_propagation = {fake_tensor}
 {run_code}
 """
 
