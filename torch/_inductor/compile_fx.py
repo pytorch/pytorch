@@ -12,7 +12,6 @@ from functorch.compile import min_cut_rematerialization_partition
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._pytree import tree_flatten
-from .._dynamo.utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
 
 from . import config, metrics, overrides
 from .debug import DebugContext
@@ -350,7 +349,6 @@ def compile_fx(
     inner_compile=compile_fx_inner,
 ):
     """Main entrypoint to a compile given FX graph"""
-
     if not is_aot_autograd_safe_to_run(model_, example_inputs_):
         log.warning("Aot Autograd is not safe to run, so falling back to eager")
         return model_
@@ -358,16 +356,7 @@ def compile_fx(
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
-    fake_mode = fake_mode_from_tensors(example_inputs_)
-
     flat_inputs, _ = tree_flatten(example_inputs_)
-
-    # if fake_mode:
-    # NOTE: This *will* create guards - we are missng
-    # the shape env guard supression logic here.
-    # We need to add it once its pushed up.
-    # Don't land this without that logic.
-    # model_ = deepcopy_to_fake_tensor(model_, fake_mode)
 
     with overrides.patch_functions():
         model_ = normalize_ir(model_, example_inputs_)

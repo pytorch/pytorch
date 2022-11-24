@@ -8,7 +8,7 @@ from torch._subclasses import FakeTensorMode  # noqa: F401
 from torch.fx.node import map_aggregate
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_map
 
 from .. import config
 
@@ -145,7 +145,7 @@ def has_mutation(gm, example_inputs, inputs_only=False):
     # NOTE: This *will* create guards - we are missng
     # the shape env guard supression logic here.
     # We need to add it once its pushed up.
-    # Don't land this without that logic. 
+    # Don't land this without that logic.
     new_gm = deepcopy_to_fake_tensor(gm, fake_mode)
     with fake_mode.restore() if hasattr(fake_mode, "restore") else fake_mode:
         ShapeAliasingAndMutationProp(new_gm).run(*example_inputs)

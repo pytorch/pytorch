@@ -37,7 +37,6 @@ from .variables.tensor import (
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
-from .optimizations.distributed import DDPOptimizer
 
 log = logging.getLogger(__name__)
 
@@ -461,7 +460,7 @@ class OutputGraph(fx.Tracer):
                 else ""
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            from inspect import signature
+
             backend_correct = True
             if config.verify_correctness:
                 try:
@@ -611,6 +610,7 @@ class OutputGraph(fx.Tracer):
 class CorrectnessException(Exception):
     pass
 
+
 def _verify_backend_correct(
     backend, gm: torch.fx.GraphModule, fake_inputs, real_inputs
 ):
@@ -633,7 +633,9 @@ def _verify_backend_correct(
         if same(correct, result):
             return True
 
-        raise CorrectnessException(f"incorrect results of backend during verify correctness")
+        raise CorrectnessException(
+            "incorrect results of backend during verify correctness"
+        )
         return False
     # Annoying legacy preserving behavior
     # see test/dynamo/test_verify_correctness.py test_incorrect_verify_true

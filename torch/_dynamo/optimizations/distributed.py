@@ -6,6 +6,8 @@ import torch
 import torch.fx.traceback as fx_traceback
 from torch import fx
 from torch.fx.node import Node
+from .. import config
+from ..utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
 
 log = logging.getLogger(__name__)
 
@@ -138,7 +140,10 @@ class DDPOptimizer:
         to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
         and returns its callable.
         """
-        compiling = True
+        fake_mode = fake_mode_from_tensors(example_inputs)
+        if config.fake_tensor_propagation:
+            assert fake_mode is not None
+
         # 1: compute the partition map according to DDP bucket logic
         buckets = [Bucket()]  # (size, param_names)
         for node in reversed(gm.graph.nodes):
@@ -241,7 +246,7 @@ class DDPOptimizer:
                         if not isinstance(sn.args[0], tuple):
                             unwrap_singleton_tuple = True
                             sn.args = (sn.args,)
-                
+
                 input_mod.recompile()
                 wrapper = WrapperModule(
                     self.compiler(input_mod, args),
@@ -252,19 +257,17 @@ class DDPOptimizer:
             def run_node(self, n: Node) -> Any:
                 with fx_traceback.append_stack_trace(n.stack_trace):
                     args, kwargs = self.fetch_args_kwargs_from_env(n)
-                    fake_mode = None
-                    for tensor in args:
-                        if isinstance(tensor, torch._subclasses.FakeTensor):
-                            fake_mode = tensor.fake_mode
-                            break
                     new_args = []
                     if fake_mode:
                         for arg in args:
-                            if isinstance(arg, torch.Tensor) and not isinstance(arg, torch._subclasses.FakeTensor):
+                            if isinstance(arg, torch.Tensor) and not isinstance(
+                                arg, torch._subclasses.FakeTensor
+                            ):
                                 new_args.append(fake_mode.from_tensor(arg))
                             else:
                                 new_args.append(arg)
                     else:
+                        assert not config.fake_tensor_propagation
                         new_args = args
 
                     log.debug(f"run_node {n.op}, {n.target} got args {args_str(args)}")
@@ -276,13 +279,16 @@ class DDPOptimizer:
                     if n.op == "call_module":
                         real_mod = self.fetch_attr(n.target)
                         if fake_mode:
-                            from ..utils import deepcopy_to_fake_tensor
                             fake_submod = deepcopy_to_fake_tensor(real_mod, fake_mode)
                         else:
                             fake_submod = real_mod
                             pass
-                        log.debug(f"\n---{n.target} graph---\n" + str(fake_submod.graph))
-                        compiled_submod_real = self.compile_submod(real_mod, new_args, kwargs)
+                        log.debug(
+                            f"\n---{n.target} graph---\n" + str(fake_submod.graph)
+                        )
+                        compiled_submod_real = self.compile_submod(
+                            real_mod, new_args, kwargs
+                        )
                         self.module.delete_submodule(n.target)
                         n.target = "compiled_" + n.target
                         self.module.add_submodule(n.target, compiled_submod_real)
@@ -295,5 +301,4 @@ class DDPOptimizer:
         split_gm.recompile()
 
         log.debug("\n---final graph---\n" + str(split_gm.graph) + "\n---------------\n")
-        compiling = False
         return split_gm

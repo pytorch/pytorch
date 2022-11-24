@@ -33,7 +33,6 @@ except ImportError:
     def disable_torchdynamo(x):
         return x
 
-
 from torch._dynamo.utils import fake_mode_from_tensors
 
 try:
@@ -1787,16 +1786,14 @@ def aot_module_simplified(
     # w/r/t where fake tensor conversion happens.
     fake_mode = None
     fake_flat_tensor_params = list(params_flat)
-    
+
     # TODO(voz): Pull up all fake param conversion to dynamo
     fake_mode = fake_mode_from_tensors(inputs)
     if config.use_fake_tensor:
         # Distributed hellscape, ask me about it in chat, dont review this as a sane
         # person would, maddness lies here
-        convert_all_inputs = False
         if fake_mode is None:
-            convert_all_inputs = len(inputs) > 0
-            # assert len(inputs) == 0, "No fake mode found, but got inputs."
+            assert len(inputs) == 0, "No fake mode found, but got inputs."
             # No fake inputs, just make a mode
             shape_env = ShapeEnv() if config.use_dynamic_shapes else None
             fake_mode = FakeTensorMode(shape_env=shape_env)
@@ -1805,8 +1802,6 @@ def aot_module_simplified(
             if not isinstance(x, torch.Tensor):
                 return x
             return fake_mode.from_tensor(x, static_shapes=True)
-        if convert_all_inputs:
-            inputs = [convert(x) for x in inputs]
         fake_flat_tensor_params = [convert(x) for x in params_flat]
     else:
         assert fake_mode is None, "Fake mode found on inputs, but config specifies otherwise."
@@ -1851,7 +1846,7 @@ def aot_module_simplified(
 
     @wraps(functional_call)
     def compiled_function(*args):
-        return aot_dispatcher_function(args) 
+        return aot_dispatcher_function(args)
 
     if top_kwargs:
         def forward(*args, **kwargs):
