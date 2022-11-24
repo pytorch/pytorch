@@ -1455,6 +1455,17 @@ class CommonTemplate:
                         (v,),
                     )
 
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
+    def test_conv2d_packed(self):
+        x_shape = (1, 3, 56, 56)
+        mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).eval()
+        v = torch.randn(x_shape, dtype=torch.float32)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
     # For gpu path, there has a accurcy issue,
     # see https://github.com/pytorch/pytorch/issues/87745.
     @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
