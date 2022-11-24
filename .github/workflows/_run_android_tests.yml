@@ -34,7 +34,7 @@ jobs:
           ln -sfn ${ANDROID_SDK_ROOT}/ndk/21.4.7075529 ${ANDROID_NDK}
 
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
-          ./scripts/build_pytorch_android.sh x86
+          ${CONDA_RUN} ./scripts/build_pytorch_android.sh x86
 
       - name: Run tests
         uses: reactivecircus/android-emulator-runner@v2
