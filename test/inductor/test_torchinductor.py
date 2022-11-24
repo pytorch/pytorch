@@ -1507,8 +1507,11 @@ class CommonTemplate:
             ).eval()
 
             # TODO: add bf16 test for cpu path?
-            v = torch.randn(x_shape, dtype=torch.float32).to(
-                memory_format=memory_format
+            # TODO: this test fails when requires_grad=False
+            v = (
+                torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
+                .add(1)
+                .to(memory_format=memory_format)
             )
             with torch.no_grad():
                 self.common(
@@ -1944,6 +1947,7 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn(2, 4, 16, 16),),
+            check_lowp=False,
         )
 
         # lowering to avg_pool2d case
@@ -1957,6 +1961,19 @@ class CommonTemplate:
             fn,
             (torch.randn(2, 4, 6, 6),),
         )
+
+    def test_adaptive_avg_pool2d2(self):
+        # Big kernel size, use fallback
+        def fn(x):
+            return aten._adaptive_avg_pool2d(x, (4, 4))
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn(2, 4, 21, 21),),
+            check_lowp=False,
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_max_pool2d1(self):
         def fn(x):
@@ -2004,6 +2021,18 @@ class CommonTemplate:
             fn,
             (torch.randn([16, 64, 55, 55]),),
         )
+
+    def test_max_pool2d6(self):
+        # Too big kernel size, use fallback
+        def fn(x):
+            return aten.max_pool2d_with_indices(x, [13, 13], [])
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn([16, 64, 55, 55]),),
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_avg_pool2d1(self):
         def fn(x):
@@ -2058,6 +2087,18 @@ class CommonTemplate:
             fn,
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
         )
+
+    def test_avg_pool2d7(self):
+        # Large kernel size, use fallback
+        def fn(x):
+            return aten.avg_pool2d(x, [13, 13], [1, 1], [0, 0])
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (-torch.arange(1 * 24 * 24, dtype=torch.float32).view(1, 1, 24, 24),),
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
@@ -3227,7 +3268,9 @@ class CommonTemplate:
             c = a + 2
             return b, c
 
-        arg1 = torch.randn([1, 64], device=self.device)
+        # NOTE: this test fails when none of the inputs require grad.
+        # That seems like an inductor bug.
+        arg1 = torch.randn([1, 64], device=self.device).requires_grad_(True).add(1)
         arg2 = arg1.clone()
         correct1 = fn(arg1)
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
@@ -3351,6 +3394,17 @@ class CommonTemplate:
                     dtype=torch.float64,
                 )
             ],
+        )
+
+    def test_isinf2(self):
+        def fn(x):
+            y = torch.tensor(
+                [1, float("inf"), 2, float("-inf"), float("nan")], device=self.device
+            )
+            return x == y
+
+        self.common(
+            fn, (torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")]),)
         )
 
     def test_any(self):
@@ -3960,6 +4014,7 @@ class CommonTemplate:
                 a, b, [5, 5], [1, 1], [2, 2], [1, 1], False, c
             )
 
+        torch._inductor.metrics.generated_kernel_count = 0
         x = torch.randn([2, 64, 3, 4])
         result, indices = aten.max_pool2d_with_indices(
             x,
@@ -3977,6 +4032,34 @@ class CommonTemplate:
                 indices,
             ],
         )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_max_pool2d_with_indices_backward5(self):
+        # Window size is too big. Should fallback
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a, b, [13, 13], [1, 1], [2, 2], [1, 1], False, c
+            )
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        x = torch.randn([2, 64, 20, 20])
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            [13, 13],
+            [1, 1],
+            2,
+            1,
+            False,
+        )
+        self.common(
+            fn,
+            [
+                torch.randn_like(result),
+                x,
+                indices,
+            ],
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_avg_pool2d_backward(self):
         def fn(a, b):
@@ -4033,6 +4116,7 @@ class CommonTemplate:
                 None,
             )
 
+        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             [
@@ -4040,6 +4124,31 @@ class CommonTemplate:
                 torch.randn([1, 2016, 21, 21]),
             ],
         )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_avg_pool2d_backward4(self):
+        def fn(a, b):
+            return aten.avg_pool2d_backward(
+                a,
+                b,
+                [13, 13],
+                [1, 1],
+                [0, 0],
+                True,
+                False,
+                None,
+            )
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            [
+                torch.randn([1, 16, 12, 12]),
+                torch.randn([1, 16, 24, 24]),
+            ],
+            check_lowp=False,
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_mm_views(self):
         def fn(a, b):
@@ -4365,7 +4474,10 @@ class CommonTemplate:
             ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
             ((3,), (1,), torch.float32),
         ]
-        args = [rand_strided(shape, stride, dtype) for shape, stride, dtype in args]
+        args = [
+            rand_strided(shape, stride, dtype).requires_grad_(True).add(1)
+            for shape, stride, dtype in args
+        ]
         self.common(forward, args)
 
     def test_misaligned_address_issue1(self):
@@ -4768,6 +4880,29 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
+        def test_masked_fill_softmax(self):
+            def fn(value, mask):
+                mask = mask.to(torch.bool)
+                x = torch.masked_fill(value, mask, -33.0)
+                return torch.softmax(x, -1)
+
+            value = torch.randn((2, 17))
+            mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8)
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(value, mask)
+
+                real_out = fn(value, mask)
+                compiled_out = opt_fn(value, mask)
+                assert same(real_out, compiled_out, equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count >= 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
         def test_sign_cpu_only(self):
             def fn(x):
                 return (torch.sign(x),)
@@ -4907,6 +5042,24 @@ if HAS_CUDA:
             self.assertEqual(num_linear_transpose, 1)
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
+
+        @patch.object(config.triton, "autotune", True)
+        def test_inplace_add_alpha_autotune(self):
+            def fn(x, y):
+                aten.add_.Tensor(x, y, alpha=0.55)
+                return (x,)
+
+            x1 = torch.zeros(2, 3, 4, 10, device="cuda")
+            x2 = torch.zeros(2, 3, 4, 10, device="cuda")
+            x3 = torch.zeros(2, 3, 4, 10, device="cuda")
+            y = torch.randn(2, 3, 4, 10, device="cuda").to(
+                memory_format=torch.channels_last
+            )
+            fn_fx = make_fx(fn)(x1, y)
+            fn_compiled = compile_fx_inner(fn_fx, [x1, y])
+            fn(x2, y)
+            fn_compiled([x3, y])
+            assert same(x2, x3)
 
         def test_permute_linear_fusion(self):
             class TestModule(torch.nn.Module):
@@ -5146,6 +5299,23 @@ if HAS_CUDA:
                     for param in model_opt.parameters():
                         param.add_(1.0)
 
+        # https://github.com/pytorch/torchdynamo/issues/1850
+        def test_inductor_output_aliases_intermediate(self):
+            def foo(x):
+                out = x + x
+                return out.t()
+
+            foo_opt = torch._dynamo.optimize("inductor")(foo)
+
+            inpt = torch.randn(10, 10, device="cuda", requires_grad=True)
+            # TODO: this is broken, fix later
+            # out = foo_opt(inpt)
+            # out.add_(2)
+
+            out_ref = foo(inpt)
+            out_ref.add_(2)
+            # self.assertEqual(out_ref, out)
+
         def test_accuracy_issue1(self):
             class Repro(torch.nn.Module):
                 def __init__(self):
@@ -5200,6 +5370,7 @@ if HAS_CUDA:
                         meta=meta,
                         configs=configs,
                         save_cache_hook=False,
+                        mutated_arg_names=["in_out_ptr0"],
                     )
 
                 return decorator
@@ -5273,6 +5444,24 @@ if HAS_CUDA:
 
             fn_optimized = torch._dynamo.optimize("inductor")(fn)
             assert same(fn(a), fn_optimized(a))
+
+        @requires_cuda()
+        def test_indirect_indexing_dense_mask(self):
+            def fn(x, y):
+                ne = torch.ops.aten.ne.Scalar(x, 1)
+                sum_1 = torch.ops.aten.sum.dim_IntList(ne, [1])
+                sub = torch.ops.aten.sub.Tensor(sum_1, 1)
+                unsqueeze = torch.ops.aten.unsqueeze.default(sub, -1)
+                gather = torch.ops.aten.gather.default(x, 1, unsqueeze)
+                squeeze = torch.ops.aten.squeeze.default(gather)
+                out = torch.ops.aten.multiply(y, squeeze)
+                return (out,)
+
+            a = torch.zeros((1, 128), dtype=torch.int64, device="cuda")
+            b = torch.zeros((1, 128), dtype=torch.int64, device="cuda")
+
+            fn_optimized = torch._dynamo.optimize("inductor")(fn)
+            assert same(fn(a, b), fn_optimized(a, b))
 
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_ops.autotune import CachingAutotuner
