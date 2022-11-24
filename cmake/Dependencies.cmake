@@ -267,6 +267,10 @@ if(NOT INTERN_BUILD_MOBILE)
     endif()
   endif()
 
+  IF(BLAS_HAS_SBGEMM)
+    add_compile_options(-DBLAS_HAS_SBGEMM)
+  ENDIF(BLAS_HAS_SBGEMM)
+
   if(MKL_FOUND)
     if("${MKL_THREADING}" STREQUAL "SEQ")
       set(AT_MKL_SEQUENTIAL 1)
