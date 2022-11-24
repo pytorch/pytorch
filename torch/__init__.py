@@ -29,7 +29,7 @@ else:
 
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING, Union, Callable, Any
+from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 import builtins
 
 __all__ = [
@@ -48,6 +48,7 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
+    'compile',
 ]
 
 ################################################################################
@@ -1111,6 +1112,47 @@ from ._linalg_utils import (  # type: ignore[misc]
     solve,
     lstsq,
 )
+
+def compile(model: Optional[Callable] = None, *,
+            fullgraph: builtins.bool = False,
+            dynamic: builtins.bool = False,
+            backend: Union[str, Callable] = "inductor",
+            mode: Union[str, None] = None,
+            passes: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
+            **kwargs) -> Callable:
+    # Decorator mode
+    if model is None:
+        def fn(model: Callable):
+            if model is None:
+                raise RuntimeError("Model can't be None")
+            return compile(model,
+                           fullgraph=fullgraph,
+                           dynamic=dynamic,
+                           backend=backend,
+                           mode=mode,
+                           passes=passes,
+                           **kwargs)
+        return fn
+
+    import torch._dynamo
+    from torch._dynamo.eval_frame import lookup_backend
+    from torch._inductor.config import InductorConfigContext
+    if mode is not None and passes is not None:
+        raise RuntimeError("Either mode or passes can be specified")
+    if mode is None and passes is None:
+        mode = "default"
+    if backend == "inductor":
+        compile_fn = lookup_backend(backend)
+        cm = InductorConfigContext(mode if mode is not None else passes)
+
+        def _compile_fn(model_, inputs_):
+            with cm:
+                return compile_fn(model_, inputs_)
+
+        _compile_fn._torchdynamo_orig_callable = compile_fn  # type: ignore[attr-defined]
+        backend = _compile_fn
+    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, **kwargs)(model)
+
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`

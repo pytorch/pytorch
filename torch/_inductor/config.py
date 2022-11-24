@@ -38,7 +38,7 @@ benchmark_harness = True
 
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
-# smaller threashold
+# smaller threshold
 realize_reads_threshold = 4
 realize_bytes_threshold = 2000
 
@@ -193,3 +193,85 @@ class trace:
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar = None
+
+
+class InductorConfigContext:
+    static_memory: bool
+    matmul_tune: str
+    matmul_padding: bool
+    trition_autotune: bool
+    trition_bmm: bool
+    trition_mm: str
+    trition_convolution: str
+    rematerialize_threshold: int
+    rematerialize_acc_threshold: int
+
+    def save(self):
+        self.static_memory = triton.cudagraphs
+        self.matmul_tune = triton.mm
+        self.matmul_padding = shape_padding
+        self.triton_autotune = triton.autotune
+        self.triton_bmm = triton.use_bmm
+        self.triton_mm = triton.mm
+        self.triton_convolution = triton.convolution
+        self.rematerialize_threshold = realize_reads_threshold
+        self.rematerialize_acc_threshold = realize_acc_reads_threshold
+
+    def apply(self):
+        triton.cudagraphs = self.static_memory
+        triton.mm = self.matmul_tune
+        shape_padding = self.matmul_padding
+        triton.autotune = self.triton_autotune
+        triton.use_bmm = self.triton_bmm
+        triton.mm = self.triton_mm
+        triton.convolution = self.triton_convolution
+        realize_reads_threshold = self.rematerialize_threshold
+        realize_acc_reads_threshold = self.rematerialize_acc_threshold
+
+    # "default" -> trition.cudagraphs = False
+    # "reduce-overhead" -> trition.cudagraphs = True
+    # "max-autotune" -> triton.mm = "autotune" + trition.convolution = "autotune", cudagraphs = False, shape_padding = True
+
+    # "static-memory":bool == tirton.cudagraphs
+    # "matmul-tune":str == trition.mm
+    # "matmul-padding":bool == shape_padding
+    # "triton-autotune": bool == triton.autotune
+    # "triton-bmm":bool = trition.use_bmm
+    # "remiterialize_threshold" : int = realize_reads_threshold
+    # "remiterialize_acc_threshold" : int = realize_acc_reads_threshold
+    def __init__(self, arg=None):
+        self.save()
+        if arg is None:
+            return
+        # Handle mode
+        if type(arg) is str:
+            if arg == "default":
+                self.static_memory = False
+            elif arg == "reduce-overhead":
+                self.static_memory = True
+            elif arg == "max-autotune":
+                self.static_memory = False
+                self.matmul_padding = True
+                self.trition_convolution = "autotune"
+                self.trition_mm = "autotune"
+                self.matmul_padding = True
+            else:
+                raise RuntimeError(f"Unrecognized mode {arg}, expected ")
+            return
+        # Handle passes
+        for (name, val) in arg.items():
+            attr_name = name.replace("-", "_")
+            if not hasattr(self, attr_name):
+                raise RuntimeError(f"Unexpected optimization pass {name}")
+            if type(val) != type(getattr(self, attr_name)):
+                raise RuntimeError(
+                    f"Unexpected type of attr {name}, got {type(val)} should be {type(getattr(self, attr_name))}"
+                )
+            setattr(self, attr_name, val)
+
+    def __enter__(self):
+        self._prev = InductorConfigContext()
+        self.apply()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._prev.apply()
