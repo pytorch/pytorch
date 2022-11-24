@@ -800,7 +800,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
 
     def test_serialization_offset(self):
         a = torch.randn(5, 5)
-        b = torch.randn(1024, 1024, 512, dtype=torch.float32)
+        b = torch.randn(1024, 512, dtype=torch.float32)
         m = torch.nn.Conv2d(1, 1, (1, 3))
         i, j = 41, 43
         with tempfile.NamedTemporaryFile() as f:
@@ -809,7 +809,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
             pickle.dump(j, f)
             torch.save(b, f)
             torch.save(m, f)
-            self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
+            self.assertTrue(f.tell() > 2 * 1024 * 1024)
             f.seek(0)
             i_loaded = pickle.load(f)
             a_loaded = torch.load(f)
@@ -825,14 +825,14 @@ class TestOldSerialization(TestCase, SerializationMixin):
     @parametrize('weights_only', (True, False))
     def test_serialization_offset_filelike(self, weights_only):
         a = torch.randn(5, 5)
-        b = torch.randn(1024, 1024, 512, dtype=torch.float32)
+        b = torch.randn(1024, 512, dtype=torch.float32)
         i, j = 41, 43
         with BytesIOContext() as f:
             pickle.dump(i, f)
             torch.save(a, f)
             pickle.dump(j, f)
             torch.save(b, f)
-            self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
+            self.assertTrue(f.tell() > 2 * 1024 * 1024)
             f.seek(0)
             i_loaded = pickle.load(f)
             a_loaded = torch.load(f, weights_only=weights_only)

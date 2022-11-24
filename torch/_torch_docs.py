@@ -4062,10 +4062,10 @@ equal(input, other) -> bool
 
 .. warning::
 
-   :func:`torch.equal` is deprecated since ``1.15`` and will be removed in ``1.17``. Depending on your use case you 
+   :func:`torch.equal` is deprecated since ``1.15`` and will be removed in ``1.17``. Depending on your use case you
    have several options:
 
-   - For testing purposes, e.g. ``assert torch.equal(...)``, use :func:`torch.testing.assert_close` with 
+   - For testing purposes, e.g. ``assert torch.equal(...)``, use :func:`torch.testing.assert_close` with
      ``rtol=0, atol=0`` instead.
    - If you don't need a device or shape check, use ``torch.eq(input, other).all().item()`` instead.
    - If you need an exact replica of the behavior, you can use this thin wrapper:
