@@ -1830,14 +1830,13 @@ class RelaxedNumberPair(NumberPair):
             return super()._to_number(number_like, id=id)
 
 
-class RelaxedTensorLikePair(TensorLikePair):
+class TensorOrArrayPair(TensorLikePair):
     """Pair for tensor-like inputs.
 
     On the one hand this class is stricter than the builtin :class:`TensorLikePair` since it only allows instances of
-    :class:`torch.Tensor`, :class:`numpy.ndarray`, and :class:`torch.storage.TypedStorage` rather than allowing any
-    tensor-like than can be converted into a tensor. On the other hand this class is looser since it converts all inputs
-    into tensors with no regard of their relationship, e.g. comparing a :class:`torch.Tensor` to :class:`numpy.ndarray`
-    is fine.
+    :class:`torch.Tensor` and :class:`numpy.ndarray` rather than allowing any tensor-like than can be converted into a
+    tensor. On the other hand this class is looser since it converts all inputs into tensors with no regard of their
+    relationship, e.g. comparing a :class:`torch.Tensor` to :class:`numpy.ndarray` is fine.
 
     In addition, this class supports overriding the absolute and relative tolerance through the ``@precisionOverride``
     and ``@toleranceOverride`` decorators.
@@ -1873,17 +1872,32 @@ class RelaxedTensorLikePair(TensorLikePair):
         return [to_dense(input) for input in [actual, expected]]
 
     def _process_inputs(self, actual, expected, *, id, allow_subclasses):
-        self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray, torch.storage.TypedStorage))
+        self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
 
         actual, expected = [self._to_tensor(input) for input in (actual, expected)]
         for tensor in (actual, expected):
             self._check_supported(tensor, id=id)
         return actual, expected
 
-    def _to_tensor(self, tensor_like: Any) -> torch.Tensor:
-        if isinstance(tensor_like, torch.storage.TypedStorage):
-            tensor_like = [tensor_like._getitem(idx) for idx in range(tensor_like._size())]
-        return super()._to_tensor(tensor_like)
+
+class TypedStoragePair(TensorLikePair):
+    """Pair for :class:`torch.storage.TypedStorage` inputs.
+
+    After their deprecation, they no longer act as a regular sequence, since :meth:`torch.storage.TypedStorage.__len__`
+    and :meth:`torch.storage.TypedStorage.__getitem__` are disabled. Thus, we need to convert them to tensors manually.
+    """
+    def __init__(self, actual, expected, *, rtol_override=0.0, atol_override=0.0, **other_parameters):
+        self._check_inputs_isinstance(actual, expected, cls=torch.storage.TypedStorage)
+        super().__init__(actual, expected, **other_parameters)
+        self.rtol = max(self.rtol, rtol_override)
+        self.atol = max(self.atol, atol_override)
+
+    def _to_tensor(self, typed_storage):
+        return torch.tensor(
+            [typed_storage._getitem(idx) for idx in range(typed_storage._size())],
+            dtype=typed_storage.dtype,
+            device=typed_storage.device,
+        )
 
 
 class UnittestPair(Pair):
@@ -2580,7 +2594,8 @@ class TestCase(expecttest.TestCase):
                 NonePair,
                 RelaxedBooleanPair,
                 RelaxedNumberPair,
-                RelaxedTensorLikePair,
+                TensorOrArrayPair,
+                TypedStoragePair,
                 StringPair,
                 SetPair,
                 TypePair,
