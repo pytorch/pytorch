@@ -15,11 +15,7 @@ from . import config, exc
 from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import is_generator, transform_code_object
-from .eval_frame import (
-    always_optimize_code_objects,
-    skip_code,
-    TorchPatcher,
-)
+from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     BackendCompilerFailed,
     InternalTorchDynamoError,

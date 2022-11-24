@@ -1,10 +1,10 @@
 import collections
+import copy
 import functools
 import itertools
 import logging
 import operator
 import re
-import copy
 import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -21,7 +21,15 @@ from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import ConstantSource, LocalSource, Source
-from .utils import checkpoint_params, clone_inputs, same, CleanupHook, count_calls, counters, format_graph_tabular
+from .utils import (
+    checkpoint_params,
+    CleanupHook,
+    clone_inputs,
+    count_calls,
+    counters,
+    format_graph_tabular,
+    same,
+)
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
