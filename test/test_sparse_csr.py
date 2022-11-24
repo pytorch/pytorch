@@ -949,6 +949,22 @@ class TestSparseCompressed(TestCase):
                 dense_to_dtype = sparse.to_dense().to(to_dtype)
                 self.assertEqual(sparse_to_dtype.to_dense(), dense_to_dtype)
 
+    @skipMeta
+    @all_sparse_compressed_layouts()
+    @dtypes(torch.double)
+    def test_pickle(self, layout, dtype, device):
+        import pickle
+
+        input_gen = self._generate_small_inputs(layout)
+        for compressed_indices, plain_indices, values, size in input_gen:
+            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size,
+                                                    dtype=dtype, device=device, layout=layout)
+            serialized = pickle.dumps(sparse)
+            sparse_loaded = pickle.loads(serialized)
+
+            self.assertEqual(sparse, sparse_loaded)
+
+
 def _npref_block_addmm_addmv(c, a, b, alpha, beta):
     return alpha * (a @ b) + beta * c
 
