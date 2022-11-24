@@ -383,12 +383,14 @@ std::string CreateMetricReport(
     const std::vector<std::string>& metric_names) {
   MetricsArena* arena = MetricsArena::Get();
   std::stringstream ss;
-  std::set<std::string> metric_name_set(metric_names.begin(), metric_names.end());
-  arena->ForEachMetric([&ss, &metric_name_set](const std::string& name, MetricData* data) {
-    if (metric_name_set.find(name) != metric_name_set.end()) {
-      EmitMetricInfo(name, data, &ss);
-    }
-  });
+  std::set<std::string> metric_name_set(
+      metric_names.begin(), metric_names.end());
+  arena->ForEachMetric(
+      [&ss, &metric_name_set](const std::string& name, MetricData* data) {
+        if (metric_name_set.find(name) != metric_name_set.end()) {
+          EmitMetricInfo(name, data, &ss);
+        }
+      });
   std::set<std::string> counter_name_set(
       counter_names.begin(), counter_names.end());
   arena->ForEachCounter(
