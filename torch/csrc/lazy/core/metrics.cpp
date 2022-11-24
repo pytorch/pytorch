@@ -368,12 +368,14 @@ std::string CreateMetricReport(
       EmitMetricInfo(metric_name, data, &ss);
     }
   }
-  std::set<std::string> counter_name_set(counter_names.begin(), counter_names.end());
-  arena->ForEachCounter([&ss, &counter_name_set](const std::string& name, CounterData* data) {
-    if (counter_name_set.find(name) != counter_name_set.end()) {
-      EmitCounterInfo(name, data, &ss);
-    }
-  });
+  std::set<std::string> counter_name_set(
+      counter_names.begin(), counter_names.end());
+  arena->ForEachCounter(
+      [&ss, &counter_name_set](const std::string& name, CounterData* data) {
+        if (counter_name_set.find(name) != counter_name_set.end()) {
+          EmitCounterInfo(name, data, &ss);
+        }
+      });
 
   static std::string fall_back_counter_prefix = "aten::";
   arena->ForEachCounter([&ss](const std::string& name, CounterData* data) {
