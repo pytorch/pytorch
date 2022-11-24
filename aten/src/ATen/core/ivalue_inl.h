@@ -975,9 +975,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   template <typename T>
   void addCallback(T callback) {
+#if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<void, T, Future&>::value,
         "The callback must have signature void(Future&)");
+#endif
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
@@ -995,26 +997,30 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   template <typename T>
   c10::intrusive_ptr<Future> then(T callback, TypePtr type) {
     using IValueWithStorages = std::tuple<IValue, std::vector<WeakStorage>>;
+#if __cpp_lib_is_invocable >= 201703
     static_assert(
         guts::disjunction<
             std::is_invocable_r<IValue, T, Future&>,
             std::is_invocable_r<IValueWithStorages, T, Future&>>::value,
         "The callback must have signature IValue(Future&) or "
         "std::tuple<IValue, std::vector<Storage>>(Future&)");
+#endif
     auto childFut = createInstance(std::move(type));
     addCallback([childFut,
                  cb = std::move(callback)](Future& parentFut) mutable {
       try {
-        if constexpr (std::is_convertible_v<
+        guts::if_constexpr<std::is_convertible<
             typename c10::invoke_result_t<T &&, Future&>,
-            IValueWithStorages>) {
+            IValueWithStorages>::value>(
+            [&](auto identity) {
               IValue value;
               std::vector<WeakStorage> storages;
-              std::tie(value, storages) = cb(parentFut);
+              std::tie(value, storages) = identity(cb)(parentFut);
               childFut->markCompleted(std::move(value), std::move(storages));
-            } else {
-              childFut->markCompleted(cb(parentFut));
-            };
+            },
+            [&](auto identity) {
+              childFut->markCompleted(identity(cb)(parentFut));
+            });
       } catch (std::exception&) {
         childFut->setError(std::current_exception());
       }
@@ -1024,9 +1030,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   template <typename T>
   c10::intrusive_ptr<Future> thenAsync(T callback, TypePtr type) {
+#if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<c10::intrusive_ptr<Future>, T, Future&>::value,
         "The callback must have signature c10::intrusive_ptr<Future>(Future&)");
+#endif
     auto childFut = createInstance(std::move(type));
     addCallback(
         [childFut, cb = std::move(callback)](Future& parentFut) mutable {
@@ -1103,9 +1111,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // synchronize them with the value, and so on (if needed).
   template<typename T>
   void invokeCallback(T callback) {
+#if __cpp_lib_is_invocable >= 201703
     static_assert(
         std::is_invocable_r<void, T, Future&>::value,
         "The callback must have signature void(Future&)");
+#endif
 
     c10::OptionalDeviceGuard deviceGuard(currentDevice_);
 
