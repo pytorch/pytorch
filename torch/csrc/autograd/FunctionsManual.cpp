@@ -4891,10 +4891,10 @@ Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad) {
   return at::constant_pad_nd_symint(grad, negated_pad, 0);
 }
 
-Tensor embedding_dense_double_backward(
+Tensor embedding_dense_double_backward_symint(
     const Tensor& grad,
     const Tensor& indices,
-    int64_t padding_idx) {
+    c10::SymInt padding_idx) {
   // since first backward takes care of scaling by frequency,
   // we don't need to worry about it here.
   auto gg_weight = grad.index_select(0, indices.reshape(-1));
