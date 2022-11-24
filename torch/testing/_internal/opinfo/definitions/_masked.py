@@ -401,10 +401,14 @@ op_db: List[OpInfo] = [
             ),
             # Failing accuracy and extremal (#89609)
             DecorateInfo(
-                unittest.expectedFailure, "TestCudaFuserOpInfo", "test_nvfuser_correctness"
+                unittest.expectedFailure,
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_correctness"
             ),
             DecorateInfo(
-                unittest.expectedFailure, "TestCudaFuserOpInfo", "test_nvfuser_extremal_values"
+                unittest.expectedFailure,
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_extremal_values"
             ),
         ),
         decorators=[
@@ -607,10 +611,14 @@ op_db: List[OpInfo] = [
             ),
             # Failing accuracy and extremal (#89609)
             DecorateInfo(
-                unittest.expectedFailure, "TestCudaFuserOpInfo", "test_nvfuser_correctness"
+                unittest.expectedFailure,
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_correctness"
             ),
             DecorateInfo(
-                unittest.expectedFailure, "TestCudaFuserOpInfo", "test_nvfuser_extremal_values"
+                unittest.expectedFailure,
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_extremal_values"
             ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
@@ -653,10 +661,14 @@ op_db: List[OpInfo] = [
             ),
             # Failing accuracy and extremal (#89609)
             DecorateInfo(
-                unittest.expectedFailure, "TestCudaFuserOpInfo", "test_nvfuser_correctness"
+                unittest.expectedFailure,
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_correctness"
             ),
             DecorateInfo(
-                unittest.expectedFailure, "TestCudaFuserOpInfo", "test_nvfuser_extremal_values"
+                unittest.expectedFailure,
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_extremal_values"
             ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
