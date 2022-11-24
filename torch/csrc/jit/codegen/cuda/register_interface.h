@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 
 /*
  * This file contains APIs for cuda fuser;
@@ -28,7 +29,7 @@ struct TORCH_API NVFuserPassManager : public PassManager<NVFuserPassManager> {
   static bool registerPass(bool enabled) {
     bool old_value = PassManager::isRegistered();
     if (enabled) {
-      PassManager::registerPass(CudaFuseGraph);
+      PassManager::registerPass(fuseGraph);
     } else {
       PassManager::clearPass();
     }
