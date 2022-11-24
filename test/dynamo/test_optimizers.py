@@ -79,7 +79,7 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
         )
         cls._exit_stack.enter_context(
             unittest.mock.patch.object(
-                torch._dynamo.config, "fake_tensor_propagation", False
+                torch._dynamo.config, "fake_tensor_propagation", True
             )
         )
         cls._exit_stack.enter_context(enable_optimizer_tracing())
@@ -91,8 +91,13 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
     # test_lbfgs = make_test(
     #    torch.optim.LBFGS, exp_frame_cnt=3, closure=lambda: model(input).sum()
     # )
-    # RAdam has data-dependent control which breaks the graph
-    test_radam = make_test(torch.optim.RAdam, exp_frame_cnt=1)
+
+    # RAdam and Adagrad have data-dependent control which breaks the graph;
+    # furthermore, the break is inside a for loop, so we bail on the frame
+    # entirely.  This is basically an xfail; if the frame count goes up
+    # you done good
+    test_radam = make_test(torch.optim.RAdam, exp_frame_cnt=0)
+    test_adagrad = make_test(torch.optim.Adagrad, exp_frame_cnt=0)
 
     # ASGD has a small optimization that avoids averaging
     # This will fully capture the graph once that optimization is removed
@@ -108,7 +113,7 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
 
 # exclude SparseAdam because other areas of the stack don't support it yet
 # the others are handled specially above
-exclude = set(["SGD", "Optimizer", "SparseAdam", "LBFGS", "RAdam", "ASGD"])
+exclude = set(["SGD", "Optimizer", "SparseAdam", "LBFGS", "RAdam", "Adagrad", "ASGD"])
 optimizers = [
     opt
     for opt in torch.optim.__dict__.values()
