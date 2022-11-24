@@ -400,9 +400,7 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
-        xfail("native_batch_norm"),          # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
-        xfail("_native_batch_norm_legit"),    # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
-
+        xfail("native_batch_norm"),
         xfail('nn.functional._scaled_dot_product_attention', device_type='cuda'),
 
         xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
@@ -691,7 +689,6 @@ class TestOperators(TestCase):
         # view doesn't work on sparse
         xfail("to_sparse"),
         xfail("native_batch_norm"),
-        xfail("_native_batch_norm_legit"),
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -776,7 +773,6 @@ class TestOperators(TestCase):
         # All of the following are bugs and need to be fixed
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         skip("native_batch_norm"),
-        skip("_native_batch_norm_legit"),
         xfail('__getitem__', ''),  # dynamic error
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
@@ -892,7 +888,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail("native_batch_norm"),
-        xfail("_native_batch_norm_legit"),
         # ----------------------------------------------------------------------
     }
 
@@ -1095,7 +1090,6 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
-        xfail("_native_batch_norm_legit"),
         xfail("native_dropout_backward"),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
@@ -1168,7 +1162,6 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
-        xfail("_native_batch_norm_legit"),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1426,7 +1419,6 @@ class TestOperators(TestCase):
         # input while the running_mean or running_var, which will be updated in
         # place, were not batched.
         xfail("native_batch_norm"),
-        xfail("_native_batch_norm_legit"),
         xfail('native_dropout_backward',)
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
