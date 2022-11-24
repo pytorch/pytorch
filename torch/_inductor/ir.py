@@ -632,8 +632,11 @@ class Reduction(Loops):
         if not index:
             # TODO determine splits when all inputs are broadcasted
             return ReductionHint.DEFAULT, 1
+        for md in read_writes.writes:
+            write_index = md.index
+        xranges = write_index.free_symbols
         reduction_vars = [
-            rv for rv in range_vars if read_writes.var_ranges[rv] in reduction_ranges
+            rv for rv in range_vars if rv not in xranges and read_writes.var_ranges[rv] in reduction_ranges
         ]
         strides = V.graph.sizevars.stride_hints(index, reduction_vars)
         outer = all([s > 1 for s in strides])
@@ -734,6 +737,7 @@ class Reduction(Loops):
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
+        xnumel = V.graph.sizevars.simplify(sympy_product(ranges))
 
         if reduction_numel == 0:
 
