@@ -11,7 +11,6 @@ from ..guards import GuardBuilder
 from ..source import AttrSource
 
 from ..utils import (
-    fake_tensors_available,
     get_fake_value,
     get_real_value,
     product,
@@ -261,9 +260,7 @@ class TensorVariable(VariableTracker):
             unimplemented(f"Tensor.{name}")
         elif name == "item":
             if config.capture_scalar_outputs:
-                use_fake_tensors = (
-                    fake_tensors_available and config.fake_tensor_propagation
-                )
+                use_fake_tensors = config.fake_tensor_propagation
                 if use_fake_tensors:
                     example_value = get_fake_value(self.proxy.node, tx)
                 else:

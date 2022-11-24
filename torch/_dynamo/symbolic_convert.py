@@ -50,7 +50,6 @@ from .source import (
 )
 from .utils import (
     counters,
-    fake_tensors_available,
     graph_break_dup_warning_checker,
     istype,
     proxy_args_kwargs,
@@ -1513,13 +1512,10 @@ class InstructionTranslatorBase(object):
         # Flag to indicate whether tracing is used for export.
         self.export = export
 
-        if fake_tensors_available:
-            with torch._subclasses.FakeTensorMode(
-                throw_on_data_dependent_ops=True,
-                shape_env=output.shape_env,
-            ) as fake_mode:
-                pass
-            self._fake_mode = fake_mode
+        self._fake_mode = torch._subclasses.FakeTensorMode(
+            throw_on_data_dependent_ops=True,
+            shape_env=output.shape_env,
+        )
 
         self.checkpoint = None
         self.random_calls: List[tuple] = []

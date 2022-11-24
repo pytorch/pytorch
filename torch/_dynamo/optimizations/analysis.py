@@ -10,12 +10,11 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._pytree import tree_map
 
 from .. import config
-from ..utils import clone_inputs, fake_tensors_available
+from ..utils import clone_inputs
 
-if fake_tensors_available:
-    from torch._subclasses import FakeTensorMode  # noqa: F401
+from torch._subclasses import FakeTensorMode  # noqa: F401
 
-    from ..utils import deepcopy_to_fake_tensor
+from ..utils import deepcopy_to_fake_tensor
 
 
 class ShapeAliasingAndMutationProp(ShapeProp):
@@ -121,7 +120,7 @@ def has_mutation(gm, example_inputs, inputs_only=False):
     true, we only check for mutation of inputs"""
     # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
 
-    if fake_tensors_available and config.fake_tensor_propagation:
+    if config.fake_tensor_propagation:
 
         def _wrap_to_fake_tensor(t, *, f_mode):
             if type(t) in (torch.Tensor, torch.nn.Parameter):
