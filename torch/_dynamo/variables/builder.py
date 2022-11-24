@@ -580,7 +580,19 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
         else:
-            wrapped_value = torch.tensor(value)
+            if (
+                config.dynamic_shapes
+                and config.fake_tensor_propagation
+                and isinstance(value, int)
+            ):
+                shape_env = self.tx.output.shape_env
+                wrapped_value = shape_env.create_symintnode(
+                    shape_env.create_symbol(value)
+                )
+                # TODO: Do float
+            else:
+                # TODO: Eliminate this case entirely
+                wrapped_value = torch.tensor(value)
             if not is_constant_source(self.get_source()):
                 self.tx.output.graphargs.append(
                     GraphArg(self.get_source(), wrapped_value, True)
@@ -591,7 +603,8 @@ class VariableBuilder:
             else:
                 options = {}
             options.update({"source": self.get_source()})
-            options.update({"raw_value": value})
+            if isinstance(wrapped_value, torch.Tensor):
+                options.update({"raw_value": value})
 
             proxy = self.tx.output.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
