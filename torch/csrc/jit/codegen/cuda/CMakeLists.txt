@@ -137,9 +137,9 @@ list(APPEND NVFUSER_SRCS
 
 set(NVFUSER_CODEGEN ${PROJECT_NAME}_codegen)
 
-find_package(Torch REQUIRED)
-find_library(TORCH_PYTHON_LIBRARY torch_python)
-find_package(PythonLibs REQUIRED)
+#find_package(Torch REQUIRED)
+#find_library(TORCH_PYTHON_LIBRARY torch_python)
+#find_package(PythonLibs REQUIRED)
 
 set(TORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
 set(TORCH_INSTALL_LIB_DIR ${TORCH_ROOT}/torch/lib)
@@ -157,7 +157,7 @@ install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_IN
 # --- pybind11
 
 set(NVFUSER_PYTHON "${PROJECT_NAME}_python")
-find_package(pybind11 REQUIRED)
+#find_package(pybind11 REQUIRED)
 
 set(NVFUSER_PYTHON_SRCS)
 list(APPEND NVFUSER_PYTHON_SRCS
@@ -171,11 +171,11 @@ message(STATUS "compile options: " ${TORCH_PYTHON_COMPILE_OPTIONS})
 message(STATUS "link options: " ${TORCH_PYTHON_LINK_FLAGS})
 message(STATUS "python module prefix: " ${PYTHON_MODULE_PREFIX})
 message(STATUS "python module extention: " ${PYTHON_MODULE_EXTENSION})
-target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${TORCH_LIBRARIES} ${NVFUSER_CODEGEN} ${TORCH_PYTHON_LIBRARY})
+target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${TORCH_LIBRARIES} ${NVFUSER_CODEGEN} ${TORCH_PYTHON_LIBRARY} pybind::pybind11)
 target_include_directories(${NVFUSER_PYTHON}
 	                   PRIVATE ${TORCH_ROOT}
-	                   PRIVATE ${pybind11_INCLUDE_DIRS}
-                           PRIVATE ${PYTHON_INCLUDE_DIRS})
+	                   #PRIVATE ${pybind11_INCLUDE_DIRS}
+                     PRIVATE ${PYTHON_INCLUDE_DIRS})
 target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 if(TORCH_PYTHON_LINK_FLAGS AND NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
     message(STATUS "somehow this is happening")
