@@ -937,8 +937,6 @@ TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WIT
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
-    import logging
-    torch._dynamo.config.log_level = logging.ERROR
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.cache_size_limit = 8
     # TODO: Remove this; this is grandfathered in because we suppressed errors
