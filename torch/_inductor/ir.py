@@ -2439,7 +2439,7 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
-        if isinstance(x, sympy.Expr):
+        if isinstance(x, (sympy.Expr, int)):
             return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
@@ -2985,6 +2985,7 @@ class FallbackKernel(ExternKernelAlloc):
             aten._fft_c2c.out,
             aten._linalg_svd.default,
             aten._linalg_svd.U,
+            aten.upsample_bilinear2d.default,
         )
         context = (
             FakeTensorMode if kernel not in fake_incorrect_kernels else nullcontext
@@ -3377,7 +3378,7 @@ def _prepare_convolution_fusion_create(
         output_size = output.size()
         req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
         req_stride_order = [len(req_stride_order)] + req_stride_order
-        ouput_stride = make_channels_last_strides_for(output_size)
+        output_stride = make_channels_last_strides_for(output_size)
 
     x = cls.require_stride_order(x, req_stride_order)
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
@@ -3387,7 +3388,7 @@ def _prepare_convolution_fusion_create(
         x.get_device(),
         x.get_dtype(),
         output.size(),
-        ouput_stride,
+        output_stride,
     )
     constant_args = [padding, stride, dilation, groups]
 

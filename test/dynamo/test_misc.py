@@ -27,6 +27,7 @@ from torch._dynamo.testing import (
     same,
     unsupported,
 )
+from torch.nn import functional as F
 from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -2071,6 +2072,23 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch.allclose(dynamo_output, output))
 
+    def test_nn_functional_reduction(self):
+        def fn(loss, reduction):
+            reduction_enum = F._Reduction.get_enum(reduction)
+            if reduction_enum == 0:
+                return loss
+            elif reduction_enum == 1:
+                return loss.mean()
+            elif reduction_enum == 2:
+                return loss.sum()
+
+        x = torch.rand([3, 5])
+        y = "mean"
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(torch.allclose(ref, res))
+
     def test_large_reduction_list(self):
         dtype = torch.float32
         device = "cpu"
@@ -2176,7 +2194,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 self.names = []
 
             def forward(self, idx, targets=None):
-                from torch.nn import functional as F
 
                 b, t = idx.size()
                 assert (
@@ -2997,6 +3014,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 return x - 1
 
         x = torch.rand(4)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_get_device(self):
+        def fn(x, y):
+            x = x + 1
+            y = y + 1
+            return x.get_device(), y.get_device()
+
+        x = torch.rand(4, device="cuda")
+        y = torch.rand(4, device="cpu")
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_get_device_index(self):
+        def fn(x):
+            x = x + 1
+            a = torch._utils._get_device_index(x.device)
+            b = torch._utils._get_device_index(1)
+            return a, b
+
+        x = torch.rand(4, device="cuda")
         ref = fn(x)
         opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         res = opt_fn(x)
