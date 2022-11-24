@@ -206,13 +206,20 @@ public:
     }
     return b;
   }
+  #pragma clang diagnostic push
+  #pragma clang diagnostic ignored "-Wignored-qualifiers"
+#if defined(__INTEL_COMPILER)
+  Vectorized<BFloat16> map(__m256 (*const vop)(__m256)) const {
+#else
   Vectorized<BFloat16> map(const __m256 (*const vop)(__m256)) const {
+#endif
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
     const auto o1 = vop(lo);
     const auto o2 = vop(hi);
     return cvtfp32_bf16(o1, o2);
   }
+  #pragma clang diagnostic pop
   Vectorized<BFloat16> abs() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
