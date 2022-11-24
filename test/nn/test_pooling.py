@@ -153,23 +153,6 @@ class TestPoolingNN(NNTestCase):
                 output = module(input)
                 self.assertEqual(output.size(), (4,) + (2,) * (numel - 1) + (4,))
 
-    def test_adaptive_pooling_empty_output_size(self):
-        error_msg = "Expected grad_output to have non-zero size for non-batch dimensions"
-
-        for device in ['cpu', 'cuda']:
-            input = torch.rand([1, 64, 10, 9], device=device, requires_grad=True)
-            output_size = 0
-
-            for numel in (2, 3):
-                for pool_type in ('max', 'avg'):
-                    cls_name = 'adaptive_{}_pool{}d'.format(pool_type, numel)
-                    module_cls = getattr(nn.functional, cls_name)
-                    output_size = 0
-
-                    with self.assertRaisesRegex(RuntimeError, error_msg):
-                        res = module_cls(input, output_size)
-                        res.sum().backward()
-
     @unittest.skipIf(TEST_WITH_UBSAN, "signed integer overflow error with UBSAN")
     def test_adaptive_pooling_size_overflow(self):
         # 0x0x3fffffffffffffff * 2 * 2 = 0xfffffffffffffffc = -4 as int64_t
@@ -392,6 +375,23 @@ class TestPoolingNNDeviceType(NNTestCase):
         inp = torch.ones(0, 10, 10, 10, dtype=dtype, device=device)
         mod = torch.nn.AdaptiveAvgPool3d((5, 5, 5)).to(device)
         _test_module_empty_input(self, mod, inp, check_size=False)
+
+    def test_adaptive_pooling_empty_output_size(self):
+        error_msg = "Expected grad_output to have non-zero size for non-batch dimensions"
+
+        for device in ['cpu', 'cuda']:
+            input = torch.rand([1, 64, 10, 9], device=device, requires_grad=True)
+            output_size = 0
+
+            for numel in (2, 3):
+                for pool_type in ('max', 'avg'):
+                    cls_name = 'adaptive_{}_pool{}d'.format(pool_type, numel)
+                    module_cls = getattr(nn.functional, cls_name)
+                    output_size = 0
+
+                    with self.assertRaisesRegex(RuntimeError, error_msg):
+                        res = module_cls(input, output_size)
+                        res.sum().backward()
 
     @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_batch(self, device):
