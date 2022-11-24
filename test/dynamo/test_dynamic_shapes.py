@@ -103,7 +103,6 @@ unittest.expectedFailure(DynamicShapesExportTests.test_export_compare_optimize_w
 # aten._local_scalar_dense.default
 unittest.expectedFailure(test_unspec.UnspecReproTests.test_batch_norm_act_unspec)
 
-
 # SymIntArrayRef expected to contain only concrete integers
 unittest.expectedFailure(
     DynamicShapesUnspecTests.test_unspec_float_precision_dynamic_shapes

@@ -89,7 +89,6 @@ def get_custom_model(device):
             self.seq = torch.nn.Sequential(*[x for items in mods for x in items])
 
         def forward(self, x):
-
             return self.seq(x)
 
     m = MyModule().to(device)
