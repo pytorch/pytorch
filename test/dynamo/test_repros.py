@@ -1970,7 +1970,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 1)
 
     # https://github.com/pytorch/torchdynamo/issues/1922
-    @expectedFailureIf(sys.version_info >= (3, 9, 0))
+    @expectedFailureIf((3, 9, 0) <= sys.version_info < (3, 10, 0))
     @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_msg(self):
         def f(x):
@@ -2018,7 +2018,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
     # https://github.com/pytorch/torchdynamo/issues/1922
-    @expectedFailureIf(sys.version_info >= (3, 9, 0))
+    @expectedFailureIf((3, 9, 0) <= sys.version_info < (3, 10, 0))
     @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_without_msg(self):
         def f(x):
