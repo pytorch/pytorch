@@ -327,6 +327,11 @@ def make_signal_windows_opinfo(
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
+            DecorateInfo(
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
             *skips,
         ),
     )
@@ -377,11 +382,6 @@ op_db: List[OpInfo] = [
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
-            DecorateInfo(
-                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
-                "TestCommon",
-                "test_numpy_ref_mps",
-            ),
         ),
     ),
     make_signal_windows_opinfo(
@@ -425,11 +425,6 @@ op_db: List[OpInfo] = [
                 "test_schema_correctness",
                 dtypes=[torch.float16],
                 device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
-                "TestCommon",
-                "test_numpy_ref_mps",
             ),
         ),
     ),
@@ -532,11 +527,6 @@ op_db: List[OpInfo] = [
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
-            DecorateInfo(
-                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
-                "TestCommon",
-                "test_numpy_ref_mps",
-            ),
         ),
     ),
     make_signal_windows_opinfo(
@@ -582,11 +572,6 @@ op_db: List[OpInfo] = [
                 "test_schema_correctness",
                 dtypes=[torch.float16],
                 device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
-                "TestCommon",
-                "test_numpy_ref_mps",
             ),
         ),
     ),
@@ -685,11 +670,6 @@ op_db: List[OpInfo] = [
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
-            DecorateInfo(
-                unittest.skip("Unsupported on MPS for now pending aten::i0 support"),
-                "TestCommon",
-                "test_numpy_ref_mps",
-            ),
         ),
     ),
     make_signal_windows_opinfo(
@@ -785,11 +765,6 @@ op_db: List[OpInfo] = [
                 "test_schema_correctness",
                 dtypes=[torch.float16],
                 device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
-                "TestCommon",
-                "test_numpy_ref_mps",
             ),
         ),
     ),
