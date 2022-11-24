@@ -40,7 +40,7 @@ if [ ! -d "$ANDROID_NDK" ]; then
 fi
 
 if [ -z "$PYTHON" ]; then
-  PYTHON=$PYTHON
+  PYTHON=python
   PYTHON_VERSION_MAJOR=$($PYTHON -c 'import sys; print(sys.version_info[0])')
   if [ "${PYTHON_VERSION_MAJOR}" -le 2 ]; then
     echo "Default python executable is Python-2, trying to use python3 alias"
