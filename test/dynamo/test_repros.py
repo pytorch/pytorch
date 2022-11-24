@@ -971,7 +971,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIn(cnt.op_count, (36, 35, 34, 29, 28, 27))
 
     # see: https://github.com/pytorch/pytorch/issues/80067
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
@@ -1590,7 +1589,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_specialized_stride(self):
         def f():
             e = torch.empty(4)
