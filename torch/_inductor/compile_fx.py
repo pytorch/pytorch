@@ -11,7 +11,6 @@ from functorch.compile import min_cut_rematerialization_partition
 
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.utils._pytree import tree_flatten
 
 from . import config, metrics, overrides
 from .debug import DebugContext
@@ -349,14 +348,13 @@ def compile_fx(
     inner_compile=compile_fx_inner,
 ):
     """Main entrypoint to a compile given FX graph"""
+
     if not is_aot_autograd_safe_to_run(model_, example_inputs_):
         log.warning("Aot Autograd is not safe to run, so falling back to eager")
         return model_
 
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
-
-    flat_inputs, _ = tree_flatten(example_inputs_)
 
     with overrides.patch_functions():
         model_ = normalize_ir(model_, example_inputs_)
@@ -391,7 +389,8 @@ def compile_fx(
         )
 
     with overrides.patch_functions():
-        # TODO: can add logging before/after the call to _create_aot_dispatcher_function
+
+        # TODO: can add logging before/after the call to create_aot_dispatcher_function
         # in functorch/_src/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch
         return aot_autograd(
