@@ -3875,3 +3875,11 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! autograd not supported.")
         if op.name == "cat":
             self.skipTest("TODO(whc) fix pre-existing bug with cat for newly added opinfo for empty+nonempty")
+
+
+def expectedFailureIf(condition):
+    def decorator(fn):
+        if condition:
+            return unittest.expectedFailure(fn)
+        return fn
+    return decorator
