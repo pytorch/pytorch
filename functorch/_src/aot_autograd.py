@@ -867,7 +867,8 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
     @wraps(compiled_fw)
     def new_fn(args):
-        return call_func_with_args(compiled_fw, args, disable_amp=disable_amp)
+        fw_outs = call_func_with_args(compiled_fw, args, disable_amp=disable_amp)
+        return fw_outs
 
     return new_fn
 
@@ -1761,6 +1762,7 @@ def aot_module_simplified(
     Note: Inputs must be fake tensors in fake tensor mode.
     """
     #########################################################
+
     params = {
         **dict(_named_parameters(mod, remove_duplicate=False)),
         **dict(_named_buffers(mod, remove_duplicate=False)),
