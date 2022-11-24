@@ -149,6 +149,9 @@ void MetricsArena::ForEachMetric(
     const std::function<void(const std::string&, MetricData*)>& metric_func) {
   std::lock_guard<std::mutex> lock(lock_);
   for (auto& name_data : metrics_) {
+    if (!name_data.second->IsValid()) {
+      continue;
+    }
     metric_func(name_data.first, name_data.second.get());
   }
 }
@@ -165,19 +168,19 @@ void MetricsArena::ForEachCounter(
 
 std::vector<std::string> MetricsArena::GetMetricNames() {
   std::vector<std::string> names;
-  std::lock_guard<std::mutex> lock(lock_);
-  for (auto& name_data : metrics_) {
-    if (name_data.second->TotalSamples() > 0) {
-      names.push_back(name_data.first);
-    }
-  }
+  ForEachMetric([&names](const std::string& name, MetricData* data) {
+    names.push_back(name);
+  });
   return names;
 }
 
 MetricData* MetricsArena::GetMetric(const std::string& name) {
   std::lock_guard<std::mutex> lock(lock_);
   auto it = metrics_.find(name);
-  return (it != metrics_.end() && it->second->TotalSamples() > 0) ? it->second.get() : nullptr;
+  if (it == metrics_.end()) {
+    return nullptr;
+  }
+  return it->second->IsValid() ? it->second.get() : nullptr;
 }
 
 std::vector<std::string> MetricsArena::GetCounterNames() {
@@ -380,12 +383,12 @@ std::string CreateMetricReport(
     const std::vector<std::string>& metric_names) {
   MetricsArena* arena = MetricsArena::Get();
   std::stringstream ss;
-  for (const std::string& metric_name : metric_names) {
-    MetricData* data = arena->GetMetric(metric_name);
-    if (data && data->TotalSamples() > 0) {
-      EmitMetricInfo(metric_name, data, &ss);
+  std::set<std::string> metric_name_set(metric_names.begin(), metric_names.end());
+  arena->ForEachMetric([&ss, &metric_name_set](const std::string& name, MetricData* data) {
+    if (metric_name_set.find(name) != metric_name_set.end()) {
+      EmitMetricInfo(name, data, &ss);
     }
-  }
+  });
   std::set<std::string> counter_name_set(
       counter_names.begin(), counter_names.end());
   arena->ForEachCounter(
