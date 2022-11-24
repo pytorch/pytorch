@@ -403,12 +403,12 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCudaFuserOpInfo",
-                "test_nvfuser_correctness"
+                "test_nvfuser_correctness",
             ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCudaFuserOpInfo",
-                "test_nvfuser_extremal_values"
+                "test_nvfuser_extremal_values",
             ),
         ),
         decorators=[
@@ -613,12 +613,12 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCudaFuserOpInfo",
-                "test_nvfuser_correctness"
+                "test_nvfuser_correctness",
             ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCudaFuserOpInfo",
-                "test_nvfuser_extremal_values"
+                "test_nvfuser_extremal_values",
             ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
@@ -663,12 +663,12 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCudaFuserOpInfo",
-                "test_nvfuser_correctness"
+                "test_nvfuser_correctness",
             ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCudaFuserOpInfo",
-                "test_nvfuser_extremal_values"
+                "test_nvfuser_extremal_values",
             ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
