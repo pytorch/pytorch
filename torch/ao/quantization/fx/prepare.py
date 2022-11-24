@@ -16,7 +16,6 @@ from ..quantize import (
 )
 from ..observer import (
     ObserverBase,
-    _is_activation_post_process
 )
 from ..qconfig import (
     _is_reuse_input_qconfig,
@@ -79,6 +78,7 @@ from .utils import (
 )
 
 from torch.ao.quantization.quantize import (
+    is_activation_post_process,
     convert
 )
 
@@ -148,7 +148,7 @@ DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
-        _is_activation_post_process(modules[str(node.target)])
+        is_activation_post_process(modules[str(node.target)])
 
 def is_input_arg_dtype_supported_by_backend(
     arg: Argument,
@@ -407,9 +407,8 @@ def get_target_activation_dtype_for_node(
         # get qconfig to determine the eventual dtype of this node
         if qconfig is not None:
             if qhandler is not None and qhandler.input_output_observed():
-                act_dtype, weight_dtype, act_compute_dtype = \
+                act_dtype, weight_dtype, input_act_is_dynamic = \
                     get_qconfig_dtypes(qconfig)
-                input_act_is_dynamic = act_compute_dtype is not None
 
                 # Currently `QConfig` only has one `activation` field.
                 # For static quantization, it is reused for both input
@@ -419,13 +418,13 @@ def get_target_activation_dtype_for_node(
                 # In the future this may change as we add more fields
                 # to the `QConfig` object.
                 output_act_dtype = act_dtype \
-                    if input_act_is_dynamic is not True else torch.float
+                    if (not input_act_is_dynamic) else torch.float
 
                 bias_dtype = torch.float16 \
                     if (
                         act_dtype == torch.float16
                         and weight_dtype == torch.float16
-                        and act_compute_dtype is None
+                        and (not input_act_is_dynamic)
                     ) else torch.float
                 return {
                     "input_activation_dtype": (act_dtype, input_act_is_dynamic),
