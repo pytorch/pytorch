@@ -27,6 +27,7 @@ from torch._dynamo.testing import (
     same,
     unsupported,
 )
+from torch.nn import functional as F
 from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -419,10 +420,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_numel(self):
         def fn(a):
-            return a + a.numel() + torch.numel(a)
+            return (a + a.numel() + torch.numel(a), a + a.nelement())
 
         return torch._dynamo.testing.standard_test(
-            self, fn=fn, nargs=1, expected_ops=2, expected_ops_dynamic=4
+            self, fn=fn, nargs=1, expected_ops=3, expected_ops_dynamic=6
         )
 
     def test_pair(self):
@@ -1301,6 +1302,32 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
 
+    def test_tensor_data(self):
+        def fn(x, y):
+            return x[y.data]
+
+        x = torch.rand(8)
+        y = torch.ones(8).to(torch.int)
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
+    def test_tensor_layout(self):
+        def fn(x):
+            return torch.zeros(
+                [x.size()[0], x.size()[1]],
+                dtype=x.dtype,
+                layout=x.layout,
+                device=x.device,
+            )
+
+        x = torch.rand(2, 3)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
     def test_version_ci(self):
         # temporary test to check that the ci torch version is set correctly
         self.assertTrue(hasattr(torch, "_subclasses"))
@@ -2045,6 +2072,23 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch.allclose(dynamo_output, output))
 
+    def test_nn_functional_reduction(self):
+        def fn(loss, reduction):
+            reduction_enum = F._Reduction.get_enum(reduction)
+            if reduction_enum == 0:
+                return loss
+            elif reduction_enum == 1:
+                return loss.mean()
+            elif reduction_enum == 2:
+                return loss.sum()
+
+        x = torch.rand([3, 5])
+        y = "mean"
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(torch.allclose(ref, res))
+
     def test_large_reduction_list(self):
         dtype = torch.float32
         device = "cpu"
@@ -2150,7 +2194,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 self.names = []
 
             def forward(self, idx, targets=None):
-                from torch.nn import functional as F
 
                 b, t = idx.size()
                 assert (
@@ -2792,6 +2835,42 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    def test_user_function_variable_supports_function_argument(self):
+        def add1(x):
+            return x + 1
+
+        def add2(x):
+            return x + 2
+
+        def gn(x, f=add1):
+            if f is add1:
+                return x + 1
+            else:
+                return x + 2
+
+        def fn(x, f):
+            return gn(x, f)
+
+        x = torch.randn(2, 3)
+        ref = fn(x, add2)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x, add2)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_typing_variable_isinstance(self):
+        def fn(x, m):
+            if isinstance(m, typing.Mapping):
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.randn(2, 3)
+        m = {"x": torch.randn(3)}
+        ref = fn(x, m)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x, m)
+        self.assertTrue(torch.allclose(ref, res))
+
     def test_repro_graph_breaks_in__get_item_by_idx(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -2925,6 +3004,47 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(4)
         ref = model(x)
         res = opt_model(x)
+        self.assertTrue(same(ref, res))
+
+    def test_torch_cuda_is_available(self):
+        def fn(x):
+            if torch.cuda.is_available():
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(4)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_get_device(self):
+        def fn(x, y):
+            x = x + 1
+            y = y + 1
+            return x.get_device(), y.get_device()
+
+        x = torch.rand(4, device="cuda")
+        y = torch.rand(4, device="cpu")
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_get_device_index(self):
+        def fn(x):
+            x = x + 1
+            a = torch._utils._get_device_index(x.device)
+            b = torch._utils._get_device_index(1)
+            return a, b
+
+        x = torch.rand(4, device="cuda")
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
 
