@@ -36,9 +36,7 @@ from ..source import (
 )
 from ..utils import (
     clone_input,
-    fake_tensors_available,
     get_fake_value,
-    get_real_value,
     getfile,
     global_key_name,
     is_namedtuple,
@@ -86,6 +84,7 @@ from .misc import (
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import (
     DynamicShapeVariable,
+    FakeItemVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedNumpyVariable,
@@ -601,14 +600,23 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
         else:
-            wrapped_value = torch.tensor(value)
+            if config.dynamic_shapes and isinstance(value, int):
+                shape_env = self.tx.output.shape_env
+                wrapped_value = shape_env.create_symintnode(
+                    shape_env.create_symbol(value)
+                )
+                # TODO: Do float
+            else:
+                # TODO: Eliminate this case entirely
+                wrapped_value = torch.tensor(value)
             if not isinstance(self.get_source(), RandomValueSource):
                 guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
                 options = {"guards": guards}
             else:
                 options = {}
             options.update({"source": self.get_source()})
-            options.update({"raw_value": value})
+            if isinstance(wrapped_value, torch.Tensor):
+                options.update({"raw_value": value})
 
             proxy = self.tx.output.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
@@ -685,17 +693,12 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
             options.update(target_cls.specialize(example_value))
         return target_cls(proxy, **options)
 
-    use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
-
     initial_example_value = example_value
 
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
-            use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not use_fake_tensors or not isinstance(
-                value, torch._subclasses.fake_tensor.FakeTensor
-            ):
+            if not isinstance(value, torch._subclasses.fake_tensor.FakeTensor):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
 
@@ -703,16 +706,12 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
 
     with preserve_rng_state():
         if example_value is None:
-            if use_fake_tensors:
-                example_value = get_fake_value(proxy.node, tx)
-            else:
-                example_value = get_real_value(proxy.node, tx.output)
+            example_value = get_fake_value(proxy.node, tx)
 
         else:
             proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
-            if use_fake_tensors:
-                fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
-                example_value = fake_wrapper(example_value)
+            fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+            example_value = fake_wrapper(example_value)
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
@@ -725,9 +724,7 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
         example_value = _clone_input(example_value)
         proxy.node.meta["example_value"] = example_value
         specialized_props = target_cls.specialize(example_value)
-        if use_fake_tensors and isinstance(
-            example_value, torch._subclasses.fake_tensor.FakeTensor
-        ):
+        if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
             specialized_props["class_type"] = (
                 torch.nn.Parameter if is_parameter else torch.Tensor
             )
@@ -821,25 +818,14 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
         and (proxy.node.target == "item" or proxy.node.target in {math.sqrt, math.pow})
         and config.capture_scalar_outputs
     ):
-        if use_fake_tensors:
-            # item raw value should not be accessed
-            return wrap_fx_proxy_cls(
-                FakeItemVariable,
-                tx=tx,
-                proxy=proxy,
-                example_value=torch.tensor(example_value),
-                **options,
-            )
-        else:
-            return wrap_fx_proxy_cls(
-                UnspecializedPythonVariable,
-                tx=tx,
-                proxy=proxy,
-                example_value=torch.tensor(example_value),
-                raw_value=None if use_fake_tensors else example_value,
-                need_unwrap=False,
-                **options,
-            )
+        # item raw value should not be accessed
+        return wrap_fx_proxy_cls(
+            FakeItemVariable,
+            tx=tx,
+            proxy=proxy,
+            example_value=torch.tensor(example_value),
+            **options,
+        )
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
         proxy.node.meta["example_value"] = example_value
         return DynamicShapeVariable(proxy, example_value, **options)

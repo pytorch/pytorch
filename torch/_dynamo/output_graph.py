@@ -26,7 +26,6 @@ from .utils import (
     clone_inputs,
     count_calls,
     counters,
-    fake_tensors_available,
     format_graph_tabular,
     same,
 )
@@ -558,8 +557,7 @@ class OutputGraph(fx.Tracer):
         # some of the tensor objects to be held alive for longer than necessary.
 
         # Clear cache for conversion of real -> fake tensors
-        if fake_tensors_available:
-            self.root_tx.fake_mode.fake_tensor_converter = None
+        self.root_tx.fake_mode.fake_tensor_converter = None
         self.root_tx = None
 
         # Note: generated fx graph will hold a reference to the nn_module,
