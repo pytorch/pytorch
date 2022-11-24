@@ -163,6 +163,9 @@ class TorchVariable(VariableTracker):
             torch.finfo,
             torch.iinfo,
             torch.is_floating_point,
+            torch.cuda.is_available,
+            torch.nn.functional._Reduction.get_enum,
+            torch._utils._get_device_index,
         ):
             return True
         return getattr(self.value, "__module__", None) == "math"
@@ -292,7 +295,7 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_type,
             )
         elif self.value is torch.amp.autocast_mode.autocast:
-            return AutocastModeVariable.create(tx, target_values=args, kwargs=kwargs)
+            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
         elif self.value in (
             torch.profiler.profile,
             torch.profiler.record_function,
@@ -381,6 +384,31 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         else:
+            any_symints_or_symfloats = any(
+                [isinstance(x, DynamicShapeVariable) for x in args]
+            )
+            all_ints_or_floats = all(
+                [
+                    isinstance(
+                        x, (variables.ConstantVariable, variables.DynamicShapeVariable)
+                    )
+                    for x in args
+                ]
+            )
+            bin_ops = set(["add", "sub", "mul", "div", "sqrt"])
+            if (
+                self.value.__module__ == "torch"
+                and self.value.__name__ in bin_ops
+                and any_symints_or_symfloats
+                and all_ints_or_floats
+            ):
+                msg = f"""\
+Calling {str(self.value)} on only torch.SymInt arguments is not yet supported.
+To support this behavior, we need to allow const-propping tensors that store symint data.
+For now, dynamo will explicitly graph break when it encounters user code with this behavior.
+"""
+                log.warning(msg)
+                raise unimplemented(msg)
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
             if (

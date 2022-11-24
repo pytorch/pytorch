@@ -1031,8 +1031,10 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         self._create_process_group_nccl(store, self.opts())
 
         # Both rank 0 and 1 will use the same CUDA device resulting in ncclInvalidUsage
-        with self.assertRaises(dist.DistBackendError):
+        with self.assertRaises(dist.DistBackendError) as cm:
             dist.broadcast(torch.tensor([1, 2, 3]).cuda(), 0)
+
+        self.assertIsInstance(cm.exception, RuntimeError)
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
@@ -2972,6 +2974,21 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
         dist.all_gather_into_tensor(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter_base(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda"
+        tensor = torch.ones(10, 10, device=torch.device(device))
+        output_tensor = torch.zeros(10, 10, device=torch.device(device))
+        dist.reduce_scatter_tensor(output_tensor, tensor)
+        self.assertEqual(output_tensor, tensor)
 
 if __name__ == "__main__":
     assert (
