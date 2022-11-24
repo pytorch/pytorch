@@ -10,10 +10,12 @@ import torch.distributed as dist
 from torch._C._distributed_c10d import (
     _create_work_from_future,
     AllgatherOptions,
+    AllreduceOptions,
     BroadcastOptions,
     ReduceScatterOptions,
     ScatterOptions,
     Store,
+    ReduceOp,
 )
 from torch.futures import Future
 from torch.utils._pytree import tree_flatten
@@ -37,6 +39,25 @@ def ret_work(ret):
     fut = Future()
     fut.set_result(ret)
     return _create_work_from_future(fut)
+
+
+class AllReduce:
+    def __init__(self, op):
+        if op != ReduceOp.SUM:
+            raise NotImplementedError(
+                "AllReduce only supports SUM on threaded pg for now."
+            )
+        self.op = op
+
+    def work(self, data):
+        # data: List[List[Tensor]]
+        res = data[0][0]
+        for src_rank in range(1, len(data)):
+            in_tensor_list = data[src_rank]
+            res.add_(in_tensor_list[0])  # Hardcoded
+        with torch.no_grad():
+            for src_rank in range(len(data)):
+                data[src_rank][0].copy_(res)
 
 
 class AllGather:
@@ -182,6 +203,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
         with cls._coll_lock:
             if cls._cur_coll == collective:
                 cls._cur_coll = None
+
+    def allreduce(self, tensor_list, opts=AllreduceOptions()):
+        coll = ProcessLocalGroup._start_coll(self._world, AllReduce(opts.reduceOp))
+        res = coll.join(self._rank, tensor_list)
+        ProcessLocalGroup._end_coll(coll)
+        return res
 
     def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
         coll = ProcessLocalGroup._start_coll(self._world, AllGather())
