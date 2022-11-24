@@ -25,3 +25,9 @@ debug_joint = os.environ.get('AOT_FX_GRAPHS_JOINT', False)
 use_dynamic_shapes = os.getenv('AOT_DYNAMIC_SHAPES', False)
 
 static_weight_shapes = True
+
+# Applies CSE to the graph before partitioning
+cse = True
+
+# Restricts the amount of computation AOTAutograd can do.
+max_dist_from_bw = 5
