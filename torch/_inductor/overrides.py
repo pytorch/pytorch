@@ -4,6 +4,7 @@ import logging
 import operator
 import random
 import weakref
+from typing import Optional
 
 import numpy
 
@@ -83,7 +84,7 @@ class ConvUnary2d(nn.Conv2d):
     def __init__(
         self,
         conv: nn.Module,
-        unary: nn.Module,
+        unary: Optional[nn.Module],
         input_size: list,
     ):
         super(ConvUnary2d, self).__init__(
@@ -103,9 +104,13 @@ class ConvUnary2d(nn.Conv2d):
 
     def _update_module_params(self, conv, unary, input_size):
         self.__dict__ = copy.deepcopy(conv.__dict__)
-        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
-            unary
-        )
+        self.attr = "none"
+        self.scalars = []
+        self.algorithm = ""
+        if unary is not None:
+            self.attr, self.scalars, self.algorithm = unary_modules_map[
+                unary.__class__
+            ](unary)
         self.weight = torch.nn.Parameter(
             torch._C._nn.mkldnn_reorder_conv2d_weight(
                 self.weight.to_mkldnn(),
@@ -398,6 +403,15 @@ class LinearBinary(nn.Linear):
             input, other, self.weight, self.bias, self.attr
         )
         return y
+
+
+def packed_conv_eval(conv: nn.Module, input_size: list):
+    assert not (conv.training), "Fusion only for eval!"
+    return ConvUnary2d(
+        conv,
+        None,
+        input_size,
+    )
 
 
 def fused_conv_unary_eval(conv: nn.Module, unary: nn.Module, input_size: list):
@@ -954,6 +968,10 @@ def pack_module(gm: torch.fx.GraphModule):
                 if type(cur_module) in [torch.nn.Linear] and not torch._C.has_mkl:
                     continue
                 computation_node_input_size = computation_node_input_meta.shape
+                if type(cur_module) in [nn.Conv2d] and isinstance(
+                    cur_module.padding, str
+                ):
+                    continue
                 new_module = computation_op_packed_map[type(cur_module)](
                     cur_module, computation_node_input_size
                 )
@@ -1133,6 +1151,7 @@ computation_op_binary_op_fusion_inplace_map = {
 
 computation_op_packed_map = {
     nn.Linear: packed_linear_eval,
+    nn.Conv2d: packed_conv_eval,
 }
 
 
