@@ -399,6 +399,13 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
             ),
+            # Failing accuracy and extremal (#89609)
+            DecorateInfo(
+                unittest.expectedFailure, "TestCudaFuserOpInfo", "test_nvfuser_correctness"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestCudaFuserOpInfo", "test_nvfuser_extremal_values"
+            ),
         ),
         decorators=[
             DecorateInfo(
@@ -598,6 +605,13 @@ op_db: List[OpInfo] = [
                 "test_mask_layout",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
+            # Failing accuracy and extremal (#89609)
+            DecorateInfo(
+                unittest.expectedFailure, "TestCudaFuserOpInfo", "test_nvfuser_correctness"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestCudaFuserOpInfo", "test_nvfuser_extremal_values"
+            ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
@@ -636,6 +650,13 @@ op_db: List[OpInfo] = [
                 "TestMasked",
                 "test_mask_layout",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
+            ),
+            # Failing accuracy and extremal (#89609)
+            DecorateInfo(
+                unittest.expectedFailure, "TestCudaFuserOpInfo", "test_nvfuser_correctness"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestCudaFuserOpInfo", "test_nvfuser_extremal_values"
             ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,

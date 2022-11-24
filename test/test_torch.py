@@ -3914,7 +3914,7 @@ else:
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @skipIfRocm
     @onlyCUDA
-    @largeTensorTest('10GB', device='cpu')
+    @largeTensorTest('12GB', device='cpu')
     @largeTensorTest('5GB', device='cuda')
     def test_pdist_norm_large(self, device):
         # use dim0>=46342 for forward, see:
@@ -3924,7 +3924,7 @@ else:
         # Will require 1249975000 float32s
         expected_cpu = torch.pdist(x, p=2)                  # ~1250M * 4 bytes = 5 GB on CPU
         actual_gpu = torch.pdist(x.to(device), p=2)         # 5 GB on GPU
-        self.assertEqual(expected_cpu, actual_gpu.cpu())    # Another 5 GB on CPU
+        self.assertEqual(expected_cpu, actual_gpu.cpu())    # Another 5 GB on CPU + 1.25GB for expected == actual
 
     # FIXME: move to elementwise ternary test suite
     @onlyNativeDeviceTypes
