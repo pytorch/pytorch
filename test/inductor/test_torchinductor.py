@@ -2863,8 +2863,6 @@ class CommonTemplate:
                 ),
             )
 
-    # https://github.com/pytorch/torchdynamo/issues/467
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_cudnn_rnn(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
