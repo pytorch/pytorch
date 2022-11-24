@@ -2747,21 +2747,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     def test_autograd_function_equivalence(self):
-        m1 = Module1()
-
-        @torch._dynamo.optimize("eager", nopython=True)
-        def f1():
-            return m1(torch.ones(2, 3))
-
-        self.assertTrue(torch.allclose(f1(), torch.tensor([2.0])))
-
-        m2 = Module2()
-
-        @torch._dynamo.optimize("eager", nopython=True)
-        def f2():
-            return m2(torch.ones(2, 3))
-
-        self.assertTrue(torch.allclose(f2(), torch.tensor([2.0])))
+        for i in range(1, 5):
+            model = globals()[f"Module{i}"]()
+            opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+            self.assertTrue(
+                torch.allclose(opt_model(torch.ones(2, 3)), torch.tensor([2.0]))
+            )
 
     def test_object_classmethod(self):
         class C:
@@ -3048,9 +3039,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
 
-class CustomFunc(torch.autograd.Function):
+class CustomFunc1(torch.autograd.Function):
     @staticmethod
     def forward(ctx, foo):
+        return foo + foo
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output
+
+
+class CustomFunc2(torch.autograd.Function):
+    # the forward function can be staticmethod or classmethod
+    @classmethod
+    def forward(cls, ctx, foo):
         return foo + foo
 
     @staticmethod
@@ -3063,13 +3065,30 @@ class Module1(torch.nn.Module):
         super().__init__()
 
     def forward(self, foo):
-        return CustomFunc().apply(foo)
+        return CustomFunc1().apply(foo)
 
 
 class Module2(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.fn = CustomFunc.apply
+        self.fn = CustomFunc1.apply
+
+    def forward(self, foo):
+        return self.fn(foo)
+
+
+class Module3(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, foo):
+        return CustomFunc2().apply(foo)
+
+
+class Module4(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fn = CustomFunc2.apply
 
     def forward(self, foo):
         return self.fn(foo)

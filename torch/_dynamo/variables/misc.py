@@ -459,9 +459,19 @@ class AutogradFunctionVariable(VariableTracker):
 
         args = [BlackHoleVariable()] + list(args)
         options = VariableTracker.propagate(self, args, kwargs.values())
-        return variables.UserFunctionVariable(
-            self.fn_cls.forward, **options
-        ).call_function(tx, args, kwargs)
+        fn = self.fn_cls.forward
+        if isinstance(fn, types.FunctionType):
+            return variables.UserFunctionVariable(fn, **options).call_function(
+                tx, args, kwargs
+            )
+        elif isinstance(fn, types.MethodType):
+            return variables.UserMethodVariable(
+                fn.__func__, variables.UserDefinedClassVariable(self.fn_cls), **options
+            ).call_function(tx, args, kwargs)
+        else:
+            unimplemented(
+                f"non-function or method in subclass of torch.autograd.Function: {fn}"
+            )
 
     def call_function(self, tx, args, kwargs):
         options = VariableTracker.propagate(self, args, kwargs.values())
