@@ -33,8 +33,6 @@
 #include <ATen/ops/_linalg_svd_meta.h>
 #include <ATen/ops/_linalg_svd_native.h>
 #include <ATen/ops/_lu_with_info_native.h>
-#include <ATen/ops/_symeig_helper.h>
-#include <ATen/ops/_symeig_helper_native.h>
 #include <ATen/ops/all.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/cat.h>
