@@ -53,7 +53,8 @@ runs:
           --test-matrix "${{ inputs.test-matrix }}" \
           --pr-number "${{ github.event.pull_request.number }}" \
           --tag "${{ steps.parse-ref.outputs.tag }}" \
-          --event-name "${{ github.event_name }}"
+          --event-name "${{ github.event_name }}" \
+          --schedule "${{ github.event.schedule }}"
 
     - name: Print the filtered test matrix
       shell: bash
