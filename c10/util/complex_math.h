@@ -291,6 +291,35 @@ C10_HOST_DEVICE inline c10::complex<T> atanh(const c10::complex<T>& x) {
 #endif
 }
 
+template <typename T>
+C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T>& z) {
+  // log1p(z) = log(1 + z)
+  // Let's define 1 + z = r * e ^ (i * a), then we have
+  // log(r * e ^ (i * a)) = log(r) + i * a
+  // With z = x + iy, the term r can be written as
+  // r = ((1 + x) ^ 2 + y ^ 2) ^ 0.5
+  //   = (1 + x ^ 2 + 2 * x + y ^ 2) ^ 0.5
+  // So, log(r) is
+  // log(r) = 0.5 * log(1 + x ^ 2 + 2 * x + y ^ 2)
+  //        = 0.5 * log1p(x * (x + 2) + y ^ 2)
+  // we need to use the expression only on certain condition to avoid overflow
+  // and underflow from `(x * (x + 2) + y ^ 2)`
+  T x = z.real();
+  T y = z.imag();
+  T zabs = std::abs(z);
+  T theta = std::atan2(y, x + T(1));
+  if (zabs < 0.5) {
+    T r = x * (T(2) + x) + y * y;
+    if (r == 0) { // handle underflow
+      return {x, theta};
+    }
+    return {T(0.5) * std::log1p(r), theta};
+  } else {
+    T z0 = std::hypot(x + 1, y);
+    return {std::log(z0), theta};
+  }
+}
+
 } // namespace c10_complex_math
 
 using c10_complex_math::acos;
@@ -304,6 +333,7 @@ using c10_complex_math::cosh;
 using c10_complex_math::exp;
 using c10_complex_math::log;
 using c10_complex_math::log10;
+using c10_complex_math::log1p;
 using c10_complex_math::log2;
 using c10_complex_math::pow;
 using c10_complex_math::sin;
@@ -325,6 +355,7 @@ using c10_complex_math::cosh;
 using c10_complex_math::exp;
 using c10_complex_math::log;
 using c10_complex_math::log10;
+using c10_complex_math::log1p;
 using c10_complex_math::log2;
 using c10_complex_math::pow;
 using c10_complex_math::sin;
