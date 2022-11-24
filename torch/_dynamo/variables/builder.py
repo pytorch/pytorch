@@ -580,9 +580,15 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
         else:
-            if config.dynamic_shapes and isinstance(value, int):
+            if (
+                config.dynamic_shapes
+                and config.fake_tensor_propagation
+                and isinstance(value, int)
+            ):
                 shape_env = self.tx.output.shape_env
-                wrapped_value = shape_env.create_symintnode(shape_env.create_symbol(value))
+                wrapped_value = shape_env.create_symintnode(
+                    shape_env.create_symbol(value)
+                )
                 # TODO: Do float
             else:
                 # TODO: Eliminate this case entirely
