@@ -708,6 +708,7 @@ torch.cuda.synchronize()
         # ROCm 16GB MI25 hits OOM error. Clear caching allocator prior to running large subtest.
         if TEST_WITH_ROCM and 'cuda' in device:
             torch.cuda.empty_cache()
+        helper(200, 512, 28, 28, 2)
         helper(4, 8, 7, 7, 3, stride=1)
         helper(4, 8, 7, 7, 3, padding=2, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
@@ -808,6 +809,7 @@ torch.cuda.synchronize()
             self.assertEqual(input.grad, ref_input.grad)
 
         helper(4, 8, 8, 8, 7)
+        helper(200, 512, 28, 28, 2)
         helper(4, 8, 7, 7, 3, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)

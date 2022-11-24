@@ -18,6 +18,8 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#include <ATen/native/AdaptivePooling.h>
+
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -426,13 +428,7 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   TensorArg grad_output_arg{gradOutput_, "gradOutput_", 2};
   TensorArg input_arg{input, "input", 3};
 
-  int64_t ndim = gradOutput_.ndimension();
-  for (const auto i : c10::irange(1, ndim)) {
-    TORCH_CHECK(gradOutput_.size(i) > 0,
-      "adaptive_avg_pool3d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
-      "but grad_output has sizes ", gradOutput_.sizes(), " with dimension ", i,
-      " being empty");
-  }
+  adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
 
   checkAllSameGPU(
       "adaptive_avg_pool3d_out_cuda",

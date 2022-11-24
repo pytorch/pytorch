@@ -18,6 +18,8 @@
 #include <ATen/ops/empty.h>
 #endif
 
+#include <ATen/native/AdaptivePooling.h>
+
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -330,13 +332,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cuda)
   TensorArg input_arg{input, "input", 3};
   TensorArg indices_arg{indices, "indices", 4};
 
-  int64_t ndim = gradOutput.ndimension();
-  for (const auto i : c10::irange(1, ndim)) {
-    TORCH_CHECK(gradOutput.size(i) > 0,
-      "adaptive_max_pool2d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
-      "but grad_output has sizes ", gradOutput.sizes(), " with dimension ", i,
-      " being empty");
-  }
+  adaptive_pool_empty_output_check(gradOutput, "adaptive_max_pool2d_backward");
 
   checkAllSameGPU(
       __func__,

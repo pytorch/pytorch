@@ -5,6 +5,8 @@
 #include <c10/util/irange.h>
 #include <tuple>
 
+#include <ATen/native/AdaptivePooling.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
@@ -371,13 +373,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool3d_backward_out_cpu)
   int64_t osizeH;
   int64_t osizeW;
 
-  int64_t ndim = gradOutput.ndimension();
-  for (const auto i : c10::irange(1, ndim)) {
-    TORCH_CHECK(gradOutput.size(i) > 0,
-      "adaptive_max_pool3d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
-      "but grad_output has sizes ", gradOutput.sizes(), " with dimension ", i,
-      " being empty");
-  }
+  adaptive_pool_empty_output_check(gradOutput, "adaptive_max_pool3d_backward");
 
   /* get contiguous gradOutput */
   auto gradOutput_ = gradOutput.contiguous();
