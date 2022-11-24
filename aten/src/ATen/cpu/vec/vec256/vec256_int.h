@@ -496,34 +496,34 @@ public:
   Vectorized<int16_t> le(const Vectorized<int16_t>& other) const;
 };
 
-template <>
-class Vectorized<int8_t> : public Vectorizedi {
+template <typename T>
+class Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>> : public Vectorizedi {
 private:
-  static const Vectorized<int8_t> ones;
+  static const Vectorized<T> ones;
 public:
-  using value_type = int8_t;
+  using value_type = T;
   static constexpr int size() {
     return 32;
   }
   using Vectorizedi::Vectorizedi;
   Vectorized() {}
-  Vectorized(int8_t v) { values = _mm256_set1_epi8(v); }
-  Vectorized(int8_t val1, int8_t val2, int8_t val3, int8_t val4,
-         int8_t val5, int8_t val6, int8_t val7, int8_t val8,
-         int8_t val9, int8_t val10, int8_t val11, int8_t val12,
-         int8_t val13, int8_t val14, int8_t val15, int8_t val16,
-         int8_t val17, int8_t val18, int8_t val19, int8_t val20,
-         int8_t val21, int8_t val22, int8_t val23, int8_t val24,
-         int8_t val25, int8_t val26, int8_t val27, int8_t val28,
-         int8_t val29, int8_t val30, int8_t val31, int8_t val32) {
+  Vectorized(T v) { values = _mm256_set1_epi8(v); }
+  Vectorized(T val1, T val2, T val3, T val4,
+         T val5, T val6, T val7, T val8,
+         T val9, T val10, T val11, T val12,
+         T val13, T val14, T val15, T val16,
+         T val17, T val18, T val19, T val20,
+         T val21, T val22, T val23, T val24,
+         T val25, T val26, T val27, T val28,
+         T val29, T val30, T val31, T val32) {
     values = _mm256_setr_epi8(val1, val2, val3, val4, val5, val6, val7, val8,
                               val9, val10, val11, val12, val13, val14, val15, val16,
                               val17, val18, val19, val20, val21, val22, val23, val24,
                               val25, val26, val27, val28, val29, val30, val31, val32);
   }
   template <int64_t mask>
-  static Vectorized<int8_t> blend(Vectorized<int8_t> a, Vectorized<int8_t> b) {
-    __at_align__ int8_t tmp_values[size()];
+  static Vectorized<T> blend(Vectorized<T> a, Vectorized<T> b) {
+    __at_align__ T tmp_values[size()];
     a.store(tmp_values);
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi8(b.values, 0);
@@ -591,13 +591,13 @@ public:
       tmp_values[31] = _mm256_extract_epi8(b.values, 31);
     return loadu(tmp_values);
   }
-  static Vectorized<int8_t> blendv(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b,
-                               const Vectorized<int8_t>& mask) {
+  static Vectorized<T> blendv(const Vectorized<T>& a, const Vectorized<T>& b,
+                               const Vectorized<T>& mask) {
     return _mm256_blendv_epi8(a.values, b.values, mask.values);
   }
   template <typename step_t>
-  static Vectorized<int8_t> arange(int8_t base = 0, step_t step = static_cast<step_t>(1)) {
-    return Vectorized<int8_t>(
+  static Vectorized<T> arange(T base = 0, step_t step = static_cast<step_t>(1)) {
+    return Vectorized<T>(
       base,             base +      step, base +  2 * step, base +  3 * step,
       base +  4 * step, base +  5 * step, base +  6 * step, base +  7 * step,
       base +  8 * step, base +  9 * step, base + 10 * step, base + 11 * step,
@@ -607,8 +607,8 @@ public:
       base + 24 * step, base + 25 * step, base + 26 * step, base + 27 * step,
       base + 28 * step, base + 29 * step, base + 30 * step, base + 31 * step);
   }
-  static Vectorized<int8_t>
-  set(Vectorized<int8_t> a, Vectorized<int8_t> b, int8_t count = size()) {
+  static Vectorized<T>
+  set(Vectorized<T> a, Vectorized<T> b, T count = size()) {
     switch (count) {
       case 0:
         return a;
@@ -677,18 +677,18 @@ public:
     }
     return b;
   }
-  static Vectorized<int8_t> loadu(const void* ptr) {
+  static Vectorized<T> loadu(const void* ptr) {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
-  static Vectorized<int8_t> loadu(const void* ptr, int8_t count) {
-    __at_align__ int8_t tmp_values[size()];
+  static Vectorized<T> loadu(const void* ptr, T count) {
+    __at_align__ T tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int8_t));
+    std::memcpy(tmp_values, ptr, count * sizeof(T));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -697,303 +697,65 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ int8_t tmp_values[size()];
+      __at_align__ T tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int8_t));
+      std::memcpy(ptr, tmp_values, count * sizeof(T));
     }
   }
-  const int8_t& operator[](int idx) const  = delete;
-  int8_t& operator[](int idx)  = delete;
-  Vectorized<int8_t> abs() const {
-    return _mm256_abs_epi8(values);
+  const T& operator[](int idx) const  = delete;
+  T& operator[](int idx)  = delete;
+  Vectorized<T> abs() const {
+    if (std::is_same<T, int8_t>::value)
+      return _mm256_abs_epi8(values);
+    else
+      return values;
   }
-  Vectorized<int8_t> real() const {
+  Vectorized<T> real() const {
     return *this;
   }
-  Vectorized<int8_t> imag() const {
+  Vectorized<T> imag() const {
     return _mm256_set1_epi8(0);
   }
-  Vectorized<int8_t> conj() const {
+  Vectorized<T> conj() const {
     return *this;
   }
-  Vectorized<int8_t> frac() const;
-  Vectorized<int8_t> neg() const;
-  Vectorized<int8_t> operator==(const Vectorized<int8_t>& other) const {
+  Vectorized<T> frac() const;
+  Vectorized<T> neg() const;
+  Vectorized<T> operator==(const Vectorized<T>& other) const {
     return _mm256_cmpeq_epi8(values, other.values);
   }
-  Vectorized<int8_t> operator!=(const Vectorized<int8_t>& other) const {
+  Vectorized<T> operator!=(const Vectorized<T>& other) const {
     return invert(_mm256_cmpeq_epi8(values, other.values));
   }
-  Vectorized<int8_t> operator<(const Vectorized<int8_t>& other) const {
-    return _mm256_cmpgt_epi8(other.values, values);
-  }
-  Vectorized<int8_t> operator<=(const Vectorized<int8_t>& other) const {
-    return invert(_mm256_cmpgt_epi8(values, other.values));
-  }
-  Vectorized<int8_t> operator>(const Vectorized<int8_t>& other) const {
-    return _mm256_cmpgt_epi8(values, other.values);
-  }
-  Vectorized<int8_t> operator>=(const Vectorized<int8_t>& other) const {
-    return invert(_mm256_cmpgt_epi8(other.values, values));
-  }
-
-  Vectorized<int8_t> eq(const Vectorized<int8_t>& other) const;
-  Vectorized<int8_t> ne(const Vectorized<int8_t>& other) const;
-  Vectorized<int8_t> gt(const Vectorized<int8_t>& other) const;
-  Vectorized<int8_t> ge(const Vectorized<int8_t>& other) const;
-  Vectorized<int8_t> lt(const Vectorized<int8_t>& other) const;
-  Vectorized<int8_t> le(const Vectorized<int8_t>& other) const;
-};
-
-template <>
-class Vectorized<uint8_t> : public Vectorizedi {
-private:
-  static const Vectorized<uint8_t> ones;
-public:
-  using value_type = uint8_t;
-  static constexpr int size() {
-    return 32;
-  }
-  using Vectorizedi::Vectorizedi;
-  Vectorized() {}
-  Vectorized(uint8_t v) { values = _mm256_set1_epi8(v); }
-  Vectorized(uint8_t val1, uint8_t val2, uint8_t val3, uint8_t val4,
-         uint8_t val5, uint8_t val6, uint8_t val7, uint8_t val8,
-         uint8_t val9, uint8_t val10, uint8_t val11, uint8_t val12,
-         uint8_t val13, uint8_t val14, uint8_t val15, uint8_t val16,
-         uint8_t val17, uint8_t val18, uint8_t val19, uint8_t val20,
-         uint8_t val21, uint8_t val22, uint8_t val23, uint8_t val24,
-         uint8_t val25, uint8_t val26, uint8_t val27, uint8_t val28,
-         uint8_t val29, uint8_t val30, uint8_t val31, uint8_t val32) {
-    values = _mm256_setr_epi8(val1, val2, val3, val4, val5, val6, val7, val8,
-                              val9, val10, val11, val12, val13, val14, val15, val16,
-                              val17, val18, val19, val20, val21, val22, val23, val24,
-                              val25, val26, val27, val28, val29, val30, val31, val32);
-  }
-  template <int64_t mask>
-  static Vectorized<uint8_t> blend(Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
-    __at_align__ uint8_t tmp_values[size()];
-    a.store(tmp_values);
-    if (mask & 0x01)
-      tmp_values[0] = _mm256_extract_epi8(b.values, 0);
-    if (mask & 0x02)
-      tmp_values[1] = _mm256_extract_epi8(b.values, 1);
-    if (mask & 0x04)
-      tmp_values[2] = _mm256_extract_epi8(b.values, 2);
-    if (mask & 0x08)
-      tmp_values[3] = _mm256_extract_epi8(b.values, 3);
-    if (mask & 0x10)
-      tmp_values[4] = _mm256_extract_epi8(b.values, 4);
-    if (mask & 0x20)
-      tmp_values[5] = _mm256_extract_epi8(b.values, 5);
-    if (mask & 0x40)
-      tmp_values[6] = _mm256_extract_epi8(b.values, 6);
-    if (mask & 0x80)
-      tmp_values[7] = _mm256_extract_epi8(b.values, 7);
-    if (mask & 0x100)
-      tmp_values[8] = _mm256_extract_epi8(b.values, 8);
-    if (mask & 0x200)
-      tmp_values[9] = _mm256_extract_epi8(b.values, 9);
-    if (mask & 0x400)
-      tmp_values[10] = _mm256_extract_epi8(b.values, 10);
-    if (mask & 0x800)
-      tmp_values[11] = _mm256_extract_epi8(b.values, 11);
-    if (mask & 0x1000)
-      tmp_values[12] = _mm256_extract_epi8(b.values, 12);
-    if (mask & 0x2000)
-      tmp_values[13] = _mm256_extract_epi8(b.values, 13);
-    if (mask & 0x4000)
-      tmp_values[14] = _mm256_extract_epi8(b.values, 14);
-    if (mask & 0x8000)
-      tmp_values[15] = _mm256_extract_epi8(b.values, 15);
-    if (mask & 0x010000)
-      tmp_values[16] = _mm256_extract_epi8(b.values, 16);
-    if (mask & 0x020000)
-      tmp_values[17] = _mm256_extract_epi8(b.values, 17);
-    if (mask & 0x040000)
-      tmp_values[18] = _mm256_extract_epi8(b.values, 18);
-    if (mask & 0x080000)
-      tmp_values[19] = _mm256_extract_epi8(b.values, 19);
-    if (mask & 0x100000)
-      tmp_values[20] = _mm256_extract_epi8(b.values, 20);
-    if (mask & 0x200000)
-      tmp_values[21] = _mm256_extract_epi8(b.values, 21);
-    if (mask & 0x400000)
-      tmp_values[22] = _mm256_extract_epi8(b.values, 22);
-    if (mask & 0x800000)
-      tmp_values[23] = _mm256_extract_epi8(b.values, 23);
-    if (mask & 0x1000000)
-      tmp_values[24] = _mm256_extract_epi8(b.values, 24);
-    if (mask & 0x2000000)
-      tmp_values[25] = _mm256_extract_epi8(b.values, 25);
-    if (mask & 0x4000000)
-      tmp_values[26] = _mm256_extract_epi8(b.values, 26);
-    if (mask & 0x8000000)
-      tmp_values[27] = _mm256_extract_epi8(b.values, 27);
-    if (mask & 0x10000000)
-      tmp_values[28] = _mm256_extract_epi8(b.values, 28);
-    if (mask & 0x20000000)
-      tmp_values[29] = _mm256_extract_epi8(b.values, 29);
-    if (mask & 0x40000000)
-      tmp_values[30] = _mm256_extract_epi8(b.values, 30);
-    if (mask & 0x80000000)
-      tmp_values[31] = _mm256_extract_epi8(b.values, 31);
-    return loadu(tmp_values);
-  }
-  static Vectorized<uint8_t> blendv(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b,
-                               const Vectorized<uint8_t>& mask) {
-    return _mm256_blendv_epi8(a.values, b.values, mask.values);
-  }
-  template <typename step_t>
-  static Vectorized<uint8_t> arange(uint8_t base = 0, step_t step = static_cast<step_t>(1)) {
-    return Vectorized<uint8_t>(
-      base,             base +      step, base +  2 * step, base +  3 * step,
-      base +  4 * step, base +  5 * step, base +  6 * step, base +  7 * step,
-      base +  8 * step, base +  9 * step, base + 10 * step, base + 11 * step,
-      base + 12 * step, base + 13 * step, base + 14 * step, base + 15 * step,
-      base + 16 * step, base + 17 * step, base + 18 * step, base + 19 * step,
-      base + 20 * step, base + 21 * step, base + 22 * step, base + 23 * step,
-      base + 24 * step, base + 25 * step, base + 26 * step, base + 27 * step,
-      base + 28 * step, base + 29 * step, base + 30 * step, base + 31 * step);
-  }
-  static Vectorized<uint8_t>
-  set(Vectorized<uint8_t> a, Vectorized<uint8_t> b, uint8_t count = size()) {
-    switch (count) {
-      case 0:
-        return a;
-      case 1:
-        return blend<0x1>(a, b);
-      case 2:
-        return blend<0x3>(a, b);
-      case 3:
-        return blend<0x7>(a, b);
-      case 4:
-        return blend<0xF>(a, b);
-      case 5:
-        return blend<0x1F>(a, b);
-      case 6:
-        return blend<0x3F>(a, b);
-      case 7:
-        return blend<0x7F>(a, b);
-      case 8:
-        return blend<0xFF>(a, b);
-      case 9:
-        return blend<0x1FF>(a, b);
-      case 10:
-        return blend<0x3FF>(a, b);
-      case 11:
-        return blend<0x7FF>(a, b);
-      case 12:
-        return blend<0xFFF>(a, b);
-      case 13:
-        return blend<0x1FFF>(a, b);
-      case 14:
-        return blend<0x3FFF>(a, b);
-      case 15:
-        return blend<0x7FFF>(a, b);
-      case 16:
-        return blend<0xFFFF>(a, b);
-      case 17:
-        return blend<0x1FFFF>(a, b);
-      case 18:
-        return blend<0x3FFFF>(a, b);
-      case 19:
-        return blend<0x7FFFF>(a, b);
-      case 20:
-        return blend<0xFFFFF>(a, b);
-      case 21:
-        return blend<0x1FFFFF>(a, b);
-      case 22:
-        return blend<0x3FFFFF>(a, b);
-      case 23:
-        return blend<0x7FFFFF>(a, b);
-      case 24:
-        return blend<0xFFFFFF>(a, b);
-      case 25:
-        return blend<0x1FFFFFF>(a, b);
-      case 26:
-        return blend<0x3FFFFFF>(a, b);
-      case 27:
-        return blend<0x7FFFFFF>(a, b);
-      case 28:
-        return blend<0xFFFFFFF>(a, b);
-      case 29:
-        return blend<0x1FFFFFFF>(a, b);
-      case 30:
-        return blend<0x3FFFFFFF>(a, b);
-      case 31:
-        return blend<0x7FFFFFFF>(a, b);
-    }
-    return b;
-  }
-  static Vectorized<uint8_t> loadu(const void* ptr) {
-    return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
-  }
-  static Vectorized<uint8_t> loadu(const void* ptr, uint8_t count) {
-    __at_align__ uint8_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-    // instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
-    }
-    std::memcpy(tmp_values, ptr, count * sizeof(uint8_t));
-    return loadu(tmp_values);
-  }
-  void store(void* ptr, int count = size()) const {
-    if (count == size()) {
-      // ptr need not to be aligned here. See
-      // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
-      _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
-    } else if (count > 0) {
-      __at_align__ uint8_t tmp_values[size()];
-      _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(uint8_t));
+  Vectorized<T> operator<(const Vectorized<T>& other) const {
+    if (std::is_same<T, int8_t>::value)
+      return _mm256_cmpgt_epi8(other.values, values);
+    else {
+      __m256i max = _mm256_max_epu8(values, other.values);
+      return invert(_mm256_cmpeq_epi8(max, values));
     }
   }
-  const uint8_t& operator[](int idx) const  = delete;
-  uint8_t& operator[](int idx)  = delete;
-  Vectorized<uint8_t> abs() const {
-    return values;
+  Vectorized<T> operator<=(const Vectorized<T>& other) const {
+    if (std::is_same<T, int8_t>::value)
+      return invert(_mm256_cmpgt_epi8(values, other.values));
+    else {
+      __m256i max = _mm256_max_epu8(values, other.values);
+      return _mm256_cmpeq_epi8(max, other.values);
+    }
   }
-  Vectorized<uint8_t> real() const {
-    return *this;
-  }
-  Vectorized<uint8_t> imag() const {
-    return _mm256_set1_epi8(0);
-  }
-  Vectorized<uint8_t> conj() const {
-    return *this;
-  }
-  Vectorized<uint8_t> frac() const;
-  Vectorized<uint8_t> neg() const;
-  Vectorized<uint8_t> operator==(const Vectorized<uint8_t>& other) const {
-    return _mm256_cmpeq_epi8(values, other.values);
-  }
-  Vectorized<uint8_t> operator!=(const Vectorized<uint8_t>& other) const {
-    return invert(_mm256_cmpeq_epi8(values, other.values));
-  }
-  Vectorized<uint8_t> operator<(const Vectorized<uint8_t>& other) const {
-    __m256i max = _mm256_max_epu8(values, other.values);
-    return invert(_mm256_cmpeq_epi8(max, values));
-  }
-  Vectorized<uint8_t> operator<=(const Vectorized<uint8_t>& other) const {
-    __m256i max = _mm256_max_epu8(values, other.values);
-    return _mm256_cmpeq_epi8(max, other.values);
-  }
-  Vectorized<uint8_t> operator>(const Vectorized<uint8_t>& other) const {
+  Vectorized<T> operator>(const Vectorized<T>& other) const {
     return other < *this;
   }
-  Vectorized<uint8_t> operator>=(const Vectorized<uint8_t>& other) const {
+  Vectorized<T> operator>=(const Vectorized<T>& other) const {
     return other <= *this;
   }
 
-  Vectorized<uint8_t> eq(const Vectorized<uint8_t>& other) const;
-  Vectorized<uint8_t> ne(const Vectorized<uint8_t>& other) const;
-  Vectorized<uint8_t> gt(const Vectorized<uint8_t>& other) const;
-  Vectorized<uint8_t> ge(const Vectorized<uint8_t>& other) const;
-  Vectorized<uint8_t> lt(const Vectorized<uint8_t>& other) const;
-  Vectorized<uint8_t> le(const Vectorized<uint8_t>& other) const;
+  Vectorized<T> eq(const Vectorized<T>& other) const;
+  Vectorized<T> ne(const Vectorized<T>& other) const;
+  Vectorized<T> gt(const Vectorized<T>& other) const;
+  Vectorized<T> ge(const Vectorized<T>& other) const;
+  Vectorized<T> lt(const Vectorized<T>& other) const;
+  Vectorized<T> le(const Vectorized<T>& other) const;
 };
 
 template <>
@@ -1020,7 +782,6 @@ template <>
 Vectorized<uint8_t> inline operator+(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
   return _mm256_add_epi8(a, b);
 }
-
 
 template <>
 Vectorized<int64_t> inline operator-(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
@@ -1060,12 +821,9 @@ inline Vectorized<int16_t> Vectorized<int16_t>::neg() const {
   return Vectorized<int16_t>(0) - *this;
 }
 
-inline Vectorized<int8_t> Vectorized<int8_t>::neg() const {
-  return Vectorized<int8_t>(0) - *this;
-}
-
-inline Vectorized<uint8_t> Vectorized<uint8_t>::neg() const {
-  return Vectorized<uint8_t>(0) - *this;
+template <typename T>
+inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::neg() const {
+  return Vectorized<T>(0) - *this;
 }
 
 // Emulate operations with no native 64-bit support in avx,
@@ -1410,52 +1168,34 @@ inline Vectorized<int16_t> Vectorized<int16_t>::le(const Vectorized<int16_t>& ot
   return (*this <= other) & Vectorized<int16_t>(1);
 }
 
-inline Vectorized<int8_t> Vectorized<int8_t>::eq(const Vectorized<int8_t>& other) const {
-  return (*this == other) & Vectorized<int8_t>(1);
+template<typename T>
+inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::eq(const Vectorized<T>& other) const {
+  return (*this == other) & Vectorized<T>(1);
 }
 
-inline Vectorized<int8_t> Vectorized<int8_t>::ne(const Vectorized<int8_t>& other) const {
-  return (*this != other) & Vectorized<int8_t>(1);
+template<typename T>
+inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::ne(const Vectorized<T>& other) const {
+  return (*this != other) & Vectorized<T>(1);
 }
 
-inline Vectorized<int8_t> Vectorized<int8_t>::gt(const Vectorized<int8_t>& other) const {
-  return (*this > other) & Vectorized<int8_t>(1);
+template<typename T>
+inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::gt(const Vectorized<T>& other) const {
+  return (*this > other) & Vectorized<T>(1);
 }
 
-inline Vectorized<int8_t> Vectorized<int8_t>::ge(const Vectorized<int8_t>& other) const {
-  return (*this >= other) & Vectorized<int8_t>(1);
+template<typename T>
+inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::ge(const Vectorized<T>& other) const {
+  return (*this >= other) & Vectorized<T>(1);
 }
 
-inline Vectorized<int8_t> Vectorized<int8_t>::lt(const Vectorized<int8_t>& other) const {
-  return (*this < other) & Vectorized<int8_t>(1);
+template<typename T>
+inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::lt(const Vectorized<T>& other) const {
+  return (*this < other) & Vectorized<T>(1);
 }
 
-inline Vectorized<int8_t> Vectorized<int8_t>::le(const Vectorized<int8_t>& other) const {
-  return (*this <= other) & Vectorized<int8_t>(1);
-}
-
-inline Vectorized<uint8_t> Vectorized<uint8_t>::eq(const Vectorized<uint8_t>& other) const {
-  return (*this == other) & Vectorized<uint8_t>(1);
-}
-
-inline Vectorized<uint8_t> Vectorized<uint8_t>::ne(const Vectorized<uint8_t>& other) const {
-  return (*this != other) & Vectorized<uint8_t>(1);
-}
-
-inline Vectorized<uint8_t> Vectorized<uint8_t>::gt(const Vectorized<uint8_t>& other) const {
-  return (*this > other) & Vectorized<uint8_t>(1);
-}
-
-inline Vectorized<uint8_t> Vectorized<uint8_t>::ge(const Vectorized<uint8_t>& other) const {
-  return (*this >= other) & Vectorized<uint8_t>(1);
-}
-
-inline Vectorized<uint8_t> Vectorized<uint8_t>::lt(const Vectorized<uint8_t>& other) const {
-  return (*this < other) & Vectorized<uint8_t>(1);
-}
-
-inline Vectorized<uint8_t> Vectorized<uint8_t>::le(const Vectorized<uint8_t>& other) const {
-  return (*this <= other) & Vectorized<uint8_t>(1);
+template<typename T>
+inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::le(const Vectorized<T>& other) const {
+  return (*this <= other) & Vectorized<T>(1);
 }
 
 template <bool left_shift>
