@@ -4,13 +4,13 @@ import copy
 import inspect
 import itertools
 import random
+import sys
 import unittest
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
 from typing import List
 from unittest.mock import patch
-import sys
 
 import functorch._src.config
 
