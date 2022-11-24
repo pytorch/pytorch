@@ -1,5 +1,4 @@
 import contextlib
-import copy
 import functools
 import inspect
 import logging
