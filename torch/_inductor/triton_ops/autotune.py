@@ -42,12 +42,11 @@ class CachingAutotuner(KernelInterface):
     configs, and does not rely on the Triton JIT.
     """
 
-    def __init__(self, fn, meta, configs, save_cache_hook, mutated_arg_names):
+    def __init__(self, fn, meta, configs, save_cache_hook):
         super().__init__()
         self.fn = fn
         self.meta = meta
         self.save_cache_hook = save_cache_hook
-        self.mutated_arg_names = mutated_arg_names
         self.configs = configs
         self.launchers = []
         self.lock = threading.Lock()
@@ -142,17 +141,12 @@ class CachingAutotuner(KernelInterface):
         """Do the actual autotuning"""
         from ..compile_fx import clone_preserve_strides
 
-        # clone inplace buffers to avoid autotune contaminating them if
-        # the kernel does in-place stores. avoid cloning other buffers because
-        # it leads to increase memory use
-        cloned_args = []
-        for i, arg in enumerate(args):
-            if self.fn.arg_names[i] in self.mutated_arg_names:
-                assert isinstance(arg, torch.Tensor)
-                cloned_args.append(clone_preserve_strides(arg))
-            else:
-                cloned_args.append(arg)
-
+        # clone the input args to avoid autotune contaminating them if
+        # the kernel does in-place stores
+        cloned_args = [
+            clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
+            for arg in args
+        ]
         timings = {
             launcher: self.bench(launcher, *cloned_args, **kwargs)
             for launcher in self.launchers
@@ -257,15 +251,9 @@ def cached_autotune(
     else:
         save_cache_hook = None
 
-    mutated_arg_names = meta.pop("mutated_arg_names", ())
-
     def decorator(fn):
         return CachingAutotuner(
-            fn,
-            meta=meta,
-            configs=configs,
-            save_cache_hook=save_cache_hook,
-            mutated_arg_names=mutated_arg_names,
+            fn, meta=meta, configs=configs, save_cache_hook=save_cache_hook
         )
 
     return decorator
