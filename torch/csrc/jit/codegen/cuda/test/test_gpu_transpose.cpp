@@ -335,6 +335,9 @@ TEST_F(NVFuserTest, FusionScheduleTransposeMultipleOutput_CUDA) {
  * t1
  */
 TEST_F(NVFuserTest, FusionScheduleTransposeMultipleInputOutput_CUDA) {
+#ifdef FBCODE_CAFFE2
+  GTEST_SKIP() << "OOM on V100 32gb";
+#endif
   Fusion fusion;
   FusionGuard fg(&fusion);
 
