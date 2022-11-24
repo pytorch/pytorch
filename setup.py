@@ -906,9 +906,9 @@ def configure_extension_build():
     extensions.append(C)
     extensions.append(C_flatbuffer)
 
-    extensions.append(Extension("torch._C",
-                      libraries=['nvfuser'],
-                      sources=["torch/csrc/jit/codegen/cuda/python_bindings_stub.c"],
+    extensions.append(Extension("torch._C_nvfuser",
+                      libraries=['nvfuser_python'],
+                      sources=["torch/csrc/jit/codegen/cuda/python_frontend/python_bindings_stub.c"],
                       language='c',
                       extra_compile_args=main_compile_args + extra_compile_args,
                       include_dirs=[],

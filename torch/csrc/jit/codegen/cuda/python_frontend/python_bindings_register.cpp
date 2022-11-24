@@ -5,8 +5,6 @@
 //     torch::jit::initNvFuserPythonBindings(m.ptr());
 // }
 
-PyObject* module;
-
 #define ASSERT_TRUE(cmd) \
   if (!(cmd))            \
   return nullptr
@@ -15,12 +13,14 @@ extern "C"
 #ifdef _WIN32
     __declspec(dllexport)
 #endif
-        TORCH_API PyObject* initModule();
+        TORCH_API PyObject* initModuleNvfuser();
 // separate decl and defn for msvc error C2491
-PyObject* initModule() {
-  static struct PyModuleDef nvfusermodule = {
-    PyModuleDef_HEAD_INIT, "nvfuser", nullptr, -1, nullptr};
-  ASSERT_TRUE(module = PyModule_Create(&nvfusermodule));
+PyObject* initModuleNvfuser() {
+  PyMethodDef m[] = {{nullptr, nullptr, 0, nullptr}}; // NOLINT
+  static struct PyModuleDef torchmodule = {
+    PyModuleDef_HEAD_INIT, "torch._C_nvfuser", nullptr, -1, m};
+  PyObject* module;
+  ASSERT_TRUE(module = PyModule_Create(&torchmodule));
   torch::jit::initNvFuserPythonBindings(module);
   return module;
 }

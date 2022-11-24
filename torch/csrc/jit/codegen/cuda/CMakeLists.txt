@@ -156,7 +156,7 @@ install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_IN
 
 # --- pybind11
 
-set(NVFUSER_PYTHON ${PROJECT_NAME})
+set(NVFUSER_PYTHON "${PROJECT_NAME}_python")
 find_package(pybind11 REQUIRED)
 
 set(NVFUSER_PYTHON_SRCS)
