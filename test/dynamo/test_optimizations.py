@@ -3,7 +3,6 @@ import importlib
 import json
 import os
 import unittest
-from unittest.mock import patch
 
 import torch
 
@@ -125,7 +124,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     @unittest.skipIf(not has_functorch(), "requires functorch")
     def test_log_conv_args(self):
         model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
