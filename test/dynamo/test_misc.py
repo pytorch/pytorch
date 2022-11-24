@@ -1700,25 +1700,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn(x, torch.mul)
         self.assertEqual(cnts.op_count, 1)
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
-    @patch.object(torch._dynamo.config, "suppress_errors", True)
-    def test_unsupported_fake_tensor(self):
-        def f(x):
-            return torch.quantize_per_tensor(x, 0.1, 10, torch.quint8)
-
-        x = torch.randn(2, 2)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_f = torch._dynamo.optimize(cnts)(f)
-        opt_f(x)
-        self.assertEqual(cnts.op_count, 0)
-
-        torch._dynamo.reset()
-        with patch.object(torch._dynamo.config, "fake_tensor_propagation", False):
-            opt_f = torch._dynamo.optimize_assert(
-                torch._dynamo.testing.CompileCounter()
-            )(f)
-            opt_f(x)
-
     def test_inline_list_mutation(self):
         def f1(x):
             x.append(torch.ones(8))
@@ -2415,53 +2396,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )  # * -1 then add x
         self.assertTrue(cc.frame_count, 2)
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
-    def test_cond_nested_fake_tensor_off(self):
-        from functorch.experimental.cond import cond
-
-        def true_fn_nested(x):
-            return x * 10
-
-        def false_fn_nested(x):
-            return x * -1
-
-        def true_fn(pred2, x):
-            return x.sin()
-
-        def false_fn(pred2, x):
-            return x + cond(pred2, true_fn_nested, false_fn_nested, [x])
-
-        def f(pred, pred2, x):
-            return cond(pred, true_fn, false_fn, [pred2, x])
-
-        cc = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cc)(f)
-        true_true_sin = opt_fn(
-            torch.tensor(True), torch.tensor(True), torch.tensor([0.25, 0.25])
-        )
-        self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), true_true_sin))
-
-        true_false_sin = opt_fn(
-            torch.tensor(True), torch.tensor(False), torch.tensor([0.25, 0.25])
-        )
-        self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), true_false_sin))
-
-        false_true_sum_mult = opt_fn(
-            torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25])
-        )
-        self.assertTrue(
-            same(torch.tensor([2.75, 2.75]), false_true_sum_mult)
-        )  # * 10 then add x
-
-        false_false_sum_neg = opt_fn(
-            torch.tensor(False), torch.tensor(False), torch.tensor([0.25, 0.25])
-        )
-        self.assertTrue(
-            same(torch.tensor([0.0, 0.0]), false_false_sum_neg)
-        )  # * -1 then add x
-        self.assertTrue(cc.frame_count, 1)
-
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_cond_export(self):
         from functorch.experimental.cond import cond
 
@@ -2507,7 +2441,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             same(torch.tensor([0.0, 0.0]), false_false_sum_neg)
         )  # * -1 then add x
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_cond_export_single_arg(self):
         from functorch.experimental.cond import cond
 
