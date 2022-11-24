@@ -20,7 +20,11 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
 
-from test_minifier import requires_cuda
+try:
+    from test_minifier import requires_cuda
+except ImportError:
+    from .test_minifier import requires_cuda
+
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
