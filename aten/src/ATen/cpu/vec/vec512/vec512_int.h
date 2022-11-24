@@ -811,6 +811,7 @@ public:
     return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
   }
   Vectorized<T> operator!=(const Vectorized<T>& other) const {
+    __mmask64 mask;
     if (std::is_same<T, int8_t>::value)
       mask = _mm512_cmpneq_epi8_mask(values, other.values);
     else
@@ -818,6 +819,7 @@ public:
     return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
   }
   Vectorized<T> operator<(const Vectorized<T>& other) const {
+    __mmask64 mask;
     if (std::is_same<T, int8_t>::value)
       mask = _mm512_cmplt_epi8_mask(values, other.values);
     else
@@ -825,6 +827,7 @@ public:
     return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
   }
   Vectorized<T> operator<=(const Vectorized<T>& other) const {
+    __mmask64 mask;
     if (std::is_same<T, int8_t>::value)
       mask = _mm512_cmple_epi8_mask(values, other.values);
     else
