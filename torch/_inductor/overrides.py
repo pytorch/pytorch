@@ -40,6 +40,11 @@ def replace_fx(gm: torch.fx.GraphModule):
     # Sometimes patch_functions() misses things already in the graph
     for node in reversed(list(gm.graph.nodes)):
         if node.op == "call_function" and node.target in replacements:
+            if (
+                config.fallback_random
+                and replacements[node.target] in replacements_using_triton_random
+            ):
+                continue
             with gm.graph.inserting_before(node):
                 node.replace_all_uses_with(
                     gm.graph.call_function(
@@ -59,6 +64,8 @@ class UnaryAttr(object):
         super(UnaryAttr, self).__init__()
 
     def __call__(self, unary_module: nn.Module):
+        if type(unary_module) is nn.ReLU6:
+            unary_module = nn.Hardtanh(min_val=0, max_val=6)
         assert all(hasattr(unary_module, item) for item in self.scalars_attr)
         scalars = [getattr(unary_module, item) for item in self.scalars_attr]
 
@@ -965,7 +972,9 @@ def rand_like(x, **kwargs):
 
 
 replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
-
+# Keep track of any replacement functions that use triton random,
+# so they can be avoided when fallback_random is set
+replacements_using_triton_random = {lowmem_dropout, rand_like}
 
 computation_op_unary_op_fusion_map = {
     nn.Conv2d: fused_conv_unary_eval,
@@ -983,6 +992,8 @@ unary_modules_map = {
     nn.LeakyReLU: UnaryAttr("leaky_relu", scalars_attr=["negative_slope"]),
     nn.Hardtanh: UnaryAttr("hardtanh", scalars_attr=["min_val", "max_val"]),
     nn.GELU: UnaryAttr("gelu", algorithm_attr="approximate"),
+    nn.ReLU6: UnaryAttr("hardtanh", scalars_attr=["min_val", "max_val"]),
+    nn.SiLU: UnaryAttr("swish"),
 }
 
 
