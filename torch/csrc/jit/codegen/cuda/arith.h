@@ -543,6 +543,11 @@ TORCH_CUDA_CU_API TensorView* lerp(
     TensorView* start,
     TensorView* end,
     TensorView* weight);
+// index_select
+TORCH_CUDA_CU_API TensorView* index_select(
+    TensorView* input,
+    int dim,
+    TensorView* index);
 // addcmul
 TORCH_CUDA_CU_API Val* addcmul(Val* v1, Val* v2, Val* v3, Val* s);
 TORCH_CUDA_CU_API TensorView* addcmul(TensorView* v1, Val* v2, Val* v3, Val* s);

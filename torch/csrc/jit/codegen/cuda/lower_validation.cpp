@@ -1312,6 +1312,17 @@ void validateGroupedReductions(Fusion* fusion) {
   }
 }
 
+void validateLookupTV(Fusion* fusion) {
+  for (auto expr : fusion->exprs()) {
+    if (expr->isA<SelectOp>() || expr->isA<IndexSelectOp>()) {
+      TORCH_CHECK(
+          expr->input(0)->isFusionInput(),
+          "Lookup input must be a fusion input: ",
+          expr->toString());
+    }
+  }
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

@@ -196,6 +196,19 @@ void IndexLowering::handle(const TernaryOp* top) {
   GpuLower::current()->propagateExprInfo(top, back());
 }
 
+void IndexLowering::handle(const IndexSelectOp* sop) {
+  const auto indices = lowerSrcIndex(sop->input(1), sop->output(0));
+  const std::unordered_map<IterDomain*, Val*> override_index = {
+      {sop->getSelectAxis(), indices}};
+  const auto lookup =
+      lowerSrcIndex(sop->input(0), sop->output(0), override_index);
+
+  const auto out = lowerDstIndex(sop->output(0));
+  pushBack(IrBuilder::create<IndexSelectOp>(
+      out, lookup, sop->dim(), sop->getSelectAxis(), indices));
+  GpuLower::current()->propagateExprInfo(sop, back());
+}
+
 void IndexLowering::handle(const SelectOp* sop) {
   const auto input = lowerSrcIndex(
       sop->input(0), sop->output(0), sop->getIndexOverridingMap());

@@ -1217,6 +1217,8 @@ class ReductionScheduler : public SchedulerEntry {
     }
 
     // Check that inputs of all select ops are fusion inputs
+    // TODO(feiwen): To add some routines to handle both SelectOp and
+    // IndexSelectOp
     for (auto select : ir_utils::getSelectOps(fusion)) {
       if (!select->input(0)->isFusionInput()) {
         scheduler_debug_utils::canScheduleRejectReason(
@@ -1228,6 +1230,20 @@ class ReductionScheduler : public SchedulerEntry {
         scheduler_debug_utils::canScheduleRejectReason(
             ScheduleHeuristic::Reduction,
             "Inputs of SelectOp can only be used by SelectOp");
+        return false;
+      }
+    }
+    for (auto idx_sel : ir_utils::getIndexSelectOps(fusion)) {
+      if (!idx_sel->input(0)->isFusionInput()) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Reduction,
+            "First input of IndexSelectOp must be fusion input.");
+        return false;
+      }
+      if (idx_sel->input(0)->uses().size() > 1) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Reduction,
+            "First input of IndexSelectOp can only be used by IndexSelectOp");
         return false;
       }
     }
@@ -1408,6 +1424,30 @@ class TransposeScheduler : public SchedulerEntry {
       }
     }
 
+    for (auto idx_sel : ir_utils::getIndexSelectOps(fusion)) {
+      if (!idx_sel->input(0)->isFusionInput()) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Transpose,
+            "First inputs of IndexSelectOp must be fusion input.");
+        return false;
+      }
+      if (idx_sel->input(0)->uses().size() > 1) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Transpose,
+            "First inputs of IndexSelectOp can only be used by SelectOp");
+        return false;
+      }
+      auto root = TensorDomain::noReductions(
+          idx_sel->input(0)->as<TensorView>()->getMaybeRFactorDomain());
+      if (idx_sel->getSelectAxis() == root[root.size() - 1]) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Transpose,
+            "IndexSelectOp on inner dim is not supported by transpose scheduler yet."
+            "In transpose scheduler, we want to leave the select dim alone, instead of creating a tile for it.");
+        return false;
+      }
+    }
+
     if (!hasAtLeastTwoValidGroups(fusion)) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Transpose,
@@ -1496,6 +1536,21 @@ class PointWiseScheduler : public SchedulerEntry {
         scheduler_debug_utils::canScheduleRejectReason(
             ScheduleHeuristic::PointWise,
             "Inputs of SelectOp can only be used by SelectOp");
+        return false;
+      }
+    }
+
+    for (auto idx_sel : ir_utils::getIndexSelectOps(fusion)) {
+      if (!idx_sel->input(0)->isFusionInput()) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::PointWise,
+            "First input of IndexSelectOp must be fusion input.");
+        return false;
+      }
+      if (idx_sel->input(0)->uses().size() > 1) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::PointWise,
+            "First input of IndexSelectOp can only be used by IndexSelectOp");
         return false;
       }
     }
@@ -1597,6 +1652,21 @@ class PersistentKernelScheduler : public SchedulerEntry {
         scheduler_debug_utils::canScheduleRejectReason(
             ScheduleHeuristic::Persistent,
             "Inputs of SelectOp can only be used by SelectOp");
+        return false;
+      }
+    }
+
+    for (auto idx_sel : ir_utils::getIndexSelectOps(fusion)) {
+      if (!idx_sel->input(0)->isFusionInput()) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Persistent,
+            "First input of IndexSelectOp must be fusion input.");
+        return false;
+      }
+      if (idx_sel->input(0)->uses().size() > 1) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Persistent,
+            "First input of IndexSelectOp can only be used by IndexSelectOp");
         return false;
       }
     }

@@ -12,6 +12,9 @@ DomainMap::DomainMap(Fusion* fusion) : fusion_(fusion), ca_map_(fusion) {
   for (auto select : ir_utils::getSelectOps(fusion)) {
     select_ids_.emplace(select->getSelectAxis());
   }
+  for (auto select : ir_utils::getIndexSelectOps(fusion)) {
+    select_ids_.emplace(select->getSelectAxis());
+  }
 }
 
 // Determine if all IterDomains in input are mapped to the given tensor

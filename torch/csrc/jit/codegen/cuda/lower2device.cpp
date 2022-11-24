@@ -318,6 +318,10 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   dumpExprsIfEnabled(fusion_->exprs(), "Before validateGroupedReductions");
   validateGroupedReductions(fusion_);
 
+  // all of the lookup TVs are fusion inputs
+  dumpExprsIfEnabled(fusion_->exprs(), "Before validateLookupTV");
+  validateLookupTV(fusion_);
+
   // Depends on thread_pred_map_, validates parallelization collects which
   // tensor views need WAR or RAW syncs
   dumpExprsIfEnabled(fusion_->exprs(), "Before SyncMap");

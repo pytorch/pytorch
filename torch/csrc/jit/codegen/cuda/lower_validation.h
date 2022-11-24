@@ -70,6 +70,9 @@ void validateAndConvertIterDomainGrouping(Fusion* fusion);
 //! Validate the number of grouped reductions is within the limit
 void validateGroupedReductions(Fusion* fusion);
 
+//! Validate all of the lookup TVs are ensured to be fusion inputs
+void validateLookupTV(Fusion* fusion);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

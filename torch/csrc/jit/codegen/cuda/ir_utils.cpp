@@ -398,6 +398,18 @@ std::vector<Expr*> getReductionOps(Fusion* fusion) {
   return red_ops;
 }
 
+std::vector<IndexSelectOp*> getIndexSelectOps(Fusion* fusion) {
+  std::vector<IndexSelectOp*> idx_sel_ops;
+
+  for (auto expr : fusion->exprs()) {
+    if (expr->isA<IndexSelectOp>()) {
+      idx_sel_ops.push_back(expr->as<IndexSelectOp>());
+    }
+  }
+
+  return idx_sel_ops;
+}
+
 std::vector<SelectOp*> getSelectOps(Fusion* fusion) {
   std::vector<SelectOp*> select_ops;
 
@@ -715,6 +727,48 @@ bool isSelectInput(TensorView* tv) {
     }
   }
   return false;
+}
+
+bool isIndexSelectLookupTv(const TensorView* tv) {
+  for (auto expr : tv->uses()) {
+    if (expr->isA<IndexSelectOp>()) {
+      auto idx_sel = expr->as<IndexSelectOp>();
+      if (idx_sel->input(0) == tv) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool isIndexSelectIndicesTv(const TensorView* tv) {
+  for (auto expr : tv->uses()) {
+    if (expr->isA<IndexSelectOp>()) {
+      auto idx_sel = expr->as<IndexSelectOp>();
+      if (idx_sel->input(1) == tv) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+IterDomain* getSelectedDomainIfTvIsIndexSelectOutput(const TensorView* tv) {
+  auto tv_def = tv->definition();
+  if (tv_def != nullptr) {
+    if (tv_def->isA<IndexSelectOp>()) {
+      auto idx_sel = tv_def->as<IndexSelectOp>();
+      auto dim = idx_sel->dim();
+      TORCH_INTERNAL_ASSERT(
+          dim < tv->domain()->getRootDomain().size(),
+          "Expect dim of index select is smaller than its output root domain size. But got dim = ",
+          dim,
+          " size = ",
+          tv->domain()->getRootDomain().size());
+      return tv->domain()->getRootDomain()[dim];
+    }
+  }
+  return nullptr;
 }
 
 } // namespace ir_utils

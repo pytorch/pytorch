@@ -144,6 +144,23 @@ SelectOp::SelectOp(
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(SelectOp)
 
+IndexSelectOp::IndexSelectOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* in,
+    int dim,
+    IterDomain* select_id,
+    Val* indices)
+    : Expr(passkey) {
+  addInput(in);
+  addInput(indices);
+  addOutput(out);
+  addAttribute(select_id);
+  addAttribute(IrBuilder::create<Attribute<int>>(passkey.ir_container_, dim));
+}
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(IndexSelectOp)
+
 ARangeOp::ARangeOp(
     IrBuilderPasskey passkey,
     Val* out,

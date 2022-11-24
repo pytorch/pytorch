@@ -1061,6 +1061,20 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
+  void handle(const IndexSelectOp* sop) final {
+    // generate code
+    if (!print_inline_) {
+      indent() << gen(sop->output(0));
+      if (!sop->output(0)->isScalar()) {
+        code_ << "\n";
+        indent() << kTab;
+      }
+      code_ << " = ";
+    }
+
+    code_ << gen(sop->input(0)) << ";\n";
+  }
+
   std::string genArchString(MmaOptions::MacroType macro) {
     std::stringstream ss;
     if (isVolta(macro)) {

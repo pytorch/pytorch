@@ -540,6 +540,17 @@ void IrPrinter::handle(const SelectOp* sop) {
            << ", index = " << sop->input(1) << " )\n";
 }
 
+void IrPrinter::handle(const IndexSelectOp* sop) {
+  indent() << sop->output(0) << "\n";
+  indent() << "   = index_select( ";
+  if (sop->input(0)->isA<kir::TensorIndex>()) {
+    os_ << sop->input(0)->as<kir::TensorIndex>()->view();
+  } else {
+    os_ << sop->input(0);
+  }
+  os_ << ", dim = " << sop->dim() << ", " << sop->input(1) << " )\n";
+}
+
 void IrPrinter::handle(const ReductionOp* rop) {
   indent() << rop->out() << "\n";
   indent() << "   = reduction( " << rop->in()

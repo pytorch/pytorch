@@ -122,6 +122,7 @@ bool isTvOp(const Expr* expr) {
           BinaryOp,
           TernaryOp,
           SelectOp,
+          IndexSelectOp,
           RNGOp,
           FullOp,
           ARangeOp,
