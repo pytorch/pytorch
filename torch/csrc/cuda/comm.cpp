@@ -194,15 +194,15 @@ tensor_list2d broadcast_coalesced(
         auto& device_outputs = outputs[i];
         auto& inds = broadcast_indices[i];
         auto& vals = broadcast_values[i];
-        for (const auto& var :
-             torch::utils::unflatten_sparse_tensors(inds, vals, chunk.tensors)) {
+        for (const auto& var : torch::utils::unflatten_sparse_tensors(
+                 inds, vals, chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
           device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }
     } else {
-      auto results =
-          broadcast(torch::utils::flatten_dense_tensors(chunk.tensors), devices);
+      auto results = broadcast(
+          torch::utils::flatten_dense_tensors(chunk.tensors), devices);
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
         device_guard.set_index(devices[i]);
         auto& device_outputs = outputs[i];
