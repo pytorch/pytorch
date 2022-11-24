@@ -141,8 +141,7 @@ class DDPOptimizer:
         and returns its callable.
         """
         fake_mode = fake_mode_from_tensors(example_inputs)
-        if config.fake_tensor_propagation:
-            assert fake_mode is not None
+        assert fake_mode is not None
 
         # 1: compute the partition map according to DDP bucket logic
         buckets = [Bucket()]  # (size, param_names)
@@ -258,17 +257,14 @@ class DDPOptimizer:
                 with fx_traceback.append_stack_trace(n.stack_trace):
                     args, kwargs = self.fetch_args_kwargs_from_env(n)
                     new_args = []
-                    if fake_mode:
-                        for arg in args:
-                            if isinstance(arg, torch.Tensor) and not isinstance(
-                                arg, torch._subclasses.FakeTensor
-                            ):
-                                new_args.append(fake_mode.from_tensor(arg))
-                            else:
-                                new_args.append(arg)
-                    else:
-                        assert not config.fake_tensor_propagation
-                        new_args = args
+                    assert fake_mode
+                    for arg in args:
+                        if isinstance(arg, torch.Tensor) and not isinstance(
+                            arg, torch._subclasses.FakeTensor
+                        ):
+                            new_args.append(fake_mode.from_tensor(arg))
+                        else:
+                            new_args.append(arg)
 
                     log.debug(f"run_node {n.op}, {n.target} got args {args_str(args)}")
                     assert isinstance(args, tuple)

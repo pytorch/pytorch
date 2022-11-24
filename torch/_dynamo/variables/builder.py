@@ -111,7 +111,7 @@ class GraphArg:
     fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
 
     def __post_init__(self):
-        if isinstance(self.example, torch.Tensor) and config.fake_tensor_propagation:
+        if isinstance(self.example, torch.Tensor):
             assert self.fake_tensor is not None and isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
