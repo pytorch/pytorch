@@ -57,7 +57,9 @@ class TORCH_API MetricData {
 
   void Reset();
 
-  bool IsValid() const { return TotalSamples() > 0; }
+  bool IsValid() const {
+    return TotalSamples() > 0;
+  }
 
  private:
   mutable std::mutex lock_;
