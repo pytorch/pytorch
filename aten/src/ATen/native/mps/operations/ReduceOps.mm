@@ -331,7 +331,7 @@ TORCH_IMPL_FUNC(prod_out_mps)
 // Taken from ReduceOps.cpp
 inline ScalarType get_dtype_from_self(
     const Tensor& self,
-    const optional<ScalarType>& dtype,
+    const c10::optional<ScalarType>& dtype,
     bool promote_integers) {
   if (dtype.has_value()) {
     return dtype.value();
