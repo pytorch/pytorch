@@ -69,3 +69,22 @@ TORCH_LIBRARY_IMPL(mkldnn_prepacked, CPU, m) {
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED()
+
+#if AT_MKL_ENABLED() && AT_MKLDNN_ENABLED()
+
+namespace at {
+namespace native {
+namespace mkl {
+
+TORCH_LIBRARY(mkl, m) {
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "mkl::_mkl_reorder_linear_weight(Tensor X, int batch_size) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "mkl::_mkl_linear(Tensor X, Tensor MKL_W, Tensor ORI_W, Tensor? B, int batch_size) -> Tensor"));
+}
+
+} // namespace mkl
+} // namespace native
+} // namespace at
+
+#endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED

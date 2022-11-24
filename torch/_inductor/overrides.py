@@ -5,6 +5,8 @@ import operator
 import random
 import weakref
 
+import numpy
+
 import torch
 import torch.nn as nn
 from torch import _prims
@@ -319,6 +321,34 @@ class ConvBinaryInplace2d(nn.Conv2d):
         return self._conv_forward(input, other, self.weight, self.bias)
 
 
+class PackedLinear(nn.Linear):
+    def __init__(self, linear: nn.Module, input_size: list):
+        super(PackedLinear, self).__init__(
+            linear.in_features,
+            linear.out_features,
+            linear.bias is not None,
+            linear.weight.device,
+            linear.weight.dtype,
+        )
+        self._update_module_params(linear, input_size)
+
+    def _update_module_params(self, linear, input_size):
+        self.__dict__ = copy.deepcopy(linear.__dict__)
+        self.batch_size = int(numpy.prod(input_size) / input_size[-1])
+        self.packed_weight = torch.nn.Parameter(
+            torch.ops.mkl._mkl_reorder_linear_weight(
+                self.weight.to_mkldnn(), self.batch_size
+            ),
+            requires_grad=self.weight.requires_grad,
+        )
+
+    def forward(self, input):
+        y = torch.ops.mkl._mkl_linear(
+            input, self.packed_weight, self.weight, self.bias, self.batch_size
+        )
+        return y
+
+
 class LinearUnary(nn.Linear):
     def __init__(
         self,
@@ -414,6 +444,11 @@ def is_bfloat16_module(m):
     return weight_is_bf16 and bias_is_bf16
 
 
+def packed_linear_eval(linear: nn.Module, input_size: list):
+    assert not (linear.training), "Fusion only for eval!"
+    return PackedLinear(linear, input_size)
+
+
 def fused_linear_unary_eval(linear: nn.Module, unary: nn.Module, input_size: list):
     assert not (linear.training), "Fusion only for eval!"
     return LinearUnary(
@@ -506,7 +541,7 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # why re-run fuse_unary? we want to enable conv+binary+unary fusion,
     # such as conv+add+relu for vision model.
     gm = fuse_unary(gm)
-
+    gm = pack_module(gm)
     return gm
 
 
@@ -906,6 +941,29 @@ def fuse_binary_inplace(gm: torch.fx.GraphModule):
     return gm
 
 
+def pack_module(gm: torch.fx.GraphModule):
+    modules = dict(gm.named_modules())
+    for node in gm.graph.nodes:
+        if node.op == "call_module":
+            assert isinstance(node.target, str)
+            cur_module = modules[node.target]
+            if type(cur_module) in computation_op_packed_map:
+                computation_node_input_meta = node.args[0].meta.get("tensor_meta")
+                if computation_node_input_meta.dtype != torch.float32:
+                    continue
+                if type(cur_module) in [torch.nn.Linear] and not torch._C.has_mkl:
+                    continue
+                computation_node_input_size = computation_node_input_meta.shape
+                new_module = computation_op_packed_map[type(cur_module)](
+                    cur_module, computation_node_input_size
+                )
+                assert isinstance(new_module, nn.Module)
+                replace_node_module(node, modules, new_module)
+                gm.graph.lint()
+    gm.recompile()
+    return gm
+
+
 philox_rand_like = _prims._make_prim(
     schema="philox_rand_like(Tensor input, Tensor seed, int offset) -> Tensor",
     return_type=_prims.RETURN_TYPE.NEW,
@@ -1071,6 +1129,12 @@ computation_op_binary_op_fusion_map = {
 computation_op_binary_op_fusion_inplace_map = {
     nn.Conv2d: fused_conv_binary_inplace_eval,
 }
+
+
+computation_op_packed_map = {
+    nn.Linear: packed_linear_eval,
+}
+
 
 # For add: we support conv/linear + other and other + conv
 # For sub/add_/sub_, we only support conv/linear - other

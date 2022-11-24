@@ -3570,6 +3570,60 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         )
 
 
+class MKLPackedLinear(ExternKernelAlloc):
+    kernel = "torch.ops.mkl._mkl_linear"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkl._mkl_linear",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+
+    @classmethod
+    def create(cls, x, packed_w, orig_w, bias, batch_size):
+        kernel = "torch.ops.mkl._mkl_linear"
+
+        with torch._subclasses.FakeTensorMode():
+            x_fake = ir_node_to_tensor(x, guard_shape=True)
+            weight_fake = ir_node_to_tensor(orig_w, guard_shape=True)
+            bias_fake = (
+                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
+            )
+            output = torch.ops.aten.linear(
+                x_fake,
+                weight_fake,
+                bias_fake,
+            )
+            output_size = output.size()
+            req_stride_order = list(reversed(range(len(output_size))))
+            output_stride = output.stride()
+        x = cls.require_stride_order(x, req_stride_order)
+        inputs = [x, packed_w, orig_w]
+        constant_args = [batch_size]
+        if bias is not None:
+            inputs.append(bias)
+        else:
+            constant_args.insert(0, bias)
+
+        return MKLPackedLinear(
+            layout=FixedLayout(
+                x.get_device(), x.get_dtype(), output_size, output_stride
+            ),
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+
 class LinearUnary(ExternKernelAlloc):
     kernel = "torch.ops.mkldnn._linear_pointwise"
 
