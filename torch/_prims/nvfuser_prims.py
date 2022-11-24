@@ -141,7 +141,7 @@ _nvfuser_unary_ops = {
 
 def _assert_nvfuser_op_exists(fname: str):
     try:
-        from torch._C._nvfuser import FusionDefinition as fd  # type: ignore[import]
+        from torch._C_nvfuser import FusionDefinition as fd  # type: ignore[import]
 
         assert getattr(fd.Operators, fname)
     except ImportError:
@@ -283,7 +283,7 @@ def _sum_nvfuser(
     dims: DimsSequenceType,
 ):
     keep_dims = False
-    output_dtype = torch._C._nvfuser.DataType.Null
+    output_dtype = torch._C_nvfuser.DataType.Null
     return fd.ops.sum(a, dims, keep_dims, output_dtype)
 
 

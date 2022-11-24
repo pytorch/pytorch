@@ -7,9 +7,8 @@ import operator
 import weakref
 import torch
 
-# nvFuser imports are conditional on being compiled with CUDA
-if hasattr(torch._C, "_nvfuser"):
-    from torch._C._nvfuser import DataType  # type: ignore[import]
+try:
+    from torch._C_nvfuser import DataType  # type: ignore[import]
 
     _torch_dtype_to_nvfuser_dtype_map = {
         torch.cdouble: DataType.ComplexDouble,
@@ -27,7 +26,7 @@ if hasattr(torch._C, "_nvfuser"):
         int: DataType.Int,
         bool: DataType.Bool,
     }
-else:
+except ImportError:
     _torch_dtype_to_nvfuser_dtype_map = {}
 
 
