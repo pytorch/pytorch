@@ -1104,7 +1104,7 @@ class TestTransformers(NNTestCase):
     @parametrize("contiguous_inputs", [True, False])
     def test_sdp_math_gradcheck(self, contiguous_inputs: bool):
 
-        batch_size, seq_len, num_heads, head_dim = 8, 8, 4, 64
+        batch_size, seq_len, num_heads, head_dim = 4, 4, 2, 16
         rand_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
 
         qkv = rand_tensor((batch_size, seq_len, num_heads, head_dim))
@@ -1128,7 +1128,7 @@ class TestTransformers(NNTestCase):
     @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM or IS_WINDOWS, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
     def test_sdp_fused_grad_against_math(self, contiguous_inputs: bool):
-        batch_size, seq_len, num_heads, head_dim = 8, 8, 4, 64
+        batch_size, seq_len, num_heads, head_dim = 4, 4, 2, 16
         rand_tensor = partial(self.rand_tensor, device="cuda", dtype=torch.float64, requires_grad=True, packed=True)
 
         qkv = rand_tensor((batch_size, seq_len, num_heads, head_dim))
