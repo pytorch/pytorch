@@ -1301,12 +1301,12 @@ class TritonScheduling:
         if src_code in wrapper.kernels:
             kernel_name = wrapper.kernels[src_code]
         else:
-            fused_name = get_fused_kernel_name(node_schedule) if config.triton.descriptive_kernel_names else ""
-            kernel_name = (
-                "triton_"
-                + fused_name
-                + wrapper.next_kernel_suffix()
+            fused_name = (
+                get_fused_kernel_name(node_schedule)
+                if config.triton.descriptive_kernel_names
+                else ""
             )
+            kernel_name = "triton_" + fused_name + wrapper.next_kernel_suffix()
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
