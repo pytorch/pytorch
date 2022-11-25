@@ -320,11 +320,14 @@ def cpp_compile_command(
     include_pytorch=False,
     vec_isa: VecISA = invalid_vec_isa,
 ):
-    if (
+    if sys.platform == "linux" and (
         include_pytorch
         or vec_isa != invalid_vec_isa
         or config.cpp.enable_kernel_profile
     ):
+        # Note - We include pytorch only on linux right now. There is more work
+        # to do to enable OMP build on darwin where PyTorch is built with IOMP
+        # and we need a way to link to what PyTorch links.
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
@@ -340,7 +343,6 @@ def cpp_compile_command(
         lpaths = []
         libs = ["gomp"]
         macros = ""
-    lpaths += ["/usr/local/opt/gcc/lib/gcc/12"] if sys.platform == "darwin" else []
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
