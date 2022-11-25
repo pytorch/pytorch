@@ -251,7 +251,7 @@ struct type_caster<c10::complex<T>> {
       const c10::complex<T>& complex,
       return_value_policy /* policy */,
       handle /* parent */) {
-    // Python only know double precision complex.
+    // Python only knows double precision complex.
     return handle(PyComplex_FromDoubles(complex.real(), complex.imag()));
   }
 };
