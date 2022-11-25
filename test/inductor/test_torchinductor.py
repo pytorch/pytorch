@@ -682,6 +682,11 @@ class CommonTemplate:
             return (torch.maximum(a, b), torch.minimum(a, b))
 
         self.common(fn, (torch.randn(8), torch.randn(8)))
+        t1 = torch.randn(8)
+        t1[0] = float("nan")
+        t2 = torch.randn(8)
+        t2[1] = float("nan")
+        self.common(fn, (t1, t2))
 
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
