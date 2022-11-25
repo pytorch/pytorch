@@ -14,6 +14,8 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
+from torch._dynamo import disable as disable_torchdynamo
+from torch._dynamo.utils import dynamo_timed
 from torch._subclasses import FakeTensorMode, CrossRefFakeMode, FakeTensor
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -25,20 +27,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
-
-try:
-    from torchdynamo import disable as disable_torchdynamo
-except ImportError:
-
-    def disable_torchdynamo(x):
-        return x
-
-try:
-    from torchdynamo.utils import dynamo_timed
-except ImportError:
-
-    def dynamo_timed(x):
-        return x
 
 MutationType = Enum("MutationType", ("none", "metadata_only", "data"))
 OutputType = Enum("OutputType", ("non_alias", "alias_of_input", "alias_of_intermediate"))
@@ -1747,7 +1735,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
 def aot_module_simplified(
     mod: nn.Module,
-    args,
+    args: List[Tensor],
     fw_compiler: Callable,
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
