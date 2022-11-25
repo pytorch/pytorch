@@ -355,11 +355,10 @@ def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
     inner_compile=compile_fx_inner,
-    fake_mode=nullcontext,
 ):
     """Main entrypoint to a compile given FX graph"""
 
-    if not is_aot_autograd_safe_to_run(model_, example_inputs_, fake_mode):
+    if not is_aot_autograd_safe_to_run(model_, example_inputs_):
         log.warning("Aot Autograd is not safe to run, so falling back to eager")
         return model_
 
@@ -400,7 +399,7 @@ def compile_fx(
 
     with overrides.patch_functions():
 
-        # TODO: can add logging before/after the call to _create_aot_dispatcher_function
+        # TODO: can add logging before/after the call to create_aot_dispatcher_function
         # in functorch/_src/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch
         return aot_autograd(
@@ -412,5 +411,4 @@ def compile_fx(
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
-            fake_mode=fake_mode,
         )

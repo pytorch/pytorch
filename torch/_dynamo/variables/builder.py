@@ -109,8 +109,6 @@ class GraphArg:
     source: Source
     example: Any
     is_unspecialized: bool
-    # Must only be a fake tensor
-    fake_tensor = None
 
     def __post_init__(self):
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
@@ -121,14 +119,6 @@ class GraphArg:
 
     def get_examples(self):
         return [self.example]
-
-    def get_fake_examples(self):
-        assert config.fake_tensor_propagation
-        if self.fake_tensor is not None:
-            assert isinstance(
-                self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
-            )
-        return [self.fake_tensor]
 
     def __len__(self):
         return 1
@@ -551,10 +541,10 @@ class VariableBuilder:
                 # guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             )
         else:
-            graph_arg = None
             if not is_constant_source(self.get_source()):
-                graph_arg = GraphArg(self.get_source(), value, False)
-                self.tx.output.graphargs.append(graph_arg)
+                self.tx.output.graphargs.append(
+                    GraphArg(self.get_source(), value, False)
+                )
             # Disable __torch_function__ to prevent cloning of `value` to hit
             # us
             with torch._C.DisableTorchFunction():
@@ -574,10 +564,6 @@ class VariableBuilder:
                     guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
                     should_specialize=self.tensor_should_specialize(),
                 )
-            if graph_arg and config.fake_tensor_propagation:
-                example = tensor_variable.proxy.node.meta["example_value"]
-                if isinstance(example, torch._subclasses.fake_tensor.FakeTensor):
-                    graph_arg.fake_tensor = example
             if torch.overrides.has_torch_function_unary(value):
                 subclass_torch_function__func = value.__torch_function__.__func__
                 subclass_type = type(value)
@@ -648,20 +634,19 @@ def _dataclasses_fields_lambda(obj):
     return TupleVariable(items).add_options(obj)
 
 
-def wrap_fx_proxy(tx, proxy, example_value=None, source=None, **options):
+def wrap_fx_proxy(tx, proxy, example_value=None, **options):
     return wrap_fx_proxy_cls(
         target_cls=TensorVariable,
         tx=tx,
         proxy=proxy,
         example_value=example_value,
-        source=source,
         **options,
     )
 
 
 # Note: Unfortunate split due to some gross classes existing that subclass TensorVariable
 # Should be compositional instead
-def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, source=None, **options):
+def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
 
@@ -697,7 +682,7 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, source=None, **
         else:
             proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
             if use_fake_tensors:
-                fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx, source=source)
+                fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
                 example_value = fake_wrapper(example_value)
 
     if isinstance(example_value, torch.Tensor):

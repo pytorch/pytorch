@@ -328,21 +328,13 @@ class WrapperBackend:
     def example_inputs(self):
         return clone_inputs(self.original_example_inputs)
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs, fake_mode):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
-        needs_fake_tensor = False
-        # This is temporary, hopefully, while we decide if we want the
-        # user provided compiler signature to have a **kwargs
-        if fake_mode and "fake_mode" in signature(self.backend).parameters.keys():
-            needs_fake_tensor = True
-            self.candidate = self.backend(
-                copy_gm, self.original_example_inputs, fake_mode
-            )
-        else:
-            self.candidate = self.backend(copy_gm, self.original_example_inputs)
+        self.candidate = self.backend(copy_gm, self.original_example_inputs)
 
         if self.candidate is None or self.candidate is self.gm.forward:
             return self.gm.forward
@@ -353,12 +345,7 @@ class WrapperBackend:
         # if verify_correctness=True
         try:
             correct = self.gm.forward(*self.example_inputs)
-            # This is temporary, hopefully, while we decide if we want the
-            # user provided compiler signature to have a **kwargs
-            if needs_fake_tensor:
-                result = self.candidate(*self.example_inputs, fake_tensor=fake_tensor)
-            else:
-                result = self.candidate(*self.example_inputs)
+            result = self.candidate(*self.example_inputs)
 
             # TODO: replace `same` function with the one in testing
             if same(correct, result):
@@ -602,7 +589,7 @@ def export(
         out_guards = guards
 
     def dynamo_normalization_capturing_compiler(
-        gm: torch.fx.GraphModule, example_inputs, fake_mode
+        gm: torch.fx.GraphModule, example_inputs
     ):
         nonlocal graph
 

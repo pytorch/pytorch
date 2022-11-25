@@ -526,7 +526,7 @@ class ShapeEnv(object):
 
     def evaluate_guards_for_args(self, *args):
         new_env = ShapeEnv()
-        # NB: This must be kept in sync with _create_aot_dispatcher_function
+        # NB: This must be kept in sync with create_aot_dispatcher_function
         # and wrap_fake_symbolic
         meta_converter = MetaConverter()
         pytree.tree_map_only(torch.Tensor, partial(meta_converter, shape_env=new_env), args)
