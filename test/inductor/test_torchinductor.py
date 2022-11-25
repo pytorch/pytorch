@@ -1455,6 +1455,17 @@ class CommonTemplate:
                         (v,),
                     )
 
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
+    def test_conv2d_packed(self):
+        x_shape = (1, 3, 56, 56)
+        mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).eval()
+        v = torch.randn(x_shape, dtype=torch.float32)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
     # For gpu path, there has a accurcy issue,
     # see https://github.com/pytorch/pytorch/issues/87745.
     @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
@@ -1595,6 +1606,20 @@ class CommonTemplate:
             v = torch.randn(x_shape, dtype=torch.float32).to(
                 memory_format=memory_format
             )
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
+
+    def test_linear_packed(self):
+        options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
+        for input_shape, bias in options:
+            mod = torch.nn.Sequential(
+                torch.nn.Linear(input_shape[-1], 30, bias=bias)
+            ).eval()
+
+            v = torch.randn(input_shape)
             with torch.no_grad():
                 self.common(
                     mod,
@@ -2863,8 +2888,6 @@ class CommonTemplate:
                 ),
             )
 
-    # https://github.com/pytorch/torchdynamo/issues/467
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_cudnn_rnn(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -5018,24 +5041,6 @@ if HAS_CUDA:
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
 
-        @patch.object(config.triton, "autotune", True)
-        def test_inplace_add_alpha_autotune(self):
-            def fn(x, y):
-                aten.add_.Tensor(x, y, alpha=0.55)
-                return (x,)
-
-            x1 = torch.zeros(2, 3, 4, 10, device="cuda")
-            x2 = torch.zeros(2, 3, 4, 10, device="cuda")
-            x3 = torch.zeros(2, 3, 4, 10, device="cuda")
-            y = torch.randn(2, 3, 4, 10, device="cuda").to(
-                memory_format=torch.channels_last
-            )
-            fn_fx = make_fx(fn)(x1, y)
-            fn_compiled = compile_fx_inner(fn_fx, [x1, y])
-            fn(x2, y)
-            fn_compiled([x3, y])
-            assert same(x2, x3)
-
         def test_permute_linear_fusion(self):
             class TestModule(torch.nn.Module):
                 def __init__(self, k: int, n: int):
@@ -5345,7 +5350,6 @@ if HAS_CUDA:
                         meta=meta,
                         configs=configs,
                         save_cache_hook=False,
-                        mutated_arg_names=["in_out_ptr0"],
                     )
 
                 return decorator
