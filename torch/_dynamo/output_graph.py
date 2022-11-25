@@ -74,21 +74,10 @@ class FakeRootModule(torch.nn.Module):
         return "FakeRootModule(...)"
 
 
-def wrap_compiler_fn(compiler_fn):
-    """WrapperBackend if config.verify_correctness is True"""
-    if config.verify_correctness:
-        # wrap backend if verify_correctness is True
-        wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
-
-        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn
-        return wrapper_backend_compiler_fn
-
-    return compiler_fn
-
-
 class WrapperBackend:
-    def __init__(self, backend=None):
+    def __init__(self, backend, original_example_inputs):
         self.backend = backend
+        self.original_example_inputs = original_example_inputs
 
     @property
     def example_inputs(self):
@@ -97,7 +86,6 @@ class WrapperBackend:
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
 
         self.restore = checkpoint_params(gm)
-        self.original_example_inputs = clone_inputs(example_inputs)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
         self.candidate = self.backend(copy_gm, self.original_example_inputs)
@@ -516,14 +504,26 @@ class OutputGraph(fx.Tracer):
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             compiler_fn = self.compiler_fn
             if config.verify_correctness:
-                compiler_fn = wrap_compiler_fn(compiler_fn)
-            compiled_fn = compiler_fn(gm, self.example_inputs())
+                compiler_fn = WrapperBackend(compiler_fn, self.example_inputs())
+            compiled_fn = compiler_fn(gm, self.fake_example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
             compiled_fn = gm.forward
             raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
+
+    def fake_example_inputs(self):
+        result = []
+        for arg in self.graphargs:
+            example = arg.get_fake_examples()
+            if example is not None:
+                result.extend(example)
+            else:
+                # Fallback, in case fake_tensor was not set
+                # Particularly for graph args that are not tensors
+                result.extend(arg.get_examples())
+        return result
 
     def example_inputs(self):
         result = []
