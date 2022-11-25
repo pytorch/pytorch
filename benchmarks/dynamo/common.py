@@ -807,6 +807,9 @@ def cast_to(dtype, model, inputs):
     return model, inputs
 
 
+def cast_to_bf16(model, inputs):
+    return cast_to(torch.bfloat16, model, inputs)
+
 def cast_to_fp16(model, inputs):
     return cast_to(torch.float16, model, inputs)
 
@@ -909,6 +912,8 @@ class BenchmarkRunner:
             #  harder.
             # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
+        elif self.args.bfloat16 and self.args.devices == ["cpu"]:
+            self.autocast = torch.cpu.amp.autocast
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
@@ -993,6 +998,8 @@ class BenchmarkRunner:
             model, example_inputs = cast_to_fp32(model, example_inputs)
         elif self.args.float16:
             model, example_inputs = cast_to_fp16(model, example_inputs)
+        elif self.args.bfloat16:
+            model, example_inputs = cast_to_bf16(model, example_inputs)
 
         try:
             self.model_iter_fn(model, example_inputs)
@@ -1006,6 +1013,8 @@ class BenchmarkRunner:
             model, example_inputs = cast_to_fp32(model, example_inputs)
         elif self.args.float16:
             model, example_inputs = cast_to_fp16(model, example_inputs)
+        elif self.args.bfloat16:
+            model, example_inputs = cast_to_bf16(model, example_inputs)
         return model, example_inputs
 
     def decay_batch_exp(self, batch_size, factor=0.5, divisor=2):
@@ -1162,7 +1171,6 @@ class BenchmarkRunner:
                 )
                 log.exception(e)
                 return record_status(accuracy_status)
-
             if not same(
                 correct_result,
                 new_result,
@@ -1569,6 +1577,7 @@ def parse_args(args=None):
 
     group_prec = parser.add_mutually_exclusive_group()
     group_prec.add_argument("--float16", action="store_true", help="cast model to fp16")
+    group_prec.add_argument("--bfloat16", action="store_true", help="cast model to bf16")
     group_prec.add_argument("--float32", action="store_true", help="cast model to fp32")
     group_prec.add_argument(
         "--amp", action="store_true", help="use automatic mixed precision"
@@ -1918,10 +1927,10 @@ def run(runner, args, original_dir=None):
         output_filename = "nothing.csv"
     elif args.backend:
         if args.backend == "ipex":
-            if args.amp:
-                optimize_ctx = torch._dynamo.optimize(backends.ipex_bf16)
+            if args.bfloat16:
+                optimize_ctx = torch._dynamo.optimize(backends.ipex_bf16, nopython=args.nopython)
             else:
-                optimize_ctx = torch._dynamo.optimize(backends.ipex_fp32)
+                optimize_ctx = torch._dynamo.optimize(backends.ipex_fp32, nopython=args.nopython)
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
@@ -2040,6 +2049,8 @@ def run(runner, args, original_dir=None):
                 model, example_inputs = cast_to_fp32(model, example_inputs)
             elif args.float16:
                 model, example_inputs = cast_to_fp16(model, example_inputs)
+            elif args.bfloat16:
+                model, example_inputs = cast_to_bf16(model, example_inputs)
 
             if args.log_operator_inputs:
                 log_operator_inputs(
