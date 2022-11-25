@@ -1494,9 +1494,9 @@ class TestAOTModuleSimplified(AOTTestCase):
         ref = mod(*inputs)
         ref[0].sum().backward()
 
-        aot_mod = aot_module_simplified(mod, nop)
-        aot_mod.zero_grad()
-        res = aot_mod(*cloned_inputs)
+        compiled_f = aot_module_simplified(mod, cloned_inputs, nop)
+        mod.zero_grad()
+        res = compiled_f(*cloned_inputs)
         res[0].sum().backward()
 
         assert torch.allclose(ref[0], res[0])
@@ -1534,12 +1534,12 @@ class TestAOTModuleSimplified(AOTTestCase):
                 assert 'test_aotdispatch.py' in node.stack_trace
             return gm.forward  # return a python callable
 
-        aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
-
         x = torch.randn(128, 20, requires_grad=True)
         y = torch.randn(128, 30, requires_grad=True)
         inputs = [x, y]
-        res = aot_mod(*inputs)
+
+        compiled_f = aot_module_simplified(mod, inputs, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
+        res = compiled_f(*inputs)
         res[0].sum().backward()
 
 # entries in here don't work and need to be fixed.

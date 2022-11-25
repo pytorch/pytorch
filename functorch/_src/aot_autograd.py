@@ -1735,6 +1735,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
 def aot_module_simplified(
     mod: nn.Module,
+    args,
     fw_compiler: Callable,
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
@@ -1795,27 +1796,30 @@ def aot_module_simplified(
         num_params_buffers=params_len,
     )
 
-    compiled_fn = None
+    full_args = []
+    full_args.extend(params_flat)
+    full_args.extend(args)
 
-    @wraps(functional_call)
-    def compiled_f(*args):
-        nonlocal compiled_fn
-        if compiled_fn is None:
-            compiled_fn = create_aot_dispatcher_function(
-                functional_call,
-                args,
-                aot_config,
-            )
-        return compiled_fn(args)
+    compiled_fn = create_aot_dispatcher_function(
+        functional_call,
+        full_args,
+        aot_config,
+    )
 
-    def forward(*args):
-        return compiled_f(
-            *params_flat,
-            *args,
-        )
+    # TODO: There is something deeply wrong here; compiled_fn running with
+    # the boxed calling convention, but aot_module_simplified somehow
+    # historically returned a function that was not the boxed calling
+    # convention.  This should get fixed...
+    def forward(*runtime_args):
+        full_args = []
+        full_args.extend(params_flat)
+        full_args.extend(runtime_args)
+        return compiled_fn(full_args)
 
+    # Just for convenience
     forward.zero_grad = mod.zero_grad
     forward.named_parameters = mod.named_parameters
+
     return forward
 
 
