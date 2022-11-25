@@ -3528,17 +3528,10 @@ class TestDynamicQuantizedOps(TestCase):
 
 
 class TestQuantizedLinear(TestCase):
-    """Tests the correctness of the quantized linear and linear_relu op."""
-    @given(batch_size=st.integers(1, 4),
-           input_channels=st.integers(16, 32),
-           output_channels=st.integers(4, 8),
-           use_bias=st.booleans(),
-           use_relu=st.booleans(),
-           use_multi_dim_input=st.booleans(),
-           use_channelwise=st.booleans())
-    @override_qengines
-    def test_qlinear(self, batch_size, input_channels, output_channels, use_bias,
-                     use_relu, use_multi_dim_input, use_channelwise):
+    def _test_qlinear_impl(self, batch_size, input_channels, output_channels, use_bias,
+                           qlinear_op, post_op_name, use_multi_dim_input, use_channelwise, **post_op_kwargs):
+        print(f'Tets cases: = '
+              f'{batch_size, input_channels, output_channels, use_bias, post_op_name, use_multi_dim_input, use_channelwise}')
         decimal_val = 4
         dtypes = [torch.quint8]
         if torch.backends.quantized.engine == 'qnnpack':
@@ -3560,10 +3553,10 @@ class TestQuantizedLinear(TestCase):
 
             nptype = np_dtype[dtype]
             qlinear_prepack = torch.ops.quantized.linear_prepack
-            if use_relu:
-                qlinear = torch.ops.quantized.linear_relu
-            else:
-                qlinear = torch.ops.quantized.linear
+            # if post_op_name == 'relu':
+            #     qlinear = torch.ops.quantized.linear_relu
+            # else:
+            #     qlinear = torch.ops.quantized.linear
             if use_multi_dim_input:
                 batch_size *= 3  # Test the multi-dim input tensor
             X_scale = 1.5
@@ -3599,7 +3592,9 @@ class TestQuantizedLinear(TestCase):
                 np.random.rand(output_channels) *
                 (b_value_max - b_value_min) + b_value_min
             ).astype(np.int32) if use_bias else None
+            print(f'qengine = {torch.backends.quantized.engine}')
             if torch.backends.quantized.engine in ('x86', 'fbgemm', 'onednn'):
+                print('avoid_vpmaddubsw_overflow_linear')
                 avoid_vpmaddubsw_overflow_linear(
                     batch_size,
                     input_channels,
@@ -3636,7 +3631,7 @@ class TestQuantizedLinear(TestCase):
                     b, scale=X_scale * (W_scales[0].item()), zero_point=0, dtype=torch.qint32) if use_bias else None
             # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
             # Y_scale * 255 (max for uint8).
-            Y_scale = 125.1234
+            Y_scale = 123.1234
             Y_zp = 5
             # Weight prepacking operator for quantized Linear
             float_bias = b if use_bias else None
@@ -3644,13 +3639,13 @@ class TestQuantizedLinear(TestCase):
             if use_multi_dim_input:
                 X_q = X_q.view(3, int(batch_size / 3), input_channels)
             # Quantized Linear operator with prepacked weight
-            Y_q = qlinear(X_q, W_prepack, Y_scale, Y_zp)
-            if not use_channelwise:
+            Y_q = qlinear_op(X_q, W_prepack, Y_scale, Y_zp, **post_op_kwargs)
+            if not use_channelwise and post_op_name in ('none', 'relu'):
                 # Test the per-tensor quantization only
                 # Reference quantized Linear operator
                 Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0,
                                       W_scales[0], W_zps[0], b_q0, Y_scale, Y_zp, dtype=nptype)
-                if use_relu:
+                if post_op_name == 'relu':
                     Y_q_ref[Y_q_ref < Y_zp] = Y_zp
                 if use_multi_dim_input:
                     Y_q_ref = np.reshape(
@@ -3663,13 +3658,57 @@ class TestQuantizedLinear(TestCase):
             X_fp32 = X_q.dequantize().to(dtype=torch.float)
             b_fp32 = b_q.dequantize().to(dtype=torch.float) if use_bias else None
             Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
-            if use_relu:
+            if post_op_name == 'relu':
                 Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
             Y_q_ref2 = torch.quantize_per_tensor(
                 Y_fp32_ref, Y_scale, Y_zp, dtype)
             # Assert equal
+            if not torch.equal(Y_q_ref2.int_repr(), Y_q.int_repr()):
+                print(f'[[Error]]: results not equal! post op = {post_op_name}'
+                      f', qengine = {torch.backends.quantized.engine}'
+                      f', dtype = {dtype}')
+                print(Y_q_ref2.int_repr() == Y_q.int_repr())
+                print(Y_q_ref2.int_repr(), '\n', Y_q.int_repr())
+            else:
+                print(f'[[Info]]: qengine = {torch.backends.quantized.engine}. OK')
             np.testing.assert_array_almost_equal(
                 Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=decimal_val)
+
+    """Tests the correctness of the quantized linear op."""
+    @override_qengines
+    def test_qlinear(self):
+        batch_size_list = [1, 4]
+        input_channels_list = [16, 32]
+        output_channels_list = [4, 8]
+        use_bias_list = [True, False]
+        use_multi_dim_input_list = [True, False]
+        use_channelwise_list = [True, False]
+        post_op = 'none'
+        cases = itertools.product(batch_size_list, input_channels_list, output_channels_list,
+                                  use_bias_list, use_multi_dim_input_list, use_channelwise_list)
+        for batch_size, input_channels, output_channels, use_bias,\
+                use_multi_dim_input, use_channelwise in cases:
+            self._test_qlinear_impl(batch_size, input_channels, output_channels,
+                                    use_bias, torch.ops.quantized.linear,
+                                    post_op, use_multi_dim_input, use_channelwise)
+
+    """Tests the correctness of the quantized linear_relu op."""
+    @override_qengines
+    def test_qlinear_relu(self):
+        batch_size_list = [1, 4]
+        input_channels_list = [16, 32]
+        output_channels_list = [4, 8]
+        use_bias_list = [True, False]
+        use_multi_dim_input_list = [True, False]
+        use_channelwise_list = [True, False]
+        post_op = 'relu'
+        cases = itertools.product(batch_size_list, input_channels_list, output_channels_list,
+                                  use_bias_list, use_multi_dim_input_list, use_channelwise_list)
+        for batch_size, input_channels, output_channels, use_bias,\
+                use_multi_dim_input, use_channelwise in cases:
+            self._test_qlinear_impl(batch_size, input_channels, output_channels,
+                                    use_bias, torch.ops.quantized.linear_relu,
+                                    post_op, use_multi_dim_input, use_channelwise)
 
     @given(batch_size=st.integers(1, 4),
            # in cudnn v. 8.4.0, there is a limitation that input channels
