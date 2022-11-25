@@ -23,7 +23,7 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import numpy as np
 import sympy
@@ -32,7 +32,7 @@ import torch
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_flatten
 
 from . import config, logging as torchdynamo_logging
 
@@ -398,6 +398,10 @@ def clone_tensor(x):
 
 def clone_input(x):
     """copy while preserving strides"""
+    # TODO: this is questionable
+    if isinstance(x, torch._subclasses.FakeTensor):
+        # this func fails on fake tensors in __torch_dispatch__
+        return x
 
     def torch_clone(x):
         y = torch.clone(x)
@@ -1144,3 +1148,19 @@ def get_real_value(node, output_graph):
     except RuntimeError as e:
         raise TorchRuntimeError() from e
     return real_value
+
+def fake_mode_from_tensors(inputs: List[Any]):
+    """
+    Takes a list of anything, unflattened is fine, returns a fake_mode
+    if any are fake. All fake modes on all fake tensors must be identical.
+    Returns None if no fake_mode is fine
+    """
+    flat_inputs, _ = tree_flatten(inputs)
+    fake_mode = None
+    for flat_input in flat_inputs:
+        if isinstance(flat_input, torch._subclasses.FakeTensor):
+            if fake_mode is None:
+                fake_mode = flat_input.fake_mode
+            else:
+                assert fake_mode == flat_input.fake_mode
+    return fake_mode

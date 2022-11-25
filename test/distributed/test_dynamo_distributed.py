@@ -204,9 +204,37 @@ class TestDistributedMultiProc(MultiProcessTestCase):
             opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
             self.assertTrue(same(correct_results, opt_results))
 
+    @skip_if_lt_x_gpu(2)
+    @import_transformers_or_skip()
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(config, "optimize_ddp", True)
+    @patch.object(torch._inductor.config, "fallback_random", True)
+    def test_hf_bert_ddp_aot(self):
+
+        with _per_rank_init(self.rank, self.world_size):
+            model, inputs = get_hf_bert(self.rank)
+            model = DDP(model)
+
+            reset_rng_state()
+            correct_outputs = model(**inputs)
+            correct_loss = correct_outputs.loss
+            correct_loss.backward()
+
+            reset_rng_state()
+            opt_model = torch._dynamo.optimize("aot_eager")(model)
+            opt_outputs = opt_model(**inputs)
+            opt_loss = opt_outputs.loss
+            opt_loss.backward()
+
+            inputs_flat = [inputs[k] for k in inputs]
+            correct_results = collect_results(model, correct_outputs.logits, correct_loss, inputs_flat)
+            opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
+            self.assertTrue(same(correct_results, opt_results))
+
 
     @skip_if_lt_x_gpu(1)
     # TODO(whc)  delete aot_eager test, if inductor test lands stably
+    # TODO(voz) Alternative take: Keep both, makes for easier debugging
     def test_fsdp_aot_eager(self):
         with _per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)
