@@ -338,11 +338,8 @@ def cpp_compile_command(
         # This approach allows us to only pay for what we use.
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = []
-        libs = []
+        libs = ["gomp"]
         macros = ""
-
-    libs += ["gomp"] if sys.platform == "linux" else []
-
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
