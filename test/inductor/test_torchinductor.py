@@ -4661,7 +4661,7 @@ class CommonTemplate:
             fn,
             [torch.randn((4, 2)), torch.randn((4))],
         )
-    
+
     @patch.object(config, "profiler_mark_wrapper_call", True)
     def test_profiler_mark_wrapper_call(self):
         from torch.profiler import profile
@@ -4674,7 +4674,9 @@ class CommonTemplate:
         b = torch.rand((100,))
         with profile() as prof:
             fn(a, b)
-        assert "inductor_wrapper_call" in (e.name for e in prof.profiler.function_events)
+        assert "inductor_wrapper_call" in (
+            e.name for e in prof.profiler.function_events
+        )
 
 
 if HAS_CPU:
