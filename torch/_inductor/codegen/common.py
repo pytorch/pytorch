@@ -461,12 +461,12 @@ class CSE:
 
     def clone(self):
         return CSE(
-            self.prefix,
-            self.suffix,
-            self.name_prefix,
-            self.iter_buffer_ids,
-            self.store_cache,
-            self.varname_map,
+            prefix=self.prefix,
+            suffix=self.suffix,
+            name_prefix=self.name_prefix,
+            iter_buffers=self.iter_buffer_ids,
+            store_cache=self.store_cache,
+            varname_map=self.varname_map,
         )
 
     def generate(
