@@ -1029,9 +1029,7 @@ To choose the best driver on CPU consider:
   - `'gelsd'` (tridiagonal reduction and SVD)
   - But if you run into memory issues: `'gelss'` (full SVD).
 
-For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank. If the linear system 
-to be solved is underdetermined (i.e. :attr:`A` is "wide" and there are infinitely many solutions),
-then `'gels'` will find the minimum-norm solution.
+For CUDA input, the only valid driver is `'gels'`, which assumes that :attr:`A` is full-rank.
 
 See also the `full description of these drivers`_
 
