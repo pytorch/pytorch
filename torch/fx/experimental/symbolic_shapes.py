@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Set, Dict, List, Type, Optional, cast, Union
+from typing import Set, Dict, List, Type, Optional, cast
 import sys
 import operator
 import itertools
@@ -433,7 +433,7 @@ def _lru_cache(fn, maxsize=None):
 
 
 class IVarSymbol(sympy.Symbol):
-    pass
+    tb: List[traceback.FrameSummary]
 
 
 class ShapeEnv(object):
@@ -592,10 +592,10 @@ class ShapeEnv(object):
         r = IVarSymbol(ivar_name, integer=True)
         import traceback
         r.tb = traceback.extract_stack()
-        self.ivar_to_val[r] = val
+        self.ivar_to_val[r] = sympy.Integer(val)
         return r
 
-    def create_var(self, val: int) -> "sympy.Symbol":
+    def create_var(self, val: int) -> "sympy.Expr":
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
         if val < 0:
@@ -661,6 +661,7 @@ class ShapeEnv(object):
         # Simplifies assuming that shape vars > 1 (since we cache on 0/1 shape values)
         symbols = list(expr.free_symbols)
         for s in symbols:
+            assert isinstance(s, sympy.Symbol)
             assert self.var_to_val[s] > 1, \
                 f"{s} which is {self.var_to_val[s]} in nontrivial expression {expr}, " \
                 "but as a 0/1 constant it should already have been eliminated"

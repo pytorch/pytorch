@@ -26,7 +26,6 @@ from functools import lru_cache
 from typing import Any, Dict
 
 import numpy as np
-import sympy
 
 import torch
 from torch import fx
@@ -749,6 +748,7 @@ def wrap_to_fake_tensor(e, fake_mode):
         )
     else:
         return e
+
 
 def wrap_to_fake_tensor_and_record(e, tx, static_shapes=False):
     if type(e) in (torch.Tensor, torch.nn.Parameter):

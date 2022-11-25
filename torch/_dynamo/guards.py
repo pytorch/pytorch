@@ -7,9 +7,9 @@ import os
 import re
 import types
 import weakref
+from contextlib import nullcontext
 from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set
-from contextlib import nullcontext
 
 import numpy as np
 
@@ -575,7 +575,10 @@ class DynamoGuardPrinter(StrPrinter):
         if expr in self.shape_env.var_to_ivar:
             return self._print(self.shape_env.var_to_ivar[expr])
         import traceback
-        assert expr in self.expr_to_tensor_ref or expr in self.intermediary_symbols, f"{expr}\n\n{''.join(traceback.format_list(expr.tb))}"
+
+        assert (
+            expr in self.expr_to_tensor_ref or expr in self.intermediary_symbols
+        ), f"{expr}\n\n{''.join(traceback.format_list(expr.tb))}"
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
@@ -623,7 +626,11 @@ class CheckFunctionManager:
         )
         global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if not config.guard_nn_modules and guard.is_nn_module() and guard.create_fn != GuardBuilder.TENSOR_MATCH:
+            if (
+                not config.guard_nn_modules
+                and guard.is_nn_module()
+                and guard.create_fn != GuardBuilder.TENSOR_MATCH
+            ):
                 # The `guard.create_fn != GuardBuilder.TENSOR_MATCH:` part is
                 # an exception to not guarding on nn_module properties
                 # In dynamic shapes mode, we sometimes get "weights" "bias" or other registered/named buffers

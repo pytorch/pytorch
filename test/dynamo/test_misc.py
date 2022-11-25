@@ -2333,6 +2333,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f_onnx(input_two_dims), 8)
         self.assertEqual(f_onnx(input_two_dims), 8)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_cond(self):
         from functorch.experimental.cond import cond
 
@@ -2351,6 +2352,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         b = opt_fn(torch.tensor(True), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), b))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_cond_nested(self):
         from functorch.experimental.cond import cond
 
@@ -2396,6 +2398,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )  # * -1 then add x
         self.assertTrue(cc.frame_count, 2)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_cond_export(self):
         from functorch.experimental.cond import cond
 
@@ -2441,6 +2444,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             same(torch.tensor([0.0, 0.0]), false_false_sum_neg)
         )  # * -1 then add x
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_cond_export_single_arg(self):
         from functorch.experimental.cond import cond
 

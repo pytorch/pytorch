@@ -267,7 +267,9 @@ class MetaConverter:
                             r._coalesced_(t.is_coalesced())
                 elif t.is_mkldnn:
                     is_leaf = safe_is_leaf(t)
-                    sizes, strides = sym_sizes_strides(t)
+                    sizes, strides, _storage_offset = sym_sizes_strides_storage_offset(
+                        t
+                    )
                     r = callback(
                         lambda: torch.empty_strided(
                             sizes, strides, dtype=t.dtype, device="meta"

@@ -1432,6 +1432,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f, (torch.randn(5)), aten_graph=False, tracing_mode="symbolic"
             )
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_with_module_layer(self):
         from functorch.experimental.cond import cond
