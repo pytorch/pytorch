@@ -15,12 +15,7 @@ from . import config, exc
 from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import is_generator, transform_code_object
-from .eval_frame import (
-    always_optimize_code_objects,
-    skip_code,
-    TorchPatcher,
-    WrapperBackend,
-)
+from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     BackendCompilerFailed,
     InternalTorchDynamoError,
@@ -84,18 +79,6 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
     result: types.FunctionType = original_forward_from_src(*args, **kwargs)
     skip_code(result.__code__)
     return result
-
-
-def wrap_compiler_fn(compiler_fn):
-    """WrapperBackend if config.verify_correctness is True"""
-    if config.verify_correctness:
-        # wrap backend if verify_correctness is True
-        wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
-
-        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn
-        return wrapper_backend_compiler_fn
-
-    return compiler_fn
 
 
 def wrap_convert_context(fn):
@@ -280,8 +263,6 @@ def convert_frame_assert(
 ):
     """Fully convert a frame into an FX graph"""
     init_logging()
-
-    compiler_fn = wrap_compiler_fn(compiler_fn)
 
     @dynamo_timed
     def _convert_frame_assert(frame: types.FrameType, cache_size: int):
