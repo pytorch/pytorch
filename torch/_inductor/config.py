@@ -59,7 +59,16 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
-compile_threads = min(32, os.cpu_count()) if sys.platform != "win32" else 1
+compile_threads = (
+    min(
+        32,
+        len(os.sched_getaffinity(0))
+        if hasattr(os, "sched_getaffinity")
+        else os.cpu_count(),
+    )
+    if sys.platform != "win32"
+    else 1
+)
 
 # If kernel is fused, the name is generated from the origin node op names
 # for larger kernels limit this
@@ -135,8 +144,6 @@ class triton:
     tiling_prevents_reduction_fusion = True
     # should we give different names to kernels
     ordered_kernel_names = False
-    # should we use natural codegen for where, needs newer triton version
-    simple_where = True
 
 
 # create a directory containing lots of debug information

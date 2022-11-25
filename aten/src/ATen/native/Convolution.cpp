@@ -11,10 +11,14 @@
 #include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
-
 #include <c10/macros/Macros.h>
-
 #include <limits>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/permute.h>
+#endif
 
 #if AT_NNPACK_ENABLED()
 #include <nnpack.h>
@@ -655,7 +659,7 @@ static void check_shape_forward(const at::Tensor& input,
 
     TORCH_CHECK(at::symint::size<T>(input, 1) == (weight_sizes[1] * groups),
                 "Given groups=", groups, ", weight of size ", weight_sizes,
-                ", expected input", input.sizes(), " to have ",
+                ", expected input", at::symint::sizes<T>(input), " to have ",
                 (weight_sizes[1] * groups), " channels, but got ", at::symint::size<T>(input, 1),
                 " channels instead");
 
@@ -693,12 +697,12 @@ static void check_shape_forward(const at::Tensor& input,
   } else { // transposed
     TORCH_CHECK(at::symint::size<T>(input, 1) == weight_sizes[0],
              "Given transposed=", transposed, ", weight of size ", weight_sizes,
-             ", expected input", input.sizes(), " to have ", weight_sizes[0],
+             ", expected input", at::symint::sizes<T>(input), " to have ", weight_sizes[0],
              " channels, but got ", at::symint::size<T>(input, 1), " channels instead");
     TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && at::symint::size<T>(bias, 0) == weight_sizes[1] * groups),
              "Given transposed=", transposed, ", weight of size ", weight_sizes,
              ", expected bias to be 1-dimensional with ", weight_sizes[1] * groups, " elements",
-             ", but got bias of size ", bias.sizes(), " instead");
+             ", but got bias of size ", at::symint::sizes<T>(bias), " instead");
   }
 }
 
@@ -1508,7 +1512,19 @@ at::Tensor _convolution(
       break;
     case ConvBackend::Empty:
     {
-      auto weight_view = at::_unsafe_view(weight, -1);
+      Tensor weight_view;
+      // Use permute and clone to avoid at::_unsafe_view(weight, -1) failure for non-contiguous cases where
+      // view size is not compatible with input tensor's size and stride.
+      if(weight.is_contiguous()) {
+        weight_view = at::_unsafe_view(weight, -1);
+      } else if (weight.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+        weight_view = at::_unsafe_view(at::permute(weight, {0, 2, 3, 1}), -1);
+      } else if (weight.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+        weight_view = at::_unsafe_view(at::permute(weight, {0, 2, 3, 4, 1}), -1);
+      } else {
+        weight_view = at::_unsafe_view(weight.clone(at::MemoryFormat::Contiguous), -1);
+      }
+
       output = (input.size(1) == 0) ? (input.view(-1) * weight_view) : (input * weight_view[0]);
       if (bias.defined()) {
         output.add_(bias[0]);

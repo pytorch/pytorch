@@ -90,7 +90,9 @@ class OpOverrides:
 
     @staticmethod
     def sign(x):
-        return ops.where(f"{x} == 0", "0", ops.where(f"{x} < 0", "-1", "1"))
+        left = ops.where(ops.lt("0", x), "1", "0")
+        right = ops.where(ops.lt(x, "0"), "1", "0")
+        return ops.sub(left, right)
 
     @staticmethod
     def bitwise_not(x):
@@ -416,6 +418,12 @@ class CSEVariable:
 
     def __str__(self):
         return self.name
+
+    def __hash__(self) -> int:
+        return hash(self.name)
+
+    def __eq__(self, other) -> bool:
+        return type(other) == type(self) and other.name == self.name
 
     def update_on_args(self, args, kwargs):
         pass
