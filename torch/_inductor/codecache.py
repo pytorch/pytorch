@@ -320,7 +320,6 @@ def cpp_compile_command(
     include_pytorch=False,
     vec_isa: VecISA = invalid_vec_isa,
 ):
-    omp_lib = "omp" if sys.platform == "darwin" else "gomp"
     if (
         include_pytorch
         or vec_isa != invalid_vec_isa
@@ -328,7 +327,7 @@ def cpp_compile_command(
     ):
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
-        libs = ["c10", "torch", "torch_cpu", "torch_python", omp_lib]
+        libs = ["c10", "torch", "torch_cpu", "torch_python"]
         macros = vec_isa.build_macro()
         if macros:
             macros = f"-D{macros}"
@@ -339,8 +338,11 @@ def cpp_compile_command(
         # This approach allows us to only pay for what we use.
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = []
-        libs = [omp_lib]
+        libs = []
         macros = ""
+
+    libs += ["gomp"] if sys.platform == "linux" else []
+
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
