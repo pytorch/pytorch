@@ -335,7 +335,7 @@ class WrapperCodeGen(CodeGen):
             stack.enter_context(result.indent())
             if config.profiler_mark_wrapper_call:
                 result.writeline("from torch.profiler import record_function")
-                result.writeline("with record_function('wrapper_call'):")
+                result.writeline("with record_function('inductor_wrapper_call'):")
                 stack.enter_context(result.indent())
             while (
                 self.lines
