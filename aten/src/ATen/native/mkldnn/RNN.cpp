@@ -5,6 +5,7 @@
 #include <ATen/MatrixRef.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/Dispatch.h>
 #include <c10/util/Exception.h>
 
 #if !AT_MKLDNN_ENABLED()
@@ -207,7 +208,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
     bool bidirectional,
     bool batch_first,
     bool train) {
-        std::cout<<"in lstm_mkldnn_rnn_layer\n";
   RNNParams rnn(
       input,
       batch_sizes,
@@ -218,7 +218,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
       batch_first,
       train);
 
-    std::cout<<"1\n";
   auto output_size = _output_size</*is_single_direction*/ true>(rnn);
   auto output = at::empty(output_size, input.options());
 
@@ -231,7 +230,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   auto bias = has_biases
       ? _shuffle_bias(w2, w3, rnn.mode)
       : at::zeros({rnn.num_bias_gates * rnn.hidden_size}, weight_ih.options());
-std::cout<<"2\n";
+
   // per layer input size
   int64_t input_size = input.size(2);
   auto x = get_mkldnn_tensor(
@@ -249,16 +248,9 @@ std::cout<<"2\n";
       hy_, rnn.dst_iter_desc(get_mkldnn_dtype(hy_.scalar_type())));
   auto cy = get_mkldnn_tensor(
       cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_.scalar_type())));
-std::cout<<"3\n";
-//   ideep::tensor w1_, w2_;
   auto w1_ = get_mkldnn_tensor(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih.scalar_type())));
   auto w2_ = get_mkldnn_tensor(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh.scalar_type())));
-std::cout<<"4\n";
-//   ideep::lstm_forward_inference::compute(x, hx, cx, w1, w2, b, y, hy, cy, reverse);
 
-//   std::vector<at::Tensor> result;
-std::cout<<train<<"\n";
-train=false;
   if (train) {
     // at::Tensor workspace = at::Tensor();
     // auto pd = ideep::lstm_forward_training::prepare(
@@ -277,17 +269,10 @@ train=false;
     // result.push_back(workspace);
     return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor());
   } else {
-    std::cout<<"before compute\n";
     ideep::lstm_forward_inference::compute(
-        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
+        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, ideep::prop_kind::forward_inference);
     return std::make_tuple(output, hy_, cy_, Tensor());
-    // result.reserve(4);
-    // result.push_back(output);
-    // result.push_back(hy_);
-    // result.push_back(cy_);
-    // result.push_back(Tensor());
   }
-//   return result;
 }
 
 // MKLDNN RNN integration notes:
@@ -312,15 +297,11 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
     int64_t mode, int64_t hidden_size,
     int64_t num_layers, bool has_biases, bool batch_first, double dropout_p,
     bool train, bool bidirectional, IntArrayRef batch_sizes) {
-        std::cout<<"in lstm_mkldnn_rnn\n";
-//   return std::make_tuple(Tensor(), Tensor(), Tensor());
 //   TORCH_CHECK(!train || dropout_p == 0.0, "mkldnn_rnn doesn't support dropout");
   TORCH_CHECK(batch_sizes.size() == 0, "mkldnn_rnn doesn't support packed input");
   if (static_cast<ideep::rnn_kind>(mode) != ideep::rnn_kind::LSTM) {
     TORCH_CHECK(!cx_.defined(), "mkldnn_rnn: illegal defined cx for non-LSTM RNN");
   }
-
-//   RNNParams fn(input_, batch_sizes, mode, hidden_size, num_layers, bidirectional, batch_first, train);
 
   auto input = input_;
   bool is_input_packed = batch_sizes.size() != 0;
@@ -331,12 +312,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
 
   auto hx = hx_.contiguous();
   auto cx = cx_.contiguous();
-//   auto cx = cx_.defined() ? cx_.contiguous() : Tensor();
-
-//   auto hy = at::empty(_hidden_size(fn), hx.options());
-//   // NB: Not allowed to return undefined tensors
-//   auto cy = cx.defined() ? at::empty(_hidden_size(fn), cx.options())
-//                          : at::empty({0}, hx.options());
 
   MatrixRef<Tensor> weights{weight, static_cast<size_t>(weight_stride0)};
 
@@ -346,23 +321,17 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
   std::vector<at::Tensor> layer_hy(num_layers * num_directions);
   std::vector<at::Tensor> layer_cy(num_layers * num_directions);
   for (int64_t layer = 0; layer < num_layers; layer++) {
-    // std::vector<Tensor> layer_output(num_directions);
     for (int64_t direction = 0; direction < num_directions; direction++) {
       auto index = layer * num_directions + direction;
       auto layer_weights = weights[index];
       TORCH_CHECK(layer_weights.size() == 2 || layer_weights.size() == 4);
       auto layer_hx = hx[index];
       auto layer_cx = cx[index];
-    //   auto layer_hy = hy[index];
-    //   auto layer_cx = cx.defined() ? cx[index] : Tensor();
-    //   auto layer_cy = cx.defined() ? cy[index] : at::empty({0}, input.options());
       auto reverse = (direction > 0);
-    //   auto bias_dtype = get_bias_dtype(layer_input, layer_weights[0]);
       auto outputs = at::mkldnn_rnn_layer(layer_input, layer_weights[0], layer_weights[1],
                                         has_biases ? layer_weights[2] : at::zeros(layer_weights[0].sizes(), layer_weights[0].options()),
           has_biases ? layer_weights[3] : at::zeros(layer_weights[1].sizes(), layer_weights[1].options()), layer_hx,
           layer_cx, reverse, batch_sizes, mode, hidden_size, num_layers, has_biases, bidirectional, batch_first, train);
-    //   layer_output[direction] = mkldnn_rnn_layer(layer_hy, layer_cy, layer_input, layer_weights, layer_hx, layer_cx, reverse, fn);
       layer_output[direction] = std::get<0>(outputs);
       layer_hy[index] = std::get<1>(outputs);
       layer_cy[index] = std::get<2>(outputs);
@@ -419,12 +388,10 @@ std::pair<Tensor, hidden_type> mkldnn_impl(
     const Tensor& input, const hidden_type& hidden,
     TensorList params, bool has_biases, ideep::rnn_kind mode,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-std::cout<<"in mkldnn_impl\n";
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
 
-  // mkldnn_output = std::tuple<output, hy, cy, workspace>
   auto mkldnn_output = mkldnn_rnn(
       input, params, has_biases ? 4 : 2,
       hx, cx, static_cast<int>(mode), hidden_size, num_layers, has_biases, batch_first, dropout_p,
@@ -432,24 +399,21 @@ std::cout<<"in mkldnn_impl\n";
 
   return {std::get<0>(mkldnn_output),
           pack_hidden<hidden_type>(std::get<1>(mkldnn_output), std::get<2>(mkldnn_output))};
-    // return {Tensor(), pack_hidden<hidden_type>(Tensor(), Tensor())};
 }
 
 } // anonymous namespace
 
-std::tuple<Tensor, Tensor, Tensor> lstm_mkldnn_stub(
+void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
     const Tensor& input, TensorList hx, TensorList params, bool has_biases,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-  std::cout<<"in lstm_mkldnn_stub\n";
-
   auto result = mkldnn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
       ideep::rnn_kind::LSTM, num_layers, dropout_p, train, bidirectional, batch_first);
-  auto output = result.first;
-  auto hy = std::get<0>(result.second);
-  auto cy = std::get<1>(result.second);
-
-  return std::make_tuple(output, hy, cy);
+  output = result.first;
+  hy = std::get<0>(result.second);
+  cy = std::get<1>(result.second);
 }
+
+REGISTER_ALL_CPU_DISPATCH(lstm_mkldnn_stub, &lstm_mkldnn);
 
 }} // namespace at::native
 
