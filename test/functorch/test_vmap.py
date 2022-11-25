@@ -3938,11 +3938,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"your tensor may have escaped from vmap.*\(from inplace\).*"):
             escaped.mul_(1)
 
-        # FIXME: this gives: 'infos.scalar_type() == kInt INTERNAL ASSERT FAILED'
-        # _linalg_check_errors is the only op that uses the 'non returned' piping
-        # how do I create a tensor with kInt dtype?
-        # with self.assertRaisesRegex(RuntimeError, r"your tensor may have escaped from vmap.*\(from no returns\).*"):
-        #     torch.ops.aten._linalg_check_errors(x, 'linalg.inv', is_matrix=False)
+        vmap(f)(torch.tensor([[0,0],[0,0]], dtype=torch.int))
+        with self.assertRaisesRegex(RuntimeError, r"your tensor may have escaped from vmap.*\(from no returns\).*"):
+            torch.ops.aten._linalg_check_errors(escaped, 'linalg.inv', is_matrix=False)
 
 class TestRandomness(TestCase):
     def _reset_random(self, generator, orig_state, use_generator, seed):
