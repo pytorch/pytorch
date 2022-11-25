@@ -259,7 +259,11 @@ def exception_handler(e, code, frame=None):
 
 
 def convert_frame_assert(
-    compiler_fn: Callable, guard_export_fn=None, one_graph=True, export=False
+    compiler_fn: Callable,
+    guard_export_fn=None,
+    one_graph=True,
+    export=False,
+    export_shape_env=None,
 ):
     """Fully convert a frame into an FX graph"""
     init_logging()
@@ -335,6 +339,7 @@ def convert_frame_assert(
             compiler_fn,
             one_graph,
             export,
+            export_shape_env,
             guard_export_fn,
             frame,
         )
@@ -351,10 +356,14 @@ def _compile(
     compiler_fn,
     one_graph,
     export,
+    export_shape_env=None,
     guard_export_fn=None,
     frame=None,
 ):
     output = None
+
+    if export_shape_env is not None:
+        assert export, "Illegal to provide an export_shape_env without being in export"
 
     # from .utils import print_once;  print_once(code.co_filename)
     def transform(instructions, code_options):
@@ -369,6 +378,7 @@ def _compile(
             compiler_fn,
             one_graph,
             export,
+            export_shape_env,
         )
         tracer.run()
         output = tracer.output
@@ -488,10 +498,11 @@ def replay(filename):
             record.locals,
             record.builtins,
             eager,
-            False,  # one_graph
-            None,  # export_fn
-            None,  # frame
-            False,  # Export
+            one_graph=False,
+            export=False,
+            export_shape_env=None,
+            guard_export_fn=None,
+            frame=None,
         )
     except Exception:
         pass

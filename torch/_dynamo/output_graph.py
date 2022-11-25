@@ -139,6 +139,7 @@ class OutputGraph(fx.Tracer):
         code_options: Dict[str, Any],
         compiler_fn: Callable,
         root_tx,
+        export_shape_env: Optional[ShapeEnv],
     ):
         super(OutputGraph, self).__init__()
 
@@ -162,7 +163,14 @@ class OutputGraph(fx.Tracer):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map = {}
-        self.shape_env = ShapeEnv() if config.dynamic_shapes else None
+
+        if export_shape_env is not None:
+            self.shape_env = export_shape_env
+            print("PASSED IN SHAPE_ENV", id(self.shape_env))
+        else:
+            self.shape_env = ShapeEnv() if config.dynamic_shapes else None
+            print("MADE SHAPE_ENV", id(self.shape_env))
+
         self.tensor_id_to_sym_shape_ref = {}
         self.intermediary_symbols = {}
 

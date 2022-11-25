@@ -1541,9 +1541,17 @@ class InstructionTranslator(InstructionTranslatorBase):
         compiler_fn,
         one_graph,
         export,
+        export_shape_env,
     ):
+        if export_shape_env is not None:
+            assert (
+                export
+            ), "Illegal to provide an export_shape_env without being in export"
+
         super(InstructionTranslator, self).__init__(
-            output=OutputGraph(f_globals, code_options, compiler_fn, self),
+            output=OutputGraph(
+                f_globals, code_options, compiler_fn, self, export_shape_env
+            ),
             instructions=instructions,
             f_locals=f_locals,
             f_globals=f_globals,

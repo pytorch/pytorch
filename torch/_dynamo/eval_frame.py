@@ -498,7 +498,13 @@ def explain(f, *args, **kwargs):
 
 
 def export(
-    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
+    f,
+    *args,
+    aten_graph=False,
+    decomposition_table=None,
+    tracing_mode="real",
+    shape_env=None,
+    **kwargs,
 ):
     torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
@@ -573,11 +579,13 @@ def export(
             dynamo_normalization_capturing_compiler,
             guard_export_fn=guard_export_print,
             export=True,
+            export_shape_env=shape_env,
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = opt_f(*args, **kwargs)
     remove_from_cache(f)
 
+    print(f"Exported graph {graph} fron {f}")
     assert graph is not None, "whole graph export entails exactly one call"
     assert out_guards is not None, "whole graph export entails exactly one guard export"
 
@@ -645,7 +653,9 @@ def assume_constant_result(fn):
     return fn
 
 
-def optimize_assert(backend, *, guard_export_fn=None, export=False, dynamic=False):
+def optimize_assert(
+    backend, *, guard_export_fn=None, export=False, dynamic=False, export_shape_env=None
+):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
@@ -655,7 +665,9 @@ def optimize_assert(backend, *, guard_export_fn=None, export=False, dynamic=Fals
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend, guard_export_fn, export=export),
+        convert_frame.convert_frame_assert(
+            backend, guard_export_fn, export=export, export_shape_env=export_shape_env
+        ),
         backend_ctx_ctor,
         dynamic=dynamic,
     )

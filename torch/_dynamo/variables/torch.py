@@ -3,6 +3,8 @@ import logging
 import math
 import re
 import types
+
+from contextlib import nullcontext
 from typing import Dict, List
 
 import numpy
@@ -10,7 +12,6 @@ import numpy
 import torch._C
 import torch.nn
 import torch.onnx.operators
-
 from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
@@ -686,9 +687,13 @@ class TorchPyOperator(VariableTracker):
                 return arg
 
         def register_as_subgraph(fn, name, args):
+            from torch.fx.experimental.symbolic_shapes import ShapeEnv
             from .. import export
 
-            gm, guards = export(fn, *args)
+            noop_env = ShapeEnv()
+            # TODO(voz): This is a gap in cond+export
+            # We need to surface these guards, and we do not do so today.
+            gm, guards = export(fn, *args, shape_env=noop_env)
 
             next_name = None
             i = 0
@@ -738,14 +743,21 @@ class TorchPyOperator(VariableTracker):
             p_args[2] = false_node
 
         # Store the invocation as a call
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                self.value,
-                args=tuple(p_args),
-                kwargs={},
-                current_tx=tx,
-            ),
-            example_value=self.value(*u_args),
+        value = self.value(*u_args)
+        proxy = tx.output.create_proxy(
+            "call_function",
+            self.value,
+            args=tuple(p_args),
+            kwargs={},
+            current_tx=tx,
         )
+        # TODO(voz): Is this sus here?
+        context = nullcontext()
+        if config.dynamic_shapes:
+            context = tx.output.shape_env.suppress_guards()
+        with context:
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=proxy,
+                example_value=value,
+            )
