@@ -1801,22 +1801,11 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
 
     compiled_f = aot_function_simplified(functional_call, *top_args, **top_kwargs)
 
-    if top_kwargs:
-
-        def forward(*args, **kwargs):
-            return compiled_f(
-                *params_flat,
-                *args,
-                **kwargs,
-            )
-
-    else:
-
-        def forward(*args):
-            return compiled_f(
-                *params_flat,
-                *args,
-            )
+    def forward(*args):
+        return compiled_f(
+            *params_flat,
+            *args,
+        )
 
     forward.zero_grad = mod.zero_grad
     forward.named_parameters = mod.named_parameters
