@@ -442,11 +442,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"std::min({a}, {b})"
+        return f"({b} != {b}) ? {b} : std::min({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"std::max({a}, {b})"
+        return f"({b} != {b}) ? {b} : std::max({a}, {b})"
 
     @staticmethod
     def where(a, b, c):

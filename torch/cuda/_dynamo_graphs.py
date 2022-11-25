@@ -9,7 +9,7 @@ from torch._dynamo.optimizations.training import AotAutogradStrategy  # type: ig
 
 import operator
 from collections import defaultdict
-from typing import Set
+from typing import Set, Dict, Any
 
 # TODO: maybe this should live in torch._dynamo instead
 
@@ -133,7 +133,7 @@ def cudagraphs(model, inputs):
 
 
 def raw_aot_autograd_cudagraphs(model, inputs):
-    kwargs = {
+    kwargs: Dict[str, Any] = {
         # these are taken from memory_efficient_fusion()
         "fw_compiler": cudagraphs,
         "bw_compiler": cudagraphs,
@@ -148,7 +148,7 @@ def raw_aot_autograd_cudagraphs(model, inputs):
 
     from functorch.compile import aot_module_simplified  # type: ignore[import]
 
-    return aot_module_simplified(model, **kwargs)
+    return aot_module_simplified(model, inputs, **kwargs)
 
 
 class AOTAutogradCudaGraphs(AotAutogradStrategy):

@@ -68,7 +68,6 @@ except (ImportError, AssertionError) as e:
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
-
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 torch._inductor.config.triton.autotune = False  # too slow
@@ -683,6 +682,11 @@ class CommonTemplate:
             return (torch.maximum(a, b), torch.minimum(a, b))
 
         self.common(fn, (torch.randn(8), torch.randn(8)))
+        t1 = torch.randn(8)
+        t1[0] = float("nan")
+        t2 = torch.randn(8)
+        t2[1] = float("nan")
+        self.common(fn, (t1, t2))
 
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
@@ -1456,6 +1460,17 @@ class CommonTemplate:
                         (v,),
                     )
 
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
+    def test_conv2d_packed(self):
+        x_shape = (1, 3, 56, 56)
+        mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).eval()
+        v = torch.randn(x_shape, dtype=torch.float32)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
     # For gpu path, there has a accurcy issue,
     # see https://github.com/pytorch/pytorch/issues/87745.
     @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
@@ -1596,6 +1611,20 @@ class CommonTemplate:
             v = torch.randn(x_shape, dtype=torch.float32).to(
                 memory_format=memory_format
             )
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
+
+    def test_linear_packed(self):
+        options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
+        for input_shape, bias in options:
+            mod = torch.nn.Sequential(
+                torch.nn.Linear(input_shape[-1], 30, bias=bias)
+            ).eval()
+
+            v = torch.randn(input_shape)
             with torch.no_grad():
                 self.common(
                     mod,
@@ -2864,8 +2893,6 @@ class CommonTemplate:
                 ),
             )
 
-    # https://github.com/pytorch/torchdynamo/issues/467
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_cudnn_rnn(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -5480,6 +5507,8 @@ if HAS_CUDA:
             return kernels
 
         def test_divisibile_by_16_covers_numel_args(self):
+            torch._dynamo.reset()
+
             def fn(a: torch.Tensor) -> torch.Tensor:
                 return torch.sum(a)
 
@@ -5499,6 +5528,7 @@ if HAS_CUDA:
                 kernels[1].meta["configs"][0].divisible_by_16
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
+            torch._dynamo.reset()
 
 
 if __name__ == "__main__":
