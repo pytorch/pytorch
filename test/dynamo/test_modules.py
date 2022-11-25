@@ -703,6 +703,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         m3 = deepcopy(m1)
         self.assertEqual(GenerationTracker.get_generation_value(m3), cur_generation)
 
+    # See https://github.com/pytorch/torchdynamo/issues/1926
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_simple_torch_function(self):
         def foo(x):
             # function call, twice to test wrapping

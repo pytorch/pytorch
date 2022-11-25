@@ -697,7 +697,7 @@ from torch._subclasses import (  # noqa: F401
 
 def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
     fake_tensor = fake_mode.from_tensor(e, static_shapes=static_shapes)
-    if tx is not None:
+    if tx is not None and not static_shapes:
         from torch._dynamo.guards import TensorReference
 
         def _record(tensor_ref):
@@ -706,11 +706,9 @@ def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None):
             tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
 
         def _extract(symbol):
-            if isinstance(symbol, int):
-                return None
-            sym_expr = symbol.get_pyobj().expr
-            if not isinstance(sym_expr, sympy.Symbol):
-                return None
+            assert not isinstance(symbol, int)
+            sym_expr = symbol.get_pyobj().symbol
+            assert sym_expr is not None
             return sym_expr
 
         def _record_ref(e, index, symbol, kind):
@@ -752,10 +750,9 @@ def wrap_to_fake_tensor(e, fake_mode):
     else:
         return e
 
-
-def wrap_to_fake_tensor_and_record(e, tx):
+def wrap_to_fake_tensor_and_record(e, tx, static_shapes=False):
     if type(e) in (torch.Tensor, torch.nn.Parameter):
-        static_shapes = config.dynamic_shapes is False
+        static_shapes = static_shapes or config.dynamic_shapes is False
         if type(e) is torch.nn.Parameter:
             # Always static for params
             static_shapes = True

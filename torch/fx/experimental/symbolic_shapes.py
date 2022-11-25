@@ -3,6 +3,7 @@ import torch.utils._pytree as pytree
 from typing import Set, Dict, List, Type, Optional, cast, Union
 import sys
 import operator
+import itertools
 import builtins
 import math
 import functools
@@ -148,8 +149,13 @@ class SymNode:
     This is a type erased SymInt/SymFloat which we use to do actual operations.
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
-    def __init__(self, expr, shape_env, pytype, constant=None):
+    def __init__(self, expr, symbol, shape_env, pytype, constant=None):
         self._expr = expr
+        # Unlike expr, sympy.Symbol is guaranteed to be a symbol,
+        # and it never gets simplified into a constant or another symbol.
+        # This only exists for fresh create_symint; intermediate values
+        # don't have this set
+        self.symbol: sympy.Symbol = symbol
         self.shape_env = shape_env
         self.pytype = pytype
         self.constant = constant
@@ -170,11 +176,11 @@ class SymNode:
 
     def wrap_int(self, num):
         assert isinstance(num, int)
-        return SymNode(sympy.Integer(num), self.shape_env, int, constant=num)
+        return SymNode(sympy.Integer(num), None, self.shape_env, int, constant=num)
 
     def wrap_float(self, num):
         assert isinstance(num, float)
-        return SymNode(sympy.Float(num), self.shape_env, float, constant=num)
+        return SymNode(sympy.Float(num), None, self.shape_env, float, constant=num)
 
     def clone(self):
         return self
@@ -333,7 +339,7 @@ def _make_node_magic(method, func):
 
         # TODO: relational operators actually technically return a
         # PySymBool, this is a type error
-        return SymNode(out, self.shape_env, pytype)
+        return SymNode(out, None, self.shape_env, pytype)
 
     def unary_magic_impl(self):
         if SYM_FUNCTION_MODE:
@@ -358,7 +364,7 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        return SymNode(out, self.shape_env, pytype)
+        return SymNode(out, None, self.shape_env, pytype)
 
     if method in unary_magic_methods:
         setattr(SymNode, method, unary_magic_impl)
@@ -426,10 +432,50 @@ def _lru_cache(fn, maxsize=None):
     return wrapper
 
 
+class IVarSymbol(sympy.Symbol):
+    pass
+
 
 class ShapeEnv(object):
     def __init__(self):
         self.guards = []
+        # We have two types of symbols
+
+        # Input symbols aka ivar (t0.size(0), t1.stride(2), t2.storage_offset(), etc)
+        # are bound for input tensors and show up solely in guards, where
+        # they encode things like 0/1 specialization (t0.size(0) == 1)
+        # duck sizing (t1.size(0) == t2.size(1)) or duck striding
+        # (t1.stride(0) == t1.size(0) * t1.stride(1)).  They NEVER show
+        # up in intermediate size expressions; instead...
+
+        # Compute symbols aka var (s0, s1, etc) are guaranteed to be greater than one,
+        # and are used for our actual size expressions.  After allocating
+        # an input symbol, we immediately either guard on it being zero
+        # or one (eliminating the symbol entirely), or we introduce a companion
+        # compute symbol t0.size(0) == s0.  Multiple input symbols may map
+        # to the same compute symbol.  There is always at least one input symbol
+        # equal to any given compute symbol (so that given inputs only, you can
+        # evaluate expressions involving compute symbols).
+        #
+        # TODO: As a future performance optimization, we intend for compute
+        # symbols to be guaranteed to be greater than zero, giving us the
+        # representation t0.size(0) + 1 == s0.  This will prevent us from
+        # needing to create a new shape_env in _maybe_evaluate_static, at the
+        # cost of uglier SymPy expressions (but you should be able to simplify
+        # for printing)
+
+        # Original concrete values for ivars.  Probably technically not
+        # necessary
+        self.ivar_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
+        # The ivar chosen to represent a given var.  There may be multiple
+        # ivars that are valid but only one is necessary; the rest have
+        # guards asserting they're equal
+        self.var_to_ivar: Dict["sympy.Symbol", "sympy.Symbol"] = {}
+        # We want to give ivars more meaningful names for debugging
+        # purposes, so we keep track of tensors/symints separately
+        self.next_ivar_tensor = itertools.count()
+        self.next_ivar_symint = itertools.count()
+
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
@@ -461,57 +507,102 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
-    def create_symbolic_sizes_strides(self, ex: torch.Tensor):
+    def _build_symint(self, ivar, expr):
+        if not self._suppress_guards_tls():
+            stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+            if isinstance(expr, sympy.Symbol):
+                self.var_to_ivar[expr] = ivar
+            # This works because sympy will simplify double negative
+            elif isinstance(-expr, sympy.Symbol):
+                self.var_to_ivar[expr] = -ivar
+            self._add_guard(
+                sympy.Eq(ivar, expr),
+                stack
+            )
+        return SymInt(SymNode(expr, ivar, self, int))
+
+    def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
-        We try our best to express stride in terms of the sizes, so as to not
-        introduce new symbolic variables.
+        After allocating ivars, we try to allocate a minimal amount of compute
+        variables, e.g., by expressing stride in terms of sizes.
         """
-        size = [self.create_symbol(i) for i in ex.size()]
-        stride: List[Optional[sympy.Expr]] = [None] * len(size)
+        tid = next(self.next_ivar_tensor)
+
+        dim = ex.dim()
+        size = [self._create_symint(f"t{tid}.size({i})", v) for i, v in enumerate(ex.size())]
+        storage_offset = self._create_symint(f"t{tid}.storage_offset()", ex.storage_offset())
+
+        # Don't create full symints (which would allocate compute vars) for
+        # these immediately, we may be able to avoid allocating a size var for
+        # them
+        stride_ivars = [self.create_ivar(f"t{tid}.stride({i})", v) for i, v in enumerate(ex.stride())]
+
+        size_exprs: List[sympy.Expr] = [s.node.expr for s in size]
+        stride_exprs: List[Optional[sympy.Expr]] = [None] * len(size)
+
+        def duck_stride(i, expr):
+            stride_exprs[i] = expr
+
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
-                stride[i] = sympy.Integer(val)
-        while any(x is None for x in stride):
+                duck_stride(i, sympy.Integer(val))
+
+        while any(x is None for x in stride_exprs):
             candidates = {
-                ex.size(i) * ex.stride()[i]: size[i] * stride[i]
-                for i in range(len(size))
-                if stride[i] is not None and ex.stride()[i] >= 0
+                ex.size(i) * ex.stride(i): size_exprs[i] * stride_exprs[i]
+                for i in range(dim)
+                if stride_exprs[i] is not None and ex.stride(i) >= 0
             }
             # iterate over unbound strides in sorted order
             val_list = sorted(
-                [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
+                [(ex.stride(i), i) for i in range(dim) if stride_exprs[i] is None]
             )
             for _, i in val_list:
-                if stride[i] is None and ex.stride()[i] in candidates:
-                    stride[i] = candidates[ex.stride()[i]]
-                    candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
-            if any(x is None for x in stride):
+                if stride_exprs[i] is None and ex.stride(i) in candidates:
+                    r = candidates[ex.stride(i)]
+                    duck_stride(i, r)
+                    candidates[ex.size(i) * ex.stride(i)] = size_exprs[i] * r
+            if any(x is None for x in stride_exprs):
                 # bind the smallest unbound stride to a new variable
                 val, i = min(
                     [
-                        (ex.stride()[i], i)
-                        for i in range(len(stride))
-                        if stride[i] is None
+                        (ex.stride(i), i)
+                        for i in range(dim)
+                        if stride_exprs[i] is None
                     ]
                 )
-                stride[i] = self.create_symbol(val)
-        assert all(x is not None for x in stride)
-        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
+                fresh_var = self.create_var(ex.stride(i))
+                duck_stride(i, fresh_var)
+        assert all(x is not None for x in stride_exprs)
+        stride = [self._build_symint(ivar, expr) for ivar, expr in zip(stride_ivars, stride_exprs)]
+        return size, stride, storage_offset
 
-    def create_symintnode(self, expr: Union["sympy.Expr", int]):
-        return SymInt(SymNode(expr, self, int))
+    def create_symint(self, val: int) -> SymInt:
+        sid = next(self.next_ivar_symint)
+        return self._create_symint(f"v{sid}", val)
 
-    def create_symbol(self, val: int) -> "sympy.Expr":
+    def _create_symint(self, ivar_name: str, val: int) -> SymInt:
+        ivar = self.create_ivar(ivar_name, val)
+        symbol = self.create_var(val)
+        return self._build_symint(ivar, symbol)
+
+    def create_ivar(self, ivar_name: str, val: int) -> "sympy.Symbol":
+        # NB: not guaranteed to be positive, could be zero
+        r = IVarSymbol(ivar_name, integer=True)
+        import traceback
+        r.tb = traceback.extract_stack()
+        self.ivar_to_val[r] = val
+        return r
+
+    def create_var(self, val: int) -> "sympy.Symbol":
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
         if val < 0:
             # all sympy base variables must be positive and > 1
-            return -self.create_symbol(-val)
+            return -self.create_var(-val)
         # This implements duck-shaping: input sizes that match are assigned
         # the same symint
-        # TODO: Create a guard whenever this happens
-        # TODO: But how do I represent the guard in this case?
         # Note: val_to_var is also initialized with 0/1 mapping to constants, so
         # this also ensures that all symbols are > 1
         if val in self.val_to_var:
@@ -527,7 +618,9 @@ class ShapeEnv(object):
         # and wrap_fake_symbolic
         meta_converter = MetaConverter()
         pytree.tree_map_only(torch.Tensor, partial(meta_converter, shape_env=new_env), args)
-        return all(guard.xreplace(new_env.var_to_val) for guard, _ in self.guards)
+        subst = new_env.var_to_val.copy()
+        subst.update(new_env.ivar_to_val)
+        return all(guard.xreplace(subst) for guard, _ in self.guards)
 
     def get_guard_expr(self):
         """
@@ -537,16 +630,21 @@ class ShapeEnv(object):
         """
         return sympy.And(*[guard for guard, _ in self.guards])
 
-    def get_nontrivial_guards(self):
-        return [self.simplify(guard) for guard, _ in self.guards if self._maybe_evaluate_static(guard) is None]
-
-    def format_guards(self, verbose=False):
+    def format_guards(self, verbose=False, *, exclude_ivar=False):
         def format_tb(tb):
             if not verbose:
                 return ""
             return f"\n   Guarded at:\n{textwrap.indent(tb, '   ')}"
 
-        return '\n'.join(f" - {guard}{format_tb(tb)}" for guard, tb in self.guards)
+        def pred(expr):
+            if not exclude_ivar:
+                return True
+            if isinstance(expr, sympy.Eq):
+                if expr.lhs in self.ivar_to_val:
+                    return False
+            return True
+
+        return '\n'.join(f" - {guard}{format_tb(tb)}" for guard, tb in self.guards if pred(guard))
 
     def get_shape_groups(self):
         shape_groups = collections.defaultdict(list)
@@ -562,6 +660,10 @@ class ShapeEnv(object):
         expr = self.simplify(expr)
         # Simplifies assuming that shape vars > 1 (since we cache on 0/1 shape values)
         symbols = list(expr.free_symbols)
+        for s in symbols:
+            assert self.var_to_val[s] > 1, \
+                f"{s} which is {self.var_to_val[s]} in nontrivial expression {expr}, " \
+                "but as a 0/1 constant it should already have been eliminated"
         new_shape_env = {
             k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
             for idx, k in enumerate(symbols)
@@ -667,6 +769,11 @@ class ShapeEnv(object):
                 except NotImplementedError:
                     pass
             return
+
+    def _add_guard(self, expr, tb):
+        if not self._suppress_guards_tls():
+            assert expr is not sympy.false
+            self.guards.append((expr, tb))
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr"):

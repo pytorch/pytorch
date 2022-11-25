@@ -612,6 +612,7 @@ class VariableBuilder:
                     tx=self.tx,
                     proxy=proxy,
                     example_value=wrapped_value,
+                    static_shapes=True,
                     **options,
                 )
             else:
@@ -620,6 +621,7 @@ class VariableBuilder:
                     tx=self.tx,
                     proxy=proxy,
                     example_value=wrapped_value,
+                    static_shapes=True,
                     **options,
                 )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
@@ -656,9 +658,13 @@ def wrap_fx_proxy(tx, proxy, example_value=None, **options):
 
 # Note: Unfortunate split due to some gross classes existing that subclass TensorVariable
 # Should be compositional instead
-def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
+def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, static_shapes=False, **options):
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
+
+    # If the tensor came from an NN module, give it all static shapes.
+    if "source" in options and options["source"] is not None and options["source"].guard_source().is_nn_module():
+        static_shapes = True
 
     assert "example_value" not in proxy.node.meta
     if not config.dynamic_propagation:
@@ -683,7 +689,7 @@ def wrap_fx_proxy_cls(target_cls, tx, proxy, example_value=None, **options):
 
         else:
             proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
-            fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+            fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx, static_shapes=static_shapes)
             example_value = fake_wrapper(example_value)
 
     if isinstance(example_value, torch.Tensor):
