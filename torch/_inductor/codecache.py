@@ -327,7 +327,7 @@ def cpp_compile_command(
     ):
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
-        libs = ["c10", "torch", "torch_cpu", "torch_python"]
+        libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
         macros = vec_isa.build_macro()
         if macros:
             macros = f"-D{macros}"
@@ -340,6 +340,7 @@ def cpp_compile_command(
         lpaths = []
         libs = ["gomp"]
         macros = ""
+    lpaths += ["/usr/local/opt/gcc/lib/gcc/12"] if sys.platform == "darwin" else []
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
