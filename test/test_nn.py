@@ -6958,7 +6958,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         device == 'cpu' and dtype == torch.half
                         or (device == 'cuda' and dtype == torch.bfloat16)
                     ):
-                        # no half precision support on cpu yet
+                        # no half precision support on cpu or bfloat16 on cuda yet
                         continue
                     for is_channels_last in (True, False):
                         helper(size, dtype, mode, device, is_channels_last)
