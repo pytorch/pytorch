@@ -38,8 +38,9 @@ from common_utils import (
     skip,
     skipOps,
 )
-from torch._subclasses.fake_tensor import DynamicOutputShapeException
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 USE_TORCHVISION = False
 try:
@@ -1502,6 +1503,43 @@ class TestAOTModuleSimplified(AOTTestCase):
         assert torch.allclose(ref[0], res[0])
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
+
+    def test_aot_module_simplified_dynamic(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(20, 30)
+
+            def forward(self, x, y):
+                return (self.linear(x) + y, )
+
+        mod = MockModule()
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        x = torch.randn(128, 20, requires_grad=True)
+        y = torch.randn(128, 30, requires_grad=True)
+
+        inputs = [x, y]
+        fake_inputs = [fake_mode.from_tensor(x) for x in inputs]
+        compiled_f = aot_module_simplified(mod, fake_inputs, nop)
+
+        ref = mod(*inputs)
+        ref[0].sum().backward()
+
+        cloned_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+        res = compiled_f(*cloned_inputs)
+        res[0].sum().backward()
+
+        self.assertExpectedInline(shape_env.format_guards(), """\
+ - Eq(s1, 20)
+ - Eq(s2, 30)""")
+
+        assert torch.allclose(ref[0], res[0])
+        assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
+        assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
+
 
     def test_aot_module_simplified_preserves_stack_trace(self):
         class MockModule(torch.nn.Module):

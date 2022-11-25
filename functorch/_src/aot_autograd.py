@@ -14,7 +14,7 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
-from torch._subclasses import FakeTensorMode, CrossRefFakeMode
+from torch._subclasses import FakeTensorMode, CrossRefFakeMode, FakeTensor
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -1488,17 +1488,29 @@ def create_aot_dispatcher_function(
     if config.use_dynamic_shapes:
         assert config.use_fake_tensor, "Dynamic shapes only works with fake tensor"
 
-    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
-    fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
+    # Check flat_args to see if they're already fake.  If so, use that fake
+    # mode instead.
+
+    for x in flat_args:
+        if isinstance(x, FakeTensor):
+            fake_mode = x.fake_mode
+            break
+    else:
+        shape_env = ShapeEnv() if config.use_dynamic_shapes else None
+        fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
+
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
 
     with torch.autograd.set_multithreading_enabled(False), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
-            if config.use_fake_tensor:
+            if config.use_fake_tensor or isinstance(fake_mode, FakeTensorMode):
                 def convert(idx, x):
                     if not isinstance(x, torch.Tensor):
+                        return x
+                    if isinstance(x, FakeTensor):
+                        assert x.fake_mode is fake_mode
                         return x
                     if idx < aot_config.num_params_buffers and config.static_weight_shapes:
                         return fake_mode.from_tensor(x, static_shapes=True)
