@@ -437,13 +437,7 @@ def run_functionalized_fw_and_collect_metadata(f):
             # on the base tensor, but we are obligated to properly set requires-gradness on the real output.
             non_aliased_outs = []
             for i, o in enumerate(non_aliased_input_outs):
-                if isinstance(o, torch.Tensor) and o._base is not None:
-                    non_aliased_outs.append(o._base)
-                    is_exact_input = False
-                    aliases_intermediate_and_not_input = True
-                    aliased_out_idx[o] = (i, aliases_intermediate_and_not_input, is_exact_input)
-                else:
-                    non_aliased_outs.append(o)
+                non_aliased_outs.append(o)
 
             return non_aliased_outs, aliased_out_idx
 
@@ -502,7 +496,7 @@ def run_functionalized_fw_and_collect_metadata(f):
                 if is_exact_input:
                     assert not is_alias_of_intermediate_not_input
                     output_type = OutputType.alias_of_input
-                    alias_idx = num_non_input_aliased_outputs
+                    alias_idx = input_alias_idx
                     sizes_idx = None
                     strides_idx = None
                     storage_offset_idx = None
@@ -648,7 +642,9 @@ def create_joint_forward_backward_functionalized(
         # For outputs that are aliases of intermediates, we will have returned the output's _base as an output in the graph instead,
         # which we *should* send to grad()
         outputs_for_grad = [
-            x._base if meta.aliased_output_info[i].output_type == OutputType.alias_of_intermediate else x
+            x
+            # TODO: support ._base
+            # x._base if meta.aliased_output_info[i].output_type == OutputType.alias_of_intermediate else x
             for (i, x) in enumerate(all_outs) if meta.aliased_output_info[i].output_type != OutputType.alias_of_input
         ]
         # Pass any (non-aliased) mutated inputs in as tangents, since they'll be returned as outputs in the fw
@@ -1131,7 +1127,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     _num_outputs_aliased_to_intermediates = len([
         x for x in _fw_metadata.aliased_output_info if x.output_type == OutputType.alias_of_intermediate])
     _num_mutated_data_inputs = len([x for x in _fw_metadata.mutated_input_info if x == MutationType.data])
-    _num_mutated_metadata_only_inputs = len(_fw_metadata.metadata_mutation_input_info)
+    _num_mutated_metadata_only_inputs = len([x for x in _fw_metadata.metadata_mutation_input_info if x is not None])
     _num_mutated_inputs = _num_mutated_data_inputs + _num_mutated_metadata_only_inputs
 
     if isinstance(out, (list, tuple)):
@@ -1180,33 +1176,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # to make that toggleable is a bit painful.
         # aot autograd without functionalization is wrong anyway, so we error.
         raise AssertionError("Graph partitioning without functionalization is not sound, we may introduce errors")
-
-    if config.use_dynamic_shapes:
-        # Constant-ify any symbolic args that are actually constant
-        # NB: This optimization is mandatory, because without it we will try
-        # to feed constant integers into backwards compiler, and many
-        # compilers will choke on this.
-        for n in fx_g.graph.nodes:
-            if n.op == "call_function":
-                hit = False
-
-                def constantify(s):
-                    nonlocal hit
-                    if isinstance(s, fx.Node) and 'val' in s.meta and isinstance(s.meta['val'], torch.SymInt):
-                        # TODO: Factor this onto SymInt
-                        node = s.meta['val'].node
-                        r = node.shape_env._maybe_evaluate_static(node.expr)
-                        if r is not None:
-                            hit = True
-                            return int(r)
-                    return s
-
-                args, kwargs = pytree.tree_map(constantify, (n.args, n.kwargs))
-                if hit:
-                    n.args = args
-                    n.kwargs = kwargs
-
-        fx_g.recompile()
 
     if config.debug_joint:
         print("====== Joint graph ======")
@@ -1492,6 +1461,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                         # Create the output alias
                         aliased_out = gen_alias_from_base(aliased_base_tensor, size_, stride_, storage_offset_, fake_meta)
                         fw_outs_including_aliases.append(aliased_out)
+
+            for inner_out, user_out in zip(fw_outs, fw_outs_including_aliases):
+                # Sanity check assert
+                assert type(inner_out) == type(user_out)
             return fw_outs_including_aliases
         else:
             return fw_outs
