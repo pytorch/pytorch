@@ -145,7 +145,7 @@ set(TORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
 set(TORCH_INSTALL_LIB_DIR ${TORCH_ROOT}/torch/lib)
 
 add_library(${NVFUSER_CODEGEN} SHARED ${NVFUSER_SRCS})
-target_link_libraries(${NVFUSER_CODEGEN} PRIVATE ${TORCH_LIBRARIES} ${CUDA_NVRTC_LIB} ${PYTHON_LIBRARIES} ${TORCH_PYTHON_LIBRARY})
+target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch torch_python torch_cuda ${CUDA_NVRTC_LIB} ${PYTHON_LIBRARIES} ${TORCH_PYTHON_LIBRARY})
 target_include_directories(${NVFUSER_CODEGEN}
                            #PUBLIC $<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>
                            PRIVATE ${TORCH_ROOT} # replace this one with nvfuser_srcs_dir?!
@@ -171,15 +171,15 @@ message(STATUS "compile options: " ${TORCH_PYTHON_COMPILE_OPTIONS})
 message(STATUS "link options: " ${TORCH_PYTHON_LINK_FLAGS})
 message(STATUS "python module prefix: " ${PYTHON_MODULE_PREFIX})
 message(STATUS "python module extention: " ${PYTHON_MODULE_EXTENSION})
-target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${TORCH_LIBRARIES} ${NVFUSER_CODEGEN} ${TORCH_PYTHON_LIBRARY} pybind::pybind11)
+target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${NVFUSER_CODEGEN} torch_python pybind::pybind11)
 target_include_directories(${NVFUSER_PYTHON}
 	                   PRIVATE ${TORCH_ROOT}
-	                   #PRIVATE ${pybind11_INCLUDE_DIRS}
-                     PRIVATE ${PYTHON_INCLUDE_DIRS})
-target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
+			   #PRIVATE ${pybind11_INCLUDE_DIRS}
+                           PRIVATE ${PYTHON_INCLUDE_DIRS})
+target_compile_options(${NVFUSER_PYTHON} PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 if(TORCH_PYTHON_LINK_FLAGS AND NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
     message(STATUS "somehow this is happening")
-    set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
+    set_target_properties(${NVFUSER_PYTHON} PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
 endif()
 install(TARGETS ${NVFUSER_PYTHON} DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
@@ -274,7 +274,7 @@ add_executable(tests
 
 target_compile_definitions(tests PRIVATE USE_GTEST)
 target_compile_definitions(tests PRIVATE USE_CUDA)
-target_include_directories(tests PRIVATE "${NVFUSER_ROOT}")
-target_link_libraries(tests PRIVATE ${TORCH_LIBRARIES} ${NVFUSER_CODEGEN} gtest_main gmock_main)
+target_include_directories(tests PRIVATE "${NVFUSER_ROOT}" "${TORCH_ROOT}/torch/csrc/api/include/")
+target_link_libraries(tests PRIVATE ${NVFUSER_CODEGEN} torch torch_cuda gtest_main gmock_main)
 
 install(TARGETS tests DESTINATION bin)
