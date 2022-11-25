@@ -1,17 +1,31 @@
 #!/bin/bash
 printf "\nCreating .buckconfig\n"
-cp .buckconfig.oss .buckconfig
 
-PROXY=""
-if [ "$1" == "devserver" ]; then
-   echo -e '\n[download]\n   proxy_host=fwdproxy\n   proxy_port=8080\n   proxy_type=HTTP\n' >> .buckconfig
-   PROXY="$(fwdproxy-config curl)"
-   printf "using proxy $PROXY\n\n"
+VERSION="${1:-1}"
+
+printf "\nBootstrapping for buck $VERSION\n"
+
+if [ "$VERSION" == "1" ]; then
+   cp ".buckconfig.1.oss" ".buckconfig"
+
+   PROXY=""
+   if [ "$2" == "devserver" ]; then
+      echo -e '\n[download]\n   proxy_host=fwdproxy\n   proxy_port=8080\n   proxy_type=HTTP\n' >> .buckconfig
+      PROXY="$(fwdproxy-config curl)"
+      printf "using proxy $PROXY\n\n"
+   fi
 fi
+
+if [ "$VERSION" == "2" ]; then
+   printf "\nRunning buck2 init\n"
+   buck2 init --allow-dirty || (echo "buck2 init failed, please resolve the error above" && exit 1)
+   cp ".buckconfig.2.oss" ".buckconfig"
+fi
+
 
 cat .buckconfig
 
-cd third_party || return
+cd third_party || exit 1
 
 printf "\nGenerating cpuinfo wrappers\n"
 python3 generate-cpuinfo-wrappers.py
