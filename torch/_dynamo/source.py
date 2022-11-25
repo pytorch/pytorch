@@ -40,7 +40,7 @@ class Source:
         raise NotImplementedError()
 
     def guard_source(self):
-        raise NotImplementedError()
+        raise NotImplementedError(str(type(self)))
 
     def name(self):
         raise NotImplementedError()
@@ -74,6 +74,9 @@ class LocalSource(Source):
 @dataclasses.dataclass
 class RandomValueSource(Source):
     random_call_index: int
+
+    def guard_source(self):
+        return GuardSource.RANDOM_VALUE
 
     def reconstruct(self, codegen):
         return [

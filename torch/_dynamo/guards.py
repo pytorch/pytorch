@@ -7,6 +7,7 @@ import os
 import re
 import types
 import weakref
+from contextlib import nullcontext
 from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -59,6 +60,7 @@ class GuardSource(enum.Enum):
     LOCAL_NN_MODULE = 2
     GLOBAL_NN_MODULE = 3
     CONSTANT = 4
+    RANDOM_VALUE = 5
 
     def select(self, locals_, globals_):
         if self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE):
@@ -159,6 +161,9 @@ class Guard:
         ), "Guarded class id must be identical, or None"
         self.guarded_class_weakref = guarded_class
 
+        if code_list is None:
+            code_list = []
+
         if not self.code_list:
             self.code_list = code_list
         else:
@@ -209,7 +214,11 @@ class GuardBuilder:
         self.guarded_code = guarded_code
 
     def get(self, name: str):
-        return eval(name, self.scope, CLOSURE_VARS)
+        try:
+            return eval(name, self.scope, CLOSURE_VARS)
+        except Exception:
+            logging.error(f"Failed to eval: {name}")
+            raise
 
     def arg_ref(self, guard: Guard):
         if isinstance(guard, str):
@@ -448,7 +457,11 @@ class GuardBuilder:
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
-        else:
+            if not config.dynamic_shapes:
+                # For dynamic shapes, we want to proceed to record tensor names
+                return
+
+        with nullcontext():
             value = self.get(guard.name)
             tensor_name = self.arg_ref(guard)
             self.tensor_check_names.append(tensor_name)
@@ -559,7 +572,13 @@ class DynamoGuardPrinter(StrPrinter):
             return "0"
         if expr == 1:
             return "1"
-        assert expr in (self.expr_to_tensor_ref) or (expr in self.intermediary_symbols)
+        if expr in self.shape_env.var_to_ivar:
+            return self._print(self.shape_env.var_to_ivar[expr])
+        import traceback
+
+        assert (
+            expr in self.expr_to_tensor_ref or expr in self.intermediary_symbols
+        ), f"{expr}\n\n{''.join(traceback.format_list(expr.tb))}"
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
@@ -607,7 +626,19 @@ class CheckFunctionManager:
         )
         global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if not config.guard_nn_modules and guard.is_nn_module():
+            if (
+                not config.guard_nn_modules
+                and guard.is_nn_module()
+                and guard.create_fn != GuardBuilder.TENSOR_MATCH
+            ):
+                # The `guard.create_fn != GuardBuilder.TENSOR_MATCH:` part is
+                # an exception to not guarding on nn_module properties
+                # In dynamic shapes mode, we sometimes get "weights" "bias" or other registered/named buffers
+                # accesed. We need to install their TENSOR_MATCH guards
+                # so that the names are known for symbolic shape guarding.
+                # This is also probably good for correctness anyway.
+                # TODO(voz): Revisit to see if we need to be more judicious
+                # with which we create guards for due to perf...
                 continue
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder, guards)

@@ -231,6 +231,9 @@ class SymInt:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
+    def __mul__(self, other: Union["SymInt", builtins.int]) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
     def __sym_float__(self):
         raise AssertionError("type stub not overridden")
 
