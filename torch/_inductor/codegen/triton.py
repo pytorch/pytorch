@@ -164,26 +164,14 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"tl.minimum({a}, {b})"
+        return f"tl.where({a} != {a}, {a}, tl.where({a} < {b}, {a}, {b}))"
 
     @staticmethod
     def maximum(a, b):
-        return f"tl.maximum({a}, {b})"
+        return f"tl.where({a} != {a}, {a}, tl.where({a} > {b}, {a}, {b}))"
 
     @staticmethod
     def where(a, b, c):
-        if not config.triton.simple_where:
-            # wonkyness to work around https://github.com/openai/triton/issues/532
-            # identity calls to force new triton variables (and get access to .shape/.dtype/.numel
-            a = ops.identity(a)
-            b = ops.identity(b)
-            c = ops.identity(c)
-            a = ops.identity(
-                f"{a} | tl.zeros({b}.shape, {a}.dtype) if {b}.numel > 1 else {a}"
-            )
-            a = ops.identity(
-                f"{a} | tl.zeros({c}.shape, {a}.dtype) if {c}.numel > 1 else {a}"
-            )
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
