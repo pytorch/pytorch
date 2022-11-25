@@ -86,7 +86,6 @@ namespace cuda { namespace detail {
 struct LinalgDispatch {
    std::tuple<Tensor, Tensor> (*symeig_helper)(const Tensor& self, bool eigenvectors, bool upper);
    Tensor (*cholesky_solve_helper)(const Tensor& self, const Tensor& A, bool upper);
-   std::tuple<Tensor, Tensor> (*legacy_lstsq)(const Tensor &B, const Tensor &A);
 };
 C10_EXPORT void registerLinalgDispatch(const LinalgDispatch&);
 }} // namespace cuda::detail

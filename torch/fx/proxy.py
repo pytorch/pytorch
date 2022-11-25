@@ -149,7 +149,7 @@ class TracerBase:
                 def no_node(arg):
                     if isinstance(arg, Node):
                         raise RuntimeError("Keys for dictionaries used as an argument cannot contain a "
-                                           "Node. Got key: {k}")
+                                           f"Node. Got key: {k}")
                 map_aggregate(k, no_node)
 
                 r[k] = self.create_arg(v)
@@ -157,12 +157,14 @@ class TracerBase:
         elif isinstance(a, slice):
             return slice(self.create_arg(a.start), self.create_arg(a.stop), self.create_arg(a.step))
 
+        elif isinstance(a, range):
+            return range(self.create_arg(a.start), self.create_arg(a.stop), self.create_arg(a.step))
+
         if isinstance(a, Proxy):
             # base case: we unwrap the Proxy object
             return a.node
         elif isinstance(a, base_types) or a is None or a is ...:
             return a
-
         raise NotImplementedError(f"argument of type: {type(a)}")
 
     @compatibility(is_backward_compatible=True)

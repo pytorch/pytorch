@@ -110,7 +110,11 @@ static PyObject* THPStorage_shareFilename(PyObject* _self, PyObject* noargs) {
         /*resizable=*/false));
 
     at::Storage _self_aten = torch::createStorage(_self);
-    storage_copy(new_storage, _self_aten);
+    {
+      // Copying into shared memory can be slow, so release the GIL
+      pybind11::gil_scoped_release no_gil;
+      storage_copy(new_storage, _self_aten);
+    }
 
     std::swap(*storage, *new_storage.unsafeGetStorageImpl());
     ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr());
@@ -210,7 +214,11 @@ static PyObject* THPStorage_shareFd(PyObject* _self, PyObject* noargs) {
   } else {
     at::Storage new_storage(THPStorage_newFdStorage(storage->nbytes()));
     at::Storage _self_aten = torch::createStorage(_self);
-    storage_copy(new_storage, _self_aten);
+    {
+      // Copying into shared memory can be slow, so release the GIL
+      pybind11::gil_scoped_release no_gil;
+      storage_copy(new_storage, _self_aten);
+    }
 
     std::swap(*storage, *new_storage.unsafeGetStorageImpl());
     ctx = at::MapAllocator::fromDataPtr(storage->data_ptr());

@@ -43,6 +43,7 @@ enum class SyncType {
   COMMIT,             // commit and flush the command buffer
   COMMIT_AND_WAIT,    // flush and wait for command buffer execution to finish
   COMMIT_AND_CONTINUE,// commit and continue with a new underlying command buffer
+  COMMIT_ADAPTIVE,    // commit adaptively based on available memory
 };
 
 class TORCH_API MPSStream
@@ -70,6 +71,7 @@ public:
                      size_t length, size_t srcOffset, size_t dstOffset, bool non_blocking);
   void flush();
   void executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results, SyncType syncType = SyncType::NONE);
+  void addCompletedHandler(MTLCommandBufferHandler block);
 
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const { return _stream.device_index(); }
@@ -125,21 +127,27 @@ class TORCH_API MPSStreamImpl
 
 struct TORCH_API MPSEvent
 {
-  MPSEvent();
-  // MPSEvent(id<MTLDevice> device);
-
+  // for a new instance of MPSEvent, sometimes we want an empty shell and don't
+  // necessarily want to create events or listeners. So we defer initialization
+  // until we actually use the event (e.g., record, notify, etc.)
+  MPSEvent(bool deferInitialization = true);
   ~MPSEvent();
   MTLSharedEvent_t event() const {return _event; }
 
-  void recordEvent(MPSStream *stream);
-  void waitForEvent(MPSStream *queue); // waits on the cpu
-  bool queryEvent();
-  uint64_t getCurrentValue() { return _currentValue; }
-  void setCurrentValue(uint64_t currValue) { _currentValue = currValue; }
+  void recordEvent(bool syncEvent = false);
+  void waitForEvent(bool syncEvent = false); // waits on the cpu
+  void notifyEvent(MTLSharedEventNotificationBlock block);
+  bool queryEvent() const;
+  uint64_t getCurrentValue() const { return _signalCounter; }
+  void setCurrentValue(uint64_t currValue) { _signalCounter = currValue; }
 private:
-  bool _isRecorded = false;
-  uint64_t  _currentValue = 0;
+  bool is_initialized;
+  uint64_t _signalCounter;
+  MPSStream* _stream;
   MTLSharedEvent_t _event;
+  MTLSharedEventListener* _listener;
+
+  void initialize();
 };
 
 typedef MPSEvent* mpsEvent_t;

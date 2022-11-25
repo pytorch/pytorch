@@ -29,7 +29,7 @@ Here is an example of a simple synchronization error in PyTorch:
 
 The ``a`` tensor is initialized on the default stream and, without any synchronization
 methods, modified on a new stream. The two kernels will run concurrently on the same tensor,
-which might cause the second kernel to read unitialized data before the first one was able
+which might cause the second kernel to read uninitialized data before the first one was able
 to write it, or the first kernel might overwrite part of the result of the second.
 When this script is run on the commandline with:
 ::
@@ -44,7 +44,7 @@ the following output is printed by CSAN:
     CSAN detected a possible data race on tensor with data pointer 139719969079296
     Access by stream 94646435460352 during kernel:
     aten::mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-    writing to argument: self, out, output
+    writing to argument(s) self, out, and to the output
     With stack trace:
       File "example_error.py", line 6, in <module>
         torch.mul(a, 5, out=a)
@@ -54,7 +54,7 @@ the following output is printed by CSAN:
 
     Previous access by stream 0 during kernel:
     aten::rand(int[] size, *, int? dtype=None, Device? device=None) -> Tensor
-    writing to argument: output
+    writing to the output
     With stack trace:
       File "example_error.py", line 3, in <module>
         a = torch.rand(10000, device="cuda")

@@ -14,6 +14,7 @@ from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
 from typing import Dict, List, TextIO
 
+__all__ = ["tail_logfile", "TailLog"]
 
 log = logging.getLogger(__name__)
 

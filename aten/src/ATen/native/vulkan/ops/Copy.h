@@ -13,7 +13,17 @@ void transfer_cpu_to_vulkan(const Tensor&, vTensor&);
 
 void transfer_vulkan_to_cpu(vTensor&, Tensor&);
 
+void pack_cpu_to_vulkan(const Tensor& src, vTensor& dst);
+
+void pack_vulkan_to_cpu(vTensor& src, Tensor& dst);
+
 Tensor& copy_(Tensor& dst, const Tensor& src);
+
+ops::vTensor to_vulkan(
+    at::Tensor& src,
+    const api::StorageType storage_type = api::StorageType::TEXTURE_3D);
+
+at::Tensor from_vulkan(ops::vTensor& v_src);
 
 //
 // Utility functions for memcpy
@@ -24,7 +34,7 @@ void memcpy_to_mapping_impl(const Tensor& src, api::MemoryMap& dst_mapping) {
   T* data_ptr = dst_mapping.template data<T>();
   memcpy(
       data_ptr,
-      src.contiguous().data_ptr<T>(),
+      src.data_ptr<T>(),
       std::min(src.nbytes(), dst_mapping.nbytes()));
 }
 

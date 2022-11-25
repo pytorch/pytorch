@@ -1,5 +1,6 @@
 #include <ATen/VmapTransforms.h>
 #include <ATen/ATen.h>
+#include <ATen/core/IListRef.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -188,7 +189,7 @@ static Tensor alignBatchDimsAtFront(
 // 4. Expand each physical tensor so that they have output batch size equal
 //    to `batch_sizes`
 VmapPhysicalViewVec
-MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
+MultiBatchVmapTransform::logicalToPhysical(ITensorListRef logical_tensors) {
   // Figure out all of the collective vmap levels in `logical_tensors`.
   std::bitset<kVmapNumLevels> collective_levels;
   for (const auto& logical_tensor : logical_tensors) {

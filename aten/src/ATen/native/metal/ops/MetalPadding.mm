@@ -35,7 +35,7 @@ Tensor reflection_pad2d(const Tensor& input, IntArrayRef padding) {
   }
 
   std::vector<int64_t> output_size(input_dim);
-  for (size_t d = 0; d < input_dim; ++d) {
+  for (int d = 0; d < input_dim; ++d) {
     if (d == input_dim - 1) {
       output_size[d] = input_size[d] + pad_right + pad_left;
     }

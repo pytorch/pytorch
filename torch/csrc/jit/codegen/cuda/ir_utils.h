@@ -106,6 +106,10 @@ class FilteredView {
     return begin() == end();
   }
 
+  std::vector<value_type> vector() const {
+    return std::vector<value_type>(begin(), end());
+  }
+
  private:
   const InputIt input_it_;
   const InputIt last_;
@@ -313,10 +317,15 @@ TORCH_CUDA_CU_API bool isReductionOp(const Expr*);
 // Returns if Expr is a reduction op with TensorView or TensorIndex
 TORCH_CUDA_CU_API bool isReductionTvOp(const Expr*);
 
+// Returns all non-trivial view operations. We shouldn't have trivial view
+// operations but this function is to simply make sure if we ever do we don't
+// pull them in.
+TORCH_CUDA_CU_API std::vector<ViewOp*> getViewOps(Fusion*);
+
 template <typename T>
 std::string toString(const T& nodes) {
   std::stringstream ss;
-  for (Statement* stmt : nodes) {
+  for (const Statement* stmt : nodes) {
     if (ss.tellp() != 0) {
       ss << ", ";
     }

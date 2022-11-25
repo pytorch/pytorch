@@ -81,6 +81,10 @@ class TORCH_API CounterData {
     value_ = 0;
   }
 
+  bool IsValid() const {
+    return value_ > 0;
+  }
+
  private:
   std::atomic<int64_t> value_;
 };
@@ -215,6 +219,11 @@ class TORCH_API Counter {
 
 // Creates a report with the current metrics statistics.
 TORCH_API std::string CreateMetricReport();
+
+// Creates a report with the selected metrics statistics.
+TORCH_API std::string CreateMetricReport(
+    const std::vector<std::string>& counter_names,
+    const std::vector<std::string>& metric_names);
 
 // Returns the currently registered metric names. Note that the list can grow
 // since metrics are usually function intialized (they are static function

@@ -619,11 +619,11 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("curand_poisson.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         ("curand_precalc.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         ("curand_uniform.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("cusparse.h", ("hipsparse.h", CONV_INCLUDE, API_RAND)),
-        ("cufft.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
-        ("cufftXt.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
+        ("cusparse.h", ("hipsparse.h" if rocm_version < (5, 2, 0) else "hipsparse/hipsparse.h", CONV_INCLUDE, API_RAND)),
+        ("cufft.h", ("hipfft.h" if rocm_version < (5, 2, 0) else "hipfft/hipfft.h", CONV_INCLUDE, API_BLAS)),
+        ("cufftXt.h", ("hipfftXt.h" if rocm_version < (5, 2, 0) else "hipfft/hipfftXt.h", CONV_INCLUDE, API_BLAS)),
         # PyTorch also has a source file named "nccl.h", so we need to "<"">" to differentiate
-        ("<nccl.h>", ("<rccl.h>", CONV_INCLUDE, API_RUNTIME)),
+        ("<nccl.h>", ("<rccl.h>" if rocm_version < (5, 2, 0) else "<rccl/rccl.h>", CONV_INCLUDE, API_RUNTIME)),
         ("nvrtc.h", ("hip/hiprtc.h", CONV_INCLUDE, API_RTC)),
         ("thrust/system/cuda", ("thrust/system/hip", CONV_INCLUDE, API_BLAS)),
         ("cub/util_allocator.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
@@ -7920,6 +7920,9 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
         ("cusparseSpGEMM_createDescr", ("hipsparseSpGEMM_createDescr", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseDnMatSetStridedBatch", ("hipsparseDnMatSetStridedBatch", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseSpGEMM_copy", ("hipsparseSpGEMM_copy", CONV_MATH_FUNC, API_SPARSE)),
+        ("cusparseSDDMM_bufferSize", ("hipsparseSDDMM_bufferSize", CONV_MATH_FUNC, API_SPARSE)),
+        ("cusparseSDDMM_preprocess", ("hipsparseSDDMM_preprocess", CONV_MATH_FUNC, API_SPARSE)),
+        ("cusparseSDDMM", ("hipsparseSDDMM", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseSpGEMM_compute", ("hipsparseSpGEMM_compute", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseSpGEMM_workEstimation", ("hipsparseSpGEMM_workEstimation", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseSpMatGetSize", ("hipsparseSpMatGetSize", CONV_MATH_FUNC, API_SPARSE)),
@@ -7947,6 +7950,7 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
         ("CUSPARSE_COOMV_ALG", ("HIPSPARSE_COOMV_ALG", CONV_NUMERIC_LITERAL, API_SPARSE)),
         ("CUSPARSE_CSRMM_ALG1", ("HIPSPARSE_CSRMM_ALG1", CONV_NUMERIC_LITERAL, API_SPARSE)),
         ("CUSPARSE_SPGEMM_DEFAULT", ("HIPSPARSE_SPGEMM_DEFAULT", CONV_NUMERIC_LITERAL, API_SPARSE)),
+        ("CUSPARSE_SDDMM_ALG_DEFAULT", ("HIPSPARSE_SDDMM_ALG_DEFAULT", CONV_NUMERIC_LITERAL, API_SPARSE)),
         (
             "CUSPARSE_STATUS_SUCCESS",
             ("HIPSPARSE_STATUS_SUCCESS", CONV_NUMERIC_LITERAL, API_SPARSE),
@@ -8076,6 +8080,20 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ),
         (
             "CUDACachingAllocator::recordStream",
+            (
+                "HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA",
+                API_PYTORCH,
+            ),
+        ),
+        (
+            "cuda::CUDAAllocator::recordStream",
+            (
+                "hip::HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA",
+                API_PYTORCH,
+            ),
+        ),
+        (
+            "CUDAAllocator::recordStream",
             (
                 "HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA",
                 API_PYTORCH,
@@ -8291,6 +8309,9 @@ C10_MAPPINGS = collections.OrderedDict(
         ("setCurrentCUDAStream", ("setCurrentHIPStream", API_C10)),
         ("cuda::CUDACachingAllocator", ("hip::HIPCachingAllocator", API_C10)),
         ("CUDACachingAllocator", ("HIPCachingAllocator", API_C10)),
+        ("c10::cuda::CUDAAllocator", ("c10::hip::HIPAllocator", API_C10)),
+        ("cuda::CUDAAllocator", ("hip::HIPAllocator", API_C10)),
+        ("CUDAAllocator", ("HIPAllocator", API_C10)),
         ("C10_CUDA_KERNEL_LAUNCH_CHECK", ("C10_HIP_KERNEL_LAUNCH_CHECK", API_C10))
     ]
 )
