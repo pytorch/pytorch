@@ -8,6 +8,7 @@
 [repositories]
   bazel_skylib = third_party/bazel-skylib/
   ovr_config = .
+  prelude = prelude-shim
 
 [download]
   in_build = true
