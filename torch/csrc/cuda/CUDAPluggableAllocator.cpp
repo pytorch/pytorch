@@ -302,7 +302,7 @@ createCustomAllocator(
 void changeCurrentAllocator(
     std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator) {
   TORCH_CHECK(
-      !getCurrentAllocator()->initialized(),
+      !c10::cuda::CUDACachingAllocator::allocator.load()->initialized(),
       "Can't swap an already initialized allocator");
   c10::cuda::CUDACachingAllocator::allocator.store(allocator.get());
   current_custom_allocator = allocator;
