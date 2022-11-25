@@ -33,6 +33,7 @@ from torch._dynamo.utils import clone_inputs
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map
 
@@ -86,74 +87,47 @@ CI_SKIP_AOT_EAGER_TRAINING = [
 CI_SKIP_INDCUTOR_INFERENCE = [
     *CI_SKIP_AOT_EAGER_INFERENCE,
     # TorchBench
+    "DALLE2_pytorch",
     "detectron2",
-    "hf_Reformer",
+    "hf_T5",  # accuracy
+    "hf_BigBird",  # accuracy
+    "hf_GPT2_large",  # OOM
+    "maml",  # accuracy
+    "mobilenet_v2_quantized_qat",  # The eval test only supports CPU
     "moco",  # accuracy
+    "pytorch_struct",  # Test eval is not implemented
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
     "tacotron2",
     "vision_maskrcnn",  # accuracy
-    "yolov3",  # Accuracy
     # Huggingface
-    "BigBird",
-    "YituTechConvBert",
+    "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
     "ghostnet_100",  # Accuracy
-    "swin_base_patch4_window7_224",  # Accuracy
-    # Trying to get CI working - https://github.com/pytorch/pytorch/pull/87588
-    "visformer_small",  # fails accuracy on CI but passes locally
 ]
 
 CI_SKIP_INDUCTOR_TRAINING = [
-    # CI does not check accuracy for inductor training yet
-    # *CI_SKIP_AOT_EAGER_TRAINING,
-    # *CI_SKIP_INDCUTOR_INFERENCE,
+    *CI_SKIP_INDCUTOR_INFERENCE,
     # TorchBench
-    "DALLE2_pytorch",
-    "detectron2",
-    "functorch_dp_cifar10",
-    "mobilenet_v3_large",
-    "moco",
-    "tacotron2",
-    "vision_maskrcnn",  # from functionalization
-    # OOM
-    "Background_Matting",
-    "fastNLP_Bert",
-    "hf_BigBird",
-    "hf_T5_base",  # fp64_OOM
-    "mobilenet_v2",
-    "mobilenet_v2_quantized_qat",
-    "resnet50_quantized_qat",
-    "timm_regnet",
+    "Background_Matting",  # fp64_OOM
+    "mobilenet_v3_large",  # accuracy
+    "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
-    "AllenaiLongformerBase",
-    "AlbertForMaskedLM",  # OOM
-    "BartForConditionalGeneration",  # OOM
+    "BlenderbotForCausalLM",  # OOM
+    "GoogleFnet",  # Eager model failed to run
     "M2M100ForConditionalGeneration",  # OOM
-    "MBartForConditionalGeneration",  # OOM
-    "MT5ForConditionalGeneration",  # OOM
-    "PegasusForConditionalGeneration",  # OOM
-    "XGLMForCausalLM",  # fp64_OOM
-    "DebertaV2ForMaskedLM",  # OOM
-    "DebertaV2ForQuestionAnswering",  # OOM
-    # OOM
-    "BigBird",
-    "TrOCRForCausalLM",
-    "AlbertForQuestionAnswering",
+    "XGLMForCausalLM",  # OOM
     # TIMM
-    "cait_m36_384",  # fp64_OOM
-    "coat_lite_mini",  # time out
     "convit_base",  # fp64_OOM
-    "gernet_l",  # accuracy
-    "gluon_xception65",
-    "hrnet_w18",  # accuracy
-    "lcnet_0500",  # accuracy
-    "levit_128",  # levit_128
-    "poolformer_m36",
+    "eca_halonext26ts",  # accuracy
+    "fbnetv3_b",  # accuracy
+    "levit_128",  # fp64_OOM
+    "res2net101_26w_4s",  # accuracy
+    "resnest101e",  # accuracy
     "rexnet_100",  # accuracy
-    "swin_base_patch4_window7_224",
-    "twins_pcpvt_base",  # time out
+    "spnasnet_100",  # accuracy
+    "swin_base_patch4_window7_224",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
@@ -269,6 +243,7 @@ def print_summary(filename):
 def tensor_is_on_xla(tensors):
     if not isinstance(tensors, (tuple, list)):
         tensors = [tensors]
+    tensors = [x for x in tensors if isinstance(x, torch.Tensor)]
     return any(map(lambda x: x.device.type == "xla", tensors))
 
 
@@ -1090,6 +1065,10 @@ class BenchmarkRunner:
             model = copy.deepcopy(model)
             if self.args.ddp:
                 model = DDP(model, find_unused_parameters=True)
+            elif self.args.fsdp:
+                model = FSDP(model)
+                torch._inductor.config.triton.cudagraphs = False
+                log.warn("Disabling cudagraphs for FSDP compatibility")
             return model
 
         # Collect the fp64 reference outputs to be used later for accuracy checking.
@@ -1313,6 +1292,8 @@ class BenchmarkRunner:
             print("RUNNING ON BRANCH:", branch)
         mode = "train" if self.args.training else "eval"
         print(f"{current_device:4} {mode:5} {current_name:34} ", end="", flush=True)
+        start_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
+        start_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
         if self.args.accuracy:
             status = self.check_accuracy(
                 name, model, example_inputs, optimize_ctx, experiment
@@ -1323,8 +1304,13 @@ class BenchmarkRunner:
                 name, model, example_inputs, optimize_ctx, experiment
             )
             print(status)
+        end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
+        end_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
         if explain:
-            print(torch._dynamo.explain(model, *example_inputs)[0])
+            print(
+                f"Dynamo produced {end_unique_graphs-start_unique_graphs} graph(s) "
+                f"covering {end_calls_captured-start_calls_captured} ops"
+            )
 
 
 def help(fn):
@@ -1447,6 +1433,13 @@ def parse_args(args=None):
         help="Wraps model in DDP before running it, and uses dynamo DDPOptmizer (graph breaks) by default.",
     )
     parser.add_argument(
+        "--fsdp",
+        action="store_true",
+        help="""Wraps model in FSDP before running it. Disables cudagraphs by default.
+        Doesn't recursively wrap, mainly useful for checking dynamo UnspecNNModule compatibility
+    """,
+    )
+    parser.add_argument(
         "--no-optimize-ddp",
         action="store_true",
         help="Disables dynamo DDPOptimizer (graph breaks). (Applies only when using --ddp benchmark mode).",
@@ -1515,7 +1508,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--explain",
         action="store_true",
-        help="run .explain() on the graph at the end of the run.",
+        help="print some graph/op statistics during the run, similar to .explain()",
     )
 
     parser.add_argument(
@@ -1637,7 +1630,7 @@ def parse_args(args=None):
 def main(runner, original_dir=None):
     args = parse_args()
     with maybe_init_distributed(
-        args.ddp and args.only, port=args.distributed_master_port
+        (args.ddp or args.fsdp) and args.only, port=args.distributed_master_port
     ):
         return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
             runner, args, original_dir

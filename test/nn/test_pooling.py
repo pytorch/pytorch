@@ -130,6 +130,9 @@ class TestAvgPool(TestCase):
 
 
 class TestPoolingNN(NNTestCase):
+    _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
+
     def test_adaptive_pooling_input_size(self):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
