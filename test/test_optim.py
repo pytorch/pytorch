@@ -10,7 +10,7 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.nn import Parameter
-from torch.optim import SGD
+from torch.optim import Optimizer, SGD
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, StepLR, \
     MultiStepLR, ConstantLR, LinearLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
@@ -19,6 +19,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     parametrize, instantiate_parametrized_tests, gradcheck, skipIfRocm
+from typing import Any, Dict, Tuple
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -1149,68 +1150,6 @@ class TestOptim(TestCase):
             for original_param, param in zip(original_params, net.parameters()):
                 # assert that the parameters have not changed
                 self.assertEqual(original_param, param)
-
-    def test_pre_hook(self):
-
-        def pre_hook(optimizer, empty_args, empty_dict):
-            data.append(1)
-
-        data = []
-        empty_args = ()
-        empty_dict = {}
-        params = [torch.Tensor([1, 1])]
-
-        self.assertEqual(len(data), 0)
-        optimizer = SGD(params, lr=0.001)
-        handles = []
-        pre_hook_handle = optimizer.register_step_pre_hook(pre_hook)
-        handles.append(pre_hook_handle)
-
-        optimizer.step()
-        self.assertEqual(len(data), 1)
-
-        optimizer.step()
-        # check if pre hooks were registered
-        self.assertEqual(len(data), 2)
-        self.assertListEqual(data, [1, 1])
-
-        # remove handles, take step and verify that hook is no longer registered
-        while len(handles) > 0:
-            elt = handles.pop()
-            elt.remove()
-
-        optimizer.step()
-        self.assertEqual(len(data), 2)
-
-    def test_post_hook(self):
-
-        def post_hook(optimizer2, empty_args2, empty_dict2):
-            _ = post_hook_data.pop(0)
-
-        post_hook_data = [1, 3, 5, 7, 9]
-        empty_args2 = ()
-        empty_dict2 = {}
-        params2 = [torch.Tensor([2, 2])]
-
-        optimizer2 = SGD(params2, lr=0.01)
-        post_hook_handle = optimizer2.register_step_post_hook(post_hook)
-        post_handles = []
-        post_handles.append(post_hook_handle)
-
-        optimizer2.step()
-        optimizer2.step()
-
-        # check if post hooks were registered
-        assert len(post_hook_data) == 3
-        assert post_hook_data == [5, 7, 9]
-
-        # remove handles, take step and verify that hook is no longer registered
-        while len(post_handles) > 0:
-            elt = post_handles.pop()
-            elt.remove()
-
-        optimizer2.step()
-        assert len(post_hook_data) == 3
 
 
 class SchedulerTestNet(torch.nn.Module):
@@ -3249,6 +3188,95 @@ class TestDifferentiableOptimizer(TestCase):
             (p, grad, state, torch.optim.RAdam,
              {'lr': 0.9, 'differentiable': True}, *state.values())
         )
+
+
+class TestOptimizerHook(TestCase):
+    optimizer: SGD
+
+    @classmethod
+    def setUpClass(cls):
+        params = [torch.Tensor([1, 1])]
+        cls.optimizer = SGD(params, lr=0.001)
+
+    def test_post_hook(self):
+        def post_hook(optimizer: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data += 2
+
+        data = 2
+        handles = []
+        hook_handle = self.optimizer.register_step_pre_hook(post_hook)
+        handles.append(hook_handle)
+
+        self.optimizer.step()
+        self.optimizer.step()
+        # check if pre hooks were registered
+        assert data == 6
+
+        # remove handles, take step and verify that hook is no longer registered
+        while len(handles) > 0:
+            elt = handles.pop()
+            elt.remove()
+
+        self.optimizer.step()
+        assert data == 6
+
+    def test_pre_hook(self):
+
+        def pre_hook(optimizer: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data += 2
+
+        data = 5
+        handles = []
+        hook_handle = self.optimizer.register_step_pre_hook(pre_hook)
+        handles.append(hook_handle)
+
+        self.optimizer.step()
+        self.optimizer.step()
+        # check if pre hooks were registered
+        assert data == 9
+
+        # remove handles, take step and verify that hook is no longer registered
+        while len(handles) > 0:
+            elt = handles.pop()
+            elt.remove()
+
+        self.optimizer.step()
+        assert data == 9
+
+    def test_pre_and_post_hook(self):
+
+        def pre_hook(optimizer: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(2)
+
+        def post_hook(optimizer: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+            nonlocal data
+            data.append(1)
+
+        data = []
+        pre_handles, post_handles = [], []
+        pre_handle = self.optimizer.register_step_pre_hook(pre_hook)
+        post_handle = self.optimizer.register_step_post_hook(post_hook)
+        pre_handles.append(pre_handle)
+        post_handles.append(post_handle)
+
+        self.optimizer.step()
+        assert data == [2, 1]
+        self.optimizer.step()
+        assert data == [2, 1, 2, 1]
+
+        while len(pre_handles) > 0:
+            elt = pre_handles.pop()
+            elt.remove()
+
+        while len(post_handles) > 0:
+            elt = post_handles.pop()
+            elt.remove()
+
+        self.optimizer.step()
+        assert data == [2, 1, 2, 1]
 
 
 if __name__ == '__main__':
