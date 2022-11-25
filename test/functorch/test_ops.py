@@ -517,11 +517,13 @@ class TestOperators(TestCase):
         # This is expected to fail as the operator
         # expects last dim to have stride=1
         xfail('view_as_complex'),
+        # RuntimeError: query: last dimension must be contiguous
+        xfail('nn.functional._scaled_dot_product_attention', device_type='cuda'),
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
         xfail('as_strided_scatter'),
-        skip('_softmax_backward_data', device_type='cpu'),
+        xfail('_softmax_backward_data', device_type='cpu'),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
