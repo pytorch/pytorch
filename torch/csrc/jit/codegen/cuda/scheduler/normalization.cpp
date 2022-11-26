@@ -1064,10 +1064,8 @@ TORCH_CUDA_CU_API void schedulePersistentKernel(
       reference_tv,
       reduction_tvs,
       cached_inputs,
-      cached_outputs);
-  for (auto output : dummy_outputs) {
-    fusion->removeOutput(output);
-  }
+      cached_outputs,
+      dummy_outputs);
 }
 
 } // namespace cuda
