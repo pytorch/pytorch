@@ -18,8 +18,6 @@
 #include <ATen/ops/empty.h>
 #endif
 
-#include <ATen/native/AdaptivePooling.h>
-
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -331,8 +329,6 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_cuda)
   TensorArg grad_output_arg{gradOutput, "gradOutput", 2};
   TensorArg input_arg{input, "input", 3};
   TensorArg indices_arg{indices, "indices", 4};
-
-  adaptive_pool_empty_output_check(gradOutput, "adaptive_max_pool2d_backward");
 
   checkAllSameGPU(
       __func__,

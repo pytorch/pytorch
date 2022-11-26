@@ -376,22 +376,23 @@ class TestPoolingNNDeviceType(NNTestCase):
         mod = torch.nn.AdaptiveAvgPool3d((5, 5, 5)).to(device)
         _test_module_empty_input(self, mod, inp, check_size=False)
 
-    def test_adaptive_pooling_empty_output_size(self):
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16, torch.float16)
+    def test_adaptive_pooling_empty_output_size(self, dtype, device):
         error_msg = "Expected grad_output to have non-zero size for non-batch dimensions"
 
-        for device in ['cpu', 'cuda']:
-            input = torch.rand([1, 64, 10, 9], device=device, requires_grad=True)
+        input = torch.rand([1, 64, 10, 9], dtype=dtype, device=device, requires_grad=True)
+        output_size = 0
+
+        for dim, pool_type in itertools.product((2, 3), ('avg', 'max')):
+            cls_name = 'adaptive_{}_pool{}d'.format(pool_type, dim)
+            module_cls = getattr(nn.functional, cls_name)
             output_size = 0
 
-            for numel in (2, 3):
-                for pool_type in ('max', 'avg'):
-                    cls_name = 'adaptive_{}_pool{}d'.format(pool_type, numel)
-                    module_cls = getattr(nn.functional, cls_name)
-                    output_size = 0
-
-                    with self.assertRaisesRegex(RuntimeError, error_msg):
-                        res = module_cls(input, output_size)
-                        res.sum().backward()
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                res = module_cls(input, output_size)
+                res.sum().backward()
 
     @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_batch(self, device):
