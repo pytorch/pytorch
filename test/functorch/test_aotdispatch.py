@@ -995,10 +995,7 @@ def forward(self, primals_1, primals_2):
 
         fxy = aot_module_simplified(F(), nop)
         fxy(x, y)
-        self.assertExpectedRaisesInline(
-            AssertionError, lambda: fxy(x, x),
-            """At compilation time, this graph was compiled under the assumption that there would be 2 distinct arguments, but at runtime there were only 1 distinct arguments.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
-        )
+        fxy(x, x)  # is ok!
 
         fxx = aot_module_simplified(F(), nop)
         fxx(x, x)

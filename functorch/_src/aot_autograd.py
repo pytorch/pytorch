@@ -1129,12 +1129,20 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                     f"input {i} was not a duplicate of {add_dupe_map[i]}.  " +
                     GUARD_BUG_BOILERPLATE
                 )
+            # This is only an error if there is metadata mutation on both of
+            # the duped arguments; in this case, we need to know what order
+            # the metadata mutation applies in.  You'll get the correct result
+            # otherwise, because a graph that assumes distinct inputs works if
+            # you dupe the inputs (the gradient contributions from each input
+            # will get summed up appropriately.)
+            """
             assert len(seen) == unique_args, (
                 "At compilation time, this graph was compiled under the assumption "
                 f"that there would be {unique_args} distinct arguments, but at "
                 f"runtime there were only {len(seen)} distinct arguments.  " +
                 GUARD_BUG_BOILERPLATE
             )
+            """
             return f(*args)
 
         return debug_wrapper
