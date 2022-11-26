@@ -48,6 +48,22 @@ class ScaleLayer(torch.nn.Module):
         return x * self.scale
 
 
+class LazyLinear(torch.nn.Module):
+    def __init__(self, in_features: int, out_features: int):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+
+    def forward(self, x) -> torch.Tensor:
+        if getattr(self, "weight", None) is None:
+            self.weight = torch.nn.Parameter(
+                torch.empty((self.out_features, self.in_features))
+            )
+            self.bias = torch.nn.Parameter(torch.empty(self.out_features))
+
+        return torch.nn.functional.linear(x, self.weight, self.bias)
+
+
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestIdentifyGradients(TestCase):
     def gradient_detected(
@@ -775,7 +791,6 @@ class TestDataFlow(TestCase):
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2E(TestCase):
-
     @staticmethod
     def _lookup_tensor_categories(
         t: torch.Tensor, memory_profile: _memory_profiler.MemoryProfile
@@ -799,25 +814,24 @@ class TestMemoryProfilerE2E(TestCase):
             if key.storage.allocation_id == max(ids | {-1})
         }
 
-    def _run_and_check_gradients(self, inner_fn, model):
+    def _run_and_check_parameters_and_gradients(self, inner_fn, model):
 
         with profile() as prof:
             inner_fn()
 
         memory_profile = prof._memory_profile()
+
+        def assert_category(t: torch.Tensor, category: _memory_profiler.Category):
+            self.assertIsNotNone(t)
+            categories = self._lookup_tensor_categories(t, memory_profile)
+            self.assertGreater(len(categories), 0)
+            self.assertTrue(all(c == category for c in categories.values()), categories)
+
         for p in model.parameters():
-            self.assertIsNotNone(p.grad)
+            assert_category(p, _memory_profiler.Category.PARAMETER)
+            assert_category(p.grad, _memory_profiler.Category.GRADIENT)
 
-            p_grad_categories = self._lookup_tensor_categories(p.grad, memory_profile)
-            self.assertGreater(len(p_grad_categories), 0)
-            self.assertTrue(
-                all(
-                    category == _memory_profiler.Category.GRADIENT
-                    for category in p_grad_categories.values()
-                )
-            )
-
-    def test_gradients(self):
+    def test_parameters_and_gradients(self):
         model = torch.nn.Sequential(
             torch.nn.Linear(2, 2), ScaleLayer(), torch.nn.Linear(2, 1), ScaleLayer()
         )
@@ -836,22 +850,22 @@ class TestMemoryProfilerE2E(TestCase):
         # created when we call `model.forward`, so if we don't call `.backward`
         # then gradients are never created.
         with self.assertRaises(AssertionError):
-            self._run_and_check_gradients(inner_fn=fwd_only, model=model)
+            self._run_and_check_parameters_and_gradients(inner_fn=fwd_only, model=model)
 
         # On the first step we must rely on `AccumulateGrad`, since gradients
         # did not exist when `model.forward` was called.
         self.assertTrue(all(p.grad is None for p in model.parameters()))
-        self._run_and_check_gradients(inner_fn=fwd_bwd_step, model=model)
+        self._run_and_check_parameters_and_gradients(inner_fn=fwd_bwd_step, model=model)
 
         # After one step the python tracer will also flag gradients.
         self.assertTrue(not any(p.grad is None for p in model.parameters()))
-        self._run_and_check_gradients(inner_fn=fwd_bwd_step, model=model)
+        self._run_and_check_parameters_and_gradients(inner_fn=fwd_bwd_step, model=model)
 
         # The parameter gradients are not used but we still detect them with
         # the python tracer.
-        self._run_and_check_gradients(inner_fn=fwd_only, model=model)
+        self._run_and_check_parameters_and_gradients(inner_fn=fwd_only, model=model)
 
-    def test_gradients_set_to_none(self):
+    def test_parameters_and_gradients_set_to_none(self):
         model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1))
         optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 
@@ -867,14 +881,41 @@ class TestMemoryProfilerE2E(TestCase):
 
         fwd_bwd_step()
         self.assertTrue(not any(p.grad is None for p in model.parameters()))
-        self._run_and_check_gradients(inner_fn=fwd_bwd_step, model=model)
+        self._run_and_check_parameters_and_gradients(inner_fn=fwd_bwd_step, model=model)
 
         optimizer.zero_grad(set_to_none=True)
         self.assertTrue(all(p.grad is None for p in model.parameters()))
-        self._run_and_check_gradients(inner_fn=fwd_bwd_step, model=model)
+        self._run_and_check_parameters_and_gradients(inner_fn=fwd_bwd_step, model=model)
 
     def test_inputs_fwd(self):
         model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1))
+        inputs = [torch.ones((2, 2)) for _ in range(2)]
+
+        with profile() as prof:
+            # Inputs which were allocated before profiling began
+            for x in inputs:
+                _ = model(x)
+
+            # Inputs which were allocated after profiling began
+            for _ in range(2):
+                x = torch.ones((2, 2))
+                inputs.append(x)
+                _ = model(x)
+
+        memory_profile = prof._memory_profile()
+        for x in inputs:
+            categories = self._lookup_tensor_categories(x, memory_profile)
+            self.assertGreater(len(categories), 0)
+            self.assertTrue(
+                all(i == _memory_profiler.Category.INPUT for i in categories.values()),
+                categories,
+            )
+
+        snapshot = memory_profile._category_snapshot()
+        self.assertTrue(_memory_profiler.Category.INPUT in snapshot.values())
+
+    def test_inputs_fwd_lazy(self):
+        model = torch.nn.Sequential(LazyLinear(2, 2), LazyLinear(2, 1))
         inputs = [torch.ones((2, 2)) for _ in range(2)]
 
         with profile() as prof:
@@ -895,10 +936,10 @@ class TestMemoryProfilerE2E(TestCase):
         for x in inputs:
             categories = self._lookup_tensor_categories(x, memory_profile)
             self.assertGreater(len(categories), 0)
-            self.assertTrue(all(i is None for i in categories.values()))
+            self.assertTrue(all(i is None for i in categories.values()), categories)
 
         snapshot = memory_profile._category_snapshot()
-        self.assertFalse({k: v for k, v in snapshot.items() if v})
+        self.assertFalse(_memory_profiler.Category.INPUT in snapshot.values())
 
     def test_inputs_fwd_bwd(self):
         model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1))
@@ -935,6 +976,42 @@ class TestMemoryProfilerE2E(TestCase):
         for x, targets in inputs_targets:
             check(x)
             check(targets)
+
+    def test_lazily_initialized(self) -> None:
+        model = torch.nn.Sequential(
+            torch.nn.Linear(2, 2),
+            torch.nn.ReLU(),
+            LazyLinear(2, 2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(2, 1),
+        )
+
+        self.assertEqual(len(list(model.parameters())), 4)
+
+        def inner_fn():
+            y = model(torch.ones((2, 2)))
+            torch.nn.functional.mse_loss(y, torch.rand((2, 1))).backward()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+            optimizer.step()
+            optimizer.zero_grad()
+
+        self._run_and_check_parameters_and_gradients(inner_fn=inner_fn, model=model)
+        self.assertEqual(len(list(model.parameters())), 6)
+
+    def test_manual_optimizer_step(self) -> None:
+        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1))
+
+        def inner_fn():
+            y = model(torch.ones((2, 2)))
+            torch.nn.functional.mse_loss(y, torch.rand((2, 1))).backward()
+
+            with torch.no_grad():
+                for p in model.parameters():
+                    grad = p.grad
+                    self.assertIsNotNone(grad)
+                    p.add_(grad, alpha=-0.1)
+
+        self._run_and_check_parameters_and_gradients(inner_fn=inner_fn, model=model)
 
 
 if __name__ == "__main__":

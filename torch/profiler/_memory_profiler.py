@@ -34,6 +34,7 @@ class Category(enum.Enum):
     INPUT = enum.auto()
     TEMPORARY = enum.auto()
     GRADIENT = enum.auto()
+    PARAMETER = enum.auto()
 
 
 @dataclasses.dataclass
@@ -108,9 +109,9 @@ class TensorKey:
         return self.id, self.storage.allocation_id, self.device.type, self.device.index
 
 
-def extract_gradients(
+def _extract_parameters_and_gradients(
     node: _ProfilerEvent,
-) -> Iterator[Tuple[Optional[TensorKey], TensorKey]]:
+) -> Iterator[Tuple[Optional[TensorKey], Optional[TensorKey]]]:
     children = node.children
 
     # AccumulateGrad is used in the Autograd engine to handle gradient updates.
@@ -132,9 +133,7 @@ def extract_gradients(
         and children[0].typed[1].inputs
         and isinstance(children[0].typed[1].inputs[0], _TensorMetadata)
     ):
-        key = TensorKey.from_tensor(children[0].typed[1].inputs[0])
-        if key:
-            yield None, key
+        yield None, TensorKey.from_tensor(children[0].typed[1].inputs[0])
 
     # We directly instrument `torch.nn.Module` and `torch.optim.Optimizer`
     # NOTE: The values captured by the python tracer are cached; they can be
@@ -145,15 +144,25 @@ def extract_gradients(
         assert typed_fields.module is None or typed_fields.optimizer is None
         if typed_fields.module is not None:
             for _, p, p_grad in typed_fields.module.parameters:
-                p_grad_key = TensorKey.from_tensor(p_grad)
-                if p_grad_key is not None:
-                    yield TensorKey.from_tensor(p), p_grad_key
+                yield TensorKey.from_tensor(p), TensorKey.from_tensor(p_grad)
 
         if typed_fields.optimizer is not None:
             for p, p_grad, _ in typed_fields.optimizer.parameters:
-                p_grad_key = TensorKey.from_tensor(p_grad)
-                if p_grad_key is not None:
-                    yield TensorKey.from_tensor(p), p_grad_key
+                yield TensorKey.from_tensor(p), TensorKey.from_tensor(p_grad)
+
+
+def extract_parameters(node: _ProfilerEvent) -> Iterator[TensorKey]:
+    for p, p_grad in _extract_parameters_and_gradients(node):
+        if p is not None:
+            yield p
+
+
+def extract_gradients(
+    node: _ProfilerEvent,
+) -> Iterator[Tuple[Optional[TensorKey], TensorKey]]:
+    for p, p_grad in _extract_parameters_and_gradients(node):
+        if p_grad is not None:
+            yield p, p_grad
 
 
 def get_scopes(event: Optional[_ProfilerEvent]) -> Tuple[RecordScope, ...]:
@@ -547,7 +556,9 @@ class MemoryProfile:
         self._categories = CategoryDict()
 
         self._set_gradients_and_temporaries()
+        self._set_parameters_using_python_tracer()
         self._set_inputs()
+        self._set_parameters_using_data_flow()
 
     def _is_gradient(self, *args, **kwargs) -> bool:
         return self._categories.get(*args, **kwargs) == Category.GRADIENT
@@ -568,6 +579,41 @@ class MemoryProfile:
             for key, version in sorted(all_tensor_versions)
         }
 
+    def _any_version_depends_on_gradient(self) -> Set[int]:
+        """Extract IDs of Tensors which depend or will depend on a gradient.
+
+        Note that this weakened definition of "depends" requires us to loop
+        over the data flow graph multiple times because it allows dependency
+        information to flow backward through edges and removes the guarantee
+        that nodes are topologically sorted. (Or indeed, even that a valid
+        topological order exists.) Put another way, we have converted an
+        acyclic data flow graph into a cyclic graph and we are attempting to
+        partition cycles involving a gradient from the rest of the graph.
+        """
+        depends_on_gradient: Set[int] = set()
+        while True:
+            start_size = len(depends_on_gradient)
+            for node in self._data_flow_graph.flow_nodes:
+                ids = tuple(
+                    key.id
+                    for key, (_, version) in node.inputs.items()
+                    if self._categories.get(key, version)
+                    in (Category.GRADIENT, Category.PARAMETER)
+                    or key.id in depends_on_gradient
+                )
+
+                if ids:
+                    depends_on_gradient.update(ids)
+                    depends_on_gradient.update(key.id for key in node.outputs)
+
+            # We are guaranteed to exit because there is a finite set of
+            # TensorAndID pairs. In practice we do not expect to loop more than
+            # three times: once to identify the core parameter update loop,
+            # once to fold the first step into that loop, and a third time
+            # where no new elements are added.
+            if len(depends_on_gradient) == start_size:
+                return depends_on_gradient
+
     def _set_gradients_and_temporaries(self) -> None:
         """Mark Tensors which are unambiguous and simple to reason about."""
 
@@ -584,6 +630,12 @@ class MemoryProfile:
         for node in self._data_flow_graph.flow_nodes:
             for i in node.intermediates:
                 self._categories.set_by_key(i, Category.TEMPORARY)
+
+    def _set_parameters_using_python_tracer(self) -> None:
+        for event in self._op_tree.dfs():
+            for p in extract_parameters(event):
+                if p is not None:
+                    self._categories.set_by_id(p, Category.PARAMETER)
 
     def _set_inputs(self) -> None:
         """Mark inputs based on which Tensors are updated using gradients.
@@ -604,39 +656,13 @@ class MemoryProfile:
         address this problem we weaken the definition of "depends on a
         gradient" to "any version of this Tensor depends on a gradient",
         which in turn strengthens the criteria for the input set enough to
-        filter the activations in the forward pass of the first step.
+        filter the activations in the forward pass of the first step."""
 
-        Note that this weakened definition requires us to loop over the data
-        flow graph multiple times because it allows dependency information to
-        flow backward through edges and removes the guarantee that nodes are
-        topologically sorted. (Or indeed, even that a valid topological order
-        exists.) Put another way, we have converted an acyclic data flow graph
-        into a cyclic graph and we are attempting to partition cycles involving
-        a gradient from the rest of the graph.
-        """
-
-        # Partition the graph based on gradient updates.
-        depends_on_gradient: Set[int] = set()
-        while True:
-            start_size = len(depends_on_gradient)
-            for node in self._data_flow_graph.flow_nodes:
-                ids = tuple(
-                    key.id
-                    for key, (_, version) in node.inputs.items()
-                    if self._is_gradient(key, version) or key.id in depends_on_gradient
-                )
-
-                if ids:
-                    depends_on_gradient.update(ids)
-                    depends_on_gradient.update(key.id for key in node.outputs)
-
-            # We are guaranteed to exit because there is a finite set of
-            # TensorAndID pairs. In practice we do not expect to loop more than
-            # three times: once to identify the core parameter update loop,
-            # once to fold the first step into that loop, and a third time
-            # where no new elements are added.
-            if len(depends_on_gradient) == start_size:
-                break
+        # All of this analysis is predicated on using at least one training
+        # step (or parameters from the python tracer) to partition the graph.
+        # Absent that we cannot determine which Tensors are inputs and which
+        # ones are part of the model.
+        depends_on_gradient = self._any_version_depends_on_gradient()
 
         # We only want to annotate Tensors which actually contribute to the
         # model calculation.
@@ -644,7 +670,11 @@ class MemoryProfile:
         for node in reversed(self._data_flow_graph.flow_nodes):
             tensors = {(key, version) for key, (_, version) in node.inputs.items()}
             tensors |= node.outputs.items()
-            if any(self._is_gradient(*i) or i in produces_gradient for i in tensors):
+            if any(
+                self._categories.get(*i) in (Category.GRADIENT, Category.PARAMETER)
+                or i in produces_gradient
+                for i in tensors
+            ):
                 produces_gradient |= tensors
 
         # Don't include Tensors created in the backward pass, as these are
@@ -657,3 +687,76 @@ class MemoryProfile:
         for key, version in input_candidates:
             if key.id not in depends_on_gradient:
                 self._categories.setdefault_by_version(key, version, Category.INPUT)
+
+    def _set_parameters_using_data_flow(self) -> None:
+        """Deduce which Tensors are parameters.
+
+        Consider the following code for the step of SGD with momentum
+        (nesterov=False), where `d_p` is the gradient of `param` and `buf` is
+        the momentum buffer.
+        ```
+          buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
+          d_p = buf
+          param.add_(d_p, alpha=-lr)
+        ```
+        Both `param` and `buf` take a gradient and perform an in-place update.
+
+        The python tracer will inspect calls to `nn.Module.forward` and
+        `optim.Optimizer.step` to extract parameter and optimizer state
+        respectively (including parameters), so this is generally a non-issue.
+
+        However as a fallback we can also exploit several properties of
+        parameters to distinguish them from other model state.
+
+        First, they are directly used in the forward pass. (At this point we
+        haven't established which parts of the graph correspond to the forward
+        pass but we can deduce enough to suffice.) Some mutable state such as
+        batch norm moving averages also contribute to the forward pass, but
+        optimizer state does not.
+
+        Second, a parameter is by definition used to compute at least one
+        gradient and depends on at least one gradient.
+        """
+        snapshot = self._category_snapshot()
+
+        # Determine which Tensors might be parameters based on forward pass
+        # data flow. Note this these are only candidates; we filter nodes that
+        # we know are part of the backward pass but that doesn't guarantee that
+        # they are part of the forward pass.
+        candidate_parameters: Set[TensorAndID] = set()
+        candidate_fwd_tensors: Set[TensorAndID] = {
+            i for i, category in snapshot.items() if category == Category.INPUT
+        }
+
+        for node in self._data_flow_graph.flow_nodes:
+            inputs = {(key, value) for key, (_, value) in node.inputs.items()}
+            if (
+                # Don't check nodes in the backward pass.
+                RecordScope.BACKWARD_FUNCTION not in get_scopes(node._event)
+                and not any(self._is_gradient(*i) for i in inputs)
+                and not any(self._is_gradient(*i) for i in node.outputs.items())
+                #
+                # and only check nodes which depend on an input.
+                and candidate_fwd_tensors.intersection(inputs)
+            ):
+                candidate_fwd_tensors |= node.outputs.items()
+                candidate_parameters |= inputs.difference(candidate_fwd_tensors)
+
+        # Require that each parameter eventually contributes to the value of a gradient
+        used_for_gradient: Set[TensorAndID] = set()
+        for node in reversed(self._data_flow_graph.flow_nodes):
+            if any(
+                self._is_gradient(*i) or i in used_for_gradient
+                for i in node.outputs.items()
+            ):
+                for key, (_, version) in node.inputs.items():
+                    used_for_gradient.add((key, version))
+        candidate_parameters.intersection_update(used_for_gradient)
+
+        # and depends on a gradient.
+        parameter_keys = {key.id for key, _ in candidate_parameters}
+        parameter_keys &= self._any_version_depends_on_gradient()
+
+        for key, _ in snapshot.keys():
+            if key.id in parameter_keys:
+                self._categories.set_by_id(key, Category.PARAMETER)
