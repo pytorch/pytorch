@@ -1040,6 +1040,11 @@ def merge_view_inputs(
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
+GUARD_BUG_BOILERPLATE = (
+    "This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."
+)
+
+
 # Wraps aot_dispatch_deduplicated_autograd, ensuring that duplicate arguments
 # are dropped from the inner compilation function.
 #
@@ -1097,9 +1102,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         add_dupe_map[i] = j
         j += 1
 
-    # Fastpath
-    if not dropped_args:
-        return aot_dispatch_deduplicated_autograd(flat_fn, flat_args, aot_config)
+    unique_args = j
 
     # NB: Hot path, avoid set lookups here
     # TODO: Can avoid the zip here too, probably
@@ -1108,6 +1111,45 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     def add_dupe_args(args):
         return [args[add_dupe_map[i]] for i in range(duped_arg_len)]
+
+    def maybe_wrap_debug(f):
+        if not config.debug_assert:
+            return f
+
+        @wraps(f)
+        def debug_wrapper(*args):
+            # Test that the computed remove/add arg functions are an inverse
+            new_args = add_dupe_args(remove_dupe_args(args))
+            seen = {}
+            for i, (x, y) in enumerate(zip(new_args, args)):
+                seen[y] = None
+                assert x is y, (
+                    "At compilation time, this graph was compiled under the "
+                    "assumption that some inputs were duplicate, but at runtime "
+                    f"input {i} was not a duplicate of {add_dupe_map[i]}.  " +
+                    GUARD_BUG_BOILERPLATE
+                )
+            # This is only an error if there is metadata mutation on both of
+            # the duped arguments; in this case, we need to know what order
+            # the metadata mutation applies in.  You'll get the correct result
+            # otherwise, because a graph that assumes distinct inputs works if
+            # you dupe the inputs (the gradient contributions from each input
+            # will get summed up appropriately.)
+            """
+            assert len(seen) == unique_args, (
+                "At compilation time, this graph was compiled under the assumption "
+                f"that there would be {unique_args} distinct arguments, but at "
+                f"runtime there were only {len(seen)} distinct arguments.  " +
+                GUARD_BUG_BOILERPLATE
+            )
+            """
+            return f(*args)
+
+        return debug_wrapper
+
+    # Fastpath
+    if not dropped_args:
+        return maybe_wrap_debug(aot_dispatch_deduplicated_autograd(flat_fn, flat_args, aot_config))
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
@@ -1121,7 +1163,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     def wrapped_compiled_fn(*args):
         return compiled_fn(*remove_dupe_args(args))
 
-    return wrapped_compiled_fn
+    return maybe_wrap_debug(wrapped_compiled_fn)
 
 
 # Like aot_dispatch_autograd, but with the precondition that there
@@ -1457,7 +1499,36 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
         else:
             return fw_outs
 
-    return compiled_function
+    if not config.debug_assert:
+        return compiled_function
+
+    flat_requires_grad = [a.requires_grad if isinstance(a, Tensor) else None for a in flat_args]
+
+    @wraps(compiled_function)
+    def debug_compiled_function(*args):
+        # TODO: Check aliasing relationships
+        # TODO: Check strides for metadata mutation
+        # (NB: ideally, this logic is factored out of this function and
+        # you move these debug checks there)
+
+        # Check requires grad.  Bad case is when we compiled with
+        # requires_grad = False, but input requires_grad = True
+        # (vice versa is OK; we compute a gradient and then throw
+        # it away when it hits the input.)
+        for i, a in enumerate(args):
+            can_require_grad = flat_requires_grad[i]
+            if can_require_grad is None:
+                assert not isinstance(a, Tensor)
+            elif not can_require_grad:
+                assert not a.requires_grad, (
+                    "At compilation time, this graph was compiled under the "
+                    f"assumption that input {i} did not require grad, but at "
+                    f"runtime input {i} requires grad.  " + GUARD_BUG_BOILERPLATE
+                )
+
+        return compiled_function(*args)
+
+    return debug_compiled_function
 
 
 @dynamo_timed
