@@ -773,5 +773,105 @@ class TestDataFlow(TestCase):
         )
 
 
+@skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
+class TestMemoryProfilerE2E(TestCase):
+    @staticmethod
+    def _lookup_tensor_categories(
+        t: torch.Tensor, memory_profile: _memory_profiler.MemoryProfile
+    ) -> Dict[_memory_profiler.TensorAndID, Optional[_memory_profiler.Category]]:
+        storage = t.storage()
+        if storage is None:
+            raise ValueError("Cannot look up uninitialized Tensor.")
+
+        snapshot = memory_profile._category_snapshot()
+        ids = {
+            key.storage.allocation_id
+            for key, _ in snapshot
+            if key.storage.ptr == storage.data_ptr() and key.device == storage.device
+        }
+
+        return {
+            (key, version): category
+            for (key, version), category in memory_profile._category_snapshot().items()
+            #
+            # If a Tensor is live we want the most recent ID
+            if key.storage.allocation_id == max(ids | {-1})
+        }
+
+    def _run_and_check_gradients(self, inner_fn, model):
+
+        with profile() as prof:
+            inner_fn()
+
+        memory_profile = prof._memory_profile()
+        for p in model.parameters():
+            self.assertIsNotNone(p.grad)
+
+            p_grad_categories = self._lookup_tensor_categories(p.grad, memory_profile)
+            self.assertGreater(len(p_grad_categories), 0)
+            self.assertTrue(
+                all(
+                    category == _memory_profiler.Category.GRADIENT
+                    for category in p_grad_categories.values()
+                )
+            )
+
+    def test_gradients(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(2, 2), ScaleLayer(), torch.nn.Linear(2, 1), ScaleLayer()
+        )
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+        def fwd_only():
+            _ = model(torch.ones((2, 2)))
+
+        def fwd_bwd_step():
+            y = model(torch.ones((2, 2)))
+            torch.nn.functional.mse_loss(y, torch.rand((2, 1))).backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+        # If we profile the first step then gradients will not have been
+        # created when we call `model.forward`, so if we don't call `.backward`
+        # then gradients are never created.
+        with self.assertRaises(AssertionError):
+            self._run_and_check_gradients(inner_fn=fwd_only, model=model)
+
+        # On the first step we must rely on `AccumulateGrad`, since gradients
+        # did not exist when `model.forward` was called.
+        self.assertTrue(all(p.grad is None for p in model.parameters()))
+        self._run_and_check_gradients(inner_fn=fwd_bwd_step, model=model)
+
+        # After one step the python tracer will also flag gradients.
+        self.assertTrue(not any(p.grad is None for p in model.parameters()))
+        self._run_and_check_gradients(inner_fn=fwd_bwd_step, model=model)
+
+        # The parameter gradients are not used but we still detect them with
+        # the python tracer.
+        self._run_and_check_gradients(inner_fn=fwd_only, model=model)
+
+    def test_gradients_set_to_none(self):
+        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1))
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+        def fwd_bwd_step():
+            for _ in range(3):
+                # zero grads at the start so gradients are still live to be
+                # checked.
+                optimizer.zero_grad(set_to_none=True)
+
+                y = model(torch.ones((2, 2)))
+                torch.nn.functional.mse_loss(y, torch.rand((2, 1))).backward()
+                optimizer.step()
+
+        fwd_bwd_step()
+        self.assertTrue(not any(p.grad is None for p in model.parameters()))
+        self._run_and_check_gradients(inner_fn=fwd_bwd_step, model=model)
+
+        optimizer.zero_grad(set_to_none=True)
+        self.assertTrue(all(p.grad is None for p in model.parameters()))
+        self._run_and_check_gradients(inner_fn=fwd_bwd_step, model=model)
+
+
 if __name__ == "__main__":
     run_tests()
