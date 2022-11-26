@@ -625,20 +625,24 @@ class Reduction(Loops):
             if isinstance(r, sympy.Expr) and not isinstance(r, sympy.Number)
         ]
         index = None
-        for md in read_writes.reads:
+        for md in sorted(read_writes.reads):
             if all([r in md.index.free_symbols for r in range_vars]):
                 index = md.index
                 break
         if not index:
             # TODO determine splits when all inputs are broadcasted
             return ReductionHint.DEFAULT, 1
-        for md in read_writes.writes:
+        for md in sorted(read_writes.writes):
             write_index = md.index
         xranges = write_index.free_symbols
         reduction_vars = [
             rv for rv in range_vars if rv not in xranges and read_writes.var_ranges[rv] in reduction_ranges
         ]
         strides = V.graph.sizevars.stride_hints(index, reduction_vars)
+        # if numel_hint == 64:
+        #     print("in split", reduction_numel_hint, numel_hint, read_writes, reduction_vars)
+        #     print("strides", index, strides)
+        #     print("reduction", r)
         outer = all([s > 1 for s in strides])
         if not outer:
             return ReductionHint.INNER, inner_reduction_splits(
@@ -952,6 +956,8 @@ class Reduction(Loops):
 
         numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
         if split <= 512 and numel_hint <= 512 and reduction_hint == ReductionHint.OUTER:
+            reduction_hint = ReductionHint.OUTER_TINY
+        if split <= 1024 and numel_hint <= 256 and reduction_hint == ReductionHint.OUTER:
             reduction_hint = ReductionHint.OUTER_TINY
         return TensorBox.create(
             Reduction(
@@ -1751,10 +1757,13 @@ class FlexibleLayout(Layout):
         )
 
     def __init__(self, device, dtype, size, stride_order=None):
+        if stride_order:
+            strides = FlexibleLayout.fill_ordered(size, stride_order)
+        else:
+            strides = FlexibleLayout.contiguous_strides(size)
         super(FlexibleLayout, self).__init__(
-            device, dtype, size, FlexibleLayout.contiguous_strides(size)
+            device, dtype, size, strides
         )
-        self.preferred_stride_order = stride_order
 
 
 class AliasedLayout(Layout):
@@ -1995,9 +2004,9 @@ class ComputedBuffer(Buffer):
         else:
             return partial(self.data.store_output, self.name, indexer)
 
-    def decide_layout(self):
+    def get_fill_order(self):
         """
-        If our layout is still flexible, try to set it based on stride orders of reads.
+        If our layout is still flexible, try to determine the stride order based on stride orders of reads.
 
         TODO(jansel): A better algorithm here would look at downstream consumers of this
                       value and try to do global graph-level layout optimization.
@@ -2037,12 +2046,19 @@ class ComputedBuffer(Buffer):
                 )
                 from .scheduler import pick_loop_order
 
-                self.freeze_layout_with_fill_order(
-                    pick_loop_order(stride_lengths, self.get_size(), priority_idx)
-                )
+                return pick_loop_order(stride_lengths, self.get_size(), priority_idx)
 
+        return None
+
+    def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
-            self.freeze_layout()
+            order = self.get_fill_order()
+            if order:
+                self.freeze_layout_with_fill_order(order)
+            else:
+                self.freeze_layout()
+
+
 
     def simplify_and_reorder(self):
         """
@@ -2116,6 +2132,7 @@ class ComputedBuffer(Buffer):
             sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
                 x_vars,
                 sizes,
+                #index_formulas,
                 index_prevent_reordering(index_formulas, x_vars, sizes),
             )
             x_vars = prune(x_vars)
@@ -3789,6 +3806,13 @@ class StorageBox(MutableBox):
                 size=self.data.get_size(),
             ),
             data=self.data,
+        )
+        order = self.data.get_fill_order()
+        self.data.layout = FlexibleLayout(
+                device=self.data.get_device(),
+                dtype=self.data.get_dtype(),
+                size=self.data.get_size(),
+                stride_order=order
         )
         self.data.name = V.graph.register_buffer(self.data)
         self.data.origins = self.origins
