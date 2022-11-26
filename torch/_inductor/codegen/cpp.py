@@ -2,6 +2,7 @@ import contextlib
 import dataclasses
 import functools
 import math
+import sys
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List
@@ -1370,11 +1371,15 @@ class KernelGroup:
         arg_defs, call_args = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
         code = BracesBuffer()
-        if config.cpp.enable_kernel_profile:
+        # TODO: support kernel profile on other platforms
+        enable_kernel_profile = (
+            config.cpp.enable_kernel_profile and sys.platform == "linux"
+        )
+        if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
         code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
-            if config.cpp.enable_kernel_profile:
+            if enable_kernel_profile:
                 code.writelines(
                     [
                         f'RECORD_FUNCTION("{kernel_name}", c10::ArrayRef<c10::IValue>({{}}));'
