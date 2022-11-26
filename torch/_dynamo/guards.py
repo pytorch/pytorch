@@ -59,6 +59,7 @@ class GuardSource(enum.Enum):
     LOCAL_NN_MODULE = 2
     GLOBAL_NN_MODULE = 3
     CONSTANT = 4
+    RANDOM_VALUE = 5
 
     def select(self, locals_, globals_):
         if self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE):
