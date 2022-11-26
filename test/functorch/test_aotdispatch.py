@@ -984,6 +984,54 @@ def forward(self, primals_1, primals_2):
         x = torch.randn(3, 3, requires_grad=True)
         self.verify_aot_autograd(f, [x, x])
 
+    @patch("functorch._src.config.debug_assert", True)
+    def test_invalid_dupe(self):
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+
+        fxy = aot_module_simplified(F(), nop)
+        fxy(x, y)
+        fxy(x, x)  # is ok!
+
+        fxx = aot_module_simplified(F(), nop)
+        fxx(x, x)
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxx(x, y),
+            """At compilation time, this graph was compiled under the assumption that some inputs were duplicate, but at runtime input 1 was not a duplicate of 0.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
+
+    @patch("functorch._src.config.debug_assert", True)
+    def test_invalid_requires_grad(self):
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+        z = torch.randn(3, 3, requires_grad=False)
+
+        # Non-mutating please!
+        def compare(m1, m2, inps):
+            r1, g1 = _outs_and_grads(m1, inps, inps)
+            r2, g2 = _outs_and_grads(m2, inps, inps)
+            self.assertEqual(r1, r2)
+            self.assertEqual(g1, g2)
+
+        fxy = aot_module_simplified(F(), nop)
+        compare(F(), fxy, (x, y))
+        compare(F(), fxy, (x, z))
+
+        fxz = aot_module_simplified(F(), nop)
+        compare(F(), fxz, (x, z))
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxz(x, y),
+            """At compilation time, this graph was compiled under the assumption that input 1 did not require grad, but at runtime input 1 requires grad.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
+
     def test_resize_input(self):
         def f(x, y):
             y.resize_(4)
