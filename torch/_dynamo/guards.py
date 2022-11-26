@@ -457,6 +457,21 @@ class GuardBuilder:
             # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
             self.tensor_check_ids[tensor_name] = id(value)
 
+            # This is the base fix, we register info about base but we don't
+            # actually guard on it
+            if value._base is not None:
+                if (
+                    id(value._base)
+                    in self.guarded_code.output_graph.tensor_id_to_sym_shape_ref
+                ):
+                    refs = self.guarded_code.output_graph.tensor_id_to_sym_shape_ref[
+                        id(value._base)
+                    ]
+                    for ref in refs:
+                        self.guarded_code.output_graph.base_symbols.update(
+                            {ref.expr: f"{tensor_name}._base"}
+                        )
+
             # Note: Guard code produced for tensor_match is a little different.
             # We accumulate tensor names, then do a single install of `___check_tensors`.
             # See _guards.cpp and TensorGuard for more information.
@@ -545,13 +560,14 @@ class DynamoGuardPrinter(StrPrinter):
         return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()"
 
     def __init__(
-        self, expr_to_tensor_ref, id_to_name_map, shape_env, intermediary_symbols
+        self, expr_to_tensor_ref, id_to_name_map, shape_env, intermediary_symbols, base_symbols
     ):
         super().__init__()
         self.expr_to_tensor_ref = expr_to_tensor_ref
         self.id_to_name_map = id_to_name_map
         self.shape_env = shape_env
         self.intermediary_symbols = intermediary_symbols
+        self.base_symbols = base_symbols
 
     def _print_Symbol(self, expr) -> str:
         assert isinstance(expr, sympy.Symbol)
@@ -559,7 +575,11 @@ class DynamoGuardPrinter(StrPrinter):
             return "0"
         if expr == 1:
             return "1"
-        assert expr in (self.expr_to_tensor_ref) or (expr in self.intermediary_symbols)
+        expr_found = expr in self.expr_to_tensor_ref or expr in self.intermediary_symbols
+        if not expr_found:
+            if expr in self.base_symbols:
+                return f"{self.shape_env.var_to_val[expr]}"
+        assert expr_found, f"Failed to find {expr}"
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
@@ -648,6 +668,7 @@ class CheckFunctionManager:
             id_to_name_map,
             self.output_graph.shape_env,
             self.output_graph.intermediary_symbols,
+            self.output_graph.base_symbols,
         )
 
         # tensor_check_names is the primary tensor association mechanism in dynamo.
