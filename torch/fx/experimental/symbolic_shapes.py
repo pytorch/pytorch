@@ -6,6 +6,8 @@ import operator
 import builtins
 import math
 import functools
+import threading
+from contextlib import contextmanager
 from functools import lru_cache, partial
 import traceback
 import collections
@@ -126,6 +128,18 @@ def sym_int(a):
         return sym_floor(a) if a > 0 else sym_ceil(a)
     return int(a)
 
+def to_node(self, num):
+    if isinstance(num, (SymInt, SymFloat)):
+        return num.node
+    elif isinstance(num, int):
+        return self.wrap_int(num)
+    elif isinstance(num, float):
+        return self.wrap_float(num)
+    else:
+        # NotImplemented is important so that Python tries the
+        # other magic method
+        return NotImplemented
+
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
 # 2. Specialize on 0/1 when we do subtraction
@@ -148,18 +162,6 @@ class SymNode:
     def _update_expr(self):
         self._expr = self.shape_env.replace(self._expr)
 
-    def to_node(self, num):
-        if isinstance(num, (SymInt, SymFloat)):
-            return num.node
-        elif isinstance(num, int):
-            return self.wrap_int(num)
-        elif isinstance(num, float):
-            return self.wrap_float(num)
-        else:
-            # NotImplemented is important so that Python tries the
-            # other magic method
-            return NotImplemented
-
     def is_int(self):
         return self.pytype is int
 
@@ -175,7 +177,7 @@ class SymNode:
         return SymNode(sympy.Float(num), self.shape_env, float, constant=num)
 
     def clone(self):
-        return SymNode(self.expr, self.shape_env, self.pytype, constant=self.constant)
+        return self
 
     def str(self):
         return f"{self.expr}"
@@ -261,9 +263,6 @@ reflectable_magic_methods = {
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
-def _nyi():
-    raise NotImplementedError()
-
 magic_methods = {
     **reflectable_magic_methods,
     'eq': lambda a, b: sympy.Eq(a, b),
@@ -297,16 +296,15 @@ always_int_magic_methods = {"ceil", "floor"}
 always_bool_magic_methods = {"eq", "gt", "lt", "le", "ge"}
 
 def wrap_node(x):
-    if not isinstance(x, SymNode):
-        return x
-    if x.constant is not None:
+    # TODO: let C++ also take advantage of this
+    if isinstance(x, SymNode) and x.constant is not None:
         return x.constant
-    if x.pytype is int:
+    if x.is_int():
         return SymInt(x)
-    elif x.pytype is float:
+    elif x.is_float():
         return SymFloat(x)
     else:
-        raise AssertionError(f"unrecognized return type {x.pytype}")
+        raise AssertionError(f"unrecognized return type {x}")
 
 def _make_node_magic(method, func):
     func = lru_cache(256)(func)
@@ -378,13 +376,13 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method)())
 
     def binary_magic_impl(self, other):
-        other_node = self.node.to_node(other)
+        other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
         return wrap_node(getattr(self.node, method)(other_node))
 
     def rbinary_magic_impl(self, other):
-        other_node = self.node.to_node(other)
+        other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
         return wrap_node(getattr(other_node, method)(self.node))
@@ -443,6 +441,18 @@ class ShapeEnv(object):
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
+        self.tls = threading.local()
+
+    def _suppress_guards_tls(self):
+        return getattr(self.tls, "suppress_guards", False)
+
+    @contextmanager
+    def suppress_guards(self):
+        self.tls.suppress_guards = True
+        try:
+            yield
+        finally:
+            self.tls.suppress_guards = False
 
     def _get_key(self):
         """
@@ -457,7 +467,6 @@ class ShapeEnv(object):
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
-
         size = [self.create_symbol(i) for i in ex.size()]
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
@@ -678,11 +687,12 @@ class ShapeEnv(object):
         # TODO: optimize this; avoid formatting traces until we need them
         # NB: drop two frames; evaluate_expr and the Sym* function that
         # actually called us
-        stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
-        if concrete_val is sympy.true:
-            self.guards.append((expr, stack))
-        elif concrete_val is sympy.false:
-            self.guards.append((sympy.Not(expr), stack))
-        else:
-            self.guards.append((sympy.Eq(expr, concrete_val), stack))
+        if not self._suppress_guards_tls():
+            stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
+            if concrete_val is sympy.true:
+                self.guards.append((expr, stack))
+            elif concrete_val is sympy.false:
+                self.guards.append((sympy.Not(expr), stack))
+            else:
+                self.guards.append((sympy.Eq(expr, concrete_val), stack))
         return concrete_val

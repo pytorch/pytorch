@@ -204,8 +204,6 @@ class SymInt:
     """
 
     def __init__(self, node):
-        from torch.fx.experimental.symbolic_shapes import SymNode
-        assert isinstance(node, SymNode)
         # This field MUST be named node; C++ binding code assumes that this
         # class has a field named node that stores SymNode
         self.node = node
@@ -237,7 +235,7 @@ class SymInt:
         raise AssertionError("type stub not overridden")
 
     def __repr__(self):
-        return self.node.str()
+        return str(self.node)
 
     # For BC; direct access of node is OK too
     def get_pyobj(self):

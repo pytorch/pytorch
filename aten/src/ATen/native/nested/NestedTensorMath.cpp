@@ -502,11 +502,6 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ntensors = self_ptr->size(0);
   TORCH_CHECK_INDEX(ntensors > 0, "You can only select when the NT is not empty.");
   int64_t ndims = static_cast<long>(sizes[0].size());
-  TORCH_CHECK(
-    positive_dim == 0 || positive_dim == 1,
-    "NestedTensor can only be selected along dimension 0 or 1",
-    "got dimension ", dim, " instead."
-  );
   if (positive_dim == 0) {
     TORCH_CHECK_INDEX(
         index >= -ntensors && index < ntensors,
@@ -534,13 +529,16 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
           size_ptr[dim_idx] = sizes[i][j];
           stride_ptr[dim_idx] = strides[i][j];
           ++dim_idx;
-        }
-        else {
+        } else {
           TORCH_CHECK_INDEX(
               index >= 0 && index < sizes[i][j],
               "index ",
               index,
-              " is out of bounds for irregular dimension 1 with size ",
+              " is out of bounds for dimension ",
+              j,
+              " of the ",
+              i,
+              "th constituent tensor with size ",
               sizes[i][j]);
           new_offsets[i] = offsets[i] + index * strides[i][j];
         }

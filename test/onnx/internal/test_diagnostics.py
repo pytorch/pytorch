@@ -19,7 +19,7 @@ def _assert_has_diagnostics(
     rule_level_pairs: AbstractSet[Tuple[infra.Rule, infra.Level]],
 ):
     sarif_log = engine.sarif_log()
-    unseen_pairs = {(rule.id, level.value) for rule, level in rule_level_pairs}
+    unseen_pairs = {(rule.id, level.name.lower()) for rule, level in rule_level_pairs}
     actual_results = []
     for run in sarif_log.runs:
         if run.results is None:
@@ -215,10 +215,11 @@ class TestOnnxDiagnostics(common_utils.TestCase):
         assert stack is not None  # for mypy
         self.assertGreater(len(stack.frames), 0)
         frame_messages = [frame.location.message for frame in stack.frames]
+        # node missing onnx shape inference warning only comes from ToONNX (_jit_pass_onnx)
+        # after node-level shape type inference and processed symbolic_fn output type
         self.assertTrue(
             any(
-                isinstance(message, str)
-                and "torch::jit::ONNXShapeTypeInference" in message
+                isinstance(message, str) and "torch::jit::NodeToONNX" in message
                 for message in frame_messages
             )
         )
