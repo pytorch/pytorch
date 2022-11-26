@@ -135,7 +135,6 @@ public:
   Vectorized<int64_t> conj() const {
     return *this;
   }
-  Vectorized<int64_t> frac() const;
   Vectorized<int64_t> neg() const;
   Vectorized<int64_t> operator==(const Vectorized<int64_t>& other) const {
     auto mask = _mm512_cmpeq_epi64_mask(values, other.values);
@@ -285,7 +284,6 @@ public:
   Vectorized<int32_t> conj() const {
     return *this;
   }
-  Vectorized<int32_t> frac() const;
   Vectorized<int32_t> neg() const;
   Vectorized<int32_t> operator==(const Vectorized<int32_t>& other) const {
     auto mask = _mm512_cmpeq_epi32_mask(values, other.values);
@@ -517,7 +515,6 @@ public:
   Vectorized<int16_t> conj() const {
     return *this;
   }
-  Vectorized<int16_t> frac() const;
   Vectorized<int16_t> neg() const;
   Vectorized<int16_t> operator==(const Vectorized<int16_t>& other) const {
     auto mask = _mm512_cmpeq_epi16_mask(values, other.values);
@@ -553,8 +550,11 @@ public:
 };
 
 template <typename T>
-class Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>> : public Vectorizedi {
-private:
+class Vectorized8 : public Vectorizedi {
+  static_assert(
+    std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value,
+    "Only int8_t/uint8_t are supported");
+protected:
   static constexpr __m512i zero_vector {0, 0, 0, 0, 0, 0, 0, 0};
   static const Vectorized<T> ones;
 public:
@@ -563,9 +563,9 @@ public:
     return 64;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
-  Vectorized(T v) { values = _mm512_set1_epi8(v); }
-  Vectorized(T val1, T val2, T val3, T val4,
+  Vectorized8() {}
+  Vectorized8(T v) { values = _mm512_set1_epi8(v); }
+  Vectorized8(T val1, T val2, T val3, T val4,
          T val5, T val6, T val7, T val8,
          T val9, T val10, T val11, T val12,
          T val13, T val14, T val15, T val16,
@@ -593,16 +593,6 @@ public:
   template <int64_t mask>
   static Vectorized<T> blend(Vectorized<T> a, Vectorized<T> b) {
     return _mm512_mask_blend_epi8(mask, a.values, b.values);
-  }
-  static Vectorized<T> blendv(const Vectorized<T>& a, const Vectorized<T>& b,
-                               const Vectorized<T>& mask) {
-    auto msb_one = _mm512_set1_epi8(0xFF);
-    __mmask64 mask_;
-    if (std::is_same<T, int8_t>::value)
-      mask_ = _mm512_cmp_epi8_mask(mask, msb_one, _MM_CMPINT_EQ);
-    else
-      mask_ = _mm512_cmp_epu8_mask(mask, msb_one, _MM_CMPINT_EQ);
-    return _mm512_mask_blend_epi8(mask_, a.values, b.values);
   }
   template <typename step_t>
   static Vectorized<T> arange(T base = 0, step_t step = static_cast<step_t>(1)) {
@@ -785,12 +775,6 @@ public:
   }
   const T& operator[](int idx) const  = delete;
   T& operator[](int idx)  = delete;
-  Vectorized<T> abs() const {
-    if (std::is_same<T, int8_t>::value)
-      return _mm512_abs_epi8(values);
-    else
-      return values;
-  }
   Vectorized<T> real() const {
     return *this;
   }
@@ -800,53 +784,104 @@ public:
   Vectorized<T> conj() const {
     return *this;
   }
-  Vectorized<T> frac() const;
-  Vectorized<T> neg() const;
-  Vectorized<T> operator==(const Vectorized<T>& other) const {
-    __mmask64 mask;
-    if (std::is_same<T, int8_t>::value)
-      mask = _mm512_cmpeq_epi8_mask(values, other.values);
-    else
-      mask = _mm512_cmpeq_epu8_mask(values, other.values);
+};
+
+template<>
+class Vectorized<int8_t>: public Vectorized8<int8_t> {
+public:
+  using Vectorized8::Vectorized8;
+
+  static Vectorized<int8_t> blendv(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b,
+                               const Vectorized<int8_t>& mask) {
+    auto msb_one = _mm512_set1_epi8(0xFF);
+    auto mask_ = _mm512_cmp_epi8_mask(mask, msb_one, _MM_CMPINT_EQ);
+    return _mm512_mask_blend_epi8(mask_, a.values, b.values);
+  }
+
+  Vectorized<int8_t> neg() const;
+
+  Vectorized<int8_t> abs() const {
+    return _mm512_abs_epi8(values);
+  }
+
+  Vectorized<int8_t> operator==(const Vectorized<int8_t>& other) const {
+    auto mask = _mm512_cmpeq_epi8_mask(values, other.values);
     return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
   }
-  Vectorized<T> operator!=(const Vectorized<T>& other) const {
-    __mmask64 mask;
-    if (std::is_same<T, int8_t>::value)
-      mask = _mm512_cmpneq_epi8_mask(values, other.values);
-    else
-      mask = _mm512_cmpneq_epu8_mask(values, other.values);
+  Vectorized<int8_t> operator!=(const Vectorized<int8_t>& other) const {
+    auto mask = _mm512_cmpneq_epi8_mask(values, other.values);
     return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
   }
-  Vectorized<T> operator<(const Vectorized<T>& other) const {
-    __mmask64 mask;
-    if (std::is_same<T, int8_t>::value)
-      mask = _mm512_cmplt_epi8_mask(values, other.values);
-    else
-      mask = _mm512_cmplt_epu8_mask(values, other.values);
+  Vectorized<int8_t> operator<(const Vectorized<int8_t>& other) const {
+    auto mask = _mm512_cmplt_epi8_mask(values, other.values);
     return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
   }
-  Vectorized<T> operator<=(const Vectorized<T>& other) const {
-    __mmask64 mask;
-    if (std::is_same<T, int8_t>::value)
-      mask = _mm512_cmple_epi8_mask(values, other.values);
-    else
-      mask = _mm512_cmple_epu8_mask(values, other.values);
+  Vectorized<int8_t> operator<=(const Vectorized<int8_t>& other) const {
+    auto mask = _mm512_cmple_epi8_mask(values, other.values);
     return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
   }
-  Vectorized<T> operator>(const Vectorized<T>& other) const {
+  Vectorized<int8_t> operator>(const Vectorized<int8_t>& other) const {
     return other < *this;
   }
-  Vectorized<T> operator>=(const Vectorized<T>& other) const {
+  Vectorized<int8_t> operator>=(const Vectorized<int8_t>& other) const {
     return other <= *this;
   }
 
-  Vectorized<T> eq(const Vectorized<T>& other) const;
-  Vectorized<T> ne(const Vectorized<T>& other) const;
-  Vectorized<T> gt(const Vectorized<T>& other) const;
-  Vectorized<T> ge(const Vectorized<T>& other) const;
-  Vectorized<T> lt(const Vectorized<T>& other) const;
-  Vectorized<T> le(const Vectorized<T>& other) const;
+  Vectorized<int8_t> eq(const Vectorized<int8_t>& other) const;
+  Vectorized<int8_t> ne(const Vectorized<int8_t>& other) const;
+  Vectorized<int8_t> gt(const Vectorized<int8_t>& other) const;
+  Vectorized<int8_t> ge(const Vectorized<int8_t>& other) const;
+  Vectorized<int8_t> lt(const Vectorized<int8_t>& other) const;
+  Vectorized<int8_t> le(const Vectorized<int8_t>& other) const;
+};
+
+template<>
+class Vectorized<uint8_t>: public Vectorized8<uint8_t> {
+public:
+  using Vectorized8::Vectorized8;
+
+  static Vectorized<uint8_t> blendv(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b,
+                               const Vectorized<uint8_t>& mask) {
+    auto msb_one = _mm512_set1_epi8(0xFF);
+    auto mask_ = _mm512_cmp_epu8_mask(mask, msb_one, _MM_CMPINT_EQ);
+    return _mm512_mask_blend_epi8(mask_, a.values, b.values);
+  }
+
+  Vectorized<uint8_t> neg() const;
+
+  Vectorized<uint8_t> abs() const {
+   return *this;
+  }
+
+  Vectorized<uint8_t> operator==(const Vectorized<uint8_t>& other) const {
+    auto mask = _mm512_cmpeq_epu8_mask(values, other.values);
+    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+  }
+  Vectorized<uint8_t> operator!=(const Vectorized<uint8_t>& other) const {
+    auto mask = _mm512_cmpneq_epu8_mask(values, other.values);
+    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+  }
+  Vectorized<uint8_t> operator<(const Vectorized<uint8_t>& other) const {
+    auto mask = _mm512_cmplt_epu8_mask(values, other.values);
+    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+  }
+  Vectorized<uint8_t> operator<=(const Vectorized<uint8_t>& other) const {
+    auto mask = _mm512_cmple_epu8_mask(values, other.values);
+    return _mm512_mask_set1_epi8(zero_vector, mask, 0xFF);
+  }
+  Vectorized<uint8_t> operator>(const Vectorized<uint8_t>& other) const {
+    return other < *this;
+  }
+  Vectorized<uint8_t> operator>=(const Vectorized<uint8_t>& other) const {
+    return other <= *this;
+  }
+
+  Vectorized<uint8_t> eq(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> ne(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> gt(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> ge(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> lt(const Vectorized<uint8_t>& other) const;
+  Vectorized<uint8_t> le(const Vectorized<uint8_t>& other) const;
 };
 
 template <>
@@ -912,9 +947,12 @@ inline Vectorized<int16_t> Vectorized<int16_t>::neg() const {
   return Vectorized<int16_t>(0) - *this;
 }
 
-template <typename T>
-inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::neg() const {
-  return Vectorized<T>(0) - *this;
+inline Vectorized<int8_t> Vectorized<int8_t>::value>>::neg() const {
+  return Vectorized<int8_t>(0) - *this;
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::value>>::neg() const {
+  return Vectorized<uint8_t>(0) - *this;
 }
 
 template <>
@@ -1206,34 +1244,52 @@ inline Vectorized<int16_t> Vectorized<int16_t>::le(const Vectorized<int16_t>& ot
   return (*this <= other) & Vectorized<int16_t>(1);
 }
 
-template<typename T>
-inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::eq(const Vectorized<T>& other) const {
-  return (*this == other) & Vectorized<T>(1);
+inline Vectorized<int8_t> Vectorized<int8_t>::eq(const Vectorized<int8_t>& other) const {
+  return (*this == other) & Vectorized<int8_t>(1);
 }
 
-template<typename T>
-inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::ne(const Vectorized<T>& other) const {
-  return (*this != other) & Vectorized<T>(1);
+inline Vectorized<int8_t> Vectorized<int8_t>::ne(const Vectorized<int8_t>& other) const {
+  return (*this != other) & Vectorized<int8_t>(1);
 }
 
-template<typename T>
-inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::gt(const Vectorized<T>& other) const {
-  return (*this > other) & Vectorized<T>(1);
+inline Vectorized<int8_t> Vectorized<int8_t>::gt(const Vectorized<int8_t>& other) const {
+  return (*this > other) & Vectorized<int8_t>(1);
 }
 
-template<typename T>
-inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::ge(const Vectorized<T>& other) const {
-  return (*this >= other) & Vectorized<T>(1);
+inline Vectorized<int8_t> Vectorized<int8_t>::ge(const Vectorized<int8_t>& other) const {
+  return (*this >= other) & Vectorized<int8_t>(1);
 }
 
-template<typename T>
-inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::lt(const Vectorized<T>& other) const {
-  return (*this < other) & Vectorized<T>(1);
+inline Vectorized<int8_t> Vectorized<int8_t>::lt(const Vectorized<int8_t>& other) const {
+  return (*this < other) & Vectorized<int8_t>(1);
 }
 
-template<typename T>
-inline Vectorized<T> Vectorized<T, std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value>>::le(const Vectorized<T>& other) const {
-  return (*this <= other) & Vectorized<T>(1);
+inline Vectorized<int8_t> Vectorized<int8_t>::le(const Vectorized<int8_t>& other) const {
+  return (*this <= other) & Vectorized<int8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::eq(const Vectorized<uint8_t>& other) const {
+  return (*this == other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::ne(const Vectorized<uint8_t>& other) const {
+  return (*this != other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::gt(const Vectorized<uint8_t>& other) const {
+  return (*this > other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::ge(const Vectorized<uint8_t>& other) const {
+  return (*this >= other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::lt(const Vectorized<uint8_t>& other) const {
+  return (*this < other) & Vectorized<uint8_t>(1);
+}
+
+inline Vectorized<uint8_t> Vectorized<uint8_t>::le(const Vectorized<uint8_t>& other) const {
+  return (*this <= other) & Vectorized<uint8_t>(1);
 }
 
 template <bool left_shift, typename T, typename std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value, int> = 0>
