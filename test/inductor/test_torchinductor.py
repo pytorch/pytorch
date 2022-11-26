@@ -5010,6 +5010,24 @@ if HAS_CPU:
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
+        @unittest.skipIf(
+            sys.platform != "linux", "cpp kernel profile only support linux now"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        @patch.object(config.cpp, "enable_kernel_profile", True)
+        def test_cpp_kernel_profile(self):
+            from torch.profiler import profile
+
+            @torch._dynamo.optimize("inductor", nopython=True)
+            def fn(a, b):
+                return a + b
+
+            a = torch.rand((100,))
+            b = torch.rand((100,))
+            with profile() as prof:
+                fn(a, b)
+            assert "kernel_cpp_0" in (e.name for e in prof.profiler.function_events)
+
 
 if HAS_CUDA:
     import triton

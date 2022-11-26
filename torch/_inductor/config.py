@@ -110,6 +110,8 @@ class cpp:
         "g++",
         "g++.par",
     )
+    # Allow kernel performance profiling via PyTorch profiler
+    enable_kernel_profile = False
 
 
 # config specific to codegen/triton.py
