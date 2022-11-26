@@ -947,11 +947,11 @@ inline Vectorized<int16_t> Vectorized<int16_t>::neg() const {
   return Vectorized<int16_t>(0) - *this;
 }
 
-inline Vectorized<int8_t> Vectorized<int8_t>::value>>::neg() const {
+inline Vectorized<int8_t> Vectorized<int8_t>::neg() const {
   return Vectorized<int8_t>(0) - *this;
 }
 
-inline Vectorized<uint8_t> Vectorized<uint8_t>::value>>::neg() const {
+inline Vectorized<uint8_t> Vectorized<uint8_t>::neg() const {
   return Vectorized<uint8_t>(0) - *this;
 }
 
