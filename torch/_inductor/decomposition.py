@@ -416,6 +416,17 @@ def all_dim(input, dim, keeepdim=False):
     return torch.logical_not(torch.any(torch.logical_not(input), dim, keeepdim))
 
 
+# NB: this decomposition is not stride accurate, do not put it in the main
+# library
+@register_decomposition(aten.copy)
+def copy(self, src, non_blocking=False):
+    intermediate = src.to(self, non_blocking)
+    if self.size() != intermediate.size():
+        return aten.expand_copy.default(intermediate, self.size())
+    else:
+        return intermediate
+
+
 @register_decomposition(aten.hardswish_)
 def hardswish_(x):
     return x.copy_(aten.hardswish(x))
