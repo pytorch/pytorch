@@ -960,7 +960,8 @@ def forward(self, primals_1, primals_2):
         inp = [torch.randn(5, requires_grad=True) for _ in range(3)]
         f(*inp).sum().backward()
 
-    def test_compilation_context(self):
+    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    def test_compilation_context(self, counter):
         def f(x):
             return x.sin().sin()
         count = []
@@ -975,7 +976,7 @@ def forward(self, primals_1, primals_2):
         f = aot_function(f, compiler)
         f(torch.randn(5))
         out.sum().backward()
-        self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
+        self.assertEqual(count, [(['0_forward'], 4), (['1_inference'], 4), (['0_backward'], 8)])
 
     def test_dupe_arg(self):
         def f(x, y):
@@ -984,8 +985,9 @@ def forward(self, primals_1, primals_2):
         x = torch.randn(3, 3, requires_grad=True)
         self.verify_aot_autograd(f, [x, x])
 
+    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
     @patch("functorch._src.config.debug_assert", True)
-    def test_invalid_dupe(self):
+    def test_invalid_dupe(self, counter):
         class F(torch.nn.Module):
             def forward(self, x, y):
                 return (x + y,)
@@ -1001,11 +1003,12 @@ def forward(self, primals_1, primals_2):
         fxx(x, x)
         self.assertExpectedRaisesInline(
             AssertionError, lambda: fxx(x, y),
-            """At compilation time, this graph was compiled under the assumption that some inputs were duplicate, but at runtime input 1 was not a duplicate of 0.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
 
+    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
     @patch("functorch._src.config.debug_assert", True)
-    def test_invalid_requires_grad(self):
+    def test_invalid_requires_grad(self, counter):
         class F(torch.nn.Module):
             def forward(self, x, y):
                 return (x + y,)
@@ -1029,7 +1032,7 @@ def forward(self, primals_1, primals_2):
         compare(F(), fxz, (x, z))
         self.assertExpectedRaisesInline(
             AssertionError, lambda: fxz(x, y),
-            """At compilation time, this graph was compiled under the assumption that input 1 did not require grad, but at runtime input 1 requires grad.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
         )
 
     def test_resize_input(self):
