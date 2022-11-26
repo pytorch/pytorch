@@ -134,6 +134,8 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_ids: Dict[str, int] = {}
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
+        self.shape_env_fn = None
+
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
     # to actually durably save this value though (because it's specific
@@ -403,8 +405,9 @@ class GuardBuilder(GuardBuilderBase):
             [a.source for a in fs],
             source_ref=self.source_ref,
         )
-        for shape_guard in guards:
-            self._produce_guard_code(guard, [shape_guard], shape_env=True)
+        if guards.fn is not None:
+            self.shape_env_fn = guards.fn
+            self._produce_guard_code(guard, [guards.call_expr], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -628,6 +631,7 @@ class CheckFunctionManager:
                 ("___guarded_code", self),
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
+                ("___symbolic_shape_fn", local_builder.shape_env_fn),
                 ("tensor_check_names", tensor_check_names),
             ]
             + list(SYMPY_INTERP.items())

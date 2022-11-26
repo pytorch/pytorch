@@ -1,5 +1,5 @@
 import torch
-from typing import Set, Dict, List, Type, Optional, cast, Union
+from typing import Set, Dict, List, Tuple, Type, Optional, cast, Union
 import sys
 import builtins
 import itertools
@@ -13,12 +13,17 @@ import traceback
 import collections
 import textwrap
 import logging
+import ctypes
+import numba
+import cffi
+import os
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_max, sym_min  # noqa: F401
 from torch._guards import ShapeGuard, Source
 
 SymTypes = (SymInt, SymFloat, SymBool)
+SymbolicShapesExpr = collections.namedtuple("SymbolicShapeExpr", ["guard_expr", "call_expr", "fn"])
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +48,16 @@ __all__ = [
 ]
 
 SYM_FUNCTION_MODE = None
+
+_FFI = cffi.FFI()
+_FFI.cdef("""
+
+const int64_t* CABI_get_tensor_size(int8_t* tensor_ptr);
+const int64_t* CABI_get_tensor_stride(int8_t* tensor_ptr);
+const int64_t CABI_get_tensor_storage_offset(int8_t* tensor_ptr);
+
+""")
+_LIB = _FFI.dlopen(os.path.join(os.path.dirname(torch.__file__), "lib", "libtorch_python.so"))
 
 # We don't bother with the metaclass as all of the dispatching logic happens
 # entirely from Python
@@ -907,6 +922,19 @@ if HAS_SYMPY:
             self.symbol_to_source = symbol_to_source
             self.source_ref = source_ref
 
+        def _print_Relational(self, expr) -> str:
+            lhs, rhs = self._print(expr.lhs), self._print(expr.rhs)
+            return f"({lhs}) {expr.rel_op} ({rhs})"
+
+        def _print_And(self, expr) -> str:
+            args = [f"({self._print(a)})" for a in expr.args]
+            return " and ".join(args)
+
+        def _print_Mod(self, expr) -> str:
+            assert len(expr.args) == 2
+            lhs, rhs = self._print(expr.args[0]), self._print(expr.args[1])
+            return f"(({lhs}) % ({rhs}))"
+
         def _print_Symbol(self, expr) -> str:
             assert isinstance(expr, Symbol), str(type(expr))
             assert expr in self.symbol_to_source, (
@@ -1090,7 +1118,7 @@ class ShapeEnv:
     # output to print them too).  It's private because it's not
     # intended for normal use
     def produce_guards(self, placeholders, sources,
-                       source_ref=lambda n: n.name(), *, _simplified=False) -> List[str]:
+                       source_ref=lambda n: n.name(), *, _simplified=False) -> SymbolicShapesExpr:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -1152,6 +1180,38 @@ class ShapeEnv:
 
         from torch._dynamo.source import NegateSource, TensorPropertySource, TensorProperty
 
+        SourceInfo = collections.namedtuple("SourceInfo", ["base", "sources"])
+        source_name_to_types = {}
+        source_name_to_infos = collections.defaultdict(lambda: SourceInfo(base=None, sources=[]))
+
+        def split_source_ref(source: Source) -> Tuple[str, str]:
+            ref = source_ref(source)
+            if isinstance(source, TensorPropertySource) and source.idx is not None:
+                end_position = -(1 + len(str(source.idx)) + 1)
+                return ref[0:end_position], ref[end_position:]
+            else:
+                return ref, ""
+
+        def flat_var_name(var_name: str) -> str:
+            var_name = var_name.replace(" ", "_")
+            var_name = var_name.replace("-", "_Neg_")
+            var_name = var_name.replace("[", "_LBr_").replace("]", "_RBr_")
+            var_name = var_name.replace("(", "_LPar_").replace(")", "_RPar_")
+            var_name = var_name.replace("'", "_Q_")
+            var_name = var_name.replace(".", "_D_").replace(",", "_C_")
+            return var_name
+
+        def flat_source_ref(source: Source) -> str:
+            name, position = split_source_ref(source)
+            return f"{flat_var_name(name)}{position}"
+
+        def source_name_to_numba_type(source_name: str) -> str:
+            type = source_name_to_types[source_name]
+            if type == int:
+                return "int64"
+            assert type == torch.Tensor
+            return "CPointer(int8)"
+
         # Actual codegen must be delayed as we don't necessarily know what
         # the symbol mapping is
         input_guards = []
@@ -1169,7 +1229,12 @@ class ShapeEnv:
         # not be available to inner levels.  For example, Dynamo can guard on
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
-        def track_symint(source, val):
+        def track_symint(source, val, base=None):
+            base = source if base is None else base
+            base_name = flat_source_ref(base)
+            info = source_name_to_infos.setdefault(base_name, SourceInfo(base=base, sources=[]))
+            info.sources.append(source)
+
             if isinstance(val, SymInt):
                 s = val.node.expr
 
@@ -1189,15 +1254,22 @@ class ShapeEnv:
             assert isinstance(source, Source)
             if t is None:
                 continue
+
+            source_name = flat_source_ref(source)
+
             if isinstance(t, SymInt):
+                source_name_to_types[source_name] = int
                 track_symint(source, t)
                 continue
+
             assert isinstance(t, torch.Tensor)
+            source_name_to_types[source_name] = torch.Tensor
+
             for i, s in enumerate(t.size()):
-                track_symint(TensorPropertySource(source, TensorProperty.SIZE, i), s)
+                track_symint(TensorPropertySource(source, TensorProperty.SIZE, i), s, base=source)
             for i, s in enumerate(t.stride()):
-                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), s)
-            track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
+                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), s, base=source)
+            track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset(), base=source)
 
         exprs = []
 
@@ -1214,8 +1286,8 @@ class ShapeEnv:
                     source == symbol_to_source[expr][0]
                 ):
                     continue
-                sexpr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
-                exprs.append(f"{source_ref(source)} == {sexpr}")
+                sexpr = ShapeGuardPrinter(symbol_to_source, flat_source_ref).doprint(expr)
+                exprs.append(f"{flat_source_ref(source)} == {sexpr}")
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
@@ -1224,7 +1296,7 @@ class ShapeEnv:
                 continue
             g = self.simplify(g)
             try:
-                exprs.append(ShapeGuardPrinter(symbol_to_source, source_ref).doprint(g))
+                exprs.append(ShapeGuardPrinter(symbol_to_source, flat_source_ref).doprint(g))
             except Exception:
                 log.warning(f"Failing guard allocated at: \n{tb}")
                 raise
@@ -1235,17 +1307,89 @@ class ShapeEnv:
                 assert sources
                 # We must assert that each symbol is not zero or one, as we make
                 # negative inferences on shape variables
-                exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
+                exprs.append(f"{flat_source_ref(sources[0])} != 0 and {flat_source_ref(sources[0])} != 1")
 
-        return exprs
+        if exprs:
+            fn_name = "___symbolic_shape_fn"
+            fn_generator_name = "___gen_symbolic_shape_fn"
+
+            closure_vars = collections.OrderedDict([
+                ("___lib", _LIB),
+                ("___math", math)
+            ])
+
+            CABI_fn_name = {
+                TensorProperty.SIZE: "CABI_get_tensor_size",
+                TensorProperty.STRIDE: "CABI_get_tensor_stride",
+                TensorProperty.STORAGE_OFFSET: "CABI_get_tensor_storage_offset",
+            }
+
+            source_name_to_infos_sequence = sorted(source_name_to_infos.items(), key=lambda pair: pair[0])
+            call_arguments = ", ".join([info.base.name() for _, info in source_name_to_infos_sequence])
+            call_expression = f"{fn_name}({call_arguments})"
+
+            guard_parameters = ", ".join([name for name, _ in source_name_to_infos_sequence])
+            guard_expression = " and ".join(exprs)
+            guard_signature_parameters = [source_name_to_numba_type(name) for name, _ in source_name_to_infos_sequence]
+            guard_signature = f"""boolean({", ".join(guard_signature_parameters)})"""
+
+            source_creation = []
+            for name, info in source_name_to_infos_sequence:
+                tensor_properties = [s for s in info.sources if isinstance(s, TensorPropertySource)]
+                for prop, sources in itertools.groupby(tensor_properties, key=lambda s: s.prop):
+                    source = next(sources)
+                    prop_expr, _ = split_source_ref(source)
+                    prop_name = flat_var_name(prop_expr)
+                    source_creation.append(f"{prop_name} = {CABI_fn_name[prop]}({name})")
+            source_creation_str = "\n".join(" " * 8 + line for line in source_creation)
+
+            py_code = f"""\
+def {fn_generator_name}({", ".join(closure_vars.keys())}):
+    CABI_get_tensor_size = ___lib.CABI_get_tensor_size
+    CABI_get_tensor_stride = ___lib.CABI_get_tensor_stride
+    CABI_get_tensor_storage_offset = ___lib.CABI_get_tensor_storage_offset
+    floor = ___math.floor
+    ceiling = ___math.ceil
+    def {fn_name}({guard_parameters}) -> bool:
+{source_creation_str}
+        return ({guard_expression})
+    return {fn_name}
+"""
+            out = {}
+
+            try:
+                exec(py_code, dict(), out)
+                fn = out[fn_generator_name](*closure_vars.values())
+                numba_compiled_fn = numba.cfunc(guard_signature)(fn)
+            except Exception:
+                print(f"Signature: {guard_signature}")
+                print(f"Code: \n{py_code}")
+                raise
+
+            # Before actually executing the compiled function, we need to
+            # preprocess the tensor variables to what numba is actually expecting
+            # (according to the signature we gave above).
+            # In other words, we need to get a pointer to the actual tensor. In
+            # cpython, that can be done by calling the id function.
+            def wrapper_fn(*args):
+                args = [
+                    ctypes.cast(id(a), ctypes.POINTER(ctypes.c_int8))
+                    for a in args
+                ]
+                return numba_compiled_fn.ctypes(*args)
+
+            return SymbolicShapesExpr(guard_expression, call_expression, wrapper_fn)
+        else:
+            return SymbolicShapesExpr("True", "True", None)
 
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import GlobalSource
         arg_names = [f"t{i}" for i in range(len(args))]
         guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names])
-        if guards:
-            code = " and ".join(guards)
-            return eval(code, {}, dict(zip(arg_names, args)))
+        if guards.fn is not None:
+            kwargs = dict(zip(arg_names, args))
+            kwargs["___symbolic_shape_fn"] = guards.fn
+            return eval(guards.call_expr, {}, kwargs)
         return True
 
     def bind_symbols(self, placeholders, args):
