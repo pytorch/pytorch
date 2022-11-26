@@ -839,8 +839,8 @@ class MemoryProfile:
                 parameters = event.typed[1].optimizer.parameters
                 for _, t in it.chain(*[state for _, _, state in parameters]):
                     key = TensorKey.from_tensor(t)
-                    assert key is not None
-                    self._categories.set_by_id(key, Category.OPTIMIZER_STATE)
+                    if key is not None:
+                        self._categories.set_by_id(key, Category.OPTIMIZER_STATE)
 
     def _set_autograd_detail(self):
         prior = {None, Category.AUTOGRAD_DETAIL}
