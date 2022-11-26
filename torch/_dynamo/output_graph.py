@@ -172,6 +172,7 @@ class OutputGraph(fx.Tracer):
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
         self.tensor_id_to_sym_shape_ref: Dict[int, Set[TensorReference]] = {}
         self.intermediary_symbols: Dict[sympy.Expr, None] = {}
+        self.base_symbols = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names

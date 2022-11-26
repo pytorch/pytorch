@@ -706,33 +706,41 @@ def make_fake_tensor(e, fake_mode, static_shapes=False, tx=None, ignore_subclass
     if tx is not None:
         from torch._dynamo.guards import TensorReference
 
-        def _record(tensor_ref):
-            if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
-                tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
-            tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
+        def _record_fake_tensor(e, fake_tensor):
+            def _record(tensor_ref):
+                if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
+                    tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
+                tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
 
-        def _extract(symbol):
-            if isinstance(symbol, int):
-                return None
-            sym_expr = symbol.get_pyobj().expr
-            if not isinstance(sym_expr, sympy.Symbol):
-                return None
-            return sym_expr
+            def _extract(symbol):
+                if isinstance(symbol, int):
+                    return None
+                sym_expr = symbol.get_pyobj().expr
+                if not isinstance(sym_expr, sympy.Symbol):
+                    return None
+                return sym_expr
 
-        def _record_ref(e, index, symbol, kind):
-            sym_expr = _extract(symbol)
-            if sym_expr:
-                tensor_ref = TensorReference(id(e), kind, index, sym_expr)
-                _record(tensor_ref)
+            def _record_ref(e, index, symbol, kind):
+                sym_expr = _extract(symbol)
+                if sym_expr:
+                    tensor_ref = TensorReference(id(e), kind, index, sym_expr)
+                    _record(tensor_ref)
 
-        for index, symbol in enumerate(fake_tensor.size()):
-            _record_ref(e, index, symbol, "size")
+            for index, symbol in enumerate(fake_tensor.size()):
+                _record_ref(e, index, symbol, "size")
 
-        for index, symbol in enumerate(fake_tensor.stride()):
-            _record_ref(e, index, symbol, "stride")
+            for index, symbol in enumerate(fake_tensor.stride()):
+                _record_ref(e, index, symbol, "stride")
 
-        offset = fake_tensor.storage_offset()
-        _record_ref(e, None, offset, "storage_offset")
+            offset = fake_tensor.storage_offset()
+            _record_ref(e, None, offset, "storage_offset")
+
+        _record_fake_tensor(e, fake_tensor)
+        if e._base is not None:
+            assert fake_tensor._base is not None
+            # We have a ._base on this tensor - we don't trace these
+            # but we do guard on them.
+            _record_fake_tensor(e._base, fake_tensor._base)
 
     return fake_tensor
 
