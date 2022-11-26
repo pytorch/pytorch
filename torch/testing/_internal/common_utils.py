@@ -2165,13 +2165,22 @@ class TestCase(expecttest.TestCase):
                 result.addExpectedFailure(self, err)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red + 1, num_green=num_green)
-        elif (RERUN_DISABLED_TESTS or report_only) and num_retries_left < MAX_NUM_RETRIES:
-            # Always re-run up to MAX_NUM_RETRIES when running under report only or rerun disabled tests modes
+        elif RERUN_DISABLED_TESTS and num_retries_left <= MAX_NUM_RETRIES and not result.skipped:
+            # Always re-run up to MAX_NUM_RETRIES when running under rerun disabled tests modes if the test successes.
+            # The parameter num_retries_left can be equal to MAX_NUM_RETRIES here because num_runs_left is initially
+            # set to MAX_NUM_RETRIES + 1, i.e. the first run successes
+            #
+            # Also if the result is skipped, this is due to check_if_enable skipping non-disabled tests, thus we
+            # want to ignore them, not retrying and skipping multiple times
             print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
-            if RERUN_DISABLED_TESTS:
-                result.addSuccess(self)
-            else:
-                result.addUnexpectedSuccess(self)
+            result.addSuccess(self)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red, num_green=num_green + 1)
+        elif report_only and num_retries_left < MAX_NUM_RETRIES:
+            # The original logic here is that num_retries_left must be smaller than MAX_NUM_RETRIES indicating
+            # that at least one retry has been spent
+            print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
+            result.addUnexpectedSuccess(self)
             self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
                                  num_red=num_red, num_green=num_green + 1)
         elif not report_only and num_retries_left < MAX_NUM_RETRIES:
@@ -3572,6 +3581,32 @@ def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.devi
             *byte_list)).value
 
     return torch.tensor(res, device=device, dtype=dtype)
+
+
+def copy_func(f):
+    """Based on http://stackoverflow.com/a/6528148/190597 (Glenn Maynard)"""
+    g = types.FunctionType(f.__code__, f.__globals__, name=f.__name__,
+                           argdefs=f.__defaults__,
+                           closure=f.__closure__)
+    g = functools.update_wrapper(g, f)
+    g.__kwdefaults__ = f.__kwdefaults__
+    return g
+
+
+def xfail_inherited_tests(tests):
+    """
+    Given a list of test names which are defined by a superclass of the
+    class this decorates, mark them as expected failure.  This is useful
+    if you are doing poor man's parameterized tests by subclassing a generic
+    test class.
+    """
+    def deco(cls):
+        for t in tests:
+            # NB: expectedFailure operates by mutating the method in question,
+            # which is why you have to copy the function first
+            setattr(cls, t, unittest.expectedFailure(copy_func(getattr(cls, t))))
+        return cls
+    return deco
 
 
 def sandcastle_skip_if(condition, reason):
