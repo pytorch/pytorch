@@ -27,6 +27,7 @@ from torch._dynamo.testing import (
     same,
     unsupported,
 )
+from torch.nn import functional as F
 from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -1699,25 +1700,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn(x, torch.mul)
         self.assertEqual(cnts.op_count, 1)
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
-    @patch.object(torch._dynamo.config, "suppress_errors", True)
-    def test_unsupported_fake_tensor(self):
-        def f(x):
-            return torch.quantize_per_tensor(x, 0.1, 10, torch.quint8)
-
-        x = torch.randn(2, 2)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_f = torch._dynamo.optimize(cnts)(f)
-        opt_f(x)
-        self.assertEqual(cnts.op_count, 0)
-
-        torch._dynamo.reset()
-        with patch.object(torch._dynamo.config, "fake_tensor_propagation", False):
-            opt_f = torch._dynamo.optimize_assert(
-                torch._dynamo.testing.CompileCounter()
-            )(f)
-            opt_f(x)
-
     def test_inline_list_mutation(self):
         def f1(x):
             x.append(torch.ones(8))
@@ -2071,6 +2053,23 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch.allclose(dynamo_output, output))
 
+    def test_nn_functional_reduction(self):
+        def fn(loss, reduction):
+            reduction_enum = F._Reduction.get_enum(reduction)
+            if reduction_enum == 0:
+                return loss
+            elif reduction_enum == 1:
+                return loss.mean()
+            elif reduction_enum == 2:
+                return loss.sum()
+
+        x = torch.rand([3, 5])
+        y = "mean"
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(torch.allclose(ref, res))
+
     def test_large_reduction_list(self):
         dtype = torch.float32
         device = "cpu"
@@ -2176,7 +2175,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 self.names = []
 
             def forward(self, idx, targets=None):
-                from torch.nn import functional as F
 
                 b, t = idx.size()
                 assert (
@@ -2398,53 +2396,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )  # * -1 then add x
         self.assertTrue(cc.frame_count, 2)
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
-    def test_cond_nested_fake_tensor_off(self):
-        from functorch.experimental.cond import cond
-
-        def true_fn_nested(x):
-            return x * 10
-
-        def false_fn_nested(x):
-            return x * -1
-
-        def true_fn(pred2, x):
-            return x.sin()
-
-        def false_fn(pred2, x):
-            return x + cond(pred2, true_fn_nested, false_fn_nested, [x])
-
-        def f(pred, pred2, x):
-            return cond(pred, true_fn, false_fn, [pred2, x])
-
-        cc = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cc)(f)
-        true_true_sin = opt_fn(
-            torch.tensor(True), torch.tensor(True), torch.tensor([0.25, 0.25])
-        )
-        self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), true_true_sin))
-
-        true_false_sin = opt_fn(
-            torch.tensor(True), torch.tensor(False), torch.tensor([0.25, 0.25])
-        )
-        self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), true_false_sin))
-
-        false_true_sum_mult = opt_fn(
-            torch.tensor(False), torch.tensor(True), torch.tensor([0.25, 0.25])
-        )
-        self.assertTrue(
-            same(torch.tensor([2.75, 2.75]), false_true_sum_mult)
-        )  # * 10 then add x
-
-        false_false_sum_neg = opt_fn(
-            torch.tensor(False), torch.tensor(False), torch.tensor([0.25, 0.25])
-        )
-        self.assertTrue(
-            same(torch.tensor([0.0, 0.0]), false_false_sum_neg)
-        )  # * -1 then add x
-        self.assertTrue(cc.frame_count, 1)
-
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_cond_export(self):
         from functorch.experimental.cond import cond
 
@@ -2490,7 +2441,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             same(torch.tensor([0.0, 0.0]), false_false_sum_neg)
         )  # * -1 then add x
 
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_cond_export_single_arg(self):
         from functorch.experimental.cond import cond
 
@@ -2730,21 +2680,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     def test_autograd_function_equivalence(self):
-        m1 = Module1()
-
-        @torch._dynamo.optimize("eager", nopython=True)
-        def f1():
-            return m1(torch.ones(2, 3))
-
-        self.assertTrue(torch.allclose(f1(), torch.tensor([2.0])))
-
-        m2 = Module2()
-
-        @torch._dynamo.optimize("eager", nopython=True)
-        def f2():
-            return m2(torch.ones(2, 3))
-
-        self.assertTrue(torch.allclose(f2(), torch.tensor([2.0])))
+        for i in range(1, 5):
+            model = globals()[f"Module{i}"]()
+            opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+            self.assertTrue(
+                torch.allclose(opt_model(torch.ones(2, 3)), torch.tensor([2.0]))
+            )
 
     def test_object_classmethod(self):
         class C:
@@ -3002,10 +2943,49 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_get_device(self):
+        def fn(x, y):
+            x = x + 1
+            y = y + 1
+            return x.get_device(), y.get_device()
 
-class CustomFunc(torch.autograd.Function):
+        x = torch.rand(4, device="cuda")
+        y = torch.rand(4, device="cpu")
+        ref = fn(x, y)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_get_device_index(self):
+        def fn(x):
+            x = x + 1
+            a = torch._utils._get_device_index(x.device)
+            b = torch._utils._get_device_index(1)
+            return a, b
+
+        x = torch.rand(4, device="cuda")
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+
+class CustomFunc1(torch.autograd.Function):
     @staticmethod
     def forward(ctx, foo):
+        return foo + foo
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output
+
+
+class CustomFunc2(torch.autograd.Function):
+    # the forward function can be staticmethod or classmethod
+    @classmethod
+    def forward(cls, ctx, foo):
         return foo + foo
 
     @staticmethod
@@ -3018,13 +2998,30 @@ class Module1(torch.nn.Module):
         super().__init__()
 
     def forward(self, foo):
-        return CustomFunc().apply(foo)
+        return CustomFunc1().apply(foo)
 
 
 class Module2(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.fn = CustomFunc.apply
+        self.fn = CustomFunc1.apply
+
+    def forward(self, foo):
+        return self.fn(foo)
+
+
+class Module3(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, foo):
+        return CustomFunc2().apply(foo)
+
+
+class Module4(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fn = CustomFunc2.apply
 
     def forward(self, foo):
         return self.fn(foo)
