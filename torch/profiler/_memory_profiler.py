@@ -11,6 +11,7 @@ from torch._C._profiler import (
     _TensorMetadata,
     RecordScope,
 )
+from torch.profiler import _utils
 
 
 @dataclasses.dataclass
@@ -229,6 +230,83 @@ class SchemaMatcher:
             return None
 
 
+class OpTree:
+    def __init__(self, result: _ProfilerResult) -> None:
+        self._root_nodes = result.experimental_event_tree()
+        self._sorted_nodes = tuple(sorted(self.dfs(), key=lambda x: x.start_time_ns))
+
+    def dfs(self, *args, **kwargs) -> Iterator[_ProfilerEvent]:
+        yield from _utils.traverse_dfs(self._root_nodes, *args, **kwargs)
+
+    @property
+    def sorted_nodes(self) -> Tuple[_ProfilerEvent, ...]:
+        return self._sorted_nodes
+
+
+class DataFlowGraph:
+    def __init__(self, tree: OpTree) -> None:
+        self._tree = tree
+        self._leaf_events = self._extract_leaf_events(tree)
+
+    @property
+    def leaf_events(self) -> Tuple[_ProfilerEvent, ...]:
+        return self._leaf_events
+
+    @staticmethod
+    def _extract_leaf_events(tree: OpTree) -> Tuple[_ProfilerEvent, ...]:
+        """Partially traverse the op tree and extract top level ops.
+
+        Consider the following code:
+        ```
+        with record_function("My annotation"):
+            x.zero_()
+            y.zero_()
+        ```
+
+        The op tree (assuming no Autograd) will look like:
+          <Python context>
+            TorchOp: "My annotation"
+              TorchOp: zero_
+                TorchOp: fill_
+              TorchOp: zero_
+                TorchOp: fill_
+
+        The recursive structure of operator calls makes data flow unwieldy.
+        In order to simplify analysis we would like to select the highest level
+        ops to represent in the graph. In this case those are the `zero_` ops;
+        the fact that `fill_` is called is an implementation detail. We also
+        do not want to group everything under "My annotation" as this could
+        create overly coarse bundles and lose critical semantics.
+
+        To address this issue we walk over the graph and select the topmost
+        torch ops ** which match at least one operator schema **. These form
+        the leaves of the first pass through the op tree. (As well as any
+        allocations or frees which do are not part of a kernel.) These events
+        form the logical nodes in our data flow graph.
+        """
+
+        leaf_events: List[_ProfilerEvent] = []
+
+        def leaf_op(e: _ProfilerEvent) -> bool:
+            return e.typed[0] == _EventType.TorchOp and (
+                e.typed[1].scope == RecordScope.BACKWARD_FUNCTION
+                or bool(SchemaMatcher.match_schemas(e.typed[1]))
+            )
+
+        def children_fn(e: _ProfilerEvent):
+            if leaf_op(e) or e.tag == _EventType.Allocation:
+                leaf_events.append(e)
+                return []
+
+            return e.children
+
+        for _ in tree.dfs(children_fn=children_fn):
+            pass
+
+        return tuple(sorted(leaf_events, key=lambda x: x.start_time_ns))
+
+
 class MemoryProfile:
     def __init__(self, result: _ProfilerResult) -> None:
-        pass
+        self._op_tree = OpTree(result)
+        self._data_flow_graph = DataFlowGraph(self._op_tree)

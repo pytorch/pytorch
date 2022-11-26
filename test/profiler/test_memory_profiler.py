@@ -1,5 +1,8 @@
 # Owner(s): ["oncall: profiler"]
 import functools
+import gc
+import re
+import textwrap
 from typing import Iterator, List, Optional, Tuple
 
 import torch
@@ -342,6 +345,73 @@ class TestDataFlow(TestCase):
         self.assertEqual(
             self.formatSchemas(prof),
             (("aten::cat.", (False, False)),),
+        )
+
+    def test_data_flow_leaf(self) -> None:
+        x = torch.ones((1,))
+        y = torch.ones((1,))
+        with profile() as prof, torch.no_grad():
+            # torch._C._jit_get_schemas_for_operator will reject any name that
+            # is missing a namespace. (denoted by the presence of "::") We want
+            # to check that we skip both annotations which have no schema
+            # (return empty tuple from SchemaMatcher.lookup_schemas) and
+            # annotations which cannot have schema (return None from
+            # SchemaMatcher.lookup_schemas).
+            with torch.profiler.record_function("Namespaced::Annotation"):
+                with torch.profiler.record_function("My Annotation"):
+                    x.zero_()
+                    y.zero_()
+                    x0 = torch.ones_like(x)
+                    y0 = torch.zeros_like(y)
+
+        leaf_events = prof._memory_profile()._data_flow_graph.leaf_events
+        leaf_names = " ".join(node.name for node in leaf_events)
+
+        # `record_function` makes a Tensor to hold its handle which is not
+        # relevant for this test.
+        record_fn_pattern = r"aten::zeros aten::empty \[memory\] \[memory\] "
+
+        self.assertExpectedInline(
+            re.sub(record_fn_pattern, "", leaf_names),
+            """aten::zero_ aten::zero_ aten::ones_like aten::zeros_like""",
+        )
+
+    def test_data_flow_leaf_non_op_allocations(self) -> None:
+        x = torch.ones((1,))
+        with profile() as prof, torch.no_grad():
+            x.mul(2)
+            gc.collect()
+
+        # The python arg parser will convert the python scalar `2` to a Tensor
+        # to pass to `aten::mul`. As a result there is no op that "owns" the
+        # allocation. The Tensor deletions also do not happen in an op; they
+        # are collected as a result of the Python objects going out of scope.
+        leaf_events = prof._memory_profile()._data_flow_graph.leaf_events
+        self.assertExpectedInline(
+            " ".join(node.name for node in leaf_events),
+            """[memory] aten::mul [memory] [memory]""",
+        )
+
+    def test_data_flow_leaf_backward(self) -> None:
+        x = torch.ones((1,))
+        w = torch.ones((1,), requires_grad=True)
+        with profile() as prof:
+            (x * w).sin().backward()
+
+        leaf_events = prof._memory_profile()._data_flow_graph.leaf_events
+        self.assertExpectedInline(
+            textwrap.indent("\n".join(node.name for node in leaf_events), " " * 12),
+            """\
+            aten::mul
+            aten::sin
+            aten::ones_like
+            SinBackward0
+            [memory]
+            MulBackward0
+            [memory]
+            torch::autograd::AccumulateGrad
+            [memory]
+            [memory]""",
         )
 
 
