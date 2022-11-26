@@ -210,11 +210,14 @@ class TestSparseCompressed(TestCase):
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_compressed_constructor(self, layout, device, dtype,
                                            use_factory_function, shape_and_device_inference, input_kind):
-        if input_kind == 'list' and shape_and_device_inference and torch.device(device).type == 'cuda':
-            # list inputs to factory/constructor function without
-            # specifying device will result a sparse compressed tensor
-            # on CPU. So, skip testing against cuda device as unused.
-            self.skipTest("nothing to test")
+        if input_kind == 'list' and shape_and_device_inference:
+            if torch.device(device).type == 'cuda':
+                # list inputs to factory/constructor function without
+                # specifying device will result a sparse compressed tensor
+                # on CPU. So, skip testing against cuda device as unused.
+                self.skipTest("nothing to test")
+            if dtype not in {torch.float32, torch.complex64, torch.int64, torch.bool}:
+                self.skipTest("dtype not supported with list values")
 
         expected_devices = [torch.device(device)]
         if TEST_CUDA and torch.device(device).type == 'cuda' and torch.cuda.device_count() >= 2 and not shape_and_device_inference:
@@ -227,10 +230,17 @@ class TestSparseCompressed(TestCase):
             torch.sparse_bsc: torch.sparse_bsc_tensor,
         }[layout]
         compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[layout]
-        for index_dtype in [torch.int32, torch.int64]:
+        if input_kind == 'list':
+            index_dtypes = [torch.int64]
+        else:
+            index_dtypes = [torch.int32, torch.int64]
+        for index_dtype in index_dtypes:
             for expected_device in expected_devices:
                 for (compressed_indices, plain_indices, values), kwargs in self.generate_simple_inputs(
-                        layout, device=expected_device, dtype=dtype, index_dtype=index_dtype, output_tensor=False):
+                        layout, device=expected_device, dtype=dtype, index_dtype=index_dtype,
+                        # skip zero-sized tensors for list inputs:
+                        enable_zero_sized=input_kind != 'list',
+                        output_tensor=False):
                     size = kwargs['size']
                     if shape_and_device_inference and 0 in size:
                         # skip shape inference for zero-sized tensor
@@ -240,6 +250,14 @@ class TestSparseCompressed(TestCase):
                         # max(plain_indices) is undefined if
                         # plain_indices has no values
                         continue
+                    compressed_indices_expect = compressed_indices
+                    plain_indices_expect = plain_indices
+                    values_expect = values
+
+                    if input_kind == 'list':
+                        compressed_indices = compressed_indices.tolist()
+                        plain_indices = plain_indices.tolist()
+                        values = values.tolist()
 
                     if use_factory_function:
                         if shape_and_device_inference:
@@ -255,9 +273,9 @@ class TestSparseCompressed(TestCase):
                                                                     dtype=dtype, layout=layout, device=expected_device)
                     self.assertEqual(layout, sparse.layout)
                     self.assertEqual(size, sparse.shape)
-                    self.assertEqual(compressed_indices, compressed_indices_mth(sparse))
-                    self.assertEqual(plain_indices, plain_indices_mth(sparse))
-                    self.assertEqual(values, sparse.values())
+                    self.assertEqual(compressed_indices_expect, compressed_indices_mth(sparse))
+                    self.assertEqual(plain_indices_expect, plain_indices_mth(sparse))
+                    self.assertEqual(values_expect, sparse.values())
                     self.assertEqual(sparse.device, sparse.values().device)
                     self.assertEqual(sparse.device, expected_device)
 
@@ -343,7 +361,7 @@ class TestSparseCompressed(TestCase):
                     for (compressed_indices, plain_indices, values), kwargs in self.generate_simple_inputs(
                             layout, device=device, dtype=dtype, index_dtype=index_dtype, enable_hybrid=enable_hybrid,
                             enable_zero_sized=False, output_tensor=False, patterns=patterns):
-                        size = kwargs['size']
+                        size = tuple(kwargs['size'])
                         block_ndim = 2 if layout in {torch.sparse_bsr, torch.sparse_bsc} else 0
                         base_ndim = 2
                         batch_ndim = compressed_indices.dim() - 1
@@ -826,12 +844,23 @@ class TestSparseCompressed(TestCase):
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     def test_to_dtype(self, layout, device, dtype):
         # to_dense does not support hybrid inputs
-        input_gen = self.generate_simple_inputs(layout, device=device, enable_hybrid=False)
-        for sparse in input_gen:
+        for sparse in self.generate_simple_inputs(layout, dtype=dtype, device=device, enable_hybrid=False):
             for to_dtype in all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16):
                 sparse_to_dtype = sparse.to(to_dtype)
                 dense_to_dtype = sparse.to_dense().to(to_dtype)
                 self.assertEqual(sparse_to_dtype.to_dense(), dense_to_dtype)
+
+    @skipMeta
+    @all_sparse_compressed_layouts()
+    @dtypes(torch.double)
+    def test_pickle(self, layout, dtype, device):
+        import pickle
+
+        for sparse in self.generate_simple_inputs(layout, device=device, dtype=dtype):
+            serialized = pickle.dumps(sparse)
+            sparse_loaded = pickle.loads(serialized)
+
+            self.assertEqual(sparse, sparse_loaded)
 
     @all_sparse_compressed_layouts()
     @parametrize("index_dtype", [torch.int32, torch.int64])

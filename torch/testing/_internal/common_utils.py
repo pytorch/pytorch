@@ -2453,10 +2453,10 @@ class TestCase(expecttest.TestCase):
                                device=None,
                                dtype=None,
                                index_dtype=None,
-                               enable_batched=True,
+                               enable_batch=True,
                                enable_hybrid=True,
                                enable_zero_sized=True,
-                               enable_batched_variable_nse=False,
+                               enable_batch_variable_nse=False,
                                output_tensor=True,
                                patterns=None):
         """Generator of simple inputs for tensor constructors of the given layout.
@@ -2488,13 +2488,14 @@ class TestCase(expecttest.TestCase):
 
         if output_tensor:
             for args, kwargs in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype,
-                                                            enable_batched=enable_batched, enable_hybrid=enable_hybrid,
+                                                            enable_batch=enable_batch, enable_hybrid=enable_hybrid,
                                                             enable_zero_sized=enable_zero_sized,
-                                                            enable_batched_variable_nse=enable_batched_variable_nse,
+                                                            enable_batch_variable_nse=enable_batch_variable_nse,
                                                             output_tensor=False):
                 if layout is torch.strided:
-                    size = kwargs.pop('size', args[0].shape)  # to ensure that a zero-sized tensor has the desired shape
                     assert len(args) == 1
+                    size = kwargs.pop('size', None)  # to ensure that a zero-sized tensor has the desired shape
+                    assert size is not None
                     yield args[0].reshape(size)
                 elif layout is torch.sparse_coo:
                     yield torch.sparse_coo_tensor(*args, **kwargs)
@@ -2505,116 +2506,120 @@ class TestCase(expecttest.TestCase):
                     assert 0  # unreachable
             return
 
-        def get_shape(pattern):
-            if isinstance(pattern, list):
-                if not pattern:
-                    return (0,)
-                return (len(pattern), *get_shape(pattern[0]))
-            return ()
-
         def get_blockpattern(pattern, blocksize):
-            basesize = get_shape(pattern)
+            basesize = pattern.shape
             assert basesize[0] % blocksize[0] == 0, (basesize, blocksize)
             assert basesize[1] % blocksize[1] == 0, (basesize, blocksize)
-            blockpattern = [[0 for _ in range(basesize[1] // blocksize[1])] for _ in range(basesize[0] // blocksize[0])]
-            for i, row in enumerate(pattern):
-                for j, maskin in enumerate(row):
-                    bi = i // blocksize[0]
-                    bj = j // blocksize[1]
-                    blockno = 1 + bi * (basesize[1] // blocksize[1]) + bj
-                    blockpattern[bi][bj] = blockno if maskin else blockpattern[bi][bj]
-            return blockpattern
-
-        def transpose(lst):
-            return list(map(list, zip(*lst)))
+            blockpattern = pattern.reshape(-1,
+                                           blocksize[0],
+                                           basesize[1] // blocksize[1],
+                                           blocksize[1]).transpose(-3, -2).any(-1).any(-1)
+            block_ids = torch.arange(1, blockpattern.numel() + 1).reshape(blockpattern.shape)
+            return (blockpattern != 0) * block_ids
 
         def get_sparse_data(pattern):
-            indices = []
-            values = []
-            count = 0
-            size = get_shape(pattern)
-            batchsize = size[:-2]
-            basesize = size[-2:]
-            crow_indices = [0 for _ in range(basesize[0] + 1)]
-            ccol_indices = [0 for _ in range(basesize[1] + 1)]
-            strided_values = [[0 for _ in range(basesize[1])] for _ in range(basesize[0])]
-            for i, row in enumerate(pattern):
-                for j, maskin in enumerate(row):
-                    if maskin:
-                        count += 1
-                        indices.append([i, j])
-                        values.append(count)
-                        strided_values[i][j] = count
-                        for i1 in range(i, basesize[0]):
-                            crow_indices[i1 + 1] += 1
-                        for j1 in range(j, basesize[1]):
-                            ccol_indices[j1 + 1] += 1
-            coo_indices = transpose(indices) if indices else [[]] * len(basesize)
-            if indices:
-                _, row_indices, csc_values = map(list, zip(*sorted(zip(coo_indices[1], coo_indices[0], values))))
-            else:
-                row_indices = []
-                csc_values = []
+            basesize = pattern.shape
+            assert len(basesize) == 2, basesize  # pattern is expected to be a matrix
+
+            # We cannot use `torch.sparse_xyz_tensor(pattern)` to
+            # compute the sparse layout indices and values because
+            # generate_simple_inputs is used to generate the inputs to
+            # test `torch.sparse_xyz_tensor` factory functions, so
+            # we'll compute the indices and values independently of
+            # the factory functions.
+
+            indices = torch.where(pattern != 0)
+            coo_indices = torch.stack(indices)
+            crow_indices = torch.zeros(basesize[0] + 1, dtype=torch.int64)
+            crow_indices[1:] = torch.cumsum(coo_indices[0].bincount(minlength=basesize[0]), 0)
+            col_indices = coo_indices[1]
+            strided_values = torch.zeros(basesize, dtype=torch.int64)
+
+            # the property of `values == range(1, 1+nnz)` is used in
+            # get_sparse_data_with_block to relate BSR and BSC values,
+            # so, don't change the following line:
+            values = torch.arange(1, 1 + len(indices[0]), dtype=torch.int64)
+            strided_values[indices] = values
+
+            indices_T = torch.where(pattern.transpose(0, 1) != 0)
+            coo_indices_T = torch.stack(indices_T)
+            ccol_indices = torch.zeros(basesize[1] + 1, dtype=torch.int64)
+            ccol_indices[1:] = torch.cumsum(coo_indices_T[0].bincount(minlength=basesize[1]), 0)
+            row_indices = coo_indices_T[1]
+            csc_values = strided_values.transpose(0, 1)[indices_T]
+
             return {torch.sparse_coo: (coo_indices, values),
-                    torch.sparse_csr: (crow_indices, coo_indices[1], values),
+                    torch.sparse_csr: (crow_indices, col_indices, values),
                     torch.sparse_csc: (ccol_indices, row_indices, csc_values),
                     torch.strided: (strided_values,)}
 
         def get_sparse_data_with_block(pattern, blocksize):
-            blockpattern = get_blockpattern(pattern, blocksize)
             nonblock_data = get_sparse_data(pattern)
+            blockpattern = get_blockpattern(pattern, blocksize)
             block_data = get_sparse_data(blockpattern)
-            bsr_values = []
-            for bi, bj in transpose(block_data[torch.sparse_coo][0]):
-                block = [[0 for j in range(blocksize[1])] for i in range(blocksize[0])]
-                for i in range(blocksize[0]):
-                    for j in range(blocksize[1]):
-                        li = bi * blocksize[0] + i
-                        lj = bj * blocksize[1] + j
-                        block[i][j] = nonblock_data[torch.strided][0][li][lj]
-                bsr_values.append(block)
+
+            strided_values = nonblock_data[torch.strided][0]
             block_indices = block_data[torch.sparse_coo][0]
-            bsc_values = [bsr_values[i - 1] for i in block_data[torch.sparse_csc][2]]
+            bsr_values = torch.stack([strided_values[bi * blocksize[0]:(bi + 1) * blocksize[0],
+                                                     bj * blocksize[1]:(bj + 1) * blocksize[1]]
+                                      for bi, bj in block_indices.transpose(0, 1)])
+
+            # here we use the property `values == range(1, 1+nnz)` and
+            # `values` relation to `csc_values` (see get_sparse_data)
+            # to get BSC blocks via reordering the BSR blocks:
+            bsc_values = bsr_values[block_data[torch.sparse_csc][2] - 1]
+
             return {torch.sparse_bsr: (*block_data[torch.sparse_csr][:2], bsr_values),
                     torch.sparse_bsc: (*block_data[torch.sparse_csc][:2], bsc_values),
                     **nonblock_data}
 
         def get_batch_sparse_data(pattern, blocksize):
-            assert isinstance(pattern, list)
-            size = get_shape(pattern)
-            if len(size) <= 2:
+            size = pattern.shape
+            if len(size) <= 2:  # non-batch
                 return get_sparse_data_with_block(pattern, blocksize)
+
+            # batch data is created recursively:
             batch_data = {}
             for i, item in enumerate(pattern):
-                data = get_batch_sparse_data(item, blocksize)
-                for layout, d in data.items():
+                for layout, d in get_batch_sparse_data(item, blocksize).items():
                     target = batch_data.get(layout)
-                    if target is None:
-                        if layout is torch.sparse_coo:
-                            target = batch_data[layout] = ([[i] * len(d[1])] + d[0], d[1])
+                    if layout is torch.sparse_coo:
+                        # a "batch COO" means a COO with the leading
+                        # sparse dimensions interpreted as batch
+                        # dimensions
+                        ext_coo_indices1 = torch.cat((torch.full((1, len(d[1])), i, dtype=torch.int64), d[0]))
+                        if target is None:
+                            target = batch_data[layout] = (ext_coo_indices1, d[1])
                         else:
-                            target = batch_data[layout] = tuple([[d_[:]] for d_ in d])
+                            target[0].set_(torch.cat((target[0], ext_coo_indices1), 1))
+                            target[1].set_(torch.cat((target[1], d[1])))
                     else:
-                        if layout is torch.sparse_coo:
-                            for j, lst in enumerate(target[0]):
-                                lst.extend([i] * len(d[1]) if j == 0 else d[0][j - 1])
-                            target[1].extend(d[1])
+                        if target is None:
+                            target = batch_data[layout] = tuple(d[j].unsqueeze(0) for j in range(len(d)))
                         else:
                             for j in range(len(d)):
-                                target[j].append(d[j])
+                                target[j].set_(torch.cat((target[j], d[j].unsqueeze(0))))
             return batch_data
 
-        def expand_values(base, densesize):
+        def generate_values(base, densesize):
+            """Generates a tensor of shape densesize with values equal to
+
+              base + i_1 * 10^0 + ... + i_d * 10^{d - 1}
+
+            at indices i_1, ..., i_d (with 0 <= i_j < densesize[j] for any 1 <= j <=
+            len(densesize))
+
+            This mapping produces unique values as long as
+            densesize[i] < 10 for all i in range(len(densesize)).
             """
-            Expand values in base to blocks of values with densesize.
-            """
+
             if not densesize:
                 return base
-            if isinstance(base, list):
-                return torch.stack([expand_values(b, densesize) for b in base])
+            if not isinstance(base, int) and base.ndim > 0:
+                return torch.stack([generate_values(b, densesize) for b in base])
             if base == 0:
                 return torch.zeros(densesize, dtype=torch.int64)
-            r = torch.tensor(range(densesize[0]))
+            r = torch.arange(densesize[0], dtype=torch.int64)
             for i, d in enumerate(densesize[1:]):
                 y = torch.arange(d, dtype=torch.int64) * (10 ** (i + 1))
                 r = r[..., None] + y[None, ...]
@@ -2637,7 +2642,7 @@ class TestCase(expecttest.TestCase):
             patterns = [
                 # a simple 3 x 2 tensor: non-hybrid, hybrid with 1 and 2 dense dimensions
                 ([[1, 2, 0],
-                  [1, 0, 3]], [(2, 1), (1, 3)], [(), (2,), (4, 5)] if enable_hybrid else [()]),
+                  [1, 0, 3]], [(2, 1), (1, 3)], [(), (2,), (4, 5)]),
                 # 2 x 3 batch of 3 x 2 tensors: non-hybrid and hybrid with 2 dense dimensions
                 ([[[[1, 2, 0],
                     [1, 0, 3]],
@@ -2650,7 +2655,7 @@ class TestCase(expecttest.TestCase):
                    [[1, 0, 3],
                     [1, 2, 0]],
                    [[1, 2, 3],
-                    [0, 2, 0]]]], [(2, 1), (2, 3)], (([(), (2,)] if enable_hybrid else [()]) if enable_batched else [])),
+                    [0, 2, 0]]]], [(2, 1), (2, 3)], [(), (2,)]),
                 # tensor with non-trivial blocksize
                 ([[0, 1, 0, 2, 0, 2],
                   [0, 1, 0, 0, 2, 0],
@@ -2659,23 +2664,30 @@ class TestCase(expecttest.TestCase):
                   [0, 5, 0, 6, 6, 6],
                   [5, 0, 5, 6, 6, 6],
                   [0, 0, 0, 0, 8, 8],
-                  [7, 7, 7, 0, 8, 8]], [(2, 3)], [(), (4, 5)] if enable_hybrid else [()]),
+                  [7, 7, 7, 0, 8, 8]], [(2, 3)], [(), (4, 5)]),
                 # batch tensor with variable NSE
                 # Requires https://github.com/pytorch/pytorch/pull/84843 or similar.
                 ([[[1, 2],
                    [3, 4]],
                   [[1, 0],
-                   [0, 0]]], [(1, 1)], ([()] if enable_batched_variable_nse else []))]
+                   [0, 0]]], [(1, 1)], ([()] if enable_batch_variable_nse else []))]
 
         # the main loop of the method:
         for pattern, blocksizes, densesizes in patterns:
-            size = get_shape(pattern)
+            if not enable_hybrid:
+                densesizes = [s for s in densesizes if not s]
+            if not (densesizes and blocksizes):
+                continue
+            pattern = torch.tensor(pattern, dtype=torch.int64)
+            if not enable_batch and pattern.ndim > 2:
+                continue
             for blocksize in blocksizes:
                 data = get_batch_sparse_data(pattern, blocksize)[layout]
                 for densesize in densesizes:
-                    indices = [torch.tensor(a, device=device, dtype=index_dtype) for a in data[:-1]]
-                    values = torch.tensor(expand_values(data[-1], densesize), device=device, dtype=dtype)
-                    yield (*indices, values), dict(device=device, dtype=dtype, size=size + densesize)
+                    indices = [a.to(device=device, dtype=index_dtype) for a in data[:-1]]
+                    values = generate_values(data[-1], densesize).to(device=device, dtype=dtype)
+                    yield (*indices, values), dict(device=device, dtype=dtype,
+                                                   size=pattern.shape + densesize)
 
         # zero-sized tensor inputs, non-batch, non-hybrid/hybrid
         if enable_zero_sized:
@@ -3849,6 +3861,32 @@ def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.devi
             *byte_list)).value
 
     return torch.tensor(res, device=device, dtype=dtype)
+
+
+def copy_func(f):
+    """Based on http://stackoverflow.com/a/6528148/190597 (Glenn Maynard)"""
+    g = types.FunctionType(f.__code__, f.__globals__, name=f.__name__,
+                           argdefs=f.__defaults__,
+                           closure=f.__closure__)
+    g = functools.update_wrapper(g, f)
+    g.__kwdefaults__ = f.__kwdefaults__
+    return g
+
+
+def xfail_inherited_tests(tests):
+    """
+    Given a list of test names which are defined by a superclass of the
+    class this decorates, mark them as expected failure.  This is useful
+    if you are doing poor man's parameterized tests by subclassing a generic
+    test class.
+    """
+    def deco(cls):
+        for t in tests:
+            # NB: expectedFailure operates by mutating the method in question,
+            # which is why you have to copy the function first
+            setattr(cls, t, unittest.expectedFailure(copy_func(getattr(cls, t))))
+        return cls
+    return deco
 
 
 def sandcastle_skip_if(condition, reason):
