@@ -4,6 +4,7 @@ import math
 import unittest
 import functools
 import itertools
+from typing import Any, Dict, Tuple
 from copy import deepcopy
 
 import torch
@@ -4319,7 +4320,6 @@ class TestOptimizerHook(TestCase):
         assert data == 6
 
     def test_pre_hook(self):
-
         def pre_hook(optimizer: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
             nonlocal data
             data += 2
@@ -4343,7 +4343,6 @@ class TestOptimizerHook(TestCase):
         assert data == 9
 
     def test_pre_and_post_hook(self):
-
         def pre_hook(optimizer: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
             nonlocal data
             data.append(2)
