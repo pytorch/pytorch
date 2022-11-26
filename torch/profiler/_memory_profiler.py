@@ -1,5 +1,6 @@
 import collections
 import dataclasses
+import enum
 from typing import (
     Any,
     cast,
@@ -25,6 +26,13 @@ from torch._C._profiler import (
     RecordScope,
 )
 from torch.profiler import _utils
+
+TensorAndID = Tuple["TensorKey", int]
+
+
+class Category(enum.Enum):
+    TEMPORARY = enum.auto()
+    GRADIENT = enum.auto()
 
 
 @dataclasses.dataclass
@@ -481,7 +489,84 @@ class DataFlowGraph:
         self._active_version[key] = None
 
 
+@dataclasses.dataclass
+class CategoryElement:
+    by_id: Optional[Category] = None
+    by_key: Dict[TensorKey, Category] = dataclasses.field(default_factory=dict)
+    by_version: Dict[TensorAndID, Category] = dataclasses.field(default_factory=dict)
+
+    # Used by unit tests to check internals. (And consequently by
+    # MemoryProfile.lookup) This should not be used in any other capacity.
+    _by_id_keyset: Set[TensorKey] = dataclasses.field(default_factory=set)
+
+
+@dataclasses.dataclass
+class CategoryDict:
+    _values: DefaultDict[int, CategoryElement] = dataclasses.field(
+        default_factory=lambda: collections.defaultdict(CategoryElement)
+    )
+
+    def set_by_id(self, key: TensorKey, category: Category) -> None:
+        self._values[key.id].by_id = category
+        self._values[key.id]._by_id_keyset.add(key)
+
+    def set_by_key(self, key: TensorKey, category: Category) -> None:
+        self._values[key.id].by_key[key] = category
+
+    def set_by_version(self, key: TensorKey, version: int, category: Category) -> None:
+        self._values[key.id].by_version[(key, version)] = category
+
+    def setdefault_by_version(
+        self, key: TensorKey, version: int, category: Category
+    ) -> None:
+        self._values[key.id].by_version.setdefault((key, version), category)
+
+    def get(self, key: TensorKey, version: int) -> Optional[Category]:
+        element = self._values[key.id]
+        return (
+            element.by_id
+            or element.by_key.get(key, None)
+            or element.by_version.get((key, version), None)
+        )
+
+
 class MemoryProfile:
     def __init__(self, result: _ProfilerResult) -> None:
         self._op_tree = OpTree(result)
         self._data_flow_graph = DataFlowGraph(self._op_tree)
+        self._categories = CategoryDict()
+
+        self._set_gradients_and_temporaries()
+
+    def _category_snapshot(self) -> Dict[TensorAndID, Optional[Category]]:
+        all_tensor_versions: Set[TensorAndID] = set()
+
+        for node in self._data_flow_graph.flow_nodes:
+            all_tensor_versions.update(((k, v) for k, (_, v) in node.inputs.items()))
+            all_tensor_versions.update(((key, 0) for key in node.intermediates))
+            all_tensor_versions.update(node.outputs.items())
+
+        for i in self._categories._values.values():
+            all_tensor_versions.update(((key, 0) for key in i._by_id_keyset))
+
+        return {
+            (key, version): self._categories.get(key, version)
+            for key, version in sorted(all_tensor_versions)
+        }
+
+    def _set_gradients_and_temporaries(self) -> None:
+        """Mark Tensors which are unambiguous and simple to reason about."""
+
+        # Gradients are straightforward to detect. We directly check the
+        # `.grad` property in the Python tracer, and we can detect any new
+        # gradient Tensors from `AccumulateGrad` ops.
+        for event in self._op_tree.dfs():
+            for _, p_grad in extract_gradients(event):
+                self._categories.set_by_id(p_grad, Category.GRADIENT)
+
+        # Similarly, temporary Tensors are easy to identify and are useful to
+        # flag since they can make memory use "spikier" than one would
+        # otherwise expect.
+        for node in self._data_flow_graph.flow_nodes:
+            for i in node.intermediates:
+                self._categories.set_by_key(i, Category.TEMPORARY)
