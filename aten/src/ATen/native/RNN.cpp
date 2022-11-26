@@ -52,7 +52,6 @@
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/zeros_like_ops.h>
 #include <utility>
-#include <ATen/ops/lstm_mkldnn_stub.h>
 #endif
 
 int register_linear_params();
