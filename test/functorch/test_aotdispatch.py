@@ -995,11 +995,17 @@ def forward(self, primals_1, primals_2):
 
         fxy = aot_module_simplified(F(), nop)
         fxy(x, y)
-        self.assertRaises(AssertionError, lambda: fxy(x, x))
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxy(x, x),
+            """At compilation time, this graph was compiled under the assumption that there would be 2 distinct arguments, but at runtime there were only 1 distinct arguments.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
 
         fxx = aot_module_simplified(F(), nop)
         fxx(x, x)
-        self.assertRaises(AssertionError, lambda: fxx(x, y))
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxx(x, y),
+            """At compilation time, this graph was compiled under the assumption that some inputs were duplicate, but at runtime input 1 was not a duplicate of 0.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
 
     @patch("functorch._src.config.debug_assert", True)
     def test_invalid_requires_grad(self):
@@ -1024,7 +1030,10 @@ def forward(self, primals_1, primals_2):
 
         fxz = aot_module_simplified(F(), nop)
         compare(F(), fxz, (x, z))
-        self.assertRaises(AssertionError, lambda: fxz(x, y))  # not OK
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxz(x, y),
+            """At compilation time, this graph was compiled under the assumption that input 1 did not require grad, but at runtime input 1 requires grad.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
 
     def test_resize_input(self):
         def f(x, y):

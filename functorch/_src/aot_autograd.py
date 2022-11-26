@@ -1040,6 +1040,11 @@ def merge_view_inputs(
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
+GUARD_BUG_BOILERPLATE = (
+    "This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."
+)
+
+
 # Wraps aot_dispatch_deduplicated_autograd, ensuring that duplicate arguments
 # are dropped from the inner compilation function.
 #
@@ -1116,10 +1121,20 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             # Test that the computed remove/add arg functions are an inverse
             new_args = add_dupe_args(remove_dupe_args(args))
             seen = {}
-            for x, y in zip(new_args, args):
+            for i, (x, y) in enumerate(zip(new_args, args)):
                 seen[y] = None
-                assert x is y
-            assert len(seen) == unique_args
+                assert x is y, (
+                    "At compilation time, this graph was compiled under the "
+                    "assumption that some inputs were duplicate, but at runtime "
+                    f"input {i} was not a duplicate of {add_dupe_map[i]}.  " +
+                    GUARD_BUG_BOILERPLATE
+                )
+            assert len(seen) == unique_args, (
+                "At compilation time, this graph was compiled under the assumption "
+                f"that there would be {unique_args} distinct arguments, but at "
+                f"runtime there were only {len(seen)} distinct arguments.  " +
+                GUARD_BUG_BOILERPLATE
+            )
             return f(*args)
 
         return debug_wrapper
@@ -1497,7 +1512,11 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
             if can_require_grad is None:
                 assert not isinstance(a, Tensor)
             elif not can_require_grad:
-                assert not a.requires_grad
+                assert not a.requires_grad, (
+                    "At compilation time, this graph was compiled under the "
+                    f"assumption that input {i} did not require grad, but at "
+                    f"runtime input {i} requires grad.  " + GUARD_BUG_BOILERPLATE
+                )
 
         return compiled_function(*args)
 
