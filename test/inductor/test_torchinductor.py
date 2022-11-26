@@ -682,6 +682,11 @@ class CommonTemplate:
             return (torch.maximum(a, b), torch.minimum(a, b))
 
         self.common(fn, (torch.randn(8), torch.randn(8)))
+        t1 = torch.randn(8)
+        t1[0] = float("nan")
+        t2 = torch.randn(8)
+        t2[1] = float("nan")
+        self.common(fn, (t1, t2))
 
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
@@ -3221,6 +3226,16 @@ class CommonTemplate:
         out = fn(*inputs)
         out_eager = (inputs[0] + inputs[1].float()).add_(inputs[1]).mul_(inputs[1])
         self.assertTrue(same(out, out_eager))
+
+    @patch.object(config.triton, "ordered_kernel_names", True)
+    @patch.object(config.triton, "descriptive_kernel_names", False)
+    def test_kernel_names(self):
+        @torch._dynamo.optimize("inductor")
+        def fn(x):
+            return 2 * x
+
+        inputs = (rand_strided((8,), (1,), device=self.device),)
+        self.assertTrue(same(fn(*inputs), 2 * inputs[0]))
 
     @patch.object(config.triton, "cudagraphs", True)
     def test_strided_inputs(self):
