@@ -1463,7 +1463,7 @@ class TestQuantizedTensor(TestCase):
         dedequantized_X = quantized_X.to(torch.float32)
         torch.testing.assert_close(X, dedequantized_X, rtol=1e-4, atol=5e-3)
 
-    def test_decomposed_quantize(self):
+    def test_decomposed_quantize_per_tensor(self):
         # register the ops
         import torch.ao.quantization.fx._decomposed
         X = torch.randn(5, 10)
@@ -1479,7 +1479,7 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(quantized_decomposed_X.dtype, dtype)
         self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
 
-    def test_decomposed_dequantize(self):
+    def test_decomposed_dequantize_per_tensor(self):
         import torch.ao.quantization.fx._decomposed
         X = torch.randn(5, 10)
         dtype = torch.uint8
@@ -1518,6 +1518,48 @@ class TestQuantizedTensor(TestCase):
         dequantized_decomposed_X = torch.ops.quantized_decomposed.dequantize_per_tensor.tensor(
             quantized_decomposed_X, scale_decomposed, zero_point_decomposed, quant_min, quant_max, dtype
         )
+        self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
+        self.assertEqual(dequantized_X, dequantized_decomposed_X)
+
+    def test_decomposed_quantize_per_channel(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        X = torch.randn(5, 10)
+        qdtype = torch.quint8
+        dtype = torch.uint8
+        scales = torch.randn(5,)
+        zero_points = torch.randint(0, 100, (5,))
+        quant_min, quant_max = 0, 255
+        axis = 0
+
+        quantized_X = torch.quantize_per_channel(X, scales, zero_points, axis, qdtype)
+        quantized_decomposed_X = \
+            torch.ops.quantized_decomposed.quantize_per_channel(
+                X, scales, zero_points, axis, quant_min, quant_max, dtype)
+        self.assertEqual(quantized_decomposed_X.dtype, dtype)
+        self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
+
+    def test_decomposed_dequantize_per_channel(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        X = torch.randn(5, 10)
+        qdtype = torch.quint8
+        dtype = torch.uint8
+        scales = torch.randn(5,)
+        zero_points = torch.randint(0, 100, (5,))
+        quant_min, quant_max = 0, 255
+        axis = 0
+
+        quantized_X = torch.quantize_per_channel(X, scales, zero_points, axis, qdtype)
+        dequantized_X = torch.dequantize(quantized_X)
+
+        quantized_decomposed_X = \
+            torch.ops.quantized_decomposed.quantize_per_channel(
+                X, scales, zero_points, axis, quant_min, quant_max, dtype)
+        dequantized_decomposed_X = \
+            torch.ops.quantized_decomposed.dequantize_per_channel(
+                quantized_decomposed_X, scales, zero_points, axis, quant_min, quant_max, dtype)
+
         self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
         self.assertEqual(dequantized_X, dequantized_decomposed_X)
 
