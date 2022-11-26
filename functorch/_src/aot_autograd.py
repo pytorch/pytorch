@@ -1829,12 +1829,6 @@ def aot_module_simplified(
     full_args.extend(params_flat)
     full_args.extend(args)
 
-    compiled_fn = create_aot_dispatcher_function(
-        functional_call,
-        full_args,
-        aot_config,
-    )
-
     # TODO: There is something deeply wrong here; compiled_fn running with
     # the boxed calling convention, but aot_module_simplified somehow
     # historically returned a function that was not the boxed calling
@@ -1843,6 +1837,15 @@ def aot_module_simplified(
         full_args = []
         full_args.extend(params_flat)
         full_args.extend(runtime_args)
+
+        # TODO: Hoist this out so we aren't recompiling
+        # NB: This is using RUNTIME args, not COMPILE time args,
+        # as the compile time args don't have correct requires_grad
+        compiled_fn = create_aot_dispatcher_function(
+            functional_call,
+            full_args,
+            aot_config,
+        )
         return compiled_fn(full_args)
 
     # Just for convenience
