@@ -39,6 +39,12 @@ SYM_FUNCTION_MODE = None
 # symints right now
 
 
+# so we can add extra attributes
+# TODO: slots'ify this
+class VarSymbol(sympy.Symbol):
+    pass
+
+
 # SymDispatchMode gets invoked whenever an operation is processed on
 # a PySymInt.  When this occurs, you get called at __sym_dispatch__
 # with the operation in question.  This is symmetric to TorchDispatchMode
@@ -519,7 +525,8 @@ class ShapeEnv(object):
         # this also ensures that all symbols are > 1
         if val in self.val_to_var:
             return self.val_to_var[val]
-        sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+        sympy_expr = VarSymbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+        sympy_expr.tb = traceback.extract_stack()
         self.var_to_val[sympy_expr] = sympy.Integer(val)
         self.val_to_var[val] = sympy_expr
         return sympy_expr

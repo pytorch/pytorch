@@ -586,7 +586,8 @@ class DynamoGuardPrinter(StrPrinter):
         if not expr_found:
             if expr in self.base_symbols:
                 return f"{self.shape_env.var_to_val[expr]}"
-        assert expr_found, f"Failed to find {expr}"
+        import traceback
+        assert expr_found, f"Failed to find {expr} allocated at {''.join(traceback.format_list(expr.tb))}"
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
