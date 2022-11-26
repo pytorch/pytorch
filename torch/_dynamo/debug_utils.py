@@ -243,7 +243,8 @@ def save_graph_repro(fd, gm, args, compiler_name):
             textwrap.dedent(
                 f"""
                 compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
-                compiled(args)
+                ref = compiled(args)
+                torch.cuda.synchronize() # Ensures that segfaults are surfaced
                 """
             )
         )
@@ -296,6 +297,7 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
         stderr.seek(0)
         print(textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "))
         print(textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "))
+        # print(f"Isolated test failed - {file_name}")
         return True
     return False
 
@@ -305,18 +307,20 @@ def inductor_fails(fx_g, args, check_str=None):
         f"{config.inductor_import}.compile_fx"
     ).compile_fx_inner
 
-    import_module(f"{config.inductor_import}.config").triton.autotune = False
-
     try:
         result = fx_g(*args)
         assert isinstance(result, (tuple, list))
         assert not any([isinstance(x, (tuple, list)) for x in result])
     except Exception:
         return False
+    result = None
+    torch.cuda.synchronize()
 
     try:
         compile_mod = compile_fx_inner(fx_g, args)
         compile_mod(args)
+        # Ensures that segfaults are surfaced
+        torch.cuda.synchronize()
     except Exception as e:
         if check_str is not None and check_str not in repr(e):
             return False
