@@ -954,7 +954,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     # NB: When you remove the expectedFailure, don't forget to
     # uncomment/adjust the assertEqual below
     @unittest.expectedFailure
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_maml_item_capture(self):
         a = torch.randn(5, 1, 28, 28)

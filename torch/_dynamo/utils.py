@@ -32,7 +32,7 @@ import torch
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map, tree_flatten
+from torch.utils._pytree import tree_flatten, tree_map
 
 from . import config, logging as torchdynamo_logging
 
@@ -758,7 +758,7 @@ def wrap_to_fake_tensor(e, fake_mode):
 
 
 def wrap_to_fake_tensor_and_record(e, tx):
-    if type(e) in (torch.Tensor, torch.nn.Parameter):
+    if isinstance(e, torch.Tensor) and not isinstance(e, torch._subclasses.FakeTensor):
         static_shapes = config.dynamic_shapes is False
         if type(e) is torch.nn.Parameter:
             # Always static for params
@@ -1148,6 +1148,7 @@ def get_real_value(node, output_graph):
     except RuntimeError as e:
         raise TorchRuntimeError() from e
     return real_value
+
 
 def fake_mode_from_tensors(inputs: List[Any]):
     """

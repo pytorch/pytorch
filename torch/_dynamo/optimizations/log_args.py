@@ -4,6 +4,8 @@ import os
 import torch
 from torch.fx.experimental.proxy_tensor import make_fx
 
+from ..utils import fake_mode_from_tensors, deepcopy_to_fake_tensor
+
 aten = torch.ops.aten
 
 
@@ -68,6 +70,8 @@ class ConvArgsAnalysis(torch.fx.Interpreter):
 
 def conv_args_analysis(gm: torch.fx.GraphModule, example_inputs):
     # lowering graph
+    fake_mode = fake_mode_from_tensors(example_inputs)
+    gm = deepcopy_to_fake_tensor(gm, fake_mode)
     gm = make_fx(gm)(*example_inputs)
     # use Interpreter to logs the args of conv
     ConvArgsAnalysis(gm).run(*example_inputs)

@@ -138,7 +138,8 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         opt_model = torch._dynamo.optimize(conv_args_analysis)(model)
         with torch.no_grad():
             r2 = opt_model(input)
-        self.assertTrue(same(r1, r2.float(), tol=0.1))
+        self.assertEqual(r1.size(), r2.size())
+        self.assertEqual(r1.stride(), r2.stride())
         self.assertTrue(os.path.exists(filename))
         with open(filename) as f:
             args_dict = json.load(f)
