@@ -107,7 +107,7 @@ class TestComplex(JitTestCase):
                     msg = f"Failed on {func_name} with input {a}. Python: {res_python}, Script: {res_script}"
                     self.assertEqual(res_python, res_script, msg=msg)
 
-        unary_ops = ['log', 'log10', 'log1p', 'sqrt', 'exp', 'sin', 'cos', 'asin', 'acos', 'atan', 'sinh', 'cosh',
+        unary_ops = ['log', 'log10', 'sqrt', 'exp', 'sin', 'cos', 'asin', 'acos', 'atan', 'sinh', 'cosh',
                      'tanh', 'asinh', 'acosh', 'atanh', 'phase', 'isinf', 'isnan', 'isfinite']
 
         # --- Unary ops ---
