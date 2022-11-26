@@ -1097,9 +1097,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         add_dupe_map[i] = j
         j += 1
 
-    # Fastpath
-    if not dropped_args:
-        return aot_dispatch_deduplicated_autograd(flat_fn, flat_args, aot_config)
+    unique_args = j
 
     # NB: Hot path, avoid set lookups here
     # TODO: Can avoid the zip here too, probably
@@ -1108,6 +1106,27 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     def add_dupe_args(args):
         return [args[add_dupe_map[i]] for i in range(duped_arg_len)]
+
+    def maybe_wrap_debug(f):
+        if not config.debug_assert:
+            return f
+
+        @wraps(f)
+        def debug_wrapper(*args):
+            # Test that the computed remove/add arg functions are an inverse
+            new_args = add_dupe_args(remove_dupe_args(args))
+            seen = {}
+            for x, y in zip(new_args, args):
+                seen[y] = None
+                assert x is y
+            assert len(seen) == unique_args
+            return f(*args)
+
+        return debug_wrapper
+
+    # Fastpath
+    if not dropped_args:
+        return maybe_wrap_debug(aot_dispatch_deduplicated_autograd(flat_fn, flat_args, aot_config))
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
@@ -1121,7 +1140,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     def wrapped_compiled_fn(*args):
         return compiled_fn(*remove_dupe_args(args))
 
-    return wrapped_compiled_fn
+    return maybe_wrap_debug(wrapped_compiled_fn)
 
 
 # Like aot_dispatch_autograd, but with the precondition that there
@@ -1457,7 +1476,31 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
         else:
             return fw_outs
 
-    return compiled_function
+    if not config.debug_assert:
+        return compiled_function
+
+    flat_requires_grad = [a.requires_grad if isinstance(a, Tensor) else None for a in flat_args]
+    @wraps(compiled_function)
+    def debug_compiled_function(*args):
+        # TODO: Check aliasing relationships
+        # TODO: Check strides for metadata mutation
+        # (NB: ideally, this logic is factored out of this function and
+        # you move these debug checks there)
+
+        # Check requires grad.  Bad case is when we compiled with
+        # requires_grad = False, but input requires_grad = True
+        # (vice versa is OK; we compute a gradient and then throw
+        # it away when it hits the input.)
+        for i, a in enumerate(args):
+            can_require_grad = flat_requires_grad[i]
+            if can_require_grad is None:
+                assert not isinstance(a, Tensor)
+            elif not can_require_grad:
+                assert not a.requires_grad
+
+        return compiled_function(*args)
+
+    return debug_compiled_function
 
 
 @dynamo_timed
