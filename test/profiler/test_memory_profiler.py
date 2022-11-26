@@ -775,6 +775,7 @@ class TestDataFlow(TestCase):
 
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2E(TestCase):
+
     @staticmethod
     def _lookup_tensor_categories(
         t: torch.Tensor, memory_profile: _memory_profiler.MemoryProfile
@@ -871,6 +872,69 @@ class TestMemoryProfilerE2E(TestCase):
         optimizer.zero_grad(set_to_none=True)
         self.assertTrue(all(p.grad is None for p in model.parameters()))
         self._run_and_check_gradients(inner_fn=fwd_bwd_step, model=model)
+
+    def test_inputs_fwd(self):
+        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1))
+        inputs = [torch.ones((2, 2)) for _ in range(2)]
+
+        with profile() as prof:
+            # Inputs which were allocated before profiling began
+            for x in inputs:
+                _ = model(x)
+
+            # Inputs which were allocated after profiling began
+            for _ in range(2):
+                x = torch.ones((2, 2))
+                inputs.append(x)
+                _ = model(x)
+
+        # For now we can't make any meaningful statements without a backward
+        # pass. Here we simply ensure that passes don't generate false positive
+        # category classifications.
+        memory_profile = prof._memory_profile()
+        for x in inputs:
+            categories = self._lookup_tensor_categories(x, memory_profile)
+            self.assertGreater(len(categories), 0)
+            self.assertTrue(all(i is None for i in categories.values()))
+
+        snapshot = memory_profile._category_snapshot()
+        self.assertFalse({k: v for k, v in snapshot.items() if v})
+
+    def test_inputs_fwd_bwd(self):
+        model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1))
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+        inputs_targets = [(torch.ones((2, 2)), torch.rand((2, 1))) for _ in range(2)]
+
+        def fwd_bwd_step(x, targets):
+            y = model(x)
+            torch.nn.functional.mse_loss(y, targets).backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+        with profile() as prof:
+            # Inputs which were allocated before profiling began
+            for x, targets in inputs_targets:
+                fwd_bwd_step(x, targets)
+
+            # Inputs which were allocated after profiling began
+            for _ in range(2):
+                x = torch.ones((2, 2))
+                targets = torch.rand((2, 1))
+                inputs_targets.append((x, targets))
+                fwd_bwd_step(x, targets)
+
+        memory_profile = prof._memory_profile()
+
+        def check(t):
+            categories = self._lookup_tensor_categories(t, memory_profile)
+            self.assertGreater(len(categories), 0)
+            self.assertTrue(
+                all(i == _memory_profiler.Category.INPUT for i in categories.values())
+            )
+
+        for x, targets in inputs_targets:
+            check(x)
+            check(targets)
 
 
 if __name__ == "__main__":
