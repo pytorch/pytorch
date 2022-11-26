@@ -784,7 +784,7 @@ public:
   Vectorized<uint8_t> operator>=(const Vectorized<uint8_t>& other) const {
     return other <= *this;
   }
-    
+
   Vectorized<uint8_t> eq(const Vectorized<uint8_t>& other) const;
   Vectorized<uint8_t> ne(const Vectorized<uint8_t>& other) const;
   Vectorized<uint8_t> gt(const Vectorized<uint8_t>& other) const;
