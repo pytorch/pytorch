@@ -430,7 +430,7 @@ def patch_triton_dir():
 class TritonCodeCache:
     @staticmethod
     def get_name(mod):
-        (name,) = [n for n in dir(mod) if n.startswith("kernel")]
+        (name,) = [n for n in dir(mod) if n.startswith("triton_")]
         return name
 
     @classmethod
