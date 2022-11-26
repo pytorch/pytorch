@@ -14,8 +14,6 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo import disable as disable_torchdynamo
-from torch._dynamo.utils import dynamo_timed
 from torch._subclasses import FakeTensorMode, CrossRefFakeMode, FakeTensor
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -27,6 +25,20 @@ from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
+
+try:
+    from torchdynamo import disable as disable_torchdynamo
+except ImportError:
+
+    def disable_torchdynamo(x):
+        return x
+
+try:
+    from torchdynamo.utils import dynamo_timed
+except ImportError:
+
+    def dynamo_timed(x):
+        return x
 
 MutationType = Enum("MutationType", ("none", "metadata_only", "data"))
 OutputType = Enum("OutputType", ("non_alias", "alias_of_input", "alias_of_intermediate"))
@@ -1040,31 +1052,9 @@ def merge_view_inputs(
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
-GUARD_BUG_BOILERPLATE = (
-    "This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."
-)
 
-
-# Wraps aot_dispatch_deduplicated_autograd, ensuring that duplicate arguments
-# are dropped from the inner compilation function.
-#
-# In Haskell types, suppose you have:
-#
-#   add_dupe_args :: DedupedArgs -> Args
-#   remove_dupe_args :: Args -> DedupedArgs
-#
-#   aot_dispatch_deduplicated_autograd
-#       :: (DedupedArgs -> R) -> DedupedArgs -> AOTConfig -> (DedupedArgs -> R)
-#   aot_dispatch_autograd
-#       :: (Args -> R) -> Args -> AOTConfig -> (Args -> R)
-#
-# Then the code below can be written in point-free style as:
-#
-#   aot_dispatch_deduplicate_autograd f a c =
-#       aot_dispatch_autograd (f . add_dupe_args) (remove_dupe_args a) c . remove_dupe_args
-#
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    # Suppose you have:
+    # Deduplicate inputs.  Suppose you have:
     #
     #   [a, b, a, c]
     #
@@ -1082,7 +1072,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     #       2: 0,
     #       3: 2,
     #   }
-    #   keep_arg_mask = [True, True, False, True]
+    #
+    # Whether to use flat_args or deduped_flat_args?  flat_fn takes flat_args,
+    # and the autograd.Function must take deduped_flat_args; everything
+    # else is just getting the types right.
 
     seen_args = {}
     keep_arg_mask = []
@@ -1102,70 +1095,22 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         add_dupe_map[i] = j
         j += 1
 
-    unique_args = j
-
     # NB: Hot path, avoid set lookups here
-    # TODO: Can avoid the zip here too, probably
     def remove_dupe_args(args):
+        if not dropped_args:
+            return args
         return [t for t, keep in zip(args, keep_arg_mask) if keep]
 
     def add_dupe_args(args):
+        if not dropped_args:
+            return args
         return [args[add_dupe_map[i]] for i in range(duped_arg_len)]
-
-    def maybe_wrap_debug(f):
-        if not config.debug_assert:
-            return f
-
-        @wraps(f)
-        def debug_wrapper(*args):
-            # Test that the computed remove/add arg functions are an inverse
-            new_args = add_dupe_args(remove_dupe_args(args))
-            seen = {}
-            for i, (x, y) in enumerate(zip(new_args, args)):
-                seen[y] = None
-                assert x is y, (
-                    "At compilation time, this graph was compiled under the "
-                    "assumption that some inputs were duplicate, but at runtime "
-                    f"input {i} was not a duplicate of {add_dupe_map[i]}.  " +
-                    GUARD_BUG_BOILERPLATE
-                )
-            assert len(seen) == unique_args, (
-                "At compilation time, this graph was compiled under the assumption "
-                f"that there would be {unique_args} distinct arguments, but at "
-                f"runtime there were only {len(seen)} distinct arguments.  " +
-                GUARD_BUG_BOILERPLATE
-            )
-            return f(*args)
-
-        return debug_wrapper
-
-    # Fastpath
-    if not dropped_args:
-        return maybe_wrap_debug(aot_dispatch_deduplicated_autograd(flat_fn, flat_args, aot_config))
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
-    @wraps(flat_fn)
-    def wrapped_flat_fn(*args):
-        return flat_fn(*add_dupe_args(args))
-
-    compiled_fn = aot_dispatch_deduplicated_autograd(wrapped_flat_fn, deduped_flat_args, aot_config)
-
-    @wraps(compiled_fn)
-    def wrapped_compiled_fn(*args):
-        return compiled_fn(*remove_dupe_args(args))
-
-    return maybe_wrap_debug(wrapped_compiled_fn)
-
-
-# Like aot_dispatch_autograd, but with the precondition that there
-# are no duplicate arguments in flat_args (e.g., the same Tensor
-# object never shows up twice.  However, two tensor inputs MAY alias
-# the same storage, so long as they have separate TensorImpls.)
-def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     _fw_metadata, out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
-        flat_fn
-    )(*flat_args)
+        lambda *args: flat_fn(*(add_dupe_args(args))),
+    )(*deduped_flat_args)
 
     # pre-compute, so we can bail out quickly in the hotpath
     _num_outputs_aliased_to_inputs = len([
@@ -1194,16 +1139,16 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
     # gets its data mutated.
     # When that happens, we replace the aliased inputs with a synthetic base, and in the traced forward
     # we later generate the input views
-    flat_args_with_views_handled, _synthetic_base_info = merge_view_inputs(
-        flat_args, _fw_metadata.mutated_input_info)
+    deduped_flat_args_with_views_handled, _synthetic_base_info = merge_view_inputs(
+        deduped_flat_args, _fw_metadata.mutated_input_info)
 
     joint_forward_backward = create_joint_forward_backward_functionalized(
-        flat_fn,
+        lambda *args: flat_fn(*add_dupe_args(args)),
         meta=_fw_metadata,
         synthetic_base_info=_synthetic_base_info,
     )
 
-    joint_inputs = (flat_args_with_views_handled, out)
+    joint_inputs = (deduped_flat_args_with_views_handled, out)
 
     disable_amp = torch._C._is_any_autocast_enabled()
 
@@ -1244,7 +1189,7 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
             bw_module.print_readable()
 
         with track_graph_compiling("forward"):
-            compiled_fw_func = aot_config.fw_compiler(fw_module, flat_args_with_views_handled)
+            compiled_fw_func = aot_config.fw_compiler(fw_module, deduped_flat_args_with_views_handled)
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
@@ -1363,6 +1308,9 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
 
     @wraps(CompiledFunction.apply)
     def compiled_function(*args):
+        # Step 1: remove dupe args
+        no_dupe_args = remove_dupe_args(args)
+
         # Step 2: remove aliased inputs that are mutated, replace with synthetic bases
         # Only happens if our graph mutates an input that aliases another input.
         if CompiledFunction.synthetic_base_info is not None:
@@ -1371,17 +1319,17 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
             # Generate: the updated args, including (potentially multiple) synthetic bases
             # that replace the views. The input views are regenerated manually in the compiled function.
             # TODO: think harder about what happens if (a view of) one of these mutated input views is ALSO returned
-            new_inputs, metadata = merge_view_inputs(args, CompiledFunction.fw_metadata.mutated_input_info)
+            new_inputs, metadata = merge_view_inputs(no_dupe_args, CompiledFunction.fw_metadata.mutated_input_info)
             # We're just re-running the original-args-to-synthetic-base transformation
             # that we ran during compilation.
             # This returns metadata that we use during tracing to recover the input views,
             # which we don't actually need at runtime.
             assert metadata is not None
-            args_with_synthetic_bases = new_inputs
+            no_dupe_args_with_synthetic_bases = new_inputs
         else:
-            args_with_synthetic_bases = args
+            no_dupe_args_with_synthetic_bases = no_dupe_args
 
-        all_outs = CompiledFunction.apply(*args_with_synthetic_bases)
+        all_outs = CompiledFunction.apply(*no_dupe_args_with_synthetic_bases)
         if CompiledFunction.num_aliasing_metadata_outs > 0:
             outs = all_outs[:-CompiledFunction.num_aliasing_metadata_outs]
             aliasing_metadata_outs = all_outs[-CompiledFunction.num_aliasing_metadata_outs:]
@@ -1411,7 +1359,7 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
             )):
                 if mutation_type == MutationType.none:
                     continue
-                original_inpt = args[inpt_idx]
+                original_inpt = no_dupe_args[inpt_idx]
                 if mutation_type == MutationType.metadata_only:
                     # We need to grab the size/stride/storage_offset from the compiled forward,
                     # and use that to mutate the metadata of the input
@@ -1491,36 +1439,7 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
         else:
             return fw_outs
 
-    if not config.debug_assert:
-        return compiled_function
-
-    flat_requires_grad = [a.requires_grad if isinstance(a, Tensor) else None for a in flat_args]
-
-    @wraps(compiled_function)
-    def debug_compiled_function(*args):
-        # TODO: Check aliasing relationships
-        # TODO: Check strides for metadata mutation
-        # (NB: ideally, this logic is factored out of this function and
-        # you move these debug checks there)
-
-        # Check requires grad.  Bad case is when we compiled with
-        # requires_grad = False, but input requires_grad = True
-        # (vice versa is OK; we compute a gradient and then throw
-        # it away when it hits the input.)
-        for i, a in enumerate(args):
-            can_require_grad = flat_requires_grad[i]
-            if can_require_grad is None:
-                assert not isinstance(a, Tensor)
-            elif not can_require_grad:
-                assert not a.requires_grad, (
-                    "At compilation time, this graph was compiled under the "
-                    f"assumption that input {i} did not require grad, but at "
-                    f"runtime input {i} requires grad.  " + GUARD_BUG_BOILERPLATE
-                )
-
-        return compiled_function(*args)
-
-    return debug_compiled_function
+    return compiled_function
 
 
 @dynamo_timed
@@ -1828,7 +1747,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
 def aot_module_simplified(
     mod: nn.Module,
-    args: List[Tensor],
+    args,
     fw_compiler: Callable,
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
