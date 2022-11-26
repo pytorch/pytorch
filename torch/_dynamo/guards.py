@@ -162,7 +162,7 @@ class Guard:
 
         if not self.code_list:
             self.code_list = code_list
-        else:
+        elif code_list:
             self.code_list.extend(code_list)
 
         assert self.obj_weakref in (
@@ -450,6 +450,9 @@ class GuardBuilder:
         if guard.is_nn_module():
             self.ID_MATCH(guard)
         else:
+            pass
+
+        if True:
             value = self.get(guard.name)
             tensor_name = self.arg_ref(guard)
             self.tensor_check_names.append(tensor_name)
@@ -494,7 +497,10 @@ class GuardBuilder:
             self.__class__
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
-        self.code.extend(code_list)
+        if not self.code:
+            self.code = code_list
+        else:
+            self.code.extend(code_list)
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
@@ -628,7 +634,15 @@ class CheckFunctionManager:
         )
         global_builder = GuardBuilder(self.id_ref, f_globals, self, renames=False)
         for guard in sorted(guards or [], key=Guard.sort_key):
-            if not config.guard_nn_modules and guard.is_nn_module():
+            if not config.guard_nn_modules and guard.is_nn_module() and guard.create_fn != GuardBuilder.TENSOR_MATCH:
+                # The `guard.create_fn != GuardBuilder.TENSOR_MATCH:` part is
+                # an exception to not guarding on nn_module properties
+                # In dynamic shapes mode, we sometimes get "weights" "bias" or other registered/named buffers
+                # accesed. We need to install their TENSOR_MATCH guards
+                # so that the names are known for symbolic shape guarding.
+                # This is also probably good for correctness anyway.
+                # TODO(voz): Revisit to see if we need to be more judicious
+                # with which we create guards for due to perf...
                 continue
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(local_builder, global_builder, guards)
