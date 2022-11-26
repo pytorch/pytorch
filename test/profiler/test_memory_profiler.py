@@ -1,9 +1,9 @@
 # Owner(s): ["oncall: profiler"]
 import functools
 import gc
-import re
+import itertools as it
 import textwrap
-from typing import Iterator, List, Optional, Tuple
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
 import torch
 from torch._C._profiler import _EventType
@@ -246,7 +246,12 @@ class TestIdentifyGradients(TestCase):
         )
 
 
+@skipIfTorchDynamo("TorchDynamo removes profiler altogether.")
 class TestDataFlow(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.maxDiff = None
+
     @staticmethod
     def formatSchemas(
         prof: torch.profiler.profile, indent: int = 12
@@ -265,6 +270,46 @@ class TestDataFlow(TestCase):
 
                 out.append((name, _memory_profiler.SchemaMatcher.inputs_are_mutable(e)))
         return tuple(out)
+
+    @staticmethod
+    def _run_and_format_data_flow(
+        inputs: Dict[str, torch.Tensor],
+        f: Callable[..., Optional[Dict[str, torch.Tensor]]],
+        indent: int = 12,
+    ) -> str:
+        with profile() as prof:
+            outputs = f(**inputs) or {}
+            gc.collect()
+
+        memory_profile = prof._memory_profile()
+        graph = memory_profile._data_flow_graph
+        storage_to_id = {key.storage.ptr: key.id for key in graph._active_version}
+
+        lines: List[str] = []
+        for name, t in it.chain(inputs.items(), outputs.items()):
+            lines.append(f"{name + ':':<8} T{storage_to_id[t.storage().data_ptr()]}")
+            if t.grad is not None:
+                grad_id = storage_to_id[t.grad.storage().data_ptr()]
+                lines.append(f"{name + '.grad:':<9} T{grad_id}")
+
+        if lines:
+            lines.append("")
+
+        for node in graph.flow_nodes:
+            destroyed = {k for k, v in node._edges.items() if v.is_deletion}
+
+            inputs: List[str] = []
+            for key, (_, v) in node.inputs.items():
+                inputs.append(f"T{key.id}(v{v}{'*' if key in destroyed else ''})")
+
+            outputs = [f"T{key.id}(v{v})" for key, v in node.outputs.items()]
+            if inputs or outputs:
+                event_name = node._event.name.replace("torch::autograd::", "")
+                lines.append(
+                    f"{event_name:<25} {', '.join(inputs):<15}  ->  {', '.join(outputs)}"
+                )
+
+        return textwrap.indent("\n".join([l.rstrip() for l in lines]), " " * indent)
 
     def test_match_schemas(self) -> None:
         with profile() as prof:
@@ -320,19 +365,15 @@ class TestDataFlow(TestCase):
                 # fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
                 ("aten::fill_.Scalar", (True, False)),
                 ("autograd::engine::evaluate_function: MulBackward0", ()),
-                #
-                # Cannot find schema, all inputs presumed mutable
-                ("MulBackward0", (True,)),
+                ("MulBackward0", (None,)),
                 ("aten::mul.Tensor", (False, False)),
                 (
                     "autograd::engine::evaluate_function: torch::autograd::AccumulateGrad",
                     (),
                 ),
-                #
-                # Cannot find schema, all inputs presumed mutable
-                ("torch::autograd::AccumulateGrad", (True,)),
+                ("torch::autograd::AccumulateGrad", (None,)),
                 ("aten::detach.", (False,)),
-                ("detach", (True,)),
+                ("detach", (None,)),
             ),
         )
 
@@ -347,10 +388,8 @@ class TestDataFlow(TestCase):
             (("aten::cat.", (False, False)),),
         )
 
-    def test_data_flow_leaf(self) -> None:
-        x = torch.ones((1,))
-        y = torch.ones((1,))
-        with profile() as prof, torch.no_grad():
+    def test_data_flow_graph_with_annotations(self) -> None:
+        def f(x, y):
             # torch._C._jit_get_schemas_for_operator will reject any name that
             # is missing a namespace. (denoted by the presence of "::") We want
             # to check that we skip both annotations which have no schema
@@ -361,57 +400,376 @@ class TestDataFlow(TestCase):
                 with torch.profiler.record_function("My Annotation"):
                     x.zero_()
                     y.zero_()
-                    x0 = torch.ones_like(x)
-                    y0 = torch.zeros_like(y)
+                    return {"x0": torch.ones_like(x), "y0": torch.zeros_like(y)}
 
-        leaf_events = prof._memory_profile()._data_flow_graph.leaf_events
-        leaf_names = " ".join(node.name for node in leaf_events)
-
-        # `record_function` makes a Tensor to hold its handle which is not
-        # relevant for this test.
-        record_fn_pattern = r"aten::zeros aten::empty \[memory\] \[memory\] "
-
+        inputs = {"x": torch.ones((1,)), "y": torch.ones((1,))}
         self.assertExpectedInline(
-            re.sub(record_fn_pattern, "", leaf_names),
-            """aten::zero_ aten::zero_ aten::ones_like aten::zeros_like""",
+            self._run_and_format_data_flow(inputs, f),
+            """\
+            x:       T0
+            y:       T1
+            x0:      T2
+            y0:      T3
+
+            aten::zero_               T0(v0)           ->  T0(v1)
+            aten::zero_               T1(v0)           ->  T1(v1)
+            aten::ones_like           T0(v1)           ->  T2(v0)
+            aten::zeros_like          T1(v1)           ->  T3(v0)""",
         )
 
-    def test_data_flow_leaf_non_op_allocations(self) -> None:
-        x = torch.ones((1,))
-        with profile() as prof, torch.no_grad():
+    def test_data_flow_graph_non_op_allocations(self) -> None:
+        def f(x):
             x.mul(2)
-            gc.collect()
 
         # The python arg parser will convert the python scalar `2` to a Tensor
         # to pass to `aten::mul`. As a result there is no op that "owns" the
         # allocation. The Tensor deletions also do not happen in an op; they
         # are collected as a result of the Python objects going out of scope.
-        leaf_events = prof._memory_profile()._data_flow_graph.leaf_events
         self.assertExpectedInline(
-            " ".join(node.name for node in leaf_events),
-            """[memory] aten::mul [memory] [memory]""",
+            self._run_and_format_data_flow({"x": torch.ones((1,))}, f),
+            """\
+            x:       T1
+
+            [memory]                                   ->  T0(v0)
+            aten::mul                 T0(v0), T1(v0)   ->
+            [memory]                  T0(v0*)          ->""",
         )
 
-    def test_data_flow_leaf_backward(self) -> None:
-        x = torch.ones((1,))
-        w = torch.ones((1,), requires_grad=True)
-        with profile() as prof:
-            (x * w).sin().backward()
+    def test_data_flow_graph_simple(self) -> None:
+        inputs = {"x": torch.ones((25,)), "y": torch.ones((25,), requires_grad=True)}
 
-        leaf_events = prof._memory_profile()._data_flow_graph.leaf_events
+        def f0(x, y):
+            z = x.mul(y)
+            return {"z": z.view_as(z)}
+
+        def f1(x, y):
+            with torch.no_grad():
+                return f0(x, y)
+
         self.assertExpectedInline(
-            textwrap.indent("\n".join(node.name for node in leaf_events), " " * 12),
+            self._run_and_format_data_flow(inputs, f0),
             """\
-            aten::mul
-            aten::sin
-            aten::ones_like
-            SinBackward0
-            [memory]
-            MulBackward0
-            [memory]
-            torch::autograd::AccumulateGrad
-            [memory]
-            [memory]""",
+            x:       T0
+            y:       T1
+            z:       T2
+
+            aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
+            aten::view_as             T2(v0)           ->""",
+        )
+
+        # Out of place is identical regardless of Autograd.
+        self.assertExpectedInline(
+            self._run_and_format_data_flow(inputs, f0),
+            """\
+            x:       T0
+            y:       T1
+            z:       T2
+
+            aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
+            aten::view_as             T2(v0)           ->""",
+        )
+
+    def test_data_flow_graph_simple_inplace(self) -> None:
+        inputs = {"x": torch.ones((25,)), "y": torch.ones((25,), requires_grad=True)}
+
+        def f0(x, y):
+            x.mul_(y)
+
+        def f1(x, y):
+            with torch.no_grad():
+                return f0(x, y)
+
+        # When Autograd is enabled a second Tensor `T2` is created to store
+        # the values of T0(v0) which are needed for backwards.
+        self.assertExpectedInline(
+            self._run_and_format_data_flow(inputs, f0),
+            """\
+            x:       T0
+            y:       T1
+
+            aten::mul_                T0(v0), T1(v0)   ->  T0(v1), T2(v0)""",
+        )
+
+        self.assertExpectedInline(
+            self._run_and_format_data_flow(inputs, f1),
+            """\
+            x:       T0
+            y:       T1
+
+            aten::mul_                T0(v0), T1(v0)   ->  T0(v1)""",
+        )
+
+    def test_data_flow_graph_simple_backward(self) -> None:
+        inputs = {
+            "x": torch.ones((1,)),
+            "w": torch.ones((1,), requires_grad=True),
+        }
+        self.assertExpectedInline(
+            self._run_and_format_data_flow(
+                inputs, lambda x, w: (x * w).sin().backward()
+            ),
+            """\
+            x:       T0
+            w:       T1
+            w.grad:   T7
+
+            aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
+            aten::sin                 T2(v0)           ->  T3(v0)
+            aten::ones_like           T3(v0)           ->  T4(v0)
+            SinBackward0              T2(v0), T4(v0)   ->  T6(v0)
+            [memory]                  T2(v0*)          ->
+            MulBackward0              T0(v0), T6(v0)   ->  T7(v0)
+            [memory]                  T6(v0*)          ->
+            AccumulateGrad            T7(v0)           ->
+            [memory]                  T4(v0*)          ->
+            [memory]                  T3(v0*)          ->""",
+        )
+
+    def test_data_flow_graph_complicated(self) -> None:
+        def f():
+            x = torch.ones((25,))
+            y = x.mul(2).add_(2)
+            z = torch.sin(y, out=torch.empty_like(y))
+            return {"x": x, "y": y, "z": z}
+
+        # T1 is the `2` in `.mul(2)`. The Python arg parser automatically
+        # converts Scalar arguments to Tensors. The same is true for `T4`
+        # and `.add_(2)`.
+        self.assertExpectedInline(
+            self._run_and_format_data_flow({}, f),
+            """\
+            x:       T0
+            y:       T3
+            z:       T6
+
+            aten::ones                                 ->  T0(v0)
+            [memory]                                   ->  T1(v0)
+            aten::mul                 T0(v0), T1(v0)   ->  T3(v0)
+            [memory]                  T1(v0*)          ->
+            [memory]                                   ->  T4(v0)
+            aten::add_                T3(v0), T4(v0)   ->  T3(v1)
+            [memory]                  T4(v0*)          ->
+            aten::empty_like          T3(v1)           ->  T6(v0)
+            aten::sin                 T3(v1), T6(v0)   ->  T6(v1)""",
+        )
+
+        with profile() as prof:
+            f()
+
+        # `aten::mul` creates a temporary Tensor (T2), which is why the output
+        # is has ID three rather than two.
+        mul_node = prof._memory_profile()._data_flow_graph.flow_nodes[2]
+        self.assertEqual(mul_node._event.name, "aten::mul")
+        self.assertEqual(len(mul_node.intermediates), 1)
+        self.assertEqual(mul_node.intermediates[0].id, 2)
+
+    def test_data_flow_graph_stacked(self) -> None:
+        inputs = {
+            "x": torch.ones((25,)),
+            "w0": torch.ones((1,), requires_grad=True),
+            "w1": torch.ones((1,), requires_grad=True),
+        }
+
+        def f(x, w0, w1):
+            return x.mul(w0).relu().mul(w1).relu().sum()
+
+        def f_fwd(**kwargs):
+            with torch.no_grad():
+                return {"loss": f(**kwargs)}
+
+        def f_fwd_bwd(**kwargs):
+            loss = f(**kwargs)
+            loss.backward()
+            return {"loss": loss}
+
+        self.assertExpectedInline(
+            self._run_and_format_data_flow(inputs, f_fwd),
+            """\
+            x:       T0
+            w0:      T1
+            w1:      T4
+            loss:    T7
+
+            aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
+            aten::relu                T2(v0)           ->  T3(v0)
+            [memory]                  T2(v0*)          ->
+            aten::mul                 T3(v0), T4(v0)   ->  T5(v0)
+            [memory]                  T3(v0*)          ->
+            aten::relu                T5(v0)           ->  T6(v0)
+            [memory]                  T5(v0*)          ->
+            aten::sum                 T6(v0)           ->  T7(v0)
+            [memory]                  T6(v0*)          ->""",
+        )
+
+        self.assertExpectedInline(
+            self._run_and_format_data_flow(inputs, f_fwd_bwd),
+            """\
+            x:       T0
+            w0:      T1
+            w0.grad:  T15
+            w1:      T4
+            w1.grad:  T12
+            loss:    T7
+
+            aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
+            aten::relu                T2(v0)           ->  T3(v0)
+            [memory]                  T2(v0*)          ->
+            aten::mul                 T3(v0), T4(v0)   ->  T5(v0)
+            aten::relu                T5(v0)           ->  T6(v0)
+            [memory]                  T5(v0*)          ->
+            aten::sum                 T6(v0)           ->  T7(v0)
+            aten::ones_like           T7(v0)           ->  T8(v0)
+            SumBackward0              T8(v0)           ->
+            ReluBackward0             T6(v0), T8(v0)   ->  T9(v0)
+            [memory]                  T6(v0*)          ->
+            MulBackward0              T3(v0), T4(v0), T9(v0)  ->  T10(v0), T11(v0)
+            aten::sum                 T10(v0)          ->  T12(v0)
+            [memory]                  T10(v0*)         ->
+            [memory]                  T9(v0*)          ->
+            AccumulateGrad            T12(v0)          ->
+            ReluBackward0             T3(v0), T11(v0)  ->  T13(v0)
+            [memory]                  T11(v0*)         ->
+            [memory]                  T3(v0*)          ->
+            MulBackward0              T0(v0), T13(v0)  ->  T14(v0)
+            aten::sum                 T14(v0)          ->  T15(v0)
+            [memory]                  T14(v0*)         ->
+            [memory]                  T13(v0*)         ->
+            AccumulateGrad            T15(v0)          ->
+            [memory]                  T8(v0*)          ->""",
+        )
+
+        # Second time grads are already initialized.
+        self.assertExpectedInline(
+            self._run_and_format_data_flow(inputs, f_fwd_bwd),
+            """\
+            x:       T0
+            w0:      T1
+            w0.grad:  T17
+            w1:      T4
+            w1.grad:  T13
+            loss:    T7
+
+            aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
+            aten::relu                T2(v0)           ->  T3(v0)
+            [memory]                  T2(v0*)          ->
+            aten::mul                 T3(v0), T4(v0)   ->  T5(v0)
+            aten::relu                T5(v0)           ->  T6(v0)
+            [memory]                  T5(v0*)          ->
+            aten::sum                 T6(v0)           ->  T7(v0)
+            aten::ones_like           T7(v0)           ->  T8(v0)
+            SumBackward0              T8(v0)           ->
+            ReluBackward0             T6(v0), T8(v0)   ->  T9(v0)
+            [memory]                  T6(v0*)          ->
+            MulBackward0              T3(v0), T4(v0), T9(v0)  ->  T10(v0), T11(v0)
+            aten::sum                 T10(v0)          ->  T12(v0)
+            [memory]                  T10(v0*)         ->
+            [memory]                  T9(v0*)          ->
+            AccumulateGrad            T12(v0*), T13(v0)  ->  T13(v1)
+            ReluBackward0             T3(v0), T11(v0)  ->  T14(v0)
+            [memory]                  T11(v0*)         ->
+            [memory]                  T3(v0*)          ->
+            MulBackward0              T0(v0), T14(v0)  ->  T15(v0)
+            aten::sum                 T15(v0)          ->  T16(v0)
+            [memory]                  T15(v0*)         ->
+            [memory]                  T14(v0*)         ->
+            AccumulateGrad            T16(v0*), T17(v0)  ->  T17(v1)
+            [memory]                  T8(v0*)          ->""",
+        )
+
+        return
+
+        x = torch.ones((25,))
+        w0 = torch.ones((1,), requires_grad=True)
+        w1 = torch.ones((1,), requires_grad=True)
+
+        with profile() as prof_no_grad:
+            with torch.no_grad():
+                x.mul(w0).relu().mul(w1).relu().sum()
+
+        # TODO: one with `.logsumexp(dim=0)`
+
+        self.assertExpectedInline(
+            self._format_graph(prof_no_grad),
+            """\
+            aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
+            aten::relu                T2(v0)           ->  T3(v0)
+            [memory]                  T2(v0*)          ->
+            aten::mul                 T3(v0), T4(v0)   ->  T5(v0)
+            [memory]                  T3(v0*)          ->
+            aten::relu                T5(v0)           ->  T6(v0)
+            [memory]                  T5(v0*)          ->
+            aten::sum                 T6(v0)           ->  T7(v0)
+            [memory]                  T6(v0*)          ->
+            [memory]                  T7(v0*)          ->""",
+        )
+
+        with profile() as prof_grad:
+            loss = x.mul(w0).relu().mul(w1).relu().sum()
+            loss.backward()
+
+        self.assertExpectedInline(
+            self._format_graph(prof_grad),
+            """\
+            aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
+            aten::relu                T2(v0)           ->  T3(v0)
+            [memory]                  T2(v0*)          ->
+            aten::mul                 T3(v0), T4(v0)   ->  T5(v0)
+            aten::relu                T5(v0)           ->  T6(v0)
+            [memory]                  T5(v0*)          ->
+            aten::sum                 T6(v0)           ->  T7(v0)
+            aten::ones_like           T7(v0)           ->  T8(v0)
+            SumBackward0              T8(v0)           ->  T8(v1)
+            ReluBackward0             T6(v0), T8(v1)   ->  T8(v2), T9(v0)
+            [memory]                  T6(v0*)          ->
+            MulBackward0              T3(v0), T4(v0), T9(v0)  ->  T9(v1), T10(v0), T11(v0)
+            aten::sum                 T10(v0)          ->  T12(v0)
+            [memory]                  T10(v0*)         ->
+            [memory]                  T9(v1*)          ->
+            AccumulateGrad            T12(v0)          ->  T12(v1)
+            ReluBackward0             T3(v0), T11(v0)  ->  T11(v1), T13(v0)
+            [memory]                  T11(v1*)         ->
+            [memory]                  T3(v0*)          ->
+            MulBackward0              T0(v0), T13(v0)  ->  T13(v1), T14(v0)
+            aten::sum                 T14(v0)          ->  T15(v0)
+            [memory]                  T14(v0*)         ->
+            [memory]                  T13(v1*)         ->
+            AccumulateGrad            T15(v0)          ->  T15(v1)
+            [memory]                  T8(v2*)          ->""",
+        )
+
+        # Second time grads are already initialized.
+        with profile() as prof_grad:
+            loss = x.mul(w0).relu().mul(w1).relu().sum()
+            loss.backward()
+
+        self.assertExpectedInline(
+            self._format_graph(prof_grad),
+            """\
+            aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
+            aten::relu                T2(v0)           ->  T3(v0)
+            [memory]                  T2(v0*)          ->
+            aten::mul                 T3(v0), T4(v0)   ->  T5(v0)
+            aten::relu                T5(v0)           ->  T6(v0)
+            [memory]                  T5(v0*)          ->
+            aten::sum                 T6(v0)           ->  T7(v0)
+            aten::ones_like           T7(v0)           ->  T8(v0)
+            SumBackward0              T8(v0)           ->  T8(v1)
+            ReluBackward0             T6(v0), T8(v1)   ->  T8(v2), T9(v0)
+            [memory]                  T6(v0*)          ->
+            MulBackward0              T3(v0), T4(v0), T9(v0)  ->  T9(v1), T10(v0), T11(v0)
+            aten::sum                 T10(v0)          ->  T12(v0)
+            [memory]                  T10(v0*)         ->
+            [memory]                  T9(v1*)          ->
+            AccumulateGrad            T12(v0*), T13(v0)  ->  T13(v1)
+            ReluBackward0             T3(v0), T11(v0)  ->  T11(v1), T14(v0)
+            [memory]                  T11(v1*)         ->
+            [memory]                  T3(v0*)          ->
+            MulBackward0              T0(v0), T14(v0)  ->  T14(v1), T15(v0)
+            aten::sum                 T15(v0)          ->  T16(v0)
+            [memory]                  T15(v0*)         ->
+            [memory]                  T14(v1*)         ->
+            AccumulateGrad            T16(v0*), T17(v0)  ->  T17(v1)
+            [memory]                  T8(v2*)          ->""",
         )
 
 

@@ -1,11 +1,24 @@
+import collections
 import dataclasses
-from typing import Any, Iterator, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    cast,
+    DefaultDict,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 from torch._C import FunctionSchema
 from torch._C._autograd import _ProfilerResult
 from torch._C._profiler import (
     _EventType,
+    _ExtraFields_Allocation,
     _ExtraFields_TorchOp,
     _ProfilerEvent,
     _TensorMetadata,
@@ -53,6 +66,9 @@ class TensorKey:
     def __repr__(self) -> str:
         return f"id={self.id}: {repr(self.storage):<24} ({self.device})"
 
+    def __lt__(self, other: "TensorKey") -> bool:
+        return self._as_sortable < other._as_sortable
+
     @staticmethod
     def _make(
         tensor_id: Optional[int],
@@ -69,10 +85,18 @@ class TensorKey:
         return None
 
     @classmethod
+    def from_allocation(cls, alloc: _ExtraFields_Allocation) -> Optional["TensorKey"]:
+        return cls._make(alloc.id, alloc.ptr, alloc.allocation_id, alloc.device)
+
+    @classmethod
     def from_tensor(cls, t: Optional[_TensorMetadata]) -> Optional["TensorKey"]:
         if t is not None:
             return cls._make(t.id, t.storage_data_ptr, t.allocation_id, t.device)
         return None
+
+    @property
+    def _as_sortable(self) -> Tuple[int, int, str, int]:
+        return self.id, self.storage.allocation_id, self.device.type, self.device.index
 
 
 def extract_gradients(
@@ -137,7 +161,7 @@ class SchemaMatcher:
     """
 
     @classmethod
-    def inputs_are_mutable(cls, t: _ExtraFields_TorchOp) -> Tuple[bool, ...]:
+    def inputs_are_mutable(cls, t: _ExtraFields_TorchOp) -> Tuple[Optional[bool], ...]:
         """Determine which inputs may have mutated based on function schema.
 
         Note that we don't need to resolve down to a single schema to perform
@@ -152,7 +176,7 @@ class SchemaMatcher:
             for i, arg in enumerate(schema.arguments):
                 mutable[i] |= getattr(arg.alias_info, "is_write", False)
 
-        return tuple(mutable or (True for _ in t.inputs))
+        return tuple(mutable or (None for _ in t.inputs))
 
     @classmethod
     def match_schemas(cls, t: _ExtraFields_TorchOp) -> Tuple[FunctionSchema, ...]:
@@ -243,17 +267,154 @@ class OpTree:
         return self._sorted_nodes
 
 
+@dataclasses.dataclass()
+class DataFlowEdge:
+    input_version: Optional[int] = None
+    mutated: Optional[bool] = False
+
+    @property
+    def is_allocation(self) -> bool:
+        return self.input_version is None
+
+    @property
+    def is_deletion(self) -> bool:
+        return self.mutated is None
+
+
+class DataFlowNode:
+    def __init__(self, event: _ProfilerEvent, graph: "DataFlowGraph") -> None:
+        self._event = event
+        self._graph = graph
+        self._edges: Dict[TensorKey, DataFlowEdge] = self._determine_edges()
+
+        for key, edge in self._edges.items():
+            if edge.mutated and not edge.is_allocation:
+                self._graph.bump(key)
+
+        # Make sure the version bumping behavior matches what we expect.
+        versions = {k: (v, self._graph.lookup(k)) for k, v in self.outputs.items()}
+        assert all(i == j for i, j in versions.values()), f"{versions}, {self._edges}"
+
+    def _determine_edges(self) -> Dict[TensorKey, DataFlowEdge]:
+        subtree = tuple(_utils.traverse_dfs([self._event]))
+
+        # Start by populating edges from op inputs and outputs.
+        mutable_by_key: Dict[Optional[TensorKey], Set[Optional[bool]]] = {}
+        for op in (i.typed[1] for i in subtree if i.typed[0] == _EventType.TorchOp):
+            for op_input, mutable in zip(
+                op.inputs, SchemaMatcher.inputs_are_mutable(op)
+            ):
+                # Tensor
+                if isinstance(op_input, _TensorMetadata):
+                    key = TensorKey.from_tensor(op_input)
+                    mutable_by_key.setdefault(key, set()).add(mutable)
+
+                # TensorList
+                elif isinstance(op_input, list):
+                    for op_input_i in op_input:
+                        key = TensorKey.from_tensor(op_input_i)
+                        mutable_by_key.setdefault(key, set()).add(mutable)
+
+        edges: DefaultDict[Optional[TensorKey], DataFlowEdge]
+        edges = collections.defaultdict(DataFlowEdge)
+        for key, mutable_set in mutable_by_key.items():
+            if key is not None:
+                edges[key].input_version = self._graph.lookup(key) if key else -1
+
+                # We consider an op to be mutated if we encounter a schema where it
+                # is a mutable argument OR if it is ambiguous. (We never explicitly
+                # see it in any schema.)
+                mutated = (True in mutable_set) or (tuple(mutable_set) == (None,))
+                edges[key].mutated = mutated
+
+        # Then handle deletions. Note that deleting a Tensor implicitly adds
+        # it as an input edge.
+        for i in subtree:
+            if i.typed[0] == _EventType.Allocation and i.typed[1].alloc_size < 0:
+                key = TensorKey.from_allocation(i.typed[1])
+                edge = edges[key]
+                assert key is None or edge.mutated is not None, f"Double delete: {key}"
+                edge.mutated = None
+                edge.input_version = self._graph.lookup(key) if key else -1
+
+        # And finally handle allocations. This step must be last, because the
+        # previous two steps optimistically add input edges.
+        for i in subtree:
+            if i.typed[0] == _EventType.Allocation and i.typed[1].alloc_size > 0:
+                edges[TensorKey.from_allocation(i.typed[1])].input_version = None
+
+        # We don't need to sort the inputs, but it makes debugging and unit tests nicer.
+        return dict(sorted((k, v) for k, v in edges.items() if k is not None))
+
+    @property
+    def inputs(self) -> Dict[TensorKey, Tuple[bool, int]]:
+        return {
+            # MyPy can't see through `is_allocation` to know that
+            # `v.input_version` is not None.
+            k: (bool(v.mutated), cast(int, v.input_version))
+            for k, v in self._edges.items()
+            if not v.is_allocation
+        }
+
+    @property
+    def outputs(self) -> Dict[TensorKey, int]:
+        return {
+            k: 0 if v.input_version is None else v.input_version + 1
+            for k, v in self._edges.items()
+            if (v.is_allocation and not v.is_deletion) or v.mutated
+        }
+
+    @property
+    def intermediates(self) -> Tuple[TensorKey, ...]:
+        return tuple(
+            k for k, v in self._edges.items() if v.is_allocation and v.is_deletion
+        )
+
+    @property
+    def start_time(self) -> int:
+        return self._event.start_time_ns
+
+
 class DataFlowGraph:
-    def __init__(self, tree: OpTree) -> None:
-        self._tree = tree
-        self._leaf_events = self._extract_leaf_events(tree)
+    def __init__(self, op_tree: OpTree) -> None:
+        self._op_tree = op_tree
+        self._leaf_events = self._extract_leaf_events(op_tree)
+        self._active_version: Dict[TensorKey, Optional[int]] = {}
+        self._flow_nodes = [DataFlowNode(e, self) for e in self.leaf_events]
+        self._flow_nodes.sort(key=lambda x: x.start_time)
+        self.validate()
+
+    @property
+    def flow_nodes(self) -> Tuple[DataFlowNode, ...]:
+        return tuple(self._flow_nodes)
+
+    def validate(self):
+        # Check that each (Tensor, version) pair has a unique creation node
+        outputs: Set[Tuple[TensorKey, int]] = set()
+        for node in self.flow_nodes:
+            node_outputs = set(node.outputs.items())
+            duplicates = outputs & node_outputs
+            assert not duplicates, f"{node._event.name} {node._edges} {duplicates}"
+            outputs |= node_outputs
+
+        # And check that `self._nodes` forms a valid topologically sorted DAG.
+        tensor_versions: Dict[TensorKey, int] = {}
+        for node in self.flow_nodes:
+            for key, (_, version) in node.inputs.items():
+                expected = tensor_versions.get(key, 0)
+                assert expected == version, (expected, version)
+
+            for key, version in node.outputs.items():
+                prior_version = tensor_versions.get(key, version)
+                assert version >= prior_version, (version, prior_version)
+                tensor_versions[key] = version
 
     @property
     def leaf_events(self) -> Tuple[_ProfilerEvent, ...]:
         return self._leaf_events
 
     @staticmethod
-    def _extract_leaf_events(tree: OpTree) -> Tuple[_ProfilerEvent, ...]:
+    def _extract_leaf_events(op_tree: OpTree) -> Tuple[_ProfilerEvent, ...]:
         """Partially traverse the op tree and extract top level ops.
 
         Consider the following code:
@@ -300,10 +461,24 @@ class DataFlowGraph:
 
             return e.children
 
-        for _ in tree.dfs(children_fn=children_fn):
+        for _ in op_tree.dfs(children_fn=children_fn):
             pass
 
         return tuple(sorted(leaf_events, key=lambda x: x.start_time_ns))
+
+    def lookup(self, key: TensorKey) -> int:
+        version = self._active_version.setdefault(key, 0)
+        assert version is not None
+        return version
+
+    def bump(self, key: TensorKey) -> None:
+        prior_version = self._active_version.get(key, None)
+        assert prior_version is not None
+        self._active_version[key] = prior_version + 1
+
+    def delete(self, key: TensorKey) -> None:
+        assert self._active_version.setdefault(key, 0) is not None
+        self._active_version[key] = None
 
 
 class MemoryProfile:
