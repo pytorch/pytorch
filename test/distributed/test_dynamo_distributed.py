@@ -100,6 +100,7 @@ def get_custom_model(device):
 
 def get_hf_bert(rank):
     # Note: use @import_transformers_or_skip on your test case if you use this
+    # in a multiprocessing test
     try:
         from transformers import BertConfig, AutoModelForMaskedLM
     except ImportError:
@@ -181,7 +182,6 @@ def run_hf_bert_ddp(self, model, inputs, backend):
     self.assertTrue(same(correct_results, opt_results))
 
 class TestFakeDistributedSingleProc(TestCase):
-    @import_transformers_or_skip()
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
@@ -190,7 +190,6 @@ class TestFakeDistributedSingleProc(TestCase):
         model = FakeDDP(model)
         run_hf_bert_ddp(self, model, inputs, "inductor")
 
-    @import_transformers_or_skip()
     @patch.object(config, "optimize_ddp", True)
     def test_hf_bert_ddp_aot_eager(self):
         model, inputs = get_hf_bert(0)
