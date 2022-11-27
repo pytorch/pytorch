@@ -210,7 +210,7 @@ FindMappedPositions::FindMappedPositions(
     reference_pos += int64_t(reference->nDims()) + 1;
   }
   TORCH_CHECK(
-      reference_pos >= 0 && reference_pos <= reference->nDims(),
+      reference_pos >= 0 && reference_pos <= int64_t(reference->nDims()),
       "Invalid axis received ",
       reference_pos,
       " but should be > -",

@@ -135,7 +135,7 @@ void OrderedIdInformation::handle(Merge* merge) {
   // Update maps
   // Find the position inner would have to have to be considered ordered
   auto pos_after_outer = outer_pos + 1;
-  for (; pos_after_outer < active_ids_.size(); pos_after_outer++) {
+  for (; pos_after_outer < int64_t(active_ids_.size()); pos_after_outer++) {
     if (active_ids_[pos_after_outer] == nullptr) {
       // Can't be considered ordered after a nullptr
       break;
