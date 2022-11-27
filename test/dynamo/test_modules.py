@@ -617,6 +617,12 @@ class ModuleForwardHasGraphBreak(torch.nn.Module):
         self.scale = torch.randn(1, 10)
 
     def forward(self, x):
+        """
+        This is used to test if the results of functions like `named_parameters`
+        can be reconstructed correctly after graph break.
+
+        https://github.com/pytorch/torchdynamo/issues/1931
+        """
         x = self.layer1(x)
         params1 = dict(self.named_parameters())
         params2 = list(self.parameters())
