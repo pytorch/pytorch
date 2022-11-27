@@ -222,6 +222,12 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 
 
 def save_graph_repro(fd, gm, args, compiler_name):
+    sync_line = ""
+    for arg in args:
+        if arg.is_cuda:
+            sync_line = "torch.cuda.synchronize() # Ensures that segfaults are surfaced"
+            break
+
     if "inductor" in compiler_name:
         fd.write(f"import {config.inductor_import}.overrides\n")
     fd.write(generate_compiler_repro_string(gm, args))
@@ -244,7 +250,7 @@ def save_graph_repro(fd, gm, args, compiler_name):
                 f"""
                 compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
                 ref = compiled(args)
-                torch.cuda.synchronize() # Ensures that segfaults are surfaced
+                {sync_line}
                 """
             )
         )
@@ -303,6 +309,17 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
 
 
 def inductor_fails(fx_g, args, check_str=None):
+    has_cuda = False
+    for arg in args:
+        if arg.is_cuda:
+            has_cuda = True
+            break
+
+    def sync():
+        if has_cuda:
+            # Ensures that segfaults are surfaced
+            torch.cuda.synchronize()
+
     compile_fx_inner = import_module(
         f"{config.inductor_import}.compile_fx"
     ).compile_fx_inner
@@ -314,13 +331,13 @@ def inductor_fails(fx_g, args, check_str=None):
     except Exception:
         return False
     result = None
-    torch.cuda.synchronize()
+
+    sync()
 
     try:
         compile_mod = compile_fx_inner(fx_g, args)
         compile_mod(args)
-        # Ensures that segfaults are surfaced
-        torch.cuda.synchronize()
+        sync()
     except Exception as e:
         if check_str is not None and check_str not in repr(e):
             return False
