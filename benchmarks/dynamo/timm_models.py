@@ -296,7 +296,8 @@ class TimmRunnner(BenchmarkRunner):
     def compute_loss(self, pred):
         # High loss values make gradient checking harder, as small changes in
         # accumulation order upsets accuracy checks.
-        return self.loss(pred, self.target) / 10.0
+        loss = self.loss(pred, self.target) / 10.0
+        return torch.min(loss, torch.tensor(0.5))
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
         return mod(*inputs)
