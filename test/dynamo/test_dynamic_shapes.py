@@ -87,7 +87,9 @@ unittest.expectedFailure(
 )
 unittest.expectedFailure(DynamicShapesSubGraphTests.test_restore_state_dynamic_shapes)
 
-unittest.expectedFailure(DynamicShapesExportTests.test_export_compare_optimize_with_make_fx_dynamic_shapes)
+unittest.expectedFailure(
+    DynamicShapesExportTests.test_export_compare_optimize_with_make_fx_dynamic_shapes
+)
 
 # DynamicShapesUnspecTests
 # Missing decomp

@@ -32,7 +32,7 @@ import torch
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map, tree_flatten
+from torch.utils._pytree import tree_flatten, tree_map
 
 from . import config, logging as torchdynamo_logging
 
@@ -1149,6 +1149,7 @@ def get_real_value(node, output_graph):
         raise TorchRuntimeError() from e
     return real_value
 
+
 def fake_mode_from_tensors(inputs: List[Any]):
     """
     Takes a list of anything, unflattened is fine, returns a fake_mode
@@ -1164,3 +1165,14 @@ def fake_mode_from_tensors(inputs: List[Any]):
             else:
                 assert fake_mode == flat_input.fake_mode
     return fake_mode
+
+
+def assert_no_fake_params_or_buffers(gm):
+    for name, buffer in gm.named_buffers():
+        assert not isinstance(
+            buffer, torch._subclasses.FakeTensor
+        ), f"Unexpected fake buffer {name}"
+    for name, param in gm.named_parameters():
+        assert not isinstance(
+            param, torch._subclasses.FakeTensor
+        ), f"Unexpected fake param {name}"

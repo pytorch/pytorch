@@ -642,9 +642,7 @@ class VariableBuilder:
             if not is_constant_source(self.get_source()):
                 fake_tensor_value = None
                 example_value = unspec_var.proxy.node.meta["example_value"]
-                if isinstance(
-                    example_value, torch._subclasses.fake_tensor.FakeTensor
-                ):
+                if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
                     fake_tensor_value = example_value
                 self.tx.output.graphargs.append(
                     GraphArg(self.get_source(), wrapped_value, True, fake_tensor_value)

@@ -7,7 +7,11 @@ import torch.fx.traceback as fx_traceback
 from torch import fx
 from torch.fx.node import Node
 from .. import config
-from ..utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
+from ..utils import (
+    assert_no_fake_params_or_buffers,
+    deepcopy_to_fake_tensor,
+    fake_mode_from_tensors,
+)
 
 log = logging.getLogger(__name__)
 
@@ -247,6 +251,7 @@ class DDPOptimizer:
                             sn.args = (sn.args,)
 
                 input_mod.recompile()
+                assert_no_fake_params_or_buffers(input_mod)
                 wrapper = WrapperModule(
                     self.compiler(input_mod, args),
                     unwrap_singleton_tuple,
