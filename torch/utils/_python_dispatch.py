@@ -66,6 +66,10 @@ def _get_current_dispatch_mode_stack():
     stack_len = _len_torch_dispatch_stack()
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
+def _is_mode_in_stack(modeCls):
+    stack_len = _len_torch_dispatch_stack()
+    return modeCls in [type(_get_dispatch_stack_at(i)) for i in range(stack_len)]
+
 def _push_mode(mode):
     _push_on_torch_dispatch_stack(mode)
 

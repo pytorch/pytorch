@@ -13,7 +13,7 @@ from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode, _is_mode_in_stack
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map
 
@@ -507,6 +507,11 @@ class FakeTensor(torch.Tensor):
     fake_mode: "FakeTensorMode"
     constant: Optional[torch.Tensor]
 
+    # DEBUG_MODE on FakeTensor enables a debug mode.
+    # Today, this mode only records fake tensor creation stack traces,
+    # But in the future will add more.
+    DEBUG_MODE = False
+
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
     # and autograd logic, we update the dispatch keys of FakeTensors
@@ -553,6 +558,10 @@ class FakeTensor(torch.Tensor):
         self.fake_device = device
         self.fake_mode = fake_mode
         self.constant = constant
+        if FakeTensor.DEBUG_MODE:
+            import traceback
+            self.trace = traceback.extract_stack()
+
 
     @staticmethod
     def from_tensor(t, fake_mode):
@@ -704,6 +713,7 @@ class FakeTensorMode(TorchDispatchMode):
         self.in_kernel_invocation = False
 
         self.shape_env = shape_env
+        assert not _is_mode_in_stack(FakeTensorMode)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
