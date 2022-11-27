@@ -1542,6 +1542,39 @@ class TestAOTModuleSimplified(AOTTestCase):
         res = aot_mod(*inputs)
         res[0].sum().backward()
 
+    def test_aot_module_simplified_fake_tensor_gm_raises(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.y = y
+
+            def forward(self, x):
+                z = self.linear(x)
+                z = z + self.y
+                z = z.relu()
+                return (z, )
+
+
+        real_x = torch.randn(4)
+        real_y = torch.randn(4)
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        fake_y = fake_mode.from_tensor(real_y)
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+        graph = tracer.trace(MockModule(fake_y))
+        mod_fake = torch.fx.GraphModule(tracer.root, graph)
+
+        with self.assertRaises(AssertionError):
+            aot_mod = aot_module_simplified(mod_fake, nop)
+
+        # Counterfactual to ensure that the raise is only due to real vs fake
+        # Run the same exact thing except with a real buffer.
+        graph = tracer.trace(MockModule(real_y))
+        mod_real = torch.fx.GraphModule(tracer.root, graph)
+        aot_module_simplified(mod_real, nop)
+
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
 aot_autograd_failures = {

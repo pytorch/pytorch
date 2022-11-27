@@ -1145,6 +1145,7 @@ def get_real_value(node, output_graph):
         raise TorchRuntimeError() from e
     return real_value
 
+
 def assert_no_fake_params_or_buffers(gm):
     for name, buffer in gm.named_buffers():
         assert not isinstance(

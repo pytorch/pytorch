@@ -1163,7 +1163,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             num_inner_fwd_outputs = _num_mutated_data_inputs + _num_non_aliased_outs + _num_aliasing_metadata_outs
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs)
-            torch._dynamo.utils.assert_no_fake_params_or_buffers(bw_module)
             fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
@@ -1742,6 +1741,8 @@ def aot_module_simplified(
     :func:`aot_module_simplified` removes these overheads.
     """
     #########################################################
+
+    torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
     params = {
         **dict(_named_parameters(mod, remove_duplicate=False)),
