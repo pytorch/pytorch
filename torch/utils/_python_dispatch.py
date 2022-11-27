@@ -69,25 +69,21 @@ def _get_current_dispatch_mode_stack():
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
 def _push_mode(mode):
-    mode_id = id(mode)
-    mode_cls = mode.__class__
-    if not hasattr(mode_cls, "tracking"):
-        mode_cls.tracking = threading.local()
+    if not hasattr(mode, "tracking"):
+        mode.tracking = threading.local()
     else:
-        if hasattr(mode_cls.tracking, "on_stack"):
-            assert mode_cls.tracking.on_stack in (mode_id, None), f"Illegal attempt to put a second {type(mode)} on stack {[type(m) for m in _get_current_dispatch_mode_stack()]}"
+        if hasattr(mode.tracking, "on_stack"):
+            assert mode.tracking.on_stack is False, "Illegal attempt to push an already pushed mode onto the stack"
 
-    mode_cls.tracking.on_stack = mode_id
+    mode.tracking.on_stack = True
     _push_on_torch_dispatch_stack(mode)
 
 
 def _pop_mode():
     mode = _pop_torch_dispatch_stack()
-    mode_id = id(mode)
-    mode_cls = mode.__class__
-    assert hasattr(mode_cls, "tracking"), f"Unexpected, popping a mode we are not tracking"
-    assert mode_cls.tracking.on_stack in (mode_id, None), f"Unexpected, popping a mode with the wrong id {mode_cls.tracking.on_stack} instead of {mode_id}"
-    mode_cls.tracking.on_stack = None
+    assert hasattr(mode, "tracking"), "Unexpected, popping a mode we are not tracking"
+    assert mode.tracking.on_stack is True, "Unexpected, popping a mode that thinks its already off the stack"
+    mode.tracking.on_stack = False
     return mode
 
 
