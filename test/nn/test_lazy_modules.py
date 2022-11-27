@@ -492,6 +492,20 @@ class TestLazyModules(TestCase):
         self._check_lazy_batchnorm_state(nn.BatchNorm3d, nn.LazyBatchNorm3d)
         self._check_lazy_batchnorm_state(nn.BatchNorm3d, nn.LazyBatchNorm3d)
 
+    def test_lazy_batchnorm(self):
+        self._check_lazy_norm(nn.BatchNorm, nn.LazyBatchNorm, (16, 3, 6))
+        self._check_lazy_norm(nn.BatchNorm, nn.LazyBatchNorm, (16, 3, 6, 7))
+        self._check_lazy_norm(nn.BatchNorm, nn.LazyBatchNorm, (16, 3, 6, 7, 8))
+
+    def test_lazy_batchnorm_pickle(self):
+        self._check_lazy_norm_pickle(nn.BatchNorm, nn.LazyBatchNorm, (16, 3, 6))
+        self._check_lazy_norm_pickle(nn.BatchNorm, nn.LazyBatchNorm, (16, 3, 6, 7))
+        self._check_lazy_norm_pickle(nn.BatchNorm, nn.LazyBatchNorm, (16, 3, 6, 7, 8))
+
+    def test_lazy_batchnorm_state(self):
+        self._check_lazy_batchnorm_state(nn.BatchNorm, nn.LazyBatchNorm)
+        self._check_lazy_batchnorm_state(nn.BatchNorm, nn.LazyBatchNorm)
+
     def test_lazy_instancenorm1d(self):
         self._check_lazy_norm(nn.InstanceNorm1d, nn.LazyInstanceNorm1d, (16, 3, 6))
 
