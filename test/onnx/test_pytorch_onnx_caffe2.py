@@ -810,6 +810,11 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         model = nn.BatchNorm3d(128, affine=False)
         self.run_model_test(model, train=False, input=c, batch_size=BATCH_SIZE)
 
+    def test_batchnorm_noaffine(self):
+        c = torch.randn(128, 128, 1, 1, 1)
+        model = nn.BatchNorm(128, affine=False)
+        self.run_model_test(model, train=False, input=c, batch_size=BATCH_SIZE)
+
     def test_constant(self):
         c = torch.randn(BATCH_SIZE, 3, 224, 224)
 

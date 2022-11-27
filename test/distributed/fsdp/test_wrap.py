@@ -53,6 +53,7 @@ class BatchNormNet(nn.Module):
         self.bn1 = nn.BatchNorm1d(10)
         self.bn2 = nn.BatchNorm2d(10)
         self.bn3 = nn.BatchNorm3d(10)
+        self.bn = nn.BatchNorm(10)
         self.sync_bn = nn.SyncBatchNorm(10)
 
 
