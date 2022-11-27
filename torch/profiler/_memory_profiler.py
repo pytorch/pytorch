@@ -575,14 +575,15 @@ class MemoryProfile:
         self._set_autograd_detail()
 
     @property
-    def timeline(self) -> Tuple[Tuple[int, Action, TensorAndID]]:
+    def timeline(self) -> Tuple[Tuple[int, Action, TensorAndID], ...]:
         t0 = min(event.start_time_ns for event in self._op_tree.dfs())
         allocation_times: Dict[Tuple[TensorKey, bool], int] = {}
         for event in self._op_tree.dfs():
             if event.typed[0] == _EventType.Allocation:
-                key = TensorKey.from_allocation(event.typed[1])
+                alloc_fields = event.typed[1]
+                key = TensorKey.from_allocation(alloc_fields)
                 if key is not None:
-                    is_allocation = event.extra_fields.alloc_size > 0
+                    is_allocation = alloc_fields.alloc_size > 0
                     allocation_times[(key, is_allocation)] = event.start_time_ns - t0
 
         snapshot = self._category_snapshot()
