@@ -5435,11 +5435,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             helper(self, shape, torch.bfloat16, False)
             helper(self, shape, torch.bfloat16, True)
 
-    def test_batchnorm_non_contig_cpu(self):
+    @parametrize_test('bn_module', [torch.nn.BatchNorm2d, torch.nn.SyncBatchNorm])
+    def test_batchnorm_non_contig_cpu(self, bn_module):
         input = torch.arange(6, dtype=torch.float).reshape(1, 3, 2, 1).cpu()
         input = input.permute(0, 2, 1, 3)
 
-        bn = torch.nn.BatchNorm2d(2).cpu().float().eval()
+        bn = bn_module(2).cpu().float().eval()
         bn.weight.data.uniform_()
         bn.bias.data.uniform_()
 
@@ -5457,7 +5458,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input_bf = torch.arange(24, dtype=torch.bfloat16).reshape(1, 3, 2, 4)
         input_bf = input_bf.permute(0, 2, 1, 3)
         input_f = input_bf.float()
-        bn_mix = torch.nn.BatchNorm2d(2).float().eval()
+        bn_mix = bn_module(2).float().eval()
         ref_bn_f = deepcopy(bn_mix)
         out_bf = bn_mix(input_bf)
         ref_out_bf = ref_bn_f(input_f)
