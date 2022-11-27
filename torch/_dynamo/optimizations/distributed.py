@@ -6,6 +6,7 @@ import torch
 import torch.fx.traceback as fx_traceback
 from torch import fx
 from torch.fx.node import Node
+from ..utils import assert_no_fake_params_or_buffers
 
 log = logging.getLogger(__name__)
 
@@ -242,7 +243,7 @@ class DDPOptimizer:
                             unwrap_singleton_tuple = True
                             sn.args = (sn.args,)
                 submod.recompile()
-
+                assert_no_fake_params_or_buffers(submod)
                 wrapper = WrapperModule(
                     self.compiler(submod, args),
                     unwrap_singleton_tuple,
