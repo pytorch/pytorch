@@ -1146,6 +1146,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             fx_g = make_fx(
                 joint_forward_backward, aot_config.decompositions
             )(*joint_inputs)
+
+        # Redudant with the check above, but worth having in case tracing introduced
+        # a fake tensor. Unlikely.
+        # See note: Fake Modules and AOTAutograd
+        torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
@@ -1695,6 +1700,8 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
         :attr:`mod`, but with forward and backward graph compiled.
 
     """
+    # See note: Fake Modules and AOTAutograd
+    torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
@@ -1742,6 +1749,18 @@ def aot_module_simplified(
     """
     #########################################################
 
+    # Redudant with dynamo, but worth having in case this gets invoked elsewhere.
+
+    # Fake Modules and AOTAutograd
+    #
+    # Passing a module with *any* fake tensors on it is invalid, as it will
+    # fake-tensor poison the runtime component of aot_autograd.
+    # Compilation will be done with fake tensors, and runtime will be invoked with real tensors.
+    # The module passed in here is utilized again as input for compiling the
+    # fx graph, from the joint forward backward function passed to make_fx.
+    # If a fake tensor got into the fx graph, it will get into the fw_module or bw_module
+    # and we will fail due to mixed real/fake tensors in runtime, or, produce a fake tensor output which will
+    # poison the next subsequent call.
     torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
     params = {
