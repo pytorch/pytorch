@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import enum
+import itertools as it
 from typing import (
     Any,
     cast,
@@ -33,8 +34,11 @@ TensorAndID = Tuple["TensorKey", int]
 class Category(enum.Enum):
     INPUT = enum.auto()
     TEMPORARY = enum.auto()
+    ACTIVATION = enum.auto()
     GRADIENT = enum.auto()
+    AUTOGRAD_DETAIL = enum.auto()
     PARAMETER = enum.auto()
+    OPTIMIZER_STATE = enum.auto()
 
 
 @dataclasses.dataclass
@@ -559,6 +563,9 @@ class MemoryProfile:
         self._set_parameters_using_python_tracer()
         self._set_inputs()
         self._set_parameters_using_data_flow()
+        self._set_activations()
+        self._set_optimizer_state()
+        self._set_autograd_detail()
 
     def _is_gradient(self, *args, **kwargs) -> bool:
         return self._categories.get(*args, **kwargs) == Category.GRADIENT
@@ -760,3 +767,41 @@ class MemoryProfile:
         for key, _ in snapshot.keys():
             if key.id in parameter_keys:
                 self._categories.set_by_id(key, Category.PARAMETER)
+
+    def _set_activations(self) -> None:
+        """Flood the graph to identify activations."""
+
+        required = {Category.INPUT, Category.ACTIVATION}
+        also_allowed = {Category.PARAMETER, Category.TEMPORARY}
+        for node in self._data_flow_graph.flow_nodes:
+            inputs = {(key, value) for key, (_, value) in node.inputs.items()}
+            input_categories = {self._categories.get(*i) for i in inputs}
+
+            if (
+                (input_categories & required)
+                and not (input_categories - (required | also_allowed))
+                #
+                # Stop filling when we reach the backward pass.
+                and RecordScope.BACKWARD_FUNCTION not in get_scopes(node._event)
+            ):
+                for i in node.outputs.items():
+                    self._categories.setdefault_by_version(*i, Category.ACTIVATION)
+
+    def _set_optimizer_state(self) -> None:
+        for event in self._op_tree.dfs():
+            if event.typed[0] == _EventType.PyCall and event.typed[1].optimizer:
+                parameters = event.typed[1].optimizer.parameters
+                for _, t in it.chain(*[state for _, _, state in parameters]):
+                    key = TensorKey.from_tensor(t)
+                    if key is not None:
+                        self._categories.set_by_id(key, Category.OPTIMIZER_STATE)
+
+    def _set_autograd_detail(self):
+        prior = {None, Category.AUTOGRAD_DETAIL}
+        for node in self._data_flow_graph.flow_nodes:
+            if RecordScope.BACKWARD_FUNCTION in get_scopes(node._event):
+                for key, version in node.outputs.items():
+                    if version == 0 or self._categories.get(key, version - 1) in prior:
+                        self._categories.setdefault_by_version(
+                            key, version, Category.AUTOGRAD_DETAIL
+                        )
