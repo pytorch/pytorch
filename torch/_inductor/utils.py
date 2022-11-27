@@ -270,8 +270,8 @@ def get_fused_kernel_name(node_schedule):
                     ],
                 )
                 if origin.op == "call_function"
-            ][0 : config.kernel_name_max_ops]
-        )
+            ]
+        )[0 : config.kernel_name_max_ops]
     )
 
 
