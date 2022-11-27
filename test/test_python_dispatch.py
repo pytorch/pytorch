@@ -1060,6 +1060,53 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
 $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
 $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
 
+    def test_nesting_across_instances(self):
+        # If the pushed mode is a different instance from current mode, we raise
+        modeA = LoggingTensorMode()
+        modeB = LoggingTensorMode()
+        def foo():
+            with modeA, modeB:
+                torch.empty([])
+
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: foo(),
+            """Illegal attempt to put a second <class 'torch.testing._internal.logging_tensor.LoggingTensorMode'> on stack [<class 'torch.testing._internal.logging_tensor.LoggingTensorMode'>]"""
+        )
+
+    def test_nesting_across_instances_across_threads(self):
+        # If the pushed mode is a different instance from current mode, we raise
+        from threading import Thread
+
+        modeA = LoggingTensorMode()
+        modeB = LoggingTensorMode()
+
+        def withA(fn, nested_fn):
+            with modeA:
+                fn(nested_fn)
+
+        def withB(nested_fn):
+            with modeB:
+                nested_fn([])
+
+        def foo():
+            withA(withB, torch.empty)
+
+        # Counterfactual first
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: foo(),
+            """Illegal attempt to put a second <class 'torch.testing._internal.logging_tensor.LoggingTensorMode'> on stack [<class 'torch.testing._internal.logging_tensor.LoggingTensorMode'>]"""
+        )
+
+        def withA_threaded(fn, nested_fn):
+            with modeA:
+                thread = Thread(target = fn, args = (nested_fn, ))
+                thread.start()
+                thread.join()
+
+        def foo_threaded():
+            withA_threaded(withB, torch.empty)
+
+        foo_threaded()
 
     def test_error_using_class_method_on_mode(self):
         class A(TorchDispatchMode):
