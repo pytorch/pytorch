@@ -337,21 +337,18 @@ class TorchVariable(VariableTracker):
             assert len(args) == 1
             assert isinstance(args[0], TensorVariable)
 
-            if config.fake_tensor_propagation:
-                unimplemented(
-                    "TODO: make torch.random.set_rng_state work with FakeTensor/aot_autograd"
-                )
-                # In fake tensor case, this state doesn't matter, but
-                # it needs to be valid to not segfault. Pull a real tensor out.
-                # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
-                # However, it is imperative to record the call_function in the graph with the true args
-                # (Not the fake example_value) - for the sake of graph correctness.
-                if self.value == torch.random.set_rng_state:
-                    example_value = torch.random.get_rng_state()
-                else:
-                    example_value = self.value.__self__.get_state()
+            unimplemented(
+                "TODO: make torch.random.set_rng_state work with FakeTensor/aot_autograd"
+            )
+            # In fake tensor case, this state doesn't matter, but
+            # it needs to be valid to not segfault. Pull a real tensor out.
+            # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
+            # However, it is imperative to record the call_function in the graph with the true args
+            # (Not the fake example_value) - for the sake of graph correctness.
+            if self.value == torch.random.set_rng_state:
+                example_value = torch.random.get_rng_state()
             else:
-                example_value = args[0].proxy.node.meta["example_value"]
+                example_value = self.value.__self__.get_state()
 
             self.value.__module__ = self.__module__
             return wrap_fx_proxy(
@@ -714,9 +711,6 @@ class TorchPyOperator(VariableTracker):
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
             from .. import config
-
-            if config.fake_tensor_propagation:
-                unimplemented("Fake tensor mode not yet supported for cond")
 
             assert len(p_args) == 4
             assert type(args[0]) is TensorVariable  # predicate

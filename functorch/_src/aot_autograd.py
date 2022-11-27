@@ -14,6 +14,8 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
+from torch._dynamo import disable as disable_torchdynamo
+from torch._dynamo.utils import dynamo_timed
 from torch._subclasses import FakeTensorMode, CrossRefFakeMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -25,20 +27,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
-
-try:
-    from torchdynamo import disable as disable_torchdynamo
-except ImportError:
-
-    def disable_torchdynamo(x):
-        return x
-
-try:
-    from torchdynamo.utils import dynamo_timed
-except ImportError:
-
-    def dynamo_timed(x):
-        return x
 
 MutationType = Enum("MutationType", ("none", "metadata_only", "data"))
 OutputType = Enum("OutputType", ("non_alias", "alias_of_input", "alias_of_intermediate"))
@@ -1733,7 +1721,15 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     return AOTModule()
 
 
-def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
+def aot_module_simplified(
+    mod: nn.Module,
+    fw_compiler: Callable,
+    bw_compiler: Optional[Callable] = None,
+    partition_fn: Callable = default_partition,
+    decompositions: Optional[Dict] = None,
+    hasher_type=None,
+    static_argnums=None
+) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
     like TorchDynamo, the input functions/modules to AOT are static and have
@@ -1776,59 +1772,35 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             )
         return out
 
-    def aot_function_simplified(
-        fn: Callable,
-        fw_compiler: Callable,
-        bw_compiler: Optional[Callable] = None,
-        partition_fn: Callable = default_partition,
-        decompositions: Optional[Dict] = None,
-        hasher_type=None,
-        static_argnums=None,
-    ) -> Callable:
-        assert static_argnums is None
-        if bw_compiler is None:
-            bw_compiler = fw_compiler
-        aot_config = AOTConfig(
-            fw_compiler=fw_compiler,
-            bw_compiler=bw_compiler,
-            partition_fn=partition_fn,
-            decompositions=decompositions,
-            num_params_buffers=params_len,
+    assert static_argnums is None
+    if bw_compiler is None:
+        bw_compiler = fw_compiler
+    aot_config = AOTConfig(
+        fw_compiler=fw_compiler,
+        bw_compiler=bw_compiler,
+        partition_fn=partition_fn,
+        decompositions=decompositions,
+        num_params_buffers=params_len,
+    )
+
+    compiled_fn = None
+
+    @wraps(functional_call)
+    def compiled_f(*args):
+        nonlocal compiled_fn
+        if compiled_fn is None:
+            compiled_fn = create_aot_dispatcher_function(
+                functional_call,
+                args,
+                aot_config,
+            )
+        return compiled_fn(args)
+
+    def forward(*args):
+        return compiled_f(
+            *params_flat,
+            *args,
         )
-
-        compiled_fn = None
-
-        @wraps(fn)
-        def new_func(*args):
-            nonlocal compiled_fn
-            if compiled_fn is None:
-                compiled_fn = create_aot_dispatcher_function(
-                    fn,
-                    args,
-                    aot_config,
-                )
-            return compiled_fn(args)
-
-        return new_func
-
-    compiled_f = aot_function_simplified(functional_call, *top_args, **top_kwargs)
-
-    if top_kwargs:
-
-        def forward(*args, **kwargs):
-            return compiled_f(
-                *params_flat,
-                *args,
-                **kwargs,
-            )
-
-    else:
-
-        def forward(*args):
-            return compiled_f(
-                *params_flat,
-                *args,
-            )
 
     forward.zero_grad = mod.zero_grad
     forward.named_parameters = mod.named_parameters
