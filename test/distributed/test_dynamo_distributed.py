@@ -137,7 +137,11 @@ def _per_rank_init(rank, world_size):
     dist.destroy_process_group()
 
 
-# This simulates DDP, but it doesn't actually do any
+# This simulates DDP, but it doesn't actually do any process communication;
+# it just has enough properties so that the dynamo distributed optimization is
+# able to optimize.  Feel free to simulate more properties as necessary.  The
+# other important thing is patching _active_ddp_module, which is what actually
+# triggers DDP optimization
 class FakeDDP(nn.Module):
     def __init__(self, module):
         super().__init__()
