@@ -2560,17 +2560,17 @@ TensorDomain* TensorDomain::flatten(int64_t start_dim, int64_t end_dim) {
     end_dim += inp_domain.size();
   }
   TORCH_CHECK(
-      start_dim >= 0 && start_dim < inp_domain.size(),
+      start_dim >= 0 && start_dim < int64_t(inp_domain.size()),
       "Invalid start_dim ",
       start_dim);
   TORCH_CHECK(
-      end_dim >= 0 && end_dim < inp_domain.size(), "Invalid end_dim ", end_dim);
+      end_dim >= 0 && end_dim < int64_t(inp_domain.size()), "Invalid end_dim ", end_dim);
   TORCH_CHECK(start_dim <= end_dim, "start_dim must be <= end_dim");
 
   std::vector<IterDomain*> new_root_domain;
   new_root_domain.reserve(inp_domain.size());
   for (auto i : c10::irange(inp_domain.size())) {
-    bool is_rfactor_dim = i >= start_dim && i <= end_dim;
+    bool is_rfactor_dim = i >= size_t(start_dim) && i <= size_t(end_dim);
     auto inp_id = inp_domain[i];
     auto out_id = IterDomainBuilder(inp_id)
                       .is_rfactor_domain(is_rfactor_dim)

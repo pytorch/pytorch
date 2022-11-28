@@ -261,7 +261,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // See:
   // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#shared-memory-7-x
   // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#shared-memory-8-x
-  const int max_static_smem_ = 48 << 10;
+  const uint64_t max_static_smem_ = 48 << 10;
   int warp_size_ = 0;
   executor_utils::NvrtcFunction compiled_kernel_;
 

@@ -1258,7 +1258,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
   if (execute_kernel_) {
     if (maybe_available_dynamic_smem_.has_value() &&
-        launch_params_.smem() > maybe_available_dynamic_smem_.value()) {
+        size_t(launch_params_.smem()) > maybe_available_dynamic_smem_.value()) {
 #ifndef USE_ROCM
       // Increase limit of dynamic shared memory if needed.
       AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuFuncSetAttribute(

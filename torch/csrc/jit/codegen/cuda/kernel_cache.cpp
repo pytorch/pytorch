@@ -209,7 +209,7 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   // permute output tensor returned by kernel execution. See Part_3 in Note [
   // Permutation support in nvfuser ]
   for (const auto& pair : fusion_->getPermutationOutputMap()) {
-    if (pair.first < outputs.size()) {
+    if (size_t(pair.first) < outputs.size()) {
       outputs[pair.first] = outputs[pair.first].permute(pair.second);
     }
   }
