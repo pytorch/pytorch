@@ -443,6 +443,10 @@ def gen_pyi(
             "_to_functional_tensor": [
                 "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
+            "_enable_functionalization": [
+                "def _enable_functionalization(*, reapply_views: _bool = False): ..."
+            ],
+            "_disable_functionalization": ["def _disable_functionalization(): ..."],
             "range": [
                 "def range(start: Number, end: Number,"
                 " step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
