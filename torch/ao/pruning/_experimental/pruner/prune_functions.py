@@ -7,15 +7,15 @@ from torch import nn
 from torch.nn.utils import parametrize
 
 __all__ = [
-    "convert_linear",
-    "convert_linear_linear",
-    "convert_linear_activation_linear",
-    "convert_conv2d",
-    "convert_conv2d_conv2d",
-    "convert_conv2d_activation_conv2d",
-    "convert_conv2d_activation_pool_conv2d",
-    "convert_conv2d_pool_activation_conv2d",
-    "convert_conv2d_pool_flatten_linear",
+    "prune_linear",
+    "prune_linear_linear",
+    "prune_linear_activation_linear",
+    "prune_conv2d",
+    "prune_conv2d_conv2d",
+    "prune_conv2d_activation_conv2d",
+    "prune_conv2d_activation_pool_conv2d",
+    "prune_conv2d_pool_activation_conv2d",
+    "prune_conv2d_pool_flatten_linear",
 ]
 
 # BIAS PROPOGATION
@@ -97,8 +97,8 @@ def _propogate_module_bias(module, mask):
     return pruned_biases
 
 
-# LINEAR CONVERSION FUNCTIONS
-def _convert_linear_helper(linear):
+# LINEAR
+def _prune_linear_helper(linear):
     mask = linear.parametrizations.weight[0].mask
     with torch.no_grad():
         parametrize.remove_parametrizations(linear, "weight", leave_parametrized=True)
@@ -107,18 +107,18 @@ def _convert_linear_helper(linear):
     return mask
 
 
-def convert_linear(linear):
-    mask = _convert_linear_helper(linear)
+def prune_linear(linear):
+    mask = _prune_linear_helper(linear)
     if getattr(linear, "prune_bias", False):
         _prune_module_bias(linear, mask)
 
 
-def convert_linear_linear(linear1, linear2):
-    convert_linear_activation_linear(linear1, None, linear2)
+def prune_linear_linear(linear1, linear2):
+    prune_linear_activation_linear(linear1, None, linear2)
 
 
-def convert_linear_activation_linear(linear1, activation, linear2):
-    mask = _convert_linear_helper(linear1)
+def prune_linear_activation_linear(linear1, activation, linear2):
+    mask = _prune_linear_helper(linear1)
     if getattr(linear1, "prune_bias", False):
         _prune_module_bias(linear1, mask)
     else:
@@ -139,8 +139,8 @@ def convert_linear_activation_linear(linear1, activation, linear2):
             linear2.in_features = linear2.weight.shape[1]
 
 
-# CONV2d CONVERSION FUNCTIONS
-def _convert_conv2d_helper(conv2d):
+# CONV2D
+def _prune_conv2d_helper(conv2d):
     mask = conv2d.parametrizations.weight[0].mask
     with torch.no_grad():
         parametrize.remove_parametrizations(conv2d, "weight", leave_parametrized=True)
@@ -149,7 +149,7 @@ def _convert_conv2d_helper(conv2d):
     return mask
 
 
-def convert_conv2d_padded(conv2d_1):
+def prune_conv2d_padded(conv2d_1):
     # remove parameterization
     mask = conv2d_1.parametrizations.weight[0].mask
     with torch.no_grad():
@@ -179,17 +179,17 @@ def convert_conv2d_padded(conv2d_1):
         delattr(conv2d_1, "_bias")
 
 
-def convert_conv2d(conv2d):
-    mask = _convert_conv2d_helper(conv2d)
+def prune_conv2d(conv2d):
+    mask = _prune_conv2d_helper(conv2d)
     if getattr(conv2d, "prune_bias", False):
         _prune_module_bias(conv2d, mask)
 
 
-def convert_conv2d_conv2d(conv2d_1, conv2d_2):
-    convert_conv2d_activation_conv2d(conv2d_1, None, conv2d_2)
+def prune_conv2d_conv2d(conv2d_1, conv2d_2):
+    prune_conv2d_activation_conv2d(conv2d_1, None, conv2d_2)
 
 
-def convert_conv2d_activation_conv2d(conv2d_1, activation, conv2d_2):
+def prune_conv2d_activation_conv2d(conv2d_1, activation, conv2d_2):
     r"""
     Fusion Pattern for conv2d -> some activation module / function -> conv2d layers
     """
@@ -200,9 +200,9 @@ def convert_conv2d_activation_conv2d(conv2d_1, activation, conv2d_2):
         and conv2d_2.padding > (0, 0)
         and (conv2d_1.bias is not None or getattr(conv2d_1, "_bias", None) is not None)
     ):
-        convert_conv2d_padded(conv2d_1)
+        prune_conv2d_padded(conv2d_1)
     else:
-        mask = _convert_conv2d_helper(conv2d_1)
+        mask = _prune_conv2d_helper(conv2d_1)
         if prune_bias:
             _prune_module_bias(conv2d_1, mask)
         else:
@@ -231,16 +231,16 @@ def convert_conv2d_activation_conv2d(conv2d_1, activation, conv2d_2):
                     conv2d_2.in_channels = conv2d_2.weight.shape[1]
 
 
-def convert_conv2d_pool_activation_conv2d(c1, pool, activation, c2):
-    convert_conv2d_activation_conv2d(c1, activation, c2)
+def prune_conv2d_pool_activation_conv2d(c1, pool, activation, c2):
+    prune_conv2d_activation_conv2d(c1, activation, c2)
 
 
-def convert_conv2d_activation_pool_conv2d(c1, activation, pool, c2):
-    convert_conv2d_activation_conv2d(c1, activation, c2)
+def prune_conv2d_activation_pool_conv2d(c1, activation, pool, c2):
+    prune_conv2d_activation_conv2d(c1, activation, c2)
 
 
-def convert_conv2d_pool_flatten_linear(conv2d, pool, flatten, linear):
-    mask = _convert_conv2d_helper(conv2d)
+def prune_conv2d_pool_flatten_linear(conv2d, pool, flatten, linear):
+    mask = _prune_conv2d_helper(conv2d)
 
     # We map the pruned indices of the Conv2d output to the flattened indices of the Linear following the Flatten layer.
     # we determine the flattening scale (h * w), and readjust `first_pruned_indices`

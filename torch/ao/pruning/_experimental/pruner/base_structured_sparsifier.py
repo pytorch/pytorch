@@ -9,16 +9,16 @@ from typing import Type, Set, Dict, Callable, Tuple, Any
 from torch.ao.pruning import BaseSparsifier
 from .parametrization import FakeStructuredSparsity, BiasHook
 from .match_utils import apply_match
-from .convert_functions import (
-    convert_linear,
-    convert_linear_linear,
-    convert_linear_activation_linear,
-    convert_conv2d,
-    convert_conv2d_conv2d,
-    convert_conv2d_activation_conv2d,
-    convert_conv2d_activation_pool_conv2d,
-    convert_conv2d_pool_activation_conv2d,
-    convert_conv2d_pool_flatten_linear,
+from .prune_functions import (
+    prune_linear,
+    prune_linear_linear,
+    prune_linear_activation_linear,
+    prune_conv2d,
+    prune_conv2d_conv2d,
+    prune_conv2d_activation_conv2d,
+    prune_conv2d_activation_pool_conv2d,
+    prune_conv2d_pool_activation_conv2d,
+    prune_conv2d_pool_flatten_linear,
 )
 
 __all__ = ["BaseStructuredSparsifier"]
@@ -86,34 +86,34 @@ def _get_default_structured_pruning_patterns():
     """
     patterns: Dict[Tuple[Any, ...], Callable] = {
         # linear -> linear
-        (nn.Linear, "output"): convert_linear,
-        (nn.Linear, nn.Linear): convert_linear_linear,
+        (nn.Linear, "output"): prune_linear,
+        (nn.Linear, nn.Linear): prune_linear_linear,
         # conv2d -> conv2d
-        (nn.Conv2d, "output"): convert_conv2d,
-        (nn.Conv2d, nn.Conv2d): convert_conv2d_conv2d,
+        (nn.Conv2d, "output"): prune_conv2d,
+        (nn.Conv2d, nn.Conv2d): prune_conv2d_conv2d,
     }
 
     for activation in chain(_get_supported_activation_functions(), _get_supported_activation_modules()):
         patterns.update({
             # linear -> activation -> linear
-            (nn.Linear, activation, nn.Linear): convert_linear_activation_linear,
+            (nn.Linear, activation, nn.Linear): prune_linear_activation_linear,
             # conv2d -> activation -> conv2d
-            (nn.Conv2d, activation, nn.Conv2d): convert_conv2d_activation_conv2d,
+            (nn.Conv2d, activation, nn.Conv2d): prune_conv2d_activation_conv2d,
             # conv2d -> activation -> pool -> conv2d
-            (nn.Conv2d, activation, nn.AvgPool2d, nn.Conv2d): convert_conv2d_activation_pool_conv2d,
-            (nn.Conv2d, activation, F.avg_pool2d, nn.Conv2d): convert_conv2d_activation_pool_conv2d,
-            (nn.Conv2d, activation, nn.MaxPool2d, nn.Conv2d): convert_conv2d_activation_pool_conv2d,
-            (nn.Conv2d, activation, F.max_pool2d, nn.Conv2d): convert_conv2d_activation_pool_conv2d,
+            (nn.Conv2d, activation, nn.AvgPool2d, nn.Conv2d): prune_conv2d_activation_pool_conv2d,
+            (nn.Conv2d, activation, F.avg_pool2d, nn.Conv2d): prune_conv2d_activation_pool_conv2d,
+            (nn.Conv2d, activation, nn.MaxPool2d, nn.Conv2d): prune_conv2d_activation_pool_conv2d,
+            (nn.Conv2d, activation, F.max_pool2d, nn.Conv2d): prune_conv2d_activation_pool_conv2d,
             # conv2d -> pool -> activation -> conv2d
-            (nn.Conv2d, nn.AvgPool2d, activation, nn.Conv2d): convert_conv2d_pool_activation_conv2d,
-            (nn.Conv2d, F.avg_pool2d, activation, nn.Conv2d): convert_conv2d_pool_activation_conv2d,
-            (nn.Conv2d, nn.MaxPool2d, activation, nn.Conv2d): convert_conv2d_pool_activation_conv2d,
-            (nn.Conv2d, F.max_pool2d, activation, nn.Conv2d): convert_conv2d_pool_activation_conv2d,
+            (nn.Conv2d, nn.AvgPool2d, activation, nn.Conv2d): prune_conv2d_pool_activation_conv2d,
+            (nn.Conv2d, F.avg_pool2d, activation, nn.Conv2d): prune_conv2d_pool_activation_conv2d,
+            (nn.Conv2d, nn.MaxPool2d, activation, nn.Conv2d): prune_conv2d_pool_activation_conv2d,
+            (nn.Conv2d, F.max_pool2d, activation, nn.Conv2d): prune_conv2d_pool_activation_conv2d,
             # conv2d -> adaptive pool -> flatten -> linear
-            (nn.Conv2d, nn.AdaptiveAvgPool2d, nn.Flatten, nn.Linear): convert_conv2d_pool_flatten_linear,
-            (nn.Conv2d, nn.AdaptiveAvgPool2d, torch.flatten, nn.Linear): convert_conv2d_pool_flatten_linear,
-            (nn.Conv2d, nn.AdaptiveMaxPool2d, nn.Flatten, nn.Linear): convert_conv2d_pool_flatten_linear,
-            (nn.Conv2d, nn.AdaptiveMaxPool2d, torch.flatten, nn.Linear): convert_conv2d_pool_flatten_linear,
+            (nn.Conv2d, nn.AdaptiveAvgPool2d, nn.Flatten, nn.Linear): prune_conv2d_pool_flatten_linear,
+            (nn.Conv2d, nn.AdaptiveAvgPool2d, torch.flatten, nn.Linear): prune_conv2d_pool_flatten_linear,
+            (nn.Conv2d, nn.AdaptiveMaxPool2d, nn.Flatten, nn.Linear): prune_conv2d_pool_flatten_linear,
+            (nn.Conv2d, nn.AdaptiveMaxPool2d, torch.flatten, nn.Linear): prune_conv2d_pool_flatten_linear,
         })
     return patterns
 
@@ -179,7 +179,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                 )
             )
 
-    def convert(self):
+    def prune(self):
         r"""
         This function will FX symbolically trace the model and then find instances of the patterns
         defined in self.patterns (by default SUPPORTED_STRUCTURED_PRUNING_PATTERNS ).
@@ -193,24 +193,27 @@ class BaseStructuredSparsifier(BaseSparsifier):
 
         # Right now we check for matches simply by iterating across all the patterns
         # if this is slow we can store patterns in a trie-structure and modify this code for faster lookup
+
         for node in self.traced.graph.nodes:
             for pattern, convert_fn in self.patterns.items():
                 matched = apply_match(modules, pattern, node, [])
-                if matched is not None:
-                    first_module = modules.get(node.target)
+                if matched is None:
+                    continue
 
-                    # check if first module exists and has a FakeStructuredSparsity parameterization, otherwise skip
-                    if (
-                        first_module is not None
-                        and parametrize.is_parametrized(first_module)
-                    ):
-                        convert_block = []
-                        for node in matched:
-                            if node.op == "call_module":
-                                convert_block.append(modules.get(node.target))
-                            elif node.op == "call_function":
-                                convert_block.append(node.target)
-                        convert_fn(*convert_block)
+                first_module = modules.get(node.target)
+                # check if first module exists and has apropriate parameterization, otherwise skip
+                if (
+                    first_module is not None
+                    and parametrize.is_parametrized(first_module)
+                    and isinstance(first_module.parametrizations["weight"][0], FakeStructuredSparsity)
+                ):
+                    convert_block = []
+                    for node in matched:
+                        if node.op == "call_module":
+                            convert_block.append(modules.get(node.target))
+                        elif node.op == "call_function":
+                            convert_block.append(node.target)
+                    convert_fn(*convert_block)
 
         # remove bias hooks, since biases are propogated during module conversion.
         for handle in self.bias_handles:

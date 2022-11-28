@@ -570,7 +570,7 @@ class ImplementedPruner(BaseStructuredSparsifier):
         module.parametrizations[tensor_name][0].mask[prune] = False
 
 
-class TestBaseStructuredSparsifierConvert(TestCase):
+class TestBaseStructuredSparsifierPrune(TestCase):
     def _check_pruner_prepared(self, model, pruner, device):
         for config in pruner.groups:
             modules = []
@@ -590,7 +590,7 @@ class TestBaseStructuredSparsifierConvert(TestCase):
                 # Assume that this is the 1st/only parametrization
                 assert type(module.parametrizations.weight[0]) == FakeStructuredSparsity
 
-    def _check_pruner_fused(self, model, pruner, device):
+    def _check_pruner_pruned(self, model, pruner, device):
         for config in pruner.groups:
             modules = []
             if type(config["module"]) is tuple:
@@ -621,14 +621,14 @@ class TestBaseStructuredSparsifierConvert(TestCase):
         # assert y_traced.shape == (128, 10)
         self._check_pruner_prepared(model, pruner, device)
 
-        # Fusion step
-        fused = pruner.convert()
-        y_fused = fused(x)
+        # Pruning step
+        pruned = pruner.prune()
+        y_pruned= pruned(x)
 
-        assert y_fused.shape == expected_shape
-        self._check_pruner_fused(model, pruner, device)
-        if y_fused.shape == y_expected.shape:
-            assert torch.isclose(y_expected, y_fused, rtol=1e-05, atol=1e-07).all()
+        assert y_pruned.shape == expected_shape
+        self._check_pruner_pruned(model, pruner, device)
+        if y_pruned.shape == y_expected.shape:
+            assert torch.isclose(y_expected, y_pruned, rtol=1e-05, atol=1e-07).all()
 
     def test_linear(self):
         """Test fusion for models that only contain Linear modules.
@@ -761,14 +761,14 @@ class TestBaseStructuredSparsifierConvert(TestCase):
         self._check_pruner_prepared(model, pruner, device)
 
         # Fusion step
-        fused = pruner.convert()
-        y_fused = fused(x)
+        pruned = pruner.prune()
+        y_pruned = pruned(x)
 
-        assert fused(x).shape == expected_shape
-        self._check_pruner_fused(model, pruner, device)
-        if y_fused.shape == y_expected.shape:
+        assert y_pruned.shape == expected_shape
+        self._check_pruner_pruned(model, pruner, device)
+        if y_pruned.shape == y_expected.shape:
             assert torch.isclose(
-                y_expected, y_fused, rtol=1e-05, atol=1e-06
+                y_expected, y_pruned, rtol=1e-05, atol=1e-06
             ).all(), f"fail for {type(model)}"
 
     def test_conv2d(self):
