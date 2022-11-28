@@ -119,7 +119,8 @@ def has_mutation(gm, example_inputs, inputs_only=False):
     # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
 
     def _wrap_to_fake_tensor(t, *, f_mode):
-        if type(t) in (torch.Tensor, torch.nn.Parameter):
+        if isinstance(t, torch.Tensor):
+            # TODO: it probably doesn't matter if we're dynamic shapes or not
             static_shapes_ = config.dynamic_shapes is False
             return fake_mode.from_tensor(
                 t, static_shapes=config.dynamic_shapes is not False
