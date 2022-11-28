@@ -623,7 +623,7 @@ class TestBaseStructuredSparsifierPrune(TestCase):
 
         # Pruning step
         pruned = pruner.prune()
-        y_pruned= pruned(x)
+        y_pruned = pruned(x)
 
         assert y_pruned.shape == expected_shape
         self._check_pruner_pruned(model, pruner, device)
