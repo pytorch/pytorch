@@ -228,6 +228,8 @@ def compute_grads(args, kwrags, results, grads):
 
 # Yanked from torch/_inductor/compile_fx.py
 def clone_preserve_strides(x):
+    if not isinstance(x, torch.Tensor):
+        return x
     needed_size = (
         sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
     )
@@ -343,7 +345,8 @@ def check_model(
             atol=atol,
             rtol=rtol,
             equal_nan=True,
-            exact_dtype=exact_dtype,
+            # our testing sometimes uses higher precision inputs for the reference
+            exact_dtype=False,
         )
     else:
         for correct_val, actual_val in zip(correct_flat, actual_flat):
