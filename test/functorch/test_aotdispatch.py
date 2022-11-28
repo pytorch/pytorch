@@ -1555,6 +1555,11 @@ class TestAOTModuleSimplified(AOTTestCase):
 
         tracer = torch.fx.Tracer()
         tracer.record_stack_traces = True
+
+        # This test uses tracing to lift the fake_y into a constant buffer,
+        # so we have a contrived trace example.
+        # For a traceless example closer to how dynamo would call us, see
+        # test_aot_module_deepcopy_fake_tensor_gm_raises below.
         graph = tracer.trace(MockModule(fake_y))
         mod_fake = torch.fx.GraphModule(tracer.root, graph)
 
@@ -1566,7 +1571,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         # Run the same exact thing except with a real buffer.
         graph = tracer.trace(MockModule(real_y))
         mod_real = torch.fx.GraphModule(tracer.root, graph)
-        aot_module_simplified(mod_real, nop)
+        aot_module_simplified(MockModule(real_y), nop)
 
     def test_aot_module_deepcopy_fake_tensor_gm_raises(self):
         class MockModule(torch.nn.Module):
@@ -1584,12 +1589,8 @@ class TestAOTModuleSimplified(AOTTestCase):
         real_x = torch.randn(4)
         real_y = torch.randn(4)
 
-        tracer = torch.fx.Tracer()
-        tracer.record_stack_traces = True
-        graph = tracer.trace(MockModule(real_y))
-        mod = torch.fx.GraphModule(tracer.root, graph)
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        mod_fake = torch._dynamo.utils.deepcopy_to_fake_tensor(mod, fake_mode)
+        mod_fake = torch._dynamo.utils.deepcopy_to_fake_tensor(MockModule(real_y), fake_mode)
 
         self.assertExpectedRaisesInline(
             AssertionError, lambda: aot_module_simplified(mod_fake, nop),
