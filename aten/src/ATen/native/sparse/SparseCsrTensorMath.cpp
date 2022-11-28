@@ -20,12 +20,15 @@
 #include <ATen/Operators.h>
 #else
 #include <ATen/ops/_conj_physical_native.h>
+#include <ATen/ops/_convert_indices_from_coo_to_csr.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_spmm_reduce.h>
+#include <ATen/ops/_spmm_reduce_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
@@ -51,6 +54,7 @@
 #include <ATen/ops/deg2rad.h>
 #include <ATen/ops/deg2rad_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/erf.h>
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/erfinv.h>
@@ -1201,6 +1205,150 @@ Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, boo
     });
   return result;
 }
+
+std::tuple<Tensor, Tensor> _spmm_reduce_sparse_csr_cpu(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::string_view reduce,
+    const c10::optional<Tensor>& row_indices_opt,
+    const c10::optional<Tensor>& ccol_indices_opt,
+    const c10::optional<Tensor>& csr2csc_opt) {
+
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> row_indices_maybe_owned = at::borrow_from_optional_tensor(row_indices_opt);
+  const Tensor& row_indices = *row_indices_maybe_owned;
+  const Tensor& ccol_indices = c10::value_or_else(ccol_indices_opt, [] {return Tensor();});
+  const Tensor& csr2csc = c10::value_or_else(csr2csc_opt, [] {return Tensor();});
+
+  sparse::impl::check_spmm_reduce_inputs</*train*/false>(
+      input, Tensor(), weight, row_indices, ccol_indices, csr2csc);
+
+  auto op = sparse::impl::get_operator_enum(reduce);
+
+  auto crow = input.crow_indices();
+  auto col = input.col_indices();
+  auto val = input.values();
+
+  // init output to be all zeros, for `rows` that has no nonzero elements,
+  // the corresponding rows in the output will be zero.
+  auto out = at::zeros({input.size(0), weight.size(1)}, weight.options());
+  auto arg_out = at::empty({0}, col.options());
+
+  int64_t nnz = input._nnz();
+  if (nnz == 0) {
+    return std::make_tuple(out, arg_out);
+  }
+
+  // only need to calculate the out args
+  // for reduce type "max" and "min" for training
+  bool need_arg_out = at::GradMode::is_enabled()
+      && (input.requires_grad() || weight.requires_grad())
+      && (op == SPMM_MAX || op == SPMM_MIN);
+
+  if (!need_arg_out) {
+    spmm_reduce_stub(kCPU, out, crow, col, val, weight, op);
+  } else {
+    // allocate memory and init with invalid index
+    arg_out.resize_(out.sizes());
+    arg_out.fill_(nnz);
+    spmm_reduce_arg_stub(kCPU, out, arg_out, crow, col, val, weight, op);
+  }
+
+  return std::make_tuple(std::move(out), std::move(arg_out));
+}
+
+std::tuple<Tensor, Tensor> _spmm_reduce_backward_sparse_csr_cpu(
+    const Tensor& input,
+    const Tensor& grad_out,
+    const Tensor& weight,
+    const c10::string_view reduce,
+    const Tensor& arg_out,
+    const Tensor& row_indices,
+    const Tensor& ccol_indices,
+    const Tensor& csr2csc,
+    std::array<bool, 2> output_mask) {
+
+  sparse::impl::check_spmm_reduce_inputs</*train*/true>(
+      input, grad_out, weight, row_indices, ccol_indices, csr2csc);
+
+  auto op = sparse::impl::get_operator_enum(reduce);
+
+  auto crow = input.crow_indices();
+  auto col = input.col_indices();
+  auto val = input.values();
+
+  // reconstruct the CSC indices in case not all given
+  bool has_csc_indices = row_indices.defined()
+      && ccol_indices.defined()
+      && csr2csc.defined();
+
+  Tensor row, ccol, permute;
+  if (has_csc_indices) {
+    row = row_indices;
+    ccol = ccol_indices;
+    permute = csr2csc;
+  } else {
+    bool out_int32 = crow.scalar_type() == ScalarType::Int;
+    Tensor coo_indices = at::_convert_indices_from_csr_to_coo(
+        crow,
+        col,
+        out_int32,
+        /*transpose*/false);
+    row = coo_indices.select(0, 0);
+
+    // calculte the global index for CSC
+    // and get the conversion permute pattern
+    Tensor index = col.mul(input.size(0)).add(row);
+    permute = index.argsort();
+
+    ccol = at::_convert_indices_from_coo_to_csr(
+        /*column indices*/col.index_select(0, permute),
+        /*column count*/input.size(1),
+        out_int32);
+  }
+
+  Tensor grad_input, grad_weight;
+  if (output_mask[0]) {
+    // grad_input has the same indices and nnz with input
+    grad_input = at::empty_like(input);
+    grad_input.values().zero_();
+    if (op == SPMM_MAX || op == SPMM_MIN) {
+      spmm_reduce_backward_input_arg_stub(kCPU, grad_input, grad_out, col, weight, arg_out, op);
+    } else {
+      spmm_reduce_backward_input_stub(kCPU, grad_input, grad_out, crow, col, weight, row, op);
+    }
+  }
+  if (output_mask[1]) {
+    grad_weight = at::zeros(weight.sizes(), weight.options());
+    if (op == SPMM_MAX || op == SPMM_MIN) {
+      spmm_reduce_backward_weight_arg_stub(kCPU, grad_weight, grad_out, col, val, arg_out, op);
+    } else {
+      spmm_reduce_backward_weight_stub(kCPU, grad_weight, grad_out, crow, val, row, ccol, permute, op);
+    }
+  }
+
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight));
+}
+
+Tensor spmm_reduce(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::string_view reduce,
+    const c10::optional<Tensor>& row_indices_opt,
+    const c10::optional<Tensor>& ccol_indices_opt,
+    const c10::optional<Tensor>& csr2csc_opt) {
+
+  // result: out, arg_out
+  auto result = at::_spmm_reduce(input, weight, reduce, row_indices_opt, ccol_indices_opt, csr2csc_opt);
+  return std::get<0>(result);
+}
+
+DEFINE_DISPATCH(spmm_reduce_stub);
+DEFINE_DISPATCH(spmm_reduce_arg_stub);
+DEFINE_DISPATCH(spmm_reduce_backward_input_stub);
+DEFINE_DISPATCH(spmm_reduce_backward_input_arg_stub);
+DEFINE_DISPATCH(spmm_reduce_backward_weight_stub);
+DEFINE_DISPATCH(spmm_reduce_backward_weight_arg_stub);
 
 } // namespace native
 } // namespace at

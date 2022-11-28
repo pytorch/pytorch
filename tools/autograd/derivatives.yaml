@@ -2383,6 +2383,10 @@
   mat1: maybe_multiply(grad.sparse_mask(self).mm(mat2.mH()), alpha.conj())
   mat2: maybe_multiply(mat1.mH().mm(grad.sparse_mask(self)), alpha.conj())
 
+- name: _spmm_reduce(Tensor input, Tensor weight, str reduce, Tensor? row_indices=None, Tensor? ccol_indices=None, Tensor? csr2csc=None) -> (Tensor, Tensor)
+  output_differentiability: [True, False]
+  input, weight: "grad.defined() ? _spmm_reduce_backward(input, grad, weight, reduce, result1, row_indices, ccol_indices, csr2csc, grad_input_mask) :  std::tuple<Tensor, Tensor>()"
+
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
   grad_output: smooth_l1_loss_backward(grad, self, target, reduction, beta)
   self: smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)

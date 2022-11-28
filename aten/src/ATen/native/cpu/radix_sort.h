@@ -5,6 +5,8 @@
 
 namespace at { namespace native {
 
+bool inline is_radix_sort_available() { return false; }
+
 template <typename K, typename V>
 std::pair<K*, V*> radix_sort_parallel(
     K* inp_key_buf,
@@ -21,6 +23,7 @@ std::pair<K*, V*> radix_sort_parallel(
 #else
 
 #include <omp.h>
+#include <c10/util/llvmMathExtras.h>
 
 namespace at { namespace native {
 
@@ -31,7 +34,7 @@ namespace {
 //
 // Copied from fbgemm implementation here:
 // https://github.com/pytorch/FBGEMM/blob/main/fbgemm_gpu/src/cpu_utils.cpp
-// 
+//
 // `radix_sort_parallel` is only available when ATen is compiled with OpenMP,
 // since the algorithm requires sync between omp threads, which can not be perfectly
 // mapped to `at::parallel_for` at the current stage.
@@ -132,7 +135,10 @@ void radix_sort_kernel(
     }
   }
 }
+
 } // namespace
+
+bool inline is_radix_sort_available() { return true; }
 
 template <typename K, typename V>
 std::pair<K*, V*> radix_sort_parallel(
@@ -143,12 +149,16 @@ std::pair<K*, V*> radix_sort_parallel(
     int64_t elements_count,
     int64_t max_value) {
   int maxthreads = omp_get_max_threads();
-  alignas(64) int histogram[RDX_HIST_SIZE * maxthreads];
-  alignas(64) int histogram_ps[RDX_HIST_SIZE * maxthreads + 1];
+  std::unique_ptr<int []> histogram_tmp(new int[RDX_HIST_SIZE * maxthreads]);
+  std::unique_ptr<int []> histogram_ps_tmp(new int[RDX_HIST_SIZE * maxthreads + 1]);
+  int* histogram = histogram_tmp.get();
+  int* histogram_ps = histogram_ps_tmp.get();
   if (max_value == 0) {
     return std::make_pair(inp_key_buf, inp_value_buf);
   }
-  int num_bits = sizeof(K) * 8 - __builtin_clz(max_value);
+
+  // __builtin_clz is not portable
+  int num_bits = sizeof(K) * 8 - llvm::countLeadingZeros(static_cast<std::make_unsigned_t<K>>(max_value));
   unsigned int num_passes = (num_bits + 7) / 8;
 
 #pragma omp parallel
