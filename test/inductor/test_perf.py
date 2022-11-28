@@ -2,8 +2,6 @@
 import contextlib
 from unittest.mock import patch
 
-import functorch
-
 import torch._dynamo
 import torch._inductor.config as config
 from torch._dynamo.optimizations.backends import register_backend
@@ -38,27 +36,11 @@ def count_numel(f, *args):
     return str(metrics.num_bytes_accessed // 4)
 
 
-def count_numel_train(f, *args):
-    """
-    Assumes all inputs are fp32
-    """
-    metrics.reset()
-
-    f = torch._dynamo.optimize("count_bytes_inductor")(f)
-    out = f(*args)
-    res = 0
-    for o in out:
-        res += o.mean()
-    res.backward()
-    print(metrics.nodes_num_elem)
-    return str(metrics.num_bytes_accessed // 4)
-
-
 DEVICE = "cuda"
 
 
-def T(*size, dtype=torch.float32, device=DEVICE, grad=False):
-    return torch.randn(size, dtype=dtype, device=device, requires_grad=grad)
+def T(*size, dtype=torch.float32, device=DEVICE):
+    return torch.randn(size, dtype=dtype, device=device)
 
 
 def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
@@ -402,56 +384,6 @@ class TilingTests(TestCase):
 
         inp = (T(10, 10, 10), T(10, 10, 10), T(10, 10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """4000""")
-
-
-class MinCutPartitioningTests(TestCase):
-    def test_partitioning_full_remat(self):
-        def f(x):
-            return x.cos().cos().cos()
-
-        inp = (T(10, grad=True),)
-        self.assertExpectedInline(count_numel_train(f, *inp), """50""")
-
-    def test_partitioning_partial_remat(self):
-        def f(a, b, c, d):
-            x = a + b + c + d
-            return x.cos().cos()
-
-        inp = (T(10, grad=True), T(10, grad=True), T(10, grad=True), T(10, grad=True))
-        self.assertExpectedInline(count_numel_train(f, *inp), """90""")
-
-    def test_partitioning_dtype(self):
-        def f(x):
-            return (x < 0) * x
-
-        inp = (T(100, grad=True),)
-        self.assertExpectedInline(count_numel_train(f, *inp), """450""")
-
-    @patch.object(functorch.compile.config, "max_dist_from_bw", 1000)
-    def test_partitioning_unremat_bw(self):
-        def f(x):
-            return torch.mm(x, x.new_ones(x.shape)).tanh().tanh()
-
-        inp = (T(10, 10, grad=True),)
-        self.assertExpectedInline(count_numel_train(f, *inp), """1300""")
-
-    def test_partitioning_unremat_bw2(self):
-        def f(a):
-            a = torch.mm(a, a)
-            a = a + 1
-            b = a + 2
-            c = torch.mm(a, b)
-            return c
-
-        inp = (T(10, 10, grad=True),)
-        self.assertExpectedInline(count_numel_train(f, *inp), """2600""")
-
-    def test_partitioning_keops(self):
-        def f(a, b):
-            return (a * b).cos().sum(dim=1)
-
-        inp = (T(20, 1, grad=True), T(1, 20, grad=True))
-        self.assertExpectedInline(count_numel_train(f, *inp), """220""")
 
 
 # Test cases where we don't do the right thing yet.
