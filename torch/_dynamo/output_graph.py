@@ -7,7 +7,9 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, OrderedDict, Set, Union
+
+import sympy
 
 import torch.nn
 from torch import fx
@@ -16,8 +18,8 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from . import config, logging as torchdynamo_logging, variables
 from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed
-from .guards import GuardBuilder
+from .exc import BackendCompilerFailed, unimplemented
+from .guards import Guard, GuardBuilder, TensorReference
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import ConstantSource, LocalSource, Source
@@ -30,7 +32,8 @@ from .utils import (
     format_graph_tabular,
     same,
 )
-from .variables.builder import VariableBuilder, wrap_fx_proxy
+from .variables.base import VariableTracker
+from .variables.builder import GraphArg, VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     DynamicShapeVariable,
@@ -80,7 +83,7 @@ def wrap_compiler_fn(compiler_fn):
         # wrap backend if verify_correctness is True
         wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
 
-        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn
+        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
         return wrapper_backend_compiler_fn
 
     return compiler_fn
@@ -144,31 +147,35 @@ class OutputGraph(fx.Tracer):
 
         # Mutable state checkpointed by copy_graphstate()
         self.graph = torch.fx.Graph()
-        self.graphargs = []
-        self.guards = set()
-        self.nn_modules = dict()
+        self.graphargs: List[GraphArg] = []
+        self.guards: Set[Guard] = set()
+        self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
-        self.output_instructions = []
+        self.output_instructions: List[Instruction] = []
         # Node => computed real value (see utils.get_real_value)
-        self.real_value_cache = {}
+        self.real_value_cache: Dict[fx.Node, torch.Tensor] = {}
 
         # Not checkpointed
         self.compiler_fn = compiler_fn
         self.root_globals = f_globals
         self.root_tx = root_tx
-        self.cleanups = []
+        self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
         self.initial_random_state = ()
-        self.unspec_variable_map = {}
+        self.unspec_variable_map: Dict[
+            str, Union[UnspecializedNumpyVariable, UnspecializedPythonVariable]
+        ] = {}
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
-        self.tensor_id_to_sym_shape_ref = {}
-        self.intermediary_symbols = {}
+        self.tensor_id_to_sym_shape_ref: Dict[int, Set[TensorReference]] = {}
+        self.intermediary_symbols: Dict[sympy.Expr, None] = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
-        self.name_to_input = collections.OrderedDict()
+        self.name_to_input: OrderedDict[
+            str, Optional[fx.Proxy]
+        ] = collections.OrderedDict()
 
     @property
     def output(self):
@@ -180,6 +187,7 @@ class OutputGraph(fx.Tracer):
 
     def copy_graphstate(self):
         """Create a checkpoint of the current state by copying everything"""
+        assert self.nn_modules is not None
         graph_nodes = set(self.graph.nodes)
         return (
             graph_nodes,
@@ -312,6 +320,7 @@ class OutputGraph(fx.Tracer):
                     target
                 )
 
+        assert self.nn_modules is not None
         for k, v in self.nn_modules.items():
             if v is target:
                 # it already exists
@@ -355,11 +364,14 @@ class OutputGraph(fx.Tracer):
 
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
+        assert self.nn_modules is not None
         root = FakeRootModule(self.nn_modules)
 
         # Add all the local vars to the "stack" so restore at the end
         restore_vars = []
-        val_to_names = collections.OrderedDict()
+        val_to_names: OrderedDict[
+            VariableTracker, List[str]
+        ] = collections.OrderedDict()
         if stack_values:
             val_to_names[stack_values[-1]] = list()
         for k, v in tx.symbolic_locals.items():
@@ -492,7 +504,7 @@ class OutputGraph(fx.Tracer):
             # the call to tabulate can cause a lot of memory to be allocated
             if config.log_level <= logging.INFO:
                 log.log(
-                    logging.CODE,
+                    logging.CODE,  # type: ignore[attr-defined]
                     f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
                 )
         except ImportError:
@@ -618,7 +630,8 @@ class OutputGraph(fx.Tracer):
             frame_summaries.append(tx.frame_summary())
             tx = getattr(tx, "parent", None)
 
-        msgs = traceback.StackSummary.from_list(frame_summaries).format()
+        # official from_list stub doesn't have new-style type
+        msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
 
         # Carry module_stack along with node.stack_trace for reusing stacktrace propagation infra
         nn_module_stack_str = f"Module stack: {nn_module_stack}\n"

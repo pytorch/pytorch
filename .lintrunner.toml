@@ -145,6 +145,7 @@ init_command = [
 code = 'MYPYNOFOLLOW'
 include_patterns = [
     'torch/_dynamo/convert_frame.py',
+    'torch/_dynamo/output_graph.py',
 ]
 exclude_patterns = [
 ]

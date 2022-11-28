@@ -6,8 +6,8 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Callable, Dict, cast, List, Optional
 from traceback import FrameSummary
+from typing import Callable, cast, Dict, List, Optional
 
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
@@ -210,7 +210,7 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
 
 
 def get_real_stack(exc) -> List[FrameSummary]:
-    assert hasattr(exc, 'real_stack')
+    assert hasattr(exc, "real_stack")
     return cast(List[FrameSummary], exc.real_stack)
 
 
@@ -379,6 +379,7 @@ def _compile(
         )
         tracer.run()
         output = tracer.output
+        assert output is not None
         assert output.output_instructions
         instructions[:] = output.output_instructions
         code_options.update(output.code_options)
