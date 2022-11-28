@@ -11,7 +11,7 @@ import types
 import warnings
 from enum import Enum
 from importlib import import_module
-from typing import Optional, Tuple, Union, TYPE_CHECKING
+from typing import Optional, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import torch
@@ -30,16 +30,16 @@ if TYPE_CHECKING:
     )
 else:
     for name in dir(torch._C._dynamo.eval_frame):
-        if name.startswith('__'):
+        if name.startswith("__"):
             continue
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 from . import config, convert_frame, skipfiles, utils
-from .types import DynamoCallback
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .optimizations.distributed import DDPOptimizer
 from .output_graph import CompilerFn
+from .types import DynamoCallback
 from .utils import compile_times
 
 log = logging.getLogger(__name__)
