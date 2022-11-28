@@ -178,4 +178,4 @@ existing methods and their limitations:
    but allows a smoother transition where partial graphs can be
    optimized without code modification
 
-.. |image0| image:: ./_static/img/TorchDynamo.png
+.. |image0| image:: ../_static/img/TorchDynamo.png
