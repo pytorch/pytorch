@@ -15,7 +15,6 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo import disable as disable_torchdynamo
 from torch._dynamo.utils import dynamo_timed
 from torch._subclasses import FakeTensorMode, CrossRefFakeMode
 from torch.fx import immutable_collections, Interpreter
@@ -1315,7 +1314,6 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
         fw_metadata = _fw_metadata
 
         @staticmethod
-        @disable_torchdynamo
         def forward(ctx, *deduped_flat_tensor_args):
 
             # There is a pretty complicated calling convention around what the compiled fw returns.
@@ -1361,7 +1359,6 @@ def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_con
             return tuple(fw_outs[0:num_forward_returns])
 
         @staticmethod
-        @disable_torchdynamo
         def backward(ctx, *all_flat_args):
             # Calling convention: we expect a grad_out passed to the backward:
             # - for every output of the fw that does *not* alias an input
