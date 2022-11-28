@@ -11,24 +11,31 @@ import types
 import warnings
 from enum import Enum
 from importlib import import_module
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, TYPE_CHECKING
 from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C._dynamo.eval_frame import (  # noqa: F401
-    DynamoCallback,
-    reset_code,
-    set_eval_frame,
-    set_guard_error_hook,
-    set_guard_fail_hook,
-    skip_code,
-    unsupported,
-)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel.distributed import DistributedDataParallel
 
+if TYPE_CHECKING:
+    from torch._C._dynamo.eval_frame import (  # noqa: F401
+        reset_code,
+        set_eval_frame,
+        set_guard_error_hook,
+        set_guard_fail_hook,
+        skip_code,
+        unsupported,
+    )
+else:
+    for name in dir(torch._C._dynamo.eval_frame):
+        if name.startswith('__'):
+            continue
+        globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
+
 from . import config, convert_frame, skipfiles, utils
+from .types import DynamoCallback
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .optimizations.distributed import DDPOptimizer
