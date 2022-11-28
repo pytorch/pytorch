@@ -104,7 +104,7 @@ def get_hf_bert(rank):
     try:
         from transformers import BertConfig, AutoModelForMaskedLM
     except ImportError:
-        unittest.skip("Unable to import transformers")
+        raise unittest.SkipTest("Unable to import transformers")
 
     batch_size, max_length, config, device = 4, 512, BertConfig(), f"cuda:{rank}"
     model = AutoModelForMaskedLM.from_config(config).to(device)
