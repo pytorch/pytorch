@@ -1582,9 +1582,11 @@ class TestAOTModuleSimplified(AOTTestCase):
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
                 self.linear.bias = torch.nn.Parameter(torch.ones(4))
+                # self.y = y
 
             def forward(self, x):
                 z = self.linear(x)
+                # z = z + self.y
                 z = z.relu()
                 return (z, )
 
@@ -1601,7 +1603,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
         self.assertExpectedRaisesInline(
             AssertionError, lambda: aot_module_simplified(mod_fake, nop),
-            """Unexpected fake param linear.weight"""
+            """Unexpected fake buffer y"""
         )
 
 
