@@ -644,11 +644,16 @@ struct ForwardingInfo {
       consumer_compliment_map;
 
   ForwardingInfo(const TensorView* producer, const TensorView* consumer) {
+    // Either producer or consumer maps depending on operation
     std::unordered_map<IterDomain*, IterDomain*>* active_forwarding_map =
         nullptr;
     std::unordered_map<IterDomain*, std::vector<IterDomain*>>*
         active_compliment_map = nullptr;
+
+    // Either squeeze or broadcast dimension flags depending on operation
     const std::vector<bool>* active_dim_flags = nullptr;
+
+    // Either producer or consumer depending on operation
     std::vector<IterDomain*> active_root_dom;
     const TensorView* active_tv = nullptr;
 
@@ -671,7 +676,7 @@ struct ForwardingInfo {
 
     TORCH_INTERNAL_ASSERT(active_root_dom.size() == active_dim_flags->size());
 
-    // Collect which root ids are in only in active_tv but not in the inactive
+    // Collect which root ids are only in active_tv but not in the inactive
     // tensor.
     std::unordered_set<IterDomain*> forwarded_ids;
     for (auto i : c10::irange(active_dim_flags->size())) {
@@ -697,7 +702,6 @@ struct ForwardingInfo {
       auto input_ids = ir_utils::filterByType<IterDomain>(expr->inputs());
       // If expr inputs are all in forwarded_ids, then so are all outputs
       if (std::all_of(input_ids.begin(), input_ids.end(), isIdOnlyInActiveTv)) {
-        // add all outputs to not being in producer
         for (auto output_ids :
              ir_utils::filterByType<IterDomain>(expr->outputs())) {
           forwarded_ids.emplace(output_ids);
@@ -879,7 +883,7 @@ BestEffortReplay BestEffortReplay::replayCasP(
       producer->domain()->domain().begin() + producer_compute_at_axis);
   producer_CA_ids = TensorDomain::noReductions(producer_CA_ids);
 
-  // If producer has an rfactor root, that's what will match the consumer
+  // If producer has an rfactor root, that's what will match to the consumer
   std::vector<IterDomain*> producer_root = producer->getMaybeRFactorDomain();
 
   // Figure out all inputs required to generate the compute_at dimensions. We

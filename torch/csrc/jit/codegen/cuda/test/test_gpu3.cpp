@@ -4057,46 +4057,6 @@ TEST_F(NVFuserTest, FusionReproNoncontigBroadcast_CUDA) {
       executor_cache.fusion(), cg_outputs, {t0, t1}, {t2}, __LINE__, __FILE__);
 }
 
-namespace {
-
-// check that the resulting sibling are identical
-void checkSiblingConsistency(TensorView* replay, TensorView* target) {
-  auto replay_root = replay->getRootDomain();
-  auto replay_dom = replay->domain()->domain();
-  auto target_root = target->getRootDomain();
-  auto target_dom = target->domain()->domain();
-  std::unordered_map<IterDomain*, IterDomain*> target2replay_map;
-  TORCH_CHECK(replay_root.size() == target_root.size());
-  target2replay_map.reserve(replay_root.size());
-  std::transform(
-      target_root.begin(),
-      target_root.end(),
-      replay_root.begin(),
-      std::inserter(target2replay_map, target2replay_map.begin()),
-      [](auto a, auto b) { return std::make_pair(a, b); });
-  BestEffortReplay replay_(replay_dom, target_dom, target2replay_map);
-  auto r = replay_.getReplay();
-  for (int64_t i = 0; i < replay_dom.size(); i++) {
-    auto target_id = target_dom[i];
-    auto replay_it = r.find(target_id);
-    TORCH_CHECK(replay_it != r.end());
-    TORCH_CHECK(
-        replay_it->second == replay_dom[i],
-        "IterDomain mismatch when checking ",
-        replay,
-        " and ",
-        target,
-        " at ",
-        i,
-        ", got ",
-        replay_it->second,
-        " and ",
-        replay_dom[i]);
-  }
-};
-
-} // namespace
-
 TEST_F(NVFuserTest, FusionTransformPropagateSibling_CUDA) {
   // https://github.com/csarofeen/pytorch/issues/1760
   Fusion fusion;
