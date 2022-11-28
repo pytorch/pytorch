@@ -11,14 +11,14 @@ from copy import deepcopy
 from typing import List
 from unittest.mock import patch
 
-import torch._functorch.config
-
 import numpy as np
 import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
+
+import torch._functorch.config
 
 try:
     from test_minifier import requires_cuda
