@@ -333,7 +333,7 @@ class TestFSDPCheckpointSubmodule(FSDPTest):
         self.assertTrue(model_ac.m1.s1.checkpoint)
         self.assertTrue(model_ac.m2.s2.checkpoint)
 
-
+        # Wrap no checkpointing model submodules with FSDP
         model.m1 = FSDP(
             module=model.m1,
             device_id=torch.cuda.current_device(),
@@ -345,6 +345,7 @@ class TestFSDPCheckpointSubmodule(FSDPTest):
             sharding_strategy=ShardingStrategy.NO_SHARD,
         )
 
+        # Wrap checkpointing model submodules with FSDP
         model_ac.m1 = FSDP(
             module=model_ac.m1,
             device_id=torch.cuda.current_device(),
