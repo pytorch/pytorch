@@ -9,12 +9,10 @@ import contextlib
 import copy
 import inspect
 import io
-import os
 import re
 import textwrap
 import typing
 import warnings
-import zipfile
 from typing import (
     Any,
     Callable,
@@ -38,15 +36,19 @@ import torch.serialization
 from torch import _C
 from torch.onnx import (  # noqa: F401
     _constants,
-    _deprecation,
     _exporter_states,
-    _patch_torch,
     errors,
     symbolic_caffe2,
     symbolic_helper,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, diagnostics, jit_utils, registration
+from torch.onnx._internal import (
+    _beartype,
+    diagnostics,
+    jit_utils,
+    onnx_proto_utils,
+    registration,
+)
 
 __all__ = [
     "is_in_onnx_export",
@@ -1331,7 +1333,9 @@ def unconvertible_ops(
             # eliminated in the conversion passes. Users may still see errors caused
             # by prim ops even though they don't show up in the list.
             continue
-        if not registration.registry.is_registered_op(domain_op, opset_version):
+        if not registration.registry.is_registered_op(
+            domain_op.rstrip("_"), opset_version
+        ):
             # We consider all registered ops supported, even though some of them are
             # only partially supported, because there is not yet a good way to check
             # if an op is fully supported.
@@ -1597,49 +1601,14 @@ def _export(
                     model_file_location,
                     node_attr_to_name,
                 )
+            # insert function_proto into model_proto.
+            proto = onnx_proto_utils._add_onnxscript_fn(
+                proto,
+                custom_opsets,
+            )
             if verbose:
                 torch.onnx.log("Exported graph: ", graph)
-            if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
-                assert len(export_map) == 0
-                with torch.serialization._open_file_like(f, "wb") as opened_file:
-                    opened_file.write(proto)
-            elif export_type in [
-                _exporter_states.ExportTypes.ZIP_ARCHIVE,
-                _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
-            ]:
-                compression = (
-                    zipfile.ZIP_DEFLATED
-                    if export_type
-                    == _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE
-                    else zipfile.ZIP_STORED
-                )
-                with zipfile.ZipFile(f, "w", compression=compression) as z:
-                    z.writestr(_constants.ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
-                    for k, v in export_map.items():
-                        z.writestr(k, v)
-            elif export_type == _exporter_states.ExportTypes.DIRECTORY:
-                if os.path.exists(f):
-                    assert os.path.isdir(f)
-                else:
-                    os.makedirs(f)
-
-                model_proto_file = os.path.join(
-                    f, _constants.ONNX_ARCHIVE_MODEL_PROTO_NAME
-                )
-                with torch.serialization._open_file_like(
-                    model_proto_file, "wb"
-                ) as opened_file:
-                    opened_file.write(proto)
-
-                for k, v in export_map.items():
-                    weight_proto_file = os.path.join(f, k)
-                    with torch.serialization._open_file_like(
-                        weight_proto_file, "wb"
-                    ) as opened_file:
-                        opened_file.write(v)
-            else:
-                raise RuntimeError("Unknown export type")
-
+            onnx_proto_utils._export_file(proto, f, export_type, export_map)
             # The ONNX checker only works for ONNX graph. So if the operator_export_type is not ONNX,
             # we can skip this check.
             # If large model format export is enabled, proto will only contain data location instead of
@@ -1739,18 +1708,34 @@ def _add_output_to_block(block: _C.Block, value: _C.Value) -> int:
 
 @_beartype.beartype
 def _should_aten_fallback(
-    name: str,
-    opset_version: int,
-    operator_export_type: _C_onnx.OperatorExportTypes,
+    name: str, opset_version: int, operator_export_type: _C_onnx.OperatorExportTypes
 ):
+    # For BUILD_CAFFE2=0 builds, if domain=="aten" and operator_export_type==ONNX_ATEN,
+    #   an aten::ATen operator is created regardless of symbolics existence
+    # For BUILD_CAFFE2=1, the same applies only if there is no symbolic available
+
     is_exportable_aten_op = registration.registry.is_registered_op(name, opset_version)
     is_onnx_aten_export = operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN
     is_aten_fallback_export = (
         operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
     )
-    return is_onnx_aten_export or (
-        not is_exportable_aten_op and is_aten_fallback_export
-    )
+    is_caffe2_build = _C_onnx._CAFFE2_ATEN_FALLBACK
+
+    if not name.startswith("aten::"):
+        return False
+
+    if is_caffe2_build:
+        if (
+            is_onnx_aten_export or is_aten_fallback_export
+        ) and not is_exportable_aten_op:
+            return True
+    else:
+        if is_onnx_aten_export or (
+            is_aten_fallback_export and not is_exportable_aten_op
+        ):
+            return True
+
+    return False
 
 
 @_beartype.beartype
@@ -1833,7 +1818,7 @@ def _run_symbolic_function(
     else:
         ns_op_name = node_kind
 
-    namespace, op_name = ns_op_name.split("::")
+    namespace, op_name = jit_utils.parse_node_kind(ns_op_name)
 
     graph_context = jit_utils.GraphContext(
         graph=graph,
@@ -1843,6 +1828,21 @@ def _run_symbolic_function(
         params_dict=_params_dict,
         env=env,
     )
+
+    # Direct ATen export requested
+    if _should_aten_fallback(ns_op_name, opset_version, operator_export_type):
+        attrs = {
+            k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
+            for k in node.attributeNames()
+        }
+        outputs = node.outputsSize()
+        attrs["outputs"] = outputs
+        return graph_context.at(
+            op_name,
+            *inputs,
+            overload_name=_get_aten_op_overload_name(node),
+            **attrs,
+        )
 
     try:
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
@@ -1861,6 +1861,7 @@ def _run_symbolic_function(
         if symbolic_function_group is not None:
             symbolic_fn = symbolic_function_group.get(opset_version)
             if symbolic_fn is not None:
+                # TODO Wrap almost identical attrs assignment or comment the difference.
                 attrs = {
                     k: symbolic_helper._node_get(node, k) for k in node.attributeNames()
                 }
@@ -1874,21 +1875,8 @@ def _run_symbolic_function(
             # Clone node to trigger ONNX shape inference
             return graph_context.op(op_name, *inputs, **attrs, outputs=node.outputsSize())  # type: ignore[attr-defined]
 
-        if _should_aten_fallback(ns_op_name, opset_version, operator_export_type):
-            # Direct ATen export requested
-            outputs = node.outputsSize()
-            attrs["outputs"] = outputs
-            # `overload_name` is set for non-Caffe2 builds only
-            return graph_context.at(
-                op_name,
-                *inputs,
-                overload_name=_get_aten_op_overload_name(node),
-                **attrs,
-            )
-
         raise errors.UnsupportedOperatorError(
-            domain,
-            op_name,
+            symbolic_function_name,
             opset_version,
             symbolic_function_group.get_min_supported()
             if symbolic_function_group
@@ -1931,7 +1919,7 @@ def _verify_custom_op_name(symbolic_name: str):
             "alphanumerical characters"
         )
 
-    ns, _ = symbolic_name.split("::")
+    ns, _ = jit_utils.parse_node_kind(symbolic_name)
     if ns == "onnx":
         raise ValueError(
             f"Failed to register operator {symbolic_name}. {ns} domain cannot be modified."
@@ -1940,7 +1928,9 @@ def _verify_custom_op_name(symbolic_name: str):
 
 @_beartype.beartype
 def register_custom_op_symbolic(
-    symbolic_name: str, symbolic_fn: Callable, opset_version: int
+    symbolic_name: str,
+    symbolic_fn: Callable,
+    opset_version: int,
 ):
     """Registers a symbolic function for a custom operator.
 

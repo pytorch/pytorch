@@ -49,6 +49,22 @@ except ImportError:
 
 from . import config
 
+"""
+A note on skipfiles:
+
+Dynamo consults this file to determine whether code should be compiled or skipped.
+
+A skip applies at the frame boundary, meaning dynamo either triggers a graph break
+at the beginning of the frame or attempts to trace the whole frame.  When skipping
+a frame, recursively called frames are still traced by dynamo unless also skipped.
+
+Skipfiles (skipped at the file level instead of function level) still apply on a
+frame-by-frame boundary as dynamo traces, but apply to all functions in that file.
+
+@skip is a helper decorator that can be applied to your function to cause it to be
+included here.
+"""
+
 
 def _strip_init_py(s):
     return re.sub(r"__init__.py$", "", s)
@@ -106,16 +122,6 @@ FILENAME_ALLOWLIST = {
     torch.set_rng_state.__code__.co_filename,
 }
 
-# Include optimizer code for tracing
-FILENAME_ALLOWLIST |= set(
-    [
-        inspect.getfile(obj)
-        for obj in torch.optim.__dict__.values()
-        if inspect.isclass(obj)
-    ]
-)
-
-FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
 if HAS_PRIMS_REFS:
     FILENAME_ALLOWLIST |= {
@@ -127,7 +133,6 @@ if HAS_PRIMS_REFS:
         torch._refs.nn.functional.__file__,
     }
 
-FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
 SKIP_DIRS_RE = None
 

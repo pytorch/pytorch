@@ -15,8 +15,8 @@ import torch
 from .. import config, ir, scheduler
 from ..ir import ReductionHint
 from ..utils import (
-    dynamo_logging,
     free_symbol_startswith,
+    get_fused_kernel_name,
     instance_descriptor,
     sympy_product,
     sympy_subs,
@@ -24,6 +24,7 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from .common import (
+    CSEVariable,
     DeferredLine,
     ExprPrinter,
     IndentedBuffer,
@@ -41,7 +42,16 @@ def signature_of(arg):
     from triton.runtime.jit import JITFunction
 
     if isinstance(arg, TensorArg):
-        return JITFunction._type_of(arg.dtype)
+        tye = JITFunction._type_of(arg.dtype)
+        if V.graph.is_unspec_arg(arg.buffer):
+            # had unwrapped 0d tensor as scalar
+            new_tye = tye.lstrip("*")
+            if new_tye in ["fp16", "bf16"]:
+                return "fp32"
+            else:
+                return new_tye
+        else:
+            return tye
     if isinstance(arg, SizeArg):
         return JITFunction._key_of(V.graph.sizevars.size_hint(arg.expr))
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
@@ -100,6 +110,17 @@ def triton_constant(value):
     return repr(value)
 
 
+class TritonCSEVariable(CSEVariable):
+    def __init__(self, name):
+        super().__init__(name)
+        self.is_scalar = False
+
+    def update_on_args(self, args, kwargs):
+        self.is_scalar = all(
+            not (isinstance(arg, TritonCSEVariable)) or arg.is_scalar for arg in args
+        )
+
+
 class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton"""
 
@@ -143,26 +164,14 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"tl.minimum({a}, {b})"
+        return f"tl.where({a} != {a}, {a}, tl.where({a} < {b}, {a}, {b}))"
 
     @staticmethod
     def maximum(a, b):
-        return f"tl.maximum({a}, {b})"
+        return f"tl.where({a} != {a}, {a}, tl.where({a} > {b}, {a}, {b}))"
 
     @staticmethod
     def where(a, b, c):
-        if not config.triton.simple_where:
-            # wonkyness to work around https://github.com/openai/triton/issues/532
-            # identity calls to force new triton variables (and get access to .shape/.dtype/.numel
-            a = ops.identity(a)
-            b = ops.identity(b)
-            c = ops.identity(c)
-            a = ops.identity(
-                f"{a} | tl.zeros({b}.shape, {a}.dtype) if {b}.numel > 1 else {a}"
-            )
-            a = ops.identity(
-                f"{a} | tl.zeros({c}.shape, {a}.dtype) if {c}.numel > 1 else {a}"
-            )
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
@@ -198,6 +207,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.lgamma({x})"
 
     @staticmethod
+    def erf(x):
+        return f"tl.libdevice.erf({x})"
+
+    @staticmethod
     def logical_and(a, b):
         return f"{a} & {b}"
 
@@ -228,11 +241,11 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
-        return f"tl.libdevice.signbitf({x}) if ({x}).dtype is tl.float32 else {x} < 0"
+        return f"tl.libdevice.signbit({x}) if ({x}).dtype is tl.float32 else {x} < 0"
 
     @staticmethod
     def fmod(a, b):
-        return f"tl.libdevice.fmod({a}, ({b}).to(tl.float32))"
+        return f"tl.libdevice.fmod({a}, {b})"
 
     @staticmethod
     def pow(a, b):
@@ -248,11 +261,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def isinf(x):
-        return f"tl.libdevice.isinfd({x}) if ({x}).dtype is tl.float64 else tl.libdevice.isinff({x})"
+        return f"tl.libdevice.isinf({x})"
 
     @staticmethod
     def isnan(x):
-        return f"tl.libdevice.isnand({x}) if ({x}).dtype is tl.float64 else tl.libdevice.isnanf({x})"
+        return f"tl.libdevice.isnan({x})"
 
     @staticmethod
     def round(x):
@@ -731,6 +744,12 @@ class TritonKernel(Kernel):
             mask = dense_mask
             index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
         elif indirect_indexing:
+            # Use dense mask for indirect_indexing
+            # See https://github.com/pytorch/torchdynamo/issues/1654
+            # TODO - An optimization could be to hoist this load outside of
+            # reduction loop, if it is independent of rmask. Such example can be found in
+            # https://github.com/pytorch/torchdynamo/issues/1654
+            index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
             mask = dense_mask
 
         if self._load_mask:
@@ -743,7 +762,13 @@ class TritonKernel(Kernel):
             # https://github.com/openai/triton/issues/633
             mask = ["None"]
 
-        return index_str, " & ".join(mask)
+        if (
+            index_str in self.cse.varname_map
+            and self.cse.varname_map[index_str].is_scalar
+        ):
+            mask = ["None"]
+
+        return index_str, " & ".join(map(str, mask))
 
     def var_ranges(self):
         return dict(
@@ -791,9 +816,13 @@ class TritonKernel(Kernel):
             other = ", other=0"
         else:
             other = ""
-        line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
-        if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
-            line += ".to(tl.float32)"
+
+        if V.graph.is_unspec_arg(name):
+            line = var
+        else:
+            line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
+            if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
+                line += ".to(tl.float32)"
 
         if (
             self.inside_reduction
@@ -969,6 +998,7 @@ class TritonKernel(Kernel):
                     import triton
                     import triton.language as tl
                     from {config.inductor_import}.ir import ReductionHint
+                    from {config.inductor_import}.ir import TileHint
                     from {config.inductor_import}.triton_ops.autotune import {heuristics}
                     from {config.inductor_import}.utils import instance_descriptor
                 """
@@ -978,15 +1008,14 @@ class TritonKernel(Kernel):
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),
             "device": V.graph.scheduler.current_device.index,
-            "configs": [config_of(signature)],
             "constants": {},
         }
 
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
-                triton_meta["signature"][len(argdefs)] = signature_of(
-                    SizeArg(f"{tree.prefix}numel", tree.numel)
-                )
+                sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
+                signature.append(sizearg)
+                triton_meta["signature"][len(argdefs)] = signature_of(sizearg)
                 argdefs.append(f"{tree.prefix}numel")
                 # constexpr version causes issues, see
                 # https://github.com/pytorch/torchdynamo/pull/1362
@@ -994,6 +1023,7 @@ class TritonKernel(Kernel):
                 #     tree.numel
                 # )
                 # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
+        triton_meta["configs"] = [config_of(signature)]
 
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
@@ -1009,8 +1039,14 @@ class TritonKernel(Kernel):
                 @triton.jit
             """
         else:
+            tile_hint = ""
+            if len(size_hints) == 2:
+                if len(signature) == 4:  # input, output and 2 args
+                    tile_hint = "tile_hint=TileHint.SQUARE,"
+                else:
+                    tile_hint = "tile_hint=TileHint.DEFAULT,"
             heuristics_line = f"""
-                @{heuristics}(size_hints={size_hints!r}, filename=__file__, meta={triton_meta!r})
+                @{heuristics}(size_hints={size_hints!r}, {tile_hint}filename=__file__, meta={triton_meta!r})
                 @triton.jit
             """
         code.splice(heuristics_line)
@@ -1064,6 +1100,10 @@ class TritonKernel(Kernel):
 
     def call_kernel(self, code, name: str):
         _, call_args, _ = self.args.python_argdefs()
+        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
+        for i in range(len(call_args)):
+            if V.graph.is_unspec_arg(call_args[i]):
+                call_args[i] = call_args[i] + ".item()"
         grid = []
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
@@ -1081,6 +1121,9 @@ class TritonKernel(Kernel):
         code.writeline(
             f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name})"
         )
+
+    def create_cse_var(self, *args, **kwargs):
+        return TritonCSEVariable(*args, **kwargs)
 
 
 class TritonScheduling:
@@ -1209,7 +1252,7 @@ class TritonScheduling:
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
-        log.log(dynamo_logging.CODE, "schedule: %s", node_schedule)
+        log.log(logging.CODE, "schedule: %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
@@ -1258,9 +1301,14 @@ class TritonScheduling:
         if src_code in wrapper.kernels:
             kernel_name = wrapper.kernels[src_code]
         else:
-            kernel_name = wrapper.next_kernel_name()
+            fused_name = (
+                get_fused_kernel_name(node_schedule)
+                if config.triton.descriptive_kernel_names
+                else ""
+            )
+            kernel_name = "triton_" + fused_name + wrapper.next_kernel_suffix()
             wrapper.kernels[src_code] = kernel_name
-            subs_name = kernel_name if config.triton.ordered_kernel_names else "kernel"
+            subs_name = kernel_name if config.triton.ordered_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.

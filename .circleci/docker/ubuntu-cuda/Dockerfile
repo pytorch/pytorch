@@ -26,6 +26,7 @@ RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 # Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
+ARG CONDA_CMAKE
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
 COPY ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
