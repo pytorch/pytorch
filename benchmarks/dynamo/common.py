@@ -121,12 +121,13 @@ CI_SKIP_INDUCTOR_TRAINING = [
     # TIMM
     "convit_base",  # fp64_OOM
     "dm_nfnet_f0",  # accuracy
+    "convmixer_768_32",  # accuracy - Unable to repro on A100
+    "hrnet_w18",  # accuracy - Unable to repro on A100
+    "eca_botnext26ts_256",  # accuracy - Fails on A100
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
     "res2net101_26w_4s",  # accuracy
-    "resnest101e",  # accuracy
-    "rexnet_100",  # accuracy
     "spnasnet_100",  # accuracy
     "swin_base_patch4_window7_224",  # accuracy
     "xcit_large_24_p8_224",  # fp64_OOM
@@ -1693,11 +1694,18 @@ def run(runner, args, original_dir=None):
         if args.batch_size is None:
             if runner.suite_name == "huggingface":
                 args.batch_size = 1
-            else:
+            elif runner.suite_name == "torchbench":
                 args.batch_size = 2
+            else:
+                # Larger batch size of TIMM models to have stable batch_norm
+                assert runner.suite_name == "timm_models"
+                args.batch_size = 8
 
         # Remove sources of randomness
-        args.use_eval_mode = True
+        if runner.suite_name != "timm_models":
+            # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
+            args.use_eval_mode = True
+        inductor_config.fallback_random = True
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
