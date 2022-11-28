@@ -811,6 +811,7 @@ def cast_to(dtype, model, inputs):
 def cast_to_bf16(model, inputs):
     return cast_to(torch.bfloat16, model, inputs)
 
+
 def cast_to_fp16(model, inputs):
     return cast_to(torch.float16, model, inputs)
 
@@ -1582,7 +1583,9 @@ def parse_args(args=None):
 
     group_prec = parser.add_mutually_exclusive_group()
     group_prec.add_argument("--float16", action="store_true", help="cast model to fp16")
-    group_prec.add_argument("--bfloat16", action="store_true", help="cast model to bf16")
+    group_prec.add_argument(
+        "--bfloat16", action="store_true", help="cast model to bf16"
+    )
     group_prec.add_argument("--float32", action="store_true", help="cast model to fp32")
     group_prec.add_argument(
         "--amp", action="store_true", help="use automatic mixed precision"
@@ -1933,9 +1936,13 @@ def run(runner, args, original_dir=None):
     elif args.backend:
         if args.backend == "ipex":
             if args.bfloat16:
-                optimize_ctx = torch._dynamo.optimize(backends.ipex_bf16, nopython=args.nopython)
+                optimize_ctx = torch._dynamo.optimize(
+                    backends.ipex_bf16, nopython=args.nopython
+                )
             else:
-                optimize_ctx = torch._dynamo.optimize(backends.ipex_fp32, nopython=args.nopython)
+                optimize_ctx = torch._dynamo.optimize(
+                    backends.ipex_fp32, nopython=args.nopython
+                )
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
