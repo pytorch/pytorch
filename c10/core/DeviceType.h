@@ -95,6 +95,9 @@ C10_API bool isValidDeviceType(DeviceType d);
 
 C10_API std::ostream& operator<<(std::ostream& stream, DeviceType type);
 
+C10_API void register_privateuse1_backend(std::string backend_name);
+C10_API std::string get_privateuse1_backend(bool lower_case = true);
+
 } // namespace c10
 
 namespace std {

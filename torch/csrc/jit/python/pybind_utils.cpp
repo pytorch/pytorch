@@ -80,10 +80,10 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           scalar = at::Scalar(THPUtils_unpackComplexDouble(obj.ptr()));
         } else if (THPUtils_checkDouble(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackDouble(obj.ptr()));
-        } else if (torch::is_symint_node(py::handle(obj))) {
+        } else if (torch::is_symint(py::handle(obj))) {
           save_symint = true;
           scalar = at::Scalar(7777777);
-        } else if (torch::is_symfloat_node(py::handle(obj))) {
+        } else if (torch::is_symfloat(py::handle(obj))) {
           save_symint = true;
           scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
         } else {
@@ -161,12 +161,12 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return py::cast<int64_t>(obj);
     }
     case TypeKind::SymIntType:
-      if (torch::is_symint_node(obj.ptr())) {
+      if (torch::is_symint(obj.ptr())) {
         return py::cast<c10::SymInt>(obj);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::SymFloatType:
-      if (torch::is_symfloat_node(obj.ptr())) {
+      if (torch::is_symfloat(obj.ptr())) {
         return py::cast<c10::SymFloat>(obj);
       }
       return py::cast<double>(obj);
@@ -253,7 +253,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           bool is_symbolic = false;
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
-            if (torch::is_symint_node(elm)) {
+            if (torch::is_symint(elm)) {
               is_symbolic = true;
               break;
             }
@@ -269,7 +269,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
             // TODO: what about SymInt conversion to SymFloat?
-            if (torch::is_symfloat_node(elm)) {
+            if (torch::is_symfloat(elm)) {
               is_symbolic = true;
               break;
             }
@@ -442,9 +442,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       } else if (PyComplex_CheckExact(obj.ptr())) {
         auto c_obj = py::cast<std::complex<double>>(obj.ptr());
         return static_cast<c10::complex<double>>(c_obj);
-      } else if (torch::is_symint_node(obj)) {
+      } else if (torch::is_symint(obj)) {
         return py::cast<c10::SymInt>(obj);
-      } else if (torch::is_symfloat_node(obj)) {
+      } else if (torch::is_symfloat(obj)) {
         return py::cast<c10::SymFloat>(obj);
       } else {
         throw py::cast_error(
@@ -755,8 +755,7 @@ py::object _get_operation_for_overload_or_packet(
         total_arg_num,
         false /* throw_error */);
   }
-  if (overloaded_args.size() > 0 ||
-      at::impl::PythonTorchFunctionTLS::get_mode()) {
+  if (overloaded_args.size() > 0 || at::impl::torch_function_mode_enabled()) {
     py::object ret;
     std::string ns = symbol.ns().toUnqualString();
     std::string method_name = symbol.toUnqualString();

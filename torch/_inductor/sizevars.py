@@ -45,7 +45,7 @@ class SizeVarAllocator(object):
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
         self.guards = []
-        self.replacements: Dict[sympy.Symbol, Expr] = {}
+        self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.need_seed = False
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
@@ -454,28 +454,30 @@ class SizeVarAllocator(object):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
 
-        # TODO: This should be the below, but causes test/test_torchinductor.py::GpuTests::test_triton_conv_cuda to fail
-        # needed_vars = set(self.var_to_val.keys()) - set(self.replacements.keys())
-
-        needed_vars = set(self.var_to_val.keys())
-        needed = set(map(str, needed_vars))
+        # Assign all symbolic shapes needed to local variables
+        needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
+        added = set()
 
         for name, value in graph_inputs.items():
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
-                shape = str(shape)
+                shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
+                    added.add(shape)
                     code.writeline(f"{shape} = {sizeof(name)}[{dim}]")
+                elif isinstance(shape, sympy.Symbol):
+                    assert shape in added, f"{shape} is needed but not added"
 
         for name, value in graph_inputs.items():
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
-                shape = str(shape)
+                shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
                     code.writeline(f"{shape} = {strideof(name)}[{dim}]")
-
+                elif isinstance(shape, sympy.Symbol):
+                    assert shape in added, f"{shape} is needed but not added"
         assert not needed
 
     def codegen_sizevar(self, x: Expr) -> str:

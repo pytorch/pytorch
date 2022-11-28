@@ -11,30 +11,15 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-update-conda: true
-          python-version: 3.8
-          activate-environment: build
-
-      - name: Install dependencies
-        run: |
-          conda install -y \
-            cffi \
-            cmake \
-            mkl \
-            mkl-include \
-            ninja \
-            numpy \
-            pyyaml \
-            requests \
-            setuptools \
-            typing_extensions
-
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
+      - name: Setup miniconda
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: 3.8
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build PyTorch Android
         run: |
@@ -49,7 +34,7 @@ jobs:
           ln -sfn ${ANDROID_SDK_ROOT}/ndk/21.4.7075529 ${ANDROID_NDK}
 
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
-          ./scripts/build_pytorch_android.sh x86
+          ${CONDA_RUN} ./scripts/build_pytorch_android.sh x86
 
       - name: Run tests
         uses: reactivecircus/android-emulator-runner@v2

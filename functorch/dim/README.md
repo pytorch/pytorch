@@ -7,7 +7,7 @@ _An implementation of [named tensors](https://namedtensor.github.io) with the fu
 
 The tensor input to a resnet might have the shape [8, 3, 224, 224] but informally we think of those dimensions as 'batch', 'channel', 'width', and 'height'. Eventhough 'width' and 'height' have the same _size_ we still think of them as separate dimensions, and if we have two _different_ images, we think of both as sharing the _same_ 'channel' dimension.
 
-Named tensors gives these dimensions names. [PyTorch's current implementation](https://pytorch.org/docs/stable/named_tensor.html) uses strings to name dimensions. Instead, this library introduces a Python object, a `Dim`, to represent the concept. By expanding the semantics of tensors with dim objects, in addition to naming dimensions, we can get behavior equivalent to batching transforms (xmap, vmap), einops-style rearragement, and loop-style tensor indexing.
+Named tensors gives these dimensions names. [PyTorch's current implementation](https://pytorch.org/docs/stable/named_tensor.html) uses strings to name dimensions. Instead, this library introduces a Python object, a `Dim`, to represent the concept. By expanding the semantics of tensors with dim objects, in addition to naming dimensions, we can get behavior equivalent to batching transforms (xmap, vmap), einops-style rearrangement, and loop-style tensor indexing.
 
 A preview:
 
@@ -85,11 +85,11 @@ from torchdim import dims
 batch, channel, width, height = dims(4)
 ```
 
-The existing implemention of [Named Tensors](https://pytorch.org/docs/stable/named_tensor.html) in PyTorch, or [JAX's xmap](https://jax.readthedocs.io/en/latest/notebooks/xmap_tutorial.html) use strings to name dimensions. We call these dimensions _first class_ because they are Python objects.
+The existing implementation of [Named Tensors](https://pytorch.org/docs/stable/named_tensor.html) in PyTorch, or [JAX's xmap](https://jax.readthedocs.io/en/latest/notebooks/xmap_tutorial.html) use strings to name dimensions. We call these dimensions _first class_ because they are Python objects.
 
 In addition to the normal _positional_ dimensions in a tensor, tensors can also have a separate set of first-class dimensions.
 
-You can create tensors with first-class dimensions by indexing the normal positional dimensions of a tensor with a dimension object. The `ndim` property continues to list the number of positional dimesions, while the new `dims` property lists all the bound first-class dimensions.
+You can create tensors with first-class dimensions by indexing the normal positional dimensions of a tensor with a dimension object. The `ndim` property continues to list the number of positional dimensions, while the new `dims` property lists all the bound first-class dimensions.
 
 ```py
 input = torch.rand(2, 3, 224, 224)
@@ -101,7 +101,7 @@ print(input_fc.dims) # first class dimensions
 > (batch, channel, width, height)
 
 
-# since we converted all the positional dimesions
+# since we converted all the positional dimensions
 # first class `input_fc` has 0 positional dimensions now.
 print(input_fc.ndim)
 > 0
@@ -266,7 +266,7 @@ print(i <= j)
 > with dims=(i, j) sizes=(4, 4)
 ```
 
-Because of the intentional similarity to loop-level code, using dimsions as tensors makes complicated indexing arithmetic easier to read.
+Because of the intentional similarity to loop-level code, using dimensions as tensors makes complicated indexing arithmetic easier to read.
 
 Here is code that lookups up features in an embedding table given a sequence of ids:
 
@@ -296,7 +296,7 @@ Unbinding Dims
 -------------
 The `order` method converts first-class dimensions in a tensor back to normal positional dimensions by specifying an order for those dimensions.[^4]
 
-By specifiying a different order from how things were originally bound, it is easy to do transpositions.
+By specifying a different order from how things were originally bound, it is easy to do transpositions.
 
 ```py
 i, j = dims(2)
@@ -305,7 +305,7 @@ A_T = A[i, j].order(j, i)
 assert torch.allclose(A.T, A_T)
 ```
 
-Indexing acts left-to-right, and `order` also places the new dimensions back on the left, so it possible to work on tensors that have mixed positonal and first-class dimensions:
+Indexing acts left-to-right, and `order` also places the new dimensions back on the left, so it possible to work on tensors that have mixed positional and first-class dimensions:
 
 ```py
 B = torch.rand(3, 4, 5)
@@ -313,7 +313,7 @@ B_T = B[i, j].order(j, i)
 assert torch.allclose(B.permute(1, 0, 2), B_T)
 ```
 
-[^4] `order` is actually just a synonym for the already-existing `permute` method, which takes a list a dimension specifiers and puts the tensor in that order because rule #2 says that first-class dims can be passed as arguments to functions that previousely took only integers as dimensions. However, the name `permute` is confusing in this context since it implies dim objects have an original order, so we prefer to use `order` when writing code.
+[^4] `order` is actually just a synonym for the already-existing `permute` method, which takes a list a dimension specifiers and puts the tensor in that order because rule #2 says that first-class dims can be passed as arguments to functions that previously took only integers as dimensions. However, the name `permute` is confusing in this context since it implies dim objects have an original order, so we prefer to use `order` when writing code.
 
 Flattening and Splitting Dims
 -----------------------------
@@ -412,7 +412,7 @@ Named tensors with first-class dimensions can accomplish the same goal, but usin
 Automatically batching Code (`vmap`, `xmap`)
 -----------------------------
 
-The implicit batching of Rule #1 means it is easy to created batched versions of existing PyTorch code. Simply bind a dim to the dimensions that should act as a batch, and then pass the tensor to the unbatched function. Since the unbatched function does not know about the dim, the dim will be implicictly batched over:
+The implicit batching of Rule #1 means it is easy to created batched versions of existing PyTorch code. Simply bind a dim to the dimensions that should act as a batch, and then pass the tensor to the unbatched function. Since the unbatched function does not know about the dim, the dim will be implicitly batched over:
 
 ```py
 batch_size, feature_size = 3, 5
@@ -501,7 +501,7 @@ def multiheadattention(q, k, v, num_attention_heads, dropout_prob, use_positiona
 Indexing
 --------
 
-Rule #3 enables indexing because dimensions act as loop indices when used as a tensor. This allows for a lot of powerful behavior. The simplest might be using the dimensions to compute masks, such as extracing the upper triangular part of a matrix:
+Rule #3 enables indexing because dimensions act as loop indices when used as a tensor. This allows for a lot of powerful behavior. The simplest might be using the dimensions to compute masks, such as extracting the upper triangular part of a matrix:
 
 ```py
 from torch import where
@@ -745,7 +745,7 @@ The semantics and surface syntax of dimension objects resembles the kind of code
 
 These compilers and language have syntax and semantics that resemble the loop-level analogy similar to first-class dimensions. However, as compilers or statically typed languages, they require some binding code to go from running deep learning framework code in Python to using the compiled language. This often at least requires refactoring the compiled parts into their own functions, and may require defining a gradient function. Similar to graph mode frameworks, this adds friction to using and debugging the code.
 
-Dimension objects are just an extension of the existing PyTorch tensors and eager sematics, so there is no friction switching between normal Python code and code that uses them. However, since loops over the dimensions are defined implicitly, they can still execute in Python with good performance compared to explicit loops. Furthermore, with dimension objects, a tensors containing dimensions can compute through code that is oblivous to the dimension such as batching examples. There is no need to separate code into 'compiled' vs 'eager'.
+Dimension objects are just an extension of the existing PyTorch tensors and eager semantics, so there is no friction switching between normal Python code and code that uses them. However, since loops over the dimensions are defined implicitly, they can still execute in Python with good performance compared to explicit loops. Furthermore, with dimension objects, a tensors containing dimensions can compute through code that is oblivious to the dimension such as batching examples. There is no need to separate code into 'compiled' vs 'eager'.
 
 In this way, first-class dims are a way of adapting the nicer syntax of these array compilers and languages to eager numpy-style libraries.
 
