@@ -43,7 +43,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     expectedFailureXLA,
     instantiate_device_type_tests,
-    onlyCUDA, onlyCPU,
+    onlyCUDA, onlyCPU,_has_sufficient_memory,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
@@ -2697,15 +2697,22 @@ else:
     def _test_large_cum_fn_helper(self, x, fn):
         x_cpu = x.cpu().float()
         expected = fn(x_cpu)
+        
         actual = fn(x).cpu().float()
-        self.assertEqual(expected, actual.cpu().float())
+        self.assertEqual(expected, actual)
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @onlyCUDA
+    #@largeTensorTest('4GB')  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
     @dtypes(torch.half)  # only small dtype not to get oom
     def test_large_cumsum2(self, device, dtype):
         # initialization to avoid overflow and half caveats
-        x = torch.empty(2**30 + 200, device=device, dtype=dtype)
+        #if not _has_sufficient_memory(device, 50461409280):
+        #        raise unittest.SkipTest('Insufficient {} memory'.format(device))
+        t = torch.cuda.memory.mem_get_info(device)[0]
+        print("total gpu memory ")
+        print(t)
+        x = torch.empty(2**30 +200, device=device, dtype=dtype)
         x[::3] = -3
         x[1::3] = 2
         x[2::3] = 1
