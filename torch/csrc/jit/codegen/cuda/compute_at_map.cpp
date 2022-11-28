@@ -72,9 +72,12 @@ void mapMaybeSwizzleOp(
     IterDomain* id) {
   if (auto swizzle_2d = dynamic_cast<Swizzle2D*>(id->definition())) {
     // Map each input to its corresponding output on the given
-    //  disjoint set.
-    disjoint_sets.mapEntries(swizzle_2d->inX(), swizzle_2d->outX());
-    disjoint_sets.mapEntries(swizzle_2d->inY(), swizzle_2d->outY());
+    // disjoint set if this is a loop swizzle. Loop swizzles don't impact
+    // indexing, only iteration order.
+    if (swizzle_2d->swizzleMode() == SwizzleMode::Loop) {
+      disjoint_sets.mapEntries(swizzle_2d->inX(), swizzle_2d->outX());
+      disjoint_sets.mapEntries(swizzle_2d->inY(), swizzle_2d->outY());
+    }
   }
 }
 
