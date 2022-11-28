@@ -226,6 +226,15 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
+# Yanked from torch/_inductor/compile_fx.py
+def clone_preserve_strides(x):
+    needed_size = (
+        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+    )
+    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
+    return torch.as_strided(buffer, x.size(), x.stride())
+
+
 @patch.object(torch._inductor.config.triton, "cudagraphs", False)
 def check_model(
     self: TestCase,
@@ -246,7 +255,7 @@ def check_model(
     kwargs = kwargs or {}
     torch._dynamo.reset()
 
-    ref_inputs = example_inputs
+    ref_inputs = [clone_preserve_strides(x) for x in example_inputs]
     ref_kwargs = kwargs
     has_lowp_args = False
     original_lowp_dtype = torch.half
@@ -322,6 +331,15 @@ def check_model(
         self.assertEqual(
             actual,
             correct,
+            atol=atol,
+            rtol=rtol,
+            equal_nan=True,
+            exact_dtype=exact_dtype,
+        )
+        # In case of input mutations, check that inputs are the same
+        self.assertEqual(
+            ref_inputs,
+            example_inputs,
             atol=atol,
             rtol=rtol,
             equal_nan=True,

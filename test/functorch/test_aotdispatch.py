@@ -6,7 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Union, Callable, List, Any
+from typing import Union, Callable, List, Any, Optional, Dict
 from unittest.mock import patch
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64, IS_WINDOWS
 import torch
@@ -254,6 +254,7 @@ class TestAOTAutograd(AOTTestCase):
         *,
         test_mutation: bool = False,
         return_fw_graph: bool = False,
+        decompositions: Optional[Dict] = None,
     ):
         # Some tests pass in a callable for inp, to generate the inputs
         # (useful if we want to generate complicated aliasing inputs)
@@ -291,9 +292,11 @@ class TestAOTAutograd(AOTTestCase):
 
         fw_graph_cell = [None]
         if isinstance(f, nn.Module):
-            compiled_f = aot_module(f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop)
+            compiled_f = aot_module(
+                f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop, decompositions=decompositions)
         else:
-            compiled_f = aot_function(f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop)
+            compiled_f = aot_function(
+                f, fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell), bw_compiler=nop, decompositions=decompositions)
         ref_out, ref_grad = _outs_and_grads(f, graph_inps, inp)
         test_out, test_grad = _outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
         self.assertEqual(ref_grad, test_grad)
@@ -305,7 +308,10 @@ class TestAOTAutograd(AOTTestCase):
             if isinstance(ref_o, torch.Tensor):
                 self.assertEqual(ref_o.requires_grad, test_o.requires_grad)
                 self.assertEqual(ref_o.is_leaf, test_o.is_leaf)
-                self.assertEqual(ref_o._is_view(), test_o._is_view())
+                if ref_o.requires_grad:
+                    # _is_view() should probably unconditionally be the same,
+                    # but in practice I don't think this matters for tensors that don't require grad
+                    self.assertEqual(ref_o._is_view(), test_o._is_view())
                 self.assertEqual(ref_o, test_o)
                 if test_mutation:
                     # This tests that autograd meta is set properly on the output we can
@@ -425,6 +431,29 @@ def forward(self, primals_1, primals_2, primals_3):
 
         self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
 
+    def test_input_mutation_batchnorm(self):
+        def f(inpt, weight, bias, running_mean, running_var):
+            # This is additionally a good test, because the input tensors that we mutate
+            # are *also* saved for backwards.
+            # This tests that what we save for the backward is actually cloned inputs,
+            # and not the original inputs that got mutated.
+            return torch._native_batch_norm_legit(inpt, weight, bias, running_mean, running_var, True, 0.5, 1e-5)
+        inp = [
+            torch.ones(2, 5, 5, 5, requires_grad=True),
+            torch.ones(5, requires_grad=True),
+            torch.ones(5, requires_grad=True),
+            torch.ones(5),
+            torch.ones(5),
+        ]
+
+        from torch._decomp import get_decompositions
+        # This simulates what inductor does (running the fw + bw decompositions)
+        decompositions = get_decompositions([
+            torch.ops.aten._native_batch_norm_legit_functional,
+            torch.ops.aten.native_batch_norm_backward,
+        ])
+        self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True, decompositions=decompositions)
+
     def test_input_output_view_simple(self):
         def f(a):
             return a.view(-1)
@@ -524,6 +553,112 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
     add_1 = torch.ops.aten.add.Tensor(primals_4, 1);  primals_4 = None
     add_2 = torch.ops.aten.add.Tensor(primals_1, add);  primals_1 = None
     return [add, add_1, add_2, 2, 2, 1, 2, 0, 2, 3, 0]""")
+
+    def test_output_aliases_intermediate_single(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            return out.view(-1)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        # In AOTAutograd, we are obligated to make the compiled forward directly return `out`,
+        # and reconstruct `out.view(-1)` as a fresh output.
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    return [mul, 9, 1, 0]""")
+
+    def test_output_aliases_intermediate_multiple(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            # AOTAutograd should manually generate these two output views in the epilogue.
+            return out.view(-1), out.view(-1)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    return [mul, mul, 9, 1, 0, 9, 1, 0]""")
+
+    def test_output_aliases_intermediate_and_returned(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            # AOTAutograd should manually generate the first output (a view of an intermediate)
+            # but not the second (which is itself the intermediate for the first)
+            return out.view(-1), out
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    return [mul, mul, 9, 1, 0]""")
+
+    def test_output_aliases_intermediate_and_returned_flipped(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            # AOTAutograd should manually generate the first output (a view of an intermediate)
+            # but not the second (which is itself the intermediate for the first)
+            return out, out.view(-1)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    return [mul, mul, 9, 1, 0]""")
+
+    def test_output_aliases_intermediate_and_returned_different_grad(self):
+        def f(a):
+            out = torch.mul(a, 3)
+            # AOTAutograd should manually generate the first output (a view of an intermediate)
+            # but not the second (which is itself the intermediate for the first)
+            return out.view(-1), out, out[0].detach()
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+    return [mul, mul, 9, 1, 0]""")
+
+    def test_output_aliases_intermediate_multiple_mixed(self):
+        def f(a):
+            out1 = torch.mul(a, 3)
+            out2 = torch.mul(a, 4)
+            # AOTAutograd should manually generate these two output views in the epilogue.
+            return out1.view(-1), out2.transpose(1, 0), out1.transpose(1, 0)
+        inp = [torch.ones(3, 3, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 3)
+    mul_1 = torch.ops.aten.mul.Tensor(primals_1, 4);  primals_1 = None
+    return [mul, mul_1, mul, 9, 1, 0, 3, 3, 1, 3, 0, 3, 3, 1, 3, 0]""")
+
+    def test_output_all_alias_types(self):
+        # There are 3 types of aliasing that require us to return metadata in the compiled fw:
+        # (1) outputs that are views of inputs
+        # (2) outputs that are views of intermediates
+        # (3) inputs that get metadata mutations
+        # test all 3 of them here
+        def f(a):
+            a.transpose_(1, 0)
+            tmp = a.mul(2)
+            return tmp.squeeze(), tmp.transpose(1, 0), a.unsqueeze(0)
+        inp = [torch.ones(1, 2, 4, requires_grad=True)]
+
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, return_fw_graph=True)
+        # TODO: make this test run with dynamic shapes so it is more meaningful
+        # metadata output order: (a_updated_meta, out1_meta, out2_meta, out3_meta)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    view = torch.ops.aten.view.default(primals_1, [1, 2, 4]);  primals_1 = None
+    transpose = torch.ops.aten.transpose.int(view, 1, 0);  view = None
+    mul = torch.ops.aten.mul.Tensor(transpose, 2);  transpose = None
+    return [mul, mul, 2, 1, 4, 4, 8, 1, 0, 2, 4, 4, 1, 0, 1, 2, 4, 8, 4, 1, 0, 1, 2, 1, 4, 8, 4, 8, 1, 0]""")
 
     def test_input_data_and_metadata_mutation(self):
         def f(a):
@@ -960,7 +1095,8 @@ def forward(self, primals_1, primals_2):
         inp = [torch.randn(5, requires_grad=True) for _ in range(3)]
         f(*inp).sum().backward()
 
-    def test_compilation_context(self):
+    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    def test_compilation_context(self, counter):
         def f(x):
             return x.sin().sin()
         count = []
@@ -975,7 +1111,7 @@ def forward(self, primals_1, primals_2):
         f = aot_function(f, compiler)
         f(torch.randn(5))
         out.sum().backward()
-        self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
+        self.assertEqual(count, [(['0_forward'], 4), (['1_inference'], 4), (['0_backward'], 8)])
 
     def test_dupe_arg(self):
         def f(x, y):
@@ -983,6 +1119,56 @@ def forward(self, primals_1, primals_2):
 
         x = torch.randn(3, 3, requires_grad=True)
         self.verify_aot_autograd(f, [x, x])
+
+    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("functorch._src.config.debug_assert", True)
+    def test_invalid_dupe(self, counter):
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+
+        fxy = aot_module_simplified(F(), nop)
+        fxy(x, y)
+        fxy(x, x)  # is ok!
+
+        fxx = aot_module_simplified(F(), nop)
+        fxx(x, x)
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxx(x, y),
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would be a duplicate of input 0, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
+
+    @patch('functorch._src.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
+    @patch("functorch._src.config.debug_assert", True)
+    def test_invalid_requires_grad(self, counter):
+        class F(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y,)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+        z = torch.randn(3, 3, requires_grad=False)
+
+        # Non-mutating please!
+        def compare(m1, m2, inps):
+            r1, g1 = _outs_and_grads(m1, inps, inps)
+            r2, g2 = _outs_and_grads(m2, inps, inps)
+            self.assertEqual(r1, r2)
+            self.assertEqual(g1, g2)
+
+        fxy = aot_module_simplified(F(), nop)
+        compare(F(), fxy, (x, y))
+        compare(F(), fxy, (x, z))
+
+        fxz = aot_module_simplified(F(), nop)
+        compare(F(), fxz, (x, z))
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: fxz(x, y),
+            """At compilation time, graph 1 was compiled under the assumption that input 1 would not require grad, but at runtime this was not the case.  This indicates a guard bug in AOTAutograd or Dynamo, please file a bug to PyTorch."""  # noqa: B950
+        )
 
     def test_resize_input(self):
         def f(x, y):
@@ -1369,14 +1555,6 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 2))
         self.assertEqual(get_num_ins_outs(bw_graph), (2, 4))
 
-        def f(x):
-            return torch.mm(x, torch.ones(x.shape)).tanh().tanh()
-        fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(5, 5, requires_grad=True)])
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
-
-        ins, outs = get_ins_outs(fw_graph)
-        self.assertEqual(outs[1].target, torch.ops.aten.mm.default)
-
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_recomputable_ops(self):
         def f(x):
@@ -1541,6 +1719,70 @@ class TestAOTModuleSimplified(AOTTestCase):
         inputs = [x, y]
         res = aot_mod(*inputs)
         res[0].sum().backward()
+
+    def test_aot_module_simplified_fake_tensor_gm_raises(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.y = y
+
+            def forward(self, x):
+                z = self.linear(x)
+                z = z + self.y
+                z = z.relu()
+                return (z, )
+
+
+        real_x = torch.randn(4)
+        real_y = torch.randn(4)
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        fake_y = fake_mode.from_tensor(real_y)
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+
+        # This test uses tracing to lift the fake_y into a constant buffer,
+        # so we have a contrived trace example.
+        # For a traceless example closer to how dynamo would call us, see
+        # test_aot_module_deepcopy_fake_tensor_gm_raises below.
+        graph = tracer.trace(MockModule(fake_y))
+        mod_fake = torch.fx.GraphModule(tracer.root, graph)
+
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: aot_module_simplified(mod_fake, nop),
+            """Unexpected fake buffer y"""
+        )
+        # Counterfactual to ensure that the raise is only due to real vs fake
+        # Run the same exact thing except with a real buffer.
+        graph = tracer.trace(MockModule(real_y))
+        mod_real = torch.fx.GraphModule(tracer.root, graph)
+        aot_module_simplified(MockModule(real_y), nop)
+
+    def test_aot_module_deepcopy_fake_tensor_gm_raises(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.linear.bias = torch.nn.Parameter(torch.ones(4))
+
+            def forward(self, x):
+                z = self.linear(x)
+                z = z.relu()
+                return (z, )
+
+
+        real_x = torch.randn(4)
+        real_y = torch.randn(4)
+
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        mod_fake = torch._dynamo.utils.deepcopy_to_fake_tensor(MockModule(real_y), fake_mode)
+
+        self.assertExpectedRaisesInline(
+            AssertionError, lambda: aot_module_simplified(mod_fake, nop),
+            """Unexpected fake param linear.weight"""
+        )
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
