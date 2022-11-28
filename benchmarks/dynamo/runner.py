@@ -1342,7 +1342,10 @@ if __name__ == "__main__":
             )
             if not args.no_update_archive:
                 archive(
-                    output_dir, args.dashboard_archive_path, args.archive_name, dtypes[0]
+                    output_dir,
+                    args.dashboard_archive_path,
+                    args.archive_name,
+                    dtypes[0],
                 )
 
     if args.update_dashboard:
