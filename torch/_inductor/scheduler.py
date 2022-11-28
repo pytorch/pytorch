@@ -318,7 +318,10 @@ class SchedulerNode(BaseSchedulerNode):
             from .codegen.triton_template import should_use_template
             from .codegen.wrapper import buffer_reuse_key
 
-            for read in self.read_writes.reads:
+            unordered_reads = list(self.read_writes.reads)
+            ordered_reads = sorted(unordered_reads, key=lambda x: x.name)
+
+            for read in ordered_reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
                 )
