@@ -435,9 +435,6 @@ class PythonKeyTracer(Tracer):
 
 DISPATCH_TRACE_ERROR_PRINT_GRAPH = False
 
-class DispatchTracingException(RuntimeError):
-    pass
-
 def dispatch_trace(
         root: Union[torch.nn.Module, Callable],
         tracer: Tracer,
@@ -446,15 +443,17 @@ def dispatch_trace(
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     try:
         graph = tracer.trace(root, concrete_args)
-    except Exception as e:
+    except Exception:
         if DISPATCH_TRACE_ERROR_PRINT_GRAPH:
             print("DISPATCH_TRACE_ERROR_PRINT_GRAPH: \n")
             GraphModule(tracer.root, tracer.graph, name).print_readable()
             print("\n")
-        raise DispatchTracingException(f"""
-            Dispatch trace exception: {e}
+        else:
+            print("""
+            Dispatch trace exception,
             set torch.fx.experimental.proxy_tensor.DISPATCH_TRACE_ERROR_PRINT_GRAPH = True
-            to print incomplete graph.""") from e
+            to print the incomplete graph.""")
+        raise
     return GraphModule(tracer.root, graph, name)
 
 
