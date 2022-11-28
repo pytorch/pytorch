@@ -226,14 +226,10 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
-# Yanked from torch/_inductor/compile_fx.py
 def clone_preserve_strides(x):
     if not isinstance(x, torch.Tensor):
         return x
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-    )
-    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
+    buffer = torch.as_strided(x, (x.numel(),), (1,)).clone()
     return torch.as_strided(buffer, x.size(), x.stride())
 
 
