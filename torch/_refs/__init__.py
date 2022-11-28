@@ -4620,9 +4620,8 @@ def full_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
-    return full(
-        a.shape,
-        fill_value,
+    e = torch.empty_like(
+        a,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -4630,6 +4629,7 @@ def full_like(
         requires_grad=requires_grad,
         memory_format=memory_format,
     )
+    return fill(e, fill_value)
 
 
 zeros_like = partial(full_like, fill_value=False)
