@@ -7,7 +7,18 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, OrderedDict, Set, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    OrderedDict,
+    Protocol,
+    Set,
+    Tuple,
+    Union,
+)
 
 import sympy
 
@@ -45,6 +56,15 @@ from .variables.tensor import (
 log = logging.getLogger(__name__)
 
 
+# TODO: I think this accepts int arguments too
+class CompiledFn(Protocol):
+    def __call__(self, *args: torch.Tensor) -> Tuple[torch.Tensor, ...]:
+        ...
+
+
+CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
+
+
 @functools.lru_cache(None)
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
@@ -77,7 +97,7 @@ class FakeRootModule(torch.nn.Module):
         return "FakeRootModule(...)"
 
 
-def wrap_compiler_fn(compiler_fn):
+def wrap_compiler_fn(compiler_fn: CompilerFn) -> CompilerFn:
     """WrapperBackend if config.verify_correctness is True"""
     if config.verify_correctness:
         # wrap backend if verify_correctness is True
@@ -97,7 +117,7 @@ class WrapperBackend:
     def example_inputs(self):
         return clone_inputs(self.original_example_inputs)
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
 
         self.restore = checkpoint_params(gm)
         self.original_example_inputs = clone_inputs(example_inputs)
@@ -140,7 +160,7 @@ class OutputGraph(fx.Tracer):
         self,
         f_globals: Dict[str, Any],
         code_options: Dict[str, Any],
-        compiler_fn: Callable,
+        compiler_fn: CompilerFn,
         root_tx,
     ):
         super(OutputGraph, self).__init__()
@@ -157,7 +177,7 @@ class OutputGraph(fx.Tracer):
         self.real_value_cache: Dict[fx.Node, torch.Tensor] = {}
 
         # Not checkpointed
-        self.compiler_fn = compiler_fn
+        self.compiler_fn: CompilerFn = compiler_fn
         self.root_globals = f_globals
         self.root_tx = root_tx
         self.cleanups: List[CleanupHook] = []
@@ -518,7 +538,7 @@ class OutputGraph(fx.Tracer):
         cg.make_call_generated_code(name)
         return cg.get_instructions()
 
-    def call_user_compiler(self, gm):
+    def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         try:
             name = (
                 self.compiler_fn.__name__
