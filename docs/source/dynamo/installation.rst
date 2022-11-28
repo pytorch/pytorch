@@ -24,7 +24,7 @@ The following command installs GPU PyTorch+TorchDynamo along with GPU
 TorchDynamo dependencies (for CUDA 11.7):
 
 .. code-block:: python
- 
+
    pip3 install numpy --pre torch[dynamo] --force-reinstall --extra-index-url https://download.pytorch.org/whl/nightly/cu117
 
 CPU requirements
@@ -72,12 +72,12 @@ We also provide all the required dependencies in the PyTorch nightly
 binaries which you can download with
 
 .. code-block::
-   
+
    docker pull ghcr.io/pytorch/pytorch-nightly
 
 And for ad hoc experiments just make sure that your container has access
 to all your GPUs
 
 .. code-block:: bash
-   
+
    docker run --gpus all -it ghcr.io/pytorch/pytorch-nightly:latest /bin/bash

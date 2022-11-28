@@ -158,8 +158,8 @@ Which will generate the following error:
 
 ::
 
-   torch._dynamo.convert_frame: [ERROR] WON'T CONVERT test_assertion_error /scratch/mlazos/torchdynamo/../test/errors.py line 26 
-   due to: 
+   torch._dynamo.convert_frame: [ERROR] WON'T CONVERT test_assertion_error /scratch/mlazos/torchdynamo/../test/errors.py line 26
+   due to:
    Traceback (most recent call last):
      File "/scratch/mlazos/torchdynamo/torchdynamo/symbolic_convert.py", line 837, in BUILD_MAP
        assert isinstance(k, ConstantVariable) or (
@@ -259,7 +259,7 @@ it)
      File "/scratch/mlazos/torchdynamo/torchinductor/lowering.py", line 810, in _foobar
        assert False
    AssertionError
-   ... 
+   ...
 
 `error with full stack
 trace <https://gist.github.com/mlazos/d6947854aa56d686800259a164c62100>`__
@@ -305,15 +305,15 @@ code:
    # torch git version: fddfc4488afb207971c54ad4bf58130fdc8a4dc5
 
 
-   # CUDA Info: 
-   # nvcc: NVIDIA (R) Cuda compiler driver 
-   # Copyright (c) 2005-2022 NVIDIA Corporation 
-   # Built on Thu_Feb_10_18:23:41_PST_2022 
-   # Cuda compilation tools, release 11.6, V11.6.112 
-   # Build cuda_11.6.r11.6/compiler.30978841_0 
+   # CUDA Info:
+   # nvcc: NVIDIA (R) Cuda compiler driver
+   # Copyright (c) 2005-2022 NVIDIA Corporation
+   # Built on Thu_Feb_10_18:23:41_PST_2022
+   # Cuda compilation tools, release 11.6, V11.6.112
+   # Build cuda_11.6.r11.6/compiler.30978841_0
 
-   # GPU Hardware Info: 
-   # NVIDIA A100-SXM4-40GB : 8 
+   # GPU Hardware Info:
+   # NVIDIA A100-SXM4-40GB : 8
 
 
    from torch.nn import *
@@ -476,7 +476,7 @@ A single node in this new debug format looks like:
 ::
 
    buf1: SchedulerNode(ComputedBuffer)
-   buf1.writes = 
+   buf1.writes =
        {   MemoryDep(name='buf1', index=0, size=()),
            MemoryDep(name='buf1', index=0, size=(s0,))}
    buf1.unmet_dependencies = {MemoryDep(name='buf0', index=c0, size=(s0,))}
@@ -513,7 +513,7 @@ Graph Breaks
 Given a program like this:
 
 .. code-block:: python
-   
+
    @dynamo.optimize(...)
    def some_fun(x):
        ...
@@ -553,13 +553,13 @@ that are encountered. Here is an example usage:
    explanation, out_guards, graphs, ops_per_graph = dynamo.explain(toy_example, torch.randn(10), torch.randn(10))
    print(explanation)
    """
-   Dynamo produced 3 graphs, with 2 graph break and 6 ops. 
-    Break reasons: 
-   1. call_function BuiltinVariable(print) [ConstantVariable(str)] {} 
+   Dynamo produced 3 graphs, with 2 graph break and 6 ops.
+    Break reasons:
+   1. call_function BuiltinVariable(print) [ConstantVariable(str)] {}
       File "t2.py", line 16, in toy_example
        print("woo")
-    
-   2. generic_jump 
+
+   2. generic_jump
       File "t2.py", line 17, in toy_example
        if b.sum() < 0:
     """

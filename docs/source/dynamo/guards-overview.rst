@@ -85,7 +85,7 @@ At a very high level, the vastly oversimplified TLDR flow is this:
 Python Frame Evaluation and PEP 523
 -----------------------------------
 
-The functionality of TorchDynamo is based on 
+The functionality of TorchDynamo is based on
 `PEP 523 <https://peps.python.org/pep-0523/>`__.
 
 TorchDynamo installs a frame evaluation function on Python, via
@@ -135,7 +135,7 @@ Here is what this function does:
    1) New code is produced through ``transform_code_object``.
 
    2) An FX tracer named ``output`` is produced through
-      ``InstructionTranslator``. 
+      ``InstructionTranslator``.
 
       This can be a bit confusing,
       as ``InstructionTranslator`` is not an `fx` tracer, but its stored
@@ -196,7 +196,7 @@ a loop that is pumped, which drives a function ``step``.
 ``step`` is just that - a single processing step, taking exactly one
 instruction and doing *something* with it. Note: These are real
 instructions processed by TorchDynamo’s ``transform_code_object``, and
-it’s pretty cool. 
+it’s pretty cool.
 
 .. note:: This section purposly skips the details of
    `dis.get_instructions <https://docs.python.org/3/library/dis.html>`__,
@@ -384,7 +384,7 @@ through ``make_guards`` on ``VariableTracker``.
 Or, in a concrete example:
 
 .. code-block:: python
-   
+
    ...
    elif istype(value, range):
        guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
@@ -408,7 +408,7 @@ cache entry, and the same one we run to know whether or not to retrieve
 the code stored alongside. For reference, here is that code:
 
 .. code-block:: cpp
-   
+
    static CacheEntry *create_cache_entry(CacheEntry *next,
                                          PyObject *guarded_code) {
      CacheEntry *e = (CacheEntry *)malloc(sizeof(CacheEntry));
@@ -420,7 +420,7 @@ the code stored alongside. For reference, here is that code:
      e->next = next;
      return e;
    }
-   
+
 We now know how a ``check_fn`` function is used, and who makes it, and
 what it is composed of, but what we do not yet know is how. How does a
 list of ``Guard`` objects become a function we can run later on?
