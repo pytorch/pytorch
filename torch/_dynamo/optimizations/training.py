@@ -77,7 +77,8 @@ def aot_autograd(**kwargs):
         kwargs["bw_compiler"] = _wrapped_bw_compiler
 
         try:
-            cg = aot_module_simplified(gm, **kwargs)
+            # NB: NOT cloned!
+            cg = aot_module_simplified(gm, example_inputs, **kwargs)
             counters["aot_autograd"]["ok"] += 1
             return eval_frame.disable(cg)
         except Exception:
