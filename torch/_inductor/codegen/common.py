@@ -12,7 +12,7 @@ from sympy.printing.printer import Printer
 
 from .. import metrics
 from ..utils import (
-    DeferredLine,
+    DeferredLineBase,
     free_symbol_startswith,
     IndentedBuffer,
     sympy_dot,
@@ -123,6 +123,25 @@ class OpOverrides:
     def remainder(a, b):
         r = ops.mod(a, b)
         return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
+
+
+class DeferredLine(DeferredLineBase):
+    """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
+
+    def __init__(self, name, line):
+        super().__init__(line)
+        self.name = name
+
+    def __call__(self):
+        if (
+            self.name not in V.graph.removed_buffers
+            and self.name not in V.graph.inplaced_to_remove
+        ):
+            return self.line
+        return None
+
+    def _new_line(self, line):
+        return DeferredLine(self.name, line)
 
 
 class DeferredIndentedBuffer(IndentedBuffer):

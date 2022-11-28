@@ -164,18 +164,14 @@ class ReadWrites:
         )
 
 
-class RecordLoadStore:  # type: ignore[name-defined]
+class _RecordLoadStoreInner(V.MockHandler):
     def __init__(self, var_ranges: VarRanges, normalize: bool):
+        super().__init__()
         self._reads: Set[MemoryDep] = set()
         self._writes: Set[MemoryDep] = set()
         self._index_exprs: Set[IndexExprDep] = set()
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
-        self._var_counter = itertools.count()
-        self._parent_handler = V.KernelFormatterHandler(V.MockHandler())
-
-    def __getattr__(self, name):
-        return getattr(self._parent_handler, name)
 
     def canonicalize(
         self, index: sympy.Expr
@@ -206,12 +202,12 @@ class RecordLoadStore:  # type: ignore[name-defined]
     def load(self, name: str, index: sympy.Expr) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._reads.add(MemoryDep(name, canonicalized_index, canonicalized_size))
-        return self._parent_handler.load(name, index)
+        return f"load({name}, {sympy_str(index)})"
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._writes.add(MemoryDep(name, canonicalized_index, canonicalized_size))
-        return self._parent_handler.store(name, sympy_str(index), value, mode)
+        return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def reduction(
         self, name: str, dtype, src_dtype, reduction_type, index, value
@@ -221,7 +217,15 @@ class RecordLoadStore:  # type: ignore[name-defined]
     def index_expr(self, index: sympy.Expr, dtype) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._index_exprs.add(IndexExprDep(canonicalized_index, canonicalized_size))
-        return self._parent_handler.index_expr(index, dtype)
+        return f"index_expr({sympy_str(index)}, {dtype})"
+
+
+class RecordLoadStore(V.KernelFormatterHandler):
+    def __init__(self, var_ranges: VarRanges, normalize: bool):
+        parent_handler = _RecordLoadStoreInner(
+            var_ranges=var_ranges, normalize=normalize
+        )
+        super().__init__(parent_handler=parent_handler)
 
 
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
@@ -273,8 +277,13 @@ def extract_read_writes(
     else:
         range_vars = [*itertools.chain(*args)]
 
+    inner = rw.parent_handler
     return ReadWrites(
-        set(rw._reads), set(rw._writes), rw._index_exprs, range_vars, var_ranges
+        set(inner._reads),
+        set(inner._writes),
+        inner._index_exprs,
+        range_vars,
+        var_ranges,
     )
 
 

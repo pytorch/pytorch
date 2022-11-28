@@ -9,7 +9,7 @@ import textwrap
 import time
 from importlib import import_module
 from io import StringIO
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from unittest import mock
 
 import numpy as np
@@ -397,7 +397,7 @@ class IndentedBuffer:
     ):
         buf = StringIO()
         for line in self._lines:
-            if isinstance(line, DeferredLine):
+            if isinstance(line, DeferredLineBase):
                 line = line()
                 if line is None:
                     continue
@@ -416,7 +416,7 @@ class IndentedBuffer:
         return " " * (self._indent * self.tabwidth)
 
     def writeline(self, line):
-        if isinstance(line, DeferredLine):
+        if isinstance(line, DeferredLineBase):
             self._lines.append(line.with_prefix(self.prefix()))
         elif line.strip():
             self._lines.append(f"{self.prefix()}{line}")
@@ -457,31 +457,30 @@ class IndentedBuffer:
                 self.writeline(line)
 
 
-class DeferredLine:
-    """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
+class DeferredLineBase:
+    """A line that can be 'unwritten' at a later time"""
 
-    def __init__(self, name, line):
+    def __init__(self, line):
         if not line.strip():
             line = ""
-        self.name = name
         self.line = line
 
-    def __call__(self):
-        if (
-            self.name not in V.graph.removed_buffers
-            and self.name not in V.graph.inplaced_to_remove
-        ):
-            return self.line
-        return None
+    def __call__(self) -> Optional[str]:
+        """Returns either self.line or None to indicate the line has been 'unwritten'"""
+        raise NotImplementedError()
+
+    def _new_line(self, line: str) -> "DeferredLineBase":
+        """Returns a new deferred line with the same condition"""
+        raise NotImplementedError()
 
     def with_prefix(self, prefix):
-        return DeferredLine(self.name, f"{prefix}{self.line}")
+        return self._new_line(f"{prefix}{self.line}")
 
     def lstrip(self):
-        return DeferredLine(self.name, self.line.lstrip())
+        return self._new_line(self.line.lstrip())
 
     def __getitem__(self, index):
-        return DeferredLine(self.name, self.line[index])
+        return self._new_line(self.line[index])
 
     def __bool__(self):
         return bool(self.line)
