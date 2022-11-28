@@ -273,7 +273,7 @@ Tensor& bernoulli_mps_(Tensor& self, const Tensor& p_, c10::optional<Generator> 
 }
 
 // random_.from
-Tensor& random_mps_(Tensor& self, int64_t from, optional<int64_t> to_opt, c10::optional<Generator> gen) {
+Tensor& random_mps_(Tensor& self, int64_t from, c10::optional<int64_t> to_opt, c10::optional<Generator> gen) {
   auto input_dtype = self.scalar_type();
   int64_t to = 0;
 
@@ -438,7 +438,7 @@ Tensor& multinomial_with_replacement_mps_kernel(
           MPSGraphTensor *randomTensor = generatorTensors[0];
 
           auto broadcastShape = @[ns_numDist ,ns_n_sample, ns_numCategories];
-          int broadcastShapeVals[3] = {numDist, n_sample, numCategories};
+          int broadcastShapeVals[3] = {numDist, static_cast<int>(n_sample), numCategories};
           MPSGraphTensor *broadcastShapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:broadcastShapeVals length:sizeof(int) * broadcastShape.count]
                                                                       shape:@[[NSNumber numberWithUnsignedInteger:broadcastShape.count]]
                                                                    dataType:MPSDataTypeUInt32];
