@@ -1,19 +1,18 @@
 Frequently Asked Questions
 ==========================
 
-
 At a high level, the TorchDynamo stack consists of a graph capture from
 Python code using dynamo and a backend compiler. In this example the
 backend compiler consists of backward graph tracing using AOTAutograd
 and graph lowering using TorchInductor. There are of course many more
-compilers available here
-https://github.com/pytorch/torchdynamo/blob/0b8aaf340dad4777a080ef24bf09623f1aa6f3dd/README.md#existing-backend
-but for this document we will focus on inductor as a motivating example
+compilers available `here <https://github.com/pytorch/torchdynamo/blob/0b8aaf340dad4777a080ef24bf09623f1aa6f3dd/README.md#existing-backend>`__
+but for this document we will focus on inductor as a motivating example.
 
 Torchdynamo supports training, using AotAutograd to capture backwards:
+
    1. the ``.forward()`` graph and ``optimizer.step()`` is captured by torchdynamo’s python evalframe frontend
    2. for each segment of ``.forward()`` that torchdynamo captures, it uses AotAutograd to generate a backward graph segment
-   3. each pair of forward, backward graph are (optionally) min-cut partitioned to save the minimal state between forward/backward 
+   3. each pair of forward, backward graph are (optionally) min-cut partitioned to save the minimal state between forward/backward
    4. the forward, backward pairs are wrapped in autograd.function modules 5. usercode calling\ ``.backward()`` still triggers eager’s autograd engine, which runs each ‘compiled backward’ graph as if it were one op, also running any non-compiled eager ops’ .backward() functions
 
 Do you support Distributed code?
@@ -35,7 +34,7 @@ backwards ops, due to how AOTAutograd compiled functions interact with
 dispatcher hooks.
 
 The basic strategy for optimizing DDP with Dynamo is outlined in
-https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/optimizations/distributed.py
+`distributed.py <https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/optimizations/distributed.py>`__
 where the main idea will be to graph break on `DDP bucket
 boundaries <https://pytorch.org/docs/stable/notes/ddp.html#internal-design>`__.
 
@@ -61,10 +60,10 @@ full graphs are necessary and you can can ensure a full graph by simply
 running ``torch.dynamo(..., nopython=True)`` \* Large scale training
 runs, think $250K+ that require pipeline parallelism and other advanced
 sharding strategies \* Inference optimizers like
-https://github.com/pytorch/TensorRT or
-https://github.com/facebookincubator/AITemplate that rely on fusing much
-more aggressively than training optimizers \* Mobile training or
-inference
+`TensorRT <https://github.com/pytorch/TensorRT>`__ or
+`AITemplate <https://github.com/facebookincubator/AITemplate>`__ that rely
+on fusing much more aggressively than training optimizers \* Mobile training or
+inference.
 
 Future work will include tracing communication operations into graphs,
 coordinating these operations with compute optimizations, and optimizing
@@ -76,18 +75,21 @@ Why is my code crashing?
 If your code ran just fine without dynamo and started to crash with it
 enabled then the most important first step is figuring out which part of
 the stack your failure occurred in so try running things in the below
-order and only try the next step if the previous step succeeded. 
-    1.``dynamo.optimize("eager")`` which only runs torchdynamo forward graph
-    capture and then runs the captured graph with PyTorch. If this fails
-    then there’s an issue with dynamo 
-    2. ``dynamo.optimize("aot_eager")``
-    which runs torchdynamo to capture a forward graph, and then AOTAutograd
-    to trace the backward graph without any additional backend compiler
-    steps. PyTorch eager will then be used to run the forward and backward
-    graphs. If this fails then there’s an issue with AOTAutograd 
-    3. ``dynamo.optimize("inductor")`` which runs torchdynamo to capture a
-    forward graph, and then AOTAutograd to trace the backward graph with the
-    TorchInductor compiler. If this fails then there’s an issue with TorchInductor
+order and only try the next step if the previous step succeeded.
+
+1. ``dynamo.optimize("eager")`` which only runs torchdynamo forward graph
+   capture and then runs the captured graph with PyTorch. If this fails
+   then there’s an issue with TorchDynamo.
+
+2. ``dynamo.optimize("aot_eager")``
+   which runs torchdynamo to capture a forward graph, and then AOTAutograd
+   to trace the backward graph without any additional backend compiler
+   steps. PyTorch eager will then be used to run the forward and backward
+   graphs. If this fails then there’s an issue with AOTAutograd.
+
+3. ``dynamo.optimize("inductor")`` which runs torchdynamo to capture a
+   forward graph, and then AOTAutograd to trace the backward graph with the
+   TorchInductor compiler. If this fails then there’s an issue with TorchInductor
 
 TorchDynamo Errors
 ~~~~~~~~~~~~~~~~~~
@@ -110,12 +112,11 @@ below log levels - ``logging.ERROR``: Print errors only
 If a model is sufficiently large, the logs can become overwhelming. If
 an error occurs deep within a model’s python code, it can be useful to
 execute only the frame in which the error occurs to enable easier
-debugging. There are 2 tools available to enable this: 1.
-``env TORCHDYNAMO_DEBUG_FUNCTION=<desired_function_name>`` will only run
-torchdynamo on functions with that name. 2.
-``env torch._dynamo.config.replay_record_enabled = True``) which dumps
-an execution record when an error is encountered. This record can then
-be replayed to run only the frame where an error occurred.
+debugging. There are 2 tools available to enable this:
+
+* ``env TORCHDYNAMO_DEBUG_FUNCTION=<desired_function_name>`` will only run TorchDynamo on functions with that name.
+
+* ``env torch._dynamo.config.replay_record_enabled = True``) which dumps an execution record when an error is encountered. This record can then be replayed to run only the frame where an error occurred.
 
 TorchInductor Errors
 --------------------
@@ -132,19 +133,20 @@ difficult which is why we highly recommend you use our minifier to
 create tiny reproducible examples of failures you’re seeing. We can
 minify errors that occur either at the AOTAutograd layer or Inductor
 layer which you should try in the following order.
-   1. ``env TORCHDYNAMO_REPRO_AFTER="aot" python your_model.py`` 
-   2.  ``env TORCHDYNAMO_REPRO_AFTER="dynamo" python your_model.py``
 
-   Minifying your error is the quickest path to getting it fixed
+1. ``env TORCHDYNAMO_REPRO_AFTER="aot" python your_model.py``
+2.  ``env TORCHDYNAMO_REPRO_AFTER="dynamo" python your_model.py``
+
+Minifying your error is the quickest path to getting it fixed.
 
 The minifier will actually create a ``repro.py`` for you at the location
 set by ``env TORCHDYNAMO_REPRO_DIR`` so make you have right access to
 that directory. You can then run ``python repro.py`` and confirm that
 you are getting the same error.
 
-Note: for other compilers such as nvfuser, the process is similar but
-instead you would leverage
-``env TORCHDYNAMO_REPRO_AFTER="dynamo" python your_model.py``
+.. note:: 
+   For other compilers such as nvfuser, the process is similar but
+   instead you would leverage ``env TORCHDYNAMO_REPRO_AFTER="dynamo" python your_model.py``.
 
 Why is compilation slow?
 ------------------------
@@ -194,14 +196,12 @@ any guard failures. You should be sure to run your program for at least
 as long (as many iterations) as you were running when you ran into
 trouble, and the profiler will accumulate statistics over this duration.
 
-.. code:: py
+.. code-block:: python
 
    prof = dynamo.utils.CompilationProfiler()
-
    @dynamo.optimize(prof)
    def my_model():
        ...
-
    my_model()
    print(prof.report())
 
@@ -219,7 +219,7 @@ latency critical application. For this, TorchDynamo provides an
 alternate mode where prior compiled graphs are used, but no new ones are
 generated:
 
-.. code:: py
+.. code-block:: python
 
    frozen_toy_example = dynamo.run(toy_example)
    frozen_toy_example(torch.randn(10), torch.randn(10))
@@ -227,20 +227,20 @@ generated:
 How are you speeding up my code?
 --------------------------------
 
-There are 3 major ways that PyTorch code can be accelerated 
+There are 3 major ways to accelerat PyTorch code:
 
-   1. Kernel fusion via vertical fusions which fuse sequential operations to avoid
+1. Kernel fusion via vertical fusions which fuse sequential operations to avoid
    excessive read/writes. For example, fuse 2 subsequent cosines means you
    can can do 1 read 1 write instead 2 reads 2 writes 2. Horizontal fusion:
    the simplest example being batching where a single matrix is multiplied
    with a batch of examples but the more general scenario is a grouped GEMM
-   where a group of matrix multiplications are scheduled together 
+   where a group of matrix multiplications are scheduled together
 
-   2. Out of order execution: A general optimization for compilers, by looking ahead
+2. Out of order execution: A general optimization for compilers, by looking ahead
    at the exact data dependencies within a graph we can decide on the most
    opportune time to execute a node and which buffers can be reused 
-   
-   3. Automatic work placement: Similar of the out of order execution point,
+
+3. Automatic work placement: Similar of the out of order execution point,
    but by matching nodes of a graph to resources like physical hardware or
    memory we can design an appropriate schedule
 
@@ -269,12 +269,11 @@ is excessive graph breaks. So what’s a graph break?
 
 Given a program like:
 
-.. code:: py
+.. code-block:: python
 
    @dynamo.optimize(...)
    def some_fun(x):
        ...
-
    some_fun(x)
    ...
 
@@ -298,30 +297,25 @@ the breaks, ``torch._dynamo.explain`` can be used. This tool runs
 TorchDynamo on the supplied function and aggregates the graph breaks
 that are encountered. Here is an example usage:
 
-.. code:: py
+.. code-block:: python
 
    import torch
    import torch._dynamo as dynamo
-
    def toy_example(a, b):
        x = a / (torch.abs(a) + 1)
        print("woo")
        if b.sum() < 0:
            b = b * -1
        return x * b
-
-
    explanation, out_guards, graphs, ops_per_graph = dynamo.explain(toy_example, torch.randn(10), torch.randn(10))
    print(explanation)
-
    """
    Dynamo produced 3 graphs, with 2 graph break and 6 ops. 
     Break reasons: 
-
    1. call_function BuiltinVariable(print) [ConstantVariable(str)] {} 
       File "t2.py", line 16, in toy_example
        print("woo")
-    
+
    2. generic_jump 
       File "t2.py", line 17, in toy_example
        if b.sum() < 0:
@@ -331,7 +325,7 @@ To throw an error on the first graph break encountered you can use
 disable python fallback by using ``nopython=True``, this should be
 familiar if you’ve worked with export based compilers.
 
-.. code:: py
+.. code-block:: python
 
    @dynamo.optimize(<compiler>, nopython=True)
    def toy_example(a, b):
@@ -349,7 +343,7 @@ sizes in CV or variable sequence length in NLP. In inference scenarios
 it’s often not possible to know what a batch size will be beforehand
 because you take what you can get from different client apps.
 
-In general torchdynamo tries very hard not to recompile things
+In general, TorchDynamo tries very hard not to recompile things
 unnecessarily so if for example torchdynamo finds 3 graphs and your
 change only modified one graph then only that graph will recompile. So
 another tip to avoid potentially slow compilation times is to warmup a
@@ -379,4 +373,4 @@ order and then open an issue on Github so we can solve the root problem
 1. If you’re using dynamic shapes try disabling them, we’ve disabled
 them by default: ``env TORCHDYNAMO_DYNAMIC_SHAPES=0 python model.py`` 2.
 CUDA graphs with Triton are enabled by default in inductor but removing
-them may alleviate some OOM issues: ``torch._inductor.config = False``
+them may alleviate some OOM issues: ``torch._inductor.config = False``.
