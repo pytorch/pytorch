@@ -564,4 +564,3 @@ class TestSaveLoadForOpVersion(JitTestCase):
             output_current = current_mobile_module(inp)
         # "Upgraded" model should match the new version output
         self.assertEqual(output, output_current)
-
