@@ -189,7 +189,7 @@ option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
      BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
-cmake_dependent_option(BUILD_NVFUSER "Build NVFUSER" ON "USE_CUDA" OFF)
+option(BUILD_NVFUSER "Build NVFUSER" ON)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -1173,15 +1173,17 @@ if(BUILD_JNI)
   add_subdirectory(android/pytorch_android)
 endif()
 
+if(NOT USE_CUDA)
+  set(BUILD_NVFUSER OFF)
+endif()
+
+if(BUILD_NVFUSER)
+  add_subdirectory(torch/csrc/jit/codegen/cuda)
+endif()
+
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
 
 if(BUILD_FUNCTORCH)
   add_subdirectory(functorch)
-endif()
-
-if(USE_CUDA AND BUILD_NVFUSER)
-  add_subdirectory(torch/csrc/jit/codegen/cuda)
-else()
-  set(BUILD_NVFUSER OFF)
 endif()

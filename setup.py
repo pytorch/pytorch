@@ -542,6 +542,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Not using ITT')
 
+        if cmake_cache_vars['BUILD_NVFUSER']:
+            report('-- Building nvfuser')
+        else:
+            report('-- Not Building nvfuser')
+
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
         c_flags = str(os.getenv('CFLAGS', ''))
