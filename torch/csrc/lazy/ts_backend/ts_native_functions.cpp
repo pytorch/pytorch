@@ -470,7 +470,7 @@ at::Tensor LazyNativeFunctions::select_backward_symint(
     const at::Tensor& grad_output,
     c10::SymIntArrayRef input_sizes,
     int64_t dim,
-    c10::SymInt index) {
+    int64_t index) {
   return at::functionalization::functionalize_aten_op_symint<ATEN_OP(
       select_backward)>::call(grad_output, input_sizes, dim, index);
 }

@@ -4,18 +4,18 @@ import torch
 from torch.distributed._tensor import DeviceMesh, DTensor
 from typing import Callable, Optional, Union
 
-_PrepareInputType = Callable[
+_Prepare_Input_Func_Type = Callable[
     [Union[torch.Tensor, DTensor], Optional[DeviceMesh], Optional[int]], DTensor
 ]
 
-_PrepareOutputType = Callable[
+_Prepare_Output_Func_Type = Callable[
     [DTensor, Optional[DeviceMesh], Optional[int]], Union[torch.Tensor, DTensor]
 ]
 
 
 def _prepare_input_validate(
-    _prepare_input_func: _PrepareInputType,
-) -> _PrepareInputType:
+    _prepare_input_func: _Prepare_Input_Func_Type,
+) -> _Prepare_Input_Func_Type:
     """
     Inject common validation logics for `_prepare_input` funcs via this
     decorator, including verifying that input needs to be either
@@ -66,8 +66,8 @@ def _prepare_input_validate(
 
 
 def _prepare_output_validate(
-    _prepare_output_func: _PrepareOutputType,
-) -> _PrepareOutputType:
+    _prepare_output_func: _Prepare_Output_Func_Type,
+) -> _Prepare_Output_Func_Type:
     """
     Inject common validation logics for _prepare_output funcs via this
     decorator, including verifying that output needs to be a DTensor
