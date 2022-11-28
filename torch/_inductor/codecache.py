@@ -22,7 +22,6 @@ from typing import Any, Callable, Dict, List
 
 import torch
 from torch.utils import cpp_extension
-
 from . import config, cuda_properties, exc
 
 LOCK_TIMEOUT = 600
@@ -102,6 +101,10 @@ def cpp_compiler_search(search):
     for cxx in search:
         try:
             if cxx is None:
+                # gxx package is only available for Linux
+                # according to https://anaconda.org/conda-forge/gxx/
+                if sys.platform != "linux":
+                    continue
                 from filelock import FileLock
 
                 lock_dir = get_lock_dir()
@@ -317,7 +320,14 @@ def cpp_compile_command(
     include_pytorch=False,
     vec_isa: VecISA = invalid_vec_isa,
 ):
-    if include_pytorch or vec_isa != invalid_vec_isa:
+    if sys.platform == "linux" and (
+        include_pytorch
+        or vec_isa != invalid_vec_isa
+        or config.cpp.enable_kernel_profile
+    ):
+        # Note - We include pytorch only on linux right now. There is more work
+        # to do to enable OMP build on darwin where PyTorch is built with IOMP
+        # and we need a way to link to what PyTorch links.
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
@@ -427,7 +437,7 @@ def patch_triton_dir():
 class TritonCodeCache:
     @staticmethod
     def get_name(mod):
-        (name,) = [n for n in dir(mod) if n.startswith("kernel")]
+        (name,) = [n for n in dir(mod) if n.startswith("triton_")]
         return name
 
     @classmethod
@@ -449,17 +459,30 @@ def _load_kernel(source_code):
     return kernel
 
 
+def _load_kernel_name(source_code):
+    return TritonCodeCache.get_name(PyCodeCache.load(source_code))
+
+
 class TritonFuture:
     def __init__(self, source_code, future):
         self.source_code = source_code
         self.future = future
 
+    # @dynamo_utils.dynamo_timed
     def result(self):
+        t0 = time()
         if hasattr(self, "kernel"):
             return self.kernel
         # If the worker failed this will throw an exception.
         self.future.result()
         kernel = self.kernel = _load_kernel(self.source_code)
+        latency = time() - t0
+        if latency > 50:
+            name = _load_kernel_name(self.source_code)
+            log.warning(
+                f"Detected long compilation time of {latency} seconds for kernel name {name}"
+            )
+            log.warning(self.source_code)
         del self.source_code, self.future
         return kernel
 
