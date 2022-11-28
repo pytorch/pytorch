@@ -124,7 +124,6 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
     "res2net101_26w_4s",  # accuracy
-    "resnest101e",  # accuracy
     "rexnet_100",  # accuracy
     "spnasnet_100",  # accuracy
     "swin_base_patch4_window7_224",  # accuracy
