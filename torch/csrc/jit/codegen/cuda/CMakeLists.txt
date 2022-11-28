@@ -145,7 +145,7 @@ set(TORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
 set(TORCH_INSTALL_LIB_DIR ${TORCH_ROOT}/torch/lib)
 
 add_library(${NVFUSER_CODEGEN} SHARED ${NVFUSER_SRCS})
-target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch torch_python torch_cuda ${CUDA_NVRTC_LIB} ${TORCH_PYTHON_LIBRARY})
+target_link_libraries(${NVFUSER_CODEGEN} PRIVATE torch torch_cuda ${CUDA_NVRTC_LIB})
 target_include_directories(${NVFUSER_CODEGEN}
                            #PUBLIC $<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>
                            PRIVATE ${TORCH_ROOT} # replace this one with nvfuser_srcs_dir?!
@@ -169,7 +169,7 @@ if(BUILD_PYTHON)
   add_library(${NVFUSER_PYTHON} SHARED ${NVFUSER_PYTHON_SRCS})
   message(STATUS "compile options: " ${TORCH_PYTHON_COMPILE_OPTIONS})
   message(STATUS "link options: " ${TORCH_PYTHON_LINK_FLAGS})
-  target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${NVFUSER_CODEGEN} torch_python python::python pybind::pybind11)
+  target_link_libraries(${NVFUSER_PYTHON} PRIVATE ${NVFUSER_CODEGEN} torch_python pybind::pybind11)
   target_include_directories(${NVFUSER_PYTHON}
   	                   PRIVATE ${TORCH_ROOT})
   			   #PRIVATE ${pybind11_INCLUDE_DIRS}
