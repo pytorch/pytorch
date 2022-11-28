@@ -29,6 +29,9 @@ ENV BASH_ENV "/etc/profile"
 # Install ninja
 RUN dnf --enablerepo=crb install -y ninja-build
 
+# Additional installs
+RUN dnf --enablerepo=crb install -y perl-File-Find-Rule
+
 # (optional) Install non-default glibc version
 ARG GLIBC_VERSION
 ADD ./common/install_glibc.sh install_glibc.sh
