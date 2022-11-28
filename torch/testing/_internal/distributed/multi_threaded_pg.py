@@ -1,12 +1,23 @@
-import time
-import sys
 import queue
+import sys
 import threading
+import time
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
+
 import torch
 import torch.distributed as dist
+from torch._C._distributed_c10d import (
+    _create_work_from_future,
+    AllgatherOptions,
+    AllreduceOptions,
+    BroadcastOptions,
+    ReduceScatterOptions,
+    ScatterOptions,
+    Store,
+    ReduceOp,
+)
 from torch.futures import Future
-
-from torch._C._distributed_c10d import _create_work_from_future
 from torch.utils._pytree import tree_flatten
 
 """
@@ -19,13 +30,35 @@ We need some synchronization around cleanup to ensure that timedout ranks don't 
 
 """
 
+
 def flatten_list(lst):
     return tree_flatten(lst)[0]
+
 
 def ret_work(ret):
     fut = Future()
     fut.set_result(ret)
     return _create_work_from_future(fut)
+
+
+class AllReduce:
+    def __init__(self, op):
+        if op != ReduceOp.SUM:
+            raise NotImplementedError(
+                "AllReduce only supports SUM on threaded pg for now."
+            )
+        self.op = op
+
+    def work(self, data):
+        # data: List[List[Tensor]]
+        res = data[0][0]
+        for src_rank in range(1, len(data)):
+            in_tensor_list = data[src_rank]
+            res.add_(in_tensor_list[0])  # Hardcoded
+        with torch.no_grad():
+            for src_rank in range(len(data)):
+                data[src_rank][0].copy_(res)
+
 
 class AllGather:
     def work(self, data):
@@ -40,6 +73,48 @@ class AllGather:
                 with torch.no_grad():
                     dest_tensor.copy_(src_tensor)
 
+class Scatter:
+    def __init__(self, src):
+        self.src = src
+
+    def work(self, data):
+        src_in_tensor_list = data[self.src][1]
+        # Can't handle scatter with multiple input tensor list
+        assert len(src_in_tensor_list) == 1
+        src_in_tensors = src_in_tensor_list[0]
+
+        for rank, each_rank_data in enumerate(data):
+            out_tensor_list = each_rank_data[0]
+            # Can't handle scatter with multiple output tensor
+            assert len(out_tensor_list) == 1
+            dest_tensor = out_tensor_list[0]
+            with torch.no_grad():
+                dest_tensor.copy_(src_in_tensors[rank])
+
+class ReduceScatter:
+    def __init__(self, op):
+        if op != dist.ReduceOp.SUM:
+            raise NotImplementedError("ReduceScatter only supports SUM on threaded pg for now.")
+        self.op = op
+
+    def work(self, data):
+        start_reduction = [False for _ in range(len(data))]
+        for each_rank_data in data:
+            # Can't handle reduce_scatter with multiple scatter list
+            assert len(each_rank_data[1]) == 1
+            to_scatter = each_rank_data[1][0]
+            for i in range(len(to_scatter)):
+                dest_tensor_on_rank_i = data[i][0]
+                # Can't handle reduce_scatter with multiple output tensor
+                assert len(dest_tensor_on_rank_i) == 1
+                if not start_reduction[i]:
+                    with torch.no_grad():
+                        dest_tensor_on_rank_i[0].copy_(to_scatter[i])
+                    start_reduction[i] = True
+                else:
+                    with torch.no_grad():
+                        dest_tensor_on_rank_i[0].add_(to_scatter[i])
+
 class Broadcast:
     def __init__(self, src):
         self.src = src
@@ -51,6 +126,7 @@ class Broadcast:
             for j in range(len(in_tensor_list)):
                 with torch.no_grad():
                     out_tensor_list[j].copy_(in_tensor_list[j])
+
 
 class Collective:
     def __init__(self, world_size, collective):
@@ -90,6 +166,7 @@ class Collective:
                 self._done_cond.notify_all()
         return ret_work(data)
 
+
 class ProcessLocalGroup(dist.ProcessGroup):
     _pg_lock = threading.Lock()
     _pg_list = []
@@ -109,12 +186,13 @@ class ProcessLocalGroup(dist.ProcessGroup):
             if cls._count == pg._world:
                 cls._ready = True
 
-
     @classmethod
     def _start_coll(cls, world_size, collective):
         with cls._coll_lock:
             if not cls._ready:
-                raise Exception(f"world not ready, only {cls._count} PG's registered but world has {world_size} ranks")
+                raise Exception(
+                    f"world not ready, only {cls._count} PG's registered but world has {world_size} ranks"
+                )
             if cls._cur_coll is None:
                 cls._cur_coll = Collective(world_size, collective)
             return cls._cur_coll
@@ -126,15 +204,33 @@ class ProcessLocalGroup(dist.ProcessGroup):
             if cls._cur_coll == collective:
                 cls._cur_coll = None
 
-    def allgather(self, output_tensors, input_tensor, options):
+    def allreduce(self, tensor_list, opts=AllreduceOptions()):
+        coll = ProcessLocalGroup._start_coll(self._world, AllReduce(opts.reduceOp))
+        res = coll.join(self._rank, tensor_list)
+        ProcessLocalGroup._end_coll(coll)
+        return res
+
+    def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
         coll = ProcessLocalGroup._start_coll(self._world, AllGather())
         res = coll.join(self._rank, (output_tensors, input_tensor))
         ProcessLocalGroup._end_coll(coll)
         return res
 
-    def broadcast(self, tensor_list, opts):
+    def broadcast(self, tensor_list, opts=BroadcastOptions()):
         coll = ProcessLocalGroup._start_coll(self._world, Broadcast(opts.rootRank))
         res = coll.join(self._rank, tensor_list)
+        ProcessLocalGroup._end_coll(coll)
+        return res
+
+    def scatter(self, output_tensors, input_tensors, opts=ScatterOptions()):
+        coll = ProcessLocalGroup._start_coll(self._world, Scatter(opts.rootRank))
+        res = coll.join(self._rank, (output_tensors, input_tensors))
+        ProcessLocalGroup._end_coll(coll)
+        return res
+
+    def reduce_scatter(self, output_tensor, scatter_list, opts=ReduceScatterOptions()):
+        coll = ProcessLocalGroup._start_coll(self._world, ReduceScatter(opts.reduceOp))
+        res = coll.join(self._rank, (output_tensor, scatter_list))
         ProcessLocalGroup._end_coll(coll)
         return res
 
@@ -153,17 +249,29 @@ class ProcessLocalGroup(dist.ProcessGroup):
     def __repr__(self):
         return f"PLG w:{self._world} r:{self._rank}"
 
+
 def _create_threaded_pg(prefix_store, rank, world_size, timeout):
     return ProcessLocalGroup(rank, world_size)
 
-dist.Backend.register_backend('threaded', _create_threaded_pg)
+
+dist.Backend.register_backend("threaded", _create_threaded_pg)
+
+
+@dataclass
+class WorldData:
+    default_pg: dist.ProcessGroup
+    pg_map: Dict[dist.ProcessGroup, Tuple[str, Optional[Store]]]
+    pg_names: Dict[dist.ProcessGroup, str]
+    pg_group_ranks: Dict[dist.ProcessGroup, Dict[int, int]]
+    group_count: int
+
 
 class ThreadLocalWorld:
     _world = threading.local()
 
-    def _get_world(self):
+    def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = dist.distributed_c10d._World()
+            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, 0)
         return ThreadLocalWorld._world.world
 
     @property
@@ -194,7 +302,9 @@ class ThreadLocalWorld:
     def group_count(self, value):
         self._get_world().group_count = value
 
+
 _old_pg_world = None
+
 
 def _install_threaded_pg():
     global _old_pg_world
@@ -202,8 +312,10 @@ def _install_threaded_pg():
     dist.distributed_c10d._world = ThreadLocalWorld()
     return dist.distributed_c10d._world
 
+
 def _uninstall_threaded_pg():
     dist.distributed_c10d._world = _old_pg_world
+
 
 def run_with_threaded_pg(world_size, timeout, callback):
     """
@@ -221,10 +333,7 @@ def run_with_threaded_pg(world_size, timeout, callback):
         if not world_is_valid():
             raise TimeoutError("Invalid world")
         dist.init_process_group(
-            backend="threaded",
-            rank=rank,
-            world_size=world_size,
-            store=global_store
+            backend="threaded", rank=rank, world_size=world_size, store=global_store
         )
         try:
             callback()
@@ -236,10 +345,7 @@ def run_with_threaded_pg(world_size, timeout, callback):
 
     try:
         threads = [
-            threading.Thread(
-                target=worker,
-                args=(rank,)
-            ) for rank in range(world_size)
+            threading.Thread(target=worker, args=(rank,)) for rank in range(world_size)
         ]
         for thread in threads:
             thread.start()
@@ -248,7 +354,18 @@ def run_with_threaded_pg(world_size, timeout, callback):
         for idx, thread in enumerate(threads):
             thread.join(max(0, deadline - time.time()))
             if thread.is_alive():
-                exception_queue.put((idx, (TimeoutError, TimeoutError(f"Rank failed to join in under {timeout} seconds"), None)))
+                exception_queue.put(
+                    (
+                        idx,
+                        (
+                            TimeoutError,
+                            TimeoutError(
+                                f"Rank failed to join in under {timeout} seconds"
+                            ),
+                            None,
+                        ),
+                    )
+                )
         failed_ranks = []
         while not exception_queue.empty():
             failure = exception_queue.get()

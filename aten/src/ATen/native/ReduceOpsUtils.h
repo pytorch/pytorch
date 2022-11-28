@@ -102,7 +102,7 @@ static inline void check_scalar_type_device_layout_equal(const Tensor& out, cons
   OPTION_TYPE_EQUALITY_CHECK(layout, out.options(), self.options());
 }
 
-static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
+static inline Tensor integer_upcast(const Tensor& self, c10::optional<ScalarType> dtype) {
   ScalarType scalarType = self.scalar_type();
   ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType, /*includeBool=*/true) ? ScalarType::Long : scalarType);
   return self.toType(upcast_scalarType);
@@ -275,16 +275,13 @@ static void zero_numel_check_dims(const Tensor& self, const int64_t dim, const c
   }
 }
 
-static void zero_numel_check_dims(const Tensor& self, const at::OptionalIntArrayRef opt_dim, const char *fn_name) {
-  if (opt_dim.has_value()) {
-    const IntArrayRef dim = opt_dim.value();
-    TORCH_CHECK(
-      !dim.empty(),
-        fn_name, ": Expected reduction dim to be specified for input.numel() == 0. ",
-          "Specify the reduction dim with the 'dim' argument.");
-    for (const int64_t d : dim) {
-      zero_numel_check_dims(self, d, fn_name);
-    }
+static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, const char *fn_name) {
+  TORCH_CHECK(
+    !dim.empty(),
+      fn_name, ": Expected reduction dim to be specified for input.numel() == 0. ",
+        "Specify the reduction dim with the 'dim' argument.");
+  for (const int64_t d : dim) {
+    zero_numel_check_dims(self, d, fn_name);
   }
 }
 

@@ -441,6 +441,7 @@ class RNN(RNNBase):
             max_batch_size = int(batch_sizes[0])
         else:
             batch_sizes = None
+            assert (input.dim() in (2, 3)), f"RNN: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:
@@ -733,6 +734,7 @@ class LSTM(RNNBase):
             max_batch_size = int(max_batch_size)
         else:
             batch_sizes = None
+            assert (input.dim() in (2, 3)), f"LSTM: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:
@@ -923,6 +925,7 @@ class GRU(RNNBase):
             max_batch_size = int(max_batch_size)
         else:
             batch_sizes = None
+            assert (input.dim() in (2, 3)), f"GRU: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:

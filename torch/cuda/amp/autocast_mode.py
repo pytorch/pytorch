@@ -9,6 +9,7 @@ except ModuleNotFoundError:
 from torch._six import string_classes
 from typing import Any
 
+__all__ = ["autocast", "custom_fwd", "custom_bwd"]
 
 class autocast(torch.amp.autocast_mode.autocast):
     r"""
@@ -92,6 +93,7 @@ def custom_fwd(fwd=None, *, cast_inputs=None):
 
     @functools.wraps(fwd)
     def decorate_fwd(*args, **kwargs):
+        args[0]._dtype = torch.get_autocast_gpu_dtype()
         if cast_inputs is None:
             args[0]._fwd_used_autocast = torch.is_autocast_enabled()
             return fwd(*args, **kwargs)
@@ -118,6 +120,6 @@ def custom_bwd(bwd):
     """
     @functools.wraps(bwd)
     def decorate_bwd(*args, **kwargs):
-        with autocast(args[0]._fwd_used_autocast):
+        with autocast(enabled=args[0]._fwd_used_autocast, dtype=args[0]._dtype):
             return bwd(*args, **kwargs)
     return decorate_bwd
