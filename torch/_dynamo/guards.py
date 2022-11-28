@@ -580,14 +580,11 @@ class DynamoGuardPrinter(StrPrinter):
             return "0"
         if expr == 1:
             return "1"
-        expr_found = expr in (self.expr_to_tensor_ref) or (
-            expr in self.intermediary_symbols
+        assert (
+            expr in (self.expr_to_tensor_ref)
+            or (expr in self.intermediary_symbols)
+            or (expr in self.base_symbols)
         )
-        if not expr_found:
-            if config.dynamic_shapes_ignore_assert or expr in (self.base_symbols):
-                return f"{self.shape_env.var_to_val[expr]}"
-
-        assert expr_found
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
