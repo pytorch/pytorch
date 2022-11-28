@@ -165,8 +165,10 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaises(AssertionError):
-            make_fx(f)(x, torch.tensor(False))
+        self.assertRaisesRegex(
+            RuntimeError, "Dispatch trace exception",
+            lambda: make_fx(f)(x, torch.tensor(False))
+        )
 
 
     def test_assert_on_mismatch_tensor_size(self):
@@ -180,8 +182,10 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaises(AssertionError):
-            make_fx(f)(x, torch.tensor(False))
+        self.assertRaisesRegex(
+            RuntimeError, "Dispatch trace exception",
+            lambda: make_fx(f)(x, torch.tensor(False))
+        )
 
     def test_cond_traced_not_nested_fake_tensor(self):
         def true_fn(x):
@@ -328,9 +332,10 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaises(AssertionError):
-            make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
-
+        self.assertRaisesRegex(
+            RuntimeError, "Dispatch trace exception",
+            lambda: make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
+        )
 
     def test_assert_on_mismatch_tensor_size_fake_tensor(self):
         def true_fn(x):
@@ -343,8 +348,10 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaises(AssertionError):
-            make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
+        self.assertRaisesRegex(
+            RuntimeError, "Dispatch trace exception",
+            lambda: make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
+        )
 
     def check_map_graph(self, gm, key):
         i = 0

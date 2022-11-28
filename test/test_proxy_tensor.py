@@ -1404,6 +1404,9 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False):
             new_f = make_fx(f, tracing_mode=tracing_mode)(args, kwargs, extra_args, extra_kwargs)
         except DynamicOutputShapeException as e:
             self.skipTest("Dynamic output shape operation in trace")
+        except torch.fx.experimental.proxy_tensor.DispatchTracingException as e:
+            if isinstance(e.__cause__, DynamicOutputShapeException):
+                self.skipTest("Dynamic output shape operation in trace")
         for arg in args:
             if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
                 arg.uniform_(0, 1)
