@@ -1,4 +1,5 @@
 import collections
+import copy
 import functools
 import itertools
 import logging
@@ -6,7 +7,7 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch.nn
 from torch import fx
@@ -15,21 +16,24 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from . import config, logging as torchdynamo_logging, variables
 from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed, unimplemented
+from .exc import BackendCompilerFailed
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import ConstantSource, LocalSource, Source
 from .utils import (
+    checkpoint_params,
     CleanupHook,
+    clone_inputs,
     count_calls,
     counters,
-    fake_tensors_available,
     format_graph_tabular,
+    same,
 )
-from .variables.builder import VariableBuilder
+from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
+    DynamicShapeVariable,
     TensorVariable,
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
@@ -70,6 +74,59 @@ class FakeRootModule(torch.nn.Module):
         return "FakeRootModule(...)"
 
 
+def wrap_compiler_fn(compiler_fn):
+    """WrapperBackend if config.verify_correctness is True"""
+    if config.verify_correctness:
+        # wrap backend if verify_correctness is True
+        wrapper_backend_compiler_fn = WrapperBackend(compiler_fn)
+
+        wrapper_backend_compiler_fn._torchdynamo_orig_callable = compiler_fn
+        return wrapper_backend_compiler_fn
+
+    return compiler_fn
+
+
+class WrapperBackend:
+    def __init__(self, backend=None):
+        self.backend = backend
+
+    @property
+    def example_inputs(self):
+        return clone_inputs(self.original_example_inputs)
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+
+        self.restore = checkpoint_params(gm)
+        self.original_example_inputs = clone_inputs(example_inputs)
+        self.gm = gm
+        copy_gm = copy.deepcopy(self.gm)
+        self.candidate = self.backend(copy_gm, self.original_example_inputs)
+
+        if self.candidate is None or self.candidate is self.gm.forward:
+            return self.gm.forward
+
+        if not config.verify_correctness:
+            return self.candidate
+
+        # if verify_correctness=True
+        try:
+            correct = self.gm.forward(*self.example_inputs)
+            result = self.candidate(*self.example_inputs)
+
+            # TODO: replace `same` function with the one in testing
+            if same(correct, result):
+                return self.candidate
+
+            raise RuntimeError(f"incorrect results of backend {self}")
+            return self.gm.forward
+
+        except Exception:
+            log.exception("error in verify_correctness")
+            raise
+        finally:
+            self.restore()
+
+
 class OutputGraph(fx.Tracer):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -93,7 +150,7 @@ class OutputGraph(fx.Tracer):
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions = []
-        # Node => computed real value (see TensorVariable.get_real_value)
+        # Node => computed real value (see utils.get_real_value)
         self.real_value_cache = {}
 
         # Not checkpointed
@@ -107,6 +164,11 @@ class OutputGraph(fx.Tracer):
         self.unspec_variable_map = {}
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
         self.tensor_id_to_sym_shape_ref = {}
+        self.intermediary_symbols = {}
+
+        # Enables creating unique node names by tracking
+        # all current placeholder node names
+        self.name_to_input = collections.OrderedDict()
 
     @property
     def output(self):
@@ -145,6 +207,7 @@ class OutputGraph(fx.Tracer):
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
                 self.real_value_cache.pop(node, None)
+                self.name_to_input.pop(node.name, None)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -160,22 +223,22 @@ class OutputGraph(fx.Tracer):
         return obj
 
     def create_graph_input(self, name, type_expr=None):
-        placeholders = [n for n in self.graph.nodes if n.op == "placeholder"]
-
         # unique
-        used_names = {n.target for n in placeholders}
-        if name in used_names:
+        if name in self.name_to_input:
             for i in itertools.count():
-                if f"{name}_{i}" not in used_names:
+                if f"{name}_{i}" not in self.name_to_input:
                     name = f"{name}_{i}"
                     break
 
-        if placeholders:
-            ctx = self.graph.inserting_after(placeholders[-1])
+        if self.name_to_input:
+            prev_name = next(reversed(self.name_to_input))
+            ctx = self.graph.inserting_after(self.name_to_input[prev_name])
         else:
             ctx = self.graph.inserting_before(None)
         with ctx:
-            return self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
+            proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
+            self.name_to_input[name] = proxy.node
+            return proxy
 
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
@@ -194,43 +257,63 @@ class OutputGraph(fx.Tracer):
                 name,
             )
 
-    def register_attr_or_module(self, mod: torch.nn.Module, *names, **options):
-        if is_dynamic_nn_module(mod):
-            return variables.UnspecializedNNModuleVariable(mod, **options)
+    def register_attr_or_module(
+        self, target: Union[torch.nn.Module, torch.Tensor, Any], *names, **options
+    ):
+        if is_dynamic_nn_module(target):
+            return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
         options["guards"] = set(options.get("guards", []))
         source: Source = options.get("source", None)
-        if isinstance(mod, torch.Tensor):
+        if isinstance(target, torch.Tensor):
             if source:
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
-                return TensorVariable.create(
+                return wrap_fx_proxy(
                     self,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
-                    example_value=mod,
+                    example_value=target,
                     **options,
                 )
 
-        elif isinstance(mod, torch.nn.Module):
-            assert isinstance(mod, torch.nn.Module)
+        elif isinstance(target, torch.nn.Module):
+            assert isinstance(target, torch.nn.Module)
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
-                return NNModuleVariable(type(mod), module_key, **options)
+                return NNModuleVariable(type(target), module_key, **options)
 
+        elif isinstance(target, (torch.SymInt, torch.SymFloat)):
+            # HACKY CODE REGION BEGIN
+            # WE ARE PIGGYBACKING ON EXISTING INFRA TO REGISTER ATTRS
+            # This ultimately gets written to self.nn_modules, which is unfortunate
+            # Attrs that are tenors and symints and such need to be migrated to have their
+            # own storage
+            # alas, this is like this for now
+            self.intermediary_symbols.update({target.get_pyobj().expr: None})
+
+            def wrap_name(module_key):
+                return DynamicShapeVariable.create(
+                    self,
+                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    dyn_shape=target,
+                    **options,
+                )
+
+            # HACKY CODE REGION END
         else:
 
             def wrap_name(module_key):
                 self.output.update_co_names(module_key)
-                self.root_globals[module_key] = mod
+                self.root_globals[module_key] = target
                 return VariableBuilder(self, ConstantSource(source_name=module_key))(
-                    mod
+                    target
                 )
 
         for k, v in self.nn_modules.items():
-            if v is mod:
+            if v is target:
                 # it already exists
                 return wrap_name(k)
 
@@ -246,7 +329,7 @@ class OutputGraph(fx.Tracer):
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
-                self.nn_modules[name] = mod
+                self.nn_modules[name] = target
                 return wrap_name(name)
             name = f"{base}_{i}"
 
@@ -431,7 +514,10 @@ class OutputGraph(fx.Tracer):
                 else ""
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            compiled_fn = self.compiler_fn(gm, self.example_inputs())
+            compiler_fn = self.compiler_fn
+            if config.verify_correctness:
+                compiler_fn = wrap_compiler_fn(compiler_fn)
+            compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
@@ -468,6 +554,7 @@ class OutputGraph(fx.Tracer):
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
                 self.real_value_cache.pop(node, None)
+                self.name_to_input.pop(node.name, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
 
@@ -487,8 +574,7 @@ class OutputGraph(fx.Tracer):
         # some of the tensor objects to be held alive for longer than necessary.
 
         # Clear cache for conversion of real -> fake tensors
-        if fake_tensors_available:
-            self.root_tx.fake_mode.fake_tensor_converter = None
+        self.root_tx.fake_mode.fake_tensor_converter = None
         self.root_tx = None
 
         # Note: generated fx graph will hold a reference to the nn_module,
@@ -503,6 +589,7 @@ class OutputGraph(fx.Tracer):
             if "example_value" in node.meta:
                 del node.meta["example_value"]
         self.real_value_cache.clear()
+        self.name_to_input.clear()
 
     def create_proxy(
         self,
