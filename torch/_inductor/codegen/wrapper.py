@@ -582,7 +582,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             """
             async_compile.wait(globals())
             del async_compile
-            from torch.utils.cpp_extension import load_inline
+            from torch._inductor.codecache import CppWrapperCodeCache
             wrapper = (
             '''
             #include <dlfcn.h>
@@ -626,7 +626,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"{name} = at::randint(std::pow(2, 31), {{}}, at::ScalarType::Long);"
                 )
             V.graph.sizevars.codegen(self.wrapper_call, V.graph.graph_inputs)
-            self.wrapper_call.writeline(f"static LoadKernel_call{self._call_func_id} load_kernel_;")
+            self.wrapper_call.writeline(
+                f"static LoadKernel_call{self._call_func_id} load_kernel_;"
+            )
 
     def write_allocate_line(self, buffer):
         self.writeline(CppAllocateLine(buffer))
@@ -714,13 +716,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         wrapper_call_hash = codecache.code_hash(self.wrapper_call.getvalue())
         result.splice(
             f"""
-            module = load_inline(
-                name='inline_extension_{wrapper_call_hash}',
-                cpp_sources=[wrapper],
-                functions=['call_{self._call_func_id}'],
-                extra_cflags=['{extra_cflags}'],
-                extra_ldflags=['{extra_ldflags}'],
-                extra_include_paths=['{extra_include_paths}'])
+            module = CppWrapperCodeCache.load(wrapper, 'call_{self._call_func_id}')
             """
         )
         # Wrap the func to support setting result._boxed_call = True
