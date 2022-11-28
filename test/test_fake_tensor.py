@@ -665,6 +665,12 @@ class FakeTensorOperatorInvariants(TestCase):
                 op = self.get_aten_op(schema)
                 self.assertIn(op, torch._subclasses.fake_tensor._like_tensor_constructors)
 
+    def test_no_reserved_keywords(self):
+        for schema in self.get_all_aten_schemas():
+            op = self.get_aten_op(schema)
+            # will fail if a reserve keyword is used as operator name or overload
+            eval(str(op), {"aten": torch.ops.aten})
+
 class FakeTensorPropTest(TestCase):
     def test_fake_tensor_prop_on_nn_module(self):
         class ToyNnModuleWithParameters(torch.nn.Module):
