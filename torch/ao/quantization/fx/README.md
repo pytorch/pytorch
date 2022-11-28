@@ -169,15 +169,17 @@ input - qat_linear_relu - output
   'pattern': nnqat.LinearReLU,
   'dtype_configs': [{input: torch.quint8, output: torch.quint8, weight: torch.qint8}],
 }
+```
 
-# step 1: assign qconfig to each op (please see [TODO: link] for details)
-# step 2: determine which qconfigs are valid according to the backend configuration (please see [TODO: link] for details)
+step 1: assign qconfig to each op (please see [TODO: link] for details)
+step 2: determine which qconfigs are valid according to the backend configuration (please see [TODO: link] for details)
 (we should add a warning here)
-# step 3: for subgraphs with validated qconfigs, insert qstub/dqstub/qdqstub needed
-# To talk about what happens in this step, let’s first define some terms. Let’s view the computation graph we showed about as a Graph consists of nodes and edges, each node here will be an FX Node that represents some computation, for example linear, and each edge will be a connection between two nodes, and each edge can both be viewed as the output of the previous Node or the input of the next Node.
+step 3: for subgraphs with validated qconfigs, insert qstub/dqstub/qdqstub needed
+To talk about what happens in this step, let’s first define some terms. Let’s view the computation graph we showed about as a Graph consists of nodes and edges, each node here will be an FX Node that represents some computation, for example linear, and each edge will be a connection between two nodes, and each edge can both be viewed as the output of the previous Node or the input of the next Node.
 
-# The end goal for this step is to insert QDQStubs at edges so that we produce a graph of quantized reference model when each QDQStub represents a quantize operator followed by a dequantize operator.
+The end goal for this step is to insert QDQStubs at edges so that we produce a graph of quantized reference model when each QDQStub represents a quantize operator followed by a dequantize operator.
 
+```
 # graph 2:
 input - QDQStub1 (FakeQuantize) - qat_linear_relu - QDQStub2 (FakeQuantize) - output
                                       |
@@ -185,10 +187,12 @@ input - QDQStub1 (FakeQuantize) - qat_linear_relu - QDQStub2 (FakeQuantize) - ou
                   (need to be updated with QDQStub + FakeQuantize)
                                       |
                                     weight
+```
 Note: weight + FakeQuantize is a part of qat_linear_relu
 
-# The overall logic to insert QDQStub1 and QDQStub2 inplace is the following:
-# 0. For each node in the original graph, we compute the target_dtype for input and output for it based on qconfig, for graph1, configured with qconfig_mapping, we have:
+The overall logic to insert QDQStub1 and QDQStub2 inplace is the following:
+0. For each node in the original graph, we compute the target_dtype for input and output for it based on qconfig, for graph1, configured with qconfig_mapping, we have:
+```
 # node_name_to_target_dtype =
 # {
 #     # this is placeholder node in FX Graph
@@ -197,35 +201,41 @@ Note: weight + FakeQuantize is a part of qat_linear_relu
 #     # this is the return node in FX Graph
 #     “output”: {“input_activation”: torch.float32, “output_activation”: torch.float32}
 # }
-# Note: this map is generated before we insert qdqstub to graph1, and will not change in the process.
-#
-# 1. Inserting QDQStub1 (for input of qat_linear_relu)
-#    We need to look at the edge between `input` Node and `qat_linear_relu` Node here, we need to decide if we need to insert a
-#    QDQStub at this edge, which could serve as an input argument for `qat_linear_relu` Node (and also output for `input` Node)
-#    The way we decide if we want to insert QDQStub here is to figure out
-#    (1). The target dtype for output of `input` Node, which is torch.float32
-#    (2). The target dtype for input of `qat_linear_relu` Node, which is torch.quint8
-#    There is a mismatch here and (2) is a quantized dtype, so we need to insert QDQStub at the edge.
-#    We also need to attach observer/fakequant module to the QDQStub we inserted here.
-# 2. Insert QDQStub2 (for output of qat_linear_relu)
-#    The logic for inserting QDQStub for output is much easier, since we assume all modules/functions in the graph produce fp32 output
-#    by default (we can have additional checks and extend this to work for other dtypes after we have type inference ready),
-#    we just need to look at the target output dtype for qat_linear_relu Node, and if it is a quantized dtype (quint8, qint8, float16),
-#    we would insert a QDQStub here.
-#
-# Questions: How to avoid inserting duplicate QDQStubs?
-# e.g. when we have a single input being used by multiple ops:
-# input — linear1 —-
-#      \--- linear2 —
-# how do we make sure we only insert one QDQStub for input of both linear1 and linear2?
-# input - QDQStub — linear1 -
-#              \ —- linear2 -
-#
-# The way we do it right now is before we insert QDQStub, we look at all users of `input` Node here and make sure there is no QDQStubs
-# with the same target_dtype, that is, if we already inserted a QDQStub with dtype quint8 for linear1, and linear2 is also connected to it, if we request another QDQStub with dtype quint8 when processing linear2 Node, we’ll detect that the desired QDQStub already exists and do nothing
+```
+Note: this map is generated before we insert qdqstub to graph1, and will not change in the process.
 
-# Question: What is the logic for keeping output to be float32?
-# Let’s say the output of `qat_linear_relu` Node is configured as float32, both in qconfig_mapping and backend_config:
+1. Inserting QDQStub1 (for input of qat_linear_relu)
+   We need to look at the edge between `input` Node and `qat_linear_relu` Node here, we need to decide if we need to insert a
+   QDQStub at this edge, which could serve as an input argument for `qat_linear_relu` Node (and also output for `input` Node)
+   The way we decide if we want to insert QDQStub here is to figure out
+   (1). The target dtype for output of `input` Node, which is torch.float32
+   (2). The target dtype for input of `qat_linear_relu` Node, which is torch.quint8
+   There is a mismatch here and (2) is a quantized dtype, so we need to insert QDQStub at the edge.
+   We also need to attach observer/fakequant module to the QDQStub we inserted here.
+2. Insert QDQStub2 (for output of qat_linear_relu)
+   The logic for inserting QDQStub for output is much easier, since we assume all modules/functions in the graph produce fp32 output
+   by default (we can have additional checks and extend this to work for other dtypes after we have type inference ready),
+   we just need to look at the target output dtype for qat_linear_relu Node, and if it is a quantized dtype (quint8, qint8, float16),
+   we would insert a QDQStub here.
+
+Questions: How to avoid inserting duplicate QDQStubs?
+e.g. when we have a single input being used by multiple ops:
+```
+input — linear1 —-
+     \--- linear2 —
+```
+how do we make sure we only insert one QDQStub for input of both linear1 and linear2?
+```
+input - QDQStub — linear1 -
+             \ —- linear2 -
+```
+
+The way we do it right now is before we insert QDQStub, we look at all users of `input` Node here and make sure there is no QDQStubs
+with the same target_dtype, that is, if we already inserted a QDQStub with dtype quint8 for linear1, and linear2 is also connected to it, if we request another QDQStub with dtype quint8 when processing linear2 Node, we’ll detect that the desired QDQStub already exists and do nothing
+
+Question: What is the logic for keeping output to be float32?
+Let’s say the output of `qat_linear_relu` Node is configured as float32, both in qconfig_mapping and backend_config:
+```
 # qconfig_mapping (simplified, shown as dict)
 {'qat_linear_relu': QConfig(
   weight=MinMaxObserver.with_args(dtype=torch.qint8),
@@ -238,12 +248,12 @@ Note: weight + FakeQuantize is a part of qat_linear_relu
   'pattern': nnqat.LinearReLU,
   'dtype_configs': [{input: torch.quint8, output: torch.float32, weight: torch.qint8}],
 }
-
-# What we’ll do here is when we are trying to insert output QDQStub for `qat_linear_relu`, we look at the target output dtype for this node (node_name_to_target_dtype[“qat_linear_relu”][“output_activation”], and find that it is float, which is not a quantized dtype, so
-# will do nothing here.
-# Note that this does not prevent other operators following `qat_linear_relu` to insert a QDQStub at the output of `qat_linear_relu`, since we are dealing with an `edge` of the graph here, and an `edge` is connected to two nodes, which means
-# the output of `qat_linear_relu` will also be the input of a node following `qat_linear_relu`.
 ```
+
+What we’ll do here is when we are trying to insert output QDQStub for `qat_linear_relu`, we look at the target output dtype for this node (node_name_to_target_dtype[“qat_linear_relu”][“output_activation”], and find that it is float, which is not a quantized dtype, so
+will do nothing here.
+Note that this does not prevent other operators following `qat_linear_relu` to insert a QDQStub at the output of `qat_linear_relu`, since we are dealing with an `edge` of the graph here, and an `edge` is connected to two nodes, which means
+the output of `qat_linear_relu` will also be the input of a node following `qat_linear_relu`.
 
 `backend_config` configurations used in this step:
 ```
@@ -256,10 +266,9 @@ BackendConfig(nniqat.LinearReLU)
 
 Pattern in this case is the same as before, it defines the pattern for the subgraph we are dealing with
 `set_observation_type`: sets the observation type for the patter, currently only two types:
-```
-OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT means the output observer instance will be different from the input, which is the most common type of observer placement.
-OUTPUT_SHARE_OBSERVER_WITH_INPUT means the output observer is shared with input, they will be the same instance. This is useful for operators like cat.
-```
+
+`OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT` means the output observer instance will be different from the input, which is the most common type of observer placement.
+`OUTPUT_SHARE_OBSERVER_WITH_INPUT` means the output observer is shared with input, they will be the same instance. This is useful for operators like cat.
 
 `set_dtype_configs`: sets a list of supported (activation, weight, bias, etc.) dtype combinations for qconfigs for the pattern. Note that we represent different modes of quantization (static/dynamic/`weight_only`) purely through this combination, for example, fbgemm static quantization can be represented as: {"`input_activation`": torch.quint8, "weight": torch.qint8, "`output_activation`": torch.quint8}
 Note: the dtype config will be used to configure the support for dynamic quantization as well
