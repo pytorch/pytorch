@@ -8,7 +8,14 @@ from typing import Callable, cast, Dict, List, Optional, Set, Tuple, Union
 import sympy
 
 from .codegen.common import index_prevent_reordering
-from .utils import get_dtype_size, sympy_product, sympy_subs, sympy_symbol, VarRanges
+from .utils import (
+    get_dtype_size,
+    sympy_product,
+    sympy_str,
+    sympy_subs,
+    sympy_symbol,
+    VarRanges,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -157,14 +164,18 @@ class ReadWrites:
         )
 
 
-class RecordLoadStore(V.KernelBuilder):  # type: ignore[name-defined]
+class RecordLoadStore:  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
-        super(RecordLoadStore, self).__init__()
         self._reads: Set[MemoryDep] = set()
         self._writes: Set[MemoryDep] = set()
         self._index_exprs: Set[IndexExprDep] = set()
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
+        self._var_counter = itertools.count()
+        self._parent_handler = V.KernelFormatterHandler(V.MockHandler())
+
+    def __getattr__(self, name):
+        return getattr(self._parent_handler, name)
 
     def canonicalize(
         self, index: sympy.Expr
@@ -195,25 +206,22 @@ class RecordLoadStore(V.KernelBuilder):  # type: ignore[name-defined]
     def load(self, name: str, index: sympy.Expr) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._reads.add(MemoryDep(name, canonicalized_index, canonicalized_size))
-        return self._Expr(format_string="load({}, {})", inputs=[name, index])
+        return self._parent_handler.load(name, index)
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._writes.add(MemoryDep(name, canonicalized_index, canonicalized_size))
-        return self._Expr(
-            format_string="store({}, {}, {}, {})", inputs=[name, index, value, mode]
-        )
+        return self._parent_handler.store(name, sympy_str(index), value, mode)
 
     def reduction(
         self, name: str, dtype, src_dtype, reduction_type, index, value
     ) -> str:
-        r0 = self._Expr(format_string=f"reduce_{reduction_type})({{}})", inputs=[value])
-        return self.store(name, index, r0)
+        return self.store(name, index, f"reduce_{reduction_type})({value})")
 
     def index_expr(self, index: sympy.Expr, dtype) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._index_exprs.add(IndexExprDep(canonicalized_index, canonicalized_size))
-        return self._Expr(format_string="index_expr({}, {})", inputs=[index, dtype])
+        return self._parent_handler.index_expr(index, dtype)
 
 
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
