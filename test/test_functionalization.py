@@ -1306,10 +1306,12 @@ def forward(self, a_1):
 
     def test_instance_norm_running_mean_is_x(self):
         size = 100
+
         def f(x):
             with enable_python_dispatcher():
-                return torch.instance_norm(torch.arange(20 * size * 35 * 45, dtype=torch.float32).reshape(20, size, 35, 45), None, None, running_mean=x, running_var=torch.ones(size),
-                                           use_input_stats=True, momentum=0.1, eps=1e-5, cudnn_enabled=False)
+                return torch.instance_norm(
+                    torch.arange(20 * size * 35 * 45, dtype=torch.float32).reshape(20, size, 35, 45), None, None,
+                    x, torch.ones(size), use_input_stats=True, momentum=0.1, eps=1e-5, cudnn_enabled=False)
         self.assert_functionalization(f, torch.zeros(size))
         logs = self.get_logs(f, torch.zeros(size))
         # On Windows, for instance_norm, the alias_copy's are reordered to come right before they need to be used
