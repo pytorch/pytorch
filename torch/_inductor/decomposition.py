@@ -66,6 +66,7 @@ decompositions = get_decompositions(
         aten.mv,
         aten.narrow,
         aten.native_batch_norm,
+        aten._native_batch_norm_legit_functional,
         aten.native_batch_norm_backward,
         aten.native_dropout_backward,
         aten.native_group_norm,

@@ -1196,9 +1196,10 @@ def describe_input(i, aot_config):
 # the same storage, so long as they have separate TensorImpls.)
 def aot_dispatch_deduplicated_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
-    _fw_metadata, out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
-        flat_fn
-    )(*flat_args)
+    with enable_python_dispatcher():
+        _fw_metadata, out, _num_aliasing_metadata_outs = run_functionalized_fw_and_collect_metadata(
+            flat_fn
+        )(*flat_args)
 
     # pre-compute, so we can bail out quickly in the hotpath
     _num_outputs_aliased_to_inputs = len([
