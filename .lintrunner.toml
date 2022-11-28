@@ -142,6 +142,21 @@ init_command = [
 ]
 
 [[linter]]
+code = 'MYPYNOFOLLOW'
+include_patterns = [
+    'torch/_dynamo/convert_frame.py',
+]
+exclude_patterns = [
+]
+command = [
+    'python3',
+    'tools/linter/adapters/mypy_linter.py',
+    '--config=mypy-nofollow.ini',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'MYPYSTRICT'
 include_patterns = [
     '.github/**/*.py',
