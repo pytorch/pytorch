@@ -8,27 +8,34 @@
 
 namespace c10d {
 
+// Macro to generate the error message on a non-successful UCC return value.
+#define TORCH_UCC_GET_ERROR_MSG(_err, _error_msg) \
+  do {                                            \
+      _err = c10::str(                            \
+          "[",                                    \
+          std::string(__FILE__),                  \
+          ":",                                    \
+          std::to_string(__LINE__),               \
+          "] ",                                   \
+          logger->getLogPrefix(),                 \
+          _error_msg,                             \
+          ", error code ",                        \
+          result,                                 \
+          ": ",                                   \
+          ucc_status_string(result),              \
+          ", system error code ",                 \
+          errno);                                 \
+  } while (0)                                     \
+
 // Macro to throw on a non-successful UCC return value.
-#define TORCH_UCC_CHECK(_cmd, _error_msg) \
-  do {                                    \
-    ucc_status_t result = _cmd;           \
-    if (result != UCC_OK) {               \
-      std::string err = c10::str(         \
-          "[",                            \
-          std::string(__FILE__),          \
-          ":",                            \
-          std::to_string(__LINE__),       \
-          "] ",                           \
-          logger->getLogPrefix(),         \
-          _error_msg,                     \
-          ", error code ",                \
-          result,                         \
-          ": ",                           \
-          ucc_status_string(result),      \
-          ", system error code ",         \
-          errno);                         \
-      TORCH_CHECK(false, err);            \
-    }                                     \
+#define TORCH_UCC_CHECK(_cmd, _error_msg)       \
+  do {                                          \
+    ucc_status_t result = _cmd;                 \
+    if (result != UCC_OK) {                     \
+      std::string err;                          \
+      TORCH_UCC_GET_ERROR_MSG(err, _error_msg); \
+      TORCH_CHECK(false, err);                  \
+    }                                           \
   } while (0)
 
 // Macro and throw on a non-successful UCC return value and free its request.
@@ -36,24 +43,9 @@ namespace c10d {
   do {                                                      \
     ucc_status_t result = _cmd;                             \
     if (result != UCC_OK) {                                 \
-      std::string err = c10::str(                           \
-          "[",                                              \
-          std::string(__FILE__),                            \
-          ":",                                              \
-          std::to_string(__LINE__),                         \
-          "] ",                                             \
-          logger->getLogPrefix(),                           \
-          _error_msg,                                       \
-          ", error code ",                                  \
-          result,                                           \
-          ": ",                                             \
-          ucc_status_string(result),                        \
-          ", system error code ",                           \
-          errno);                                           \
-      TORCH_UCC_CHECK(                                      \
-        ucc_collective_finalize(_request),                  \
-        "failed to finalize posted collective"              \
-      );                                                    \
+      std::string err;                                      \
+      TORCH_UCC_GET_ERROR_MSG(err, _error_msg);             \
+      ucc_collective_finalize(_request);                    \
       TORCH_CHECK(false, err);                              \
     }                                                       \
   } while (0)
