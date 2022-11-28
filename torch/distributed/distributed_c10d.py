@@ -1072,7 +1072,7 @@ def _new_process_group_helper(
                     backend_pg = _create_process_group_wrapper(
                         wrapped_pg=backend_pg,
                         store_prefix=group_name,
-                        store=store,
+                        store=prefix_store,
                         rank=group_rank,
                         world_size=group_size,
                         timeout=timeout,
@@ -1083,7 +1083,7 @@ def _new_process_group_helper(
         print(f"finished creating {backend_pg} for device {device}")
 
     # update global state
-    _world.pg_map[pg] = (backend, store)
+    _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
     _pg_backend_map[pg] = str(backend_config)
     return pg

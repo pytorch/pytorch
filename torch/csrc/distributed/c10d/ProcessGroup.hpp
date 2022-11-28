@@ -350,6 +350,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "ProcessGroup ", getBackendName(), " does not support barrier"));
   }
 
+  bool hasBackends() {
+    return !deviceTypeToBackendType_.empty();
+  }
+
   void setBackend(c10::DeviceType deviceType, BackendType backendType, const c10::intrusive_ptr<Backend>& backend) {
     deviceTypeToBackendType_[deviceType] = backendType;
     deviceTypeToBackend_[deviceType] = backend;

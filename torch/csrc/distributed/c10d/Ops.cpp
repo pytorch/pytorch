@@ -297,6 +297,12 @@ c10::intrusive_ptr<Work> broadcast(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     const BroadcastOptions& opts) {
+  // TODO: if clause handles the case of using a PythonProcessGroup
+  if (!process_group->hasBackends()) {
+    auto tensor_vec = tensors.vec();
+    return process_group->broadcast(tensor_vec, opts);
+  }
+
   static auto op =
       c10::Dispatcher::singleton()
           .findSchemaOrThrow("c10d::broadcast_", "")
@@ -321,6 +327,12 @@ c10::intrusive_ptr<Work> allreduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     const AllreduceOptions& opts) {
+  // TODO: if clause handles the case of using a PythonProcessGroup
+  if (!process_group->hasBackends()) {
+    auto tensor_vec = tensors.vec();
+    return process_group->allreduce(tensor_vec, opts);
+  }
+
   static auto op =
       c10::Dispatcher::singleton()
           .findSchemaOrThrow("c10d::allreduce_", "")
@@ -361,6 +373,15 @@ c10::intrusive_ptr<Work> allgather(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     at::TensorList input_tensors,
     const AllgatherOptions& opts) {
+  // TODO: if clause handles the case of using a PythonProcessGroup
+  if (!process_group->hasBackends()) {
+    auto input_tensors_vec = input_tensors.vec();
+    return process_group->allgather(
+        const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
+        input_tensors_vec,
+        opts);
+  }
+
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::allgather_", "")
                        .typed<std::tuple<
@@ -567,7 +588,7 @@ c10::intrusive_ptr<Work> barrier(
   // if opts.device_ids or backend is nccl are specified then use cuda
   // implementation
   // TODO: getBackendName() is always "NOT DEFINED"
-  if (opts.device_ids.size() > 0 || process_group->getBackendName() == "nccl") {
+  if (opts.device_ids.size() > 0 && process_group->getBackendName() == "nccl") {
     // set cuda tensor
     tensor = at::empty(
         {0}, at::TensorOptions().device(at::kCUDA, opts.device_ids[0]));
