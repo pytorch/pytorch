@@ -335,7 +335,7 @@ class FullyShardedDataParallel(nn.Module):
         # Add module annotations for Dynamo support
         for submodule in module.modules():
             if submodule not in self._ignored_modules:
-                """[Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
+                """[note: Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
 
                 Dynamo doesn't get to see this instance (FullyShardedDataParallel) during tracing, since
                 it skips tracing all the torch.distributed.fsdp code.
@@ -714,7 +714,7 @@ class FullyShardedDataParallel(nn.Module):
         with torch.autograd.profiler.record_function(
             "FullyShardedDataParallel.forward"
         ):
-            args, kwargs = _root_pre_forward(self, self, *args, **kwargs)
+            args, kwargs = _root_pre_forward(self, self, args, kwargs)
             unused = None
             unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
             reshard_fn = functools.partial(_post_forward_reshard, self, self._handles)

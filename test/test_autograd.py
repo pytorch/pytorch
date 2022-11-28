@@ -63,6 +63,30 @@ def graph_desc(fn):
 
 class TestAutograd(TestCase):
 
+    def test_grad_mode_class_decoration(self):
+        # Decorating class is deprecated and should not be used
+        with self.assertWarnsRegex(UserWarning, "Decorating classes is deprecated"):
+            @torch.no_grad()
+            class Foo():
+                pass
+
+        # Decorating functions or methods is fine though
+        with warnings.catch_warnings(record=True) as w:
+            @torch.no_grad()
+            def foo():
+                pass
+
+            class Foo2():
+                @torch.no_grad()
+                def __init__(self):
+                    pass
+
+                @torch.no_grad()
+                def foo(self):
+                    pass
+
+        self.assertEqual(len(w), 0)
+
     def test_tensor_grad_warnings(self):
         dummy = torch.empty(1)
 
@@ -7211,6 +7235,28 @@ get_out().sum().backward()
         except subprocess.CalledProcessError as e:
             err_msg = "RuntimeError: one of the variables needed for gradient computation"
             self.assertTrue(err_msg in e.output.decode("utf-8"))
+
+    def test_view_func_replay(self):
+        def _assert_match_metadata(a, b):
+            self.assertEqual(a.size(), b.size())
+            self.assertEqual(a.stride(), b.stride())
+            self.assertEqual(a.storage_offset(), b.storage_offset())
+
+        def _test_op(fn, inp, args):
+            out = fn(inp, *args)
+            self.assertTrue(out._is_view)
+            self.assertTrue(out._base is inp)
+
+            new_inp = inp.clone()
+            _assert_match_metadata(new_inp, inp)
+            new_out = out._view_func(new_inp)
+            _assert_match_metadata(new_out, out)
+
+        _test_op(torch.select, torch.rand(2, 2), (0, 0))
+        _test_op(torch.as_strided, torch.rand(2, 2), ((4,), (1,)))
+        _test_op(torch.view_as_complex, torch.rand(2, 2), ())
+        _test_op(torch.view_as_real, torch.rand(2, 2, dtype=torch.cfloat), ())
+
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
