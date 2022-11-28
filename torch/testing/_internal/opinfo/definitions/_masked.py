@@ -399,14 +399,14 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
             ),
-            # Failing accuracy and extremal (#89609)
+            # Failing accuracy and extremal on sm86 (#89609)
             DecorateInfo(
-                unittest.expectedFailure,
+                unittest.skip("Skipped!"),
                 "TestCudaFuserOpInfo",
                 "test_nvfuser_correctness",
             ),
             DecorateInfo(
-                unittest.expectedFailure,
+                unittest.skip("Skipped!"),
                 "TestCudaFuserOpInfo",
                 "test_nvfuser_extremal_values",
             ),
@@ -609,14 +609,14 @@ op_db: List[OpInfo] = [
                 "test_mask_layout",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
-            # Failing accuracy and extremal (#89609)
+            # Failing accuracy and extremal on sm86 (#89609)
             DecorateInfo(
-                unittest.expectedFailure,
+                unittest.skip("Skipped!"),
                 "TestCudaFuserOpInfo",
                 "test_nvfuser_correctness",
             ),
             DecorateInfo(
-                unittest.expectedFailure,
+                unittest.skip("Skipped!"),
                 "TestCudaFuserOpInfo",
                 "test_nvfuser_extremal_values",
             ),
@@ -659,14 +659,14 @@ op_db: List[OpInfo] = [
                 "test_mask_layout",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
-            # Failing accuracy and extremal (#89609)
+            # Failing accuracy and extremal on sm86 (#89609)
             DecorateInfo(
-                unittest.expectedFailure,
+                unittest.skip("Skipped!"),
                 "TestCudaFuserOpInfo",
                 "test_nvfuser_correctness",
             ),
             DecorateInfo(
-                unittest.expectedFailure,
+                unittest.skip("Skipped!"),
                 "TestCudaFuserOpInfo",
                 "test_nvfuser_extremal_values",
             ),
