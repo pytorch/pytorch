@@ -43,7 +43,9 @@ def aot_autograd(**kwargs):
         functorch.compile.config.use_functionalize = True
         functorch.compile.config.use_fake_tensor = True
 
-        if count_calls(gm.graph) < 2:
+        force_compile_tiny_graphs = kwargs.pop("force_compile_tiny_graphs", False)
+
+        if count_calls(gm.graph) < 2 and not force_compile_tiny_graphs:
             return gm  # no point for tiny graphs
 
         counters["aot_autograd"]["total"] += 1
