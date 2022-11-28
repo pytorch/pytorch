@@ -449,16 +449,15 @@ def dispatch_trace(
     except Exception:
         if DISPATCH_TRACE_ERROR_PRINT_GRAPH:
             gm_printed = GraphModule(tracer.root, tracer.graph, name).print_readable(print_output=False)
-            log.info(f"""
-            DISPATCH_TRACE_ERROR_PRINT_GRAPH: \n
-            {gm_printed} \n
-            """)
+            print(f"""
+DISPATCH_TRACE_ERROR_PRINT_GRAPH:
+{gm_printed}
+""")
         else:
             log.warning("""
-            Dispatch trace exception,
-            set torch.fx.experimental.proxy_tensor.DISPATCH_TRACE_ERROR_PRINT_GRAPH = True
-            to print the incomplete graph.
-            """)
+Dispatch trace exception, set torch.fx.experimental.proxy_tensor.DISPATCH_TRACE_ERROR_PRINT_GRAPH = True
+to print the incomplete graph.
+""")
         raise
     return GraphModule(tracer.root, graph, name)
 
